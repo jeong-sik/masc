@@ -28,7 +28,6 @@ let config_for_label
     ?stream_idle_timeout_s
     ?hooks
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
     ?approval
     ~(description : string option)
@@ -62,7 +61,6 @@ let config_for_label
       hooks;
       enable_thinking;
       description;
-      compact_ratio;
       approval;
     }
 
@@ -84,7 +82,6 @@ let run_model_by_label
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
     ?on_event
     ?transport
@@ -97,7 +94,6 @@ let run_model_by_label
       ~tools ~max_tokens ~temperature
       ~max_idle_turns ?stream_idle_timeout_s ?hooks
       ?enable_thinking
-      ?compact_ratio
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
@@ -175,7 +171,6 @@ let run_named_with_masc_tools
     ?on_resume
     ?transport
     ?(yield_on_tool = false)
-    ?compact_ratio
     ?approval
     ?max_turns
     ?(max_idle_turns = 3)
@@ -196,7 +191,6 @@ let run_named_with_masc_tools
     ?temperature
     ?stream_idle_timeout_s ?hooks
     ~accept
-    ?compact_ratio
     ?approval
     ?raw_trace ?on_event ?on_yield ?on_resume 
     ?transport ~yield_on_tool ?provider_config_transform ?sw ?net ()
@@ -212,7 +206,6 @@ let run_model_with_masc_tools
     ?max_tokens
     ?hooks
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
     ?raw_trace
     ?on_event
@@ -225,7 +218,6 @@ let run_model_with_masc_tools
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_tokens ~temperature
       ?stream_idle_timeout_s ?hooks ?enable_thinking
-      ?compact_ratio
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()

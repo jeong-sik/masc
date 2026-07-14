@@ -93,48 +93,6 @@ let project_provider_attempt_result ~replay_prefix_projection provider_result =
   { provider_result; turn_result }
 ;;
 
-type context_window_rebudget =
-  { requested_context_window : int option
-  ; final_runtime_context_window : int
-  ; resolved_context_window : int
-  ; context_window_rebudgeted : bool
-  }
-
-let resolve_context_window_tokens_after_runtime_selection
-    ~(requested_context_window : int option)
-    ~(final_runtime_context_window : int)
-    : (context_window_rebudget, Agent_sdk.Error.sdk_error) result =
-  let invalid_requested_context_window value =
-    Agent_sdk.Error.Config
-      (Agent_sdk.Error.InvalidConfig
-         { field = "context_window_tokens"
-         ; detail =
-             Printf.sprintf
-               "requested_context_window must be positive when provided (got %d)"
-               value
-         })
-  in
-  match requested_context_window with
-  | Some value when value <= 0 -> Error (invalid_requested_context_window value)
-  | Some requested ->
-    let resolved_context_window = min requested final_runtime_context_window in
-    Ok
-      { requested_context_window
-      ; final_runtime_context_window
-      ; resolved_context_window
-      ; context_window_rebudgeted =
-          (match requested_context_window with
-           | Some value when value > 0 -> value <> resolved_context_window
-           | Some _ | None -> false)
-      }
-  | None ->
-    Ok
-      { requested_context_window
-      ; final_runtime_context_window
-      ; resolved_context_window = final_runtime_context_window
-      ; context_window_rebudgeted = false
-      }
-
 let runtime_attempt_decision ~idx ~runtime_id =
   `Assoc [ ("idx", `Int idx); ("runtime_id", `String runtime_id) ]
 
@@ -329,9 +287,6 @@ let run_named
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?tool_failure_judge
-    ?compact_ratio
-    ?context_window_tokens
-    ?(oas_auto_context_overflow_retry = true)
     ?checkpoint_sink
     ?context_injector
     ?context
@@ -339,7 +294,6 @@ let run_named
     ?approval
     ?exit_condition
     ?exit_condition_result
-    ?summarizer
     ?oas_checkpoint
     ?trace_link
     ?event_bus
@@ -455,15 +409,10 @@ let run_named
     dedupe_runtimes_preserve_order (first_runtime :: remaining_runtimes)
   in
   let assigned_runtime_context_window =
-    Some (Runtime.max_context_of_runtime first_candidate)
+    Runtime.max_context_of_runtime first_candidate
   in
   let first_runtime_context_window =
     Runtime.max_context_of_runtime first_runtime
-  in
-  let* first_context_window_rebudget =
-    resolve_context_window_tokens_after_runtime_selection
-      ~requested_context_window:context_window_tokens
-      ~final_runtime_context_window:first_runtime_context_window
   in
   (match reroute_decision with
    | Runtime_agent.Reroute { reason; _ } ->
@@ -478,22 +427,8 @@ let run_named
                 ("routing_reason", `String reason);
                 ("assigned_runtime_id", `String first_candidate_id);
                 ("rerouted_runtime_id", `String first_runtime_id);
-                ( "assigned_context_window",
-                  match assigned_runtime_context_window with
-                  | Some value -> `Int value
-                  | None -> `Null );
-                ( "requested_context_window",
-                  match
-                    first_context_window_rebudget.requested_context_window
-                  with
-                  | Some value -> `Int value
-                  | None -> `Null );
-                ( "final_runtime_context_window",
-                  `Int first_context_window_rebudget.final_runtime_context_window );
-                ( "resolved_context_window",
-                  `Int first_context_window_rebudget.resolved_context_window );
-                ( "context_window_rebudgeted",
-                  `Bool first_context_window_rebudget.context_window_rebudgeted );
+                ("assigned_context_window", `Int assigned_runtime_context_window);
+                ("rerouted_context_window", `Int first_runtime_context_window);
               ]))
        Keeper_runtime_manifest.Runtime_routed
    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ());
@@ -600,19 +535,7 @@ let run_named
           ~fallback_enable_thinking:enable_thinking
           ()
       in
-      let final_runtime_context_window =
-        Runtime.max_context_of_runtime runtime
-      in
-      let context_window_rebudget_res =
-        resolve_context_window_tokens_after_runtime_selection
-          ~requested_context_window:context_window_tokens
-          ~final_runtime_context_window
-      in
-      match context_window_rebudget_res with
-      | Error err -> Error err, None
-      | Ok context_window_rebudget ->
-      let context_window_tokens = Some context_window_rebudget.resolved_context_window in
-      (match
+      match
          match provider_config_transform with
          | None -> Ok runtime.Runtime.provider_config
          | Some transform -> transform runtime.Runtime.provider_config
@@ -655,9 +578,6 @@ let run_named
             ; cache_system_prompt
             ; yield_on_tool
             ; tool_failure_judge
-            ; compact_ratio
-            ; context_window_tokens
-            ; oas_auto_context_overflow_retry
             ; checkpoint_sink
             ; checkpoint_stage_observed
             ; context_injector
@@ -667,7 +587,6 @@ let run_named
             ; approval
             ; exit_condition
             ; exit_condition_result
-            ; summarizer
             ; oas_checkpoint
             ; trace_link
             ; sw
@@ -693,7 +612,7 @@ let run_named
               ~replay_prefix_projection
               provider_result
           in
-          outcomes.turn_result, checkpoint_after))
+          outcomes.turn_result, checkpoint_after)
     attempt_runtimes
 
 
@@ -720,9 +639,6 @@ module For_testing = struct
 
   let same_run_retry_allowed =
     Keeper_turn_driver_try_provider.same_run_retry_allowed
-
-  let resolve_context_window_tokens_after_runtime_selection =
-    resolve_context_window_tokens_after_runtime_selection
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next

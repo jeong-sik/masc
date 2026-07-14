@@ -48,9 +48,6 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
-  ; compact_ratio : float option
-  ; context_window_tokens : int option
-  ; oas_auto_context_overflow_retry : bool
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
   ; checkpoint_stage_observed : bool Atomic.t
   ; context_injector : Agent_sdk.Hooks.context_injector option
@@ -60,7 +57,6 @@ type try_provider_ctx =
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
-  ; summarizer : (Agent_sdk.Types.message list -> string) option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; (* Eio concurrency *)
     sw : Eio.Switch.t
@@ -253,9 +249,6 @@ let run_try_provider
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = ctx.session_id
           ; cache_system_prompt = ctx.cache_system_prompt
-          ; compact_ratio = ctx.compact_ratio
-          ; context_window_tokens = ctx.context_window_tokens
-          ; oas_auto_context_overflow_retry = ctx.oas_auto_context_overflow_retry
           ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
           ; context = ctx.context
@@ -268,7 +261,6 @@ let run_try_provider
           ; approval = ctx.approval
           ; exit_condition = ctx.exit_condition
           ; exit_condition_result = ctx.exit_condition_result
-          ; summarizer = ctx.summarizer
           ; initial_messages = ctx.initial_messages
           ; model_input_projection = ctx.model_input_projection
           ; raw_trace = ctx.raw_trace

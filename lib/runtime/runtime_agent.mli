@@ -97,15 +97,11 @@ type config = Runtime_agent_context.config = {
   cache_system_prompt : bool;
   yield_on_tool : bool;
   tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
-  compact_ratio : float option;
-  context_window_tokens : int option;
-  oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
   approval : Agent_sdk.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
-  summarizer : (Agent_sdk.Types.message list -> string) option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;

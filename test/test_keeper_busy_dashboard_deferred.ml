@@ -18,6 +18,7 @@ let check name cond =
 ;;
 
 let keeper_name = "busy-dashboard-keeper"
+let thread_id = "busy-dashboard-thread"
 
 let payload ?(name = keeper_name) ?(content = "are you there?") ()
     : Server_routes_http_keeper_stream.keeper_chat_stream_request =
@@ -111,6 +112,7 @@ let test_busy_dashboard_enqueues () =
      Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
        ~base_path:base
        ~clock
+       ~thread_id
        (payload ())
    with
    | `Queued len -> check "queue length is reported" (len = 1)
@@ -122,10 +124,20 @@ let test_busy_dashboard_enqueues () =
   check "dashboard queue revision advances" (snapshot.revision = 1L);
   (match snapshot.pending with
    | [ { Keeper_chat_queue.message =
-           { Keeper_chat_queue.content; source = Dashboard; _ }
+           { Keeper_chat_queue.content
+           ; source = Dashboard { thread_id = queued_thread_id }
+           ; user_row_origin
+           ; _
+           }
        ; _
        } ] ->
-     check "queued content is the user's message" (String.equal content "are you there?")
+     check "queued content is the user's message" (String.equal content "are you there?");
+     check "queued dashboard thread is exact" (String.equal queued_thread_id thread_id);
+     check "queued dashboard user row remains route-owned"
+       (match user_row_origin with
+        | Keeper_chat_store.Needs_append -> true
+        | Keeper_chat_store.Already_persisted _
+        | Keeper_chat_store.Already_persisted_upstream -> false)
    | _ -> check "queue holds one dashboard receipt" false)
 ;;
 
@@ -137,6 +149,7 @@ let test_free_dashboard_not_enqueued () =
      Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
        ~base_path:base
        ~clock
+       ~thread_id
        (payload ~content:"run now" ())
    with
    | `Not_busy -> check "free keeper stays on direct stream path" true
@@ -155,7 +168,8 @@ let test_existing_backlog_defers_new_dashboard_message () =
        ; user_blocks = []
        ; attachments = []
        ; timestamp = Eio.Time.now clock
-       ; source = Dashboard
+       ; source = Dashboard { thread_id }
+       ; user_row_origin = Keeper_chat_store.Needs_append
        }
    with
    | Ok receipt ->
@@ -166,6 +180,7 @@ let test_existing_backlog_defers_new_dashboard_message () =
      Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
        ~base_path:base
        ~clock
+       ~thread_id
        (payload ~content:"newer dashboard message" ())
    with
    | `Queued len -> check "newer message joins existing backlog" (len = 2)
@@ -205,6 +220,7 @@ let test_concurrent_busy_dashboard_enqueues_are_per_keeper () =
         Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
           ~base_path:base
           ~clock
+          ~thread_id:(Printf.sprintf "%s-%d" thread_id i)
           (payload ~name:keeper_name
              ~content:(Printf.sprintf "burst message %d" i)
              ())
@@ -257,11 +273,12 @@ let test_busy_dashboard_persist_failure_is_explicit () =
   @@ fun sw ->
   with_busy_slot ~base ~sw
   @@ fun () ->
-  Keeper_chat_queue.For_testing.fail_next_persist ();
+  Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Mutation_applied ];
   (match
      Server_routes_http_keeper_stream.For_testing.defer_dashboard_payload_if_busy
        ~base_path:base
        ~clock
+       ~thread_id
        (payload ~content:"do not acknowledge this as queued" ())
    with
    | `Queue_error message ->
@@ -302,7 +319,7 @@ let test_shutdown_fenced_dashboard_ack_preserves_cause () =
   (match
      Server_routes_http_keeper_stream.For_testing
      .defer_dashboard_payload_if_busy_evidence
-       ~base_path:base ~clock
+       ~base_path:base ~clock ~thread_id
        (payload ~content:"keep this through shutdown" ())
    with
    | `Queued (json, ack) ->

@@ -13,10 +13,12 @@
 // Create/edit/deregister dialogs land with the full keeper-v2 registry port.
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import type { Keeper } from '../../types'
 import { callMcpTool } from '../../api/mcp'
 import { keepers } from '../../store'
+import { asString, isRecord } from '../common/normalize'
+import { createAsyncResource, isFailed, getData } from '../../lib/async-state'
 import { KeeperBadge } from '../keeper-badge'
 import { Dot, Pill, type DotState } from '../v2/primitives-v2'
 
@@ -27,32 +29,47 @@ export interface RegistryPersona {
   has_keeper_defaults: boolean
 }
 
-// Defensive parse: masc_persona_list returns { count, personas } where each
-// entry is either a summary object (detailed) or a bare name string.
-export function parsePersonaList(raw: string): RegistryPersona[] {
-  let json: unknown
-  try {
-    json = JSON.parse(raw)
-  } catch {
-    return []
-  }
-  if (typeof json !== 'object' || json === null) return []
-  const personas = (json as { personas?: unknown }).personas
-  if (!Array.isArray(personas)) return []
+// Defensive normalize on the shared helper idiom (asString/isRecord — the
+// same building blocks keeper-spawn-state's persona pipeline uses; full
+// unification onto that pipeline is deferred until the spawn panel is
+// replaced by the registry wizard, after #24340 lands on this domain).
+// masc_persona_list returns { count, personas } where each entry is either
+// a summary object (detailed) or a bare name string. A schema mismatch
+// (no `personas` array) returns null — the caller surfaces it as an error
+// instead of rendering a fake empty roster; per-entry junk is skipped.
+export function normalizeRegistryPersonas(json: unknown): RegistryPersona[] | null {
+  if (!isRecord(json)) return null
+  const personas = json.personas
+  if (!Array.isArray(personas)) return null
   return personas.flatMap((entry): RegistryPersona[] => {
     if (typeof entry === 'string') {
       return [{ persona_name: entry, display_name: entry, trait: null, has_keeper_defaults: false }]
     }
-    if (typeof entry !== 'object' || entry === null) return []
-    const rec = entry as Record<string, unknown>
-    const name = typeof rec.persona_name === 'string' ? rec.persona_name : ''
+    if (!isRecord(entry)) return []
+    const name = asString(entry.persona_name)
     if (!name) return []
     return [{
       persona_name: name,
-      display_name: typeof rec.display_name === 'string' && rec.display_name ? rec.display_name : name,
-      trait: typeof rec.trait === 'string' ? rec.trait : null,
-      has_keeper_defaults: rec.has_keeper_defaults === true,
+      display_name: asString(entry.display_name) ?? name,
+      trait: asString(entry.trait) ?? null,
+      has_keeper_defaults: entry.has_keeper_defaults === true,
     }]
+  })
+}
+
+// Registry-scoped resource: the spawn panel's shared personasResource calls
+// masc_persona_list without `detailed`, drops bare-name entries, and lacks
+// has_keeper_defaults — retargeting it would change behaviour for its 15+
+// consumers while #24340 is rewriting that domain. One resource, one fetch
+// shape, per surface until the wizard unifies them.
+export const registryPersonas = createAsyncResource<RegistryPersona[]>()
+
+export async function loadRegistryPersonas(): Promise<void> {
+  await registryPersonas.load(async () => {
+    const raw = await callMcpTool('masc_persona_list', { detailed: true })
+    const parsed = normalizeRegistryPersonas(JSON.parse(raw))
+    if (parsed === null) throw new Error('masc_persona_list: unexpected response shape')
+    return parsed
   })
 }
 
@@ -85,22 +102,13 @@ function groupDot(group: KeeperGroupId): DotState {
 }
 
 export function RegistrySurface() {
-  const [personas, setPersonas] = useState<RegistryPersona[] | null>(null)
-  const [personaError, setPersonaError] = useState<string | null>(null)
-
   useEffect(() => {
-    let cancelled = false
-    callMcpTool('masc_persona_list', { detailed: true })
-      .then(raw => {
-        if (!cancelled) setPersonas(parsePersonaList(raw))
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setPersonaError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
+    void loadRegistryPersonas()
   }, [])
+
+  const personaState = registryPersonas.state.value
+  const personas = getData(personaState) ?? null
+  const personaError = isFailed(personaState) ? personaState.message : null
 
   const roster = keepers.value
   const grouped = useMemo(() => {

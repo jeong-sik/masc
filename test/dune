@@ -224,7 +224,6 @@
   test_workspace_eio_pure
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
-  test_keeper_compact_policy_pure
   test_compaction_llm_summarizer
   test_keeper_runtime_failure_route
   test_keeper_allowed_paths
@@ -548,7 +547,6 @@
   test_workspace_eio_pure
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
-  test_keeper_compact_policy_pure
   test_compaction_llm_summarizer
   test_keeper_runtime_failure_route
   test_keeper_allowed_paths
@@ -2065,9 +2063,9 @@
 
 (include stanzas/test_timeout_policy.inc)
 
-(include stanzas/test_masc_event_bus_policy.inc)
-
 (include stanzas/test_timeout_policy_overshoot_counter.inc)
+
+(include stanzas/test_event_bus_subscription_contract.inc)
 
 (include stanzas/test_tool_call_replay_harness.inc)
 

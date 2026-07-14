@@ -31,10 +31,8 @@ let all_variants : blocker_class list =
   ; Stale_fleet_batch
   ; Sdk_context_window_exceeded
   ; Sdk_unrecognized_stop_reason
-  ; Sdk_idle_detected
   ; Sdk_guardrail_violation
   ; Sdk_tripwire_violation
-  ; Sdk_exit_condition_met
   ; Sdk_input_required
   ]
 ;;

@@ -6,7 +6,7 @@ type t =
   | Persistent_escalation
   | Resilience_audit_store
   | Overflow_retry_oas_load
-  | Context_overflow_after_oas_retry
+  | Provider_context_overflow
 
 let to_label = function
   | Turn_start -> "turn_start"
@@ -16,5 +16,5 @@ let to_label = function
   | Persistent_escalation -> "persistent_escalation"
   | Resilience_audit_store -> "resilience_audit_store"
   | Overflow_retry_oas_load -> "overflow_retry_oas_load"
-  | Context_overflow_after_oas_retry -> "context_overflow_after_oas_retry"
+  | Provider_context_overflow -> "provider_context_overflow"
 ;;

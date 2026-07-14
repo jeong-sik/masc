@@ -29,7 +29,6 @@ type judgment_class =
 type judgment_provenance =
   | Oas_api_error
   | Oas_provider_error
-  | Oas_agent_idle_detected of { consecutive_idle_turns : int }
   | Oas_agent_error
   | Oas_mcp_error
   | Oas_config_error
@@ -258,7 +257,6 @@ let judgment_class_label = function
 let judgment_provenance_label = function
   | Oas_api_error -> "oas_api_error"
   | Oas_provider_error -> "oas_provider_error"
-  | Oas_agent_idle_detected _ -> "oas_agent_idle_detected"
   | Oas_agent_error -> "oas_agent_error"
   | Oas_mcp_error -> "oas_mcp_error"
   | Oas_config_error -> "oas_config_error"
@@ -273,7 +271,6 @@ let judgment_provenance_label = function
 type judgment_provenance_boundary =
   | Boundary_oas_api
   | Boundary_oas_provider
-  | Boundary_oas_agent_idle
   | Boundary_oas_agent
   | Boundary_oas_mcp
   | Boundary_oas_config
@@ -288,7 +285,6 @@ type judgment_provenance_boundary =
 let judgment_provenance_boundary = function
   | Oas_api_error -> Boundary_oas_api
   | Oas_provider_error -> Boundary_oas_provider
-  | Oas_agent_idle_detected _ -> Boundary_oas_agent_idle
   | Oas_agent_error -> Boundary_oas_agent
   | Oas_mcp_error -> Boundary_oas_mcp
   | Oas_config_error -> Boundary_oas_config
@@ -308,8 +304,6 @@ let judgment_provenance_same_boundary left right =
 let judgment_provenance_to_yojson provenance =
   let kind = "kind", `String (judgment_provenance_label provenance) in
   match provenance with
-  | Oas_agent_idle_detected { consecutive_idle_turns } ->
-    `Assoc [ kind; "consecutive_idle_turns", `Int consecutive_idle_turns ]
   | Oas_api_error
   | Oas_provider_error
   | Oas_agent_error
@@ -350,21 +344,6 @@ let judgment_provenance_of_yojson = function
        provenance_without_payload fields Oas_api_error
      | Some (`String "oas_provider_error") ->
        provenance_without_payload fields Oas_provider_error
-     | Some (`String "oas_agent_idle_detected") ->
-       (match
-          require_exact_provenance_fields
-            [ "kind"; "consecutive_idle_turns" ]
-            fields
-        with
-        | Error _ as error -> error
-        | Ok () ->
-          (match List.assoc_opt "consecutive_idle_turns" fields with
-           | Some (`Int value) when value > 0 ->
-             Ok (Oas_agent_idle_detected { consecutive_idle_turns = value })
-           | Some (`Int _) ->
-             Error "failure judgment idle provenance count must be positive"
-           | Some _ | None ->
-             Error "failure judgment idle provenance requires an integer count"))
      | Some (`String "oas_agent_error") ->
        provenance_without_payload fields Oas_agent_error
      | Some (`String "oas_mcp_error") ->

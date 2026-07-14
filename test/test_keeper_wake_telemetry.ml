@@ -174,6 +174,51 @@ let test_role_counts_are_stably_sorted () =
   check (list string) "role_counts keys are sorted for stable JSON output"
     sorted_keys keys
 
+let test_phase0_record_always_emits_observation () =
+  let meta =
+    match
+      Masc.Keeper_meta_json_parse.meta_of_json
+        (`Assoc
+          [ "name", `String "wake-observation-test"
+          ; "agent_name", `String "wake-observation-test"
+          ; "trace_id", `String "trace-wake-observation-test"
+          ])
+    with
+    | Ok meta -> meta
+    | Error err -> fail ("meta_of_json failed: " ^ err)
+  in
+  let observed = ref None in
+  let restore () =
+    Masc.Keeper_keepalive_signal.register_record_wake_payload
+      (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_
+        ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_
+        ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_
+        ~tool_count:_ ~has_compact_happened:_ -> ())
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+       Masc.Keeper_keepalive_signal.register_record_wake_payload
+         (fun ~keeper_name ~trace_id:_ ~turn_index:_ ~model_id:_
+           ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes
+           ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count ~role_counts:_
+           ~tool_count:_ ~has_compact_happened:_ ->
+            observed := Some (keeper_name, system_prompt_bytes, message_count));
+       Masc.Keeper_agent_run_phase0_telemetry.record
+         ~meta
+         ~turn_system_prompt:"system"
+         ~tools:[]
+         ~history_messages:[ text_msg Types.Assistant "previous" ]
+         ~user_message:"next"
+         ~start_turn_count:3
+         ~max_context:4096
+         ~pre_dispatch_compacted:false;
+       check
+         (option (triple string int int))
+         "phase-0 emits exact observation without an admission switch"
+         (Some ("wake-observation-test", String.length "system", 2))
+         !observed)
+
 let () =
   run "Keeper_wake_telemetry"
     [
@@ -203,5 +248,10 @@ let () =
             test_role_counts_sum_matches_message_count;
           test_case "invariant holds across mixed content shapes" `Quick
             test_compute_sizes_invariant_across_shapes;
+        ] );
+      ( "phase0_record",
+        [
+          test_case "observation has no environment admission switch" `Quick
+            test_phase0_record_always_emits_observation;
         ] );
     ]

@@ -116,12 +116,12 @@ let test_valid_partition_accepted () =
     true
     (is_ok (C.plan_of_json ~message_count:5 json))
 
-let test_all_kept_accepted () =
+let test_all_kept_rejected () =
   let json = plan_json ~summary:"n/a" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[] in
   Alcotest.(check bool)
-    "kept covering everything parses (summary unused but required non-empty)"
+    "keeping everything is not semantic compaction"
     true
-    (is_ok (C.plan_of_json ~message_count:3 json))
+    (is_error (C.plan_of_json ~message_count:3 json))
 
 let test_drop_only_with_kept_accepted () =
   let json = plan_json ~summary:"unused" ~kept:[ 1 ] ~summarized:[] ~dropped:[ 0 ] in
@@ -166,16 +166,6 @@ let test_all_dropped_rejected () =
     "a non-empty working set must not compact to empty output"
     true
     (is_error (C.plan_of_json ~message_count:2 json))
-
-(* The summary is only consumed when there are summarized indices. A blank
-   summary with an empty [summarized] set is a legitimate "keep everything"
-   plan and must be accepted — rejecting it would spuriously fail compaction. *)
-let test_empty_summary_accepted_when_nothing_summarized () =
-  let json = plan_json ~summary:"   " ~kept:[ 0; 1 ] ~summarized:[] ~dropped:[] in
-  Alcotest.(check bool)
-    "a blank summary is accepted when nothing is summarized"
-    true
-    (is_ok (C.plan_of_json ~message_count:2 json))
 
 let test_empty_summary_rejected_when_summarizing () =
   let json = plan_json ~summary:"   " ~kept:[ 1 ] ~summarized:[ 0 ] ~dropped:[] in
@@ -227,15 +217,15 @@ let test_apply_keeps_summarizes_drops () =
       [ "u3" ]
       (List.tl out_texts)
 
-let test_apply_all_kept_is_identity () =
-  let json = plan_json ~summary:"unused" ~kept:[ 0; 1; 2; 3 ] ~summarized:[] ~dropped:[] in
+let test_apply_drop_only_preserves_kept () =
+  let json = plan_json ~summary:"unused" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[ 3 ] in
   match C.plan_of_json ~message_count:4 json with
   | Error e -> Alcotest.failf "expected valid plan, got %s" e
   | Ok plan ->
     let out = C.apply plan ~messages:sample in
     Alcotest.(check (list string))
-      "all-kept leaves the working set unchanged"
-      (texts sample)
+      "drop-only removes only the selected message"
+      [ "u0"; "a1"; "t2" ]
       (texts out)
 
 let () =
@@ -250,7 +240,7 @@ let () =
         ] )
     ; ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted
-        ; Alcotest.test_case "all kept accepted" `Quick test_all_kept_accepted
+        ; Alcotest.test_case "all kept rejected" `Quick test_all_kept_rejected
         ; Alcotest.test_case "drop-only with kept accepted" `Quick
             test_drop_only_with_kept_accepted
         ; Alcotest.test_case "out of range rejected" `Quick test_out_of_range_rejected
@@ -258,14 +248,13 @@ let () =
         ; Alcotest.test_case "duplicate rejected" `Quick test_duplicate_rejected
         ; Alcotest.test_case "missing index rejected" `Quick test_missing_index_rejected
         ; Alcotest.test_case "all dropped rejected" `Quick test_all_dropped_rejected
-        ; Alcotest.test_case "empty summary accepted when nothing summarized" `Quick
-            test_empty_summary_accepted_when_nothing_summarized
         ; Alcotest.test_case "empty summary rejected when summarizing" `Quick
             test_empty_summary_rejected_when_summarizing
         ; Alcotest.test_case "missing field rejected" `Quick test_missing_field_rejected
         ] )
     ; ( "apply"
       , [ Alcotest.test_case "keeps/summarizes/drops" `Quick test_apply_keeps_summarizes_drops
-        ; Alcotest.test_case "all-kept is identity" `Quick test_apply_all_kept_is_identity
+        ; Alcotest.test_case "drop-only preserves kept" `Quick
+            test_apply_drop_only_preserves_kept
         ] )
     ]

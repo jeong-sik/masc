@@ -119,10 +119,8 @@ type blocker_class =
         meta; stale keepers use their per-keeper watchdog blocker instead. *)
   | Sdk_context_window_exceeded
   | Sdk_unrecognized_stop_reason
-  | Sdk_idle_detected
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
-  | Sdk_exit_condition_met
   | Sdk_input_required
 
 let blocker_class_to_string = function
@@ -133,10 +131,8 @@ let blocker_class_to_string = function
   | Stale_fleet_batch -> "stale_fleet_batch"
   | Sdk_context_window_exceeded -> "sdk_context_window_exceeded"
   | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
-  | Sdk_idle_detected -> "sdk_idle_detected"
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
-  | Sdk_exit_condition_met -> "sdk_exit_condition_met"
   | Sdk_input_required -> "sdk_input_required"
 ;;
 
@@ -148,10 +144,8 @@ let blocker_class_of_serialized_string = function
   | "stale_fleet_batch" -> Some Stale_fleet_batch
   | "sdk_context_window_exceeded" -> Some Sdk_context_window_exceeded
   | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
-  | "sdk_idle_detected" -> Some Sdk_idle_detected
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
-  | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
   | "sdk_input_required" -> Some Sdk_input_required
   | _ -> None
 ;;

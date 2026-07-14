@@ -12,9 +12,8 @@
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
-(** Outcome of the compaction step. [applied] iff a compaction
-    strategy actually ran; [trigger] is the gate label that fired
-    ([ratio]/[messages]/[tokens]). *)
+(** Outcome of the compaction step. [applied] iff an explicit compaction
+    request ran. *)
 type compaction_event =
   { attempted : bool
   ; applied : bool
@@ -59,9 +58,9 @@ type overflow_retry_recovery =
   ; turn_generation : int
   } [@@warning "-69"]
 
-(** End-of-turn pipeline. Decides compaction, rolls over generations
-    when the handoff gate fires, and persists the result to the keeper meta
-    and dashboard surface.
+(** End-of-turn pipeline. Preserves the checkpoint and persists the result to
+    the keeper meta and dashboard surface. Explicit compaction is a separate
+    request path.
 
     {b Tier A5} (Cycle 22): when the [MASC_AUTONOMOUS] environment
     variable is on (see {!Autonomous.Wirein_helpers.masc_autonomous_enabled}),
@@ -106,17 +105,8 @@ val apply_post_turn_lifecycle_with_resilience_handles :
     verification.  Callers own serialization; the typical pattern
     is one store per keeper, owned by the keeper bridge. *)
 
-(** Build the relaxed-policy meta used during forced overflow
-    retry: zero compaction gates so the next compaction always
-    fires. *)
-val forced_overflow_retry_meta :
-  Keeper_meta_contract.keeper_meta ->
-  turn_generation:int ->
-  now_ts:float ->
-  Keeper_meta_contract.keeper_meta
-
-(** Reload the canonical OAS checkpoint and apply forced
-    compaction so the turn can retry from a smaller context.
+(** Reload the canonical OAS checkpoint and apply an explicit typed
+    compaction request so the caller can continue from a smaller context.
     Returns [None] when no checkpoint exists, when compaction did
     not actually shrink the token count, or when the recovery save
     failed. *)
@@ -124,5 +114,6 @@ val recover_latest_checkpoint_for_overflow_retry :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   model:string ->
+  trigger:Compaction_trigger.t ->
   primary_model_max_tokens:int ->
   overflow_retry_recovery option

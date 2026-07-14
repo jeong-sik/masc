@@ -316,7 +316,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     }
   in
   let agent_config : Agent_sdk.Types.agent_config =
-    { Agent_sdk.Types.default_config with
+    { (Agent_sdk.Types.default_config ~model:config.model_id) with
       name = config.name
     ; model = config.model_id
     ; system_prompt = Some config.system_prompt

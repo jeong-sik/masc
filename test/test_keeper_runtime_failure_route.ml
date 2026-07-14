@@ -222,7 +222,6 @@ let test_judgment_provenance_codec () =
   let values =
     [ KFR.Oas_api_error
     ; KFR.Oas_provider_error
-    ; KFR.Oas_agent_idle_detected { consecutive_idle_turns = 3 }
     ; KFR.Oas_agent_error
     ; KFR.Oas_mcp_error
     ; KFR.Oas_config_error
@@ -251,31 +250,12 @@ let test_judgment_provenance_codec () =
   (match
      KFR.judgment_provenance_of_yojson
        (`Assoc
-         [ "kind", `String "oas_agent_idle_detected"
-         ; "consecutive_idle_turns", `Int 0
-         ])
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "zero idle count decoded");
-  (match
-     KFR.judgment_provenance_of_yojson
-       (`Assoc
          [ "kind", `String "oas_mcp_error"
          ; "unexpected", `String "ignored"
          ])
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "extra provenance field was silently ignored");
-  (match
-     KFR.judgment_provenance_of_yojson
-       (`Assoc
-         [ "kind", `String "oas_agent_idle_detected"
-         ; "consecutive_idle_turns", `Int 3
-         ; "unexpected", `Bool true
-         ])
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "extra idle provenance field was silently ignored");
   match
     KFR.judgment_provenance_of_yojson
       (`Assoc [ "kind", `String "future_unregistered_boundary" ])
@@ -390,27 +370,7 @@ let test_queue_bounded_across_detail_variants () =
   Alcotest.(check bool)
     "a different judgment class is a distinct durable event"
     false
-    (Keeper_event_queue.stimulus_identity_equal first other_class);
-  let idle_stimulus count =
-    let fj : Keeper_event_queue.failure_judgment =
-      { fj_runtime_id = "glm-coding.glm-5-turbo"
-      ; fj_judgment = KFR.Contract_violation
-      ; fj_provenance =
-          KFR.Oas_agent_idle_detected { consecutive_idle_turns = count }
-      ; fj_detail = "idle loop"
-      }
-    in
-    { first with
-      post_id = Keeper_event_queue.failure_judgment_post_id fj
-    ; payload = Keeper_event_queue.Failure_judgment fj
-    }
-  in
-  Alcotest.(check bool)
-    "idle observation count is evidence, not event identity"
-    true
-    (Keeper_event_queue.stimulus_identity_equal
-       (idle_stimulus 3)
-       (idle_stimulus 4))
+    (Keeper_event_queue.stimulus_identity_equal first other_class)
 
 let () =
   Alcotest.run

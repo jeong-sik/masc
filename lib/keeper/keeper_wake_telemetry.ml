@@ -5,9 +5,8 @@
     without standing up a live keeper. The functions here operate purely
     on [Agent_sdk] values and return plain records/ints; they never
     touch stores, logs, or side effects. Callers (currently
-    [Keeper_agent_run]) feed the result to
-    [Dashboard_harness_health.record_wake_payload] when
-    [MASC_PAYLOAD_TELEMETRY] is on.
+    [Keeper_agent_run]) feed every result to
+    [Dashboard_harness_health.record_wake_payload].
 
     Invariant: [result.message_count =
       List.fold_left (fun a (_, n) -> a + n) 0 result.role_counts].

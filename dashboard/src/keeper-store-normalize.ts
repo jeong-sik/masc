@@ -403,18 +403,16 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
 function normalizePromptSegments(
   raw: Record<string, unknown> | null,
   excludedKeys: Set<string>,
-): Record<string, { bytes: number; estimated_tokens: number; fingerprint: string | null }> {
-  const segments: Record<string, { bytes: number; estimated_tokens: number; fingerprint: string | null }> = {}
+): Record<string, { bytes: number; fingerprint: string | null }> {
+  const segments: Record<string, { bytes: number; fingerprint: string | null }> = {}
   if (!raw) return segments
   for (const [key, value] of Object.entries(raw)) {
     if (excludedKeys.has(key) || !isRecord(value)) continue
     const bytes = asNumber(value.bytes)
-    const estimatedTokens = asNumber(value.estimated_tokens)
     const fingerprint = typeof value.fingerprint === 'string' ? value.fingerprint : null
-    if (bytes == null && estimatedTokens == null && fingerprint == null) continue
+    if (bytes == null && fingerprint == null) continue
     segments[key] = {
       bytes: bytes ?? 0,
-      estimated_tokens: estimatedTokens ?? 0,
       fingerprint,
     }
   }
@@ -442,7 +440,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
       const rawPrompt = isRecord(item.prompt) ? item.prompt : null
       const rawUsage = isRecord(item.usage) ? item.usage : null
       const promptSegments: NonNullable<PromptTelemetry['segments']> =
-        normalizePromptSegments(rawPrompt, new Set(['fingerprint', 'estimated_total_tokens', 'estimated_cacheable_tokens']))
+        normalizePromptSegments(rawPrompt, new Set(['fingerprint', 'total_bytes', 'cacheable_bytes']))
       const promptFingerprint =
         (typeof item.prompt_fingerprint === 'string' ? item.prompt_fingerprint : null)
         ?? (rawPrompt && typeof rawPrompt.fingerprint === 'string' ? rawPrompt.fingerprint : null)
@@ -450,8 +448,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         promptFingerprint != null || rawPrompt != null || Object.keys(promptSegments).length > 0
           ? {
               fingerprint: promptFingerprint,
-              estimated_total_tokens: rawPrompt ? (asNumber(rawPrompt.estimated_total_tokens) ?? null) : null,
-              estimated_cacheable_tokens: rawPrompt ? (asNumber(rawPrompt.estimated_cacheable_tokens) ?? null) : null,
+              total_bytes: rawPrompt ? (asNumber(rawPrompt.total_bytes) ?? null) : null,
+              cacheable_bytes: rawPrompt ? (asNumber(rawPrompt.cacheable_bytes) ?? null) : null,
               segments: promptSegments,
             }
           : null
@@ -464,8 +462,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         rawCtxComposition != null || Object.keys(ctxSegments).length > 0
           ? {
               actual_input_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.actual_input_tokens) ?? null) : null,
-              display_total_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.display_total_tokens) ?? 0) : 0,
-              estimated_known_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.estimated_known_tokens) ?? 0) : 0,
+              attributed_bytes: rawCtxComposition ? (asNumber(rawCtxComposition.attributed_bytes) ?? 0) : 0,
               segments: ctxSegments,
             }
           : null

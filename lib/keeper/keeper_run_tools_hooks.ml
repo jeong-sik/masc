@@ -18,7 +18,6 @@ type agent_setup =
       Agent_sdk.Types.message list -> Agent_sdk.Types.message list
   ; acc : hook_accumulator
   ; all_tool_names : string list
-  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -38,9 +37,7 @@ type ctx =
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
-  ; max_context : int
   ; meta : Keeper_meta_contract.keeper_meta
-  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_oas. *)
@@ -142,15 +139,12 @@ let assemble_hooks
   : (agent_setup, Agent_sdk.Error.sdk_error) result
   =
   let acc = ctx.acc in
-  let agent_name = ctx.agent_name in
   let compute_tool_surface = ctx.compute_tool_surface in
   let record_tool_assignment = ctx.record_tool_assignment in
   let config = ctx.config in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
-  let max_context = ctx.max_context in
   let meta = ctx.meta in
-  let tool_context_estimate = ctx.tool_context_estimate in
   let turn_ctx_cell = ctx.turn_ctx_cell in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
@@ -339,22 +333,13 @@ let assemble_hooks
                 let record_block block text =
                   recorded_blocks := (block, text) :: !recorded_blocks
                 in
-                let preflight_accounted_blocks = ref [] in
-                let record_preflight_accounted_block block text =
-                  record_block block text;
-                  preflight_accounted_blocks := block :: !preflight_accounted_blocks
-                in
                 (if String.trim dynamic_context <> ""
                  then
-                   record_preflight_accounted_block
-                     Prompt_block_id.Dynamic_context
-                     dynamic_context);
+                   record_block Prompt_block_id.Dynamic_context dynamic_context);
                 (match Masc_context_injector.render_temporal_summary shared_context with
                  | None -> ()
                  | Some temporal ->
-                   record_preflight_accounted_block
-                     Prompt_block_id.Temporal_summary
-                     temporal);
+                   record_block Prompt_block_id.Temporal_summary temporal);
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn
@@ -383,13 +368,8 @@ let assemble_hooks
                  | Some block -> record_block Prompt_block_id.Memory_os_recall block);
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_extra_system_context
-                    ~estimated_input_tokens_with_tools:
-                      tool_context_estimate.estimated_input_tokens_with_tools
-                    ~max_context
                     ~existing_extra_system_context:
                       current_params.extra_system_context
-                    ~preflight_accounted_blocks:
-                      (List.rev !preflight_accounted_blocks)
                     ~blocks:(List.rev !recorded_blocks)
                 in
                 let ctx = extra_system_context_assembly.extra_system_context in
@@ -506,28 +486,6 @@ let assemble_hooks
                        recorded_blocks_for_receipt;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
-                let extra_system_context_estimated_tokens =
-                  Option.map Keeper_context_core_accessors.estimate_char_tokens ctx
-                in
-                let hook_extra_system_context_estimated_tokens =
-                  extra_system_context_assembly
-                    .hook_extra_system_context_estimated_tokens
-                in
-                let post_hook_estimated_input_tokens =
-                  extra_system_context_assembly.post_hook_estimated_input_tokens
-                in
-                let post_hook_context_window_observation =
-                  extra_system_context_assembly
-                    .post_hook_context_window_observation
-                in
-                (* The complete block sequence is already assembled into [ctx].
-                   This estimate is manifest-only: OAS receives [ctx] unchanged
-                   and owns typed ContextOverflow/compaction. *)
-                let post_hook_over_context_window =
-                  post_hook_context_window_observation
-                    .observed_over_context_tokens
-                  > 0
-                in
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
                    let post_tool_context =
@@ -540,9 +498,7 @@ let assemble_hooks
                         ~oas_turn_count:turn
                         ~runtime_id:runtime_id_string
                         ~status:
-                          (if post_hook_over_context_window
-                           then "post_hook_context_overflow"
-                           else if post_tool_context
+                          (if post_tool_context
                            then "post_tool_context_injection"
                            else "pre_tool_context_injection")
                         ~decision:
@@ -562,32 +518,6 @@ let assemble_hooks
                                ; ( "extra_system_context_computed_size",
                                    Json_util.int_opt_to_json
                                      acc.extra_system_context_size )
-                               ; ( "extra_system_context_estimated_tokens",
-                                   Json_util.int_opt_to_json
-                                     extra_system_context_estimated_tokens )
-                               ; ( "hook_extra_system_context_estimated_tokens",
-                                   `Int hook_extra_system_context_estimated_tokens )
-                               ; ( "estimated_input_tokens_with_tools",
-                                   `Int
-                                     tool_context_estimate.estimated_input_tokens_with_tools )
-                               ; ( "post_hook_estimated_input_tokens",
-                                   `Int post_hook_estimated_input_tokens )
-                               ; ( "context_window",
-                                   `Int max_context )
-                               ; ( "post_hook_remaining_context_tokens",
-                                   `Int
-                                     post_hook_context_window_observation
-                                       .observed_remaining_context_tokens )
-                               ; ( "post_hook_over_context_tokens",
-                                   `Int
-                                     post_hook_context_window_observation
-                                       .observed_over_context_tokens )
-                               ; ( "post_hook_context_usage_ratio",
-                                   `Float
-                                     post_hook_context_window_observation
-                                       .observed_context_usage_ratio )
-                               ; ( "post_hook_over_context_window",
-                                   `Bool post_hook_over_context_window )
                                ]))
                         ())
                  | _ -> ());
@@ -613,7 +543,6 @@ let assemble_hooks
                   { current_params with
                     extra_system_context = ctx
                   ; tool_choice
-                  ; tool_filter_override = None
                   }
               | _event -> Agent_sdk.Hooks.Continue)
       }
@@ -632,7 +561,6 @@ let assemble_hooks
       ; model_input_projection
       ; acc
       ; all_tool_names
-      ; tool_context_estimate
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref

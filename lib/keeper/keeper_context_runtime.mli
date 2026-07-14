@@ -136,15 +136,14 @@ val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
-  | Blocked_below_thresholds
+  | Prepared of Compaction_trigger.t
+  | Rejected of Compaction_trigger.t * Keeper_compact_policy.compaction_rejection
+  | Not_requested
   | Skipped_no_checkpoint
-  | Skipped_cooldown of
-      { hold_s : float
-      ; cooldown_sec : int
-      }
 
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
+val compaction_decision_prepared : compaction_decision -> bool
 
 val apply_post_turn_lifecycle_with_resilience_handles
   :  resilience_audit_store:Shared_audit.Store.t option
@@ -193,9 +192,8 @@ val record_compaction_outcome
     [context_overflow] set in this case, so operators need the signal
     to escalate profile / alert.
 
-    Two emit paths exist ([keeper_tool_surface] manual compact recovery and
-    [dispatch_post_turn_lifecycle_events] automatic compact); both
-    funnel through this helper to keep observability coherent. *)
+    Explicit compaction completion paths funnel through this helper to keep
+    observability coherent. *)
 val dispatch_compaction_completed
   :  config:Workspace.config
   -> origin:Keeper_registry.lifecycle_event_origin
@@ -214,6 +212,7 @@ val recover_latest_checkpoint_for_overflow_retry
   :  base_dir:string
   -> meta:keeper_meta
   -> model:string
+  -> trigger:Compaction_trigger.t
   -> primary_model_max_tokens:int
   -> overflow_retry_recovery option
 

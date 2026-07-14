@@ -19,7 +19,7 @@ export const ctxCompositionSearch = signal('')
 export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   const points = series.filter(
-    (p: KeeperMetricPoint) => (p.ctx_composition?.display_total_tokens ?? 0) > 0,
+    (p: KeeperMetricPoint) => (p.ctx_composition?.attributed_bytes ?? 0) > 0,
   )
   if (points.length === 0) return null
 
@@ -27,23 +27,22 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   const latestComposition = latest?.ctx_composition ?? null
   if (!latestComposition) return null
 
-  const latestTotal = latestComposition.display_total_tokens
+  const latestTotalBytes = latestComposition.attributed_bytes
   const latestActual = latestComposition.actual_input_tokens
-  const latestKnown = latestComposition.estimated_known_tokens
   const latestEntries = Object.entries(latestComposition.segments)
-    .filter(([, segment]) => (segment?.estimated_tokens ?? 0) > 0)
-    .sort(([, left], [, right]) => (right.estimated_tokens ?? 0) - (left.estimated_tokens ?? 0))
-  if (latestEntries.length === 0 || latestTotal <= 0) return null
+    .filter(([, segment]) => (segment?.bytes ?? 0) > 0)
+    .sort(([, left], [, right]) => (right.bytes ?? 0) - (left.bytes ?? 0))
+  if (latestEntries.length === 0 || latestTotalBytes <= 0) return null
   const visibleCtxEntries = filterCtxCompositionEntries(latestEntries, ctxCompositionSearch.value)
 
   const allKeys = Array.from(
     new Set(points.flatMap((point: KeeperMetricPoint) => Object.keys(point.ctx_composition?.segments ?? {}))),
   )
   const sortedKeys = allKeys
-    .filter((key) => points.some((point: KeeperMetricPoint) => (point.ctx_composition?.segments?.[key]?.estimated_tokens ?? 0) > 0))
+    .filter((key) => points.some((point: KeeperMetricPoint) => (point.ctx_composition?.segments?.[key]?.bytes ?? 0) > 0))
     .sort((left, right) => {
-      const rightLatest = latestComposition.segments[right]?.estimated_tokens ?? 0
-      const leftLatest = latestComposition.segments[left]?.estimated_tokens ?? 0
+      const rightLatest = latestComposition.segments[right]?.bytes ?? 0
+      const leftLatest = latestComposition.segments[left]?.bytes ?? 0
       if (rightLatest !== leftLatest) return rightLatest - leftLatest
       return left.localeCompare(right)
     })
@@ -56,9 +55,6 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   const barStep = innerW / Math.max(points.length, 1)
   const barWidth = Math.max(3, Math.min(8, barStep - 1))
 
-  const knownRatio = latestTotal > 0 ? latestKnown / latestTotal : 0
-  const unattributedTokens = latestComposition.segments.unattributed?.estimated_tokens ?? 0
-
   return html`
     <div class="mb-5 v2-monitoring-panel">
       <div class="flex items-center gap-2 mb-2">
@@ -68,23 +64,20 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3 v2-monitoring-row">
         <${DetailCard} class="md:col-span-2">
           <div class="flex items-center justify-between mb-2 gap-3">
-            <${Eyebrow}>latest turn input</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(latestTotal)}</span>
+            <${Eyebrow}>attributed content bytes</${Eyebrow}>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotalBytes.toLocaleString()} bytes</span>
           </div>
           <div class="h-3 rounded-[var(--r-0)] overflow-hidden border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] flex">
             ${latestEntries.map(([key, segment]) => {
-              const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
+              const pct = latestTotalBytes > 0 ? (segment.bytes / latestTotalBytes) * 100 : 0
               return html`<div
-                title=${`${ctxSegmentLabel(key)} · ${formatTokens(segment.estimated_tokens)} · ${pct.toFixed(1)}%`}
+                title=${`${ctxSegmentLabel(key)} · ${segment.bytes.toLocaleString()} bytes · ${pct.toFixed(1)}%`}
                 style=${`width:${pct}%;background:${ctxSegmentColor(key)};min-width:${pct > 0 ? '1px' : '0'};`}
               ></div>`
             })}
           </div>
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-disabled)]">
-            ${latestActual != null ? html`<span>actual ${formatTokens(latestActual)}</span>` : null}
-            <span>known ${formatTokens(latestKnown)}</span>
-            <span>${Math.round(knownRatio * 100)}% attributed</span>
-            ${unattributedTokens > 0 ? html`<span>residual ${formatTokens(unattributedTokens)}</span>` : null}
+            <span>${latestTotalBytes.toLocaleString()} exact bytes represented</span>
           </div>
         <//>
 
@@ -92,14 +85,14 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
           <${Eyebrow}>largest bucket</${Eyebrow}>
           <span class="text-sm font-medium text-[var(--color-fg-secondary)]">${ctxSegmentLabel(latestEntries[0]?.[0] ?? 'unknown')}</span>
           <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">
-            ${latestEntries[0] ? `${formatTokens(latestEntries[0][1].estimated_tokens)} · ${((latestEntries[0][1].estimated_tokens / latestTotal) * 100).toFixed(1)}%` : '-'}
+            ${latestEntries[0] ? `${latestEntries[0][1].bytes.toLocaleString()} bytes · ${((latestEntries[0][1].bytes / latestTotalBytes) * 100).toFixed(1)}%` : '-'}
           </span>
         <//>
 
         <${DetailCard} class="flex flex-col justify-between">
-          <${Eyebrow}>residual</${Eyebrow}>
-          <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${formatTokens(unattributedTokens)}</span>
-          <${MutedSpan}>tool schema / provider overhead / estimator gap</${MutedSpan}>
+          <${Eyebrow}>provider input</${Eyebrow}>
+          <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${latestActual != null ? `${formatTokens(latestActual)} tokens` : '-'}</span>
+          <${MutedSpan}>reported separately; not byte-attributed</${MutedSpan}>
         <//>
       </div>
 
@@ -112,13 +105,13 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="컨텍스트 구성 스택 히스토리" style="background:var(--bg-deepest);">
             ${points.map((point: KeeperMetricPoint, index: number) => {
               const comp = point.ctx_composition
-              if (!comp || comp.display_total_tokens <= 0) return null
+              if (!comp || comp.attributed_bytes <= 0) return null
               const x = pad + (index * barStep) + Math.max(0, (barStep - barWidth) / 2)
               let yCursor = H - pad
               return sortedKeys.map((key) => {
-                const tokens = comp.segments[key]?.estimated_tokens ?? 0
-                if (tokens <= 0) return null
-                const height = (tokens / comp.display_total_tokens) * innerH
+                const bytes = comp.segments[key]?.bytes ?? 0
+                if (bytes <= 0) return null
+                const height = (bytes / comp.attributed_bytes) * innerH
                 yCursor -= height
                 return html`<rect
                   x="${x.toFixed(1)}"
@@ -153,7 +146,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
           ` : null}
           <div class="flex flex-col gap-1.5 v2-monitoring-row">
             ${visibleCtxEntries.map(([key, segment]) => {
-              const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
+              const pct = latestTotalBytes > 0 ? (segment.bytes / latestTotalBytes) * 100 : 0
               return html`
                 <div class="flex items-center justify-between gap-2 text-2xs v2-monitoring-row">
                   <span class="inline-flex items-center gap-2 min-w-0">
@@ -161,7 +154,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
                     <span class="truncate text-[var(--color-fg-primary)]">${ctxSegmentLabel(key)}</span>
                   </span>
                   <span class="font-mono tabular-nums text-[var(--color-fg-disabled)] whitespace-nowrap">
-                    ${pct.toFixed(1)}% · ${formatTokens(segment.estimated_tokens)}
+                    ${pct.toFixed(1)}% · ${segment.bytes.toLocaleString()} bytes
                   </span>
                 </div>
               `

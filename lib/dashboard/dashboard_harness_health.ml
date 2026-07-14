@@ -94,8 +94,8 @@ let runtime_warning_ctx_ratio =
 let pre_compact_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let pre_compact_store_mu = Eio.Mutex.create ()
 
-(** Store for wake-time payload observations. Populated lazily on first
-    [record_wake_payload] call when [MASC_PAYLOAD_TELEMETRY] is enabled. *)
+(** Store for wake-time payload observations. Populated lazily on the first
+    [record_wake_payload] call. *)
 let wake_payload_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let wake_payload_store_mu = Eio.Mutex.create ()
 

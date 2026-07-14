@@ -410,9 +410,9 @@ let ensure_thompson_persistence ~base_path =
 let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     ~proc_mgr ~fs ?env ()
     : Mcp_server.server_state =
-  (* DET-OK: absent transport input delegates to the explicit owner BasePath;
-     normalization below remains the single path interpretation boundary. *)
   let input_base_path =
+    (* DET-OK: absent transport input selects the explicit owner BasePath;
+       normalization below remains the sole interpretation boundary. *)
     match String.trim (Option.value input_base_path ~default:base_path) with
     | "" -> None
     | raw -> Some raw

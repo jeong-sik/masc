@@ -695,9 +695,9 @@ let prepare_keeper_persistence ?requested_base_path ~config () =
   | Error _ as error -> error
   | Ok () ->
     let config_base_path = config.Workspace.base_path in
-    (* DET-OK: omission selects the same workspace BasePath supplied by the
-       typed config; no ambient path or guessed owner enters this branch. *)
     let requested_base_path =
+      (* DET-OK: omission selects the explicit typed-config BasePath; no
+         ambient path or guessed owner enters this branch. *)
       Option.value requested_base_path ~default:config_base_path
     in
     let phase = ref Resolving_base_path in

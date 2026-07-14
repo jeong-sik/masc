@@ -130,10 +130,8 @@ type blocker_class =
   | Stale_fleet_batch
   | Sdk_context_window_exceeded
   | Sdk_unrecognized_stop_reason
-  | Sdk_idle_detected
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
-  | Sdk_exit_condition_met
   | Sdk_input_required
 
 val blocker_class_to_string : blocker_class -> string

@@ -1,79 +1,39 @@
-(** Keeper_compact_policy — compaction gate and strategy application.
+(** Keeper_compact_policy — explicit compaction request application.
 
-    Decides whether compaction should run based on ratio/message/token
-    gates and cooldown, then applies OAS strategies + persona fold.
+    Applies a caller-owned typed request. Context observations never admit
+    compaction on their own.
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
-(** Fraction of context window at which compaction is treated as an
-    emergency, bypassing the continuity-reflection cooldown gate.
-
-    Env override: [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD]
-    (default 0.8, valid range \[0.5, 0.99\]; out-of-range falls back
-    to default with warn). Read once at module init; restart required
-    to change. Effective value is exported as Otel_metric_store gauge
-    {!Keeper_metrics.(to_string EmergencyCompactRatioThreshold)}. *)
-val emergency_compact_ratio_threshold : float
-
-(** Typed result for the compaction policy gate. String rendering is kept
+(** Typed result for an explicit compaction request. String rendering is kept
     at telemetry/persistence boundaries via {!compaction_decision_to_string}. *)
 type compaction_decision =
   | Applied of Compaction_trigger.t
-  | Blocked_below_thresholds
+  | Not_requested
   | Skipped_no_checkpoint
-  | Skipped_cooldown of
-      { hold_s : float
-      ; cooldown_sec : int
-      }
 
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
-
-(** Pure compaction gate decision. Exposed so the FSM-level cooldown
-    contract can be tested without constructing an OAS checkpoint or
-    running reducers. *)
-val decide_compaction
-  :  ratio:float
-  -> msg_count:int
-  -> tok_count:int
-  -> ratio_gate:float
-  -> message_gate:int
-  -> token_gate:int
-  -> cooldown_sec:int
-  -> last_compaction_ts:float
-  -> now_ts:float
-  -> compaction_decision
 
 (** Project [meta] to its [(ratio_gate, message_gate, token_gate)]
     tuple. *)
 val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * int * int
 
-(** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the configured
-    observation gates and either returns [ctx] unchanged or applies a valid
-    configured-LLM plan. Missing/invalid LLM output and the retired
+(** [compact_for_request_typed ~meta ~trigger ctx] applies a caller-owned typed
+    request through a valid configured-LLM plan. Missing/invalid LLM output and the retired
     deterministic mode preserve the original messages exactly.
 
     Return triple:
     - the (possibly compacted) working context;
     - [Some trigger] when compaction was applied, [None] otherwise;
-    - a typed decision tag describing the gate outcome. *)
-val compact_if_needed_typed
+    - a typed decision tag describing the request outcome. *)
+val compact_for_request_typed
   :  meta:Keeper_meta_contract.keeper_meta
-  -> now_ts:float
+  -> trigger:Compaction_trigger.t
   -> Keeper_context_core.working_context
   -> Keeper_context_core.working_context
      * Compaction_trigger.t option
      * compaction_decision
-
-(** Compatibility wrapper around {!compact_if_needed_typed}; the third
-    return value is {!compaction_decision_to_string}.  The [string option]
-    in the second position is the human-readable rendering of the
-    {!Compaction_trigger.t} (via {!Compaction_trigger.to_human}). *)
-val compact_if_needed
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> now_ts:float
-  -> Keeper_context_core.working_context
-  -> Keeper_context_core.working_context * string option * string
 
 type pre_compact_event = {
   timestamp : float;

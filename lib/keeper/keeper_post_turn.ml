@@ -32,10 +32,8 @@
     trace_id replacement, append-only ancestry, checkpoint lineage
     parity once back to idle.
 
-    Spec out-of-scope (line 15-18 in spec): compaction strategy
-    selection (KeeperCompactionLifecycle), Agent.run turn loop,
-    long-term memory recall.  This module *triggers* compaction but
-    does not *select* the strategy. *)
+    Spec out-of-scope (line 15-18 in spec): explicit compaction requests,
+    Agent.run turn loop, and long-term memory recall. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -474,9 +472,9 @@ let apply_post_turn_lifecycle_with_resilience_handles
             meta
       in
       let before_tokens = token_count ctx in
-      let compacted_ctx, trigger, decision =
-        Keeper_compact_policy.compact_if_needed_typed ~meta:base_meta ~now_ts ctx
-      in
+      let compacted_ctx = ctx in
+      let trigger = None in
+      let decision = Keeper_compact_policy.Not_requested in
       let compaction_decided =
         Keeper_compact_policy.compaction_decision_applied decision
       in
@@ -630,42 +628,11 @@ let apply_post_turn_lifecycle_with_resilience_handles
   let body = apply_tool_emission_wirein ~now:now_ts body in
   apply_multimodal_wirein ~now:now_ts body
 
-let forced_overflow_retry_meta
-    (meta : keeper_meta)
-    ~(turn_generation : int)
-    ~(now_ts : float) : keeper_meta =
-  let base_meta =
-    if turn_generation = meta.runtime.generation then meta
-    else
-      map_runtime
-        (fun rt -> { rt with generation = turn_generation })
-        meta
-  in
-  {
-    (map_runtime
-       (fun rt ->
-         let proactive_rt =
-           if rt.proactive_rt.last_ts > 0.0
-           then rt.proactive_rt
-           else { rt.proactive_rt with last_ts = now_ts }
-         in
-         { rt with proactive_rt })
-       base_meta)
-    with
-    compaction =
-      {
-        base_meta.compaction with
-        ratio_gate = 0.0;
-        message_gate = 0;
-        token_gate = 0;
-        cooldown_sec = 0;
-      };
-  }
-
 let recover_latest_checkpoint_for_overflow_retry
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(model : string)
+    ~(trigger : Compaction_trigger.t)
     ~(primary_model_max_tokens : int) : overflow_retry_recovery option =
   let session = create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir in
   let oas_result =
@@ -710,7 +677,6 @@ let recover_latest_checkpoint_for_overflow_retry
   match selected with
   | None -> None
   | Some (ctx, turn_generation) ->
-      let now_ts = Time_compat.now () in
       let ctx =
         if primary_model_max_tokens <= 0 then ctx
         else
@@ -720,10 +686,14 @@ let recover_latest_checkpoint_for_overflow_retry
       in
       let before_tokens = token_count ctx in
       let retry_meta =
-        forced_overflow_retry_meta meta ~turn_generation ~now_ts
+        if turn_generation = meta.runtime.generation then meta
+        else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
       in
       let compacted_ctx, trigger, base_decision =
-        Keeper_compact_policy.compact_if_needed_typed ~meta:retry_meta ~now_ts ctx
+        Keeper_compact_policy.compact_for_request_typed
+          ~meta:retry_meta
+          ~trigger
+          ctx
       in
       let after_tokens = token_count compacted_ctx in
       let compaction_applied =

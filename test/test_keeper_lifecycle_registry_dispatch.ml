@@ -150,7 +150,7 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
         started_dispatched = false;
         failure_reason = None;
         trigger = None;
-        decision = KEC.Blocked_below_thresholds;
+        decision = KEC.Not_requested;
         before_tokens = 0;
         after_tokens = 0;
         saved_tokens = 0;

@@ -68,12 +68,8 @@ let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_kee
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
-  | Blocked_below_thresholds
+  | Not_requested
   | Skipped_no_checkpoint
-  | Skipped_cooldown of {
-      hold_s : float;
-      cooldown_sec : int;
-    }
 
 let compaction_decision_to_string =
   Keeper_compact_policy.compaction_decision_to_string

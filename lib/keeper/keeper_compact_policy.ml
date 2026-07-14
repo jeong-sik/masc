@@ -1,7 +1,7 @@
-(** Keeper_compact_policy — compaction gate and strategy application.
+(** Keeper_compact_policy — explicit compaction request application.
 
-    Decides whether compaction should run based on ratio/message/token
-    gates and cooldown, then applies OAS strategies + persona fold.
+    Applies a caller-owned typed request. Context observations never admit
+    compaction on their own.
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
@@ -94,183 +94,36 @@ let pre_compact_is_local_model_of_meta meta =
        false)
 ;;
 
-(** Fraction of context window at which compaction is treated as an
-    emergency, bypassing the continuity-reflection cooldown gate.
-    Distinct from [ratio_gate] (per-keeper compaction threshold) and
-    [handoff_threshold] (handoff gate); this is a safety floor that
-    prevents context overflow regardless of cooldown state (#5634).
-
-    Operator override: [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD].
-    Default 0.8. Valid range [0.5, 0.99]; out-of-range falls back to
-    the default with a one-time warn (parse-correctness, not silent
-    coercion — a stale operator typo should not push the emergency
-    floor outside the policy envelope, but it also should not block
-    boot). The effective value is exposed via Otel_metric_store gauge
-    {!Keeper_metrics.(to_string EmergencyCompactRatioThreshold)}
-    so operators can see what the running process is actually using.
-
-    Read once at module init: keeper compact policy is a hot path and
-    re-reading env per gate call would be wasteful. Operator must
-    restart the process to change the threshold (consistent with
-    [context_ratio_hard_cap] and other compact knobs in
-    {!Env_config_keeper}). *)
-let emergency_compact_ratio_threshold : float =
-  let env_var = "MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD" in
-  let default_value = 0.8 in
-  let min_valid = 0.5 in
-  let max_valid = 0.99 in
-  (* Read raw env directly (not Env_config_core.get_float ~default) so we can
-     distinguish three observable cases:
-       1. env unset           → silent default
-       2. env set & parses    → validate range; warn on out-of-range
-       3. env set & malformed → warn explicitly with distinct message
-     get_float ~default collapses (1) and (3) into the same float value,
-     making operator typos (e.g. "foo" or "0,9" with comma) indistinguishable
-     from the unset case. The subsequent Float.equal raw default_value check
-     then suppresses the warn path entirely. (Review on PR #15782.) *)
-  let effective =
-    match Sys.getenv_opt env_var with
-    | None -> default_value
-    | Some raw ->
-      (match Float.of_string_opt (String.trim raw) with
-       | None ->
-         Log.Harness.warn
-           "[compact_policy] %s=%S is not a parseable float; falling back to default \
-            %.2f"
-           env_var
-           raw
-           default_value;
-         default_value
-       | Some parsed when not (Float.is_finite parsed) ->
-         Log.Harness.warn
-           "[compact_policy] %s=%s parsed to non-finite %f; falling back to default %.2f"
-           env_var
-           raw
-           parsed
-           default_value;
-         default_value
-       | Some parsed when parsed < min_valid || parsed > max_valid ->
-         Log.Harness.warn
-           "[compact_policy] %s=%f out of range [%.2f, %.2f]; falling back to default \
-            %.2f"
-           env_var
-           parsed
-           min_valid
-           max_valid
-           default_value;
-         default_value
-       | Some parsed -> parsed)
-  in
-  (* Surface the effective value for operators via telemetry export. Registered
-     here so the gauge exists from module init regardless of whether any
-     compaction has fired yet. *)
-  Otel_metric_store.register_gauge
-    ~name:Keeper_metrics.(to_string EmergencyCompactRatioThreshold)
-    ~help:
-      "Effective emergency compaction ratio threshold (env-overridable via \
-       MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD; clamped to [0.5, 0.99])."
-    ();
-  Otel_metric_store.set_gauge
-    Keeper_metrics.(to_string EmergencyCompactRatioThreshold)
-    effective;
-  effective
-;;
-
-(* MASC never reduces stored history from tool density or message shape.
-   Provider context pressure is owned by OAS; the gates below only decide
-   whether to request a configured LLM plan and never authorize a local
-   fallback reducer. *)
-
 type compaction_decision =
   | Applied of Compaction_trigger.t
-  | Blocked_below_thresholds
+  | Not_requested
   | Skipped_no_checkpoint
-  | Skipped_cooldown of
-      { hold_s : float
-      ; cooldown_sec : int
-      }
 
 let compaction_decision_to_string = function
   | Applied trigger -> "applied:" ^ Compaction_trigger.to_human trigger
-  | Blocked_below_thresholds -> "blocked:below_thresholds"
+  | Not_requested -> "not_requested"
   | Skipped_no_checkpoint -> "skipped:no_checkpoint"
-  | Skipped_cooldown { hold_s; cooldown_sec } ->
-    Printf.sprintf "skipped:cooldown(%0.0fs<%ds)" hold_s cooldown_sec
 ;;
 
 let compaction_decision_applied = function
   | Applied _ -> true
-  | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_cooldown _ ->
-    false
-;;
-
-let decide_compaction
-      ~ratio
-      ~msg_count
-      ~tok_count
-      ~ratio_gate
-      ~message_gate
-      ~token_gate
-      ~cooldown_sec
-      ~last_compaction_ts
-      ~now_ts
-  =
-  let cooldown = Float.of_int cooldown_sec in
-  let emergency = ratio >= emergency_compact_ratio_threshold in
-  let cooldown_ready =
-    emergency
-    || last_compaction_ts <= 0.0
-    || now_ts -. last_compaction_ts >= cooldown
-  in
-  let hold_s =
-    if cooldown <= 0.0 || emergency || last_compaction_ts <= 0.0
-    then 0.0
-    else max 0.0 (Float.of_int cooldown_sec -. (now_ts -. last_compaction_ts))
-  in
-  if not cooldown_ready
-  then Skipped_cooldown { hold_s; cooldown_sec }
-  else if ratio >= ratio_gate
-  then Applied (Compaction_trigger.Ratio_threshold { ratio; threshold = ratio_gate })
-  else if message_gate > 0 && msg_count >= message_gate
-  then Applied (Compaction_trigger.Message_count { count = msg_count; threshold = message_gate })
-  else if token_gate > 0 && tok_count >= token_gate
-  then Applied (Compaction_trigger.Token_count { count = tok_count; threshold = token_gate })
-  else Blocked_below_thresholds
+  | Not_requested | Skipped_no_checkpoint -> false
 ;;
 
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
 
-let compact_if_needed_typed
+let compact_for_request_typed
       ~(meta : keeper_meta)
-      ~(now_ts : float)
+      ~(trigger : Compaction_trigger.t)
       (ctx : working_context)
   : working_context * Compaction_trigger.t option * compaction_decision
   =
   let ratio = context_ratio ctx in
   let msg_count = message_count ctx in
-  (* NOTE(boundary): tok_count is raw infrastructure — ideally ratio alone
-     suffices.  token_gate is kept for backward compat; most profiles
-     default token_gate=0 which disables this gate.  See keeper_guard.ml. *)
   let tok_count = token_count ctx in
-  let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
-  let decision =
-    decide_compaction
-      ~ratio
-      ~msg_count
-      ~tok_count
-      ~ratio_gate
-      ~message_gate
-      ~token_gate
-      ~cooldown_sec:meta.compaction.cooldown_sec
-      ~last_compaction_ts:meta.runtime.compaction_rt.last_ts
-      ~now_ts
-  in
-  match decision with
-  | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_cooldown _ ->
-    ctx, None, decision
-  | Applied trigger ->
+  let decision = Applied trigger in
     let strategy_names =
       match meta.compaction.mode with
       | Keeper_config.Llm -> [ "ConfiguredLlm" ]
@@ -515,11 +368,5 @@ let compact_if_needed_typed
          saved_tokens
          pair_repair_stats.dropped_tool_uses
          pair_repair_stats.dropped_tool_results);
-    compacted_ctx, Some trigger, decision
-;;
-
-let compact_if_needed ~meta ~now_ts ctx =
-  let ctx, trigger, decision = compact_if_needed_typed ~meta ~now_ts ctx in
-  let trigger_str = Option.map Compaction_trigger.to_human trigger in
-  ctx, trigger_str, compaction_decision_to_string decision
+  compacted_ctx, Some trigger, decision
 ;;

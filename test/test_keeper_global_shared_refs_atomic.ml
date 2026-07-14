@@ -78,16 +78,7 @@ let compact_policy_meta () =
         ])
   with
   | Error err -> fail ("meta_of_json failed: " ^ err)
-  | Ok meta ->
-    { meta with
-      compaction =
-        { meta.compaction with
-          ratio_gate = 0.99
-        ; message_gate = 1
-        ; token_gate = 0
-        ; cooldown_sec = 0
-        }
-    }
+  | Ok meta -> meta
 
 let test_pre_compact_context_window_uses_working_context () =
   let open Masc in
@@ -123,12 +114,12 @@ let test_pre_compact_context_window_uses_working_context () =
            ~max_tokens:131_072
          |> fun ctx ->
          Keeper_context_runtime.append ctx
-           (Agent_sdk.Types.user_msg "force message-gate compaction")
+           (Agent_sdk.Types.user_msg "explicit compaction request")
        in
        let _, trigger, decision =
-         Keeper_compact_policy.compact_if_needed_typed
+         Keeper_compact_policy.compact_for_request_typed
            ~meta:(compact_policy_meta ())
-           ~now_ts:1.0
+           ~trigger:Compaction_trigger.Manual
            ctx
        in
        check bool "compaction triggered" true (Option.is_some trigger);

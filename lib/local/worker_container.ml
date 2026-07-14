@@ -328,27 +328,13 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
                }))
     listed_schemas
 
-(** Convert a model label to an OAS Provider.config.
-    Returns Error when the label cannot be parsed. *)
-let oas_provider_of_label (label : string) :
-    (Agent_sdk.Provider.config, string) result =
-  match Runtime_model_string.parse_model_string label with
-  | Some pc -> Ok (Agent_sdk.Provider.config_of_provider_config pc)
-  | None ->
-    let msg = Printf.sprintf "Cannot parse model label: %S (expected provider:model)" label in
-    Log.Misc.error "%s" msg;
-    Error msg
-
 (** Resolve provider from a model label string.
     Returns the provider config and model_id on success. *)
 let resolve_oas_provider_of_label (label : string) :
-    (Agent_sdk.Provider.config * string, string) result =
+    (Llm_provider.Provider_config.t * string, string) result =
   match Runtime_model_string.parse_model_string label with
   | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
-  | Some pc ->
-    Ok
-      ( Agent_sdk.Provider.config_of_provider_config pc,
-        pc.Llm_provider.Provider_config.model_id )
+  | Some pc -> Ok (pc, pc.Llm_provider.Provider_config.model_id)
 
 let make_worker_meta ~base_path ~workspace_path ~worker_name
     ~mcp_session_id ~role ~selection_note ~runtime_backend
@@ -397,15 +383,14 @@ let append_worker_completion_log ~base_path ~worker_name
 
 (** Build (config, options) for Agent.resume — the continue_worker path.
     New workers use Worker_oas.build_agent (Builder pattern) instead.
-    Accepts [~provider] + [~model_id] as resolved values. *)
-let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
+    The exact provider config is passed directly to [Agent.resume]. *)
+let build_resume_config ~worker_name ~model_id ~system_prompt
     ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
     () =
   let config =
     {
-      Agent_sdk.Types.default_config with
+      (Agent_sdk.Types.default_config ~model:model_id) with
       name = worker_name;
-      model = model_id;
       system_prompt = Some system_prompt;
       enable_thinking = Some thinking_enabled;
     }
@@ -413,7 +398,6 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
   let options =
     {
       Agent_sdk.Agent.default_options with
-      provider = Some provider;
       hooks;
       raw_trace = Some raw_trace;
       periodic_callbacks;

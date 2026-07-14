@@ -10,7 +10,7 @@
 val build_agent :
   net:([ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t) ->
   meta:Worker_container_types.worker_container_meta ->
-  provider:Agent_sdk.Provider.config ->
+  provider_config:Llm_provider.Provider_config.t ->
   system_prompt:string ->
   tools:Agent_sdk.Tool.t list ->
   hooks:Agent_sdk.Hooks.hooks ->
@@ -37,7 +37,7 @@ val run_worker_via_oas :
   base_path:string ->
   auth_token:string option ->
   meta:Worker_container_types.worker_container_meta ->
-  provider:Agent_sdk.Provider.config ->
+  provider_config:Llm_provider.Provider_config.t ->
   system_prompt:string ->
   prompt:string ->
   tools:Agent_sdk.Tool.t list ->
@@ -52,6 +52,7 @@ val resume_worker_via_oas :
   base_path:string ->
   auth_token:string option ->
   meta:Worker_container_types.worker_container_meta ->
+  provider_config:Llm_provider.Provider_config.t ->
   checkpoint:Agent_sdk.Checkpoint.t ->
   prompt:string ->
   tools:Agent_sdk.Tool.t list ->

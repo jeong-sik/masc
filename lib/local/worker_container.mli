@@ -8,8 +8,7 @@
     [include module type of struct include M end]
     (cycle 187 rationale).
 
-    External surface (15 entries — 11 dotted callers + 4
-    additional helpers consumed unqualified by
+    External surface (including helpers consumed unqualified by
     {!Worker_container_runners} through the runtime):
     - File paths: {!worker_container_dir},
       {!worker_raw_trace_path},
@@ -22,8 +21,7 @@
       {!evidence_session_id_of_worker_run}.
     - Tool catalogue: {!session_min_tool_names}.
     - Tool builders: {!build_oas_mcp_tools}.
-    - Provider: {!oas_provider_of_label},
-      {!resolve_oas_provider_of_label}.
+    - Provider: {!resolve_oas_provider_of_label}.
     - Audit + run helpers: {!append_worker_completion_log},
       {!build_resume_config}.
 
@@ -157,18 +155,11 @@ val build_oas_mcp_tools :
 
 (** {1 Provider resolution} *)
 
-val oas_provider_of_label :
-  string -> (Agent_sdk.Provider.config, string) result
-(** Parses a model label (e.g. ["openai:gpt-4.1"]) into an
-    {!Agent_sdk.Provider.config}.  Errors when
-    {!Runtime_model_string.parse_model_string} returns [None]. *)
-
 val resolve_oas_provider_of_label :
-  string -> (Agent_sdk.Provider.config * string, string) result
-(** Like {!oas_provider_of_label} but additionally returns
-    the parsed [model_id] so callers do not have to
-    re-parse the label to feed both fields into
-    {!build_resume_config}. *)
+  string -> (Llm_provider.Provider_config.t * string, string) result
+(** Parses a model label into the exact provider config and its declared
+    [model_id]. Errors when {!Runtime_model_string.parse_model_string}
+    returns [None]. *)
 
 (** {1 Turn-log audit trail} *)
 
@@ -192,10 +183,8 @@ val append_worker_completion_log :
 
 val build_resume_config :
   worker_name:string ->
-  provider:Agent_sdk.Provider.config ->
   model_id:string ->
   system_prompt:string ->
-  tools:Agent_sdk.Tool.t list ->
   thinking_enabled:bool ->
   hooks:Agent_sdk.Hooks.hooks ->
   raw_trace:Agent_sdk.Raw_trace.t ->
@@ -204,7 +193,7 @@ val build_resume_config :
   Agent_sdk.Types.agent_config * Agent_sdk.Agent.options
 (** Assembles the [(config, options)] pair consumed by
     [Agent_sdk.Agent.resume].  [config] inherits
-    {!Agent_sdk.Types.default_config} and overrides
-    [name] / [model] / [system_prompt] / [enable_thinking] /
-    [tool_choice = Auto]. Provider/model sampling and output defaults remain
-    OAS-owned. The concrete [tools] list is the tool-exposure SSOT. *)
+    {!Agent_sdk.Types.default_config} for the exact [model_id] and overrides
+    [name] / [system_prompt] / [enable_thinking]. Provider/model sampling and output defaults remain
+    OAS-owned. The concrete provider config is passed separately through
+    [Agent_sdk.Agent.resume ~provider_config]. *)

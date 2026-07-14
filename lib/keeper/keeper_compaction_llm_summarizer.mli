@@ -1,18 +1,6 @@
-(** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
-
-    Default compaction path, selected per keeper via [meta.compaction.mode]
-    ([Llm] unless overridden). Requests a structured {!compaction_plan} from a
-    librarian-lane provider that classifies each working-set message (by
-    0-based index) into kept / summarized / dropped, plus one [summary] prose
-    block standing in for the summarized indices.
-
-    Fail-closed by construction: {!make} returns [None] (caller falls back to
-    the deterministic chain) whenever the Eio context is unavailable, no
-    schema-capable direct-completion provider resolves, or the produced plan
-    is structurally invalid. This mirrors {!Keeper_memory_llm_summary.make};
-    it never lies about effects — the provider call happens inside the
-    fiber-local Eio context captured at construction, and the summarizer type
-    stays synchronous+total. *)
+(** LLM-backed Keeper context compaction. The exact caller-supplied Runtime
+    produces a structured {!compaction_plan}; unavailable providers and invalid
+    plans fail explicitly as [None]. *)
 
 (** A validated compaction plan over a working set of [n] messages. Every
     index in [kept]/[summarized]/[dropped] is in [\[0, n)], the three sets are
@@ -43,11 +31,9 @@ type complete_fn =
   unit ->
   (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
 
-(** [make ~runtime_id ~keeper_name ()] builds a summarizer bound to the
-    librarian lane resolved from [runtime_id], or [None] if the Eio context
-    or a schema-capable provider is unavailable. The caller treats [None] as
-    "use the deterministic chain". [complete]/[timeout_sec] override the
-    provider call and deadline (tests). *)
+(** [make ~runtime_id ~keeper_name ()] builds a summarizer from that exact
+    Runtime, or [None] if its Eio context or schema-capable provider is
+    unavailable. [complete]/[timeout_sec] override the call in tests. *)
 val make
   :  ?complete:complete_fn
   -> ?timeout_sec:float

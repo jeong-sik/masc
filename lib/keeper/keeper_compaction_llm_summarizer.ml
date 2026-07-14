@@ -6,17 +6,6 @@
 module Schema = Keeper_structured_output_schema
 module Int_set = Set.Make (Int)
 
-(* Bound the summary output. Larger than the memory-bank 512 because a
-   compaction summary stands in for many messages, but still capped so the
-   emergency path (a near-full context) cannot request an unbounded reply. *)
-let summary_max_tokens = 1024
-
-(* Bound the serialized working set handed to the model. A compaction fires
-   near the context limit, so the notes text must itself be bounded well below
-   the window; the model classifies by index, so truncation loses tail detail
-   but never the index mapping (the tail simply lands in [kept]). *)
-let max_notes_bytes = 24_000
-
 type compaction_plan =
   { summary : string
   ; kept : int list
@@ -43,14 +32,8 @@ let is_direct_completion_provider (provider_cfg : Llm_provider.Provider_config.t
   | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope -> true
 
 let provider_for_plan (provider_cfg : Llm_provider.Provider_config.t) =
-  let max_tokens =
-    match provider_cfg.max_tokens with
-    | Some n when n > 0 -> Some (min n summary_max_tokens)
-    | _ -> Some summary_max_tokens
-  in
   { provider_cfg with
-    max_tokens
-  ; tool_choice = None
+    tool_choice = None
   ; disable_parallel_tool_use = true
   }
   (* Full module path (not the [Schema] alias): the structured-output
@@ -80,8 +63,6 @@ let indexed_messages_text (messages : Agent_sdk.Types.message list) =
     let text = Agent_sdk.Types.text_of_message m |> String.trim in
     Printf.sprintf "[%d] %s: %s" idx role text)
   |> String.concat "\n"
-  |> String_util.utf8_safe ~max_bytes:max_notes_bytes ~suffix:"..."
-  |> String_util.to_string
 
 let messages_for_plan ~(messages : Agent_sdk.Types.message list) =
   let count = List.length messages in
@@ -134,10 +115,8 @@ let string_field key = function
 
 let ( let* ) = Result.bind
 
-(* The three index lists must together partition [0, message_count) exactly:
-   every index in range, no out-of-range, no negatives, no duplicates across
-   the union. A violation yields [Error] (caller falls back to deterministic),
-   not a silent repair — an LLM that miscounts must not drop real messages. *)
+(* The three index lists must together partition [0, message_count) exactly.
+   An invalid LLM plan is an explicit error, never a silent repair. *)
 let validate_partition ~message_count ~kept ~summarized ~dropped =
   let all = kept @ summarized @ dropped in
   let seen = Array.make message_count false in
@@ -174,12 +153,7 @@ let plan_of_json ~message_count json =
   let* kept = int_list_field Schema.compaction_plan_field_kept_indices json in
   let* summarized = int_list_field Schema.compaction_plan_field_summarized_indices json in
   let* dropped = int_list_field Schema.compaction_plan_field_dropped_indices json in
-  (* The summary stands in for the [summarized] messages; it is consumed by
-     [apply] only when [summarized] is non-empty. Requiring it non-empty
-     unconditionally would reject a legitimate "keep everything, nothing to
-     summarize" plan (summary="") and spuriously fall back to the
-     deterministic chain. So the summary must be non-empty iff it will be
-     used. *)
+  (* The summary must be non-empty exactly when [apply] will use it. *)
   let* () =
     if summarized <> [] && summary = ""
     then Error "summary must be non-empty when summarized indices are present"
@@ -279,24 +253,17 @@ let run_plan
 let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
   : summarizer option
   =
-  (* Gating lives in the caller's [meta.compaction.mode] (Llm vs
-     Deterministic). The memory-bank MASC_KEEPER_MEMORY_LLM_SUMMARY flag is a
-     different subsystem's opt-in and must not silence compaction (38-bug
-     campaign #3: the double gate kept the LLM path permanently dead). *)
   match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     let clock = Eio_context.get_clock_opt () in
-    let provider_runtime_id =
-      Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
-    in
     (match
        Keeper_memory_runtime_resolution.provider_for_runtime
-         ~runtime_id:provider_runtime_id
+         ~runtime_id
      with
      | Error err ->
        Log.Keeper.warn ~keeper_name
          "compaction LLM summarizer provider resolution failed runtime=%s: %s"
-         provider_runtime_id err;
+         runtime_id err;
        None
      | Ok provider ->
        let providers =
@@ -309,13 +276,13 @@ let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) (
           Log.Keeper.warn ~keeper_name
             "compaction LLM summarizer has no schema-capable direct completion \
              provider runtime=%s"
-            provider_runtime_id;
+            runtime_id;
           None
         | provider_cfg :: _ ->
           Some
             (fun ~messages ->
               run_plan ?complete ?clock ?timeout_sec ~keeper_name
-                ~runtime_id:provider_runtime_id ~sw ~net ~provider_cfg ~messages ())))
+                ~runtime_id ~sw ~net ~provider_cfg ~messages ())))
   | _ ->
     Log.Keeper.warn ~keeper_name
       "compaction LLM summarizer skipped: Eio context unavailable runtime=%s"

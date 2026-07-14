@@ -164,7 +164,8 @@ val read_recent_verdicts_for_agents
 
 (** Returns the wake-payload samples within the
     [?since] / [?until] ISO-date window, sorted by
-    descending timestamp. *)
+    descending timestamp. Records missing required exact fields, carrying a
+    wrong JSON type, or containing malformed role counts are warned and rejected. *)
 val read_wake_payload_events
   :  ?since:string
   -> ?until:string

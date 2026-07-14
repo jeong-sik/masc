@@ -65,6 +65,17 @@ type load_result =
   | Unreadable of string
   | Rejected of access_rejection
 
+type durable_terminal_proof = { terminal_entry : entry }
+
+type canonical_terminal_error =
+  | Canonical_terminal_absent
+  | Canonical_terminal_unreadable of string
+  | Canonical_terminal_access_rejected of access_rejection
+  | Canonical_terminal_runtime_active of request_status
+  | Canonical_terminal_publication_ambiguous of request_status
+  | Canonical_terminal_nonterminal of request_status
+  | Canonical_terminal_noncanonical_location of request_status
+
 type recovery_report =
   { lost : int
   ; finalized : int
@@ -617,6 +628,33 @@ let access_rejection_to_json = function
       ; "message", `String "request does not belong to the authenticated caller"
       ]
 ;;
+
+let canonical_terminal_error_to_string = function
+  | Canonical_terminal_absent -> "canonical terminal request record is absent"
+  | Canonical_terminal_unreadable reason ->
+    "canonical terminal request record is unreadable: " ^ reason
+  | Canonical_terminal_access_rejected rejection ->
+    "canonical terminal request access rejected: "
+    ^ Yojson.Safe.to_string (access_rejection_to_json rejection)
+  | Canonical_terminal_runtime_active status ->
+    Printf.sprintf
+      "canonical terminal proof rejected process-local status=%s"
+      (status_to_string status)
+  | Canonical_terminal_publication_ambiguous status ->
+    Printf.sprintf
+      "canonical terminal publication is visible but durability is ambiguous status=%s"
+      (status_to_string status)
+  | Canonical_terminal_nonterminal status ->
+    Printf.sprintf
+      "canonical request record is nonterminal status=%s"
+      (status_to_string status)
+  | Canonical_terminal_noncanonical_location status ->
+    Printf.sprintf
+      "terminal request record is outside the canonical terminal partition status=%s"
+      (status_to_string status)
+;;
+
+let durable_terminal_entry proof = proof.terminal_entry
 
 let submit_error_to_json = function
   | Submit_rejected rejection -> access_rejection_to_json rejection
@@ -2279,6 +2317,43 @@ let poll ~base_path ~caller request_id : load_result =
          | Located_absent -> Absent
          | Located_unreadable reason -> Unreadable reason
          | Located_rejected rejection -> Rejected rejection))
+;;
+
+let load_canonical_durable_terminal ~base_path ~caller request_id =
+  match resolve_access_identity ~base_path ~caller with
+  | Error rejection -> Error (Canonical_terminal_access_rejected rejection)
+  | Ok (base_path, caller) ->
+    if not (is_safe_request_id request_id)
+    then Error (Canonical_terminal_access_rejected Invalid_request_id)
+    else
+      with_store_transition_lock ~base_path ~request_id (fun () ->
+        let key = request_key ~base_path ~submitted_by:caller ~request_id in
+        match
+          Eio.Mutex.use_ro mu (fun () -> Request_table.find_opt pending key)
+        with
+        | Some entry when is_terminal_status entry.status ->
+          Error (Canonical_terminal_publication_ambiguous entry.status)
+        | Some entry -> Error (Canonical_terminal_runtime_active entry.status)
+        | None ->
+          (match load_record_canonical_located ~base_path ~request_id with
+           | Located_absent -> Error Canonical_terminal_absent
+           | Located_unreadable reason ->
+             Error (Canonical_terminal_unreadable reason)
+           | Located_rejected rejection ->
+             Error (Canonical_terminal_access_rejected rejection)
+           | Located (entry, location, _source_path) ->
+             (match owner_rejection ~caller entry with
+              | Some rejection ->
+                Error (Canonical_terminal_access_rejected rejection)
+              | None ->
+                if not (is_terminal_status entry.status)
+                then Error (Canonical_terminal_nonterminal entry.status)
+                else
+                  match location with
+                  | Terminal_location -> Ok { terminal_entry = entry }
+                  | Active_location | Legacy_location ->
+                    Error
+                      (Canonical_terminal_noncanonical_location entry.status))))
 ;;
 
 (** List only this caller lane; cross-lane rows are intentionally omitted. *)

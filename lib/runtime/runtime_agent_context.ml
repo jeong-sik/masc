@@ -5,7 +5,15 @@
     [Runtime_agent] remains the public facade and still performs the
     approval wiring and final [build_safe] / [Agent.resume] calls. *)
 
-let default_max_turns = Agent_sdk.Types.unbounded_max_turns
+(* [0] is the pinned SDK's documented unbounded sentinel (agent_sdk
+   lib/base/types.mli: "[0] = no turn-count limit; positive values enforce
+   a finite limit") and is what [Agent_sdk.Types.has_finite_max_turns]
+   tests against. The SDK exports the predicate but no named constant
+   (a name only exists in the unmerged oas#2589), so masc owns the name
+   here. If an oas release ships a named sentinel, replace this value
+   with that re-export (masc#24391 layer 2). *)
+let unbounded_max_turns = 0
+let default_max_turns = unbounded_max_turns
 
 type stop_reason =
   | Completed
@@ -463,7 +471,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   let max_turns_for_resume =
     if Agent_sdk.Types.has_finite_max_turns config.max_turns
     then checkpoint.turn_count + config.max_turns
-    else Agent_sdk.Types.unbounded_max_turns
+    else unbounded_max_turns
   in
   let patched_checkpoint =
     { checkpoint with

@@ -144,7 +144,7 @@ let raw_trace_for_dispatch
     None
 ;;
 
-let keeper_max_turns = Agent_sdk.Types.unbounded_max_turns
+let keeper_max_turns = Runtime_agent_context.unbounded_max_turns
 
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind

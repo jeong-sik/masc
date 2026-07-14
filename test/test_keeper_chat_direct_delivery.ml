@@ -91,7 +91,7 @@ type flow =
   ; transcript_committed : Direct.t
   }
 
-let complete_flow ?(time_offset = 0.0) ~base_path ~request_id =
+let complete_flow ?(time_offset = 0.0) ~base_path ~request_id () =
   let at value = time_offset +. value in
   let prepared =
     Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:(at 1.0)
@@ -126,7 +126,7 @@ let complete_flow ?(time_offset = 0.0) ~base_path ~request_id =
 let test_direct_flow_is_active_only _env =
   with_temp_dir (fun base_path ->
     let request_id = request_id "direct-flow" in
-    let flow = complete_flow ~base_path ~request_id in
+    let flow = complete_flow ~base_path ~request_id () in
     check int64 "five active phases produce four revisions" 4L flow.transcript_committed.revision;
     let loaded =
       Direct.load ~base_path ~keeper_name:"sangsu" ~request_id |> expect_ok
@@ -149,6 +149,7 @@ let fail_after_rename_io () =
       | Keeper_fs.Parent_directory_fsync_after_rename ->
         failwith "synthetic post-rename fsync failure"
       | Keeper_fs.Directory_prepare
+      | Keeper_fs.Payload_encode
       | Keeper_fs.Temp_file_create
       | Keeper_fs.Payload_write
       | Keeper_fs.Payload_fsync
@@ -226,6 +227,7 @@ let test_transcript_append_crash_retries_once _env =
         ~before_durable_write:(function
           | Keeper_fs.Payload_write -> failwith "synthetic checkpoint write crash"
           | Keeper_fs.Directory_prepare
+          | Keeper_fs.Payload_encode
           | Keeper_fs.Temp_file_create
           | Keeper_fs.Payload_fsync
           | Keeper_fs.Temp_file_close
@@ -452,7 +454,7 @@ let test_remove_requires_canonical_terminal_proof_and_reports_ambiguity _env =
   with_temp_dir (fun base_path ->
     Eio.Switch.run (fun background_sw ->
       let request_id = request_id "direct-remove-proof" in
-      let flow = complete_flow ~base_path ~request_id in
+      let flow = complete_flow ~base_path ~request_id () in
       let ops =
         Keeper_msg_async.For_testing.make_request_ops
           ~generate_request_id:(fun () -> Direct.Request_id.to_string request_id)
@@ -494,7 +496,7 @@ let test_remove_requires_canonical_terminal_proof_and_reports_ambiguity _env =
        | Error error -> fail (Direct.error_to_string error)
        | Ok _ -> fail "active checkpoint survived an observed unlink");
       let replacement =
-        complete_flow ~time_offset:10.0 ~base_path ~request_id
+        complete_flow ~time_offset:10.0 ~base_path ~request_id ()
       in
       (match
          Direct.remove_after_async_terminal
@@ -520,7 +522,7 @@ let test_startup_checkpoint_rejects_volatile_poll_terminal _env =
   with_temp_dir (fun base_path ->
     Eio.Switch.run (fun background_sw ->
       let request_id = request_id "direct-volatile-terminal" in
-      let flow = complete_flow ~base_path ~request_id in
+      let flow = complete_flow ~base_path ~request_id () in
       let publications = Atomic.make 0 in
       let ops =
         Keeper_msg_async.For_testing.make_request_ops
@@ -532,6 +534,7 @@ let test_startup_checkpoint_rejects_volatile_poll_terminal _env =
               if ordinal = 3
               then failwith "synthetic terminal publication ambiguity"
             | Keeper_fs.Directory_prepare
+            | Keeper_fs.Payload_encode
             | Keeper_fs.Temp_file_create
             | Keeper_fs.Payload_write
             | Keeper_fs.Payload_fsync
@@ -578,7 +581,7 @@ let test_corrupt_canonical_terminal_is_typed_and_preserved _env =
   with_temp_dir (fun base_path ->
     Eio.Switch.run (fun background_sw ->
       let request_id = request_id "direct-corrupt-terminal" in
-      let flow = complete_flow ~base_path ~request_id in
+      let flow = complete_flow ~base_path ~request_id () in
       let request_id_wire = Direct.Request_id.to_string request_id in
       let ops =
         Keeper_msg_async.For_testing.make_request_ops

@@ -265,7 +265,13 @@ let enqueue_dashboard_payload
       ; user_blocks = payload.user_blocks
       ; attachments = payload.attachments
       ; timestamp = Eio.Time.now clock
-      ; source = Keeper_chat_queue.Dashboard
+        (* Same dashboard SSE thread convention as run_keeper_stream below;
+           the continuation channel resumes the deferred turn on this
+           thread. The payload is fresh HTTP input, so the user transcript
+           row is appended at delivery (Needs_append), never skipped. *)
+      ; source =
+          Keeper_chat_queue.Dashboard { thread_id = "keeper:" ^ payload.name }
+      ; user_row_origin = Keeper_chat_store.Needs_append
       }
   with
   | Error error -> Error (Keeper_chat_queue.mutation_error_to_string error)

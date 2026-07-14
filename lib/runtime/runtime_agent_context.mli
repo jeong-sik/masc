@@ -136,6 +136,13 @@ type config = {
 
 (** {1 Default config builder} *)
 
+val unbounded_max_turns : int
+(** The pinned SDK's documented "no turn-count limit" sentinel ([0],
+    agent_sdk lib/base/types.mli); the value
+    {!Agent_sdk.Types.has_finite_max_turns} tests against. The SDK
+    exports the predicate but no named constant, so masc names it here
+    (masc#24391 layer 2). *)
+
 val default_config :
   name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
@@ -185,6 +192,6 @@ val prepare_resume :
 (** [prepare_resume ~config ~checkpoint] computes the patched
     checkpoint + agent_config + options for an
     [Agent.resume] call.  Pure — no side effects.  The patched
-    agent config preserves {!Agent_sdk.Types.unbounded_max_turns}; otherwise it
+    agent config preserves {!unbounded_max_turns}; otherwise it
     extends [config.max_turns] beyond the consumed [checkpoint.turn_count] for
     generic finite OAS clients. Keeper callers use the unbounded sentinel. *)

@@ -99,20 +99,20 @@ let () =
           { elapsed_sec = 300.0
           ; timeout_sec = 300.0
           ; turn_count = 7
-          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          ; max_turns = Runtime_agent_context.unbounded_max_turns
           }
       , Printf.sprintf
           "execution_timeout_observed:elapsed_sec=300.0,timeout_sec=300.0,turn_count=7,max_turns=%d"
-          Agent_sdk.Types.unbounded_max_turns )
+          Runtime_agent_context.unbounded_max_turns )
     ; ( Runtime_agent.ExecutionIdleTimeoutObserved
           { idle_sec = 120.0
           ; idle_timeout_sec = 120.0
           ; turn_count = 7
-          ; max_turns = Agent_sdk.Types.unbounded_max_turns
+          ; max_turns = Runtime_agent_context.unbounded_max_turns
           }
       , Printf.sprintf
           "execution_idle_timeout_observed:idle_sec=120.0,idle_timeout_sec=120.0,turn_count=7,max_turns=%d"
-          Agent_sdk.Types.unbounded_max_turns )
+          Runtime_agent_context.unbounded_max_turns )
     ]
   in
   List.iter

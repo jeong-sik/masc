@@ -122,7 +122,7 @@ let test_busy_dashboard_enqueues () =
   check "dashboard queue revision advances" (snapshot.revision = 1L);
   (match snapshot.pending with
    | [ { Keeper_chat_queue.message =
-           { Keeper_chat_queue.content; source = Dashboard; _ }
+           { Keeper_chat_queue.content; source = Dashboard _; _ }
        ; _
        } ] ->
      check "queued content is the user's message" (String.equal content "are you there?")
@@ -155,7 +155,8 @@ let test_existing_backlog_defers_new_dashboard_message () =
        ; user_blocks = []
        ; attachments = []
        ; timestamp = Eio.Time.now clock
-       ; source = Dashboard
+       ; source = Dashboard { thread_id = "keeper:" ^ keeper_name }
+       ; user_row_origin = Keeper_chat_store.Needs_append
        }
    with
    | Ok receipt ->

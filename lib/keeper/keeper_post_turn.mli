@@ -55,6 +55,20 @@ type overflow_retry_recovery =
   ; turn_generation : int
   } [@@warning "-69"]
 
+type compaction_recovery_error =
+  | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
+  | Compaction_rejected of Keeper_compact_policy.compaction_rejection
+  | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
+  | Checkpoint_superseded of {
+      incoming_turn_count : int;
+      known_turn_count : int;
+    }
+  | Checkpoint_save_failed of string
+  | Checkpoint_save_raised of exn
+
+val compaction_recovery_error_to_tag : compaction_recovery_error -> string
+val compaction_recovery_error_to_string : compaction_recovery_error -> string
+
 (** End-of-turn pipeline. Preserves the checkpoint and persists the result to
     the keeper meta and dashboard surface. Explicit compaction is a separate
     request path.
@@ -104,14 +118,14 @@ val apply_post_turn_lifecycle_with_resilience_handles :
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Returns a durably saved [Applied] checkpoint only for a
-    structurally changed [Prepared] candidate; otherwise returns [None]. *)
+    structurally changed [Prepared] candidate; every other outcome is a typed
+    [Error]. *)
 val recover_latest_checkpoint_for_overflow_retry :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
-  model:string ->
   trigger:Compaction_trigger.t ->
   primary_model_max_tokens:int ->
-  overflow_retry_recovery option
+  (overflow_retry_recovery, compaction_recovery_error) result
 
 module For_testing : sig
   (** Promote a structurally [Prepared] trigger only after [save] reports an

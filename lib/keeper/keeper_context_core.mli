@@ -153,8 +153,8 @@ val usage_of_response :
 val total_tokens : Agent_sdk.Types.api_usage -> int
 
 (** Save the current working context as a generation-tagged OAS checkpoint.
-    Message order and typed content are preserved exactly; OAS owns any
-    call-time context reduction. *)
+    Message order and typed content are preserved exactly. No implicit context
+    reduction is performed at this boundary. *)
 val save_oas_checkpoint :
   multimodal_policy:Keeper_types_profile.multimodal_policy ->
   keeper_name:string ->
@@ -166,6 +166,20 @@ val save_oas_checkpoint :
 (** [multimodal_policy]/[keeper_name] gate RFC §2.3 site-2 image eviction at the
     checkpoint write boundary (Store_only); required so every write path is
     compiler-forced to declare its policy (N-of-M closure). *)
+
+(** The same write with the watermark result preserved. Compaction callers use
+    this to distinguish a durable write from a checkpoint superseded by a
+    newer lane write. *)
+val save_oas_checkpoint_classified :
+  multimodal_policy:Keeper_types_profile.multimodal_policy ->
+  keeper_name:string ->
+  session:session_context ->
+  agent_name:string ->
+  ctx:working_context ->
+  generation:int ->
+  ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_store.save_oas_outcome
+  , string )
+  result
 
 (** {1 OAS checkpoint inspection} *)
 

@@ -52,6 +52,7 @@ type try_provider_ctx =
   ; preserve_thinking : bool option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
+  ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; (* Eio concurrency *)
     sw : Eio.Switch.t
@@ -286,6 +287,7 @@ let run_try_provider
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
                 ~agent_ref:local_agent_ref
+                ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 ~goal_detail:ctx.goal
                 blocks
           | None ->
@@ -298,6 +300,7 @@ let run_try_provider
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
                 ~agent_ref:local_agent_ref
+                ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 ctx.goal
         in
         run_fn ())

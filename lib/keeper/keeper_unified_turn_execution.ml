@@ -113,8 +113,8 @@ let run (ctx : ctx)
       ; cleanup
       ; drain_turn_event_bus
       ; event_bus
-      ; event_bus_integrity_error_snapshot
-      ; tool_completed_count_snapshot
+      ; event_bus_integrity_error_snapshot = _
+      ; tool_completed_count_snapshot = _
       ; attempt = _attempt
       } =
     ctx
@@ -122,6 +122,16 @@ let run (ctx : ctx)
   (match Eio_context.get_clock () with
    | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
    | Ok clock ->
+   (* Same-run retry authority comes from OAS's typed checkpoint boundary.
+      OAS invokes the sink only after mutating the agent state at a declared
+      checkpoint stage, and MASC marks the stage before delegating persistence.
+      Therefore a sink failure also closes replay authority: the attempt may
+      already contain effects even when the durable write failed. A lossy
+      Event_bus observation must never reopen or close this boundary.
+
+      [test_keeper_turn_driver_failover] proves both directions: transport
+      failure before any stage may fall back, while every typed stage blocks a
+      same-run fallback. *)
    let checkpoint_stage_observed = Atomic.make false in
   let do_run
         ~(execution : runtime_execution)
@@ -325,30 +335,20 @@ let run (ctx : ctx)
         meta.name;
       Ok result, turn_state
     | Error err ->
-      let _ = drain_turn_event_bus ~site:"reconcile_pre_check" () in
-      let err =
-        match event_bus_integrity_error_snapshot () with
-        | Some integrity_err -> integrity_err
-        | None -> err
-      in
-      let tool_completed_count = tool_completed_count_snapshot () in
       let checkpoint_observed =
         not
           (Keeper_turn_driver_try_provider.same_run_retry_allowed
              checkpoint_stage_observed)
       in
-      let same_run_retry_has_input_authority =
-        tool_completed_count = 0 && not checkpoint_observed
-      in
+      let same_run_retry_has_input_authority = not checkpoint_observed in
       if not same_run_retry_has_input_authority
       then
         Log.Keeper.info
           ~keeper_name:meta.name
           "%s: same-run runtime retry deferred after durable run progress \
-           (event_count=%d checkpoint_observed=%b); \
+           (checkpoint_observed=%b); \
            current OAS contract cannot continue without admitting the input again"
           meta.name
-          tool_completed_count
           checkpoint_observed;
       match
           Keeper_turn_runtime_budget.plan_degraded_retry_step

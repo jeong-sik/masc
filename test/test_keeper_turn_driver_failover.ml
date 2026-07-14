@@ -817,7 +817,7 @@ let test_attempt_loop_does_not_gate_network_retry () =
     4
     (List.length !events)
 
-let test_attempt_loop_blocks_retry_after_any_checkpoint_stage () =
+let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_sdk.Agent.After_assistant_collected
     ; Agent_sdk.Agent.After_tool_results_appended
@@ -965,9 +965,9 @@ let () =
             `Quick
             test_attempt_loop_does_not_gate_network_retry;
           Alcotest.test_case
-            "any checkpoint stage blocks same-run retry"
+            "typed checkpoint is same-run retry authority"
             `Quick
-            test_attempt_loop_blocks_retry_after_any_checkpoint_stage;
+            test_typed_checkpoint_is_the_same_run_retry_authority;
           Alcotest.test_case
             "attempt loop preserves last SDK error"
             `Quick

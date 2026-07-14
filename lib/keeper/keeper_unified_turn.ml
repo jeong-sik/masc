@@ -640,11 +640,6 @@ let run_keeper_cycle
                         (turn_event_bus_manifest_decision turn_event_bus))
                    Keeper_runtime_manifest.Event_bus_correlated
                in
-               let run_result =
-                 match event_bus_integrity_error_snapshot () with
-                 | Some integrity_err -> Error integrity_err
-                 | None -> run_result
-               in
                let degraded_retry_info = turn_state.degraded_retry_info in
                let degraded_retry_applied = Option.is_some degraded_retry_info in
                let degraded_retry_runtime =

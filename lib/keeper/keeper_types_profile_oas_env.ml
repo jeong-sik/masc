@@ -59,7 +59,7 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
             ();
           Log.Keeper.warn
             "keeper.oas_env: dropping key=%S — suffix %S not in \
-             allowlist (OAS_<PROVIDER>_*); \
+             allowlist (OAS_<PROVIDER>_...); \
              fix the TOML or expand the allowlist"
             k
             suffix;

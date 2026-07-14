@@ -40,7 +40,14 @@ type pending_approval =
   ; summary_status : summary_status
   }
 
-type decision = Agent_sdk.Hooks.approval_decision
+module Decision = struct
+  type t =
+    | Approve
+    | Reject of string
+    | Edit of Yojson.Safe.t
+end
+
+type decision = Decision.t
 
 type decision_source =
   | Always_allowed
@@ -84,9 +91,9 @@ let advisory_judgment_of_string = function
 ;;
 
 let approval_decision_to_string = function
-  | Agent_sdk.Hooks.Approve -> "approve"
-  | Agent_sdk.Hooks.Reject reason -> "reject:" ^ reason
-  | Agent_sdk.Hooks.Edit _ -> "edit"
+  | Decision.Approve -> "approve"
+  | Decision.Reject reason -> "reject:" ^ reason
+  | Decision.Edit _ -> "edit"
 ;;
 
 let decision_source_to_string = function

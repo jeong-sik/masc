@@ -339,9 +339,9 @@ let approval_resolve_decision_name = function
   | Approval_resolve_reject _ -> approval_resolve_reject_name
 ;;
 
-let approval_resolve_decision_to_hook = function
-  | Approval_resolve_approve -> Agent_sdk.Hooks.Approve
-  | Approval_resolve_reject reason -> Agent_sdk.Hooks.Reject reason
+let approval_resolve_decision_to_queue_decision = function
+  | Approval_resolve_approve -> Keeper_approval_queue.Decision.Approve
+  | Approval_resolve_reject reason -> Keeper_approval_queue.Decision.Reject reason
 ;;
 
 let approval_resolve_decision_of_json args =
@@ -385,7 +385,7 @@ let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
      | Error _ as err -> err
      | Ok decision ->
        let decision_name = approval_resolve_decision_name decision in
-       let decision = approval_resolve_decision_to_hook decision in
+       let decision = approval_resolve_decision_to_queue_decision decision in
        (match
           Keeper_approval_queue.resolve_with_policy
             ~id

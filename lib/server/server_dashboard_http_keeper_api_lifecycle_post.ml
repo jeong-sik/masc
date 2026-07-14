@@ -403,6 +403,72 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               respond_error ~status:`Internal_server_error ~request:req ~ok:false
                 reqd "dispatch returned None"))
 
+(* POST /api/v1/keepers/:name/create — REST surface over
+   [masc_keeper_create_from_persona]. The path segment is the keeper name
+   and wins over any [name] in the body; every other body field
+   (persona_name, initial_goal, no_boot, dry_run, ...) passes through to
+   the tool unchanged, so this surface cannot drift from the tool
+   contract. *)
+let handle_keeper_create_post ~sw ~clock state agent_name req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_post req_path keeper_suffix_create in
+  if String.length name = 0 then respond_error reqd "keeper name is required"
+  else
+    let body_result =
+      match Yojson.Safe.from_string body_str with
+      | `Assoc fields -> Ok fields
+      | _ -> Error "request body must be a JSON object"
+      | exception Yojson.Json_error e ->
+          Error (Printf.sprintf "invalid json: %s" e)
+    in
+    match body_result with
+    | Error msg -> respond_error ~ok:false reqd msg
+    | Ok fields ->
+        let config = Mcp_server.workspace_config state in
+        let keeper_ctx : _ Keeper_tool_surface.context =
+          {
+            config;
+            agent_name;
+            sw;
+            clock;
+            proc_mgr = state.Mcp_server.proc_mgr;
+            net = state.Mcp_server.net;
+          }
+        in
+        let args =
+          `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
+        in
+        (match
+           Keeper_tool_surface.dispatch keeper_ctx
+             ~name:"masc_keeper_create_from_persona" ~args
+         with
+        | Some result when Tool_result.is_success result ->
+            let body = Tool_result.message result in
+            invalidate_keeper_execution_surfaces ~config ();
+            Log.Server.info "keeper create name=%s actor=%s outcome=ok" name
+              agent_name;
+            Http.Response.json_value ~compress:true ~request:req
+              (`Assoc
+                 [
+                   ("ok", `Bool true);
+                   ("name", `String name);
+                   ("detail", tool_detail_json body);
+                 ])
+              reqd
+        | Some result ->
+            let body = Tool_result.message result in
+            Log.Server.warn "keeper create name=%s actor=%s outcome=rejected"
+              name agent_name;
+            Http.Response.json_value ~status:`Bad_request ~request:req
+              (`Assoc [ ("ok", `Bool false); ("error", `String body) ])
+              reqd
+        | None ->
+            Log.Server.warn
+              "keeper create name=%s actor=%s outcome=dispatch_none" name
+              agent_name;
+            respond_error ~status:`Internal_server_error ~request:req ~ok:false
+              reqd "dispatch returned None")
+
 (** POST /api/v1/keepers/:name/directive — pause / resume / wakeup.
 
     Delegates to [Keeper_keepalive.process_directive] which updates

@@ -809,6 +809,9 @@ let handle_keeper_secrets_post state req reqd body_str =
 let handle_keeper_lifecycle_post =
   Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_lifecycle_post
 
+let handle_keeper_create_post =
+  Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_create_post
+
 let directive_action_to_string = function
   | Keeper_directive.Pause -> "pause"
   | Keeper_directive.Resume -> "resume"

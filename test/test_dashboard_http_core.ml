@@ -150,6 +150,25 @@ let test_keeper_post_route_classifies_catchup_judge () =
     (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
        Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
 
+let test_keeper_post_route_classifies_create () =
+  let path = "/api/v1/keepers/noboot-probe/create" in
+  check bool "create route kind" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_create);
+  check string "keeper name extracted" "noboot-probe"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_post path
+       Server_dashboard_http_keeper_api.keeper_suffix_create);
+  (* Unknown suffixes stay 404-classified — the new arm must not widen
+     the parser. *)
+  check bool "unrelated suffix stays unknown" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route
+       "/api/v1/keepers/noboot-probe/created"
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown);
+  check bool "bare collection path stays unknown" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route
+       "/api/v1/keepers/create"
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
+
 let test_keeper_chat_receipt_route_and_json () =
   let receipt_id =
     match
@@ -1858,6 +1877,8 @@ let () =
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper catch-up judge route is classified" `Quick
             test_keeper_post_route_classifies_catchup_judge;
+          test_case "keeper create route is classified, unknown stays 404"
+            `Quick test_keeper_post_route_classifies_create;
           test_case "keeper chat receipt route is typed" `Quick
             test_keeper_chat_receipt_route_and_json;
         ] );

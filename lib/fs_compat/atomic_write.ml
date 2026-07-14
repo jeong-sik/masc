@@ -296,6 +296,9 @@ let identity_of_open_file ~before_stage file =
     file
 ;;
 
+(* NDT-OK: UUID entropy names an exclusive per-write staging directory;
+   correctness comes from exclusive mkdir and typed collision retry, and the
+   nonce never drives publication policy. *)
 let capability_staging_rng = Domain.DLS.new_key Random.State.make_self_init
 let capability_staging_directory_prefix = ".masc_atomic_stage_"
 let capability_staging_directory_suffix = ".dir"

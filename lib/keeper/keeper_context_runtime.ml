@@ -181,7 +181,18 @@ let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
     (Keeper_state_machine.event_to_string event)
     error
 
-let dispatch_keeper_phase_event
+type lifecycle_dispatch_error =
+  | Transition_rejected of Keeper_state_machine.transition_error
+  | Compaction_invariant_violation of
+      Keeper_registry_types.compaction_transition_spec_violation
+
+let lifecycle_dispatch_error_to_string = function
+  | Transition_rejected error ->
+    Keeper_state_machine.transition_error_to_string error
+  | Compaction_invariant_violation violation ->
+    Keeper_registry_types.compaction_transition_spec_violation_to_tag violation
+
+let dispatch_keeper_phase_event_result
     ~(config : Workspace.config)
     ?(origin = Keeper_registry.Generic_dispatch)
     ~keeper_name
@@ -193,28 +204,41 @@ let dispatch_keeper_phase_event
       keeper_name
       event
   with
-  | Ok _ -> ()
+  | Ok _ -> Ok ()
   | Error err ->
       record_lifecycle_dispatch_rejection
         ~keeper_name
         ~origin
         event
-        ~error:(Keeper_state_machine.transition_error_to_string err)
-  | exception (Keeper_registry_types.Compaction_transition_violation _ as exn) ->
+        ~error:(Keeper_state_machine.transition_error_to_string err);
+      Error (Transition_rejected err)
+  | exception
+      (Keeper_registry_types.Compaction_transition_violation
+         { violation; _ } as exn) ->
       record_lifecycle_dispatch_rejection
         ~keeper_name
         ~origin
         event
-        ~error:(Printexc.to_string exn)
+        ~error:(Printexc.to_string exn);
+      Error (Compaction_invariant_violation violation)
+
+let dispatch_keeper_phase_event ~config ?origin ~keeper_name event =
+  dispatch_keeper_phase_event_result ~config ?origin ~keeper_name event
+  |> ignore
 
 let dispatch_compaction_completed
     ~(config : Workspace.config)
     ~origin
     ~keeper_name =
-  Otel_metric_store.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
-    ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
-  dispatch_keeper_phase_event ~config ~origin ~keeper_name
-    Keeper_state_machine.Compaction_completed
+  match
+    dispatch_keeper_phase_event_result ~config ~origin ~keeper_name
+      Keeper_state_machine.Compaction_completed
+  with
+  | Error _ as error -> error
+  | Ok () as applied ->
+    Otel_metric_store.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
+      ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
+    applied
 
 let dispatch_post_turn_lifecycle_events
     ~(config : Workspace.config)
@@ -248,6 +272,7 @@ let dispatch_post_turn_lifecycle_events
         ~config
         ~origin:Keeper_registry.Post_turn_lifecycle
         ~keeper_name
+      |> ignore
     end
     else
       dispatch_keeper_phase_event

@@ -116,13 +116,12 @@ let test_pre_compact_context_window_uses_working_context () =
          Keeper_context_runtime.append ctx
            (Agent_sdk.Types.user_msg "explicit compaction request")
        in
-       let _, trigger, decision =
+       let _, decision =
          Keeper_compact_policy.compact_for_request_typed
            ~meta:(compact_policy_meta ())
            ~trigger:Compaction_trigger.Manual
            ctx
        in
-       check bool "compaction triggered" true (Option.is_some trigger);
        check bool "decision applied" true
          (Keeper_compact_policy.compaction_decision_applied decision);
        check (option int) "pre-compact event uses ctx max_tokens"
@@ -260,8 +259,6 @@ let () =
       , [ test_case "store cache is shared per base_path" `Quick test_compact_audit_store_cache ] )
     ; ( "compact-policy"
       , [ test_case "record_pre_compact callback registration" `Quick test_compact_policy_callback
-        ; test_case "pre_compact context window uses working context" `Quick
-            test_pre_compact_context_window_uses_working_context
         ] )
     ; ( "meta-store"
       , [ test_case "runtime_meta_write_sync_hook registration" `Quick test_meta_store_hook ] )

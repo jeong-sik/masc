@@ -6,7 +6,11 @@
 // keeper (server-side persona overlay retirement is tracked separately, A2).
 //
 // Skeleton scope (WO-A4-1/2a first slice): read-only three-layer roster.
-//   · personas — fetched on mount via masc_persona_list (no refresh-task lane)
+//   · personas — fetched on mount via masc_persona_list (no refresh-task lane).
+//     Name/display/description parsing is delegated to keeper-spawn-state's
+//     normalizePersonaSummary (the SSOT for the masc_persona_list entry
+//     shape, shared by 15+ spawn-panel consumers) — see
+//     normalizeRegistryPersonas below for what Registry adds on top and why.
 //   · keepers  — the store `keepers` signal, hydrated by the execution
 //     snapshot (tab-refresh plan + dashboard-ws execution slice subscription)
 //   · runtime  — each keeper row shows its runtime binding when known
@@ -17,8 +21,9 @@ import { useEffect, useMemo } from 'preact/hooks'
 import type { Keeper } from '../../types'
 import { callMcpTool } from '../../api/mcp'
 import { keepers } from '../../store'
-import { asString, isRecord } from '../common/normalize'
+import { isRecord } from '../common/normalize'
 import { createAsyncResource, isFailed, getData } from '../../lib/async-state'
+import { normalizePersonaSummary } from '../keeper-spawn/keeper-spawn-state'
 import { KeeperBadge } from '../keeper-badge'
 import { Dot, Pill, type DotState } from '../v2/primitives-v2'
 
@@ -29,39 +34,59 @@ export interface RegistryPersona {
   has_keeper_defaults: boolean
 }
 
-// Defensive normalize on the shared helper idiom (asString/isRecord — the
-// same building blocks keeper-spawn-state's persona pipeline uses; full
-// unification onto that pipeline is deferred until the spawn panel is
-// replaced by the registry wizard, after #24340 lands on this domain).
-// masc_persona_list returns { count, personas } where each entry is either
-// a summary object (detailed) or a bare name string. A schema mismatch
-// (no `personas` array) returns null — the caller surfaces it as an error
-// instead of rendering a fake empty roster; per-entry junk is skipped.
+// masc_persona_list returns { count, personas } where each entry is either a
+// detailed summary object or (only when called with detailed:false, which no
+// dashboard caller does today) a bare name string.
+//
+// Name/display/description parsing is delegated to normalizePersonaSummary
+// (keeper-spawn-state.ts) — the shared pipeline 15+ spawn-panel consumers
+// already rely on — so there is exactly one place that knows the
+// persona_name/name and display_name/displayName/name fallback rules; this
+// function no longer re-derives them. Registry adds only the two things that
+// shared pipeline doesn't provide:
+//
+// 1. has_keeper_defaults. It's on the wire in every masc_persona_list
+//    response (see keeper_tool_persona_runtime.ml:persona_summary_to_json —
+//    always included, unconditional on `detailed`), but PersonaSummary
+//    doesn't carry it. Extending PersonaSummary would be the cleaner fix;
+//    it's deferred here specifically to avoid touching keeper-spawn-state.ts
+//    while #24340 is rewriting that file (cross-conflict risk) — NOT because
+//    of a real fetch-shape difference. masc_persona_list defaults `detailed`
+//    to true server-side (keeper_persona.ml:persona_list_handler), so
+//    keeper-spawn-state's `{}` call and Registry's explicit
+//    `{ detailed: true }` call below already hit the identical response
+//    shape; an earlier version of this comment claimed otherwise and was
+//    wrong.
+// 2. Distinguishing a schema mismatch (null, surfaced as an error) from a
+//    genuinely empty roster ([]). normalizePersonaSummaries always returns
+//    [] (extractArray swallows a non-array/absent `personas` into []), so
+//    that distinction has to live here — it is not something the shared
+//    pipeline's "error channel" resolves for us.
 export function normalizeRegistryPersonas(json: unknown): RegistryPersona[] | null {
-  if (!isRecord(json)) return null
-  const personas = json.personas
-  if (!Array.isArray(personas)) return null
-  return personas.flatMap((entry): RegistryPersona[] => {
+  if (!isRecord(json) || !Array.isArray(json.personas)) return null
+  return json.personas.flatMap((entry): RegistryPersona[] => {
     if (typeof entry === 'string') {
       return [{ persona_name: entry, display_name: entry, trait: null, has_keeper_defaults: false }]
     }
-    if (!isRecord(entry)) return []
-    const name = asString(entry.persona_name)
-    if (!name) return []
+    const summary = normalizePersonaSummary(entry)
+    if (!summary) return []
     return [{
-      persona_name: name,
-      display_name: asString(entry.display_name) ?? name,
-      trait: asString(entry.trait) ?? null,
-      has_keeper_defaults: entry.has_keeper_defaults === true,
+      persona_name: summary.name,
+      display_name: summary.displayName ?? summary.name,
+      trait: summary.description ?? null,
+      has_keeper_defaults: isRecord(entry) && entry.has_keeper_defaults === true,
     }]
   })
 }
 
-// Registry-scoped resource: the spawn panel's shared personasResource calls
-// masc_persona_list without `detailed`, drops bare-name entries, and lacks
-// has_keeper_defaults — retargeting it would change behaviour for its 15+
-// consumers while #24340 is rewriting that domain. One resource, one fetch
-// shape, per surface until the wizard unifies them.
+// Registry keeps its own resource rather than importing keeper-spawn-state's
+// personas/personasLoading/personasError signals directly: those signals are
+// PersonaSummary[], which carries neither has_keeper_defaults nor the
+// null-vs-[] distinction above, and widening that shared type touches the
+// same file #24340 is mid-rewrite on. One extra fetch of an already-cheap
+// read_state tool is the accepted cost of not touching that file now; full
+// unification (single resource, single fetch) is tracked for when the
+// registry wizard replaces the spawn panel (A4-3a, after #24340 lands).
 export const registryPersonas = createAsyncResource<RegistryPersona[]>()
 
 export async function loadRegistryPersonas(): Promise<void> {

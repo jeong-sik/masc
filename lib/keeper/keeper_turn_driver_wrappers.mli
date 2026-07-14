@@ -20,7 +20,6 @@ val run_model_by_label :
   ?max_tokens:int ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
-  ?context_reducer:Agent_sdk.Context_reducer.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
   ?provider_config_transform:

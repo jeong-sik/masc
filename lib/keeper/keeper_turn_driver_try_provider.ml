@@ -29,6 +29,8 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
+  ; model_input_projection :
+      (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option
   ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
@@ -36,7 +38,6 @@ type try_provider_ctx =
   ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
-  ; context_reducer : Agent_sdk.Context_reducer.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; (* Transport *)
@@ -245,7 +246,6 @@ let run_try_provider
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = Some Agent_sdk.Guardrails.permissive
           ; hooks = ctx.hooks
-          ; context_reducer = ctx.context_reducer
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved
@@ -270,6 +270,7 @@ let run_try_provider
           ; exit_condition_result = ctx.exit_condition_result
           ; summarizer = ctx.summarizer
           ; initial_messages = ctx.initial_messages
+          ; model_input_projection = ctx.model_input_projection
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool

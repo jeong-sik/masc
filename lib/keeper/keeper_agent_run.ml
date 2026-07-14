@@ -425,6 +425,12 @@ let run_turn
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let prompt_metrics = prompt_ctx.Keeper_run_prompt.prompt_metrics in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
+  let resume_oas_checkpoint =
+    Option.map
+      (fun (checkpoint : Agent_sdk.Checkpoint.t) ->
+        { checkpoint with messages = history_messages })
+      resume_oas_checkpoint
+  in
   let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   let history_messages_digest = digest_message_texts_as_joined history_messages in
@@ -545,7 +551,9 @@ let run_turn
             ]))
       Keeper_runtime_manifest.Context_injected;
     let hooks = s.Keeper_run_tools.hooks in
-    let reducer = s.Keeper_run_tools.reducer in
+    let model_input_projection =
+      s.Keeper_run_tools.model_input_projection
+    in
     let acc = s.Keeper_run_tools.acc in
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
@@ -704,9 +712,9 @@ let run_turn
                     ~oas_auto_context_overflow_retry:true
                     ~checkpoint_sink
                     ~initial_messages
+                    ~model_input_projection
                     ~max_turns:keeper_max_turns
                     ~hooks
-                    ~context_reducer:reducer
                     ~runtime_manifest_context
                     ~runtime_manifest_append:
                       (fun manifest ->

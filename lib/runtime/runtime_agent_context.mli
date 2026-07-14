@@ -77,12 +77,13 @@ type config = {
       (** Exact caller/model sampling declaration. [None] omits temperature and
           leaves the selected provider's default intact. *)
   hooks : Agent_sdk.Hooks.hooks option;
-  context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
+  model_input_projection
+      : (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;

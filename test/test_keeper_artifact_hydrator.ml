@@ -1,7 +1,7 @@
 (** Tests for Keeper_artifact_hydrator.
 
     Pins the contract:
-    - The reducer hydrates only the LAST [keep_recent] Stored markers.
+    - The projection hydrates only the LAST [keep_recent] Stored markers.
     - Older Stored markers stay in the message list as markers.
     - Inline blocks pass through.
     - Hydration miss (sha not in store) leaves the marker untouched —
@@ -66,11 +66,6 @@ let extract_tool_content (msg : T.message) : string =
   | [ T.ToolResult { content; _ } ] -> content
   | _ -> failwith "expected single ToolResult block"
 
-let invoke_reducer reducer messages =
-  match reducer.Agent_sdk.Context_reducer.strategy with
-  | Agent_sdk.Context_reducer.Custom f -> f messages
-  | _ -> failwith "expected Custom strategy"
-
 (* --- Basic hydration --- *)
 
 let test_hydrates_recent_marker () =
@@ -80,7 +75,7 @@ let test_hydrates_recent_marker () =
       let _sha, marker = store_a_blob store payload in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:marker in
       let r = H.hydrate_recent ~store ~keep_recent:3 in
-      let result = invoke_reducer r [ msg ] in
+      let result = r [ msg ] in
       Alcotest.(check int) "single message back" 1 (List.length result);
       Alcotest.(check string) "hydrated" payload
         (extract_tool_content (List.hd result)))
@@ -115,7 +110,7 @@ let test_hydration_preserves_tool_failure_provenance () =
         }
       in
       let result =
-        invoke_reducer (H.hydrate_recent ~store ~keep_recent:1) [ msg ]
+        H.hydrate_recent ~store ~keep_recent:1 [ msg ]
       in
       match (List.hd result).content with
       | [ T.ToolResult { content; outcome; _ } ] ->
@@ -135,7 +130,7 @@ let test_keep_recent_zero_no_hydration () =
       let _sha, marker = store_a_blob store "hello payload" in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:marker in
       let r = H.hydrate_recent ~store ~keep_recent:0 in
-      let result = invoke_reducer r [ msg ] in
+      let result = r [ msg ] in
       Alcotest.(check string) "marker unchanged" marker
         (extract_tool_content (List.hd result)))
 
@@ -155,7 +150,7 @@ let test_only_last_k_hydrated () =
         ]
       in
       let r = H.hydrate_recent ~store ~keep_recent:2 in
-      let result = invoke_reducer r msgs in
+      let result = r msgs in
       Alcotest.(check int) "msg count preserved" 4 (List.length result);
       let contents = List.map extract_tool_content result in
       (match contents with
@@ -177,7 +172,7 @@ let test_inline_unchanged () =
       let inline_payload = "small inline payload" in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:inline_payload in
       let r = H.hydrate_recent ~store ~keep_recent:3 in
-      let result = invoke_reducer r [ msg ] in
+      let result = r [ msg ] in
       Alcotest.(check string) "inline preserved" inline_payload
         (extract_tool_content (List.hd result)))
 
@@ -194,7 +189,7 @@ let test_non_tool_result_unchanged () =
         }
       in
       let r = H.hydrate_recent ~store ~keep_recent:3 in
-      let result = invoke_reducer r [ msg ] in
+      let result = r [ msg ] in
       Alcotest.(check int) "still one block" 1
         (List.length (List.hd result).content);
       match (List.hd result).content with
@@ -219,7 +214,7 @@ let test_hydration_miss_keeps_marker () =
       in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:phantom in
       let r = H.hydrate_recent ~store ~keep_recent:3 in
-      let result = invoke_reducer r [ msg ] in
+      let result = r [ msg ] in
       Alcotest.(check string) "marker untouched" phantom
         (extract_tool_content (List.hd result)))
 

@@ -1,14 +1,12 @@
-(** Lazy artifact hydrator reducer.
+(** Lazy artifact hydrator projection.
 
     Reads ToolResult blocks whose [content] is a [Tool_output.Stored]
     blob marker and re-inflates the bytes from [Tool_blob_store]
     just before the LLM call. Older messages keep their markers, which
     cap the on-disk + on-wire token cost of historical context.
 
-    Inserted at the front of the keeper's reducer pipeline (BEFORE
-    [prune_tool_outputs]) so the standard cap still applies to hydrated
-    bytes — hydration restores the most recent K, the cap then trims
-    each to the per-output budget. *)
+    Applied only to the provider-bound message projection. Persisted keeper
+    history and OAS checkpoints retain their content-addressed markers. *)
 
 val default_keep_recent : int
 
@@ -20,8 +18,9 @@ val keep_recent_from_env : unit -> int
 val hydrate_recent :
   store:Tool_blob_store.t ->
   keep_recent:int ->
-  Agent_sdk.Context_reducer.t
-(** Build a [Custom] reducer that walks the message list right-to-left
+  Agent_sdk.Types.message list ->
+  Agent_sdk.Types.message list
+(** Walk the message list right-to-left
     and hydrates the last [keep_recent] [Stored] markers it encounters.
 
     Hydration misses (sha256 not in the store) leave the marker in
@@ -29,9 +28,4 @@ val hydrate_recent :
     preview) to reason about the missing payload.
 
     Storage exceptions are caught — a corrupted store cannot break the
-    reducer pipeline. *)
-
-val reducer_from_env : unit -> Agent_sdk.Context_reducer.t option
-(** Returns a configured reducer if a blob store can be resolved from
-    [MASC_BASE_PATH], else [None]. The [None] case lets callers compose
-    the pipeline conditionally without a separate enable flag. *)
+    provider-bound projection. *)

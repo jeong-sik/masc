@@ -54,7 +54,6 @@ graph TB
     OW[oas_worker.ml]
     WO[worker_oas.ml]
     VO[verifier_oas.ml]
-    CC[context_compact_oas.ml]
     OE[oas_events.ml]
     OSB[oas_event_bridge.ml]
     OM[oas_message.ml]
@@ -67,7 +66,6 @@ graph TB
     AG[Agent.t / Agent.run]
     BU[Builder]
     PR[Provider]
-    CR[Context_reducer]
     EB[Event_bus]
     GR[Guardrails]
     HK[Hooks]
@@ -81,7 +79,6 @@ graph TB
   WO -->|"worker lifecycle"| AG
   VO -->|"PreToolUse hook"| HK
   VO -->|"tool filter"| GR
-  CC -->|"strategy mapping"| CR
   OE -->|"Custom events"| EB
   OSB -->|"subscribe + relay"| EB
   OMR -->|"resolve labels"| CC2
@@ -99,7 +96,7 @@ graph TB
 | 단일 에이전트 실행 | `Agent.run`, `Builder`, `Hooks`, `Guardrails`, `Checkpoint` | 언제/왜/어떤 agent를 돌릴지 결정 |
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | workspace, board, workflow, policies |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, dispatch, auth |
-| 컨텍스트 축약 | `Context_reducer` | 어떤 전략을 언제 적용할지 결정 |
+| 컨텍스트 축약 | 없음; exact message history를 실행 | Keeper compaction, persisted-history repair, provider-bound artifact projection |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 publish할지, SSE/dashboard 연결 |
 | 장기 메모리 | 없음 | `Masc.Memory.t`, keeper memory bank, institution/procedural stores |
 | 조율 상태 | 없음 | workspace, tasks, board, keeper Gate |
@@ -125,13 +122,14 @@ type config = {
   max_tokens : int;
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
-  context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
+  model_input_projection :
+    (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   transport : Masc_grpc_transport.t;
 }
@@ -429,9 +427,11 @@ Allowed, LLM Auto Judge, 비차단 HITL 중 하나로 결정된다.
 
 ## 10. Context Compaction
 
-`context_compact_oas.ml`은 MASC 컨텍스트 전략을 OAS `Context_reducer`에 위임한다. 상세는 12-memory-systems.md 6.3절 참조.
-
-핵심: MASC `strategy` variant -> OAS `Context_reducer.strategy` 매핑. MASC-specific 로직(importance scoring, extractive summarizer)은 OAS `Custom` closure로 주입된다.
+Keeper compaction and persisted-history repair are MASC-owned. OAS receives the
+resulting exact message history without an implicit reducer. Provider-bound
+artifact hydration is a caller-owned `model_input_projection`; it changes only
+the request projection, while agent state and checkpoints retain their
+content-addressed markers.
 
 ---
 
@@ -448,7 +448,7 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | 영역 | 상태 | 설명 |
 |------|------|------|
 | Agent 실행 | Complete | `oas_worker.ml`이 모든 MODEL 호출을 Agent.run으로 라우팅 |
-| Context compaction | Complete | OAS Context_reducer 직접 위임, MASC Custom closure 주입 |
+| Context compaction | Complete | Keeper compaction is MASC-owned; OAS receives exact messages without an implicit reducer |
 | Event_bus bridge | Complete | OAS native/custom events are relayed to SSE and persisted under `.masc/oas-events/` |
 | Dashboard OAS runtime health | Complete | dashboard health uses `durable replay + live tail`, not live-only counters |
 | Dashboard runtime counts | Complete | dashboard `counts` carries active runtimes and `configured_keepers` carries inventory |

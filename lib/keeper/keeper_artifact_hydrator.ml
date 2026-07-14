@@ -81,16 +81,5 @@ let hydrate_messages ~store ~keep_recent
   in
   List.rev mapped
 
-let hydrate_recent ~store ~keep_recent : Agent_sdk.Context_reducer.t =
-  let strategy =
-    Agent_sdk.Context_reducer.Custom (hydrate_messages ~store ~keep_recent)
-  in
-  { Agent_sdk.Context_reducer.strategy }
-
-let reducer_from_env () =
-  match (Host_config.from_env ()).base_path with
-  | None -> None
-  | Some base_path ->
-      let store = Tool_blob_store.create ~base_path in
-      let keep_recent = keep_recent_from_env () in
-      Some (hydrate_recent ~store ~keep_recent)
+let hydrate_recent ~store ~keep_recent messages =
+  hydrate_messages ~store ~keep_recent messages

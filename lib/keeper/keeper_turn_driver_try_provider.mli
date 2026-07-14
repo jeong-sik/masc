@@ -12,6 +12,8 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
+  ; model_input_projection :
+      (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option
   ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
@@ -19,7 +21,6 @@ type try_provider_ctx =
   ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
-  ; context_reducer : Agent_sdk.Context_reducer.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t

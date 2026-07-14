@@ -394,10 +394,10 @@ let summarize_turn_event_bus
     empty_turn_event_bus_summary
     events
 
-let turn_event_bus_overflow_evidence_detail
+let turn_event_bus_evidence_detail
     (summary : turn_event_bus_summary) : string =
   Printf.sprintf
-    "oas_retry_evidence(events=%d,payload_kinds=[%s])"
+    "oas_event_evidence(events=%d,payload_kinds=[%s])"
     summary.event_count
     (String.concat "," summary.payload_kinds)
 

@@ -42,7 +42,7 @@ type turn_event_bus_summary =
     the signals MASC currently consumes. *)
 val summarize_turn_event_bus : Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
-val turn_event_bus_overflow_evidence_detail : turn_event_bus_summary -> string
+val turn_event_bus_evidence_detail : turn_event_bus_summary -> string
 (** Compact forensic string for observed OAS events around a typed overflow. *)
 
 (** Turn-local tool-event pairing state used to detect event-bus integrity

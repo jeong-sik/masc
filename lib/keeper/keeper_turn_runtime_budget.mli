@@ -186,9 +186,10 @@ val merge_turn_event_bus_summary :
 val summarize_turn_event_bus :
   Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
-val turn_event_bus_overflow_evidence_detail :
+val turn_event_bus_evidence_detail :
   turn_event_bus_summary -> string
-(** Compact forensic string for observed OAS events around a typed overflow. *)
+(** Compact forensic string for observed OAS events around a typed provider
+    failure. *)
 
 val context_overflow_event_of_error :
   Agent_sdk.Error.sdk_error ->

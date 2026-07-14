@@ -476,7 +476,7 @@ let run (ctx : ctx)
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
             ~decision:No_degraded_retry
-            ~reason:"context_overflow_after_oas_retry"
+            ~reason:"provider_context_overflow"
             ~next_runtime:None
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
@@ -485,7 +485,7 @@ let run (ctx : ctx)
             drain_turn_event_bus ~site:"context_overflow_capture" ()
           in
           let overflow_evidence_detail =
-            turn_event_bus_overflow_evidence_detail current_turn_event_bus
+            turn_event_bus_evidence_detail current_turn_event_bus
           in
           let turn_state =
             { turn_state with
@@ -507,7 +507,7 @@ let run (ctx : ctx)
               [ "keeper", meta.name
               ; "phase",
                 Keeper_oas_execution_error_phase.(
-                  to_label Context_overflow_after_oas_retry)
+                  to_label Provider_context_overflow)
               ]
             ();
           Log.Keeper.warn
@@ -520,7 +520,7 @@ let run (ctx : ctx)
           record_overflow_failure
             ~config
             ~meta
-            ~reason:"context_overflow_after_oas_retry";
+            ~reason:"provider_context_overflow";
           mark_terminal_error err;
           Error err, turn_state
         | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed, None ->

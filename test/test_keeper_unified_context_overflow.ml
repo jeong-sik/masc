@@ -123,7 +123,7 @@ let test_overflow_failure_contract_keeps_lifecycle_active () =
     (contains_substring ~needle:"Keeper lifecycle remains active" budget_src);
   let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
   check bool "post-OAS retry overflow has dedicated phase label" true
-    (contains_substring ~needle:"Context_overflow_after_oas_retry" execution_src);
+    (contains_substring ~needle:"Provider_context_overflow" execution_src);
   check bool "post-OAS retry overflow records failure" true
     (contains_substring ~needle:"record_overflow_failure" execution_src);
   check bool "overflow path has no paused-meta override" false

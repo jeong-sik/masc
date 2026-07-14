@@ -40,6 +40,18 @@ type stop_reason = Runtime_agent_context.stop_reason =
       turns_used : int;
       request : Agent_sdk.Error.input_required;
     }
+
+type cooperative_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type cooperative_yield_decision =
+  | Continue
+  | Yield of cooperative_yield_reason
+
+type cooperative_yield_probe =
+  Agent_sdk.Agent.Advanced.tool_boundary ->
+  (cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
 (** Why this single OAS call yielded control. [Completed] is the
     model's success path. [TurnLimitObserved], [ExecutionTimeoutObserved],
     and [ExecutionIdleTimeoutObserved] preserve unexpected typed OAS
@@ -395,6 +407,7 @@ val run :
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?cooperative_yield_probe:cooperative_yield_probe ->
   string ->
   (run_result, Agent_sdk.Error.sdk_error) result
 (** Runs an OAS agent against [goal].  When
@@ -412,6 +425,7 @@ val run_blocks :
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?cooperative_yield_probe:cooperative_yield_probe ->
   ?goal_detail:string ->
   Agent_sdk.Types.content_block list ->
   (run_result, Agent_sdk.Error.sdk_error) result

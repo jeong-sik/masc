@@ -243,11 +243,6 @@ let builder
     | None -> builder
   in
   let builder =
-    match config.exit_condition with
-    | Some cond -> Agent_sdk.Builder.with_exit_condition cond builder
-    | None -> builder
-  in
-  let builder =
     match config.thinking_budget with
     | Some budget -> Agent_sdk.Builder.with_thinking_budget budget builder
     | None -> builder
@@ -330,7 +325,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; yield_on_tool = config.yield_on_tool
-    ; exit_condition = config.exit_condition
     }
   in
   let options : Agent_sdk.Agent.options =

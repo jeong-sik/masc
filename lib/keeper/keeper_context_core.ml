@@ -593,14 +593,17 @@ let context_of_oas_checkpoint
   sync_oas_context
     { checkpoint; max_tokens }
 
-let save_oas_checkpoint
+let save_oas_checkpoint_classified
     ~(multimodal_policy : Keeper_types_profile.multimodal_policy)
     ~(keeper_name : string)
     ~(session : session_context)
     ~(agent_name : string)
     ~(ctx : working_context)
     ~(generation : int)
-  : (Agent_sdk.Checkpoint.t, string) result =
+  : ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_store.save_oas_outcome
+    , string )
+    result
+  =
   let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
@@ -635,8 +638,33 @@ let save_oas_checkpoint
       context = checkpoint_context;
     }
   in
-  match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
-  | Ok () -> Ok checkpoint
+  match
+    Keeper_checkpoint_store.save_oas_classified
+      ~session_dir:session.session_dir
+      checkpoint
+  with
+  | Ok outcome -> Ok (checkpoint, outcome)
+  | Error e -> Error e
+
+let save_oas_checkpoint
+    ~multimodal_policy
+    ~keeper_name
+    ~session
+    ~agent_name
+    ~ctx
+    ~generation
+  =
+  match
+    save_oas_checkpoint_classified
+      ~multimodal_policy
+      ~keeper_name
+      ~session
+      ~agent_name
+      ~ctx
+      ~generation
+  with
+  | Ok (checkpoint, Saved _)
+  | Ok (checkpoint, Stale_noop _) -> Ok checkpoint
   | Error e -> Error e
 
 let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =

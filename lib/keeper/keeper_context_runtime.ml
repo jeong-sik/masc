@@ -116,6 +116,23 @@ type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
   turn_generation : int;
 }
 
+type compaction_recovery_error = Keeper_post_turn.compaction_recovery_error =
+  | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
+  | Compaction_rejected of Keeper_compact_policy.compaction_rejection
+  | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
+  | Checkpoint_superseded of {
+      incoming_turn_count : int;
+      known_turn_count : int;
+    }
+  | Checkpoint_save_failed of string
+  | Checkpoint_save_raised of exn
+
+let compaction_recovery_error_to_tag =
+  Keeper_post_turn.compaction_recovery_error_to_tag
+
+let compaction_recovery_error_to_string =
+  Keeper_post_turn.compaction_recovery_error_to_string
+
 type max_context_resolution = {
   requested_override : int option;
   primary_budget : int;

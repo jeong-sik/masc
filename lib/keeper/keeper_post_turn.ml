@@ -54,9 +54,6 @@ type compaction_event = {
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
-  before_tokens : int;
-  after_tokens : int;
-  saved_tokens : int;
 }
 
 type post_turn_lifecycle = {
@@ -445,9 +442,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
             failure_reason = None;
             trigger = None;
             decision = no_checkpoint_decision;
-            before_tokens = 0;
-            after_tokens = 0;
-            saved_tokens = 0;
           };
         turn_generation = meta.runtime.generation;
         context_ratio = 0.0;
@@ -472,7 +466,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
             meta
       in
       let decision = Keeper_compact_policy.Not_requested in
-      let observed_tokens = token_count ctx in
       let meta_after_compaction =
         map_runtime
           (fun rt ->
@@ -504,9 +497,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
             failure_reason = None;
             trigger = None;
             decision;
-            before_tokens = observed_tokens;
-            after_tokens = observed_tokens;
-            saved_tokens = 0;
           };
         turn_generation = current_generation;
         context_ratio = context_ratio ctx;
@@ -582,7 +572,6 @@ let recover_latest_checkpoint_for_overflow_retry
   match selected with
   | None -> None
   | Some (ctx, turn_generation) ->
-      let before_tokens = token_count ctx in
       let retry_meta =
         if turn_generation = meta.runtime.generation then meta
         else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
@@ -593,7 +582,6 @@ let recover_latest_checkpoint_for_overflow_retry
           ~trigger
           ctx
       in
-      let after_tokens = token_count compacted_ctx in
       match base_decision with
       | Keeper_compact_policy.Prepared prepared_trigger ->
         (try
@@ -618,9 +606,6 @@ let recover_latest_checkpoint_for_overflow_retry
                     ; failure_reason = None
                     ; trigger = Some prepared_trigger
                     ; decision = Keeper_compact_policy.Applied prepared_trigger
-                    ; before_tokens
-                    ; after_tokens
-                    ; saved_tokens = before_tokens - after_tokens
                     }
                 ; turn_generation
                 }

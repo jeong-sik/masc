@@ -164,7 +164,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Context_measured { context_actions; _ } ->
     { c with context_handoff_needed = context_actions.handoff }
   | Compaction_started -> { c with compaction_active = true }
-  | Compaction_completed _ ->
+  | Compaction_completed ->
     { c with compaction_active = false; context_overflow = false }
   | Compaction_failed _ ->
     (* Leave [context_overflow] set — the overflow has not been resolved.
@@ -265,7 +265,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Turn_failed _
          | Context_measured _
          | Compaction_started
-         | Compaction_completed _
+         | Compaction_completed
          | Compaction_failed _
          | Context_overflow_detected _
          | Handoff_started
@@ -299,7 +299,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Turn_failed _
          | Context_measured _
          | Compaction_started
-         | Compaction_completed _
+         | Compaction_completed
          | Compaction_failed _
          | Handoff_started
          | Handoff_completed _
@@ -328,7 +328,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Turn_failed _
       | Context_measured _
       | Compaction_started
-      | Compaction_completed _
+      | Compaction_completed
       | Compaction_failed _
       | Handoff_started
       | Handoff_completed _
@@ -378,7 +378,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        let detail =
          match event with
          | Operator_resume -> "operator request"
-         | Compaction_completed _ -> "auto-compact recovered"
+         | Compaction_completed -> "auto-compact recovered"
          | Fiber_terminated _ -> "fiber recovered"
          | Heartbeat_ok
          | Heartbeat_failed _

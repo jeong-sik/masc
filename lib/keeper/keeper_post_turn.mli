@@ -25,9 +25,6 @@ type compaction_event =
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
-  ; before_tokens : int
-  ; after_tokens : int
-  ; saved_tokens : int
   }
 
 (** Combined post-turn outcome — compaction + rollover + per-turn context

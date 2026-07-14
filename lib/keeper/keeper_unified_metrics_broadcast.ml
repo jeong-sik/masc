@@ -22,9 +22,6 @@ let broadcast_lifecycle_events ~(name : string)
              ("type", `String "keeper_compaction");
              ("name", `String name);
              ("generation", `Int turn_generation);
-             ("before_tokens", `Int compaction.before_tokens);
-             ("after_tokens", `Int compaction.after_tokens);
-             ("saved_tokens", `Int compaction.saved_tokens);
              ( "trigger",
                match compaction.trigger with
                | Some trigger -> `String (Compaction_trigger.to_label trigger)
@@ -73,4 +70,3 @@ let broadcast_lifecycle_events ~(name : string)
             (Printexc.to_string exn);
           Otel_metric_store.inc_counter Keeper_metrics.(to_string MetricsSseFailures) ~labels:[("kind", Keeper_metrics_sse_failure_kind.(to_label Handoff))] ())
   | _ -> ()
-

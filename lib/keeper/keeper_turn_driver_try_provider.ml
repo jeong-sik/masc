@@ -269,7 +269,6 @@ let run_try_provider
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
           ; tool_failure_judge = ctx.tool_failure_judge
-          ; runtime_mcp_policy = None
           }
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in

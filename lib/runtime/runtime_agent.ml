@@ -96,8 +96,6 @@ type config =
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  runtime_mcp_policy :
-    Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
@@ -212,17 +210,8 @@ let provider_caps_of_config =
 let provider_supports_inline_tools =
   Runtime_transport.provider_supports_inline_tools
 
-let provider_supports_runtime_mcp_lane =
-  Runtime_transport.provider_supports_runtime_mcp_lane
-
-let runtime_mcp_policy_of_tool_names =
-  Runtime_transport.runtime_mcp_policy_of_tool_names
-
 let provider_label =
   Runtime_transport.provider_label
-
-let resolve_tool_lane_for_oas_tools =
-  Runtime_transport.resolve_tool_lane_for_oas_tools
 
 let request_runtime_fields_on_base_config
     ~(base : Llm_provider.Provider_config.t)
@@ -1584,7 +1573,6 @@ let run
 let run_with_masc_tools
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~base_path
     ~(config : config)
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
@@ -1593,18 +1581,8 @@ let run_with_masc_tools
     ?on_resume
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
-  match
-    runtime_mcp_policy_of_tool_names
-      ~base_path
-      ~agent_name:config.name
-      (List.map (fun (td : Masc_domain.tool_schema) -> td.name) masc_tools)
-  with
-  | Some runtime_mcp_policy
-    when Provider_tool_support.provider_supports_runtime_mcp_lane
-           config.provider_cfg ->
-      let config = { config with runtime_mcp_policy = Some runtime_mcp_policy } in
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
-  | _ when masc_tools = [] ->
+  match masc_tools with
+  | [] ->
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
       (match !oas_tool_of_masc_hook with
@@ -1622,4 +1600,5 @@ let run_with_masc_tools
          in
          let config = { config with tools = oas_tools @ config.tools } in
          run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal)
-  | _ -> run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
+  | _ ->
+    Error (invalid_runtime_config "tools" "provider lacks inline tool support")

@@ -1698,8 +1698,6 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
       ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
       ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
-      ; "supports_runtime_mcp_tools", `Bool caps.supports_runtime_mcp_tools
-      ; "supports_runtime_tool_events", `Bool caps.supports_runtime_tool_events
       ; ( "assistant_tool_content_format"
         , `String (assistant_tool_content_format_wire caps.assistant_tool_content_format) )
       ; "supports_reasoning", `Bool caps.supports_reasoning

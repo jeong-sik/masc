@@ -5,9 +5,8 @@
     {!Runtime_transport}, and
     {!Runtime_oas_checkpoint}.  External callers reach
     the run/config entry points via [Runtime_agent.X];
-    provider transport internals (CLI / MCP wire formats,
-    runtime policy projections, and transport-local
-    diagnostics) are owned by {!Runtime_transport}.
+    provider transport internals and transport-local diagnostics are owned by
+    {!Runtime_transport}.
 
     All model-selection and runtime logic lives in
     {!Runtime_observation} and {!Keeper_turn_driver}.
@@ -15,7 +14,6 @@
     Internal helpers stay private at this boundary
     ([invalid_runtime_config],
     [provider_supports_inline_tools],
-    [provider_supports_runtime_mcp_lane],
     [persist_checkpoint], [build_checkpoint],
     [partial_response_of_stop]). *)
 
@@ -76,8 +74,6 @@ type config = Runtime_agent_context.config = {
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  runtime_mcp_policy :
-    Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
@@ -177,16 +173,6 @@ val provider_caps_of_config :
   Llm_provider.Provider_config.t ->
   Llm_provider.Capabilities.capabilities
 val provider_label : Llm_provider.Provider_config.t -> string
-val resolve_tool_lane_for_oas_tools :
-  base_path:string ->
-  ?agent_name:string ->
-  provider_cfg:Llm_provider.Provider_config.t ->
-  tools:Agent_sdk.Tool.t list ->
-  unit ->
-  ( Agent_sdk.Tool.t list
-    * Llm_provider.Llm_transport.runtime_mcp_policy option,
-    Agent_sdk.Error.sdk_error )
-  result
 
 val runtime_observation_for_terminal_config :
   total_duration_ms:float ->
@@ -464,7 +450,6 @@ val run_blocks :
 val run_with_masc_tools :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  base_path:string ->
   config:config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
@@ -473,10 +458,8 @@ val run_with_masc_tools :
   ?on_resume:(unit -> unit) ->
   string ->
   (run_result, Agent_sdk.Error.sdk_error) result
-(** Variant of {!run} that wires MASC public-MCP tools
-    into the agent through [dispatch].  Used by the
-    keeper-runtime path that needs to expose MCP-style
-    tools to the model alongside OAS tools. *)
+(** Variant of {!run} that projects the supplied MASC schemas into exact inline
+    [Agent_sdk.Tool.t] values through [dispatch]. *)
 
 val set_oas_tool_of_masc_hook :
   (name:string ->

@@ -1442,6 +1442,23 @@ let read_active_rows db =
       in
       loop Sequence_map.empty None)
 
+let read_sequence_summary db =
+  with_statement db
+    "SELECT COUNT(*), MAX(fifo_sequence) FROM receipts"
+    (fun stmt ->
+      match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW ->
+        let row_count = Sqlite3.column_int64 stmt 0 in
+        let max_sequence =
+          if Sqlite3.column_is_null stmt 1
+          then None
+          else Some (Sqlite3.column_int64 stmt 1)
+        in
+        (match Sqlite3.step stmt with
+         | Sqlite3.Rc.DONE -> Ok (row_count, max_sequence)
+         | rc -> Error (sqlite_error ~operation:"finish FIFO summary" db rc))
+      | rc -> Error (sqlite_error ~operation:"read FIFO summary" db rc))
+
 let read_loaded_database db =
   let* () = sqlite_exec db ~operation:"begin load transaction" "BEGIN" in
   let body =
@@ -1453,8 +1470,30 @@ let read_loaded_database db =
       sqlite_single_int64 db ~operation:"count terminal receipts"
         "SELECT COUNT(*) FROM receipts WHERE state_kind IN ('delivered', 'failed')"
     in
+    let* row_count, max_sequence = read_sequence_summary db in
+    let active_count =
+      Sequence_map.cardinal loaded_pending
+      + if Option.is_some loaded_inflight then 1 else 0
+    in
+    let projected_row_count =
+      Int64.add loaded_terminal_count (Int64.of_int active_count)
+    in
+    let sequence_is_contiguous =
+      match row_count, max_sequence with
+      | 0L, None -> Int64.equal loaded_next_sequence 0L
+      | count, Some max_sequence
+        when Int64.compare count 0L > 0
+             && Int64.compare max_sequence Int64.max_int < 0 ->
+        Int64.equal loaded_next_sequence (Int64.succ max_sequence)
+        && Int64.equal count loaded_next_sequence
+      | 0L, Some _ | _, None | _, Some _ -> false
+    in
     if not (Int64.equal observed_terminal_count loaded_terminal_count)
     then Error "chat queue terminal_count metadata differs from terminal rows"
+    else if not (Int64.equal row_count projected_row_count)
+    then Error "chat queue active and terminal projections do not cover every receipt"
+    else if not sequence_is_contiguous
+    then Error "chat queue FIFO sequence metadata is not contiguous"
     else
       let* () = sqlite_exec db ~operation:"commit load transaction" "COMMIT" in
       Ok
@@ -1555,20 +1594,6 @@ let update_row db row =
          then Ok ()
          else Error "chat queue receipt update did not affect exactly one row"))
 
-let delete_row db row =
-  require_sqlite
-    (with_statement db
-       "DELETE FROM receipts WHERE receipt_id = ?"
-       (fun stmt ->
-         let* () =
-           sqlite_bind_text db stmt ~operation:"bind deleted receipt id" 1
-             (Receipt_id.to_string row.receipt.receipt_id)
-         in
-         let* () = sqlite_expect_done db stmt ~operation:"delete receipt" in
-         if Sqlite3.changes db = 1
-         then Ok ()
-         else Error "chat queue receipt delete did not affect exactly one row"))
-
 let update_meta db plan =
   require_sqlite
     (with_statement db
@@ -1637,7 +1662,8 @@ let validate_plan_shape plan =
       when not (Receipt_id.equal before.receipt.receipt_id target.receipt.receipt_id) ->
       Error "chat queue transaction plan changes receipt identity"
     | None, None -> Error "chat queue transaction plan has no row mutation"
-    | None, Some _ | Some _, None | Some _, Some _ -> Ok ()
+    | Some _, None -> Error "chat queue receipts are append-only and cannot be deleted"
+    | None, Some _ | Some _, Some _ -> Ok ()
 
 let apply_plan_in_transaction db plan =
   require_sqlite (validate_plan_shape plan);
@@ -1672,7 +1698,10 @@ let apply_plan_in_transaction db plan =
   (match plan.before_row, plan.target_row with
    | None, Some target -> insert_row db target
    | Some _, Some target -> update_row db target
-   | Some before, None -> delete_row db before
+   | Some _, None ->
+     raise
+       (Sqlite_operation_failed
+          "chat queue receipts are append-only and cannot be deleted")
    | None, None ->
      raise
        (Sqlite_operation_failed

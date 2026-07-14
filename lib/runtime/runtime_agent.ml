@@ -860,6 +860,11 @@ let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
        |> List.map (fun (runtime : Runtime.t) ->
          runtime.Runtime.id, input_capabilities_of_runtime runtime))
 
+let select_agent_result ~checkpoint ~resume ~build =
+  match checkpoint with
+  | Some checkpoint -> resume checkpoint
+  | None -> build ()
+
 module For_testing = struct
   let request_runtime_fields_on_base_config =
     request_runtime_fields_on_base_config
@@ -890,6 +895,7 @@ module For_testing = struct
     validate_content_blocks_against_capabilities
   let apply_runtime_model_input_capabilities =
     apply_runtime_model_input_capabilities
+  let select_agent_result = select_agent_result
 end
 
 (* ================================================================ *)
@@ -1170,16 +1176,12 @@ let run_blocks
   publish_lifecycle ~name:config.name ~event:"build" ~detail:goal_detail
     ~attrs:(provider_lifecycle_attrs config)
     ();
-  let agent_result = match oas_checkpoint with
-    | Some checkpoint ->
-      (try resume_from_checkpoint ~sw ~net ~config ~checkpoint
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Misc.warn "oas_worker %s: resume_from_checkpoint failed (%s), falling back to build"
-           config.name (Printexc.to_string exn);
-         build ~sw ~net ~config)
-    | None -> build ~sw ~net ~config
+  let agent_result =
+    select_agent_result
+      ~checkpoint:oas_checkpoint
+      ~resume:(fun checkpoint ->
+        resume_from_checkpoint ~sw ~net ~config ~checkpoint)
+      ~build:(fun () -> build ~sw ~net ~config)
   in
   match agent_result with
   | Error e ->

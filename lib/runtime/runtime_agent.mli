@@ -363,6 +363,12 @@ module For_testing : sig
     Runtime_schema.model_capabilities ->
     Llm_provider.Capabilities.capabilities
 
+  val select_agent_result :
+    checkpoint:'checkpoint option ->
+    resume:('checkpoint -> 'result) ->
+    build:(unit -> 'result) ->
+    'result
+
   val runtime_observation_for_completed_config :
     total_duration_ms:float -> config -> Runtime_observation.runtime_observation
 

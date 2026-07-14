@@ -108,28 +108,21 @@ module Reg = Masc.Keeper_registry
     observation/control checkpoint for which [None] is correct. *)
 
 let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
-  [ ( "AgentExecutionTimeout"
-    , SdkE.Agent
-        (SdkE.AgentExecutionTimeout
-           { elapsed_sec = 10.0; timeout_sec = 5.0; turn_count = 3; max_turns = 10 })
-    )
-  ; ( "AgentExecutionIdleTimeout"
-    , SdkE.Agent
-        (SdkE.AgentExecutionIdleTimeout
-           { idle_sec = 10.0; idle_timeout_sec = 5.0; turn_count = 3; max_turns = 10 })
-    )
-  ; ( "MaxTurnsExceeded"
-    , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 }) )
-  ; ( "UnrecognizedStopReason"
+  [ ( "UnrecognizedStopReason"
     , SdkE.Agent (SdkE.UnrecognizedStopReason { reason = "abrupt" }) )
-  ; ( "IdleDetected"
-    , SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 }) )
+  ; ( "HookExecutionFailed"
+    , SdkE.Agent
+        (SdkE.HookExecutionFailed
+           { hook_name = "post_tool_use"
+           ; stage = "execute"
+           ; tool_name = Some "Execute"
+           ; tool_use_id = Some "tool-1"
+           ; detail = "hook failed"
+           }) )
   ; ( "GuardrailViolation"
     , SdkE.Agent (SdkE.GuardrailViolation { validator = "content_filter"; reason = "toxic" }) )
   ; ( "TripwireViolation"
     , SdkE.Agent (SdkE.TripwireViolation { tripwire = "disallow_shell"; reason = "exec detected" }) )
-  ; ( "ExitConditionMet"
-    , SdkE.Agent (SdkE.ExitConditionMet { turn = 5 }) )
   ; ( "InputRequired"
     , SdkE.Agent
         (SdkE.InputRequired
@@ -144,10 +137,7 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
 ;;
 
 let agent_variants_with_no_runtime_blocker =
-  [ "AgentExecutionTimeout"
-  ; "AgentExecutionIdleTimeout"
-  ; "MaxTurnsExceeded"
-  ]
+  [ "HookExecutionFailed" ]
 
 let test_all_agent_variants_classified_intentionally () =
   List.iter
@@ -175,7 +165,7 @@ let test_all_agent_variants_classified_intentionally () =
 (** Pin the Agent sub-variant count so additions are visible in diffs.
     When the SDK adds a new [Agent] sub-variant, bump this number and add it
     to [all_sdk_agent_variants]. *)
-let expected_agent_variant_count = 9
+let expected_agent_variant_count = 5
 
 let test_agent_variant_count_pin () =
   let count = List.length all_sdk_agent_variants in

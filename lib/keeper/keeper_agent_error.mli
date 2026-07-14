@@ -21,10 +21,6 @@ val user_message_of_sdk_error : Agent_sdk.Error.sdk_error -> string
     Keeper pause, retry, or blocker authority. *)
 type sdk_termination_semantics =
   | Provider_wall_clock_timeout
-  | Oas_execution_timeout_observed
-  | Oas_turn_limit_observed
-  | Oas_idle_detected_failure
-  | Oas_exit_condition_reached
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required

@@ -131,8 +131,21 @@ let test_agent_failed_matches_typed_sse_event () =
   let task_id = "task-failed-1" in
   let elapsed_s = 4.25 in
   let caused_by = "run-agent-started-1" in
-  let error = Agent_sdk.Error.Internal "bridge failure" in
+  let error =
+    Agent_sdk.Error.Agent
+      (Agent_sdk.Error.HookExecutionFailed
+         { hook_name = "post_tool_use"
+         ; stage = "execute"
+         ; tool_name = Some "Execute"
+         ; tool_use_id = Some "tool-1"
+         ; detail = "hook failed"
+         })
+  in
   let projection = Error_json.agent_failed_error_projection error in
+  check (option string)
+    "hook failure variant"
+    (Some "hook_execution_failed")
+    (string_of_field (member "variant" projection.error_detail));
   let actual =
     Bridge.native_event_to_json
       (mk_event

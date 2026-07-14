@@ -1595,32 +1595,6 @@ let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
     Alcotest.failf "expected typed keeper error, got %s"
       (Agent_sdk.Error.to_string mapped)
 
-let test_provider_turn_limit_remains_an_execution_observation () =
-  let mapped =
-    Agent_sdk.Error.Agent
-      (Agent_sdk.Error.MaxTurnsExceeded { turns = 12; limit = 12 })
-  in
-  (match mapped with
-   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded { turns; limit }) ->
-     Alcotest.(check int) "turns preserved" 12 turns;
-     Alcotest.(check int) "limit preserved" 12 limit
-   | _ ->
-     Alcotest.failf
-       "expected typed MaxTurnsExceeded observation, got %s"
-       (Agent_sdk.Error.to_string mapped));
-  Alcotest.(check bool)
-    "provider turn limit is not runtime exhaustion"
-    false
-    (Masc.Keeper_error_classify.is_runtime_exhausted_error mapped);
-  Alcotest.(check bool)
-    "provider turn limit cannot increment Keeper failure streak"
-    true
-    (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped);
-  Alcotest.(check bool)
-    "provider turn limit grants no blocker"
-    true
-    (Masc.Keeper_status_bridge.blocker_class_of_sdk_error mapped = None)
-
 let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
   let mapped =
     Keeper_internal_error.sdk_error_of_masc_internal_error
@@ -1820,10 +1794,6 @@ let () =
             "no-candidates exhaustion classifies as No_providers_available"
             `Quick
             test_no_candidates_exhaustion_classifies_as_no_providers_available;
-          Alcotest.test_case
-            "provider turn limit stays an execution observation"
-            `Quick
-            test_provider_turn_limit_remains_an_execution_observation;
           Alcotest.test_case
             "capacity exhaustion classifies as retryable Runtime_exhausted"
             `Quick

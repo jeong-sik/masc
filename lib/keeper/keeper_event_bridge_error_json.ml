@@ -1,4 +1,5 @@
 let stop_reason_to_wire = Agent_sdk.Types.stop_reason_to_string
+let sha256_hex value = Digestif.SHA256.(digest_string value |> to_hex)
 
 let agent_completed_usage_fields (response : Agent_sdk.Types.api_response) =
   match response.usage with
@@ -90,10 +91,17 @@ let sdk_api_error_fields = function
 ;;
 
 let sdk_agent_error_fields = function
-  | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
-    [ "variant", `String "max_turns_exceeded"; "turns", `Int turns; "limit", `Int limit ]
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
     [ "variant", `String "unrecognized_stop_reason"; "reason", `String reason ]
+  | Agent_sdk.Error.HookExecutionFailed
+      { hook_name; stage; tool_name; tool_use_id; detail } ->
+    [ "variant", `String "hook_execution_failed"
+    ; "hook_name", `String hook_name
+    ; "stage", `String stage
+    ; "tool_name", Json_util.string_opt_to_json tool_name
+    ; "tool_use_id", Json_util.string_opt_to_json tool_use_id
+    ; "detail_digest", `String (sha256_hex detail)
+    ]
   | Agent_sdk.Error.GuardrailViolation { validator; reason } ->
     [ "variant", `String "guardrail_violation"
     ; "validator", `String validator
@@ -104,29 +112,11 @@ let sdk_agent_error_fields = function
     ; "tripwire", `String tripwire
     ; "reason", `String reason
     ]
-  | Agent_sdk.Error.ExitConditionMet { turn } ->
-    [ "variant", `String "exit_condition_met"; "turn", `Int turn ]
   | Agent_sdk.Error.InputRequired { request_id; participant_name; question; _ } ->
     [ "variant", `String "input_required"
     ; "request_id", `String request_id
     ; "participant_name", Json_util.string_opt_to_json participant_name
     ; "question", `String question
-    ]
-  | Agent_sdk.Error.AgentExecutionTimeout
-      { elapsed_sec; timeout_sec; turn_count; max_turns } ->
-    [ "variant", `String "agent_execution_timeout"
-    ; "elapsed_sec", `Float elapsed_sec
-    ; "timeout_sec", `Float timeout_sec
-    ; "turn_count", `Int turn_count
-    ; "max_turns", `Int max_turns
-    ]
-  | Agent_sdk.Error.AgentExecutionIdleTimeout
-      { idle_sec; idle_timeout_sec; turn_count; max_turns } ->
-    [ "variant", `String "agent_idle_timeout"
-    ; "idle_sec", `Float idle_sec
-    ; "idle_timeout_sec", `Float idle_timeout_sec
-    ; "turn_count", `Int turn_count
-    ; "max_turns", `Int max_turns
     ]
 ;;
 

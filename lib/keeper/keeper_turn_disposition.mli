@@ -29,8 +29,7 @@ type t =
   | External_cancel
   (** Turn cancelled before completion (operator stop, switch_keeper, …). *)
   | Input_required
-  (** Agent paused to request human input. Not a failure — a special
-          stop condition analogous to [ExitConditionMet]. Operator action:
+  (** Agent emitted a typed input request. Not a failure. Operator action:
           provide input or decline. *)
   | Turn_wall_clock_timeout (** Turn exceeded its wall-clock budget. *)
   | Runtime_attempts_exhausted

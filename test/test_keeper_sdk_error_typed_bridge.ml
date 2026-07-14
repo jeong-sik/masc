@@ -19,8 +19,6 @@ module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
 module KFR = Keeper_runtime_failure_route
 module KTD = Masc.Keeper_turn_driver
-module KRB = Masc.Keeper_turn_runtime_budget
-module KSB = Masc.Keeper_status_bridge
 module RC = Runtime_candidate
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
@@ -69,27 +67,19 @@ let api_cases : (string * SdkE.api_error * string) list =
 
 (* All variants reached through the top-level dispatcher. *)
 let sdk_cases : (string * SdkE.sdk_error * string) list =
-  [ ( "Agent/MaxTurnsExceeded"
-    , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 })
-    , "agent_error_max_turns_exceeded:turns=10,limit=10" )
-  ; ( "Agent/AgentExecutionTimeout"
+  [ ( "Agent/HookExecutionFailed"
     , SdkE.Agent
-        (SdkE.AgentExecutionTimeout
-           { elapsed_sec = 572.5
-           ; timeout_sec = 555.0
-           ; turn_count = 24
-           ; max_turns = 340
+        (SdkE.HookExecutionFailed
+           { hook_name = "post_tool_use"
+           ; stage = "execute"
+           ; tool_name = Some "Execute"
+           ; tool_use_id = Some "tool-1"
+           ; detail = "hook failed"
            })
-    , "agent_error_execution_timeout:elapsed_sec=572.5,timeout_sec=555.0,turn_count=24,max_turns=340" )
-  ; ( "Agent/ExitConditionMet"
-    , SdkE.Agent (SdkE.ExitConditionMet { turn = 5 })
-    , "agent_error_exit_condition_met:turn=5" )
+    , "agent_error_hook_execution_failed:hook=post_tool_use,stage=execute" )
   ; ( "Agent/UnrecognizedStopReason"
     , SdkE.Agent (SdkE.UnrecognizedStopReason { reason = "abrupt" })
     , "agent_error_unrecognized_stop_reason:abrupt" )
-  ; ( "Agent/IdleDetected"
-    , SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 })
-    , "agent_error_idle_detected:consecutive_idle_turns=3" )
   ; ( "Api/Timeout"
     , SdkE.Api (Retry.Timeout { message = "60s"; phase = None })
     , "api_error_timeout" )
@@ -128,102 +118,6 @@ let test_sdk_typed_wire () =
        let actual = typed_wire (AE.terminal_reason_code_of_sdk_error_typed err) in
        Alcotest.(check string) ("sdk/" ^ label) expected actual)
     sdk_cases
-;;
-
-let test_idle_detected_receipt_is_failure () =
-  let outcome =
-    AE.receipt_outcome_kind_of_sdk_error
-      (SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 }))
-  in
-  Alcotest.(check string)
-    "IdleDetected is not cancellation"
-    "error"
-    (Masc.Keeper_execution_receipt.outcome_kind_to_string outcome)
-;;
-
-let test_execution_limit_observations_are_successful_receipts () =
-  let observations =
-    [ ( "max turns"
-      , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 }) )
-    ; ( "execution timeout"
-      , SdkE.Agent
-          (SdkE.AgentExecutionTimeout
-             { elapsed_sec = 60.0
-             ; timeout_sec = 60.0
-             ; turn_count = 2
-             ; max_turns = 10
-             }) )
-    ; ( "idle timeout"
-      , SdkE.Agent
-          (SdkE.AgentExecutionIdleTimeout
-             { idle_sec = 60.0
-             ; idle_timeout_sec = 60.0
-             ; turn_count = 2
-             ; max_turns = 10
-             }) )
-    ]
-  in
-  List.iter
-    (fun (label, error) ->
-       let outcome = AE.receipt_outcome_kind_of_sdk_error error in
-       Alcotest.(check string)
-         (label ^ " remains a successful observation")
-         "ok"
-         (Masc.Keeper_execution_receipt.outcome_kind_to_string outcome))
-    observations
-;;
-
-let test_execution_limit_observations_have_no_keeper_authority () =
-  let observations =
-    [ ( "max turns"
-      , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 }) )
-    ; ( "execution timeout"
-      , SdkE.Agent
-          (SdkE.AgentExecutionTimeout
-             { elapsed_sec = 60.0
-             ; timeout_sec = 60.0
-             ; turn_count = 2
-             ; max_turns = 10
-             }) )
-    ; ( "idle timeout"
-      , SdkE.Agent
-          (SdkE.AgentExecutionIdleTimeout
-             { idle_sec = 60.0
-             ; idle_timeout_sec = 60.0
-             ; turn_count = 2
-             ; max_turns = 10
-             }) )
-    ]
-  in
-  List.iter
-    (fun (label, error) ->
-       Alcotest.(check bool)
-         (label ^ " is typed as an OAS execution observation")
-         true
-         (EC.classify_error error = EC.Oas_execution_observed);
-       Alcotest.(check bool)
-         (label ^ " cannot increment the turn failure streak")
-         true
-         (EC.is_auto_recoverable_turn_error error);
-       Alcotest.(check bool)
-         (label ^ " grants no runtime rotation")
-         true
-         (EC.recoverable_runtime_failure_reason error = None);
-       Alcotest.(check bool)
-         (label ^ " grants no blocker")
-         true
-         (KSB.blocker_class_of_sdk_error error = None);
-       match
-         KRB.decide_degraded_retry
-           ~base_runtime:"observation.base"
-           ~effective_runtime:"observation.effective"
-           ~attempted_runtimes:[]
-           error
-       with
-       | KRB.No_degraded_retry -> ()
-       | KRB.Degraded_retry_allowed _ ->
-         Alcotest.failf "%s unexpectedly authorized degraded retry" label)
-    observations
 ;;
 
 let check_parse_split label err ~provider ~model_ ~server =
@@ -471,7 +365,6 @@ let test_soft_rate_limit_classifies_as_rate_limit () =
 let classification_to_string = function
   | EC.Transient_network -> "transient_network"
   | EC.Transient_internal_runner -> "transient_internal_runner"
-  | EC.Oas_execution_observed -> "oas_execution_observed"
   | EC.Transient_rate_limit -> "transient_rate_limit"
   | EC.Transient_capacity -> "transient_capacity"
   | EC.Non_transient -> "non_transient"
@@ -521,16 +414,6 @@ let test_static_error_classification_preserves_retry_semantics () =
     "api transport timeout"
     EC.Transient_network
     (SdkE.Api (Retry.Timeout { message = "read timed out"; phase = None }));
-  check_classification
-    "typed agent execution timeout"
-    EC.Oas_execution_observed
-    (SdkE.Agent
-       (SdkE.AgentExecutionTimeout
-          { elapsed_sec = 60.0
-          ; timeout_sec = 60.0
-          ; turn_count = 2
-          ; max_turns = 10
-          }));
   check_classification
     "internal runner tls"
     EC.Transient_internal_runner
@@ -911,18 +794,6 @@ let () =
             "all sdk_error cases produce expected wire"
             `Quick
             test_sdk_typed_wire
-        ; Alcotest.test_case
-            "IdleDetected receipt remains a failure"
-            `Quick
-            test_idle_detected_receipt_is_failure
-        ; Alcotest.test_case
-            "execution limits do not impersonate cancellation"
-            `Quick
-            test_execution_limit_observations_are_successful_receipts
-        ; Alcotest.test_case
-            "execution limits have no Keeper authority"
-            `Quick
-            test_execution_limit_observations_have_no_keeper_authority
         ] )
     ; ( "server parse rejection split"
       , [ Alcotest.test_case

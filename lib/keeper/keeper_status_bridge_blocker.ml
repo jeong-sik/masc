@@ -48,14 +48,11 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | None ->
     (match err with
      | Agent_sdk.Error.Internal _ -> None
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)
-     | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> None
+     | Agent_sdk.Error.Agent (HookExecutionFailed _) -> None
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
      | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
      | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
-     | Agent_sdk.Error.Agent (ExitConditionMet _) -> Some Sdk_exit_condition_met
      | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
      (* Provider-level [Api] errors are surfaced via OAS retry / runtime
          layers and do not map to a typed blocker_class by themselves. *)

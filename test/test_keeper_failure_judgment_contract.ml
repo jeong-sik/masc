@@ -155,14 +155,6 @@ let test_typed_judge_error_disposition () =
                 })
        });
   check_disposition
-    "judge idle loop terminates instead of requeueing itself"
-    (Keeper_failure_judge.Oas_error
-       { runtime_id = "structured-judge"
-       ; error =
-           Agent_sdk.Error.Agent
-             (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 15 })
-       });
-  check_disposition
     "response contract error escalates"
     (Keeper_failure_judge.Response_contract_error
        { runtime_id = "structured-judge"; detail = "invalid JSON" })

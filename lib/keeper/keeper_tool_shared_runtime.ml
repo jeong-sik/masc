@@ -5,8 +5,6 @@ open Keeper_alerting
 module StringMap = Set_util.StringMap
 module StringSet = Set_util.StringSet
 
-let count_context_tokens (ctx : working_context) = Keeper_context_runtime.token_count ctx
-
 let has_json_field name fields =
   List.exists (fun (field, _) -> String.equal field name) fields
 ;;

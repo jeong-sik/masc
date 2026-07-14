@@ -720,8 +720,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                          `Assoc [
                            ("has_checkpoint", `Bool true);
                            ("source", `String "checkpoint");
-                           ("context_ratio", `Float (Keeper_context_runtime.context_ratio c));
-                           ("context_tokens", `Int (Keeper_context_runtime.token_count c));
                            ("context_max", `Int c.max_tokens);
                            ("message_count", `Int (Keeper_context_runtime.message_count c));
                          ])

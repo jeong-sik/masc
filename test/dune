@@ -164,7 +164,6 @@
   test_boundary_redaction_runtime_lane
   test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
-  test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
   test_llm_metric_bridge
   test_otel_dispatch_hook
@@ -487,7 +486,6 @@
   test_boundary_redaction_runtime_lane
   test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
-  test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
   test_llm_metric_bridge
   test_otel_dispatch_hook

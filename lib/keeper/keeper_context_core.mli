@@ -1,4 +1,4 @@
-(** Keeper working-context primitives — token counting, message
+(** Keeper working-context primitives — message
     history, OAS checkpoint conversion, JSONL persistence.
 
     Final selective-exposure .mli of the keeper subsystem (PR#3
@@ -10,17 +10,7 @@
 type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
-(** {1 Token counting} *)
-
-(** Token count of a single OAS message. *)
-val msg_tokens : Agent_sdk.Types.message -> int
-
-(** Total tokens across [system_prompt] + every message. *)
-val count_tokens : string -> Agent_sdk.Types.message list -> int
-
-val token_count : working_context -> int
 val message_count : working_context -> int
-val context_ratio : working_context -> float
 val max_tokens_of_context : working_context -> int
 
 (** Replace the working-context's [max_tokens]; mirrors the value

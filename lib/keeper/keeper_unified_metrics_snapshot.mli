@@ -10,8 +10,6 @@ val append_metrics_snapshot :
   turn_generation:int ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   snapshot_source:string ->
-  context_ratio:float ->
-  context_tokens:int ->
   context_max:int ->
   message_count:int ->
   compaction:Keeper_context_runtime.compaction_event ->

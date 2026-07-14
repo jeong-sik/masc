@@ -147,7 +147,7 @@ type event =
   | Compaction_started
     (** Emit only through the registry lifecycle origin guard. See the
         paired lifecycle contract above. *)
-  | Compaction_completed of { before_tokens : int; after_tokens : int }
+  | Compaction_completed of { before_messages : int; after_messages : int }
     (** Must fire in the same turn as the matching [Compaction_started]. *)
   | Compaction_failed of { reason : string }
     (** Must fire in the same turn as the matching [Compaction_started]. *)

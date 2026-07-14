@@ -81,8 +81,8 @@ type event =
       }
   | Compaction_started
   | Compaction_completed of
-      { before_tokens : int
-      ; after_tokens : int
+      { before_messages : int
+      ; after_messages : int
       }
   | Compaction_failed of { reason : string }
   | Handoff_started
@@ -121,7 +121,7 @@ let event_to_string = function
   | Context_measured r -> Printf.sprintf "context_measured(ratio=%.3f)" r.context_ratio
   | Compaction_started -> "compaction_started"
   | Compaction_completed r ->
-    Printf.sprintf "compaction_completed(%d->%d)" r.before_tokens r.after_tokens
+    Printf.sprintf "compaction_completed(%dmsg->%dmsg)" r.before_messages r.after_messages
   | Compaction_failed r -> Printf.sprintf "compaction_failed(%s)" r.reason
   | Handoff_started -> "handoff_started"
   | Handoff_completed r -> Printf.sprintf "handoff_completed(gen=%d)" r.generation

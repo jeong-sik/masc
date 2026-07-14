@@ -60,7 +60,7 @@ let test_happy_path () =
   (* Compaction completes → Running (context_overflow cleared) *)
   let tr3 =
     apply_ok SM.Compacting tr2.updated_conditions
-      (SM.Compaction_completed { before_tokens = 205_000; after_tokens = 80_000 })
+      (SM.Compaction_completed { before_messages = 205; after_messages = 80 })
   in
   check_phase SM.Running tr3.new_phase "compaction done → Running";
   check bool "context_overflow cleared" false
@@ -114,7 +114,7 @@ let test_two_consecutive_overflows () =
   in
   let tr3 =
     apply_ok SM.Compacting tr2.updated_conditions
-      (SM.Compaction_completed { before_tokens = 210_000; after_tokens = 90_000 })
+      (SM.Compaction_completed { before_messages = 210; after_messages = 90 })
   in
   check_phase SM.Running tr3.new_phase "cycle 1 back to Running";
   (* Second overflow should be handled cleanly after the successful cycle. *)
@@ -127,11 +127,11 @@ let test_two_consecutive_overflows () =
 
 let test_completion_counts_are_observations () =
   List.iter
-    (fun (before_tokens, after_tokens) ->
+    (fun (before_messages, after_messages) ->
       let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
       let tr2 = apply_ok SM.Overflowed tr1.updated_conditions SM.Compaction_started in
       let tr3 = apply_ok SM.Compacting tr2.updated_conditions
-          (SM.Compaction_completed { before_tokens; after_tokens }) in
+          (SM.Compaction_completed { before_messages; after_messages }) in
       check bool "completed compaction clears overflow" false
         tr3.updated_conditions.context_overflow;
       check_phase SM.Running tr3.new_phase "completed compaction resumes")
@@ -163,7 +163,7 @@ let test_heartbeat_failure_preserved_through_overflow () =
   check_phase SM.Compacting tr3.new_phase "compact starts";
   let tr4 =
     apply_ok SM.Compacting tr3.updated_conditions
-      (SM.Compaction_completed { before_tokens = 205_000; after_tokens = 70_000 })
+      (SM.Compaction_completed { before_messages = 205; after_messages = 70 })
   in
   (* context_overflow cleared, heartbeat_healthy=false remains → Failing *)
   check_phase SM.Failing tr4.new_phase

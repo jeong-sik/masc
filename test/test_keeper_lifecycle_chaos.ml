@@ -134,7 +134,7 @@ let test_compaction_crash_recovery () =
   let tr = dispatch "compact" KSM.Compaction_started in
   check phase_t "2nd compaction" KSM.Compacting tr.new_phase;
   let tr = dispatch "compact"
-    (KSM.Compaction_completed { before_tokens = 100000; after_tokens = 30000 }) in
+    (KSM.Compaction_completed { before_messages = 100; after_messages = 30 }) in
   check phase_t "2nd compact → running" KSM.Running tr.new_phase;
 
   let tr = dispatch "compact"
@@ -185,7 +185,7 @@ let test_full_chaos_sequence () =
   let tr = dispatch "chaos" KSM.Compaction_started in
   check phase_t "compacting" KSM.Compacting tr.new_phase;
   let tr = dispatch "chaos"
-    (KSM.Compaction_completed { before_tokens = 100000; after_tokens = 30000 }) in
+    (KSM.Compaction_completed { before_messages = 100; after_messages = 30 }) in
   check phase_t "post-compact → running" KSM.Running tr.new_phase;
 
   let tr = dispatch "chaos" KSM.Handoff_started in

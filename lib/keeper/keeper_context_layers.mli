@@ -17,6 +17,7 @@ type layer_id =
   | Current_task
   | Connected_surfaces
   | Namespace_state
+  | Context_health
   | Autonomous_trigger
   | Scheduled_automation
   | Pending_mentions

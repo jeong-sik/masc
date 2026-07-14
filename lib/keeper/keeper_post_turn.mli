@@ -25,9 +25,8 @@ type compaction_event =
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
-  ; before_tokens : int
-  ; after_tokens : int
-  ; saved_tokens : int
+  ; before_messages : int
+  ; after_messages : int
   }
 
 (** Combined post-turn outcome — compaction + rollover + per-turn context
@@ -40,8 +39,6 @@ type post_turn_lifecycle =
   ; handoff_failure_reason : string option
   ; compaction : compaction_event
   ; turn_generation : int
-  ; context_ratio : float
-  ; context_tokens : int
   ; context_max : int
   ; message_count : int
   }

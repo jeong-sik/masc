@@ -18,12 +18,8 @@ type session_context = Keeper_types.session_context
 (** {1 Working Context Operations} *)
 
 val text_of_message : Agent_sdk.Types.message -> string
-val msg_tokens : Agent_sdk.Types.message -> int
-val count_tokens : string -> Agent_sdk.Types.message list -> int
 val max_tokens_of_context : working_context -> int
-val token_count : working_context -> int
 val message_count : working_context -> int
-val context_ratio : working_context -> float
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val resume_checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
@@ -84,9 +80,8 @@ type compaction_event =
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
-  ; before_tokens : int
-  ; after_tokens : int
-  ; saved_tokens : int
+  ; before_messages : int
+  ; after_messages : int
   }
 
 type post_turn_lifecycle =
@@ -97,8 +92,6 @@ type post_turn_lifecycle =
   ; handoff_failure_reason : string option
   ; compaction : compaction_event
   ; turn_generation : int
-  ; context_ratio : float
-  ; context_tokens : int
   ; context_max : int
   ; message_count : int
   }
@@ -165,41 +158,14 @@ val dispatch_keeper_phase_event
   -> Keeper_state_machine.event
   -> unit
 
-(** Canonical metric name for the compaction outcome counter.
-
-    Labels: [("keeper", <name>); ("outcome", "ok" | "noop")].
-    Exported so tests can pin the name without hard-coding a string
-    literal.  #9988. *)
-val compaction_outcome_metric : string
-
-(** [record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens]
-    emits the outcome counter and (for [saved_tokens <= 0]) a warn log,
-    without dispatching an FSM event.  Exposed for unit tests and for
-    callers that need the observability signal before/after a dispatch.  *)
-val record_compaction_outcome
-  :  keeper_name:string
-  -> before_tokens:int
-  -> after_tokens:int
-  -> unit
-
-(** [dispatch_compaction_completed ~config ~keeper_name ~before_tokens
-    ~after_tokens] dispatches a [Compaction_completed] phase event and
-    updates observability in one place.
-
-    Emits [compaction_outcome_metric] labelled with [outcome=ok] when
-    [after_tokens < before_tokens] and [outcome=noop] otherwise.  A
-    [noop] outcome also logs a warning — the FSM (#9988) keeps
-    [context_overflow] set in this case, so operators need the signal
-    to escalate profile / alert.
-
-    Explicit compaction completion paths funnel through this helper to keep
-    observability coherent. *)
+(** Dispatch a [Compaction_completed] phase event with exact message counts.
+    The payload is observation only and never gates continuation. *)
 val dispatch_compaction_completed
   :  config:Workspace.config
   -> origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
-  -> before_tokens:int
-  -> after_tokens:int
+  -> before_messages:int
+  -> after_messages:int
   -> unit
 
 val dispatch_post_turn_lifecycle_events

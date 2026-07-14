@@ -74,17 +74,152 @@ let resolved_keeper_args_to_json
   `Assoc
     (base @ allowed_paths_field @ autoboot_field)
 
-let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
-  let errors = ref [] in
-  let name = Safe_ops.json_string ~default:"" "name" json in
-  let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
-  let mention_targets = Safe_ops.json_string_list "mention_targets" json in
-  if not (validate_name name) then
-    errors := invalid_name_error name :: !errors;
-  if goal = "" then errors := "goal is required" :: !errors;
-  if mention_targets = [] then
-    errors := "mention_targets is required" :: !errors;
-  List.rev !errors
+type create_field =
+  | Keeper_name
+  | Initial_goal
+  | Mention_targets
+
+type mention_target_error =
+  | Expected_string
+  | Empty_string
+
+type create_validation_error =
+  | Required of create_field
+  | Invalid_json_type of create_field
+  | Invalid_keeper_name of string
+  | Invalid_mention_target of
+      { index : int
+      ; reason : mention_target_error
+      }
+
+type create_validation_status =
+  | Ready
+  | Not_ready of create_validation_error list
+
+type create_validation_decision =
+  | Preview of create_validation_status
+  | Proceed
+  | Reject of create_validation_error list
+
+let create_field_wire_name = function
+  | Keeper_name -> "name"
+  | Initial_goal -> "goal"
+  | Mention_targets -> "mention_targets"
+
+let create_field_code = function
+  | Keeper_name -> "keeper_name"
+  | Initial_goal -> "initial_goal"
+  | Mention_targets -> "mention_targets"
+
+let create_field_expected_json = function
+  | Keeper_name | Initial_goal -> "non-empty string"
+  | Mention_targets -> "non-empty array of non-empty strings"
+
+let required_string field json =
+  match Safe_ops.json_member_opt (create_field_wire_name field) json with
+  | None -> Error (Required field)
+  | Some (`String value) when String.equal (String.trim value) "" ->
+      Error (Required field)
+  | Some (`String value) -> Ok value
+  | Some _ -> Error (Invalid_json_type field)
+
+let mention_target_errors json =
+  match Safe_ops.json_member_opt (create_field_wire_name Mention_targets) json with
+  | None -> [ Required Mention_targets ]
+  | Some (`List []) -> [ Required Mention_targets ]
+  | Some (`List values) ->
+      let rec collect_invalid index errors = function
+        | [] -> List.rev errors
+        | `String value :: rest ->
+            if String.equal (String.trim value) "" then
+              collect_invalid
+                (index + 1)
+                (Invalid_mention_target { index; reason = Empty_string } :: errors)
+                rest
+            else
+              collect_invalid (index + 1) errors rest
+        | _ :: rest ->
+            collect_invalid
+              (index + 1)
+              (Invalid_mention_target { index; reason = Expected_string } :: errors)
+              rest
+      in
+      collect_invalid 0 [] values
+  | Some _ -> [ Invalid_json_type Mention_targets ]
+
+let validate_resolved_keeper_create_json (json : Yojson.Safe.t) =
+  let keeper_name_error =
+    match required_string Keeper_name json with
+    | Error error -> Some error
+    | Ok name when validate_name name -> None
+    | Ok name -> Some (Invalid_keeper_name name)
+  in
+  let initial_goal_error =
+    match required_string Initial_goal json with
+    | Ok _ -> None
+    | Error error -> Some error
+  in
+  let errors =
+    List.filter_map Fun.id [ keeper_name_error; initial_goal_error ]
+    @ mention_target_errors json
+  in
+  match errors with
+  | [] -> Ok ()
+  | _ :: _ -> Error errors
+
+let decide_resolved_keeper_create ~dry_run json =
+  let status =
+    match validate_resolved_keeper_create_json json with
+    | Ok () -> Ready
+    | Error errors -> Not_ready errors
+  in
+  match dry_run, status with
+  | true, status -> Preview status
+  | false, Ready -> Proceed
+  | false, Not_ready errors -> Reject errors
+
+let create_validation_error_to_json error =
+  let code, field, message, details =
+    match error with
+    | Required field ->
+        ( create_field_code field ^ "_required"
+        , create_field_wire_name field
+        , Printf.sprintf "%s is required" (create_field_wire_name field)
+        , [] )
+    | Invalid_json_type field ->
+        ( create_field_code field ^ "_invalid_json_type"
+        , create_field_wire_name field
+        , Printf.sprintf
+            "%s must be a %s"
+            (create_field_wire_name field)
+            (create_field_expected_json field)
+        , [] )
+    | Invalid_keeper_name name ->
+        ( "keeper_name_invalid"
+        , create_field_wire_name Keeper_name
+        , invalid_name_error name
+        , [ "value", `String name ] )
+    | Invalid_mention_target { index; reason } ->
+        let code, message =
+          match reason with
+          | Expected_string ->
+              ( "mention_target_expected_string"
+              , "mention_targets entries must be strings" )
+          | Empty_string ->
+              ( "mention_target_empty"
+              , "mention_targets entries must be non-empty strings" )
+        in
+        ( code
+        , create_field_wire_name Mention_targets
+        , message
+        , [ "index", `Int index ] )
+  in
+  `Assoc
+    ([ "code", `String code; "field", `String field; "message", `String message ]
+     @ details)
+
+let create_validation_errors_to_json errors =
+  `List (List.map create_validation_error_to_json errors)
 
 let toml_escape_string value =
   let buf = Buffer.create (String.length value + 8) in

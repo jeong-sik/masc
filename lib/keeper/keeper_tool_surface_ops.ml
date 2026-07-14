@@ -395,6 +395,18 @@ let attach_identity_reseed ?identity_reseed json =
   match identity_reseed with
   | None -> json
   | Some note -> attach_assoc_field "identity_reseed" note json
+
+let create_from_persona_validation_json ~persona ~resolved_args ~ready ~errors =
+  `Assoc
+    [ ( "persona"
+      , Keeper_tool_persona_runtime.persona_summary_to_json persona )
+    ; "created", `Bool false
+    ; "ready", `Bool ready
+    ; ( "errors"
+      , Keeper_tool_persona_runtime.create_validation_errors_to_json errors )
+    ; "resolved_args", resolved_args
+    ]
+
 let handle_keeper_create_from_persona ctx args : tool_result =
   if not Server_startup_state.((!state).state_ready) then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
@@ -407,17 +419,33 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         |> Result.map_error (fun e -> "" ^ e)
       in
       let dry_run = get_bool args "dry_run" false in
-      if dry_run then
+      match
+        Keeper_tool_persona_runtime.decide_resolved_keeper_create
+          ~dry_run
+          resolved_args
+      with
+      | Keeper_tool_persona_runtime.Preview status ->
+        let ready, errors =
+          match status with
+          | Keeper_tool_persona_runtime.Ready -> true, []
+          | Keeper_tool_persona_runtime.Not_ready errors -> false, errors
+        in
         Ok
           (tool_result_ok_data
-             (`Assoc
-                [
-                  ( "persona",
-                    Keeper_tool_persona_runtime.persona_summary_to_json persona );
-                  ("created", `Bool false);
-                  ("resolved_args", resolved_args);
-                ]))
-      else
+             (create_from_persona_validation_json
+                ~persona
+                ~resolved_args
+                ~ready
+                ~errors))
+      | Keeper_tool_persona_runtime.Reject errors ->
+        Ok
+          (tool_result_error_data
+             (create_from_persona_validation_json
+                ~persona
+                ~resolved_args
+                ~ready:false
+                ~errors))
+      | Keeper_tool_persona_runtime.Proceed ->
         let* _rendered_toml =
           Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args
             resolved_args

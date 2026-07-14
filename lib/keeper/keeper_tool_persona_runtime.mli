@@ -9,7 +9,41 @@ val read_jsonl_rows :
 val find_jsonl_row_by_action_id :
   Yojson.Safe.t list -> string -> Yojson.Safe.t option
 
-val validate_resolved_keeper_create_json : Yojson.Safe.t -> string list
+type create_field =
+  | Keeper_name
+  | Initial_goal
+  | Mention_targets
+
+type mention_target_error =
+  | Expected_string
+  | Empty_string
+
+type create_validation_error =
+  | Required of create_field
+  | Invalid_json_type of create_field
+  | Invalid_keeper_name of string
+  | Invalid_mention_target of
+      { index : int
+      ; reason : mention_target_error
+      }
+
+type create_validation_status =
+  | Ready
+  | Not_ready of create_validation_error list
+
+type create_validation_decision =
+  | Preview of create_validation_status
+  | Proceed
+  | Reject of create_validation_error list
+
+val validate_resolved_keeper_create_json :
+  Yojson.Safe.t -> (unit, create_validation_error list) result
+
+val decide_resolved_keeper_create :
+  dry_run:bool -> Yojson.Safe.t -> create_validation_decision
+
+val create_validation_errors_to_json :
+  create_validation_error list -> Yojson.Safe.t
 
 val render_keeper_toml_from_resolved_args :
   Yojson.Safe.t -> (string, string) result

@@ -92,7 +92,9 @@ end
     Primary path: LLM calls [report_verdict] tool with typed verdict.
     Fallback path: if LLM responds with text, parse provider-native JSON only.
 
-    The structured path is deterministic (JSON schema constrains output).
+    The structured path constrains the output shape with JSON Schema; sampling
+    remains an exact runtime/model declaration rather than an implicit judge
+    profile.
     The fallback path is strict JSON and returns Error on failure instead of
     extracting a verdict from prose. *)
 let verify (req : Core.verification_request) : (Core.verdict, string) result =
@@ -123,7 +125,6 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
       ~goal:prompt
       ~masc_tools:[ Core.report_verdict_schema ]
       ~dispatch
-      ~temperature:Runtime_provider_defaults.deterministic_temperature
       ~approval:Approval_callbacks.auto_approve
       ~provider_config_transform:apply_report_verdict_output_schema
       ()

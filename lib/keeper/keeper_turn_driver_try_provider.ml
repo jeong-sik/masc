@@ -33,7 +33,7 @@ type try_provider_ctx =
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
-  ; temperature : float
+  ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -222,16 +222,25 @@ let run_try_provider
     | None -> Ok ()
   in
   let config_result =
+    let base_config =
+      Runtime_candidate.default_config
+        ~name:ctx.name
+        ~system_prompt:ctx.system_prompt
+        ~tools:ctx.tools
+        candidate
+    in
+    (* Runtime/model configuration is authoritative; the run-level value only
+       fills an omitted provider temperature. *)
+    let temperature =
+      match base_config.temperature with
+      | Some _ as configured -> configured
+      | None -> ctx.temperature
+    in
     Ok
-      { (Runtime_candidate.default_config
-           ~name:ctx.name
-           ~system_prompt:ctx.system_prompt
-           ~tools:ctx.tools
-           candidate)
-            with
-            stream_idle_timeout_s = ctx.stream_idle_timeout_s
+      { base_config with
+        stream_idle_timeout_s = ctx.stream_idle_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
-          ; temperature = ctx.temperature
+          ; temperature
           ; max_turns = ctx.max_turns
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = Some Agent_sdk.Guardrails.permissive

@@ -1,16 +1,6 @@
-(** Runtime-boundary projection for provider inference defaults. *)
-
-let agent_default_temperature =
-  Llm_provider.Constants.Inference_profile.agent_default.temperature
-;;
-
-let worker_default_temperature =
-  Llm_provider.Constants.Inference_profile.worker_default.temperature
-;;
-
-let deterministic_temperature =
-  Llm_provider.Constants.Inference_profile.deterministic.temperature
-;;
+(** Runtime-boundary projection for provider constants that remain owned by
+    OAS. Sampling defaults are intentionally absent: an omitted temperature is
+    carried as [None] so the selected provider applies its declared default. *)
 
 let max_error_body_length =
   Llm_provider.Constants.Truncation.max_error_body_length

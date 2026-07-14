@@ -2,8 +2,7 @@
    in runtime.toml ([models.<id>.temperature], read via
    [Runtime.temperature_of_runtime_id]); when set, that value is the request
    temperature at every inference boundary for the model. Otherwise the caller's
-   subsystem fallback stands (keeper turn, deterministic compaction, or HITL
-   summary policy).
+   explicitly configured subsystem value stands.
 
    Completes the previously stubbed per-runtime [resolve_temperature] (the
    [~runtime_id:_] passthrough). Required for

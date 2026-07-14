@@ -69,21 +69,15 @@ let with_facts_lock ?clock ~keeper_id f =
     f
 ;;
 
-let provider_for_consolidation ~runtime_id (provider_cfg : Llm_provider.Provider_config.t) =
+let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
     | Some n when n > 0 -> Some n
     | Some _ | None -> Some consolidation_max_tokens
   in
-  let temperature =
-    Runtime_inference.resolve_temperature
-      ~runtime_id
-      ~fallback:(fun () -> Runtime_provider_defaults.deterministic_temperature)
-  in
   let tuned_cfg =
     { provider_cfg with
       Llm_provider.Provider_config.max_tokens
-    ; temperature = Some temperature
     ; tool_choice = None
     ; disable_parallel_tool_use = true
     }
@@ -168,7 +162,7 @@ let consolidate_keeper
       match messages_for_consolidation facts with
       | Error msg -> Unparseable msg
       | Ok messages ->
-        let config = provider_for_consolidation ~runtime_id provider_cfg in
+        let config = provider_for_consolidation provider_cfg in
         (match validate_provider_for_consolidation config with
          | Error msg -> Transport_failed ("consolidation provider config rejected: " ^ msg)
          | Ok () ->

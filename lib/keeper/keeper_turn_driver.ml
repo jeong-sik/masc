@@ -283,32 +283,22 @@ let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
        to_runtime_id, rerouted)
 
 type attempt_inference_policy =
-  { attempt_temperature : float
-  ; attempt_enable_thinking : bool option
+  { attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
   }
 
 let attempt_inference_policy
     ~runtime_id
-    ~fallback_temperature
     ~fallback_enable_thinking
     ()
   =
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
-  let attempt_temperature =
-    Runtime_inference.resolve_temperature
-      ~runtime_id
-      ~fallback:(fun () -> fallback_temperature)
-  in
   let attempt_enable_thinking =
     match runtime_seed.thinking_enabled with
     | Some _ as enabled -> enabled
     | None -> fallback_enable_thinking
   in
-  { attempt_temperature
-  ; attempt_enable_thinking
-  ; attempt_preserve_thinking = runtime_seed.preserve_thinking
-  }
+  { attempt_enable_thinking; attempt_preserve_thinking = runtime_seed.preserve_thinking }
 
 let run_named
     ~runtime_id
@@ -324,7 +314,7 @@ let run_named
     ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s
-    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?temperature
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
     ?context_reducer
@@ -607,7 +597,6 @@ let run_named
       let inference_policy =
         attempt_inference_policy
           ~runtime_id:attempt_runtime_id
-          ~fallback_temperature:temperature
           ~fallback_enable_thinking:enable_thinking
           ()
       in
@@ -655,7 +644,7 @@ let run_named
             ; max_idle_turns
             ; stream_idle_timeout_s
             ; body_timeout_s
-            ; temperature = inference_policy.attempt_temperature
+            ; temperature
             ; accept
             ; hooks
             ; context_reducer

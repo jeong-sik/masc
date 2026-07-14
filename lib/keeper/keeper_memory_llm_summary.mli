@@ -15,11 +15,10 @@ val is_direct_completion_provider :
   Llm_provider.Provider_config.t -> bool
 
 val provider_for_summary :
-  runtime_id:string ->
   Llm_provider.Provider_config.t ->
   Llm_provider.Provider_config.t
-(** Tune the summary request while preserving a temperature declared by the
-    selected runtime model; otherwise use the deterministic subsystem fallback. *)
+(** Tune the summary request while preserving the selected provider config's
+    exact temperature, including omission. *)
 
 val summary_schema_supported : Llm_provider.Provider_config.t -> bool
 

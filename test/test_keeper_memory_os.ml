@@ -831,18 +831,13 @@ let test_memory_provider_configs_use_runtime_temperature () =
     | None -> Alcotest.fail "default memory runtime should resolve"
     | Some runtime ->
       let summary =
-        Memory_summary.provider_for_summary
-          ~runtime_id:runtime.Runtime.id
-          runtime.Runtime.provider_config
+        Memory_summary.provider_for_summary runtime.Runtime.provider_config
       in
       let librarian =
-        Librarian_runtime.provider_for_librarian
-          ~runtime_id:runtime.Runtime.id
-          runtime.Runtime.provider_config
+        Librarian_runtime.provider_for_librarian runtime.Runtime.provider_config
       in
       let consolidation =
         Consolidation_runtime.For_testing.provider_for_consolidation
-          ~runtime_id:runtime.Runtime.id
           runtime.Runtime.provider_config
       in
       Alcotest.(check (option (float 0.0001)))
@@ -1168,7 +1163,6 @@ let test_librarian_max_tokens_override_env () =
      no-op while the config snapshot reported source=env. *)
   let effective_cap () =
     (Librarian_runtime.provider_for_librarian
-       ~runtime_id:unconfigured_runtime_id
        (test_provider_cfg ()))
       .Llm_provider.Provider_config.max_tokens
   in
@@ -1365,9 +1359,7 @@ let test_librarian_rejects_invalid_claims () =
 
 let test_memory_llm_summary_provider_requests_json_schema () =
   let provider_cfg =
-    Memory_summary.provider_for_summary
-      ~runtime_id:unconfigured_runtime_id
-      (test_provider_cfg ())
+    Memory_summary.provider_for_summary (test_provider_cfg ())
   in
   let expected_schema = Structured_schema.memory_bank_summary_output_schema in
   Alcotest.(check (option int))

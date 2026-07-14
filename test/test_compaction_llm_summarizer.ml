@@ -64,12 +64,26 @@ let with_temperature_runtime f =
 let test_provider_for_plan_preserves_runtime_temperature () =
   with_temperature_runtime (fun provider_cfg ->
     let cfg =
-      C.For_testing.provider_for_plan ~runtime_id:temperature_runtime_id provider_cfg
+      C.For_testing.provider_for_plan provider_cfg
     in
     Alcotest.(check (option (float 0.0001)))
-      "runtime.toml temperature overrides deterministic compaction fallback"
+      "runtime.toml temperature is preserved"
       (Some 1.0)
       cfg.temperature)
+
+let test_provider_for_plan_preserves_temperature_omission () =
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"test-model"
+      ~base_url:"http://example.invalid"
+      ()
+  in
+  let cfg = C.For_testing.provider_for_plan provider_cfg in
+  Alcotest.(check (option (float 0.0001)))
+    "temperature remains omitted"
+    None
+    cfg.temperature
 
 (* -- plan_of_json: valid partition accepted -- *)
 
@@ -208,6 +222,8 @@ let () =
     [ ( "provider"
       , [ Alcotest.test_case "runtime temperature is authoritative" `Quick
             test_provider_for_plan_preserves_runtime_temperature
+        ; Alcotest.test_case "temperature omission is preserved" `Quick
+            test_provider_for_plan_preserves_temperature_omission
         ] )
     ; ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted

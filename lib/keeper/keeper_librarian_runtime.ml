@@ -252,7 +252,7 @@ let select_recent_messages ~max_messages messages =
   drop drop_count messages
 ;;
 
-let provider_for_librarian ~runtime_id (provider_cfg : Llm_provider.Provider_config.t) =
+let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
   let configured_librarian_max_tokens = librarian_max_tokens () in
   let max_tokens =
     match provider_cfg.max_tokens with
@@ -260,15 +260,9 @@ let provider_for_librarian ~runtime_id (provider_cfg : Llm_provider.Provider_con
     | Some _ -> Some configured_librarian_max_tokens
     | None -> Some configured_librarian_max_tokens
   in
-  let temperature =
-    Runtime_inference.resolve_temperature
-      ~runtime_id
-      ~fallback:(fun () -> Runtime_provider_defaults.deterministic_temperature)
-  in
   let tuned_cfg =
     { provider_cfg with
       max_tokens
-    ; temperature = Some temperature
     ; tool_choice = None
     ; disable_parallel_tool_use = true
     ; enable_thinking = Some false
@@ -530,7 +524,7 @@ let extract_with_provider_classified
     (match messages_for_librarian inp with
      | Error msg -> Error (Prompt_render_failed msg)
      | Ok messages ->
-       let provider_cfg = provider_for_librarian ~runtime_id provider_cfg in
+       let provider_cfg = provider_for_librarian provider_cfg in
        (match
           Llm_provider.Provider_config.validate_output_schema_request provider_cfg
         with

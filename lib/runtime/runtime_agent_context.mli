@@ -73,7 +73,9 @@ type config = {
           validation bound, never a synthesized request value. [Some n] is
           an explicit operator/profile override or a non-keeper caller's
           deliberate request budget. *)
-  temperature : float;
+  temperature : float option;
+      (** Exact caller/model sampling declaration. [None] omits temperature and
+          leaves the selected provider's default intact. *)
   hooks : Agent_sdk.Hooks.hooks option;
   context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;

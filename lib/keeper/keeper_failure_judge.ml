@@ -110,7 +110,6 @@ let run ~base_path ~keeper_name request =
             ~base_path
             ~masc_tools:[]
             ~dispatch:reject_unregistered_tool
-            ~temperature:Runtime_provider_defaults.deterministic_temperature
             ~provider_config_transform:apply_output_schema
             ()
         with

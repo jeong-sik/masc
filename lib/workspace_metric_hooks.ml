@@ -468,7 +468,6 @@ let install () =
              ~masc_tools:[ report_tool_schema ]
              ~dispatch
              
-             ~temperature:Runtime_provider_defaults.deterministic_temperature
              ~approval:Approval_callbacks.auto_approve
              ~provider_config_transform:apply_review_verdict_output_schema
              ?sw

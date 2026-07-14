@@ -50,7 +50,6 @@ let invoke
     ~goal:user_prompt
     ~system_prompt
     ~max_idle_turns:0
-    ~temperature:Runtime_provider_defaults.deterministic_temperature
     ~accept:(fun response ->
       not (String.equal (String.trim (Agent_sdk.Types.text_of_response response)) ""))
     ~provider_config_transform

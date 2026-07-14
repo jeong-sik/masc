@@ -23,7 +23,7 @@ let config_for_label
     ~(system_prompt : string)
     ~(tools : Agent_sdk.Tool.t list)
     ~(max_tokens : int option)
-    ~(temperature : float)
+    ~(temperature : float option)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?hooks
@@ -43,11 +43,18 @@ let config_for_label
     | None -> Ok provider
     | Some transform -> transform provider
   in
+  let base_config =
+    Runtime_agent.default_config ~name ~provider_cfg:provider ~system_prompt ~tools
+  in
+  (* The resolved model declaration is authoritative; a caller value only fills
+     an omitted provider temperature. *)
+  let temperature =
+    match base_config.temperature with
+    | Some _ as configured -> configured
+    | None -> temperature
+  in
   Ok
-    {
-      (Runtime_agent.default_config ~name ~provider_cfg:provider
-         ~system_prompt ~tools)
-      with
+    { base_config with
       max_tokens;
       temperature;
       max_idle_turns;
@@ -74,7 +81,7 @@ let run_model_by_label
     ?(tools = [])
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
-    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?temperature
     ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
@@ -162,7 +169,7 @@ let run_named_with_masc_tools
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
-    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?temperature
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
     ?raw_trace
@@ -189,7 +196,7 @@ let run_named_with_masc_tools
   Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ~system_prompt ~tools:oas_tools
     ?max_turns
     ~max_idle_turns
-    ~temperature
+    ?temperature
     ?stream_idle_timeout_s ?hooks
     ~accept
     ?compact_ratio
@@ -204,7 +211,7 @@ let run_model_with_masc_tools
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
-    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?temperature
     ?max_tokens
     ?hooks
     ?enable_thinking

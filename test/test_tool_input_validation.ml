@@ -684,7 +684,10 @@ let check_param_type name expected params =
 
 let test_tool_execute_schema_exposes_typed_boundary () =
   let params = Tool_bridge.params_of_json_schema tool_execute_schema in
-  check_param_type "executable" "string" params;
+  Alcotest.(check bool)
+    "retired executable field is not exposed"
+    true
+    (Option.is_none (param_by_name "executable" params));
   check_param_type "argv" "array" params;
   check_param_type "pipeline" "array" params;
   check_param_type "env" "object" params;
@@ -744,7 +747,7 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
     Alcotest.(check bool)
       "validation error points to typed argv"
       true
-      (string_contains msg "executable=\\\"git\\\" argv=[\\\"status\\\",\\\"--short\\\"]")
+      (string_contains msg "argv=[\\\"git\\\",\\\"status\\\",\\\"--short\\\"]")
 
 let test_validate_args_tool_execute_rejects_command_string () =
   let args = `Assoc [ "command", `String "pwd" ] in
@@ -770,7 +773,7 @@ let test_validate_args_tool_execute_rejects_command_string () =
 let test_validate_args_tool_execute_rejects_background_flag () =
   let args =
     `Assoc
-      [ "executable", `String "pwd"; legacy_background_flag_name, `Bool true ]
+      [ "argv", `List [ `String "pwd" ]; legacy_background_flag_name, `Bool true ]
   in
   match
     Tool_input_validation.validate_args
@@ -797,7 +800,7 @@ let test_validate_args_tool_execute_rejects_async_lifecycle_fields () =
   in
   List.iter
     (fun (field, value) ->
-      let args = `Assoc [ "executable", `String "pwd"; field, value ] in
+      let args = `Assoc [ "argv", `List [ `String "pwd" ]; field, value ] in
       match
         Tool_input_validation.validate_args
           ~schema:tool_execute_schema
@@ -820,8 +823,7 @@ let test_validate_args_tool_execute_rejects_async_lifecycle_fields () =
 let test_validate_args_tool_execute_accepts_typed_exec () =
   let args =
     `Assoc
-      [ "executable", `String "rg"
-      ; "argv", `List [ `String "--files"; `String "lib" ]
+      [ "argv", `List [ `String "rg"; `String "--files"; `String "lib" ]
       ; "cwd", `String "/tmp"
       ; "env", `Assoc [ "NO_COLOR", `String "1" ]
       ]
@@ -840,18 +842,10 @@ let test_validate_args_tool_execute_accepts_typed_exec () =
       "expected typed tool_execute exec to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-let test_validate_args_tool_execute_decodes_json_string_argv () =
-  let expected =
-    `Assoc
-      [ "executable", `String "git"
-      ; "argv", `List [ `String "status"; `String "--short" ]
-      ; "cwd", `String "/tmp"
-      ]
-  in
+let test_validate_args_tool_execute_rejects_json_string_argv () =
   let args =
     `Assoc
-      [ "executable", `String "git"
-      ; "argv", `String "[\"status\",\"--short\"]"
+      [ "argv", `String "[\"git\",\"status\",\"--short\"]"
       ; "cwd", `String "/tmp"
       ]
   in
@@ -862,15 +856,16 @@ let test_validate_args_tool_execute_decodes_json_string_argv () =
       ~args
       ()
   with
-  | Ok forwarded ->
-    Alcotest.(check bool)
-      "json-string argv decoded to typed array"
-      true
-      (Yojson.Safe.equal expected forwarded)
   | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "json-string argv remains a schema violation"
+      true
+      (string_contains msg "expected: array")
+  | Ok forwarded ->
     Alcotest.failf
-      "expected json-string argv to be decoded, got %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+      "expected json-string argv to be rejected, got %s"
+      (Yojson.Safe.to_string forwarded)
 
 let test_validate_args_tool_execute_accepts_typed_pipeline () =
   let args =
@@ -878,13 +873,9 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       [ ( "pipeline"
         , `List
             [ `Assoc
-                [ "executable", `String "rg"
-                ; "argv", `List [ `String "--files"; `String "lib" ]
-                ]
+                [ "argv", `List [ `String "rg"; `String "--files"; `String "lib" ] ]
             ; `Assoc
-                [ "executable", `String "head"
-                ; "argv", `List [ `String "-20" ]
-                ]
+                [ "argv", `List [ `String "head"; `String "-20" ] ]
             ] )
       ; "cwd", `String "/tmp"
       ]
@@ -903,13 +894,7 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       "expected typed tool_execute pipeline to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-let test_validate_args_masc_transition_decodes_json_string_handoff_context () =
-  let expected_handoff =
-    `Assoc
-      [ "summary", `String "task-1823 edits applied"
-      ; "evidence_refs", `List [ `String "board:task-1823" ]
-      ]
-  in
+let test_validate_args_masc_transition_rejects_json_string_handoff_context () =
   let args =
     `Assoc
       [ "agent_name", `String "codex-local-admin"
@@ -928,22 +913,21 @@ let test_validate_args_masc_transition_decodes_json_string_handoff_context () =
       ~args
       ()
   with
-  | Ok forwarded ->
-    Alcotest.(check bool)
-      "json-string handoff_context decoded to typed object"
-      true
-      (Yojson.Safe.equal expected_handoff
-         (Yojson.Safe.Util.member "handoff_context" forwarded))
   | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "json-string handoff remains a schema violation"
+      true
+      (string_contains msg "expected: object")
+  | Ok forwarded ->
     Alcotest.failf
-      "expected json-string handoff_context to be decoded, got %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+      "expected json-string handoff_context to be rejected, got %s"
+      (Yojson.Safe.to_string forwarded)
 
-let test_validate_args_execute_unwraps_args_object_envelope () =
+let test_validate_args_execute_rejects_args_object_envelope () =
   let inner =
     `Assoc
-      [ "executable", `String "git"
-      ; "argv", `List [ `String "status"; `String "--short" ]
+      [ "argv", `List [ `String "git"; `String "status"; `String "--short" ]
       ; "cwd", `String "/tmp"
       ]
   in
@@ -955,18 +939,19 @@ let test_validate_args_execute_unwraps_args_object_envelope () =
       ~args
       ()
   with
-  | Ok forwarded ->
-    Alcotest.(check bool)
-      "args object envelope unwrapped"
-      true
-      (Yojson.Safe.equal inner forwarded)
   | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "args object envelope is unsupported"
+      true
+      (string_contains msg "unsupported field(s): args")
+  | Ok forwarded ->
     Alcotest.failf
-      "expected Execute args object envelope to pass validation, got %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+      "expected Execute args object envelope to be rejected, got %s"
+      (Yojson.Safe.to_string forwarded)
 
-let test_validate_args_tool_execute_unwraps_args_object_envelope () =
-  let inner = `Assoc [ "executable", `String "pwd" ] in
+let test_validate_args_tool_execute_rejects_args_object_envelope () =
+  let inner = `Assoc [ "argv", `List [ `String "pwd" ] ] in
   let args = `Assoc [ "args", inner ] in
   match
     Tool_input_validation.validate_args
@@ -975,23 +960,24 @@ let test_validate_args_tool_execute_unwraps_args_object_envelope () =
       ~args
       ()
   with
-  | Ok forwarded ->
-    Alcotest.(check bool)
-      "internal tool_execute args object envelope unwrapped"
-      true
-      (Yojson.Safe.equal inner forwarded)
   | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "internal args object envelope is unsupported"
+      true
+      (string_contains msg "unsupported field(s): args")
+  | Ok forwarded ->
     Alcotest.failf
-      "expected tool_execute args object envelope to pass validation, got %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+      "expected tool_execute args object envelope to be rejected, got %s"
+      (Yojson.Safe.to_string forwarded)
 
-let test_validate_args_execute_unwraps_pipeline_envelope () =
+let test_validate_args_execute_rejects_pipeline_envelope () =
   let inner =
     `Assoc
       [ ( "pipeline"
         , `List
-            [ `Assoc [ "executable", `String "printf"; "argv", `List [ `String "x" ] ]
-            ; `Assoc [ "executable", `String "cat" ]
+            [ `Assoc [ "argv", `List [ `String "printf"; `String "x" ] ]
+            ; `Assoc [ "argv", `List [ `String "cat" ] ]
             ] )
       ]
   in
@@ -1003,15 +989,16 @@ let test_validate_args_execute_unwraps_pipeline_envelope () =
       ~args
       ()
   with
-  | Ok forwarded ->
-    Alcotest.(check bool)
-      "pipeline args object envelope unwrapped"
-      true
-      (Yojson.Safe.equal inner forwarded)
   | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "pipeline args envelope is unsupported"
+      true
+      (string_contains msg "unsupported field(s): args")
+  | Ok forwarded ->
     Alcotest.failf
-      "expected Execute pipeline args object envelope to pass validation, got %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+      "expected Execute pipeline args envelope to be rejected, got %s"
+      (Yojson.Safe.to_string forwarded)
 
 let test_validate_args_execute_rejects_args_array_envelope () =
   let args = `Assoc [ "args", `List [ `String "git"; `String "status" ] ] in
@@ -1038,9 +1025,7 @@ let test_validate_args_execute_rejects_mixed_args_envelope () =
     `Assoc
       [ ( "args"
         , `Assoc
-            [ "executable", `String "git"
-            ; "argv", `List [ `String "status" ]
-            ] )
+            [ "argv", `List [ `String "git"; `String "status" ] ] )
       ; "cwd", `String "/tmp"
       ]
   in
@@ -1063,7 +1048,9 @@ let test_validate_args_execute_rejects_mixed_args_envelope () =
       (string_contains msg "unsupported field(s): args")
 
 let test_validate_args_non_execute_rejects_args_object_envelope () =
-  let args = `Assoc [ "args", `Assoc [ "executable", `String "git" ] ] in
+  let args =
+    `Assoc [ "args", `Assoc [ "argv", `List [ `String "git" ] ] ]
+  in
   match
     Tool_input_validation.validate_args
       ~schema:tool_execute_schema
@@ -1078,16 +1065,15 @@ let test_validate_args_non_execute_rejects_args_object_envelope () =
   | Error result ->
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool)
-      "non-Execute name does not get Execute envelope normalization"
+      "non-Execute args envelope remains unsupported"
       true
       (string_contains msg "unsupported field(s): args")
 
-let readonly_exec_input executable argv =
+let readonly_exec_input program arguments =
   match
     Keeper_tool_execute_typed_input.of_json
       (`Assoc
-        [ "executable", `String executable
-        ; "argv", `List (List.map (fun arg -> `String arg) argv)
+        [ "argv", `List (List.map (fun arg -> `String arg) (program :: arguments))
         ; "cwd", `String "/tmp"
         ])
   with
@@ -1102,11 +1088,13 @@ let readonly_pipeline_input stages =
         [ ( "pipeline"
           , `List
               (List.map
-                 (fun (executable, argv) ->
+                 (fun (program, arguments) ->
                     `Assoc
-                      [ "executable", `String executable
-                      ; "argv", `List (List.map (fun arg -> `String arg) argv)
-                      ])
+                      [ ( "argv"
+                        , `List
+                            (List.map
+                               (fun arg -> `String arg)
+                               (program :: arguments)) ) ])
                  stages) )
         ; "cwd", `String "/tmp"
         ])
@@ -1123,13 +1111,15 @@ let test_tool_execute_write_validation_stays_structural () =
   | Ok () -> ()
   | Error e ->
     Alcotest.failf
-      "write-capable structural validation should not reject executable: %s"
+      "write-capable structural validation should not reject program: %s"
       (Keeper_tool_execute_input.typed_validation_error_text e)
 
 let tool_execute_exec_stage args =
   match Keeper_tool_execute_typed_input.of_json args with
-  | Ok (Keeper_tool_execute_typed_input.Exec { executable; argv; _ }) ->
-    executable, argv
+  | Ok (Keeper_tool_execute_typed_input.Exec { argv = program :: arguments; _ }) ->
+    program, arguments
+  | Ok (Keeper_tool_execute_typed_input.Exec { argv = []; _ }) ->
+    Alcotest.fail "expected non-empty argv"
   | Ok (Keeper_tool_execute_typed_input.Pipeline _) ->
     Alcotest.fail "expected exec input"
   | Error msg ->
@@ -1141,9 +1131,14 @@ let test_tool_execute_find_expression_not_rewritten () =
   let argv =
     tool_execute_exec_argv
       (`Assoc
-        [ "executable", `String "find"
-        ; "argv", `List [ `String "-type"; `String "f"; `String "-name"; `String "*.ml" ]
-        ])
+        [ ( "argv"
+          , `List
+              [ `String "find"
+              ; `String "-type"
+              ; `String "f"
+              ; `String "-name"
+              ; `String "*.ml"
+              ] ) ])
   in
   Alcotest.(check (list string))
     "find expression remains caller-authored"
@@ -1154,8 +1149,8 @@ let test_tool_execute_find_global_option_not_rewritten () =
   let argv =
     tool_execute_exec_argv
       (`Assoc
-        [ "executable", `String "find"
-        ; "argv", `List [ `String "-E"; `String "-type"; `String "f" ]
+        [ "argv"
+        , `List [ `String "find"; `String "-E"; `String "-type"; `String "f" ]
         ])
   in
   Alcotest.(check (list string))
@@ -1163,15 +1158,15 @@ let test_tool_execute_find_global_option_not_rewritten () =
     [ "-E"; "-type"; "f" ]
     argv
 
-let test_tool_execute_empty_executable_not_promoted () =
-  let executable, argv =
+let test_tool_execute_empty_program_not_promoted () =
+  let program, argv =
     tool_execute_exec_stage
       (`Assoc
-        [ "executable", `String ""
-        ; "argv", `List [ `String "find"; `String "-type"; `String "f" ]
+        [ "argv"
+        , `List [ `String ""; `String "find"; `String "-type"; `String "f" ]
         ])
   in
-  Alcotest.(check string) "empty executable preserved" "" executable;
+  Alcotest.(check string) "empty program preserved" "" program;
   Alcotest.(check (list string))
     "argv0 command is not promoted"
     [ "find"; "-type"; "f" ]
@@ -1184,10 +1179,8 @@ let test_tool_execute_pipeline_find_expression_not_rewritten () =
         [ ( "pipeline"
           , `List
               [ `Assoc
-                  [ "executable", `String "find"
-                  ; "argv", `List [ `String "-type"; `String "f" ]
-                  ]
-              ; `Assoc [ "executable", `String "head"; "argv", `List [ `String "-5" ] ]
+                  [ "argv", `List [ `String "find"; `String "-type"; `String "f" ] ]
+              ; `Assoc [ "argv", `List [ `String "head"; `String "-5" ] ]
               ] )
         ])
   with
@@ -1196,7 +1189,7 @@ let test_tool_execute_pipeline_find_expression_not_rewritten () =
         { stages = { Keeper_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
     Alcotest.(check (list string))
       "pipeline find stage remains caller-authored"
-      [ "-type"; "f" ]
+      [ "find"; "-type"; "f" ]
       argv
   | Ok (Keeper_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
     Alcotest.fail "expected non-empty pipeline"
@@ -1206,7 +1199,7 @@ let test_tool_execute_pipeline_find_expression_not_rewritten () =
 
 let test_validate_args_tool_execute_rejects_bad_argv_type () =
   let args =
-    `Assoc [ "executable", `String "rg"; "argv", `String "--files lib" ]
+    `Assoc [ "argv", `String "rg --files lib" ]
   in
   match
     Tool_input_validation.validate_args
@@ -1599,7 +1592,7 @@ let test_typed_tool_contract_rejection_corpus () =
       , "tool_execute"
       , tool_execute_schema
       , `Assoc [ "cmd", `String "git status --short" ]
-      , [ "cmd"; "executable/argv" ] )
+      , [ "cmd"; "non-empty argv" ] )
     ; ( "keeper_task_done notes-only drift"
       , "keeper_task_done"
       , keeper_task_done_schema
@@ -1674,29 +1667,21 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
     claim_guidance
     "`keeper_task_claim { \"task_id\": \"task-123\" }`";
   assert_contains
-    "Execute core behavior forbids duplicate argv0"
+    "Execute core behavior defines argv0 as program"
     core_behavior
-    "never put the executable name in `argv[0]`";
+    "`argv[0]` is the program";
   assert_contains
-    "Execute core behavior gives corrected git argv"
+    "Execute core behavior gives complete git process vector"
     core_behavior
-    "`argv=[\"status\", \"--short\"]`";
-  assert_contains
-    "Execute core behavior gives bad git argv contrast"
+    "`argv=[\"git\", \"status\", \"--short\"]`";
+  assert_not_contains
+    "Execute core behavior does not advertise retired executable field"
     core_behavior
-    "not `argv=[\"git\", \"status\", \"--short\"]`";
+    "`executable`";
   assert_contains
-    "keeper_task_done hint names task_id"
+    "keeper_task_done hint names canonical fields"
     capabilities
-    "keeper_task_done task_id=...";
-  assert_contains
-    "keeper_task_done hint names result"
-    capabilities
-    "result=...";
-  assert_contains
-    "keeper_task_done hint names evidence"
-    capabilities
-    "evidence_refs=[...]";
+    "keeper_task_done with task_id, result, and evidence_refs";
   assert_not_contains
     "keeper_task_done hint does not regress to notes-only"
     capabilities
@@ -1786,11 +1771,11 @@ let test_board_prompt_does_not_require_optional_hearth () =
 (** Shape-validation boundary: [not: {required: ["pipeline"]}] must treat the
     [pipeline] key as present even when its value is an empty array. Otherwise
     validation forwards a payload that the typed Execute parser rejects as an
-    [executable] + [pipeline] mutually-exclusive pair. *)
+    [argv] + [pipeline] mutually-exclusive pair. *)
 let test_validate_args_tool_execute_exec_with_empty_pipeline () =
   let args =
     `Assoc
-      [ "executable", `String "pwd"
+      [ "argv", `List [ `String "pwd" ]
       ; "pipeline", `List []
       ]
   in
@@ -1807,7 +1792,7 @@ let test_validate_args_tool_execute_exec_with_empty_pipeline () =
       (string_contains msg "exactly one of")
   | Ok forwarded ->
     Alcotest.failf
-      "expected tool_execute with executable + empty pipeline to fail, got %s"
+      "expected tool_execute with argv + empty pipeline to fail, got %s"
       (Yojson.Safe.to_string forwarded)
 
 (** stages is not a tool_execute input field. Sending stages in args triggers
@@ -1816,7 +1801,7 @@ let test_validate_args_tool_execute_exec_with_empty_pipeline () =
 let test_validate_args_tool_execute_stages_rejected_by_schema () =
   let args =
     `Assoc
-      [ "executable", `String "ls"
+      [ "argv", `List [ `String "ls" ]
       ; "stages", `Null
       ]
   in
@@ -1833,12 +1818,12 @@ let test_validate_args_tool_execute_stages_rejected_by_schema () =
   | Ok _ ->
     Alcotest.fail "expected rejection: stages is no longer a schema-advertised field"
 
-let test_validate_args_tool_execute_pipeline_rejects_null_exec () =
+let test_validate_args_tool_execute_pipeline_rejects_null_argv () =
   let args =
     `Assoc
-      [ "executable", `Null
+      [ "argv", `Null
       ; "pipeline", `List
-          [ `Assoc [ "executable", `String "echo"; "argv", `List [] ] ]
+          [ `Assoc [ "argv", `List [ `String "echo" ] ] ]
       ]
   in
   match
@@ -1854,7 +1839,7 @@ let test_validate_args_tool_execute_pipeline_rejects_null_exec () =
       (string_contains msg "exactly one of")
   | Ok forwarded ->
     Alcotest.failf
-      "expected tool_execute pipeline with null exec to fail, got %s"
+      "expected tool_execute pipeline with null argv to fail, got %s"
       (Yojson.Safe.to_string forwarded)
 
 (* ================================================================ *)
@@ -2168,18 +2153,18 @@ let () =
         test_validate_args_tool_execute_rejects_async_lifecycle_fields;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick
         test_validate_args_tool_execute_accepts_typed_exec;
-      Alcotest.test_case "tool_execute decodes json-string argv" `Quick
-        test_validate_args_tool_execute_decodes_json_string_argv;
+      Alcotest.test_case "tool_execute rejects json-string argv" `Quick
+        test_validate_args_tool_execute_rejects_json_string_argv;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
-      Alcotest.test_case "masc_transition decodes json-string handoff" `Quick
-        test_validate_args_masc_transition_decodes_json_string_handoff_context;
-      Alcotest.test_case "Execute unwraps args object envelope" `Quick
-        test_validate_args_execute_unwraps_args_object_envelope;
-      Alcotest.test_case "tool_execute unwraps args object envelope" `Quick
-        test_validate_args_tool_execute_unwraps_args_object_envelope;
-      Alcotest.test_case "Execute unwraps pipeline args envelope" `Quick
-        test_validate_args_execute_unwraps_pipeline_envelope;
+      Alcotest.test_case "masc_transition rejects json-string handoff" `Quick
+        test_validate_args_masc_transition_rejects_json_string_handoff_context;
+      Alcotest.test_case "Execute rejects args object envelope" `Quick
+        test_validate_args_execute_rejects_args_object_envelope;
+      Alcotest.test_case "tool_execute rejects args object envelope" `Quick
+        test_validate_args_tool_execute_rejects_args_object_envelope;
+      Alcotest.test_case "Execute rejects pipeline args envelope" `Quick
+        test_validate_args_execute_rejects_pipeline_envelope;
       Alcotest.test_case "Execute rejects args array envelope" `Quick
         test_validate_args_execute_rejects_args_array_envelope;
       Alcotest.test_case "Execute rejects mixed args envelope" `Quick
@@ -2192,8 +2177,8 @@ let () =
         test_tool_execute_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute find global option not rewritten" `Quick
         test_tool_execute_find_global_option_not_rewritten;
-      Alcotest.test_case "tool_execute empty executable not promoted" `Quick
-        test_tool_execute_empty_executable_not_promoted;
+      Alcotest.test_case "tool_execute empty program not promoted" `Quick
+        test_tool_execute_empty_program_not_promoted;
       Alcotest.test_case "tool_execute pipeline find not rewritten" `Quick
         test_tool_execute_pipeline_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute rejects bad typed argv" `Quick
@@ -2202,8 +2187,8 @@ let () =
         test_validate_args_tool_execute_exec_with_empty_pipeline;
       Alcotest.test_case "tool_execute stages rejected by schema" `Quick
         test_validate_args_tool_execute_stages_rejected_by_schema;
-      Alcotest.test_case "tool_execute pipeline + null exec" `Quick
-        test_validate_args_tool_execute_pipeline_rejects_null_exec;
+      Alcotest.test_case "tool_execute pipeline + null argv" `Quick
+        test_validate_args_tool_execute_pipeline_rejects_null_argv;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick

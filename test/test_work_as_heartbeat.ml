@@ -54,24 +54,6 @@ let test_keepalive_sleep_chunk_default () =
   check (float 0.01) "default sleep chunk 2.0s" 2.0
     Cfg.KeeperKeepalive.sleep_chunk_sec
 
-(* ── OAS call timeout tests ───────────────────────────── *)
-
-(* RFC-0156: OAS total timeout removed. [oas_call_timeout_sec] is now the
-   legacy override when present, otherwise [turn_timeout_sec]. No token/turn-budget
-   dependence — the historic [oas_timeout_for_estimated_input_tokens(_with_turn_budget)]
-   names lied. *)
-
-let test_oas_call_timeout_no_override_equals_turn_timeout () =
-  (* No env override in test → resolved value equals turn_timeout_sec. *)
-  check (float 1.0)
-    "no override -> turn_timeout_sec"
-    Cfg.KeeperKeepalive.turn_timeout_sec
-    Cfg.KeeperKeepalive.oas_call_timeout_sec
-
-let test_turn_timeout_default () =
-  check (float 0.1) "default turn timeout 600s" 600.0
-    Cfg.KeeperKeepalive.turn_timeout_sec
-
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 
 let test_grpc_backoff_default () =
@@ -211,11 +193,6 @@ let () =
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;
-    ];
-    "oas_call_timeout", [
-      test_case "no override equals turn_timeout_sec (RFC-0156)" `Quick
-        test_oas_call_timeout_no_override_equals_turn_timeout;
-      test_case "turn timeout default is 600" `Quick test_turn_timeout_default;
     ];
     "grpc_config", [
       test_case "backoff default" `Quick test_grpc_backoff_default;

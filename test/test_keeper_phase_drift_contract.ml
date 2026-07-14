@@ -73,9 +73,7 @@ let oas_terminal_is_subset_of_all () =
 (* masc bridge maps oas stop reasons to keeper transitions.
    This test ensures the mapping surface is documented and complete. *)
 let oas_stop_reason_strings =
-  [ "completed"
-  ; "turn_budget_exhausted"
-  ]
+  [ "completed" ]
 
 let () =
   Alcotest.run "keeper_phase_drift_contract"
@@ -95,7 +93,7 @@ let () =
         ; Alcotest.test_case "oas terminal phases are subset of all phases" `Quick
             (fun () -> Alcotest.(check bool) "subset" true (oas_terminal_is_subset_of_all ()))
         ; Alcotest.test_case "oas stop reason strings documented" `Quick (fun () ->
-            Alcotest.(check bool) "2 stop reasons" true
-              (List.length oas_stop_reason_strings = 2))
+            Alcotest.(check bool) "one lifecycle stop reason" true
+              (List.length oas_stop_reason_strings = 1))
         ] )
     ]

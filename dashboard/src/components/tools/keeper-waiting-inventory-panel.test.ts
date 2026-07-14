@@ -15,7 +15,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
     keeper_count_known: true,
     keeper_count: 4,
     waiting_keeper_count: 3,
-    row_count: 5,
+    row_count: 6,
     global_row_count: 1,
     global_pending_confirm_count_known: true,
     global_pending_confirm_count: 1,
@@ -23,6 +23,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       event_queue_pending: 1,
       event_queue_inflight: 1,
       chat_queue_inflight: 1,
+      chat_queue_recovery_required: 1,
       schedule_waiting: 1,
       turn_admission_waiting: 1,
       turn_admission_shutdown: 1,
@@ -31,11 +32,12 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       {
         keeper_name: 'sangsu',
         state: 'waiting',
-        waiting_count: 3,
+        waiting_count: 4,
         sources: {
           event_queue_pending: 1,
           event_queue_inflight: 1,
           chat_queue_inflight: 1,
+          chat_queue_recovery_required: 1,
         },
         waiting_on: [
           {
@@ -68,6 +70,24 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
                 state: 'inflight',
                 lease_id: 'lease_00000000-0000-4000-8000-000000000002',
                 started_at_iso: '2026-07-04T00:02:30Z',
+              },
+            },
+          },
+          {
+            keeper_name: 'sangsu',
+            source: 'chat_queue_recovery_required',
+            waiting_on: 'dashboard',
+            wake_producer: 'keeper_chat_queue_store',
+            since_iso: '2026-07-04T00:03:00Z',
+            next_action: 'resolve_keeper_chat_queue_recovery',
+            detail: {
+              queue_index: 0,
+              receipt_id: 'chatq_00000000-0000-4000-8000-000000000003',
+              lifecycle: {
+                state: 'recovery_required',
+                lease_id: 'lease_00000000-0000-4000-8000-000000000004',
+                started_at_iso: '2026-07-04T00:02:45Z',
+                dispatchable: false,
               },
             },
           },
@@ -169,6 +189,10 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000001')
     expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000002')
     expect(container.textContent).toContain('state inflight')
+    expect(container.textContent).toContain('chat queue recovery required')
+    expect(container.textContent).toContain('resolve keeper chat queue recovery')
+    expect(container.textContent).toContain('state recovery required')
+    expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000004')
     expect(container.textContent).toContain('Global waiting')
     expect(container.textContent).toContain('masc.board_post')
     expect(container.textContent).not.toContain('idle-one')

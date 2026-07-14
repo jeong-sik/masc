@@ -249,12 +249,10 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_ide_annotate -> Meta_group
 ;;
 
-let discovery_example ~label ?cwd ~executable ~argv () =
+let discovery_example ~label ?cwd ~argv () =
   let input =
     `Assoc
-      ([ "executable", `String executable
-       ; "argv", Json_util.json_string_list argv
-       ]
+      ([ "argv", Json_util.json_string_list argv ]
        @
        match cwd with
        | Some cwd -> [ "cwd", `String cwd ]
@@ -655,11 +653,11 @@ let public_descriptors =
       ~internal_name:"tool_execute"
       ~description:
         "Execute one opaque typed process invocation inside the Keeper sandbox. \
-         Provide executable plus argv, or an explicit typed pipeline; do not \
-         repeat executable as argv[0]. Use typed stdin/stdout/stderr fields for \
+         Provide one non-empty argv process vector, or an explicit typed \
+         pipeline. Use typed stdin/stdout/stderr fields for \
          I/O and typed env for environment variables. MASC validates the input \
          shape, path jail, sandbox target, and external-effect Gate but never \
-         interprets executable or subcommand meaning. The invoked program owns \
+         interprets program or subcommand meaning. The invoked program owns \
          its syntax and exit result."
       ~input_schema:execute_schema
       ~policy:
@@ -675,8 +673,7 @@ let public_descriptors =
         [ discovery_example
             ~label:"Run an opaque typed program"
             ~cwd:"<allowed-directory>"
-            ~executable:"program"
-            ~argv:[ "--version" ]
+            ~argv:[ "program"; "--version" ]
             ()
         ]
       ~validate_translated_input:true
@@ -692,8 +689,8 @@ let public_descriptors =
       ~description:
         "Search file contents with ripgrep: provide a regex `pattern` (and \
          optionally path/glob/type). To list a directory, read a file, or run \
-         git status/log/diff, use the Execute tool (e.g. executable='ls' \
-         argv=['-la','<path>']). Patterns match within a single line; a \
+         git status/log/diff, use the Execute tool (e.g. \
+         argv=['ls','-la','<path>']). Patterns match within a single line; a \
          literal newline in `pattern` is rejected. To match across lines, run \
          `rg -U` through the Execute tool."
       ~input_schema:search_files_schema

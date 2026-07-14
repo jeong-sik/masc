@@ -25,7 +25,6 @@ import {
   KeeperSecretProjectionPanel,
   RuntimeLensSection,
   RuntimeSignals,
-  TurnBudgetSection,
   KeeperNeighborhood,
 } from './keeper-detail-runtime'
 import {
@@ -292,7 +291,6 @@ export function KeeperDetailBody({
           title="설정 / 작업 방식"
           defaultCollapsed=${true}
         >
-          <${TurnBudgetSection} keeper=${keeper} />
           <${CollapsibleSection} title="허용 도구">
             <div class="mt-3">
               <${KeeperNeighborhood} keeper=${keeper} />

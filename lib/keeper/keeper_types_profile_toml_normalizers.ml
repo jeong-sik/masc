@@ -29,18 +29,6 @@ let lower_string_list_opt = function
   | xs -> Some (List.map String.lowercase_ascii xs)
 
 let first_some = Dashboard_utils.first_some
-(* ── Per-provider timeout aliases ──────────────────────────────── *)
-
-let normalize_per_provider_timeout_opt =
-  Keeper_types_profile_per_provider_timeout.normalize_per_provider_timeout_opt
-let per_provider_timeout_of_declared_float_opt =
-  Keeper_types_profile_per_provider_timeout.per_provider_timeout_of_declared_float_opt
-let per_provider_timeout_of_toml =
-  Keeper_types_profile_per_provider_timeout.per_provider_timeout_of_toml
-let per_provider_timeout_of_json_field =
-  Keeper_types_profile_per_provider_timeout.per_provider_timeout_of_json_field
-let normalize_per_provider_timeout_json_field =
-  Keeper_types_profile_per_provider_timeout.normalize_per_provider_timeout_json_field
 
 (* ── Persona path helpers ──────────────────────────────────────── *)
 

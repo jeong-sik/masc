@@ -77,7 +77,6 @@ function runtimeProvidersPayload() {
               supports_inline_tools: true,
               argv_prompt_preflight: false,
               uses_anthropic_caching: false,
-              max_turns_per_attempt: null,
             },
             custom_header_count: 1,
             connect_timeout_s: 120,
@@ -328,10 +327,8 @@ describe('ConfigResolutionPanel', () => {
             uptime_seconds: 42,
           },
           keeper_runtime: {
-            turn_timeout_sec: { value: 90, source: 'toml' },
-            oas_timeout_override_sec: { value: 120, source: 'env' },
-            oas_timeout_per_1k: { value: 7.5, source: 'derived' },
-            oas_timeout_per_turn: { value: 30, source: 'derived' },
+            stream_idle_timeout_sec: { value: null, source: 'default' },
+            body_timeout_override_sec: { value: 120, source: 'env' },
           },
         }}
       />`,
@@ -367,10 +364,13 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('kv likely reused')
     expect(container.textContent).toContain('qwen3.5:35b-a3b-coding-nvfp4')
     expect(container.textContent).toContain('keeper runtime configuration')
-    expect(container.textContent).toContain('Per-keeper runtime behavior and timeout settings. These values are not the live keeper count.')
+    expect(container.textContent).toContain('Explicit keeper runtime settings. Disabled timeouts are not inferred from provider/model kind.')
+    expect(container.textContent).toContain('stream idle timeout (opt-in)')
+    expect(container.textContent).toContain('response body timeout override')
     expect(container.textContent).not.toContain('bootstrap max active keepers')
-    expect(container.textContent).toContain('default')
-    expect(container.textContent).not.toContain('derived')
+    expect(container.textContent).toContain('1 env')
+    expect(container.textContent).toContain('disabled')
+    expect(container.textContent).toContain('unset')
   })
 
   it('surfaces provider catalog spec beside provider reachability rows', async () => {

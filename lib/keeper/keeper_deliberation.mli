@@ -135,16 +135,6 @@ val deterministic_baseline_action : world_observation -> deliberation_action
 
 (** {1 Phase 2: Deliberation Evaluation} *)
 
-(** Current daily budget from keeper runtime config
-    ([MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD], default: 0.10). *)
-val daily_budget_usd : unit -> float
-
-(** Advisory cost telemetry for deliberation.
-
-    Always returns [true]; daily cost thresholds must not gate deliberation. *)
-val deliberation_budget_check :
-  daily_budget_usd:float -> cost_today_usd:float -> bool
-
 (** Build a prompt for the MODEL to decide the keeper's next action.
     Describes the keeper's identity, current state, detected triggers,
     and available actions. Asks the MODEL to return only the schema-matching

@@ -55,8 +55,9 @@ type access_rejection =
 (** Outcome of looking up a request record.
 
     - [Found entry] — the request is known (in memory or recovered from disk).
-    - [Absent] — no record exists: the id was never accepted, or an explicit
-      operator retention action removed it. Pollers can stop polling or resubmit.
+    - [Absent] — no canonical record is observable. Pollers can stop polling,
+      but absence does not prove that an earlier side effect never occurred and
+      therefore does not authorize blind resubmission.
     - [Unreadable reason] — a record file exists but cannot be decoded
       (corrupt JSON, missing required fields, or unknown status). The request
       WAS accepted, but its result cannot be recovered. *)
@@ -66,14 +67,42 @@ type load_result =
   | Unreadable of string
   | Rejected of access_rejection
 
+(** Opaque evidence that the exact request's canonical terminal-partition
+    record is durably authoritative.  A proof is never constructed from
+    {!poll}: process memory may contain a visible but unconfirmed terminal
+    publication. *)
+type durable_terminal_proof
+
+type canonical_terminal_error =
+  | Canonical_terminal_absent
+  | Canonical_terminal_unreadable of string
+  | Canonical_terminal_access_rejected of access_rejection
+  | Canonical_terminal_runtime_active of request_status
+      (** The exact request still has process-local nonterminal ownership. *)
+  | Canonical_terminal_publication_ambiguous of request_status
+      (** A terminal value is visible in process memory, but its canonical
+          partition publication was not durably confirmed. *)
+  | Canonical_terminal_nonterminal of request_status
+  | Canonical_terminal_noncanonical_location of request_status
+
+val canonical_terminal_error_to_string : canonical_terminal_error -> string
+
+val durable_terminal_entry : durable_terminal_proof -> entry
+(** Read-only identity/status carried by a proof.  The proof constructor stays
+    private to this module. *)
+
+(** Recovery observations for canonical v3 storage only. [finalized] counts
+    terminal states moved from the active partition after a crash; [cleaned]
+    counts duplicate active sources removed after terminal durability was
+    established. Staging counters cover only the current dedicated atomic
+    staging directory. *)
 type recovery_report =
   { lost : int
-  ; migrated : int
+  ; finalized : int
   ; cleaned : int
-  ; atomic_orphans_inspected : int
-  ; atomic_orphans_deleted : int
-  ; atomic_orphans_preserved : int
-  ; deferred : int
+  ; staging_files_inspected : int
+  ; staging_files_deleted : int
+  ; staging_files_preserved : int
   ; unreadable : int
   ; failed : int
   ; store_errors : recovery_store_error list
@@ -82,8 +111,7 @@ type recovery_report =
 
 and recovery_store =
   | Active_store
-  | Legacy_store
-  | Atomic_orphan_store
+  | Atomic_staging_store
 
 and recovery_store_error =
   { store : recovery_store
@@ -104,7 +132,6 @@ and recovery_record_error_kind =
   | Recovery_record_missing
   | Recovery_record_not_file
   | Recovery_record_rejected of access_rejection
-  | Recovery_source_ambiguity of string
   | Recovery_terminal_integrity of string
   | Recovery_persistence_failed of string
   | Recovery_source_cleanup_failed
@@ -198,7 +225,7 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     explicitly supplied server-lifetime [background_sw].  The per-request
     worker switch passed to [f] is distinct: cancellation fails that switch,
     never the server root. Returns the fresh [request_id] synchronously after
-    the owner-bearing v2 request record is durably accepted. If an atomic
+    the owner-bearing v3 request record is durably accepted. If an atomic
     rename publishes the record but its directory fsync and the compensating
     rollback both fail, [Reconciliation_required] preserves the request id so
     the caller can poll instead of creating an unreachable orphan. The async
@@ -254,26 +281,28 @@ val submit
     recovery boundary may transition such records to [Lost]. *)
 val poll : base_path:string -> caller:string -> string -> load_result
 
+(** Exact O(1) canonical-disk lookup for a durably committed terminal request.
+    It checks only the request's terminal/active/legacy filenames; it never
+    inventories a partition.  Process-local nonterminal ownership and a visible
+    but unconfirmed terminal publication are distinct typed failures, so neither
+    can be mistaken for durable truth.  Corrupt, conflicting, nonterminal, and
+    noncanonical records remain in place for lane-local recovery. *)
+val load_canonical_durable_terminal :
+  base_path:string ->
+  caller:string ->
+  string ->
+  (durable_terminal_proof, canonical_terminal_error) result
+
 (** Mark persisted non-terminal request records that have no live in-memory
     worker as [Lost], returning the number of records transitioned. This is
-    intended for server startup/recovery sweeps. Only the active partition and
-    the finite legacy flat-layout residue are scanned; the terminal partition
-    is excluded. Current-process workers remain protected by the in-memory
-    active table, while disk-only
+    intended for server startup/recovery sweeps. Only the canonical active
+    partition and its dedicated atomic staging directory are scanned; the
+    terminal partition is excluded. Current-process workers remain protected
+    by the in-memory active table, while disk-only
     [Queued]/[Running]/[Cancelling]
     records from a previous process stop looking indefinitely active. *)
 val recover_lost_disk_records :
   base_path:string -> unit -> recovery_report
-
-(** One-time owner maintenance for temp files created before the dedicated
-    atomic staging layout. It requires exclusive BasePath ownership and a
-    quiescent retired temp namespace; current request writers satisfy that by
-    staging only below [.atomic-staging-v1]. The durable marker is a one-way
-    writer epoch: a binary that still writes the retired temp layout must not
-    be run against that BasePath after completion. Every cleanup,
-    namespace-seal, or marker failure is retained in the report and never
-    acquires Keeper lifecycle authority. *)
-val migrate_legacy_atomic_orphans : base_path:string -> recovery_report
 
 (** [cancel ~base_path ~caller request_id] validates exact request ownership,
     durably commits a non-terminal [Cancelling] intent, publishes it, and only
@@ -348,9 +377,7 @@ module For_testing : sig
   val clear : unit -> unit
   val active_record_path : base_path:string -> request_id:string -> string option
   val terminal_record_path : base_path:string -> request_id:string -> string option
-  val legacy_record_path : base_path:string -> request_id:string -> string option
   val atomic_staging_dir : base_path:string -> string
-  val legacy_atomic_migration_marker : base_path:string -> string
   val load_record : base_path:string -> request_id:string -> load_result
   val recover_lost_disk_records :
     base_path:string -> unit -> recovery_report

@@ -41,14 +41,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let substantive_tool_call_count = List.length tool_names in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
-  (* RFC-0232: a budget-exhausted turn substitutes a synthetic continuation
-     notice for the model reply (runtime_agent.ml MaxTurnsExceeded arm). That
-     text is display-only ("no consumer may sniff this string"); gate the
-     visible-output *preview* on the typed turn outcome rather than on the raw
-     string being non-empty, so the dashboard stops showing the canned
-     "Continuation checkpoint saved; ..." sentence as if it were work output.
-     Scope is deliberately narrow: only last_preview is gated here — has_text
-     still drives the visible/noop/autonomous counters unchanged. *)
+  (* Visible-output preview follows the typed result surface. In particular,
+     [TurnLimitObserved] is only an observed OAS fact: MASC neither fabricates
+     continuation text nor promotes it to a lifecycle checkpoint. *)
   let is_visible_reply =
     Keeper_turn_outcome.equal
       (Keeper_turn_outcome.of_result_surface

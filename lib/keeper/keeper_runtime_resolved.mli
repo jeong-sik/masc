@@ -11,7 +11,6 @@ type source =
   | Env
   | Toml
   | Default
-  | Derived
 
 type 'a field = {
   value : 'a;
@@ -19,13 +18,8 @@ type 'a field = {
 }
 
 type t = {
-  turn_timeout_sec : float field;
-  oas_timeout_override_sec : float option field;
-  stream_idle_timeout_sec : float field;
-  execution_idle_timeout_sec : float option field;
+  stream_idle_timeout_sec : float option field;
   body_timeout_override_sec : float option field;
-  oas_timeout_per_1k : float field;
-  oas_timeout_per_turn : float field;
 }
 
 val init : unit -> unit
@@ -35,26 +29,20 @@ val current : unit -> t
 val source_to_string : source -> string
 val to_yojson : t -> Yojson.Safe.t
 
-val turn_timeout_sec : unit -> float
-val stream_idle_timeout_sec : unit -> float
-val execution_idle_timeout_sec : unit -> float option
-(** Resolved [turn.execution_idle_timeout_sec].
+val stream_idle_timeout_sec : unit -> float option
+(** Explicit streaming-provider idle-gap timeout. [None] means disabled.
+    MASC does not synthesize a provider/model default and does not clamp an
+    operator-provided value. Invalid configured values fail during runtime
+    configuration initialization.
 
-    The keeper runtime currently parses this value but does not forward it to
-    OAS until active tool execution is proven to be excluded from idle
-    accounting.
-
-    Default disabled, clamped to [5, 600] when explicitly set. Unset, invalid,
-    [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC=0], or
-    [turn.execution_idle_timeout_sec = 0] disables it. *)
-
-val stream_idle_timeout_for_total_timeout : total_timeout_s:float -> float
+    SSOT: {!Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec}. *)
 
 (** Non-streaming HTTP body-consumption deadline override.
     [None] (env unset) skips [Builder.with_body_timeout]. [Some s] is
     forwarded through [Runtime_agent_context.body_timeout_s] for OAS sync
-    completion paths. Streaming paths ignore this knob and rely on
-    [stream_idle_timeout_sec] plus the attempt liveness observer.
+    completion paths. Streaming paths ignore this knob and rely on an
+    explicitly configured [stream_idle_timeout_sec] plus the attempt liveness
+    observer.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
 val body_timeout_override_sec : unit -> float option
@@ -65,7 +53,3 @@ val body_timeout_override_sec : unit -> float option
     transports require an OAS upstream change to expose
     [stdout_idle_timeout_s]. *)
 val cli_subprocess_idle_sec : unit -> float
-val oas_call_timeout_sec : unit -> float
-(** Resolved OAS-call timeout: legacy override
-    [oas_timeout_override_sec] when set, otherwise [turn_timeout_sec].
-    RFC-0156: no token- or turn-budget dependence. *)

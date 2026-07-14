@@ -92,14 +92,10 @@ module For_testing : sig
     :  turn:int
     -> autonomous_yield_request
     -> Runtime_agent.stop_reason
-end
 
-val per_provider_timeout_for_turn
-  :  ?oas_timeout_s:float
-  -> ?oas_timeout_is_explicit:bool
-  -> timeout_s:float
-  -> unit
-  -> float option
+  val keeper_max_turns : int
+  (** OAS-owned unbounded sentinel used explicitly for every Keeper run. *)
+end
 
 (** {1 Turn execution} *)
 
@@ -124,10 +120,6 @@ val per_provider_timeout_for_turn
     @param history_assistant_source Source label for assistant messages in history
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence
-    @param max_tokens Explicit caller output-token override. When omitted, the
-           turn-start profile snapshot may provide the validated keeper OAS
-           override; absent both, no [max_tokens] field is sent. The keeper lane
-           never synthesizes a model-derived value (masc#24067 / oas#2517)
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
     @param priority Optional priority for scheduling
@@ -151,9 +143,6 @@ val run_turn
   -> ?history_user_source:string
   -> ?history_assistant_source:string
   -> ?temperature:float
-  -> ?max_tokens:int
-  -> ?oas_timeout_s:float
-  -> ?oas_timeout_is_explicit:bool
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?priority:Llm_provider.Request_priority.t

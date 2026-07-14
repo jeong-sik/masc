@@ -150,13 +150,6 @@ module KeeperRuntime = struct
   (** Enable keeper debug logging. Default: false. *)
   let debug = Feature_flag_registry.get_bool "MASC_KEEPER_DEBUG"
 
-  (** Daily budget for keeper deliberation (USD). Default: 0.10.
-      Re-readable within the process. Live operator control should use
-      Runtime_params, not parent-shell env edits. *)
-  let deliberation_daily_budget_usd () =
-    get_float ~default:0.10 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
-  ;;
-
   (** Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. *)
   let snapshot_sec = max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
 end
@@ -552,136 +545,50 @@ module KeeperKeepalive = struct
     Float.max 0.1 (Float.min 10.0 (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
   ;;
 
-  (** Hard ceiling for all keeper timeout constants (seconds).
-      No timeout may exceed this value regardless of env override.
-
-      Default: 900 (15 minutes), lifted from 600 in PR #13861's
-      RFC-0012/0022 update permitting per-runtime turn_timeout_sec
-      overrides. Local-LLM runtimes that legitimately run 27 B turns
-      ≥600 s can now opt in via env or the upcoming runtime.toml
-      override; remote runtimes stay at the global default 600.
-
-      Promotion above 900 s requires a follow-up RFC plus one week of
-      retry-admission and p95 duration data — see RFC-0012 §Out of scope. *)
-  let timeout_hard_ceiling_sec = 900.0
-
-  (** Retry/admission budget in seconds for a single unified turn (including all
-      retries and runtime fallbacks). This value no longer kills an active turn
-      solely because cumulative wall-clock elapsed.
-      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 900].
-
-      The default stays at 600 (the prior hard ceiling) so existing
-      remote runtimes keep their budget unchanged; the lifted ceiling
-      only fires when an operator opts in via env or runtime override.
-      Active-runaway detection is driven by [stream_idle_timeout_sec],
-      provider-attempt liveness, tool timeouts, OAS max-turn limits, HTTP error,
-      and the optional supervisor stale-turn watchdog. *)
-  let turn_timeout_sec =
-    Float.max
-      60.0
-      (Float.min
-         timeout_hard_ceiling_sec
-         (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+  let parse_stream_idle_timeout_sec raw =
+    match Float.of_string_opt (String.trim raw) with
+    | Some seconds when Float.is_finite seconds && Float.compare seconds 0.0 > 0 ->
+      Ok seconds
+    | Some _ | None ->
+      Error "expected a finite, positive number of seconds"
   ;;
 
+  let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
 
-  (** Per-call OAS timeout override in seconds.
-
-      Legacy/env override value is clamped to the active keepalive
-      retry/admission budget. The override is still parsed for observability
-      and to preserve compatibility with existing profiles, but it is not
-      guaranteed to represent a distinct timeout policy anymore.
-
-      Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: none.
-      Range (when set): [30, turn_timeout_sec]. *)
-  let oas_timeout_sec_override =
-    match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
-    | Some raw ->
-      (* DET-OK: timeout override parsing is config-boundary behavior. Unknown/invalid env
-         values intentionally disable override (fallback to baseline policy). *)
-      (match Float.of_string_opt (String.trim raw) with
-       | Some parsed ->
-         Some (Float.max 30.0 (Float.min parsed turn_timeout_sec))
-       | None -> None)
-    | None -> None
-  ;;
-
-  (* RFC-0156/RFC-020x: OAS total timeout removed. Resolved OAS-call budget =
-     override when set, else turn_timeout_sec. stream_idle_timeout handles
-     per-stream idle; runtime rotation triggers on stream_idle + HTTP error +
-     completion contract. Historic names
-     ([oas_timeout_for_estimated_input_tokens] /
-     [oas_timeout_for_estimated_input_tokens_with_turn_budget]) ignored the
-     [estimated_input_tokens] and [max_turns] args — function-name-lying. *)
-  let oas_call_timeout_sec : float =
-    match oas_timeout_sec_override with
-    | Some v -> v
-    | None -> turn_timeout_sec
-  ;;
-
-  (** Deprecated compatibility knob for the removed whole-run attempt watchdog.
-
-      The keeper runtime must not apply this as a wall-clock timeout around
-      active provider/tool execution. Real liveness policy must live at a
-      narrower boundary: admission/queue wait, provider connect/stream progress,
-      or tool-local policy owned by the tool substrate.
-
-      Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
-      Default: 1800 (30 min). Range: [300, 7200]. *)
-  let attempt_watchdog_safety_cap_sec =
-    Float.max
-      300.0
-      (Float.min
-         7200.0
-         (get_float ~default:1800.0
-            "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"))
-  ;;
-
-  (** Idle-gap timeout for streaming OAS provider responses.
+  (** Explicit idle-gap timeout for streaming OAS provider responses.
       This bounds time between streamed lines, not total turn duration.
-      Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: 120. Range: [5, 600]. *)
-  let stream_idle_timeout_sec =
-    Float.max
-      5.0
-      (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
-  ;;
+      Unset means disabled: MASC and OAS must not synthesize a provider/model
+      default.  A configured value must be finite and strictly positive;
+      malformed values are operator configuration errors, never a fallback.
 
-  (** OAS Agent.run inactivity deadline.
-
-      This is progress-based rather than cumulative wall-clock: OAS resets the
-      timer when the run emits progress. It complements
-      [stream_idle_timeout_sec], which watches transport line gaps; this knob
-      catches Agent-level no-progress stalls that still keep a transport
-      connection superficially alive.
-
-      The keeper path parses this knob but does not forward it until OAS proves
-      active tool execution is excluded from idle accounting.
-
-      Env: [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC]. Default: disabled.
-      Range when enabled: [5, 600]. Unset, invalid, [0], or a negative
-      value disables it. This stays opt-in because it is an Agent.run-level
-      stall detector, not provider transport policy or tool timeout policy.
-      @category Timeouts
-      @ops_class operator *)
-  let execution_idle_timeout_sec =
-    match Env_config_core.raw_value_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" with
+      Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: unset -> [None].
+      @category Timeouts @ops_class operator *)
+  let stream_idle_timeout_sec () =
+    match Env_config_core.raw_value_opt stream_idle_timeout_env_key with
     | None -> None
-    | Some _ ->
-      let value = get_float ~default:0.0 "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" in
-      if (not (Float.is_finite value)) || value <= 0.0
-      then None
-      else Some (Float.max 5.0 (Float.min 600.0 value))
+    | Some raw ->
+      (match parse_stream_idle_timeout_sec raw with
+       | Ok seconds -> Some seconds
+       | Error detail ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf
+                 "invalid %s=%S (%s)"
+                 stream_idle_timeout_env_key
+                 raw
+                 detail)))
   ;;
 
   (** Total HTTP body-consumption deadline for non-streaming OAS completion
       calls. In agent_sdk this wraps [Complete.complete]'s synchronous HTTP
       body read; streaming calls deliberately ignore the knob so active
       long streams are not killed by total duration. Streaming liveness is
-      handled by [stream_idle_timeout_sec] and the attempt liveness observer.
+      handled by an explicitly configured [stream_idle_timeout_sec] and the
+      attempt liveness observer.
 
       Opt-in: unset env leaves [None] so {!Runtime_agent_context} skips
       the builder wiring. Set only for sync completion callers that need a
-      body-read ceiling before the outer turn cap.
+      body-read ceiling.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset → [None].
       Range when set: [10, 600]. *)

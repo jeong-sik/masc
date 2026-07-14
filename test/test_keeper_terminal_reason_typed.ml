@@ -65,7 +65,7 @@ let read_meta_exn config keeper_name =
 (* ------------------------------------------------------------------ *)
 (* 1. Wire round-trip corpus: built from the PRODUCER sites, not from  *)
 (*    the classifier prefixes. Includes both api_error/provider_error  *)
-(*    families, budget strings, direct producer strings, and one       *)
+(*    families, direct producer strings, and one mixed-case input.     *)
 (*    mixed-case adversarial input.                                    *)
 (* ------------------------------------------------------------------ *)
 
@@ -93,11 +93,6 @@ let roundtrip_corpus =
   ; "provider_error_server:500"
   ; "provider_error_missing_api_key"
   ; "provider_error_hard_quota:openai"
-    (* budget cut-offs *)
-  ; "agent_error_max_turns_exceeded:turns=8,limit=8"
-  ; "agent_error_execution_timeout:elapsed_sec=120.0,timeout_sec=120.0,turn_count=7,max_turns=8"
-  ; "agent_error_idle_timeout:idle_sec=120.0,idle_timeout_sec=120.0,turn_count=7,max_turns=8"
-  ; "turn_budget_exhausted:8/8"
     (* genuine Unknown (preserve-don't-fix) *)
   ; "no_capable_provider"
   ; "mcp_error"
@@ -105,7 +100,6 @@ let roundtrip_corpus =
   ; "io_error"
   ; "orchestration_error"
   ; "a2a_error"
-  ; "agent_error_token_budget_exceeded:kind=output,used=100,limit=50"
   ; "agent_error_guardrail_violation:validator=x"
   ; "agent_error_idle_detected:consecutive_idle_turns=3"
   ; "registry_phase_missing"
@@ -135,21 +129,6 @@ let () =
 
 (* Independent copy of the intended canonical-wire policy. DO NOT refactor to
    call production helpers — this is the oracle. *)
-
-let frozen_terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"
-let frozen_terminal_prefix_execution_timeout = "agent_error_execution_timeout"
-let frozen_terminal_prefix_idle_timeout = "agent_error_idle_timeout"
-let frozen_terminal_prefix_turn_budget_exhausted = "turn_budget_exhausted"
-
-let frozen_is_auto_recoverable_turn_budget_terminal terminal_reason =
-  String.starts_with ~prefix:frozen_terminal_prefix_max_turns_exceeded terminal_reason
-  || String.starts_with ~prefix:frozen_terminal_prefix_execution_timeout terminal_reason
-  || String.starts_with ~prefix:frozen_terminal_prefix_idle_timeout terminal_reason
-;;
-
-let frozen_is_turn_budget_exhausted_terminal terminal_reason =
-  String.starts_with ~prefix:frozen_terminal_prefix_turn_budget_exhausted terminal_reason
-;;
 
 let frozen_is_transient_provider_runtime_failure terminal_reason =
   String.equal terminal_reason "api_error_timeout"
@@ -199,16 +178,12 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
   else if String.equal terminal_reason "internal_error"
   then R.Disp_fail_open_next_runtime, R.Reason_internal_error
-  else if frozen_is_auto_recoverable_turn_budget_terminal terminal_reason
-  then R.Disp_pass, R.Reason_turn_budget_exhausted
   else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
   then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
   else if
     receipt.runtime_fallback_applied
     || receipt.runtime_outcome = R.Runtime_passed_to_next_model
   then R.Disp_pass_next_model, R.Reason_runtime_fallback
-  else if frozen_is_turn_budget_exhausted_terminal terminal_reason
-  then R.Disp_pass, R.Reason_turn_budget_exhausted
   else if
     receipt.outcome = `Ok
     && receipt.runtime_outcome = R.Runtime_not_dispatched
@@ -287,6 +262,9 @@ let () =
          (match Tr.of_wire wire with
           | Tr.Unknown original -> String.equal original wire
           | _ -> false);
+       check
+         (Printf.sprintf "free-form terminal %S round-trips" wire)
+         (String.equal (Tr.to_wire (Tr.of_wire wire)) wire);
        let got =
          R.operator_disposition
            { base_receipt with terminal_reason_code = wire }
@@ -297,6 +275,9 @@ let () =
     [ "unrelated authentication failed"
     ; "not_a_config_error"
     ; "API_ERROR_Auth"
+    ; "agent_error_max_turns_exceeded:turns=8,limit=8"
+    ; "agent_error_execution_timeout:elapsed_sec=120.0,timeout_sec=120.0,turn_count=7,max_turns=8"
+    ; "agent_error_idle_timeout:idle_sec=120.0,idle_timeout_sec=120.0,turn_count=7,max_turns=8"
     ];
   let canonical =
     R.operator_disposition
@@ -642,50 +623,6 @@ let () =
 ;;
 
 let () =
-  let code = "turn_budget_exhausted:12704/12704" in
-  let no_visible_output_receipt =
-    { base_receipt with
-      terminal_reason_code = code
-    ; outcome = `Ok
-    ; runtime_outcome = R.Runtime_completed
-    ; completion_contract_result = R.Completion_no_visible_output
-    }
-  in
-  let got = R.operator_disposition no_visible_output_receipt in
-  let want = R.Disp_pass, R.Reason_turn_budget_exhausted in
-  check
-    (Printf.sprintf
-       "turn-budget disposition ignores visible-output observation want=%s got=%s"
-       (disp_pair_to_string want)
-       (disp_pair_to_string got))
-    (got = want);
-  let active_receipt =
-    { no_visible_output_receipt with current_task_id = Some "TASK-1" }
-  in
-  let got = R.operator_disposition active_receipt in
-  let want = R.Disp_pass, R.Reason_turn_budget_exhausted in
-  check
-    (Printf.sprintf
-       "active-task turn-budget disposition ignores completion observation want=%s got=%s"
-       (disp_pair_to_string want)
-       (disp_pair_to_string got))
-    (got = want);
-  let executed_receipt =
-    { no_visible_output_receipt with
-      completion_contract_result = R.Completion_tool_execution_observed
-    }
-  in
-  let got = R.operator_disposition executed_receipt in
-  let want = R.Disp_pass, R.Reason_turn_budget_exhausted in
-  check
-    (Printf.sprintf
-       "tool-execution observation leaves turn-budget disposition unchanged want=%s got=%s"
-       (disp_pair_to_string want)
-       (disp_pair_to_string got))
-    (got = want)
-;;
-
-let () =
   let completed_receipt =
     { base_receipt with
       terminal_reason_code = "success"
@@ -919,15 +856,15 @@ let () =
          ~config
          ~updated_meta:meta
          (run_result
-            ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 8; limit = 8 })
+            ~stop_reason:(Runtime_agent.TurnLimitObserved { turns_used = 8; limit = 8 })
             ());
-       let entry_after_budget = registered_entry () in
+       let entry_after_turn_limit_observation = registered_entry () in
        check
-         "budget checkpoint clears stale provider failure reason"
-         (entry_after_budget.last_failure_reason = None);
+         "turn-limit observation clears stale provider failure reason"
+         (entry_after_turn_limit_observation.last_failure_reason = None);
        check
-         "budget checkpoint clears turn consecutive failures"
-         (entry_after_budget.turn_consecutive_failures = 0))
+         "turn-limit observation clears turn consecutive failures"
+         (entry_after_turn_limit_observation.turn_consecutive_failures = 0))
 ;;
 
 let () =

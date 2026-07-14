@@ -58,7 +58,8 @@ let queued_message : Keeper_chat_queue.queued_message =
   ; user_blocks = []
   ; attachments = []
   ; timestamp = 1.0
-  ; source = Keeper_chat_queue.Dashboard
+  ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
+  ; user_row_origin = Keeper_chat_store.Needs_append
   }
 ;;
 
@@ -117,6 +118,46 @@ let test_free_slot_admits () =
   | `Ran _ | `Rejected _ -> check "run_serialized admits on a free slot" false
 ;;
 
+let test_dispatchability_transitions_are_observed () =
+  reset ();
+  Printf.printf "Test 1a: dispatchability transitions are observed exactly\n%!";
+  let observed = ref [] in
+  Keeper_turn_admission.set_slot_transition_observer
+    (Some
+       (fun ~base_path:observed_base_path ~keeper_name:observed_keeper
+            ~transition ->
+          observed :=
+            (observed_base_path, observed_keeper, transition) :: !observed));
+  ignore
+    (Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ())
+      : [ `Ran of unit | `Busy of Keeper_turn_admission.autonomous_block ]);
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore
+    (Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+      : Keeper_turn_admission.begin_shutdown_result);
+  ignore
+    (Keeper_turn_admission.rollback_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+      : Keeper_turn_admission.rollback_shutdown_result);
+  let observed = List.rev !observed in
+  check "turn release and shutdown rollback both publish"
+    (match observed with
+     | [ (turn_base, turn_keeper, Keeper_turn_admission.Turn_released)
+       ; (rollback_base, rollback_keeper, Keeper_turn_admission.Shutdown_rolled_back)
+       ] ->
+       String.equal turn_base base_path
+       && String.equal rollback_base base_path
+       && String.equal turn_keeper keeper_name
+       && String.equal rollback_keeper keeper_name
+     | _ -> false);
+  Keeper_turn_admission.set_slot_transition_observer None
+;;
+
 let test_chat_if_free_never_parks () =
   reset ();
   Printf.printf "Test 1b: run_chat_if_free runs only on an immediately free slot\n%!";
@@ -166,7 +207,8 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
     ; user_blocks = []
     ; attachments = []
     ; timestamp = Time_compat.now ()
-    ; source = Keeper_chat_queue.Dashboard
+    ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
+    ; user_row_origin = Keeper_chat_store.Needs_append
     }
   in
   let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
@@ -181,9 +223,9 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
    | `Busy _ | `Ran () -> check "pending receipt blocks direct admission" false);
   check "pending receipt is not overtaken" (not !direct_ran);
   let lease =
-    match Keeper_chat_queue.lease_batch ~keeper_name with
+    match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> lease
-    | `Empty | `Already_leased _ | `Error _ ->
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
       failwith "expected the committed receipt to lease"
   in
   (match
@@ -520,6 +562,7 @@ let test_autonomous_yields_to_queued_connector_message () =
              ; team_id = Some "T-test"
              ; thread_ts = Some "171.001"
              }
+       ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
        }
    with
    | Ok _ -> ()
@@ -540,10 +583,10 @@ let test_autonomous_yields_to_queued_connector_message () =
   (* Leasing changes the receipt to Inflight but does not make it disappear.
      The autonomous lane keeps yielding until the terminal decision commits. *)
   let lease =
-    match Keeper_chat_queue.lease_batch ~keeper_name with
+    match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> Some lease
-    | `Empty | `Already_leased _ | `Error _ ->
-      check "lease_batch leases the queued connector message" false;
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+      check "lease_next leases the queued connector message" false;
       None
   in
   let inflight = Keeper_chat_queue.snapshot ~keeper_name in
@@ -685,6 +728,7 @@ let () =
   test_autonomous_admits_when_chat_persistence_is_not_configured ();
   test_global_chat_load_error_does_not_close_autonomous_admission ();
   test_free_slot_admits ();
+  test_dispatchability_transitions_are_observed ();
   test_chat_if_free_never_parks ();
   test_chat_if_free_rechecks_durable_queue_after_stale_peek ();
   test_autonomous_skips_in_flight_chat ();

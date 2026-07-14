@@ -68,7 +68,7 @@ let record_imminent ~keeper_name ~ts =
          — OAS issued context_overflow_imminent but no \
          context_compact_started / context_compacted event \
          followed within the grace window. Check compaction \
-         gating (#9943), keeper turn budget (#9933), or the \
+         gating (#9943), context-window resolution (#9933), or the \
          OAS compact planner." keeper_name (ts -. prior_ts) grace
     | Some _ ->
       (* Within grace, or latch already engaged. Advance the

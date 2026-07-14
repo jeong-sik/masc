@@ -74,12 +74,8 @@ let test_name_matcher () =
   yes ".atomic_abc.tmp";
   yes ".atomic_946c84.tmp";
   yes ".atomic_.tmp";
-  yes ".keeper_atomic_abc.tmp";
-  yes ".keeper_atomic_.tmp";
   no "atomic_abc.tmp";
   no ".atomic_abc";
-  no "keeper_atomic_abc.tmp";
-  no ".keeper_atomic_abc";
   no "normal.json";
   no "sangsu.json";
   no ".atomic_prefix_only";
@@ -98,24 +94,6 @@ let test_zero_byte_orphan_at_base_deleted () =
   Alcotest.(check int) "0 preserved" 0 report.preserved;
   Alcotest.(check bool) "orphan file removed" false
     (Sys.file_exists orphan)
-
-(* The durable Keeper writer used the retired prefix before both writers
-   were moved onto the shared temp-name factory. Recovery must still sweep
-   those files, but no new writer may generate them. *)
-let test_legacy_keeper_orphans_are_swept () =
-  with_temp_base @@ fun base_path ->
-  let empty = Filename.concat base_path ".keeper_atomic_empty.tmp" in
-  let data = Filename.concat base_path ".keeper_atomic_data.tmp" in
-  touch empty;
-  write_file ~path:data ~content:"legacy keeper payload";
-  let report = cleanup base_path in
-  check_no_failures report;
-  Alcotest.(check int) "legacy empty orphan deleted" 1 report.deleted;
-  Alcotest.(check int) "legacy data orphan preserved" 1 report.preserved;
-  Alcotest.(check bool) "legacy empty source removed" false
-    (Sys.file_exists empty);
-  Alcotest.(check bool) "legacy data source moved" false
-    (Sys.file_exists data)
 
 (* Non-zero orphan at base_path: moved to .recovered/, NOT
    deleted.  The original path is gone but the payload survives
@@ -338,8 +316,6 @@ let () =
         [
           Alcotest.test_case "zero-byte at base: deleted" `Quick
             test_zero_byte_orphan_at_base_deleted;
-          Alcotest.test_case "legacy Keeper orphans are swept" `Quick
-            test_legacy_keeper_orphans_are_swept;
           Alcotest.test_case "non-zero: preserved in .recovered/" `Quick
             test_nonzero_orphan_preserved_in_recovered;
           Alcotest.test_case "orphans in subdirs found" `Quick

@@ -197,7 +197,6 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
         behavior.supports_inline_tools ? 'inline-tools' : null,
         behavior.argv_prompt_preflight ? 'argv-preflight' : null,
         behavior.uses_anthropic_caching ? 'anthropic-cache' : null,
-        typeof behavior.max_turns_per_attempt === 'number' ? `max-turns:${behavior.max_turns_per_attempt}` : null,
       ])
     : []
   const controls = nonEmptyParts([

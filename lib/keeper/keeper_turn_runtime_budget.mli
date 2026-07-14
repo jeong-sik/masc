@@ -1,5 +1,5 @@
 (* Keeper_turn_runtime_budget — runtime execution types, fail-open rotation,
-   provider timeout resolution, context overflow observation, Keeper lifecycle
+   context overflow observation, Keeper lifecycle
    sync, and context budget resolution.
 
    Public sub-module included by [Keeper_unified_turn]. *)
@@ -15,7 +15,6 @@ type runtime_execution = {
   max_context_resolution : max_context_resolution;
   max_context : int;
   temperature : float;
-  max_tokens : int option;
 }
 
 val next_fail_open_runtime_for_turn :
@@ -28,33 +27,6 @@ val next_fail_open_runtime_for_turn :
     any explicit [fallback_runtime] hint. *)
 
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
-
-val provider_timeout_guard_sec : float
-(** Provider startup guard floor (seconds). *)
-
-val min_provider_timeout_budget_sec : float
-(** Minimum provider timeout budget (seconds). *)
-
-type provider_timeout_budget = {
-  effective_timeout_sec : float;
-  adaptive_timeout_sec : float;
-  keeper_turn_timeout_sec : float;
-  remaining_turn_budget_sec : float;
-  estimated_input_tokens : int;
-  source : string;
-}
-
-val provider_timeout_budget_to_yojson :
-  provider_timeout_budget -> Yojson.Safe.t
-
-val resolve_provider_timeout_budget :
-  is_retry:bool ->
-  estimated_input_tokens:int ->
-  remaining_turn_budget_s:float ->
-  provider_timeout_budget
-(** Resolves the per-provider timeout plan. The outer keeper turn budget is
-    telemetry here, not an admission gate; provider liveness, stream idle, and
-    idle-turn limits own attempt termination. *)
 
 type degraded_retry_decision =
   | No_degraded_retry
@@ -195,8 +167,8 @@ val run_direct_no_progress_retry_loop :
   unit ->
   ('a * int, Agent_sdk.Error.sdk_error) result
 (** Execute the direct-message no-progress retry loop with injected side
-    effects. This keeps direct-message retry orchestration on the same budget
-    and cascade path as unified degraded-runtime retries. *)
+    effects. Rotation is bounded only by the typed, finite runtime candidate
+    set; no numeric Keeper budget participates in admission or retry. *)
 
 type turn_event_bus_overflow = {
   estimated_tokens : int;

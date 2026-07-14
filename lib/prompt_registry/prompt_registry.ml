@@ -221,7 +221,32 @@ let set_markdown_dir dir =
   with_override_mutation_lock (fun () ->
       with_mutex (fun () -> markdown_dir := Some dir))
 
-let get_markdown_dir () = !markdown_dir
+(* Dune-context fallback for the markdown dir (quick-suite unmasking
+   #24377, 'Prompt ... is missing' class). Production always pins the dir
+   through [Prompt_defaults.bootstrap_runtime], and an explicit
+   [set_markdown_dir] always wins. Test executables, however, run inside
+   dune's sandbox where the cwd has no [config/prompts]; every executable
+   that forgot the per-test pin resolved prompts to "missing" only in CI.
+   DUNE_SOURCEROOT is set by dune for every build/exec/runtest and absent
+   in production processes, so this is a deterministic, environment-scoped
+   branch — not a permissive default: outside dune the behaviour is
+   byte-identical to before (None). Tests that need true prompt absence
+   pin an explicit empty dir (see [with_task_create_prompt_missing] in
+   test_keeper_prompt_external.ml), which this never overrides. *)
+let dune_sourceroot_markdown_dir =
+  lazy
+    (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | None -> None
+    | Some root ->
+        let dir = Filename.concat (Filename.concat root "config") "prompts" in
+        if Sys.file_exists dir && Sys.is_directory dir then Some dir else None)
+
+let effective_markdown_dir () =
+  match !markdown_dir with
+  | Some _ as pinned -> pinned
+  | None -> Lazy.force dune_sourceroot_markdown_dir
+
+let get_markdown_dir () = effective_markdown_dir ()
 
 let is_valid_prompt_key key =
   key <> ""
@@ -234,7 +259,9 @@ let is_valid_prompt_key key =
 let prompt_markdown_path key =
   if not (is_valid_prompt_key key) then None
   else
-    Option.map (fun dir -> Filename.concat dir (key ^ ".md")) !markdown_dir
+    Option.map
+      (fun dir -> Filename.concat dir (key ^ ".md"))
+      (effective_markdown_dir ())
 
 (** Read a markdown file, stripping YAML frontmatter if present.
     Returns only the body after the closing [---] delimiter. *)

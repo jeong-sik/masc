@@ -45,8 +45,6 @@ val handle
   -> degraded_retry_applied:bool
   -> degraded_retry_runtime:string option
   -> fallback_reason:Keeper_error_classify.degraded_retry_reason option
-  -> last_provider_timeout_budget:
-       Keeper_turn_runtime_budget.provider_timeout_budget option
   -> current_turn_blocker_info:Keeper_meta_contract.blocker_info option
   -> keeper_turn_id:int
   -> Keeper_agent_run.run_result

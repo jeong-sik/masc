@@ -101,18 +101,14 @@ type runtime_exhaustion_reason =
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
-  | Max_turns_exceeded
   | Session_conflict
-  | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
   | Other_detail of string
 
 let runtime_exhaustion_reason_retryable = function
-  | Candidates_filtered_after_cycles | Max_turns_exceeded | Capacity_exhausted ->
-    true
+  | Candidates_filtered_after_cycles | Capacity_exhausted -> true
   | Connection_refused | Dns_failure | No_providers_available | All_providers_failed ->
     true
-  | Structural_attempt_timeout _ -> true
   | Session_conflict | Other_detail _ -> false
 
 let runtime_exhaustion_label_payload_max_bytes = 200
@@ -137,11 +133,7 @@ let runtime_exhaustion_reason_to_label = function
   | No_providers_available -> "no_providers_available"
   | All_providers_failed -> "all_providers_failed"
   | Candidates_filtered_after_cycles -> "candidates_filtered_after_cycles"
-  | Max_turns_exceeded -> "max_turns_exceeded"
   | Session_conflict -> "session_conflict"
-  | Structural_attempt_timeout { detail } ->
-    Printf.sprintf "structural_attempt_timeout(%s)"
-      (runtime_exhaustion_label_payload detail)
   | Capacity_exhausted -> "capacity_exhausted"
   | Other_detail detail ->
     Printf.sprintf "other(%s)" (runtime_exhaustion_label_payload detail)
@@ -152,10 +144,7 @@ let runtime_exhaustion_reason_to_json = function
   | No_providers_available -> `String "no_providers_available"
   | All_providers_failed -> `String "all_providers_failed"
   | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
-  | Max_turns_exceeded -> `String "max_turns_exceeded"
   | Session_conflict -> `String "session_conflict"
-  | Structural_attempt_timeout { detail } ->
-    `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
   | Capacity_exhausted -> `String "capacity_exhausted"
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 
@@ -165,15 +154,10 @@ let runtime_exhaustion_reason_of_json = function
   | `String "no_providers_available" -> Some No_providers_available
   | `String "all_providers_failed" -> Some All_providers_failed
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
-  | `String "max_turns_exceeded" -> Some Max_turns_exceeded
   | `String "session_conflict" -> Some Session_conflict
   | `String "capacity_exhausted" -> Some Capacity_exhausted
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with
-     | Some (`String "structural_attempt_timeout") ->
-       (match List.assoc_opt "detail" fields with
-         | Some (`String detail) -> Some (Structural_attempt_timeout { detail })
-         | _ -> None)
      | Some (`String "other_detail") ->
        (match List.assoc_opt "message" fields with
          | Some (`String msg) -> Some (Other_detail msg)
@@ -274,18 +258,6 @@ type masc_internal_error =
          not yet consumed by classification (§4.5 slices 2-3). *)
       stop_reason : Agent_sdk.Types.stop_reason option;
       reason : string;
-    }
-  | Turn_timeout of {
-      elapsed_sec : float;
-    }
-  | Provider_timeout of {
-      budget_sec : float;
-      keeper_turn_timeout_sec : float;
-      estimated_input_tokens : int;
-      source : string;
-      remaining_turn_budget_sec : float option;
-      min_required_sec : float;
-      phase : string;
     }
   | Internal_unhandled_exception of {
       site : string;
@@ -477,34 +449,6 @@ let masc_internal_error_to_json = function
             (Option.map Agent_sdk.Types.stop_reason_to_string stop_reason) );
         ("reason", `String reason);
       ]
-  | Turn_timeout { elapsed_sec } ->
-    `Assoc
-      [
-        ("kind", `String "turn_timeout");
-        ("elapsed_sec", `Float elapsed_sec);
-      ]
-  | Provider_timeout
-      {
-        budget_sec;
-        keeper_turn_timeout_sec;
-        estimated_input_tokens;
-        source;
-        remaining_turn_budget_sec;
-        min_required_sec;
-        phase;
-      } ->
-    `Assoc
-      [
-        ("kind", `String "provider_timeout");
-        ("budget_sec", `Float budget_sec);
-        ("keeper_turn_timeout_sec", `Float keeper_turn_timeout_sec);
-        ("estimated_input_tokens", `Int estimated_input_tokens);
-        ("source", `String source);
-        ( "remaining_turn_budget_sec",
-          Json_util.float_opt_to_json remaining_turn_budget_sec );
-        ("min_required_sec", `Float min_required_sec);
-        ("phase", `String phase);
-      ]
   | Internal_unhandled_exception { site; exn_repr; transport_error_kind } ->
     `Assoc
       ([ ("kind", `String "internal_unhandled_exception")
@@ -590,26 +534,6 @@ let summary_of_masc_internal_error = function
            detail
            retry_after_suffix
            cooldown_cause_suffix)
-  | Provider_timeout
-      {
-        budget_sec;
-        keeper_turn_timeout_sec;
-        estimated_input_tokens;
-        source;
-        remaining_turn_budget_sec;
-        min_required_sec;
-        phase;
-      } ->
-      let remaining =
-        match remaining_turn_budget_sec with
-        | Some value -> Printf.sprintf "%.1fs" value
-        | None -> "unknown"
-      in
-      Some
-        (Printf.sprintf
-           "Provider timeout exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
-           phase source budget_sec remaining min_required_sec
-           estimated_input_tokens keeper_turn_timeout_sec)
   | Accept_rejected
       {
         scope;
@@ -670,7 +594,6 @@ let summary_of_masc_internal_error = function
          (nonempty_or_unknown runtime_id)
          (runtime_exhaustion_reason_to_label reason))
   | Resumable_cli_session _
-  | Turn_timeout _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _
@@ -681,8 +604,6 @@ let kind_of_masc_internal_error = function
   | Capacity_backpressure _ -> capacity_backpressure_kind
   | Resumable_cli_session _ -> "resumable_cli_session"
   | Accept_rejected _ -> "accept_rejected"
-  | Turn_timeout _ -> "turn_timeout"
-  | Provider_timeout _ -> "provider_timeout"
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"
   | Internal_bridge_exception _ -> "internal_bridge_exception"
   | Internal_contract_rejected _ -> "internal_contract_rejected"
@@ -697,8 +618,6 @@ let runtime_id_of_masc_internal_error = function
       else runtime_id
   | Accept_rejected { scope; _ } ->
       nonempty_or_unknown scope
-  | Turn_timeout _
-  | Provider_timeout _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _
@@ -729,8 +648,6 @@ let accept_no_progress_retry_kind = function
   | Runtime_exhausted _
   | Capacity_backpressure _
   | Resumable_cli_session _
-  | Turn_timeout _
-  | Provider_timeout _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _
@@ -867,46 +784,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                        (string_opt_of_assoc "stop_reason" json);
                    reason;
                  })
-          | _ -> None)
-      | Some (`String "turn_timeout") -> (
-          match json with
-          | `Assoc fields -> (
-              match List.assoc_opt "elapsed_sec" fields with
-              | Some (`Float v) ->
-                Some (Turn_timeout { elapsed_sec = v })
-              | _ -> None)
-          | _ -> None)
-      | Some (`String "provider_timeout") -> (
-          match json with
-          | `Assoc fields -> (
-              match
-                List.assoc_opt "budget_sec" fields,
-                List.assoc_opt "keeper_turn_timeout_sec" fields,
-                List.assoc_opt "estimated_input_tokens" fields,
-                List.assoc_opt "source" fields
-              with
-              | Some (`Float budget_sec),
-                Some (`Float keeper_turn_timeout_sec),
-                Some (`Int estimated_input_tokens),
-                Some (`String source) ->
-                  Some
-                    (Provider_timeout
-                       {
-                         budget_sec;
-                         keeper_turn_timeout_sec;
-                         estimated_input_tokens;
-                         source;
-                         remaining_turn_budget_sec =
-                           float_opt_of_assoc
-                             "remaining_turn_budget_sec" json;
-                         min_required_sec =
-                           Option.value ~default:0.0
-                             (float_opt_of_assoc "min_required_sec" json);
-                         phase =
-                           Option.value ~default:"unknown"
-                             (string_opt_of_assoc "phase" json);
-                       })
-              | _ -> None)
           | _ -> None)
       | Some (`String "internal_unhandled_exception") -> (
           match string_opt_of_assoc "site" json, string_opt_of_assoc "exn_repr" json with

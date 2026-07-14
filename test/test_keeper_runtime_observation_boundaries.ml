@@ -1,21 +1,8 @@
 open Masc
 
 module KPB = Keeper_provider_runtime_boundary
-module KCB = Keeper_turn_runtime_budget
 module KTD = Keeper_turn_driver
 module EC = Keeper_error_classify
-
-let provider_timeout_error ~phase =
-  KTD.sdk_error_of_masc_internal_error
-    (KTD.Provider_timeout
-       { budget_sec = 90.0
-       ; keeper_turn_timeout_sec = 1200.0
-       ; estimated_input_tokens = 10_000
-       ; source = "test"
-       ; remaining_turn_budget_sec = Some 42.0
-       ; min_required_sec = 15.0
-       ; phase
-       })
 
 let raw_provider_timeout_error ~phase =
   Agent_sdk.Error.Provider
@@ -30,9 +17,6 @@ let raw_api_timeout_error () =
     (Llm_provider.Retry.Timeout
        { message = "Per-provider timeout after 90.0s"; phase = None })
 
-let turn_timeout_error () =
-  KTD.sdk_error_of_masc_internal_error (KTD.Turn_timeout { elapsed_sec = 600.0 })
-
 let tls_handshake_internal_error () =
   KTD.sdk_error_of_masc_internal_error
     (KTD.Internal_unhandled_exception
@@ -41,17 +25,6 @@ let tls_handshake_internal_error () =
        ; transport_error_kind = Some Llm_provider.Http_client.Tls_error
        })
 
-
-let test_cycle_failed_log_level_uses_typed_error () =
-  Alcotest.(check bool)
-    "provider timeout cycle failure is warn"
-    true
-    (EC.should_warn_keeper_cycle_failed
-       (provider_timeout_error ~phase:"runtime_attempt_watchdog"));
-  Alcotest.(check bool)
-    "turn timeout remains error"
-    false
-    (EC.should_warn_keeper_cycle_failed (turn_timeout_error ()))
 
 let test_raw_oas_provider_timeout_preserves_typed_observation () =
   let err =
@@ -101,62 +74,6 @@ let test_tls_handshake_internal_error_is_transient () =
     true
     (EC.is_auto_recoverable_turn_error err)
 
-let test_retry_timeout_budget_ignores_expired_outer_turn_budget () =
-  let budget =
-    KCB.resolve_provider_timeout_budget
-      ~is_retry:true
-      ~estimated_input_tokens:10_000
-      ~remaining_turn_budget_s:0.0
-  in
-  Alcotest.(check string)
-    "retry source"
-    "retry_adaptive_timeout"
-    budget.source;
-  Alcotest.(check bool)
-    "retry keeps an actionable provider timeout"
-    true
-    (budget.effective_timeout_sec >= KCB.min_provider_timeout_budget_sec);
-  Alcotest.(check (float 0.001))
-    "remaining turn budget is telemetry only"
-    0.0
-    budget.remaining_turn_budget_sec
-
-let test_first_attempt_timeout_ignores_expired_outer_turn_budget () =
-  let budget =
-    KCB.resolve_provider_timeout_budget
-      ~is_retry:false
-      ~estimated_input_tokens:10_000
-      ~remaining_turn_budget_s:0.0
-  in
-  Alcotest.(check string)
-    "first attempt source"
-    "first_attempt_adaptive_timeout"
-    budget.source;
-  Alcotest.(check bool)
-    "first attempt keeps an actionable provider timeout"
-    true
-    (budget.effective_timeout_sec >= KCB.min_provider_timeout_budget_sec);
-  Alcotest.(check (float 0.001))
-    "remaining turn budget is telemetry only"
-    0.0
-    budget.remaining_turn_budget_sec
-
-let test_internal_timeout_preserves_typed_stream_phase () =
-  let err = provider_timeout_error ~phase:"stream_idle:streaming_thinking" in
-  match KPB.classify_sdk_error err with
-  | KPB.Provider_timeout
-      { source = KPB.Masc_internal
-      ; phase = Some (KPB.Stream_idle KPB.Streaming_thinking)
-      } -> ()
-  | _ -> Alcotest.fail "expected typed internal streaming-thinking observation"
-
-let test_capacity_phase_is_a_typed_observation () =
-  let err = provider_timeout_error ~phase:"capacity_backpressure" in
-  match KPB.classify_sdk_error err with
-  | KPB.Provider_timeout
-      { source = KPB.Masc_internal; phase = Some KPB.Capacity_backpressure } -> ()
-  | _ -> Alcotest.fail "expected typed capacity observation"
-
 let source_path path =
   if Filename.is_relative path then
     match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -197,13 +114,6 @@ let test_runtime_provider_path_has_no_cumulative_run_timeout () =
     "runtime provider path does not timeout Runtime_agent.run"
     false
     (contains_substring source "Eio.Time.with_timeout_exn clock t run_fn")
-
-let test_runtime_provider_path_does_not_forward_execution_idle_timeout () =
-  let source = read_file "lib/keeper/keeper_turn_driver_try_provider.ml" in
-  Alcotest.(check bool)
-    "runtime provider path does not forward execution idle timeout"
-    false
-    (contains_substring source "execution_idle_timeout_s = ctx.execution_idle_timeout_s")
 
 let make_tool name description : Agent_sdk.Tool.t =
   Agent_sdk.Tool.create ~name ~description ~parameters:[]
@@ -374,7 +284,7 @@ let test_context_window_observation_reports_remaining_and_overage () =
     (140.0 /. 128.0)
     over.observed_context_usage_ratio
 
-let test_context_preflight_manifest_records_budget_delta () =
+let test_context_preflight_manifest_records_window_delta () =
   let source = read_file "lib/keeper/keeper_agent_run.ml" in
   Alcotest.(check bool)
     "context preflight records remaining tokens"
@@ -460,18 +370,18 @@ let test_keeper_preflight_reuses_setup_tool_estimate () =
     false
     (contains_substring agent_run_source "estimate_tool_schema_context")
 
-let test_keeper_budget_estimates_use_context_facade () =
+let test_keeper_context_estimates_use_context_facade () =
   let prompt_source = read_file "lib/keeper/keeper_run_prompt.ml" in
   let hook_source = read_file "lib/keeper/keeper_run_tools_hooks.ml" in
   Alcotest.(check bool)
-    "budgeting uses keeper estimation facade"
+    "context estimation uses keeper facade"
     true
     (contains_substring prompt_source
        "Keeper_context_core_accessors.estimate_char_tokens"
      && contains_substring hook_source
           "Keeper_context_core_accessors.estimate_char_tokens");
   Alcotest.(check bool)
-    "budgeting avoids direct OAS estimator calls"
+    "context estimation avoids direct OAS estimator calls"
     false
     (contains_substring prompt_source
        "Agent_sdk.Context_reducer.estimate_char_tokens"
@@ -497,38 +407,22 @@ let test_oas_thresholds_do_not_use_output_max_tokens_as_context_window () =
     (contains_substring source "~context_window_tokens:config.max_tokens")
 
 let () =
-  Alcotest.run "provider_timeout_observation"
+  Alcotest.run "keeper_runtime_observation_boundaries"
   [
-    ( "strike ledger",
+    ( "typed observations",
       [
-        Alcotest.test_case "cycle failure log level uses typed error" `Quick
-          test_cycle_failed_log_level_uses_typed_error;
         Alcotest.test_case "raw OAS provider timeout remains typed" `Quick
           test_raw_oas_provider_timeout_preserves_typed_observation;
         Alcotest.test_case "raw OAS API timeout remains typed" `Quick
           test_raw_oas_api_timeout_preserves_typed_observation;
         Alcotest.test_case "TLS handshake internal error is transient" `Quick
           test_tls_handshake_internal_error_is_transient;
-        Alcotest.test_case
-          "retry timeout budget ignores expired outer turn budget"
-          `Quick
-          test_retry_timeout_budget_ignores_expired_outer_turn_budget;
-        Alcotest.test_case
-          "first attempt timeout ignores expired outer turn budget"
-          `Quick
-          test_first_attempt_timeout_ignores_expired_outer_turn_budget;
-        Alcotest.test_case "internal timeout stream phase remains typed" `Quick
-          test_internal_timeout_preserves_typed_stream_phase;
-        Alcotest.test_case "capacity phase remains a typed observation" `Quick
-          test_capacity_phase_is_a_typed_observation;
         Alcotest.test_case "keeper turn has no total wall-clock kill" `Quick
           test_keeper_turn_has_no_total_wall_clock_kill;
         Alcotest.test_case "keeper OAS path has no bridge total timeout" `Quick
           test_keeper_oas_path_has_no_bridge_total_timeout;
         Alcotest.test_case "runtime provider path has no cumulative timeout" `Quick
           test_runtime_provider_path_has_no_cumulative_run_timeout;
-        Alcotest.test_case "runtime provider path does not forward idle timeout" `Quick
-          test_runtime_provider_path_does_not_forward_execution_idle_timeout;
         Alcotest.test_case "tool schema estimate adds provider payload" `Quick
           test_tool_schema_estimate_adds_provider_payload;
         Alcotest.test_case
@@ -547,14 +441,14 @@ let () =
           "context window observation reports remaining and overage"
           `Quick
           test_context_window_observation_reports_remaining_and_overage;
-        Alcotest.test_case "context preflight manifest records budget delta" `Quick
-          test_context_preflight_manifest_records_budget_delta;
+        Alcotest.test_case "context preflight manifest records window delta" `Quick
+          test_context_preflight_manifest_records_window_delta;
         Alcotest.test_case "context injection hook records post-tool ledger" `Quick
           test_context_injection_hook_records_post_tool_ledger;
         Alcotest.test_case "keeper preflight reuses setup tool estimate" `Quick
           test_keeper_preflight_reuses_setup_tool_estimate;
-        Alcotest.test_case "keeper budget estimates use context facade" `Quick
-          test_keeper_budget_estimates_use_context_facade;
+        Alcotest.test_case "keeper context estimates use context facade" `Quick
+          test_keeper_context_estimates_use_context_facade;
         Alcotest.test_case "keeper passes context window to OAS thresholds" `Quick
           test_keeper_passes_context_window_to_oas_thresholds;
         Alcotest.test_case "OAS thresholds keep output max_tokens separate" `Quick

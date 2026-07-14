@@ -577,15 +577,9 @@ let tool_execute_typed_pipeline_args ~cwd =
         `List
           [
             `Assoc
-              [
-                ("executable", `String "printf");
-                ("argv", `List [ `String "typed" ]);
-              ];
+              [("argv", `List [ `String "printf"; `String "typed" ])];
             `Assoc
-              [
-                ("executable", `String "wc");
-                ("argv", `List [ `String "-c" ]);
-              ];
+              [("argv", `List [ `String "wc"; `String "-c" ])];
           ] );
       ("cwd", `String cwd);
       ("timeout_sec", `Float 5.0);
@@ -594,11 +588,10 @@ let tool_execute_typed_pipeline_args ~cwd =
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
-let tool_execute_typed_exec_args ?(argv = []) ~cwd executable =
+let tool_execute_typed_exec_args ?(argv = []) ~cwd program =
   `Assoc
     [
-      ("executable", `String executable);
-      ("argv", json_string_list argv);
+      ("argv", json_string_list (program :: argv));
       ("cwd", `String cwd);
       ("timeout_sec", `Float 5.0);
     ]
@@ -609,12 +602,9 @@ let tool_execute_typed_pipeline_args_of ~cwd stages =
       ( "pipeline",
         `List
           (List.map
-             (fun (executable, argv) ->
+             (fun (program, argv) ->
                `Assoc
-                 [
-                   ("executable", `String executable);
-                   ("argv", json_string_list argv);
-                 ])
+                 [("argv", json_string_list (program :: argv))])
              stages) );
       ("cwd", `String cwd);
       ("timeout_sec", `Float 5.0);
@@ -627,10 +617,7 @@ let tool_execute_typed_single_stage_pipeline_args ~cwd =
         `List
           [
             `Assoc
-              [
-                ("executable", `String "printf");
-                ("argv", `List [ `String "typed" ]);
-              ];
+              [("argv", `List [ `String "printf"; `String "typed" ])];
           ] );
       ("cwd", `String cwd);
       ("timeout_sec", `Float 5.0);
@@ -639,8 +626,7 @@ let tool_execute_typed_single_stage_pipeline_args ~cwd =
 let tool_execute_typed_env_wrapper_args ~cwd =
   `Assoc
     [
-      ("executable", `String "env");
-      ("argv", `List [ `String "id" ]);
+      ("argv", `List [ `String "env"; `String "id" ]);
       ("cwd", `String cwd);
       ("timeout_sec", `Float 5.0);
     ]
@@ -1792,7 +1778,7 @@ let test_execute_blocks_file_redirect_before_docker () =
    | Some false | None -> ());
   Alcotest.(check (option string))
     "typed boundary error"
-    (Some "Typed Shell IR input is required. Provide executable/argv or pipeline.")
+    (Some "Typed Shell IR input is required. Provide non-empty argv or pipeline.")
     (parse_string_field raw "error");
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)

@@ -4,7 +4,7 @@
 type error_classification =
   | Transient_network
   | Transient_internal_runner
-  | Transient_oas_timeout
+  | Oas_execution_observed
   | Transient_rate_limit
   | Transient_capacity
   | Non_transient
@@ -44,7 +44,9 @@ val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the keeper should preserve liveness and skip consecutive
-    failure counting, even if same-turn retry is still disabled. *)
+    failure counting, even if same-turn retry is still disabled. Typed OAS
+    turn-limit and execution-time observations are included defensively so a
+    boundary regression cannot promote them into Keeper lifecycle authority. *)
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for accept-rejected responses tagged by the built-in keeper
@@ -52,9 +54,8 @@ val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the turn runner should record the immediate
-    ["keeper cycle FAILED"] line as WARN instead of ERROR because the
-    heartbeat policy layer will handle the failure as a provider/OAS budget
-    strike with cooldown or work-level pause. *)
+    ["keeper cycle FAILED"] line as WARN instead of ERROR. This controls log
+    severity only; it grants no retry, admission, pause, or blocker authority. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when a structured error indicates context overflow. *)
@@ -82,8 +83,6 @@ val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
 type degraded_retry_reason =
   | Hard_quota
   | Resumable_cli_session
-  | Provider_timeout
-  | Turn_timeout
   | Runtime_candidates_filtered
   | Runtime_exhausted
   | Capacity_backpressure
@@ -172,8 +171,7 @@ val degraded_rotation_after_recoverable_error :
   degraded_retry option
 
 val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
-(** True when [err] is a provider-timeout class failure (deadline,
-    runtime timeout, budget retry). Live caller:
+(** True when [err] is a typed provider-timeout class failure. Live caller:
     [keeper_unified_turn.ml] degraded-retry classification. *)
 
 val is_receipt_lost_error : Agent_sdk.Error.sdk_error -> bool

@@ -10,21 +10,6 @@
    tests. Wire bytes are preserved: payload-bearing variants carry the
    original string and [to_wire] returns it verbatim. *)
 
-(* SSOT for the turn/time-budget cut-off prefixes. These were previously
-   defined in [Keeper_execution_receipt]; moved down here so the typed
-   classifier owns them and [Keeper_execution_receipt] re-exports for
-   backward compatibility (the encoder [Keeper_agent_error] still reads
-   them through [Keeper_execution_receipt]). A turn cut off by the
-   per-call turn cap ([MaxTurnsExceeded]), the wall-clock ceiling
-   ([AgentExecutionTimeout]), or the progress-aware idle watchdog
-   ([AgentExecutionIdleTimeout]) did NOT violate the completion contract — it
-   never reached a verdict; the supervisor auto-resumes from the
-   checkpoint. *)
-let terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"
-let terminal_prefix_execution_timeout = "agent_error_execution_timeout"
-let terminal_prefix_idle_timeout = "agent_error_idle_timeout"
-let terminal_prefix_turn_budget_exhausted = "turn_budget_exhausted"
-
 (* SSOT for the two retry-recoverable transient wire codes inside the
    [api_error_*] / [Provider_runtime_failure] family. These are the wire
    forms of exactly the [Agent_sdk.Error] variants that
@@ -34,17 +19,9 @@ let terminal_prefix_turn_budget_exhausted = "turn_budget_exhausted"
    same strings; it references these constants so encoder and the
    consumer-side classifier cannot drift.
 
-   Agent execution-budget expiry has its own typed
-   [Agent_sdk.Error.AgentExecutionTimeout] constructors and therefore never
-   enters this API-error wire family. *)
+   Agent execution observations never enter this API-error wire family. *)
 let wire_api_error_timeout = "api_error_timeout"
 let wire_api_error_network = "api_error_network"
-
-let is_auto_recoverable_turn_budget_terminal terminal_reason =
-  String.starts_with ~prefix:terminal_prefix_max_turns_exceeded terminal_reason
-  || String.starts_with ~prefix:terminal_prefix_execution_timeout terminal_reason
-  || String.starts_with ~prefix:terminal_prefix_idle_timeout terminal_reason
-;;
 
 type t =
   | Runtime_exhausted of string
@@ -52,8 +29,6 @@ type t =
   | Config_or_auth of string
   | Provider_runtime_failure of string
   | Internal_error of string
-  | Turn_budget_exhausted of string
-  | Auto_recoverable_budget of string
   | Pre_dispatch_success of string
   | Unknown of string
 
@@ -91,10 +66,6 @@ let of_wire wire =
   then Provider_runtime_failure wire
   else if String.equal wire "internal_error"
   then Internal_error wire
-  else if String.starts_with ~prefix:terminal_prefix_turn_budget_exhausted wire
-  then Turn_budget_exhausted wire
-  else if is_auto_recoverable_turn_budget_terminal wire
-  then Auto_recoverable_budget wire
   else if String.equal wire "pre_dispatch_success"
   then Pre_dispatch_success wire
   else Unknown wire
@@ -110,8 +81,6 @@ let to_wire = function
   | Config_or_auth wire -> wire
   | Provider_runtime_failure wire -> wire
   | Internal_error wire -> wire
-  | Turn_budget_exhausted wire -> wire
-  | Auto_recoverable_budget wire -> wire
   | Pre_dispatch_success wire -> wire
   | Unknown wire -> wire
 ;;
@@ -139,8 +108,6 @@ let is_transient_provider_runtime_failure = function
   | Capacity_backpressure _
   | Config_or_auth _
   | Internal_error _
-  | Turn_budget_exhausted _
-  | Auto_recoverable_budget _
   | Pre_dispatch_success _
   | Unknown _ -> false
 ;;

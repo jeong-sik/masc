@@ -175,8 +175,8 @@ type t =
 
 val stop_reason_to_string : Runtime_agent.stop_reason -> string
 
-(** Receipt terminal-reason projection for the runtime-stop axis. Unlike
-    {!stop_reason_to_string}, normal completion serialises as canonical
+(** Receipt terminal-reason projection for the runtime-stop axis. Normal
+    completion and observational execution-limit stops serialise as canonical
     [Keeper_turn_disposition.Success]. *)
 val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> string
 
@@ -222,28 +222,11 @@ type operator_disposition_reason =
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_input_required
-  | Reason_turn_budget_exhausted
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_unmapped_runtime_state
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string
-
-(** Terminal-reason prefixes for OAS agent-execution errors that exhaust a
-    turn/time budget before the turn completes. SSOT: the encoder
-    [Keeper_agent_error.agent_error_terminal_reason_code] builds the wire
-    strings from these, and [operator_disposition] /
-    [is_auto_recoverable_turn_budget_terminal] match on them. *)
-val terminal_prefix_max_turns_exceeded : string
-
-val terminal_prefix_execution_timeout : string
-val terminal_prefix_idle_timeout : string
-
-(** [true] when [terminal_reason] is a turn/time-budget cut-off
-    ([MaxTurnsExceeded] / [AgentExecutionTimeout] / [AgentExecutionIdleTimeout]):
-    retryable from its checkpoint, so it must NOT be classified as a
-    completion-contract failure. *)
-val is_auto_recoverable_turn_budget_terminal : string -> bool
 
 (** Derived display pair (disposition, reason) computed from receipt fields.
     Exposed for test access; the runtime path consumes it via [append]. *)

@@ -14,6 +14,49 @@ val resolve_active_goal_ids :
   string list ->
   (string list, string) result
 
+(** Outcome of {!revival_decision}. *)
+type revival_decision = {
+  dead_revival_requested : bool;
+      (** Route this [masc_keeper_up] call through
+          {!Keeper_dead_revival_transaction.revive} instead of the normal
+          CAS-merge write path. *)
+  clear_pause_state : bool;
+      (** Clear [paused], [latched_reason], and [runtime.last_blocker] on
+          the updated meta before it is persisted. *)
+}
+
+(** Decide the dead-revival / pause-clearing outcome for an existing
+    keeper's [masc_keeper_up] call, from its persisted latch/pause state
+    alone. Pure and total -- does not read or write the meta store.
+
+    [dead_revival_requested] is true exactly when [latched_reason] is
+    [Dead_tombstone], independent of [paused]. The canonical setter
+    ([Keeper_shutdown_finalize]'s [dead_tombstone_meta]) always pairs
+    [Dead_tombstone] with [paused = true], but a resume writer that clears
+    [paused] without clearing the latch can strand a keeper at
+    [paused = false] + [Dead_tombstone] (see
+    [Keeper_meta_contract.dead_tombstone_pause_violation]). Lifecycle
+    admission denies by the latch regardless of [paused], so a stranded
+    keeper needs a revival path that does not require [paused = true].
+
+    This does not widen who can call [update_keeper]: [masc_keeper_up] is
+    already a general MCP tool ({!Tool_catalog}), registered in
+    {!Keeper_tool_surface}'s in-process dispatch, and reachable from the
+    dashboard HTTP handler and [masc_keeper_recover]'s automated down/up
+    sequence ({!Operator_control}). What it widens is the set of
+    legacy-corrupted states that a call, once made, normalizes: previously
+    only the canonical [paused = true] + [Dead_tombstone] pairing reached
+    the revival transaction; the stranded [paused = false] + [Dead_tombstone]
+    split now does too.
+
+    [clear_pause_state] is [paused || dead_revival_requested]: an ordinary
+    [masc_keeper_up] call on a keeper that is merely paused resumes it, and
+    a dead-revival always clears pause/latch state as well. *)
+val revival_decision :
+  latched_reason:Keeper_latched_reason.t option ->
+  paused:bool ->
+  revival_decision
+
 (** Update an existing keeper's meta record. Validates tool-access
     transitions, resolves active goals, applies parsed-arg overrides,
     persists the new meta, and broadcasts state-machine events.

@@ -36,9 +36,8 @@ Allowed top-level fields:
 
 | Field | Type | Required? |
 |---|---|---|
-| `executable` | string | required for single-process branch |
-| `argv` | array of strings | optional; contains arguments after `executable` |
-| `pipeline` | array of `{executable, argv}` stages | alternative branch |
+| `argv` | non-empty array of strings | required for single-process branch; element 0 is the program |
+| `pipeline` | array of `{argv}` stages | alternative branch; every stage has a non-empty process vector |
 | `env` | object | optional |
 | `cwd` | string | optional |
 | `timeout_sec` | number | optional |
@@ -49,7 +48,7 @@ Allowed top-level fields:
 Schema properties:
 
 - `additionalProperties: false`
-- `oneOf`: either `executable` with optional `argv` **or** `pipeline`, never both.
+- `oneOf`: either one non-empty `argv` **or** `pipeline`, never both.
 
 Therefore **any of these inputs are rejected**:
 
@@ -58,13 +57,14 @@ Therefore **any of these inputs are rejected**:
 {"args": {"command": "ls -la"}}
 {"command": "ls -la"}
 {"cmd": "ls -la"}
-{"executable": "ls", "argv": ["-la"], "args": {}}
+{"executable": "ls", "argv": ["-la"]}
+{"argv": ["ls", "-la"], "args": {}}
 ```
 
 The correct shape is:
 
 ```json
-{"executable": "ls", "argv": ["-la"]}
+{"argv": ["ls", "-la"]}
 ```
 
 ---
@@ -130,14 +130,12 @@ When MASC exposes `Execute` to OAS agents:
 
 The schema is flattened into a flat `tool_param list`. This loses `oneOf`, `additionalProperties: false`, and mutual-exclusion constraints. The model may therefore generate invalid shapes more easily, including adding spurious fields like `args`.
 
-### 4.4 Legacy alias `execute_command` / `Bash` / `Shell`
+### 4.4 Retired aliases and wrappers
 
-OAS has an alias layer (`oas/lib/agent/agent_tool_name_alias.ml:88-110`) that normalizes:
-
-- `execute_command` / `Bash` / `Shell` → `Execute`
-- Rewrites `{"command":"git status --short"}` → `{"executable":"git","argv":["status","--short"]}`
-
-But if the alias layer is **not** invoked (e.g., the model calls `Execute` directly, or the tool name is already `Execute`), no normalization happens. A `command`/`cmd`/`args` legacy field then reaches MASC validation and is rejected.
+MASC does not normalize `execute_command`, `Bash`, `Shell`, `cmd`, `command`,
+`args`, or the retired `executable` field into an Execute request. Provider and
+tool-name boundaries must produce the canonical typed call directly. Any
+non-canonical field that reaches MASC is rejected explicitly.
 
 ### 4.5 Persona / prompt examples
 
@@ -155,11 +153,11 @@ This is correct, but if any few-shot example, memory, or older prompt template s
 
 The exact upstream source is **not yet proven** without a raw provider response or captured `ToolUse.input`. Given the current code, the defensible scenarios are:
 
-1. **Model hallucinated `args`** — the flattened OAS bridge schema plus a confused prompt caused the model to emit `{"args": ...}` instead of `{"executable": ..., "argv": ...}`.
-2. **Legacy alias not applied** — the model called `Execute` directly while thinking it was `execute_command`/`Bash`, and included a `command` or `args` field. (The error would normally say `command`/`cmd` is unsupported, but if the field is `args`, this scenario is also possible.)
+1. **Model hallucinated `args`** — the flattened OAS bridge schema plus a confused prompt caused the model to emit `{"args": ...}` instead of the canonical `{"argv": ["program", ...]}`.
+2. **Retired shape emitted** — the model called `Execute` while using a `command`, `args`, or `executable` field learned from another tool contract.
 3. **Provider parser edge case** — possible only if capture proves a provider parser returned `ToolUse.input = {"args": ...}`. The normal Gemini non-streaming and streaming paths already unwrap `functionCall.args` into the inner object, so Gemini should not be treated as the leading suspect without that evidence.
 
-The error says **`args`**, not `command`/`cmd`, which is consistent with a model-level envelope hallucination or an unverified provider-specific parser edge. The read-side MASC normalization in this PR is still justified as defense-in-depth for that exact envelope shape; it should not be framed as proof that the Gemini parser is broken.
+The error says **`args`**, not `command`/`cmd`, which is consistent with a model-level envelope hallucination or an unverified provider-specific parser edge. MASC must preserve this as explicit invalid input rather than guessing a canonical request from it.
 
 ---
 
@@ -194,11 +192,10 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king
 
 ### Immediate mitigation
 
-1. **Add defensive normalization in MASC for `Execute`**
-   - In the validation boundary, unwrap only the exact provider/tool-call envelope shape:
-     `{"args": {"executable": ..., "argv": ...}}` → `{"executable": ..., "argv": ...}`.
-   - Keep `{"command": ...}`, `{"cmd": ...}`, `{"args": [...]}`, and mixed envelopes rejected unless a separate policy explicitly reintroduces legacy shell-string coercion.
-   - This preserves the typed argv contract while tolerating one narrow envelope shape that providers/models commonly use around function arguments.
+1. **Keep one canonical MASC input contract**
+   - Accept only `{"argv": ["program", ...]}` or the typed `pipeline` branch.
+   - Keep `{"command": ...}`, `{"cmd": ...}`, `{"args": ...}`, `{"executable": ...}`, JSON-string composites, and mixed envelopes rejected.
+   - Normalize provider-specific function-call envelopes at the provider codec boundary before constructing `ToolUse.input`; never guess process tokens in MASC.
 
 2. **Only consider `tool_use_recovery.ml` changes with separate evidence**
    - Text-block recovery currently does not recognize `args`, so text that merely resembles a tool call should stay text.

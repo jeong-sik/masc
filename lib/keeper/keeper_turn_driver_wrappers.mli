@@ -48,7 +48,6 @@ val run_named_with_masc_tools :
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
-  ?max_tokens:int ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->

@@ -89,10 +89,8 @@ val save_file_atomic : string -> string -> (unit, string) Result.t
     filename shape. The caller owns the returned channel and file. *)
 val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
 
-(** [true] iff [name] matches either the canonical [.atomic_*.tmp]
-    pattern produced by this module or the retired
-    [.keeper_atomic_*.tmp] pattern. Exposed for tests and recovery
-    sweeps. *)
+(** [true] iff [name] matches the canonical [.atomic_*.tmp] pattern produced by
+    this module. Exposed for tests and recovery sweeps. *)
 val is_atomic_orphan_name : string -> bool
 
 type atomic_orphan_cleanup_scope =

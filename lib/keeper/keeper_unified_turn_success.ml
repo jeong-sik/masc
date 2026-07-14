@@ -69,9 +69,12 @@ let acknowledge_pending_messages
 
 let terminal_outcome_of_result result =
   match result.Keeper_agent_run.stop_reason with
-  | Runtime_agent.Completed -> Terminal_done
+  | Runtime_agent.Completed
+  | Runtime_agent.TurnLimitObserved _
+  | Runtime_agent.ExecutionTimeoutObserved _
+  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
+    Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
-  | Runtime_agent.TurnBudgetExhausted _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
@@ -104,7 +107,6 @@ let append_metrics_snapshot
       ~latency_ms
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
-      ~last_provider_timeout_budget
       ~terminal_outcome
   =
   let any_pending =
@@ -140,8 +142,6 @@ let append_metrics_snapshot
       ~message_count:lifecycle.message_count
       ~compaction:lifecycle.compaction
       ~handoff_json:lifecycle.handoff_json
-      ?provider_timeout_plan_json:
-        (Option.map KCB.provider_timeout_budget_to_yojson last_provider_timeout_budget)
       ~count_completed_turn:(terminal_outcome_is_completed_turn terminal_outcome)
       ()
   with
@@ -272,8 +272,12 @@ let emit_usage_metrics_and_log
   let outcome_str =
     match result.Keeper_agent_run.stop_reason with
     | Runtime_agent.Completed -> "completed"
-    | Runtime_agent.TurnBudgetExhausted { turns_used; limit; _ } ->
-      Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit
+    | Runtime_agent.TurnLimitObserved { turns_used; limit; _ } ->
+      Printf.sprintf "turn_limit_observed(%d/%d)" turns_used limit
+    | Runtime_agent.ExecutionTimeoutObserved { elapsed_sec; turn_count; _ } ->
+      Printf.sprintf "execution_timeout_observed(%.1fs/%d)" elapsed_sec turn_count
+    | Runtime_agent.ExecutionIdleTimeoutObserved { idle_sec; turn_count; _ } ->
+      Printf.sprintf "execution_idle_timeout_observed(%.1fs/%d)" idle_sec turn_count
     | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
@@ -287,16 +291,18 @@ let emit_usage_metrics_and_log
     match terminal_outcome with
     | Terminal_done -> "success"
     | Terminal_input_required -> "input_required"
-    | Terminal_checkpoint ->
+     | Terminal_checkpoint ->
       (match result.stop_reason with
-       | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
        | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
        | Runtime_agent.InputRequired _ -> "input_required"
        | Runtime_agent.ToolFailureRecoveryDeferred _ ->
          "tool_failure_recovery_deferred"
-       | Runtime_agent.Completed -> "success")
+       | Runtime_agent.Completed
+       | Runtime_agent.TurnLimitObserved _
+       | Runtime_agent.ExecutionTimeoutObserved _
+       | Runtime_agent.ExecutionIdleTimeoutObserved _ -> "success")
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string Turns)
@@ -410,11 +416,6 @@ let terminal_reason_of_outcome result = function
       Keeper_turn_disposition.Input_required
   | Terminal_checkpoint ->
     (match result.Keeper_agent_run.stop_reason with
-     | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-       Keeper_turn_terminal.of_disposition
-         ~source:"runtime_stop_reason"
-         (Keeper_turn_disposition.Turn_budget_exhausted
-            { detail = None; used = turns_used; limit })
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.InputRequired _ ->
@@ -422,7 +423,10 @@ let terminal_reason_of_outcome result = function
          ~source:"runtime_stop_reason"
          Keeper_turn_disposition.Input_required
      | Runtime_agent.ToolFailureRecoveryDeferred _
-     | Runtime_agent.Completed ->
+     | Runtime_agent.Completed
+     | Runtime_agent.TurnLimitObserved _
+     | Runtime_agent.ExecutionTimeoutObserved _
+     | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
        Keeper_turn_terminal.success ())
 
 let persist_terminal_turn_meta
@@ -479,12 +483,27 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with
-  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "runtime reported turn budget checkpoint (%d/%d); Keeper remains healthy \
-       and resumes on its next lane cycle"
+  | Runtime_agent.TurnLimitObserved { turns_used; limit } ->
+    Log.Keeper.warn ~keeper_name:updated_meta.name
+      "runtime reported unexpected turn-limit observation (%d/%d); no Keeper checkpoint, blocker, retry, or follow-up action was created"
       turns_used
       limit;
+    reset_failure_state ()
+  | Runtime_agent.ExecutionTimeoutObserved
+      { elapsed_sec; timeout_sec; turn_count; _ } ->
+    Log.Keeper.warn ~keeper_name:updated_meta.name
+      "runtime reported unexpected execution timeout observation (elapsed=%.1fs timeout=%.1fs turns=%d); no Keeper blocker, retry, or follow-up action was created"
+      elapsed_sec
+      timeout_sec
+      turn_count;
+    reset_failure_state ()
+  | Runtime_agent.ExecutionIdleTimeoutObserved
+      { idle_sec; idle_timeout_sec; turn_count; _ } ->
+    Log.Keeper.warn ~keeper_name:updated_meta.name
+      "runtime reported unexpected execution idle-timeout observation (idle=%.1fs timeout=%.1fs turns=%d); no Keeper blocker, retry, or follow-up action was created"
+      idle_sec
+      idle_timeout_sec
+      turn_count;
     reset_failure_state ()
   | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
     (* A clean, intentional yield to a parked chat, not a degraded outcome:
@@ -575,7 +594,6 @@ let handle
       ~degraded_retry_applied
       ~degraded_retry_runtime
       ~fallback_reason
-      ~last_provider_timeout_budget
       ~current_turn_blocker_info
       ~keeper_turn_id
       result
@@ -611,7 +629,6 @@ let handle
     ~latency_ms
     ~turn_cost
     ~lifecycle
-    ~last_provider_timeout_budget
     ~terminal_outcome;
   let turn_mode = KUM.turn_mode_of_result result in
   let turn_mode_label = KUM.turn_mode_to_string turn_mode in

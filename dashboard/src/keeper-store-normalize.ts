@@ -314,38 +314,6 @@ export function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number
     : null
 }
 
-function normalizeTurnBudget(raw: unknown): Keeper['turn_budget'] {
-  if (!isRecord(raw)) return null
-  const readSlot = (v: unknown) => {
-    if (!isRecord(v)) return null
-    const value = asNumber(v.value)
-    if (value == null) return null
-    let source: 'override' | 'env' | 'override_invalid' = 'env'
-    if (v.source === 'override') source = 'override'
-    else if (v.source === 'override_invalid') source = 'override_invalid'
-    const envDefault = asNumber(v.env_default) ?? value
-    const envVar = asString(v.env_var) ?? ''
-    const rawOverride = asNumber(v.raw_override)
-    return {
-      value,
-      source,
-      env_default: envDefault,
-      env_var: envVar,
-      raw_override: rawOverride ?? null,
-    }
-  }
-  const reactive = readSlot(raw.reactive)
-  const scheduled = readSlot(raw.scheduled_autonomous)
-  if (!reactive || !scheduled) return null
-  return {
-    reactive,
-    scheduled_autonomous: scheduled,
-    manifest_path: asString(raw.manifest_path) ?? null,
-    clamp_min: asNumber(raw.clamp_min) ?? 1,
-    clamp_max: asNumber(raw.clamp_max) ?? 50,
-  }
-}
-
 function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent | null {
   if (!isRecord(raw)) return null
   const kind = asString(raw.kind)
@@ -487,18 +455,6 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
               segments: promptSegments,
             }
           : null
-      const rawProviderTimeoutPlan = isRecord(item.provider_timeout_plan) ? item.provider_timeout_plan : null
-      const provider_timeout_plan =
-        rawProviderTimeoutPlan != null
-          ? {
-              oas_timeout_sec: asNumber(rawProviderTimeoutPlan.oas_timeout_sec) ?? null,
-              adaptive_timeout_sec: asNumber(rawProviderTimeoutPlan.adaptive_timeout_sec) ?? null,
-              keeper_turn_timeout_sec: asNumber(rawProviderTimeoutPlan.keeper_turn_timeout_sec) ?? null,
-              remaining_turn_budget_sec: asNumber(rawProviderTimeoutPlan.remaining_turn_budget_sec) ?? null,
-              estimated_input_tokens: asNumber(rawProviderTimeoutPlan.estimated_input_tokens) ?? null,
-              source: typeof rawProviderTimeoutPlan.source === 'string' ? rawProviderTimeoutPlan.source : null,
-            }
-          : null
       const rawCtxComposition = isRecord(item.ctx_composition) ? item.ctx_composition : null
       const rawCtxSegments =
         rawCtxComposition && isRecord(rawCtxComposition.segments) ? rawCtxComposition.segments : null
@@ -561,7 +517,6 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoff_new_generation: handoffNewGeneration,
         prompt_fingerprint: promptFingerprint,
         prompt_metrics,
-        provider_timeout_plan,
         ctx_composition,
         input_tokens: inputTokens,
         output_tokens: outputTokens,
@@ -817,7 +772,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         latest_tool_call_count: asNumber(row.latest_tool_call_count) ?? null,
         tool_audit_source: asString(row.tool_audit_source) ?? null,
         tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
-        turn_budget: normalizeTurnBudget(row.turn_budget),
         diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
         conversation_tail_count: asNumber(row.conversation_tail_count),
         k2k_count: asNumber(row.k2k_count),

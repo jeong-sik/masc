@@ -72,10 +72,6 @@ let finalize
    | Error err ->
      let status, exception_kind =
        match err with
-       | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
-         "timeout", Some "oas_agent_execution_timeout"
-       | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
-         "timeout", Some "oas_agent_idle_timeout"
        | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
          "timeout", Some "outer_oas_timeout"
        | _ -> "error", Some "outer_oas_error"

@@ -11,6 +11,9 @@
 type cancel_reason =
   | Cancelled_supervisor_stop
       (** Operator/supervisor requested keeper shutdown. *)
+  | Cancelled_external
+      (** Parent fiber or enclosing switch cancelled the turn without a
+          Keeper supervisor stop signal. *)
   | Cancelled_phase_gate_close
       (** Phase transition closed an in-flight turn. *)
   | Cancelled_provider_timeout

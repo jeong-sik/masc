@@ -107,7 +107,7 @@ type max_context_resolution =
   { requested_override : int option
   ; primary_budget : int
   ; runtime_budget : int
-  ; turn_budget : int
+  ; requested_context_window : int
   ; effective_budget : int
   }
 

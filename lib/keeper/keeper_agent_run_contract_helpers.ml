@@ -28,11 +28,13 @@ let observed_completion_evidence
   match stop_reason with
   | Runtime_agent.InputRequired _
   | Runtime_agent.ToolFailureRecoveryDeferred _
-  | Runtime_agent.TurnBudgetExhausted _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Keeper_execution_receipt.Completion_observation_unknown
-  | Runtime_agent.Completed ->
+  | Runtime_agent.Completed
+  | Runtime_agent.TurnLimitObserved _
+  | Runtime_agent.ExecutionTimeoutObserved _
+  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
     if actual_keeper_tool_names <> []
     then Keeper_execution_receipt.Completion_tool_execution_observed
     else if response_text_present

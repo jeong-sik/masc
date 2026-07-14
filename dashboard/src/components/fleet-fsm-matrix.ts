@@ -390,7 +390,7 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
     return 'runtime auth/config receipt 확인'
   }
   if (execution.terminal_reason_code === 'api_error_timeout') {
-    return 'runtime timeout budget/lane 확인'
+    return 'runtime lane의 provider timeout receipt 확인'
   }
   if (execution.operator_disposition === 'pause_human') {
     return 'blocker gate/approval 상태와 최신 receipt 확인'

@@ -892,7 +892,7 @@ describe('KeeperConversationPanel', () => {
     })
   })
 
-  it('separates durable server pending/inflight counts from browser-local drafts', async () => {
+  it('separates every durable server queue state from browser-local drafts', async () => {
     mockedToolsData.value = {
       keeper_waiting_inventory: {
         keepers: [
@@ -900,10 +900,12 @@ describe('KeeperConversationPanel', () => {
             keeper_name: 'sangsu',
             state: 'busy',
             waiting_on: [],
-            waiting_count: 3,
+            waiting_count: 5,
             sources: {
               chat_queue_pending: 2,
               chat_queue_inflight: 1,
+              chat_queue_recovery_required: 1,
+              chat_queue_persistence_blocked: 1,
             },
             next_action: 'keeper_chat_consumer_drain',
           },
@@ -919,8 +921,12 @@ describe('KeeperConversationPanel', () => {
       const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
       expect(status?.getAttribute('data-server-chat-queue-pending')).toBe('2')
       expect(status?.getAttribute('data-server-chat-queue-inflight')).toBe('1')
+      expect(status?.getAttribute('data-server-chat-queue-recovery-required')).toBe('1')
+      expect(status?.getAttribute('data-server-chat-queue-persistence-blocked')).toBe('1')
       expect(status?.textContent).toContain('서버 대기 2')
       expect(status?.textContent).toContain('처리 중 1')
+      expect(status?.textContent).toContain('배송 복구 확인 필요 1')
+      expect(status?.textContent).toContain('영속화 조정 필요 1')
       expect(container.textContent).not.toContain('브라우저 초안 · 서버 미접수')
     })
   })
@@ -983,7 +989,13 @@ describe('KeeperConversationPanel', () => {
   })
 
   it('shows each durable receipt lifecycle in messenger mode with receipt identity', async () => {
-    const receiptStates = ['pending', 'inflight', 'delivered', 'failed'] as const
+    const receiptStates = [
+      'pending',
+      'inflight',
+      'recovery_required',
+      'delivered',
+      'failed',
+    ] as const
     keeperThreads.value = {
       sangsu: receiptStates.map((queueState, index) => ({
         id: `receipt-${queueState}`,
@@ -1016,6 +1028,7 @@ describe('KeeperConversationPanel', () => {
     await waitFor(() => {
       expect(container.querySelector('[data-chat-queue-state-badge="pending"]')?.textContent).toContain('서버 대기')
       expect(container.querySelector('[data-chat-queue-state-badge="inflight"]')?.textContent).toContain('Keeper 처리 중')
+      expect(container.querySelector('[data-chat-queue-state-badge="recovery_required"]')?.textContent).toContain('복구 확인 필요')
       expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.textContent).toContain('처리 완료')
       expect(container.querySelector('[data-chat-queue-state-badge="failed"]')?.textContent).toContain('처리 실패')
       expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.getAttribute('title')).toContain('chatq_')

@@ -839,6 +839,8 @@ describe('fetchTlcResults', () => {
 describe('fetchDashboardTools', () => {
   it('parses the shutdown admission source without accepting source drift', () => {
     expect(parseDashboardKeeperWaitingSource('turn_admission_shutdown')).toBe('turn_admission_shutdown')
+    expect(parseDashboardKeeperWaitingSource('chat_queue_recovery_required')).toBe('chat_queue_recovery_required')
+    expect(parseDashboardKeeperWaitingSource('chat_queue_persistence_blocked')).toBe('chat_queue_persistence_blocked')
     expect(parseDashboardKeeperWaitingSource(' turn_admission_shutdown ')).toBeNull()
     expect(parseDashboardKeeperWaitingSource('turn_admission_stopping')).toBeNull()
     expect(parseDashboardKeeperWaitingSource(null)).toBeNull()
@@ -1783,8 +1785,6 @@ describe('fetchKeeperConfig', () => {
       execution: {
         models: 'llama:test-balanced',
         active_model: 'llama:test-balanced',
-        per_provider_timeout_sec: 12.5,
-        per_provider_timeout_mode: 'override',
         verify: 'true',
         selected_runtime_id: 'keeper_unified',
         selected_runtime_canonical: 'keeper_unified',
@@ -1900,8 +1900,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
-    expect(result.execution.per_provider_timeout_sec).toBe(12.5)
-    expect(result.execution.per_provider_timeout_mode).toBe('override')
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
     // deny_list count is derived from the array (deny_list_count field dropped).
     expect(result.hooks?.deny_list).toEqual(['Execute'])
@@ -1978,30 +1976,6 @@ describe('fetchKeeperConfig', () => {
     })
   })
 
-  it('normalizes default per-provider timeout mode without legacy label', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          name: 'keeper-sangsu',
-          execution: {
-            per_provider_timeout_sec: null,
-            per_provider_timeout_mode: 'legacy-value',
-          },
-        }),
-        {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      ),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchKeeperConfig('keeper-sangsu')
-
-    expect(result.execution.per_provider_timeout_sec).toBeNull()
-    expect(result.execution.per_provider_timeout_mode).toBe('turn_budget_default')
-  })
-
   it('preserves missing keeper config latency as null instead of zero', async () => {
     const cases: Array<[string, Record<string, unknown>]> = [
       ['null', { last_latency_ms: null }],
@@ -2043,9 +2017,7 @@ describe('fetchKeeperConfig', () => {
       ['supervisor_paused', 'Supervisor 일시정지'],
       ['synthetic_stall', '합성 상태 정체'],
       ['self_imposed_idle', '자체 대기'],
-      ['sdk_max_turns_exceeded', 'SDK 최대 턴 초과'],
-      ['sdk_token_budget_exceeded', 'SDK 토큰 예산 초과'],
-      ['sdk_cost_budget_exceeded', 'SDK 비용 예산 초과'],
+      ['sdk_context_window_exceeded', 'SDK 컨텍스트 윈도 초과'],
       ['sdk_unrecognized_stop_reason', 'SDK 미식별 정지 사유'],
       ['sdk_idle_detected', 'SDK Idle 감지'],
       ['sdk_guardrail_violation', 'SDK 가드레일 위반'],
@@ -2454,7 +2426,6 @@ describe('fetchRuntimeProviders', () => {
                   supports_inline_tools: true,
                   argv_prompt_preflight: false,
                   uses_anthropic_caching: false,
-                  max_turns_per_attempt: 3,
                 },
                 custom_header_count: 2,
                 connect_timeout_s: 120,
@@ -2743,7 +2714,7 @@ describe('fetchRuntimeModelMetrics', () => {
             {
               ts_unix: 1,
               outcome: 'success',
-              stop_reason: 'turn_budget_exhausted(3/3)',
+              stop_reason: 'turn_limit_observed:turns=3,limit=3',
               turn_lane: 'text_only',
               input_tokens: null,
               output_tokens: null,
@@ -2801,7 +2772,7 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.total_input_tokens).toBeNull()
     expect(metric.total_cost_usd).toBeNull()
     expect(metric.recent_entries?.[0]?.outcome).toBe('success')
-    expect(metric.recent_entries?.[0]?.stop_reason).toBe('turn_budget_exhausted(3/3)')
+    expect(metric.recent_entries?.[0]?.stop_reason).toBe('turn_limit_observed:turns=3,limit=3')
     expect(metric.recent_entries?.[0]?.turn_lane).toBe('text_only')
     expect(metric.recent_entries?.[0]?.input_tokens).toBeNull()
     expect(metric.recent_entries?.[0]?.cache_read_tokens).toBeNull()

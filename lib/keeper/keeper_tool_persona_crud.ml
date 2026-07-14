@@ -4,15 +4,26 @@ open Tool_args
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-let personas_dir () =
-  match Sys.getenv_opt "MASC_PERSONAS_DIR" with
-  | Some d -> d
-  | None ->
-      let base = match Sys.getenv_opt "MASC_BASE" with
-        | Some b -> b
-        | None -> Config_dir_resolver.base_path_or_cwd ()
-      in
-      Filename.concat base "personas"
+(* Write/read personas at the same location the loaders read from. The list
+   loader (Keeper_types_profile_persona) resolves persona roots exclusively
+   through Config_dir_resolver.personas_dirs (MASC_PERSONAS_DIR, else the
+   resolved CONFIG_ROOT/personas); its own comment warns that MASC_BASE/cwd
+   fallbacks "make the dashboard lie about the actual source of truth". When
+   the resolver disowns every root this returns [Error] instead of inventing
+   a writable fallback: a profile written to a root the loaders never read is
+   permanently invisible (the original #24340 bug shape), so refusing loudly
+   is strictly better than succeeding silently. *)
+let personas_dir_of_roots (roots : string list) : (string, string) result =
+  match roots with
+  | dir :: _ -> Ok dir
+  | [] ->
+      Error
+        "persona root unresolved: Config_dir_resolver.personas_dirs returned \
+         no roots (set MASC_PERSONAS_DIR or repair the config root); refusing \
+         to write to a fallback location the persona loaders never read"
+
+let personas_dir () : (string, string) result =
+  personas_dir_of_roots (Config_dir_resolver.personas_dirs ())
 
 (** Reject any [persona_name] that is not a single, self-contained path
     component. [Filename.basename ".." = ".."] and [Filename.basename "." =
@@ -31,14 +42,14 @@ let validate_persona_name persona_name : (unit, string) result =
     Error "persona_name must not contain path separators"
   else Ok ()
 
-let profile_path persona_name =
-  Filename.concat (personas_dir ()) (Filename.concat persona_name "profile.json")
+let profile_path ~dir persona_name =
+  Filename.concat dir (Filename.concat persona_name "profile.json")
 
-let persona_exists persona_name =
-  Fs_compat.file_exists (profile_path persona_name)
+let persona_exists ~dir persona_name =
+  Fs_compat.file_exists (profile_path ~dir persona_name)
 
-let read_profile persona_name =
-  let path = profile_path persona_name in
+let read_profile ~dir persona_name =
+  let path = profile_path ~dir persona_name in
   if not (Fs_compat.file_exists path) then
     Error ("Persona '" ^ persona_name ^ "' not found at " ^ path)
   else
@@ -49,18 +60,18 @@ let read_profile persona_name =
            Error ("Invalid JSON in " ^ path ^ ": " ^ msg))
     | None -> Error ("Failed to read " ^ path)
 
-let write_profile persona_name json =
-  let dir = Filename.concat (personas_dir ()) persona_name in
-  let path = Filename.concat dir "profile.json" in
+let write_profile ~dir persona_name json =
+  let persona_dir = Filename.concat dir persona_name in
+  let path = Filename.concat persona_dir "profile.json" in
   match
     try
-      Fs_compat.mkdir_p dir;
+      Fs_compat.mkdir_p persona_dir;
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
   with
-  | Error detail -> Error ("Failed to create " ^ dir ^ ": " ^ detail)
+  | Error detail -> Error ("Failed to create " ^ persona_dir ^ ": " ^ detail)
   | Ok () ->
     let tmp = path ^ ".tmp" in
     let content = Yojson.Safe.to_string ~std:true json in
@@ -90,36 +101,76 @@ let validate_create_args args =
         | Ok () ->
           if String.trim dn = "" then [ "display_name must not be empty" ] else []))
 
-let profile_from_create_args args =
-  let persona_name = get_string args "persona_name" "" in
-  let display_name = get_string args "display_name" "" in
-  let role = get_string_opt args "role" in
-  let trait = get_string_opt args "trait" in
+(* A persona profile.json is read by two loaders that pull from two distinct
+   locations, verified against config/personas/*/profile.json:
+
+     - persona identity, top level: ["name"] (display name), ["role"],
+       ["trait"] — read by
+       [Keeper_types_profile_persona.persona_summary_of_profile_json];
+     - keeper template defaults, nested under ["keeper"]: ["goal"],
+       ["instructions"], ["mention_targets"], ["proactive_enabled"] — read by
+       [Keeper_types_profile_persona_defaults.load_from_path], which only ever
+       inspects the ["keeper"] member and rejects removed fields
+       (tool_access/tool_denylist) fail-closed.
+
+   Earlier this tool wrote every field at the top level under different keys
+   (["display_name"] instead of ["name"]; the keeper-template fields at the
+   top level instead of under ["keeper"]). Neither loader reads that shape, so
+   the display name showed the directory name and every keeper-template field
+   was silently dropped — spawning a keeper from a tool-created persona then
+   failed with "goal is required". These helpers write the shape the loaders
+   actually read. Fields that no reader consumes (previously [persona_name],
+   [display_name] as a separate key, [created_at], [auto_handoff]) are not
+   persisted. *)
+
+let keeper_defaults_fields args : (string * Yojson.Safe.t) list =
   let goal = get_string_opt args "goal" in
   let instructions = get_string_opt args "instructions" in
   let mention_targets = get_string_list args "mention_targets" in
   let proactive_enabled = get_bool_opt args "proactive_enabled" in
-  let auto_handoff = get_bool_opt args "auto_handoff" in
-  `Assoc ([
-    ("persona_name", `String persona_name);
-    ("display_name", `String display_name);
-    ("created_at", `String (Printf.sprintf "%.0f" (Unix.time ())));
-  ]
-  @ (match role with Some v -> [("role", `String v)] | None -> [])
-  @ (match trait with Some v -> [("trait", `String v)] | None -> [])
-  @ (match goal with Some v -> [("goal", `String v)] | None -> [])
+  (match goal with Some v -> [("goal", `String v)] | None -> [])
   @ (match instructions with Some v -> [("instructions", `String v)] | None -> [])
   @ (if mention_targets = [] then [] else [("mention_targets", `List (List.map (fun s -> `String s) mention_targets))])
   @ (match proactive_enabled with Some v -> [("proactive_enabled", `Bool v)] | None -> [])
-  @ (match auto_handoff with Some v -> [("auto_handoff", `Bool v)] | None -> []))
+
+let profile_from_create_args args =
+  (* The public arg is [display_name] (required by [validate_create_args]);
+     it is persisted as the top-level ["name"] the summary loader reads. *)
+  let display_name = get_string args "display_name" "" in
+  let role = get_string_opt args "role" in
+  let trait = get_string_opt args "trait" in
+  let keeper_fields = keeper_defaults_fields args in
+  `Assoc ([ ("name", `String display_name) ]
+  @ (match role with Some v -> [("role", `String v)] | None -> [])
+  @ (match trait with Some v -> [("trait", `String v)] | None -> [])
+  @ (if keeper_fields = [] then [] else [("keeper", `Assoc keeper_fields)]))
+
+(* Merge [updates] into [base], preserving [base] key order: an update replaces
+   the value in place, and keys absent from [base] are appended in [updates]
+   order. *)
+let merge_assoc base updates =
+  let merged =
+    List.map
+      (fun (k, v) ->
+        match List.assoc_opt k updates with Some uv -> (k, uv) | None -> (k, v))
+      base
+  in
+  let base_keys = List.map fst base in
+  let new_items = List.filter (fun (k, _) -> not (List.mem k base_keys)) updates in
+  merged @ new_items
 
 (** Merge [args] into [existing_json]. Returns [Error] rather than
     fabricating a placeholder persona when [existing_json] is not a JSON
     object — a persisted profile that failed to parse as an object means
     something else already corrupted it (disk, manual edit, prior bug),
-    and papering over it with [persona_name = "unknown"] would silently
-    rewrite the caller's data under the wrong identity on every future
-    update. *)
+    and papering over it with a fresh object would silently rewrite the
+    caller's data on every future update.
+
+    Updates are routed to the same two layers the loaders read: identity
+    fields ([display_name] -> top-level ["name"], [role], [trait]) stay at
+    the top level, and keeper-template fields ([goal], [instructions],
+    [mention_targets], [proactive_enabled]) merge into the
+    nested ["keeper"] object. Only fields present in [args] change. *)
 let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) result =
   match reject_removed_keeper_input_keys ~tool_name:"masc_persona_update" args with
   | Error _ as error -> error
@@ -136,44 +187,42 @@ let merge_update_args_into_profile existing_json args : (Yojson.Safe.t, string) 
              "removed persona profile fields are no longer supported: %s"
              (String.concat ", " removed_fields))
       else
-      let update_field key to_json =
-        match get_string_opt args key with
-        | Some v -> Some (key, to_json v)
-        | None -> None
+      let str_update key =
+        match get_string_opt args key with Some v -> Some (`String v) | None -> None
       in
-      let update_bool_field key =
-        match get_bool_opt args key with
-        | Some v -> Some (key, `Bool v)
-        | None -> None
+      let bool_update key =
+        match get_bool_opt args key with Some v -> Some (`Bool v) | None -> None
       in
-      let update_list_field key =
-        let v = get_string_list args key in
-        if v = [] then None else Some (key, `List (List.map (fun s -> `String s) v))
+      let list_update key =
+        match get_string_list args key with
+        | [] -> None
+        | xs -> Some (`List (List.map (fun s -> `String s) xs))
       in
-      let updates =
-        List.filter_map (fun x -> x) [
-          update_field "display_name" (fun v -> `String v);
-          update_field "role" (fun v -> `String v);
-          update_field "trait" (fun v -> `String v);
-          update_field "goal" (fun v -> `String v);
-          update_field "instructions" (fun v -> `String v);
-          update_list_field "mention_targets";
-          update_bool_field "proactive_enabled";
-          update_bool_field "auto_handoff";
-        ]
+      let field name = function Some v -> [(name, v)] | None -> [] in
+      (* The public arg [display_name] updates the top-level ["name"] key. *)
+      let top_updates =
+        field "name" (str_update "display_name")
+        @ field "role" (str_update "role")
+        @ field "trait" (str_update "trait")
       in
-      let merged =
-        List.map (fun (k, v) ->
-          match List.find_opt (fun (uk, _) -> uk = k) updates with
-          | Some (_, uv) -> (k, uv)
-          | None -> (k, v)
-        ) existing
+      let keeper_updates =
+        field "goal" (str_update "goal")
+        @ field "instructions" (str_update "instructions")
+        @ field "mention_targets" (list_update "mention_targets")
+        @ field "proactive_enabled" (bool_update "proactive_enabled")
       in
-      let existing_keys = List.map fst existing in
-      let new_items =
-        List.filter (fun (k, _) -> not (List.mem k existing_keys)) updates
+      let existing_keeper =
+        match List.assoc_opt "keeper" existing with
+        | Some (`Assoc kv) -> kv
+        | _ -> []
       in
-      Ok (`Assoc (merged @ new_items))
+      let merged_keeper = merge_assoc existing_keeper keeper_updates in
+      let merged_top = merge_assoc existing top_updates in
+      let with_keeper =
+        if merged_keeper = [] then merged_top
+        else merge_assoc merged_top [("keeper", `Assoc merged_keeper)]
+      in
+      Ok (`Assoc with_keeper)
   | other ->
       Error
         (Printf.sprintf "Corrupt persona profile: expected a JSON object, got %s"
@@ -190,16 +239,19 @@ let handle_persona_create_json args =
   if errors <> [] then
     Error (error_assoc [("errors", `List (List.map (fun e -> `String e) errors))])
   else
-    let persona_name = get_string args "persona_name" "" in
-    if persona_exists persona_name then
-      Error
-        (error_assoc
-           [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))])
-    else
-      let profile = profile_from_create_args args in
-      match write_profile persona_name profile with
-      | Ok result -> Ok result
-      | Error msg -> Error (error_assoc [("error", `String msg)])
+    match personas_dir () with
+    | Error msg -> Error (error_assoc [("error", `String msg)])
+    | Ok dir ->
+      let persona_name = get_string args "persona_name" "" in
+      if persona_exists ~dir persona_name then
+        Error
+          (error_assoc
+             [("error", `String ("Persona '" ^ persona_name ^ "' already exists. Use masc_persona_update to modify it."))])
+      else
+        let profile = profile_from_create_args args in
+        match write_profile ~dir persona_name profile with
+        | Ok result -> Ok result
+        | Error msg -> Error (error_assoc [("error", `String msg)])
 
 let handle_persona_update_json args =
   let persona_name = get_string_opt args "persona_name" in
@@ -211,18 +263,21 @@ let handle_persona_update_json args =
       match validate_persona_name pn with
       | Error msg -> Error (error_assoc [("error", `String msg)])
       | Ok () ->
-          if not (persona_exists pn) then
+          match personas_dir () with
+          | Error msg -> Error (error_assoc [("error", `String msg)])
+          | Ok dir ->
+          if not (persona_exists ~dir pn) then
             Error
               (error_assoc
                  [("error", `String ("Persona '" ^ pn ^ "' does not exist. Use masc_persona_create first."))])
           else
-            match read_profile pn with
+            match read_profile ~dir pn with
             | Error msg -> Error (error_assoc [("error", `String msg)])
             | Ok existing_json ->
                 match merge_update_args_into_profile existing_json args with
                 | Error msg -> Error (error_assoc [("error", `String msg)])
                 | Ok updated ->
-                    match write_profile pn updated with
+                    match write_profile ~dir pn updated with
                     | Ok result -> Ok result
                     | Error msg -> Error (error_assoc [("error", `String msg)])
 
@@ -231,3 +286,43 @@ let handle_persona_create _ctx args : tool_result =
 
 let handle_persona_update _ctx args : tool_result =
   tool_result_of_json_result (handle_persona_update_json args)
+
+(* Remove the whole persona directory (profile.json plus any AGENT.md /
+   metrics siblings) so no orphaned files survive the delete. [remove_tree]
+   ignores missing paths and does not follow symlinks; the [validate_persona_name]
+   guard keeps [persona_name] a single path component under [personas_dir ()],
+   so the removal target cannot escape that directory. *)
+let delete_persona_dir ~dir persona_name : (Yojson.Safe.t, string) result =
+  let target = Filename.concat dir persona_name in
+  try
+    Fs_compat.remove_tree target;
+    (* Audit trail for a destructive operator action. *)
+    Log.Keeper.info "masc_persona_delete: removed persona %s (%s)" persona_name target;
+    Ok
+      (ok_assoc
+         [ ("persona_name", `String persona_name)
+         ; ("deleted", `Bool true)
+         ; ("path", `String target)
+         ])
+  with exn ->
+    Error ("Failed to delete persona directory " ^ target ^ ": " ^ Printexc.to_string exn)
+
+let handle_persona_delete_json args : (Yojson.Safe.t, Yojson.Safe.t) result =
+  match get_string_opt args "persona_name" with
+  | None -> Error (error_assoc [("error", `String "Missing required field: persona_name")])
+  | Some pn ->
+      (match validate_persona_name pn with
+       | Error msg -> Error (error_assoc [("error", `String msg)])
+       | Ok () ->
+           match personas_dir () with
+           | Error msg -> Error (error_assoc [("error", `String msg)])
+           | Ok dir ->
+           if not (persona_exists ~dir pn) then
+             Error (error_assoc [("error", `String ("Persona '" ^ pn ^ "' does not exist."))])
+           else
+             (match delete_persona_dir ~dir pn with
+              | Ok result -> Ok result
+              | Error msg -> Error (error_assoc [("error", `String msg)])))
+
+let handle_persona_delete _ctx args : tool_result =
+  tool_result_of_json_result (handle_persona_delete_json args)

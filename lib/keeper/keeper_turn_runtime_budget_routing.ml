@@ -1,4 +1,4 @@
-(** Fail-open runtime routing helpers for keeper turn budgeting. *)
+(** Typed fail-open runtime rotation helpers. *)
 
 open Keeper_types
 open Keeper_meta_contract

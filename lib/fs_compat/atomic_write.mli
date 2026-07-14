@@ -7,11 +7,10 @@
     cannot leave the target truncated or zero-length. Observed on
     [backlog.json] after an abrupt shutdown on 2026-04-18.
 
-    Crash recovery is provided by [cleanup_atomic_orphans], a
-    boot-time sweep for canonical [.atomic_*.tmp] files and legacy
-    [.keeper_atomic_*.tmp] files left behind when the owning process
-    was SIGKILL'd or temp-file creation itself raised ENFILE/EMFILE
-    before the with-handler could register.
+    Crash recovery is provided by [cleanup_atomic_orphans], a boot-time sweep
+    for canonical [.atomic_*.tmp] files left behind when the owning process was
+    SIGKILL'd or temp-file creation itself raised ENFILE/EMFILE before the
+    with-handler could register.
 
     The [save_file] primitive is injected so this module stays free of
     [Fs_compat]'s Eio bridge. Recovery uses only typed [Unix] operations and
@@ -36,10 +35,9 @@ val save_file_atomic
     filename shape. The caller owns the returned channel and file. *)
 val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
 
-(** [true] iff [name] matches either the canonical [.atomic_*.tmp]
-    shape produced by this module or the retired
-    [.keeper_atomic_*.tmp] shape. Exposed so recovery sweeps do not
-    re-derive either filename contract — #10205 finding 2. *)
+(** [true] iff [name] matches the canonical [.atomic_*.tmp] shape produced by
+    this module. Exposed so recovery sweeps do not re-derive the filename
+    contract — #10205 finding 2. *)
 val is_atomic_orphan_name : string -> bool
 
 type atomic_orphan_cleanup_scope =
@@ -86,8 +84,7 @@ val atomic_orphan_cleanup_failure_to_string
   :  atomic_orphan_cleanup_failure
   -> string
 
-(** #10130: no-follow boot-time cleanup for canonical [.atomic_*.tmp] and
-    legacy [.keeper_atomic_*.tmp] orphans.
+(** #10130: no-follow boot-time cleanup for canonical [.atomic_*.tmp] orphans.
 
     [Directory_only] scans exactly [base_path].
     [Directory_and_immediate_subdirectories] additionally scans only real

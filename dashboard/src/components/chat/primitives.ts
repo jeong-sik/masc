@@ -447,6 +447,7 @@ function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
     switch (queueState) {
       case 'pending': return '서버 대기'
       case 'inflight': return 'Keeper 처리 중'
+      case 'recovery_required': return '복구 확인 필요'
       case 'delivered': return '처리 완료'
       case 'failed': return '처리 실패'
       default: return '상태 확인 필요'
@@ -612,6 +613,9 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     typeof details.queueRevision === 'number' ? { label: '큐 revision', value: `${details.queueRevision}` } : null,
     typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
     typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
+    typeof details.queueRecoveryRequiredCount === 'number'
+      ? { label: '접수 시 recovery required', value: `${details.queueRecoveryRequiredCount}` }
+      : null,
     typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
@@ -2532,6 +2536,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
       data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}
       data-chat-queue-inflight-count=${entry.details?.queueInflightCount ?? undefined}
+      data-chat-queue-recovery-required-count=${entry.details?.queueRecoveryRequiredCount ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
       data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}

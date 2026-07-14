@@ -23,7 +23,19 @@
 
 type stop_reason = Runtime_agent_context.stop_reason =
   | Completed
-  | TurnBudgetExhausted of { turns_used : int; limit : int }
+  | TurnLimitObserved of { turns_used : int; limit : int }
+  | ExecutionTimeoutObserved of {
+      elapsed_sec : float;
+      timeout_sec : float;
+      turn_count : int;
+      max_turns : int;
+    }
+  | ExecutionIdleTimeoutObserved of {
+      idle_sec : float;
+      idle_timeout_sec : float;
+      turn_count : int;
+      max_turns : int;
+    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
@@ -36,11 +48,11 @@ type stop_reason = Runtime_agent_context.stop_reason =
       tool_names : string list;
     }
 (** Why this single OAS call yielded control. [Completed] is the
-    model's success path; [TurnBudgetExhausted] means the per-call
-    turn budget checkpoint was reached. It is not a completed
-    deliverable; callers must classify it from typed stop reason plus
-    durable-progress evidence before deciding whether to continue from
-    the persisted checkpoint. [Yielded_to_chat_waiting] fires when an
+    model's success path. [TurnLimitObserved], [ExecutionTimeoutObserved],
+    and [ExecutionIdleTimeoutObserved] preserve unexpected typed OAS
+    observations; Keeper callers configure execution unbounded and must not
+    promote these observations to a checkpoint, blocker, retry, or follow-up
+    action. [Yielded_to_chat_waiting] fires when an
     autonomous-lane run stopped at a turn boundary to hand the keeper's
     turn slot to a parked dashboard/connector chat request.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
@@ -100,7 +112,6 @@ type config = Runtime_agent_context.config = {
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
-  execution_idle_timeout_s : float option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;

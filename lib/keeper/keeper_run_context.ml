@@ -11,7 +11,6 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; max_tokens : int option
   ; context_injector : Agent_sdk.Hooks.context_injector
   ; shared_context : Agent_sdk.Context.t
   ; session_dir : string
@@ -71,18 +70,6 @@ let build_base_system_prompt
     ~home_ground:config.base_path
     ()
 
-(* masc#24067 / oas#2517: no flat int fallback. The only "no explicit
-   override" outcome is [None] — no max_tokens field goes on the request. *)
-let max_tokens_override ~keeper_name profile_defaults =
-  Keeper_types_profile.unified_max_tokens_override_of_oas_env
-    ~keeper_name
-    profile_defaults.oas_env
-
-let resolve_turn_max_tokens ~keeper_name ~profile_defaults ?max_tokens () =
-  match max_tokens with
-  | Some _ as caller_override -> caller_override
-  | None -> max_tokens_override ~keeper_name profile_defaults
-
 let prepare_run_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -91,7 +78,6 @@ let prepare_run_context
       ~(max_context : int)
       ~(runtime_id : string)
       ?temperature
-      ?max_tokens
       ?shared_context
       ~(generation : int)
       ()
@@ -117,16 +103,6 @@ let prepare_run_context
     Runtime_inference.resolve_temperature
       ~runtime_id
       ~fallback:fallback_temperature
-  in
-  let max_tokens =
-    (* Freeze caller/profile intent exactly once for this turn. Every runtime
-       candidate receives this immutable value; OAS owns provider-envelope
-       validation and catalog-ceiling clamp policy (oas#2517). *)
-    resolve_turn_max_tokens
-      ~keeper_name:meta.name
-      ~profile_defaults
-      ?max_tokens
-      ()
   in
   (* 0b. Create context injector for temporal awareness *)
   let injector_config = Masc_context_injector.default_config () in
@@ -194,7 +170,6 @@ let prepare_run_context
   in
   { meta
   ; temperature
-  ; max_tokens
   ; context_injector
   ; shared_context
   ; session_dir

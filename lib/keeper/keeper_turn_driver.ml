@@ -286,14 +286,12 @@ type attempt_inference_policy =
   { attempt_temperature : float
   ; attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
-  ; attempt_max_tokens : int option
   }
 
 let attempt_inference_policy
     ~runtime_id
     ~fallback_temperature
     ~fallback_enable_thinking
-    ~turn_max_tokens
     ()
   =
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
@@ -307,12 +305,9 @@ let attempt_inference_policy
     | Some _ as enabled -> enabled
     | None -> fallback_enable_thinking
   in
-  (* Temperature/thinking are runtime capabilities. Output-token intent is a
-     turn input, so candidate selection must not reinterpret or reload it. *)
   { attempt_temperature
   ; attempt_enable_thinking
   ; attempt_preserve_thinking = runtime_seed.preserve_thinking
-  ; attempt_max_tokens = turn_max_tokens
   }
 
 let run_named
@@ -326,15 +321,11 @@ let run_named
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
-    ?(max_turns = Agent_sdk.Types.default_config.max_turns)
+    ?(max_turns = Agent_sdk.Types.unbounded_max_turns)
     ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-    (* masc#24067 / oas#2517: no flat-int default. Omitting [?max_tokens]
-       means [None] — no request [max_tokens] field, not a synthesized
-       fallback. *)
-    ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
     ?context_reducer
@@ -370,7 +361,6 @@ let run_named
     ?provider_config_transform
     ?sw
     ?net
-    ?per_provider_timeout_s
     ()
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   match require_eio ?sw ?net () with
@@ -592,11 +582,6 @@ let run_named
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()
   in
-  (* RFC-0206: execution_idle_timeout is intentionally not forwarded on the
-     keeper path until OAS proves active tool execution is excluded from idle
-     accounting. Passing [None] keeps the previous behavior without exposing a
-     dead compatibility knob. *)
-  let execution_idle_timeout_s = None in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
@@ -626,7 +611,6 @@ let run_named
           ~runtime_id:attempt_runtime_id
           ~fallback_temperature:temperature
           ~fallback_enable_thinking:enable_thinking
-          ~turn_max_tokens:max_tokens
           ()
       in
       let final_runtime_context_window =
@@ -673,10 +657,8 @@ let run_named
             ; max_turns
             ; max_idle_turns
             ; stream_idle_timeout_s
-            ; execution_idle_timeout_s
             ; body_timeout_s
             ; temperature = inference_policy.attempt_temperature
-            ; max_tokens = inference_policy.attempt_max_tokens
             ; accept
             ; hooks
             ; context_reducer
@@ -719,7 +701,7 @@ let run_named
           in
           let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider
-              try_provider_ctx ?per_provider_timeout_s candidate
+              try_provider_ctx candidate
           in
           let outcomes =
             project_provider_attempt_result
@@ -739,12 +721,6 @@ module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
-  let max_execution_time_for_attempt =
-    Keeper_turn_driver_try_provider.For_testing.max_execution_time_for_attempt
-
-  let sdk_error_of_nonretryable_attempt_error =
-    Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
-
   let first_runtime_after_modality_reroute =
     first_runtime_after_modality_reroute
 
@@ -764,16 +740,6 @@ module For_testing = struct
     resolve_context_window_tokens_after_runtime_selection
 
   let accept_no_progress_should_try_next =
-    Keeper_turn_driver_try_runtime.For_testing.accept_no_progress_should_try_next
+    Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
 
-  let accept_rejected_result_should_try_next =
-    Keeper_turn_driver_try_runtime.For_testing
-    .accept_rejected_result_should_try_next
-
-  let runtime_exhaustion_reason_of_http_error =
-    Keeper_turn_driver_try_runtime.For_testing
-    .runtime_exhaustion_reason_of_http_error
-
-  let sdk_error_of_exhausted =
-    Keeper_turn_driver_try_runtime.For_testing.sdk_error_of_exhausted
 end

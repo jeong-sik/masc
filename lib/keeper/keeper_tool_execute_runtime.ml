@@ -94,10 +94,9 @@ let docker_local_fallback_target =
 
 let input_with_cwd cwd = function
   | Keeper_tool_execute_typed_input.Exec
-      { executable; argv; cwd = _; env; timeout_sec; stdin; stdout; stderr } ->
+      { argv; cwd = _; env; timeout_sec; stdin; stdout; stderr } ->
     Keeper_tool_execute_typed_input.Exec
-      { executable
-      ; argv
+      { argv
       ; cwd = Some cwd
       ; env
       ; timeout_sec
@@ -546,7 +545,7 @@ let handle_tool_execute_with_outcome
       ~class_:Tool_result.Policy_rejection
       (error_json
          ~fields:[ "typed", `Bool true ]
-         "Typed Shell IR input is required. Provide executable/argv or pipeline.")
+         "Typed Shell IR input is required. Provide non-empty argv or pipeline.")
 ;;
 
 let handle_tool_execute

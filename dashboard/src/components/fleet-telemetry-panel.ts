@@ -388,7 +388,6 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
             <${ThRight}>지연</${ThRight}>
             <${ThRight}>런타임</${ThRight}>
             <th scope="col" class="py-1 text-center font-normal">상태</th>
-            <th scope="col" class="py-1 text-center font-normal">예산</th>
             <th scope="col" class="w-8 py-1"></th>
           </tr>
         </thead>
@@ -511,13 +510,6 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               </td>
               <td class="py-1.5 text-center">
                 <span class="text-3xs text-[var(--color-fg-disabled)]">—</span>
-              </td>
-              <td class="py-1.5 text-center">
-                ${row.budget_source === 'override_invalid'
-                  ? html`<span class="rounded-[var(--r-1)] bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
-                  : row.budget_source === 'override'
-                    ? html`<span class="rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]" title="TOML override 적용됨">OVR</span>`
-                    : html`<span class="text-3xs text-[var(--color-fg-disabled)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
                 <button
@@ -768,8 +760,6 @@ export function FleetTelemetryPanel() {
         ? 'ok'
         : 'warn'
   const sourcesWithData = value.telemetry_sources.filter(source => source.entry_count > 0).length
-  const budgetOverrideCount = value.rows.filter(r => r.budget_source === 'override' || r.budget_source === 'override_invalid').length
-
   if (value.loading && value.rows.length === 0) {
     return html`<${LoadingState}>Keeper 텔레메트리 불러오는 중...<//>`
   }
@@ -806,7 +796,6 @@ export function FleetTelemetryPanel() {
             ${activeCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${activeCount} 가동</span>` : null}
             ${attentionCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${attentionCount} 주의</span>` : null}
             ${offlineCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-[var(--color-fg-disabled)]">${offlineCount} 오프라인</span>` : null}
-            ${budgetOverrideCount > 0 ? html`<span class="rounded-[var(--r-0)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--color-status-warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">

@@ -12,7 +12,7 @@ let has_typed_execute_input_key = function
   | `Assoc fields ->
     List.exists
       (fun (key, _) ->
-         String.equal key "executable" || String.equal key "pipeline")
+         String.equal key "argv" || String.equal key "pipeline")
       fields
   | _ -> false
 ;;
@@ -36,19 +36,17 @@ let shell_quote_for_policy token =
     "'" ^ String.concat "'\\''" parts ^ "'")
 ;;
 
-let typed_stage_command_text ~executable ~argv =
-  executable :: argv
-  |> List.map shell_quote_for_policy
-  |> String.concat " "
+let typed_stage_command_text argv =
+  argv |> List.map shell_quote_for_policy |> String.concat " "
 ;;
 
 let typed_input_command_text = function
-  | Keeper_tool_execute_typed_input.Exec { executable; argv; _ } ->
-    typed_stage_command_text ~executable ~argv
+  | Keeper_tool_execute_typed_input.Exec { argv; _ } ->
+    typed_stage_command_text argv
   | Keeper_tool_execute_typed_input.Pipeline { stages; _ } ->
     stages
     |> List.map (fun (stage : Keeper_tool_execute_typed_input.exec_stage) ->
-      typed_stage_command_text ~executable:stage.executable ~argv:stage.argv)
+      typed_stage_command_text stage.argv)
     |> String.concat " | "
 ;;
 

@@ -193,7 +193,7 @@ Runtime failsafe fallback (runtime.toml 없을 때):
 
 OAS와 MASC는 "turn"과 "timeout"을 같은 layer에서 쓰지 않는다. Keeper
 호출은 OAS의 `max_turns = 0` 및 `max_idle_turns = 0` unbounded sentinel을
-사용한다. SDK가 외부의 명시적 유한 설정에서 budget signal을 반환하더라도
+사용한다. SDK가 외부의 명시적 유한 설정에서 execution-limit signal을 반환하더라도
 MASC는 이를 관측할 뿐 Keeper lifecycle 권한으로 사용하지 않는다.
 
 `lib/keeper/keeper_agent_error.ml`의 `sdk_termination_semantics`가 OAS
@@ -202,17 +202,21 @@ error를 keeper receipt로 접기 전 layer-aware 의미를 먼저 고정한다:
 | OAS / SDK signal | MASC semantic | Receipt outcome |
 |------------------|---------------|-----------------|
 | `Retry.Timeout` | `provider_wall_clock_timeout` | `cancelled` |
-| `MaxTurnsExceeded` | `oas_turn_budget_exhausted` | `cancelled` |
-| `IdleDetected` | `oas_idle_budget_exhausted` | `cancelled` |
+| `MaxTurnsExceeded` | `oas_turn_limit_observed` | `success` observation |
+| `AgentExecutionTimeout` / `AgentExecutionIdleTimeout` | `oas_execution_timeout_observed` | `success` observation |
+| `IdleDetected` | `oas_idle_detected_failure` | `error` |
 | `ExitConditionMet` | `oas_exit_condition_reached` | `cancelled` |
-| `TokenBudgetExceeded` | `oas_token_budget_exhausted` | `error` |
-| `CostBudgetExceeded` | `oas_cost_budget_exhausted` | `error` |
 | other SDK/API failure | `sdk_error_failure` or specific OAS failure semantic | `error` |
+
+Execution-limit observations preserve the complete OAS replay checkpoint but
+create no Keeper blocker, retry, failure streak, or follow-up action. Token and
+cost counters remain telemetry only and do not participate in this terminal
+mapping.
 
 Invariant: new OAS terminal variants must first be assigned a stable
 `sdk_termination_semantics` value, then mapped to keeper receipt outcome.
-Tests in `test/test_keeper_terminal_reason.ml` pin the semantic layer and the
-collapsed receipt outcome separately.
+Tests in `test/test_keeper_sdk_error_typed_bridge.ml` pin the semantic layer and
+the collapsed receipt outcome separately.
 
 ### 4.7 MASC Tool Bridge
 

@@ -401,8 +401,8 @@ let handle_keeper_reset ctx args : tool_result =
 
 (** Resolve the primary model max context for a keeper.
 
-    Returns the resolved primary provider/runtime budget, separate from any
-    requested [max_context_override] turn-budget widening.
+    Returns the resolved primary provider/runtime context window, separate from
+    any requested [max_context_override].
     Returns [min_keeper_context_tokens] when meta is unavailable. *)
 let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option) : int =
   let min_ctx = Keeper_config.min_keeper_context_tokens in
@@ -652,6 +652,7 @@ let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
   | "masc_persona_create" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_create ctx args))
   | "masc_persona_update" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_update ctx args))
+  | "masc_persona_delete" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_delete ctx args))
   | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))

@@ -30,7 +30,6 @@ let fsync_path path =
    files. *)
 let atomic_tmp_prefix = ".atomic_"
 let atomic_tmp_suffix = ".tmp"
-let legacy_keeper_atomic_tmp_prefix = ".keeper_atomic_"
 
 let open_atomic_temp_file ~temp_dir () =
   Stdlib.Filename.open_temp_file
@@ -78,7 +77,6 @@ let has_atomic_temp_shape ~prefix name =
 
 let is_atomic_orphan_name name =
   has_atomic_temp_shape ~prefix:atomic_tmp_prefix name
-  || has_atomic_temp_shape ~prefix:legacy_keeper_atomic_tmp_prefix name
 ;;
 
 type atomic_orphan_cleanup_scope =

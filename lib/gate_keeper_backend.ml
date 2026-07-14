@@ -206,7 +206,7 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
    outbound adapter. *)
 let busy_ack_reply_text_queued
     ~(admission_rejection : Keeper_turn_admission.rejection)
-    ~keeper_name ~receipt_id =
+    ~keeper_name ~receipt_id ~recovery_required_count =
   let in_flight_text =
     match admission_rejection.in_flight with
     | None -> ""
@@ -215,19 +215,29 @@ let busy_ack_reply_text_queued
           " Current turn: %s."
           (Keeper_turn_admission.lane_to_string lane)
   in
-  match admission_rejection.shutdown_operation_id with
-  | Some operation_id ->
+  match admission_rejection.shutdown_operation_id, recovery_required_count with
+  | Some operation_id, 0 ->
       Printf.sprintf
         "%s is stopping under shutdown operation %s; your message is durably \
          queued and will wait for the next active lane (receipt_id=%s).%s"
         keeper_name
         (Keeper_shutdown_types.Operation_id.to_string operation_id)
         receipt_id in_flight_text
-  | None ->
+  | Some operation_id, recovery_required_count ->
+      Printf.sprintf
+        "%s is stopping under shutdown operation %s; your message is durably queued, but this Keeper lane also has %d receipt(s) awaiting explicit delivery recovery and cannot dispatch automatically (receipt_id=%s).%s"
+        keeper_name
+        (Keeper_shutdown_types.Operation_id.to_string operation_id)
+        recovery_required_count receipt_id in_flight_text
+  | None, 0 ->
       Printf.sprintf
         "%s is busy; your message is queued and will be answered once the current \
-         turn finishes (receipt_id=%s).%s"
+        turn finishes (receipt_id=%s).%s"
         keeper_name receipt_id in_flight_text
+  | None, recovery_required_count ->
+      Printf.sprintf
+        "%s accepted your message durably, but this Keeper lane has %d receipt(s) awaiting explicit delivery recovery and cannot dispatch automatically (receipt_id=%s).%s"
+        keeper_name recovery_required_count receipt_id in_flight_text
 
 let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
     ~(admission_rejection : Keeper_turn_admission.rejection) ~metadata
@@ -256,6 +266,8 @@ let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
       ; "queue_revision", Int64.to_string receipt.revision
       ; "pending_count", string_of_int receipt.pending_count
       ; "inflight_count", string_of_int receipt.inflight_count
+      ; ( "recovery_required_count"
+        , string_of_int receipt.recovery_required_count )
       ]
       @ shutdown_metadata
       @ metadata
@@ -638,6 +650,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
            ; attachments = []
            ; timestamp = Eio.Time.now clock
            ; source
+           ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
            }
        with
        | Ok receipt -> `Queued_to_chat_lane (admission_rejection, receipt)
@@ -739,7 +752,8 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
       let reply =
         redact_text
           (busy_ack_reply_text_queued ~admission_rejection ~keeper_name
-             ~receipt_id:message_request.request_id)
+             ~receipt_id:message_request.request_id
+             ~recovery_required_count:receipt.recovery_required_count)
       in
       let stats =
         Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }

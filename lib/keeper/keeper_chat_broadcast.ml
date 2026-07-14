@@ -112,7 +112,7 @@ let queue_changed ~keeper_name ~revision () =
       (`Assoc
         [ ("type", `String "keeper_chat_queue_changed");
           ("keeper_name", `String keeper_name);
-          ("revision", `Intlit (Int64.to_string revision));
+          ("revision", `String (Int64.to_string revision));
           ("ts_unix", `Float (Time_compat.now ()));
         ])
   with

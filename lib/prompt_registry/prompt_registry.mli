@@ -124,8 +124,11 @@ val set_markdown_dir : string -> unit
     looks under for [<key>.md]. *)
 
 val get_markdown_dir : unit -> string option
-(** Returns the currently-pinned markdown dir, [None] if
-    {!set_markdown_dir} was never called. *)
+(** Returns the effective markdown dir: the {!set_markdown_dir} pin when
+    one exists, else — only when DUNE_SOURCEROOT is set (dune build/test
+    context, never production) and [<root>/config/prompts] exists — that
+    directory. [None] otherwise. Tests that need true prompt absence pin
+    an explicit empty directory instead of relying on the unset state. *)
 
 val load_prompts_from_directory : string -> unit
 (** Auto-discovers [*.md] files under [dir], parses YAML

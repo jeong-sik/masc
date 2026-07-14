@@ -548,8 +548,9 @@ Requires a reason for the audit trail.";
     name = "masc_persona_create";
     description = "Create a new persona profile at MASC_PERSONAS_DIR/<name>/profile.json. \
 Persona profiles serve as templates for keeper creation via masc_keeper_create_from_persona. \
-Required fields: persona_name, display_name. Optional fields: role, trait, goal, instructions, \
-mention_targets, proactive_enabled, auto_handoff.";
+Identity fields (display_name, role, trait) describe the persona; keeper-template fields \
+(goal, instructions, mention_targets, proactive_enabled) become the defaults a \
+keeper spawned from this persona inherits. Required fields: persona_name, display_name.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -570,7 +571,6 @@ mention_targets, proactive_enabled, auto_handoff.";
           ("items", `Assoc [("type", `String "string")]);
         ]);
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
-        ("auto_handoff", `Assoc [("type", `String "boolean")]);
       ]);
       ("required", `List [`String "persona_name"; `String "display_name"]);
     ];
@@ -599,7 +599,25 @@ persona does not exist.";
           ("items", `Assoc [("type", `String "string")]);
         ]);
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
-        ("auto_handoff", `Assoc [("type", `String "boolean")]);
+      ]);
+      ("required", `List [`String "persona_name"]);
+    ];
+  };
+
+  {
+    name = "masc_persona_delete";
+    description = "Delete an existing persona profile and its directory under \
+MASC_PERSONAS_DIR/<name>/ (profile.json plus any sibling files such as AGENT.md). \
+Returns an error if the persona does not exist. Keepers already spawned from the \
+persona are unaffected (their keeper TOML is independent); this only prevents \
+future spawns from the persona.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("persona_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Persona handle to delete. Must already exist.");
+        ]);
       ]);
       ("required", `List [`String "persona_name"]);
     ];

@@ -157,7 +157,10 @@ let test_context_budget_json_schema_lives_in_context_runtime () =
     "\"requested_override\"";
   check_contains "shared helper emits primary budget" src "\"primary_budget\"";
   check_contains "shared helper emits runtime budget" src "\"runtime_budget\"";
-  check_contains "shared helper emits turn budget" src "\"turn_budget\"";
+  check_contains
+    "shared helper emits requested context window"
+    src
+    "\"requested_context_window\"";
   check_contains "shared helper emits effective budget" src "\"effective_budget\""
 
 let test_heartbeat_snapshot_uses_runtime_effective_budget () =

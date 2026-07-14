@@ -14,8 +14,7 @@ let typed_ok input =
 
 let mk_exec executable argv =
   Execute_input.Exec
-    { executable
-    ; argv
+    { argv = executable :: argv
     ; cwd = None
     ; env = []
     ; timeout_sec = None
@@ -74,13 +73,13 @@ let cases : case list =
     ; expect_typed = true
     ; rationale = "relative path argv"
     }
-  ; { name = "duplicate_executable_argv0"
+  ; { name = "repeated_program_argument"
     ; sample_cmd = "cat cat README.md"
     ; typed = mk_exec "cat" [ "cat"; "README.md" ]
     ; expect_typed = true
     ; rationale =
-        "typed Execute preserves caller-authored argv; a leading token equal \
-         to executable may be intentional payload"
+        "typed Execute preserves caller-authored arguments; the first argument \
+         may intentionally equal the program token"
     }
   ; { name = "unknown_executable"
     ; sample_cmd = "unknown_cmd foo"
@@ -168,7 +167,7 @@ let test_pipeline_empty () =
 let test_pipeline_single_stage_rejected () =
   let input =
     Execute_input.Pipeline
-      { stages = [ { executable = "rg"; argv = [ "pattern" ] } ]
+      { stages = [ { argv = [ "rg"; "pattern" ] } ]
       ; cwd = None
       ; env = []
       ; timeout_sec = None
@@ -180,12 +179,12 @@ let test_pipeline_single_stage_rejected () =
     (typed_ok input)
 ;;
 
-let test_pipeline_stage_executable_check () =
+let test_pipeline_stage_program_check () =
   let input =
     Execute_input.Pipeline
       { stages =
-          [ { executable = "rg"; argv = [ "pattern" ] }
-          ; { executable = "unknown_cmd"; argv = [] }
+          [ { argv = [ "rg"; "pattern" ] }
+          ; { argv = [ "unknown_cmd" ] }
           ]
       ; cwd = None
       ; env = []
@@ -198,29 +197,15 @@ let test_pipeline_stage_executable_check () =
     (typed_ok input)
 ;;
 
-let test_empty_executable_with_argv_hints_rewrite () =
+let test_empty_program_is_rejected () =
   match Execute_input.validate  (mk_exec "" [ "ls"; "-la" ]) with
-  | Error (Execute_input.Empty_executable { argv }) ->
-    Alcotest.(check (list string)) "argv preserved" [ "ls"; "-la" ] argv;
-    let msg = Format.asprintf "%a" Execute_input.pp_validation_error (Execute_input.Empty_executable { argv }) in
-    Alcotest.(check bool)
-      "error points at argv[0]"
-      true
-      (String_util.contains_substring_ci msg "argv[0]=\"ls\"");
-    Alcotest.(check bool)
-      "error suggests executable rewrite"
-      true
-      (String_util.contains_substring_ci msg "executable=\"ls\"");
-    Alcotest.(check bool)
-      "error removes duplicated executable from argv"
-      true
-      (String_util.contains_substring_ci msg "argv=[\"-la\"]")
+  | Error Execute_input.Empty_program -> ()
   | Error error ->
     Alcotest.failf
-      "expected Empty_executable with argv, got %a"
+      "expected Empty_program, got %a"
       Execute_input.pp_validation_error
       error
-  | Ok () -> Alcotest.fail "empty executable should not be accepted"
+  | Ok () -> Alcotest.fail "empty argv[0] should not be accepted"
 ;;
 
 (* Regression: validate-bypass paths (to_shell_ir_unvalidated /
@@ -231,31 +216,33 @@ let test_empty_executable_with_argv_hints_rewrite () =
    The regression was originally observed on a typed input inspected before
    lowering. Product-specific pre-dispatch inspection has since been removed;
    this test keeps the structural argv-preservation contract only. *)
-let test_unvalidated_path_preserves_argv_in_error () =
+let test_unvalidated_path_rejects_empty_program () =
   let input = mk_exec "" [ "opaque-cli"; "subcommand"; "--state"; "open" ] in
   match Execute_input.to_shell_ir_unvalidated  input with
-  | Error (Execute_input.Empty_executable { argv }) ->
-    Alcotest.(check (list string))
-      "argv preserved through shell_simple/shell_bin"
-      [ "opaque-cli"; "subcommand"; "--state"; "open" ]
-      argv;
-    let msg =
-      Format.asprintf
-        "%a"
-        Execute_input.pp_validation_error
-        (Execute_input.Empty_executable { argv })
-    in
-    Alcotest.(check bool)
-      "rewrite hint points at argv[0]"
-      true
-      (String_util.contains_substring_ci msg "argv[0]=\"opaque-cli\"")
+  | Error Execute_input.Empty_program -> ()
   | Error error ->
     Alcotest.failf
-      "expected Empty_executable with preserved argv, got %a"
+      "expected Empty_program, got %a"
       Execute_input.pp_validation_error
       error
   | Ok _ ->
-    Alcotest.fail "empty executable should not produce a Shell IR"
+    Alcotest.fail "empty argv[0] should not produce a Shell IR"
+;;
+
+let test_program_whitespace_is_preserved () =
+  let input = mk_exec " ls " [ "-la" ] in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    Alcotest.(check string)
+      "program is opaque caller-authored data"
+      " ls "
+      (Masc_exec.Exec_program.to_string simple.bin)
+  | Ok (Masc_exec.Shell_ir.Pipeline _) -> Alcotest.fail "expected simple process"
+  | Error error ->
+    Alcotest.failf
+      "opaque whitespace program was rejected: %a"
+      Execute_input.pp_validation_error
+      error
 ;;
 
 let validation_error_text error = Format.asprintf "%a" Execute_input.pp_validation_error error
@@ -265,16 +252,14 @@ let test_of_json_exec () =
   let input =
     parse_json_exn
       (`Assoc
-          [ "executable", `String "rg"
-          ; "argv", `List [ `String "pattern"; `String "lib/" ]
+          [ "argv", `List [ `String "rg"; `String "pattern"; `String "lib/" ]
           ; "cwd", `String "/tmp"
           ; "env", `Assoc [ "LC_ALL", `String "C" ]
           ])
   in
   match input with
-  | Execute_input.Exec { executable; argv; cwd; env; _ } ->
-    Alcotest.(check string) "executable" "rg" executable;
-    Alcotest.(check (list string)) "argv" [ "pattern"; "lib/" ] argv;
+  | Execute_input.Exec { argv; cwd; env; _ } ->
+    Alcotest.(check (list string)) "argv" [ "rg"; "pattern"; "lib/" ] argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [ "LC_ALL", "C" ] env
   | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
@@ -282,13 +267,12 @@ let test_of_json_exec () =
 
 let test_of_json_timeout_is_optional_and_preserved () =
   let without_timeout =
-    parse_json_exn (`Assoc [ "executable", `String "sleep" ])
+    parse_json_exn (`Assoc [ "argv", `List [ `String "sleep" ] ])
   in
   let with_timeout =
     parse_json_exn
       (`Assoc
-        [ "executable", `String "sleep"
-        ; "timeout_sec", `Float 12.5
+        [ "argv", `List [ `String "sleep" ]; "timeout_sec", `Float 12.5
         ])
   in
   let timeout = function
@@ -312,8 +296,7 @@ let test_of_json_rejects_invalid_explicit_timeout () =
       let message =
         parse_json_error
           (`Assoc
-            [ "executable", `String "sleep"
-            ; "timeout_sec", timeout
+            [ "argv", `List [ `String "sleep" ]; "timeout_sec", timeout
             ])
       in
       Alcotest.(check bool)
@@ -325,55 +308,73 @@ let test_of_json_rejects_invalid_explicit_timeout () =
     [ `Float 0.0; `Float (-1.0) ]
 ;;
 
-let test_of_json_rejects_argv_without_executable () =
-  let msg =
-    parse_json_error
+let test_of_json_accepts_single_argv_ssot () =
+  let input =
+    parse_json_exn
       (`Assoc
           [ "argv", `List [ `String "git"; `String "status"; `String "--short" ]
           ; "cwd", `String "/tmp"
           ; "env", `Assoc [ "LC_ALL", `String "C" ]
           ])
   in
-  Alcotest.(check bool)
-    "error requires explicit command form"
-    true
-    (String_util.contains_substring_ci msg "$.executable or $.pipeline is required")
-;;
-
-let test_of_json_preserves_duplicate_executable_argv0 () =
-  let input =
-    parse_json_exn
-      (`Assoc
-          [ "executable", `String "cat"
-          ; "argv", `List [ `String "cat"; `String "repos/masc/README.md" ]
-          ])
-  in
   match input with
-  | Execute_input.Exec { executable; argv; _ } ->
-    Alcotest.(check string) "executable" "cat" executable;
+  | Execute_input.Exec { argv; _ } ->
     Alcotest.(check (list string))
-      "argv remains caller-authored"
-      [ "cat"; "repos/masc/README.md" ]
+      "one argv owns program and arguments"
+      [ "git"; "status"; "--short" ]
       argv
   | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
 ;;
 
-let test_of_json_rejects_empty_argv_without_executable () =
-  let msg =
-    parse_json_error (`Assoc [ "argv", `List [] ])
-  in
-  Alcotest.(check bool)
-    "error still requires a command form"
-    true
-    (String_util.contains_substring_ci msg "$.executable or $.pipeline is required")
-;;
-
-let test_of_json_rejects_empty_pipeline_with_executable () =
+let test_of_json_rejects_retired_executable_field () =
   let msg =
     parse_json_error
       (`Assoc
-          [ "executable", `String "echo"
-          ; "argv", `List [ `String "hello" ]
+        [ "executable", `String "cat"
+        ; "argv", `List [ `String "cat"; `String "README.md" ]
+        ])
+  in
+  Alcotest.(check bool)
+    "retired duplicate command field is explicit"
+    true
+    (String_util.contains_substring_ci msg "$.executable is not a supported")
+;;
+
+let test_of_json_preserves_repeated_argument () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "argv"
+          , `List
+              [ `String "cat"; `String "cat"; `String "repos/masc/README.md" ]
+          ])
+  in
+  match input with
+  | Execute_input.Exec { argv; _ } ->
+    Alcotest.(check (list string))
+      "argv remains caller-authored"
+      [ "cat"; "cat"; "repos/masc/README.md" ]
+      argv
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
+let test_of_json_keeps_empty_argv_for_typed_validation () =
+  let input = parse_json_exn (`Assoc [ "argv", `List [] ]) in
+  match Execute_input.validate input with
+  | Error Execute_input.Empty_argv -> ()
+  | Error error ->
+    Alcotest.failf
+      "expected Empty_argv, got %a"
+      Execute_input.pp_validation_error
+      error
+  | Ok () -> Alcotest.fail "empty process vector must be rejected"
+;;
+
+let test_of_json_rejects_argv_and_pipeline () =
+  let msg =
+    parse_json_error
+      (`Assoc
+          [ "argv", `List [ `String "echo"; `String "hello" ]
           ; "pipeline", `List []
           ])
   in
@@ -387,17 +388,15 @@ let test_of_json_keeps_empty_exec_for_validation () =
   let input =
     parse_json_exn
       (`Assoc
-          [ "executable", `String ""
-          ; "argv", `List [ `String "gh"; `String "pr"; `String "list" ]
+          [ "argv", `List [ `String ""; `String "gh"; `String "pr"; `String "list" ]
           ; "cwd", `String "/tmp"
           ])
   in
   match input with
-  | Execute_input.Exec { executable; argv; cwd; env; _ } ->
-    Alcotest.(check string) "empty executable is not promoted" "" executable;
+  | Execute_input.Exec { argv; cwd; env; _ } ->
     Alcotest.(check (list string))
       "argv0 command remains caller-authored"
-      [ "gh"; "pr"; "list" ]
+      [ ""; "gh"; "pr"; "list" ]
       argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env
@@ -411,13 +410,9 @@ let test_of_json_pipeline () =
           [ ( "pipeline"
             , `List
                 [ `Assoc
-                    [ "executable", `String "printf"
-                    ; "argv", `List [ `String "hello" ]
-                    ]
+                    [ "argv", `List [ `String "printf"; `String "hello" ] ]
                 ; `Assoc
-                    [ "executable", `String "wc"
-                    ; "argv", `List [ `String "-c" ]
-                    ]
+                    [ "argv", `List [ `String "wc"; `String "-c" ] ]
                 ] )
           ; "cwd", `String "/tmp"
           ])
@@ -429,10 +424,8 @@ let test_of_json_pipeline () =
     Alcotest.(check (list (pair string string))) "env" [] env;
     (match stages with
      | [ first; second ] ->
-       Alcotest.(check string) "first executable" "printf" first.executable;
-       Alcotest.(check (list string)) "first argv" [ "hello" ] first.argv;
-       Alcotest.(check string) "second executable" "wc" second.executable;
-       Alcotest.(check (list string)) "second argv" [ "-c" ] second.argv
+       Alcotest.(check (list string)) "first argv" [ "printf"; "hello" ] first.argv;
+       Alcotest.(check (list string)) "second argv" [ "wc"; "-c" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
   | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
 ;;
@@ -444,13 +437,11 @@ let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
           [ ( "pipeline"
             , `List
                 [ `Assoc
-                    [ "executable", `String "printf"
-                    ; "argv", `List [ `String "printf"; `String "hello" ]
+                    [ "argv"
+                    , `List [ `String "printf"; `String "printf"; `String "hello" ]
                     ]
                 ; `Assoc
-                    [ "executable", `String "wc"
-                    ; "argv", `List [ `String "wc"; `String "-c" ]
-                    ]
+                    [ "argv", `List [ `String "wc"; `String "wc"; `String "-c" ] ]
                 ] )
           ])
   in
@@ -460,11 +451,11 @@ let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
      | [ first; second ] ->
        Alcotest.(check (list string))
          "first argv remains caller-authored"
-         [ "printf"; "hello" ]
+         [ "printf"; "printf"; "hello" ]
          first.argv;
        Alcotest.(check (list string))
          "second argv remains caller-authored"
-         [ "wc"; "-c" ]
+         [ "wc"; "wc"; "-c" ]
          second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
   | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
@@ -477,11 +468,12 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
           [ ( "pipeline"
             , `List
                 [ `Assoc
-                    [ "executable", `String ""
-                    ; "argv", `List [ `String "rg"; `String "--files"; `String "lib" ]
+                    [ "argv"
+                    , `List
+                        [ `String ""; `String "rg"; `String "--files"; `String "lib" ]
                     ]
                 ; `Assoc
-                    [ "executable", `String "head"; "argv", `List [ `String "-20" ] ]
+                    [ "argv", `List [ `String "head"; `String "-20" ] ]
                 ] )
           ; "cwd", `String "/tmp"
           ])
@@ -492,13 +484,11 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
     Alcotest.(check (list (pair string string))) "env" [] env;
     (match stages with
      | [ first; second ] ->
-       Alcotest.(check string) "first executable remains empty" "" first.executable;
        Alcotest.(check (list string))
          "first argv0 command remains caller-authored"
-         [ "rg"; "--files"; "lib" ]
+         [ ""; "rg"; "--files"; "lib" ]
          first.argv;
-       Alcotest.(check string) "second executable" "head" second.executable;
-       Alcotest.(check (list string)) "second argv" [ "-20" ] second.argv
+       Alcotest.(check (list string)) "second argv" [ "head"; "-20" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
   | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
 ;;
@@ -513,10 +503,13 @@ let test_of_json_rejects_cmd_string_only () =
     (String_util.contains_substring_ci msg "typed Shell IR input")
 ;;
 
-let test_of_json_rejects_cmd_string_with_exec () =
+let test_of_json_rejects_cmd_string_with_argv () =
   let msg =
     parse_json_error
-      (`Assoc [ "cmd", `String "rg pattern lib/"; "executable", `String "rg" ])
+      (`Assoc
+        [ "cmd", `String "rg pattern lib/"
+        ; "argv", `List [ `String "rg"; `String "pattern"; `String "lib/" ]
+        ])
   in
   Alcotest.(check bool)
     "error mentions typed input"
@@ -528,21 +521,20 @@ let test_of_json_rejects_non_string_argv () =
   let msg =
     parse_json_error
       (`Assoc
-          [ "executable", `String "echo"; "argv", `List [ `Int 1 ] ])
+          [ "argv", `List [ `String "echo"; `Int 1 ] ])
   in
   Alcotest.(check bool)
-    "error mentions argv[0]"
+    "error mentions argv[1]"
     true
-    (String_util.contains_substring_ci msg "$.argv[0]")
+    (String_util.contains_substring_ci msg "$.argv[1]")
 ;;
 
 let test_of_json_rejects_exec_and_pipeline_together () =
   let msg =
     parse_json_error
       (`Assoc
-          [ "executable", `String "echo"
-          ; "argv", `List [ `String "hello" ]
-          ; "pipeline", `List [ `Assoc [ "executable", `String "wc" ] ]
+          [ "argv", `List [ `String "echo"; `String "hello" ]
+          ; "pipeline", `List [ `Assoc [ "argv", `List [ `String "wc" ] ] ]
           ])
   in
   Alcotest.(check bool)
@@ -560,8 +552,8 @@ let test_of_json_rejects_pipeline_with_redirect () =
           [ ( "pipeline"
             , `List
                 [ `Assoc
-                    [ "executable", `String "printf"; "argv", `List [ `String "x" ] ]
-                ; `Assoc [ "executable", `String "wc" ]
+                    [ "argv", `List [ `String "printf"; `String "x" ] ]
+                ; `Assoc [ "argv", `List [ `String "wc" ] ]
                 ] )
           ; "stdout", `Assoc [ "file", `String "/tmp/out.log" ]
           ])
@@ -604,7 +596,7 @@ let to_shell_ir_exn input =
       error
 ;;
 
-let test_duplicate_executable_argv0_preserved () =
+let test_repeated_first_argument_preserved () =
   let input = mk_exec "git" [ "git"; "status"; "--short" ] in
   Alcotest.(check bool)
     "validate accepts caller-authored argv"
@@ -613,14 +605,14 @@ let test_duplicate_executable_argv0_preserved () =
   match Execute_input.to_shell_ir input with
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
     Alcotest.(check (pair string (list string)))
-      "lowered IR preserves duplicated argv[0]"
+      "lowered IR preserves repeated first argument"
       ("git", [ "git"; "status"; "--short" ])
       (shell_simple_tuple simple)
   | Ok (Masc_exec.Shell_ir.Pipeline _) ->
     Alcotest.fail "single Exec must not lower to Pipeline"
   | Error err ->
     Alcotest.failf
-      "to_shell_ir should preserve duplicate argv[0], got %a"
+      "to_shell_ir should preserve repeated first argument, got %a"
       Execute_input.pp_validation_error
       err
 ;;
@@ -629,8 +621,8 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
   let input =
     Execute_input.Pipeline
       { stages =
-          [ { executable = "echo"; argv = [ "hello world" ] }
-          ; { executable = "tr"; argv = [ "a-z"; "A-Z" ] }
+          [ { argv = [ "echo"; "hello world" ] }
+          ; { argv = [ "tr"; "a-z"; "A-Z" ] }
           ]
       ; cwd = Some "/tmp"
       ; env = [ "LC_ALL", "C" ]
@@ -660,11 +652,10 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
     Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
 ;;
 
-let test_exec_lowering_preserves_duplicate_executable_argv () =
+let test_exec_lowering_preserves_repeated_argument () =
   let input =
     Execute_input.Exec
-      { executable = "git"
-      ; argv = [ "git"; "status" ]
+      { argv = [ "git"; "git"; "status" ]
       ; cwd = None
       ; env = []
       ; timeout_sec = None
@@ -688,11 +679,10 @@ let test_exec_lowering_preserves_duplicate_executable_argv () =
       error
 ;;
 
-let test_exec_lowering_preserves_single_argv_equal_to_executable () =
+let test_exec_lowering_preserves_argument_equal_to_program () =
   let input =
     Execute_input.Exec
-      { executable = "echo"
-      ; argv = [ "echo" ]
+      { argv = [ "echo"; "echo" ]
       ; cwd = None
       ; env = []
       ; timeout_sec = None
@@ -716,12 +706,12 @@ let test_exec_lowering_preserves_single_argv_equal_to_executable () =
       error
 ;;
 
-let test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable () =
+let test_pipeline_lowering_preserves_argument_equal_to_program () =
   let input =
     Execute_input.Pipeline
       { stages =
-          [ { executable = "echo"; argv = [ "echo" ] }
-          ; { executable = "wc"; argv = [ "-c" ] }
+          [ { argv = [ "echo"; "echo" ] }
+          ; { argv = [ "wc"; "-c" ] }
           ]
       ; cwd = None
       ; env = []
@@ -753,8 +743,8 @@ let test_pipeline_lowering_preserves_duplicate_stage_argv () =
   let input =
     Execute_input.Pipeline
       { stages =
-          [ { executable = "printf"; argv = [ "printf"; "hello" ] }
-          ; { executable = "wc"; argv = [ "wc"; "-c" ] }
+          [ { argv = [ "printf"; "printf"; "hello" ] }
+          ; { argv = [ "wc"; "wc"; "-c" ] }
           ]
       ; cwd = None
       ; env = []
@@ -800,8 +790,8 @@ let test_pipeline_lowers_with_injected_docker_sandbox () =
   let input =
     Execute_input.Pipeline
       { stages =
-          [ { executable = "echo"; argv = [ "hello" ] }
-          ; { executable = "wc"; argv = [ "-c" ] }
+          [ { argv = [ "echo"; "hello" ] }
+          ; { argv = [ "wc"; "-c" ] }
           ]
       ; cwd = Some "/tmp"
       ; env = []
@@ -830,8 +820,7 @@ let test_pipeline_lowers_with_injected_docker_sandbox () =
 let test_pipe_character_in_exec_argv_is_literal () =
   let input =
     Execute_input.Exec
-      { executable = "echo"
-      ; argv = [ "foo|bar" ]
+      { argv = [ "echo"; "foo|bar" ]
       ; cwd = None
       ; env = []
       ; timeout_sec = None
@@ -854,8 +843,7 @@ let test_standalone_pipe_operator_in_exec_argv_is_literal () =
   let check_case ~name argv =
     let input =
       Execute_input.Exec
-        { executable = "tail"
-        ; argv
+        { argv = "tail" :: argv
         ; cwd = None
         ; env = []
         ; timeout_sec = None
@@ -896,8 +884,7 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
   in
   let input =
     Execute_input.Exec
-      { executable = "gh"
-      ; argv = [ "pr"; "create"; "--body"; body ]
+      { argv = [ "gh"; "pr"; "create"; "--body"; body ]
       ; cwd = None
       ; env = []
       ; timeout_sec = None
@@ -926,8 +913,7 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
 let test_cwd_not_absolute () =
   let input =
     Execute_input.Exec
-      { executable = "ls"
-      ; argv = []
+      { argv = [ "ls" ]
       ; cwd = Some "relative/path"
       ; env = []
       ; timeout_sec = None
@@ -945,8 +931,7 @@ let test_cwd_not_absolute () =
 let test_env_key_invalid () =
   let input =
     Execute_input.Exec
-      { executable = "ls"
-      ; argv = []
+      { argv = [ "ls" ]
       ; cwd = None
       ; env = [ "FOO BAR", "value" ]
       ; timeout_sec = None
@@ -966,8 +951,7 @@ let test_shell_redirection_looking_tokens_are_literal () =
     (fun (token, argv) ->
       let input =
         Execute_input.Exec
-          { executable = "find"
-          ; argv
+          { argv = "find" :: argv
           ; cwd = None
           ; env = []
           ; timeout_sec = None
@@ -1012,8 +996,7 @@ let test_legitimate_metachar_still_allowed () =
     (fun (rationale, argv) ->
       let input =
         Execute_input.Exec
-          { executable = "find"
-          ; argv
+          { argv = "find" :: argv
           ; cwd = None
           ; env = []
           ; timeout_sec = None
@@ -1059,7 +1042,7 @@ let mk_exec_with_redirects
       ()
   =
   Execute_input.Exec
-    { executable; argv; cwd; env; timeout_sec; stdin; stdout; stderr }
+    { argv = executable :: argv; cwd; env; timeout_sec; stdin; stdout; stderr }
 ;;
 
 let count_redirects ir =
@@ -1177,8 +1160,7 @@ let test_redirect_stderr_discard_equivalent_to_dev_null_redirect () =
 let test_of_json_parses_discard_stderr_shorthand () =
   let json =
     `Assoc
-      [ "executable", `String "rg"
-      ; "argv", `List [ `String "pattern" ]
+      [ "argv", `List [ `String "rg"; `String "pattern" ]
       ; "cwd", `String "/tmp"
       ; "stderr", `Assoc [ "discard", `Bool true ]
       ]
@@ -1192,8 +1174,7 @@ let test_of_json_parses_discard_stderr_shorthand () =
 let test_of_json_rejects_redirect_with_both_discard_and_file () =
   let json =
     `Assoc
-      [ "executable", `String "rg"
-      ; "argv", `List [ `String "pattern" ]
+      [ "argv", `List [ `String "rg"; `String "pattern" ]
       ; "cwd", `String "/tmp"
       ; ( "stderr"
         , `Assoc
@@ -1216,21 +1197,25 @@ let suite =
           `Quick
           test_pipeline_single_stage_rejected
       ; Alcotest.test_case
-          "pipeline_stage_executable_check"
+          "pipeline_stage_program_check"
           `Quick
-          test_pipeline_stage_executable_check
+          test_pipeline_stage_program_check
       ; Alcotest.test_case
-          "empty_executable_with_argv_hints_rewrite"
+          "empty_program_is_rejected"
           `Quick
-          test_empty_executable_with_argv_hints_rewrite
+          test_empty_program_is_rejected
       ; Alcotest.test_case
-          "duplicate_executable_argv0_preserved"
+          "repeated_first_argument_preserved"
           `Quick
-          test_duplicate_executable_argv0_preserved
+          test_repeated_first_argument_preserved
       ; Alcotest.test_case
-          "unvalidated_path_preserves_argv_in_error"
+          "unvalidated_path_rejects_empty_program"
           `Quick
-          test_unvalidated_path_preserves_argv_in_error
+          test_unvalidated_path_rejects_empty_program
+      ; Alcotest.test_case
+          "program_whitespace_is_preserved"
+          `Quick
+          test_program_whitespace_is_preserved
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case
           "of_json_timeout_is_optional_and_preserved"
@@ -1241,21 +1226,25 @@ let suite =
           `Quick
           test_of_json_rejects_invalid_explicit_timeout
       ; Alcotest.test_case
-          "of_json_rejects_argv_without_executable"
+          "of_json_accepts_single_argv_ssot"
           `Quick
-          test_of_json_rejects_argv_without_executable
+          test_of_json_accepts_single_argv_ssot
       ; Alcotest.test_case
-          "of_json_preserves_duplicate_executable_argv0"
+          "of_json_rejects_retired_executable_field"
           `Quick
-          test_of_json_preserves_duplicate_executable_argv0
+          test_of_json_rejects_retired_executable_field
       ; Alcotest.test_case
-          "of_json_rejects_empty_argv_without_executable"
+          "of_json_preserves_repeated_argument"
           `Quick
-          test_of_json_rejects_empty_argv_without_executable
+          test_of_json_preserves_repeated_argument
       ; Alcotest.test_case
-          "of_json_rejects_empty_pipeline_with_executable"
+          "of_json_keeps_empty_argv_for_typed_validation"
           `Quick
-          test_of_json_rejects_empty_pipeline_with_executable
+          test_of_json_keeps_empty_argv_for_typed_validation
+      ; Alcotest.test_case
+          "of_json_rejects_argv_and_pipeline"
+          `Quick
+          test_of_json_rejects_argv_and_pipeline
       ; Alcotest.test_case
           "of_json_keeps_empty_exec_for_validation"
           `Quick
@@ -1274,9 +1263,9 @@ let suite =
           `Quick
           test_of_json_rejects_cmd_string_only
       ; Alcotest.test_case
-          "of_json_rejects_cmd_string_with_exec"
+          "of_json_rejects_cmd_string_with_argv"
           `Quick
-          test_of_json_rejects_cmd_string_with_exec
+          test_of_json_rejects_cmd_string_with_argv
       ; Alcotest.test_case
           "of_json_rejects_non_string_argv"
           `Quick
@@ -1298,17 +1287,17 @@ let suite =
           `Quick
           test_pipeline_lowers_to_shell_ir_pipeline
       ; Alcotest.test_case
-          "exec_lowering_preserves_duplicate_executable_argv"
+          "exec_lowering_preserves_repeated_argument"
           `Quick
-          test_exec_lowering_preserves_duplicate_executable_argv
+          test_exec_lowering_preserves_repeated_argument
       ; Alcotest.test_case
-          "exec_lowering_preserves_single_argv_equal_to_executable"
+          "exec_lowering_preserves_argument_equal_to_program"
           `Quick
-          test_exec_lowering_preserves_single_argv_equal_to_executable
+          test_exec_lowering_preserves_argument_equal_to_program
       ; Alcotest.test_case
-          "pipeline_lowering_preserves_single_stage_argv_equal_to_executable"
+          "pipeline_lowering_preserves_argument_equal_to_program"
           `Quick
-          test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable
+          test_pipeline_lowering_preserves_argument_equal_to_program
       ; Alcotest.test_case
           "pipeline_lowering_preserves_duplicate_stage_argv"
           `Quick

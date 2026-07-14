@@ -18,7 +18,19 @@
 (** Why a worker run terminated. *)
 type stop_reason =
   | Completed
-  | TurnBudgetExhausted of { turns_used : int; limit : int }
+  | TurnLimitObserved of { turns_used : int; limit : int }
+  | ExecutionTimeoutObserved of {
+      elapsed_sec : float;
+      timeout_sec : float;
+      turn_count : int;
+      max_turns : int;
+    }
+  | ExecutionIdleTimeoutObserved of {
+      idle_sec : float;
+      idle_timeout_sec : float;
+      turn_count : int;
+      max_turns : int;
+    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
@@ -96,14 +108,6 @@ type config = {
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
-  execution_idle_timeout_s : float option;
-      (** Per-run inactivity deadline forwarded to OAS
-          [Builder.with_execution_idle_timeout]. Resets on each unit of
-          progress (streamed token or completed turn) and fires only on
-          genuine silence, surfacing [Error.AgentExecutionIdleTimeout].
-          Unlike [max_execution_time_s] (total wall-clock), this never
-          cancels a run that is still producing output.
-          @since 0.201.0 OAS *)
   thinking_budget : int option;
       (** Token budget for extended thinking, forwarded to OAS
           [Builder.with_thinking_budget]. Only meaningful when
@@ -181,7 +185,6 @@ val prepare_resume :
 (** [prepare_resume ~config ~checkpoint] computes the patched
     checkpoint + agent_config + options for an
     [Agent.resume] call.  Pure — no side effects.  The patched
-    agent config preserves [config.max_turns = 0] as unbounded; otherwise it
-    extends [config.max_turns] beyond the consumed [checkpoint.turn_count] so
-    the resumed run gets a fresh turn budget instead of inheriting the
-    exhausted one. *)
+    agent config preserves {!Agent_sdk.Types.unbounded_max_turns}; otherwise it
+    extends [config.max_turns] beyond the consumed [checkpoint.turn_count] for
+    generic finite OAS clients. Keeper callers use the unbounded sentinel. *)

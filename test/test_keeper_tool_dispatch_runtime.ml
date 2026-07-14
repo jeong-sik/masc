@@ -367,7 +367,9 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check bool "Execute policy group omitted" true
     (Yojson.Safe.Util.member "policy_group" policy = `Null);
   let schema_shape = Yojson.Safe.Util.member "schema_shape" execute in
-  check bool "Execute schema properties include executable" true
+  check bool "Execute schema properties include argv" true
+    (list_member_contains "properties" "argv" schema_shape);
+  check bool "Execute schema properties omit retired executable" false
     (list_member_contains "properties" "executable" schema_shape);
   check bool "Execute schema properties include pipeline" true
     (list_member_contains "properties" "pipeline" schema_shape);
@@ -385,21 +387,21 @@ let test_keeper_tools_list_json_uses_typed_groups () =
          check bool ("example input property is declared: " ^ key) true
            (List.mem key execute_properties)))
     examples;
-  let example_with_executable executable =
+  let example_with_program program =
     List.exists
       (fun example ->
-         String.equal
-           executable
-           Yojson.Safe.Util.(member "input" example |> member "executable" |> to_string))
+         match Yojson.Safe.Util.(member "input" example |> member "argv" |> to_list) with
+         | `String argv0 :: _ -> String.equal program argv0
+         | _ -> false)
       examples
   in
   check int "Execute has one neutral typed example" 1 (List.length examples);
   check bool "Execute example uses an opaque program identity" true
-    (example_with_executable "program");
+    (example_with_program "program");
   List.iter
     (fun product_name ->
        check bool ("Execute example excludes product identity " ^ product_name) false
-         (example_with_executable product_name))
+         (example_with_program product_name))
     [ "gh"; "git"; "rg" ];
   check bool "Execute examples use neutral cwd placeholders" true
     (List.for_all
@@ -463,10 +465,10 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
         `Assoc
-          [ "properties", `Assoc [ "executable", `Assoc []; "pipeline", `Assoc [] ]
+          [ "properties", `Assoc [ "argv", `Assoc []; "pipeline", `Assoc [] ]
           ; "oneOf"
           , `List
-              [ `Assoc [ "required", `List [ `String "executable" ] ]
+              [ `Assoc [ "required", `List [ `String "argv" ] ]
               ; `Assoc [ "required", `List [] ]
               ]
           ]
@@ -480,9 +482,9 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   in
   check int "oneOf shape keeps both branches" 2 (List.length one_of_required);
   (match one_of_required with
-   | [ executable_branch; empty_branch ] ->
-     check bool "oneOf executable branch retained" true
-       (json_list_contains "executable" executable_branch);
+   | [ argv_branch; empty_branch ] ->
+     check bool "oneOf argv branch retained" true
+       (json_list_contains "argv" argv_branch);
      check int "oneOf empty-required branch retained" 0
        Yojson.Safe.Util.(empty_branch |> to_list |> List.length)
    | _ -> fail "expected exactly two oneOf required branches");
@@ -642,7 +644,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
         run
           "Execute"
           (`Assoc
-             [ "executable", `String "pwd"
+             [ "argv", `List [ `String "pwd" ]
              ; "cwd", `String playground
              ; "timeout_sec", `Float 5.0
              ])
@@ -977,7 +979,7 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
         (fun raw ->
            let json = Yojson.Safe.from_string raw in
            check string "typed shell ir required"
-             "Typed Shell IR input is required. Provide executable/argv or pipeline."
+             "Typed Shell IR input is required. Provide non-empty argv or pipeline."
              Yojson.Safe.Util.(member "error" json |> to_string);
            check bool "typed marker" true
              Yojson.Safe.Util.(member "typed" json |> to_bool))

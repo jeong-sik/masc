@@ -17,12 +17,12 @@ let temp_dir () =
 
 let cleanup_dir dir =
   let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then (
-        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
-        Unix.rmdir path)
-      else
-        Unix.unlink path
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+    | stat when stat.Unix.st_kind = Unix.S_DIR ->
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    | _ -> Unix.unlink path
   in
   try rm dir with _ -> ()
 
@@ -302,7 +302,7 @@ let test_durable_write_uses_explicit_atomic_staging_directory () =
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        let target_dir = Filename.concat base "active" in
-       let staging_dir = Filename.concat base ".atomic-staging-v1" in
+       let staging_dir = Filename.concat base ".atomic-staging" in
        let path = Filename.concat target_dir "request.json" in
        let observed_staging_temp = Atomic.make false in
        let observed_target_temp = Atomic.make false in
@@ -338,7 +338,7 @@ let test_durable_write_reports_staging_directory_fsync_failure () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       let staging_dir = Filename.concat base ".atomic-staging-v1" in
+       let staging_dir = Filename.concat base ".atomic-staging" in
        let path = Filename.concat base "active/request.json" in
        let result =
          KF.For_testing.save_json_durable_atomic
@@ -409,6 +409,62 @@ let test_durable_remove_reports_absent_parent_fsync_failure () =
            "unexpected durable remove error: %s"
            (KF.durable_remove_error_to_string error)
        | Ok () -> fail "absent remove hid the parent fsync failure")
+
+let test_owned_regular_file_read_rejects_symbolic_links () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  let outside = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir base;
+      cleanup_dir outside)
+    (fun () ->
+       let outside_path = Filename.concat outside "outside.json" in
+       require_ok "seed outside file" (KF.save_atomic outside_path "outside");
+       let owned_parent = Filename.concat base "keepers/alpha" in
+       let owned_path = Filename.concat owned_parent "record.json" in
+       ignore (KF.ensure_dir owned_parent : string);
+       Unix.symlink outside_path owned_path;
+       (match KF.load_owned_regular_file ~ownership_root:base owned_path with
+        | Error (KF.Path_is_not_regular_file { kind = Unix.S_LNK; _ }) -> ()
+        | Error error ->
+          failf
+            "unexpected final-link error: %s"
+            (KF.owned_regular_file_read_error_to_string error)
+        | Ok _ -> fail "final symbolic link was accepted");
+       check string "outside target is never read or changed" "outside"
+         (read_file outside_path);
+       Unix.unlink owned_path;
+       require_ok "seed owned regular file" (KF.save_atomic owned_path "owned");
+       (match KF.load_owned_regular_file ~ownership_root:base owned_path with
+        | Ok (Some content) -> check string "regular file loads" "owned" content
+        | Ok None -> fail "owned regular file was reported absent"
+        | Error error ->
+          failf
+            "owned regular file failed: %s"
+            (KF.owned_regular_file_read_error_to_string error));
+       Unix.unlink owned_path;
+       (match KF.load_owned_regular_file ~ownership_root:base owned_path with
+        | Ok None -> ()
+        | Ok (Some _) -> fail "absent owned file returned content"
+        | Error error ->
+          failf
+            "absent owned file failed: %s"
+            (KF.owned_regular_file_read_error_to_string error));
+       let linked_parent = Filename.concat base "linked-parent" in
+       Unix.symlink outside linked_parent;
+       (match
+          KF.load_owned_regular_file
+            ~ownership_root:base
+            (Filename.concat linked_parent "outside.json")
+        with
+        | Error (KF.Ownership_boundary_rejected _) -> ()
+        | Error error ->
+          failf
+            "unexpected parent-link error: %s"
+            (KF.owned_regular_file_read_error_to_string error)
+        | Ok _ -> fail "symbolic-link parent escaped ownership root"))
 
 (* ================================================================ *)
 (* Keeper_identity tests                                            *)
@@ -517,6 +573,11 @@ let () =
             "absent remove reports parent fsync failure"
             `Quick
             test_durable_remove_reports_absent_parent_fsync_failure;
+        ] );
+      ( "owned_read",
+        [ test_case
+            "regular files only and no symbolic-link parents"
+            `Quick test_owned_regular_file_read_rejects_symbolic_links
         ] );
       ( "identity",
         [

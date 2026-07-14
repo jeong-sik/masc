@@ -199,17 +199,24 @@ type t =
 
 let stop_reason_to_string = function
   | Runtime_agent.Completed -> "completed"
-  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-    (* Single SSOT for the budget-exhausted wire grammar: serialise through
-       [Keeper_turn_disposition.to_wire] so this producer and the dashboard /
-       runtime-trust [of_wire] consumers cannot drift. [Runtime_agent]'s variant
-       carries only used/limit, so the detail-less form is emitted. The previous
-       hand-rolled "%s:%d/%d" used a colon that
-       [of_wire] (paren grammar) rejected → Unknown → dashboards misreported the
-       budget state (re-coupled by test_keeper_execution_receipt_budget_wire). *)
-    Keeper_turn_disposition.to_wire
-      (Keeper_turn_disposition.Turn_budget_exhausted
-         { detail = None; used = turns_used; limit })
+  | Runtime_agent.TurnLimitObserved { turns_used; limit } ->
+    Printf.sprintf "turn_limit_observed:turns=%d,limit=%d" turns_used limit
+  | Runtime_agent.ExecutionTimeoutObserved
+      { elapsed_sec; timeout_sec; turn_count; max_turns } ->
+    Printf.sprintf
+      "execution_timeout_observed:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      elapsed_sec
+      timeout_sec
+      turn_count
+      max_turns
+  | Runtime_agent.ExecutionIdleTimeoutObserved
+      { idle_sec; idle_timeout_sec; turn_count; max_turns } ->
+    Printf.sprintf
+      "execution_idle_timeout_observed:idle_sec=%.1f,idle_timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      idle_sec
+      idle_timeout_sec
+      turn_count
+      max_turns
   | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
     Printf.sprintf "yielded_to_chat_waiting:%d" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
@@ -227,10 +234,12 @@ let receipt_terminal_reason_code_of_stop_reason = function
   | Runtime_agent.InputRequired _ ->
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
   | Runtime_agent.Completed
+  | Runtime_agent.TurnLimitObserved _
+  | Runtime_agent.ExecutionTimeoutObserved _
+  | Runtime_agent.ExecutionIdleTimeoutObserved _
   | Runtime_agent.ToolFailureRecoveryDeferred _ ->
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
-  | ( Runtime_agent.TurnBudgetExhausted _
-    | Runtime_agent.Yielded_to_chat_waiting _
+  | ( Runtime_agent.Yielded_to_chat_waiting _
     | Runtime_agent.Yielded_to_durable_stimulus _ ) as stop_reason ->
     stop_reason_to_string stop_reason
 ;;

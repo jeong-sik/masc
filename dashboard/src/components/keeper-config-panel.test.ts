@@ -58,8 +58,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     execution: {
       models: ['llama:test-balanced'],
       active_model: 'llama:test-balanced',
-      per_provider_timeout_sec: null,
-      per_provider_timeout_mode: 'turn_budget_default',
       verify: true,
       selected_runtime_id: 'tier-group.keeper_unified',
       selected_runtime_canonical: 'tier-group.keeper_unified',
@@ -836,7 +834,6 @@ const mocks = vi.hoisted(() => {
                 supports_inline_tools: true,
                 argv_prompt_preflight: true,
                 uses_anthropic_caching: false,
-                max_turns_per_attempt: 3,
               },
               custom_header_count: 1,
               connect_timeout_s: 120,

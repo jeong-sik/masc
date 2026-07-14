@@ -74,7 +74,6 @@ val coverage_reason_of_result : Keeper_agent_run.run_result -> string option
 val coverage_stage_of_result : Keeper_agent_run.run_result -> string option
 val coverage_stage_of_no_result_outcome : string -> string
 val coverage_reason_of_no_result_outcome : string -> string
-val error_category_of_no_result_outcome : outcome:string -> error:string option -> string option
 val validated_evidence_preview : Agent_sdk.Raw_trace.run_validation -> string
 
 val accountability_evidence_refs :
@@ -106,8 +105,6 @@ val decision_channel_of_observation :
 val is_scheduled_autonomous_cycle_of_observation :
   Keeper_world_observation.world_observation -> bool
 
-val response_requests_confirmation : string -> bool
-
 val select_proactive_preview :
   previous:string ->
   has_text:bool ->
@@ -118,6 +115,6 @@ val select_proactive_preview :
   validated_evidence_preview:string option ->
   string
 (** RFC-0232 scheduled-autonomous work preview, by precedence: visible model
-    text (only when [is_visible_reply], so the synthetic continuation notice on
-    a budget-exhausted turn is not shown as output) -> substantive tool calls ->
+    text (only when [is_visible_reply], so a no-output turn-limit observation
+    is not shown as output) -> substantive tool calls ->
     validated evidence -> [previous]. Pure for unit testing. *)

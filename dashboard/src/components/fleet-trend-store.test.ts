@@ -29,7 +29,6 @@ function makeRow(name: string, overrides: Partial<FleetRow> = {}): FleetRow {
     active_goal_count: 0,
     sandbox_profile: null,
     sandbox_last_error: null,
-    budget_source: null,
     provider_health_status: null,
     provider_health_label: null,
     ...overrides,

@@ -221,19 +221,6 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
           path
           key
   in
-  let positive_int_opt_field key =
-    (* Reject non-positive values at parse time: a cap of 0 or -N would
-       clamp every attempt to a meaningless budget downstream. *)
-    match Otoml.find_opt tbl Otoml.get_integer [ key ] with
-    | None -> None
-    | Some n when n > 0 -> Some n
-    | Some n ->
-      Log.Runtime.warn "runtime_toml: %s.capabilities.%s = %d — expected positive integer, ignoring"
-          path
-          key
-          n;
-      None
-  in
   List.iter
     warn_deprecated
     [ "supports-runtime-mcp-tools"
@@ -242,7 +229,6 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
   { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
   ; argv_prompt_preflight = b "argv-prompt-preflight"
   ; uses_anthropic_caching = b "uses-messages-caching"
-  ; max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt"
   }
 ;;
 

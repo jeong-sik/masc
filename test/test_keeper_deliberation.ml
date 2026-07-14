@@ -919,59 +919,6 @@ let test_parse_missing_confidence_defaults () =
   | Ok (_action, _reasoning, confidence) ->
       check (float 0.01) "default confidence" 0.5 confidence
 
-(* ---------- deliberation_budget_check tests ---------- *)
-
-let test_budget_check_under_budget () =
-  check bool "under budget" true
-    (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.05)
-
-let test_budget_check_at_budget () =
-  check bool "at budget remains advisory" true
-    (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.10)
-
-let test_budget_check_over_budget () =
-  check bool "over budget remains advisory" true
-    (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.15)
-
-let test_budget_check_zero_budget () =
-  check bool "zero budget remains advisory" true
-    (D.deliberation_budget_check ~daily_budget_usd:0.0 ~cost_today_usd:0.0)
-
-let test_budget_check_zero_cost () =
-  check bool "zero cost under positive budget" true
-    (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.0)
-
-let test_default_daily_budget () =
-  (* default is 0.10 in env_config_keeper.ml KeeperRuntime *)
-  check (float 0.001) "default budget" 0.10 (D.daily_budget_usd ())
-
-let test_daily_budget_empty_env_default () =
-  (* Unset the env var to get default *)
-  let saved = Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" in
-  (match saved with
-   | Some _ -> Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" ""
-   | None -> ());
-  (* The function reads at call time, but with empty string it should
-     fall back to default due to float_of_string failure *)
-  let budget = D.daily_budget_usd () in
-  (* Restore *)
-  (match saved with
-   | Some v -> Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" v
-   | None -> ());
-  (* Empty string causes Failure in float_of_string, so default applies *)
-  check (float 0.001) "env default budget" 0.10 budget
-
-let test_daily_budget_live_env_custom () =
-  let saved = Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" in
-  Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" "0.50";
-  let budget = D.daily_budget_usd () in
-  (match saved with
-   | Some v -> Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" v
-   | None ->
-       (* Cannot truly unset with Unix.putenv, set to empty *)
-       Unix.putenv "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" "");
-  check (float 0.001) "custom env budget" 0.50 budget
-
 (* ---------- L3 Strategic: multi_step parse ---------- *)
 
 let test_parse_multi_step_action () =
@@ -1290,25 +1237,6 @@ let () =
             test_parse_multi_step_nested_rejected;
           test_case "multi_step invalid substep fails" `Quick
             test_parse_multi_step_invalid_substep_fails;
-        ] );
-      ( "deliberation_budget",
-        [
-          test_case "under budget returns true" `Quick
-            test_budget_check_under_budget;
-          test_case "at budget remains advisory" `Quick
-            test_budget_check_at_budget;
-          test_case "over budget remains advisory" `Quick
-            test_budget_check_over_budget;
-          test_case "zero budget remains advisory" `Quick
-            test_budget_check_zero_budget;
-          test_case "zero cost under positive budget" `Quick
-            test_budget_check_zero_cost;
-          test_case "default daily budget value" `Quick
-            test_default_daily_budget;
-          test_case "daily budget empty env default" `Quick
-            test_daily_budget_empty_env_default;
-          test_case "daily budget live env custom" `Quick
-            test_daily_budget_live_env_custom;
         ] );
       ( "keeper_field_cleanup",
         [

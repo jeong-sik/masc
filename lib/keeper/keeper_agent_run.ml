@@ -538,7 +538,7 @@ let run_turn
        let stream_idle_timeout_s =
          Keeper_runtime_resolved.stream_idle_timeout_sec ()
        in
-       Keeper_agent_run_phase0_telemetry.record_if_enabled
+       Keeper_agent_run_phase0_telemetry.record
          ~meta
          ~turn_system_prompt
          ~tools

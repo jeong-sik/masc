@@ -1,6 +1,6 @@
 (** Phase-0 wake-time payload telemetry, extracted from [Keeper_agent_run]. *)
 
-let record_if_enabled
+let record
     ~(meta : Keeper_meta_contract.keeper_meta)
     ~turn_system_prompt
     ~tools
@@ -10,9 +10,7 @@ let record_if_enabled
     ~max_context
     ~pre_dispatch_compacted
   =
-  if Env_config_keeper.KeeperTelemetry.payload_telemetry_enabled ()
-  then (
-    try
+  try
       let sizes =
         Keeper_wake_telemetry.compute_sizes
           ~system_prompt:turn_system_prompt
@@ -48,5 +46,5 @@ let record_if_enabled
       Log.Harness.warn
         "[wake_payload] telemetry failed keeper=%s: %s"
         meta.name
-        (Printexc.to_string exn))
+        (Printexc.to_string exn)
 ;;

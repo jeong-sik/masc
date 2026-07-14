@@ -77,7 +77,6 @@ type world_observation =
   ; pending_board_events : pending_board_event list
   ; idle_seconds : int
   ; active_goals : string list
-  ; context_ratio : float Lazy.t
   ; unclaimed_task_count : int
   ; claimable_task_count : int
   ; failed_task_count : int
@@ -162,7 +161,6 @@ let collect_message_scope = Message_scope.collect_message_scope
 let read_backlog_counts = Inputs.read_backlog_counts
 let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
-let read_context_ratio = Inputs.read_context_ratio
 let board_signal_match = Board_signal.match_signal
 let check_self_comment_status = Board_signal.check_self_comment_status
 let board_signal_wake_reason = Board_signal.wake_reason
@@ -993,13 +991,6 @@ let observe
       ~config
       ~now:(Time_compat.now ())
   in
-  (* Defer the checkpoint load (file read + Yojson parse + sanitize + O(n)
-     tool-pair repair) out of [observe]. Most cycles are no-op skips where
-     the gate decides not to run; on those, [context_ratio] is never forced
-     so the checkpoint is not loaded. The post-gate Run-path consumers
-     (build_prompt, append_decision_record) force it exactly once per run
-     cycle. Verified the gate never reads it. *)
-  let context_ratio = Lazy.from_fun (fun () -> read_context_ratio ~config ~meta) in
   let pending_board_events =
     match pending_board_events with
     | Some events -> events
@@ -1013,7 +1004,6 @@ let observe
   ; pending_board_events
   ; idle_seconds
   ; active_goals = meta.active_goal_ids
-  ; context_ratio
   ; unclaimed_task_count
   ; claimable_task_count
   ; failed_task_count
@@ -1047,7 +1037,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; pending_board_events = []
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
-  ; context_ratio = Lazy.from_fun (fun () -> read_context_ratio ~config ~meta)
   ; unclaimed_task_count
   ; claimable_task_count
   ; failed_task_count

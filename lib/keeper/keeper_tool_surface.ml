@@ -668,8 +668,6 @@ let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
   | "masc_keeper_msg_result" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_result ctx args))
   | "masc_keeper_msg_cancel" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_cancel ctx args))
   | "masc_keeper_msg_queue" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_queue ctx args))
-  | "masc_keeper_adversarial_review" ->
-      Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_adversarial_review ctx args))
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
   | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
   | "masc_keeper_persona_audit" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_persona_audit ctx args))
@@ -864,11 +862,6 @@ let () =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.keeper_status_body ~config ~agent_name args))
-    | "masc_keeper_adversarial_review" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (Keeper_tool_surface_ops.adversarial_review_body ~config ~agent_name args))
     | "masc_keeper_sandbox_status" ->
       (match sw, clock with
        | Some sw, Some clock ->

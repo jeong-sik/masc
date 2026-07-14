@@ -283,7 +283,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_msg_queue", read_state_tool);
     ("masc_keeper_persona_audit", read_state_tool);
     ("masc_keeper_sandbox_status", read_state_tool);
-    ("masc_keeper_adversarial_review", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", broadcast_tool);
     ("masc_keeper_down", mutating_tool);

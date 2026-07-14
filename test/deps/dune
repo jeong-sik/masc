@@ -64,11 +64,6 @@
   ;; CDAL runtime proof/session modules are local to this sub-library; tests
   ;; need it re-exported so [Masc_cdal_runtime.*] resolves.
   (re_export masc.cdal_runtime)
-  ;; RFC-0056 Phase 0 — contract Phase 1A evaluator extracted to lib/cdal/.
-  ;; Hosts Cdal_types + Adversarial_eval + Labeling. Re-exported so
-  ;; test_cdal_types / test_labeling / test_adversarial_eval and other
-  ;; consumers keep resolving these unprefixed module names.
-  (re_export masc.cdal)
   ;; RFC-0056 Phase 1A — Trajectory leaf module sub-library.
   ;; Tests previously wrote `Masc.Trajectory.X` (wrapped pattern);
   ;; after this re-export they use bare `Trajectory.X` per the

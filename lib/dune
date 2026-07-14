@@ -120,12 +120,6 @@
   ;; literals in lib/runtime and lib/keeper through this leaf.
   masc.types_boundary
   masc.cdal_runtime
-  ;; RFC-0056 Phase 0 — contract Phase 1A evaluator extracted to lib/cdal/
-  ;; as its own sub-library. Hosts Cdal_types + Adversarial_eval +
-  ;; Labeling. Phase 1 will move judge / eval_v1 / loader once their
-  ;; root-namespace cycles (Proof_artifact_reader, Bounded, Session,
-  ;; Attribution, Violation_record) are resolved.
-  masc.cdal
   ;; RFC-0056 Phase 1A — Trajectory leaf module promoted out of flat
   ;; masc namespace. Unblocks Wave A keeper/server godfile extractions
   ;; (PR-1+) by removing the parent ↔ sub-lib cycle on `Trajectory.X`.

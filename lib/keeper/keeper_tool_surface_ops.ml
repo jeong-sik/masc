@@ -914,53 +914,6 @@ let resolve_keeper_meta_config ~(config : Workspace.config) args =
 let resolve_keeper_meta ctx args =
   resolve_keeper_meta_config ~config:ctx.config args
 
-let adversarial_review_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
-  ignore config;
-  let diff = get_string args "diff" "" in
-  if String.equal (String.trim diff) ""
-  then tool_result_error_data (`Assoc [ "error", `String "diff is required" ])
-  else
-    match
-      let inputs =
-        match get_string_opt args "path" with
-        | Some path -> [ Adversarial_eval.Changed_file { path; content = diff } ]
-        | None -> [ Adversarial_eval.Diff diff ]
-      in
-      let* valid_inputs =
-        Adversarial_eval.validate_inputs inputs
-        |> Result.map_error (fun (path, kind) ->
-            let kind_str =
-              match (kind : Adversarial_eval.banned_input_kind) with
-              | Readme -> "readme"
-              | Design_doc -> "design_doc"
-              | State_history -> "state_history"
-              | Task_history -> "task_history"
-              | Session_history -> "session_history"
-            in
-            Payload_error
-              (`Assoc
-                 [ ( "error"
-                   , `String
-                       (Printf.sprintf "banned input: %s (%s)" path kind_str) ) ]))
-      in
-      let session_id =
-        Printf.sprintf "%s-%s-%.0f"
-          agent_name
-          "adversarial-review"
-          (Time_compat.now ())
-      in
-      let ctx =
-        Adversarial_eval.create_context ~session_id ~inputs:valid_inputs
-      in
-      let result = Adversarial_eval.evaluate ctx in
-      Ok (tool_result_ok_data (Adversarial_eval.result_to_yojson result))
-    with
-    | Ok result -> result
-    | Error error -> tool_result_of_handler_error error
-
-let handle_keeper_adversarial_review ctx args : tool_result =
-  adversarial_review_body ~config:ctx.config ~agent_name:ctx.agent_name args
-
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
   invalidate_status_cache (get_string args "name" "");

@@ -65,7 +65,6 @@
   masc.json_field
   masc.types_boundary
   masc.cdal_runtime
-  masc.cdal
   masc.trajectory
   masc.host_config
   masc.briefing_compactors

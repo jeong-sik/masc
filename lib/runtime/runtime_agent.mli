@@ -69,7 +69,6 @@ type stop_reason = Runtime_agent_context.stop_reason =
 type config = Runtime_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Agent_sdk.Provider.config;
   model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
@@ -279,11 +278,6 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
-  val request_runtime_fields_on_base_config :
-    base:Llm_provider.Provider_config.t ->
-    Llm_provider.Provider_config.t ->
-    Llm_provider.Provider_config.t
-
   val provider_http_observation_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 

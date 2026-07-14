@@ -130,7 +130,7 @@ let make_registry_config
     in
     match caps.max_context_tokens with
     | Some n -> Some n
-    | None -> entry.max_context
+    | None -> Some entry.max_context
   in
   Llm_provider.Provider_config.make
     ~kind:defaults.kind

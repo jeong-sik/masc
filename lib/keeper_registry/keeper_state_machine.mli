@@ -28,11 +28,8 @@ type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
   | Failing       (** Consecutive failures detected, probing recovery *)
-  | Overflowed    (** Prompt exceeded provider max context; auto-compact
-                      pending. Transient: [entry_actions_for] emits
-                      [Start_compaction] so the next event-loop iteration
-                      derives [Compacting]. Distinguishes "context overflow"
-                      from generic [Failing] for operator observability. *)
+  | Overflowed    (** Prompt exceeded provider max context; durable lane
+                      compaction is pending. *)
   | Compacting    (** Context compaction in progress *)
   | HandingOff    (** Generation rollover in progress *)
   | Draining      (** Graceful shutdown: completing current turn *)
@@ -88,10 +85,8 @@ type conditions = {
   (** Provider rejected the most recent prompt for exceeding its max
       context window. Distinct from [context_within_budget] (soft,
       ratio-based warning): [context_overflow] is a hard failure reported
-      by the provider. Cleared by a [Compaction_completed] whose payload
-      reports real token savings ([before_tokens > after_tokens]) or by
-      an operator clear action. A noop compaction ([before = after])
-      leaves this flag set for observability and later recovery. *)
+      by the provider. Cleared by completed compaction or operator clear;
+      token counts remain observations, not lifecycle gates. *)
   credential_archived : bool;
 }
 
@@ -188,12 +183,9 @@ type event =
         diagnostics or from the drained OAS [Event_bus]
         [ContextOverflowImminent] signal for the same turn. *)
   | Auto_compact_triggered
-    (** Emitted as part of [Overflowed] entry actions to mark the
-        start of auto-recovery. Sets [compaction_active] so the next
-        [derive_phase] returns [Compacting]. *)
+    (** Legacy explicit input; no entry action produces this event. *)
   | Operator_compact_requested
-    (** Operator invoked [masc_keeper_compact] MCP tool. Behaves like
-        [Auto_compact_triggered] without requiring a preceding overflow. *)
+    (** Operator invoked [masc_keeper_compact] MCP tool. *)
   | Operator_clear_requested of { preserve_system : bool; reason : string }
     (** Operator invoked [masc_keeper_clear]. Last-resort: drops
         conversation context entirely. Bypasses [Compacting] buffer
@@ -208,9 +200,6 @@ val event_to_string : event -> string
     Runtime contract:
     - [Publish_lifecycle] is executed by the registry integration as an
       observability-only SSE/log side effect.
-    - [Start_compaction] is executed by the registry only for the
-      [Overflowed] auto-compact path, which emits
-      [Auto_compact_triggered] after the transition is committed.
     - The remaining variants remain descriptive placeholders for
       supervisor-owned work and are intentionally ignored by the registry. *)
 type entry_action =
@@ -268,7 +257,7 @@ val transition_error_to_string : transition_error -> string
     7.  Paused (operator_paused)
     8.  HandingOff (handoff_active)
     9.  Compacting (compaction_active)
-    10. Overflowed (context_overflow) -- transient, auto-compact pending
+    10. Overflowed (context_overflow) -- durable compaction pending
     11. Failing (latest health failure or structural failure observation)
     12. Running (fiber_alive)
     13. Offline (default fallback for inconsistent zero-state)

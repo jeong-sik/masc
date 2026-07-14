@@ -244,7 +244,6 @@ let parse_workspace_judgment ~config ~generated_at ~generated_at_unix ~model_use
 let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ~base_path
     ~facts_json =
   let prompt = prompt_for_facts facts_json in
   let runtime_id =
@@ -257,9 +256,8 @@ let compute_judgments
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
-        ~base_path ~goal:prompt ~masc_tools ~dispatch
+        ~goal:prompt ~masc_tools ~dispatch
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-        ~approval:Approval_callbacks.auto_approve
         ~provider_config_transform:apply_operator_judge_output_schema
         ()
     )
@@ -292,7 +290,7 @@ let refresh_once
     ~(config : Workspace.config) ~build_facts =
   let st = get_state config.base_path in
   with_lock st (fun () -> st.refreshing <- true);
-  match compute_judgments ~masc_tools ~dispatch ~base_path:config.base_path
+  match compute_judgments ~masc_tools ~dispatch
           ~facts_json:(build_facts ()) with
   | Error message ->
       with_lock st (fun () ->

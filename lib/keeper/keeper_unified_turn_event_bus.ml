@@ -56,8 +56,10 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~tur
         { event_bus
         ; event_bus_sub =
             Agent_sdk_metrics_bridge.subscribe
-           ~purpose:"keeper_turn"
-           ~filter:(Agent_sdk.Event_bus.filter_agent keeper_name)
+              ~contract:
+                (Masc_event_bus_subscription.for_subscriber
+                   Masc_event_bus_subscription.Keeper_turn)
+              ~filter:(Agent_sdk.Event_bus.filter_agent keeper_name)
               event_bus
         }
     | None -> No_event_bus

@@ -96,7 +96,6 @@ val run_named :
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
   ?context_window_tokens:int ->
-  ?checkpoint_dir:string ->
   ?checkpoint_sink:Agent_sdk.Agent.checkpoint_sink ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->

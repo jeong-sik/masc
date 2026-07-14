@@ -482,23 +482,6 @@ function ingestRuntimeProjection(
         })
       }
       return
-    case 'oas:context_compacted':
-      if (opts?.includeLiveTrace) {
-        const before = asNumber(payload.before_tokens)
-        const after = asNumber(payload.after_tokens)
-        const phase = asString(payload.phase)
-        maybeAppendLiveTrace(agentName, event, {
-          idSuffix: `${phase ?? 'compact'}|${before ?? 'na'}|${after ?? 'na'}`,
-          kind: 'oas_context',
-          summary: `compact${before != null && after != null ? ` ${before}→${after}` : ''}`,
-          data: {
-            before_tokens: before ?? null,
-            after_tokens: after ?? null,
-            phase: phase ?? null,
-          },
-        })
-      }
-      return
     case 'oas:durable:llm_request':
       recordOasLlmCall(eventTimestampMs(event))
       if (opts?.includeLiveTrace) {

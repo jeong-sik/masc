@@ -284,10 +284,10 @@ describe('keeperRuntimeBlockerLabel', () => {
   it('labels the active SDK blocker variants', () => {
     expect(keeperRuntimeBlockerLabel('sdk_context_window_exceeded')).toBe('SDK 컨텍스트 윈도 초과')
     expect(keeperRuntimeBlockerLabel('sdk_unrecognized_stop_reason')).toBe('SDK 미식별 정지 사유')
-    expect(keeperRuntimeBlockerLabel('sdk_idle_detected')).toBe('SDK Idle 감지')
+    expect(keeperRuntimeBlockerLabel('sdk_hook_execution_failed')).toBe('SDK 훅 실행 실패')
     expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')
     expect(keeperRuntimeBlockerLabel('sdk_tripwire_violation')).toBe('SDK Tripwire 위반')
-    expect(keeperRuntimeBlockerLabel('sdk_exit_condition_met')).toBe('SDK 종료 조건 충족')
+    expect(keeperRuntimeBlockerLabel('sdk_input_required')).toBe('SDK 입력 필요')
   })
 
   it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {

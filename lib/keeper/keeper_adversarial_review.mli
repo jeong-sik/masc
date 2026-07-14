@@ -35,16 +35,7 @@ val build_prompt : review_input -> (string, string) result
     the prompt registry cannot replace one of the prompt's declared template
     variables. Literal [{{...}}] text inside substituted values is preserved. *)
 
-val run_review :
-  base_path:string ->
-  runtime_id:string ->
-  review_input ->
-  (Verifier_core.verdict, string) result
-(** Compatibility wrapper around {!run_grounded_review}; returns only the
-    public verdict variant. *)
-
 val run_grounded_review :
-  base_path:string ->
   runtime_id:string ->
   review_input ->
   (Verifier_core.grounded_verdict, string) result

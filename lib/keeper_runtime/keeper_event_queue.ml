@@ -677,11 +677,7 @@ let payload_of_yojson json =
     let* provenance =
       match List.assoc_opt "provenance" fields with
       | Some json -> Keeper_runtime_failure_route.judgment_provenance_of_yojson json
-      | None ->
-        (* Explicit migration state for pre-provenance durable envelopes. New
-           producers never emit it, but old queues remain replayable without
-           inventing an execution boundary. *)
-        Ok Keeper_runtime_failure_route.Legacy_unattributed
+      | None -> Error "failure_judgment requires provenance"
     in
     let* detail = string_field ~context "detail" fields in
     Ok

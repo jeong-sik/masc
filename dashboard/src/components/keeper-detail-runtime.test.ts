@@ -408,9 +408,6 @@ describe('RuntimeLensSection', () => {
         event_bus_correlated_count: 1,
         correlation_ids: ['corr-1'],
         run_ids: ['run-1'],
-        context_compact_started_count: 1,
-        context_compacted_count: 1,
-        last_compaction: null,
       },
       memory: {
         memory_injected_count: 1,
@@ -487,11 +484,8 @@ describe('RuntimeLensSection', () => {
             context_injected_count: 1,
             context_compacted_event_count: 1,
             event_bus_correlated_count: 1,
-            context_compact_started_count: 1,
-            context_compacted_count: 1,
             checkpoint_loaded_count: 1,
             checkpoint_saved_count: 1,
-            last_compaction: null,
           },
           memory: {
             memory_injected_count: 1,

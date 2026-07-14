@@ -93,34 +93,22 @@ type config =
   Runtime_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Agent_sdk.Provider.config;
-  model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
   stream_idle_timeout_s : float option;
   body_timeout_s : float option;
-  max_tokens : int option;
-  temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
   event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_dir : string option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
-  enable_thinking : bool option;
-  preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
   checkpoint_sidecar : Yojson.Safe.t option;
-  cache_system_prompt : bool;
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  thinking_budget : int option;
-  top_p : float option;
-  top_k : int option;
-  min_p : float option;
   on_run_complete : (bool -> unit) option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
@@ -185,61 +173,6 @@ let provider_supports_inline_tools =
 let provider_label =
   Runtime_transport.provider_label
 
-let request_runtime_fields_on_base_config
-    ~(base : Llm_provider.Provider_config.t)
-    (req_config : Llm_provider.Provider_config.t)
-  =
-  let request_option_or_base req base =
-    match req with
-    | Some _ as value -> value
-    | None -> base
-  in
-  let response_format, output_schema =
-    match req_config.response_format, req_config.output_schema with
-    | Agent_sdk.Types.Off, None -> base.response_format, base.output_schema
-    | _, Some schema ->
-      let response_format = Agent_sdk.Types.JsonSchema schema in
-      ( response_format
-      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
-    | Agent_sdk.Types.JsonMode, None -> Agent_sdk.Types.JsonMode, None
-    | Agent_sdk.Types.JsonSchema schema, None ->
-      let response_format = Agent_sdk.Types.JsonSchema schema in
-      ( response_format
-      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
-  in
-  { base with
-    max_tokens = req_config.max_tokens;
-    temperature = req_config.temperature;
-    top_p = request_option_or_base req_config.top_p base.top_p;
-    top_k = request_option_or_base req_config.top_k base.top_k;
-    min_p = request_option_or_base req_config.min_p base.min_p;
-    system_prompt = req_config.system_prompt;
-    enable_thinking = req_config.enable_thinking;
-    preserve_thinking = req_config.preserve_thinking;
-    thinking_budget = req_config.thinking_budget;
-    clear_thinking = req_config.clear_thinking;
-    tool_stream = req_config.tool_stream;
-    tool_choice = req_config.tool_choice;
-    disable_parallel_tool_use = req_config.disable_parallel_tool_use;
-    (* structured output 계약은 [supports_tool_choice_override]와 같은
-       "요청이 의견을 낼 때만 요청 우선" 병합이다. OAS Agent의 요청 config는
-       [Agent_sdk.Provider.config](라우팅 삼중항)에서 파생되어 schema 필드를
-       구조적으로 운반할 수 없으므로 언제나 [Off]/[None]으로 도착한다 — 이를
-       무조건 복사하면 base(빌드 시 validate까지 통과한 schema-carrying config)의
-       계약이 와이어 직전에 조용히 증발한다. 실제로 #22768 이후 fusion judge/panel,
-       verifier, dashboard judge 등 모든 Keeper_structured_output_schema 소비자의
-       native schema가 HTTP body에 실린 적이 없었다 (2026-07-02 hop-by-hop 추적,
-       masc#23003 후속). [Off]/[None] = 무의견 → base 유지; 요청이 명시하면 요청 우선. *)
-    response_format;
-    output_schema;
-    cache_system_prompt = req_config.cache_system_prompt;
-    supports_tool_choice_override =
-      (match req_config.supports_tool_choice_override with
-       | Some _ as override -> override
-       | None -> base.supports_tool_choice_override);
-    seed = req_config.seed;
-  }
-
 let provider_resource_observation_transport
     ~(kind : Fd_accountant.kind)
     (transport : Llm_provider.Llm_transport.t)
@@ -257,12 +190,11 @@ let provider_resource_observation_transport
 let provider_http_observation_transport transport =
   provider_resource_observation_transport ~kind:Provider_http transport
 
-let provider_config_preserving_http_transport
+let observed_http_transport
     ~sw
     ~net
     ?clock
     ?body_timeout_s
-    ~(provider_cfg : Llm_provider.Provider_config.t)
     ()
   : Llm_provider.Llm_transport.t =
   (* RFC-OAS-026: stream_idle_timeout_s moved off transport construction
@@ -271,21 +203,14 @@ let provider_config_preserving_http_transport
      transport itself carries no idle deadline; OAS does not infer one. *)
   let http_transport =
     (* OAS owns stream-idle liveness on
-       [Llm_transport.completion_request.stream_idle_timeout_s].  The request
-       record update below changes only [config], so that typed deadline is
-       preserved without a second construction-time fallback. *)
+       [Llm_transport.completion_request.stream_idle_timeout_s]. The exact
+       typed provider request reaches this transport unchanged. *)
     Llm_provider.Complete.make_http_transport
       ?clock
       ?body_timeout_s
       ~sw
       ~net
       ()
-  in
-  let patch_request (req : Llm_provider.Llm_transport.completion_request) =
-    { req with
-      config =
-        request_runtime_fields_on_base_config ~base:provider_cfg req.config;
-    }
   in
   provider_http_observation_transport
     { complete_sync =
@@ -294,7 +219,7 @@ let provider_config_preserving_http_transport
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
-        http_transport.complete_sync (patch_request req));
+        http_transport.complete_sync req);
       complete_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
@@ -302,23 +227,20 @@ let provider_config_preserving_http_transport
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
         http_transport.complete_stream ?on_telemetry ~on_event
-          (patch_request req));
+          req);
     }
 
-let transport_for_provider ~sw ~net ?clock ?body_timeout_s ~provider_cfg () =
+let transport_for_provider ~sw ~net ?clock ?body_timeout_s () =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
-     over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
-     per-request patching, not at transport construction, so it is no longer
-     threaded here. stream_idle_timeout_s is applied at the builder, not here
+     over HTTP. [stream_idle_timeout_s] is applied at the builder, not here
      (see RFC-OAS-026 note above). *)
   Ok
     (Some
-       (provider_config_preserving_http_transport
+       (observed_http_transport
           ~sw
           ~net
           ?clock
           ?body_timeout_s
-          ~provider_cfg
           ()))
 
 let runtime_id_of_config (config : config) =
@@ -340,7 +262,8 @@ let runtime_observation_for_terminal_config ~total_duration_ms ?error
   let capture, _metrics =
     Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
   in
-  Runtime_observation.record_attempt_terminal capture ~model_id:config.model_id
+  Runtime_observation.record_attempt_terminal capture
+    ~model_id:config.provider_cfg.model_id
     ~latency_ms ~error;
   Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:(runtime_id_of_config config)
@@ -348,7 +271,7 @@ let runtime_observation_for_terminal_config ~total_duration_ms ?error
     ~configured_labels:
       [ Runtime_observation.model_label_of_config config.provider_cfg ]
     ~candidate_count:1
-    ~selected_model_raw:(Some config.model_id)
+    ~selected_model_raw:(Some config.provider_cfg.model_id)
     ~capture
     ~attempt_details_source:
       (match error with
@@ -834,9 +757,6 @@ let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
          runtime.Runtime.id, input_capabilities_of_runtime runtime))
 
 module For_testing = struct
-  let request_runtime_fields_on_base_config =
-    request_runtime_fields_on_base_config
-
   let provider_http_observation_transport = provider_http_observation_transport
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
@@ -889,10 +809,10 @@ let provider_lifecycle_attrs (config : config) =
   in
   [
     ("provider_kind", `String provider_kind);
-    ("model_id", `String config.model_id);
+    ("model_id", `String provider_cfg.model_id);
     ("provider_model_id", `String provider_cfg.model_id);
   ]
-  @ Runtime_max_tokens.telemetry_fields config.max_tokens
+  @ Runtime_max_tokens.telemetry_fields provider_cfg.max_tokens
   @ nonempty_string "base_url" provider_cfg.base_url
   @ nonempty_string "request_path" provider_cfg.request_path
   @ endpoint
@@ -904,9 +824,6 @@ end
 (* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)
 (* ================================================================ *)
-
-let persist_checkpoint =
-  Runtime_oas_checkpoint.persist_checkpoint
 
 let build_checkpoint =
   Runtime_oas_checkpoint.build_checkpoint
@@ -932,26 +849,12 @@ let build
          ~net
          ?clock
          ?body_timeout_s:config.body_timeout_s
-         ~provider_cfg:config.provider_cfg
          ()
      with
      | Error _ as e -> e
      | Ok transport ->
       let builder = Runtime_agent_context.builder ~net ~config ?transport () in
       Agent_sdk.Builder.build_safe builder)
-
-(* ================================================================ *)
-(* Idle-detail enrichment                                           *)
-(* ================================================================ *)
-
-(** Enrich an [Agent_sdk.Error.to_string] detail with the name of the most
-    recently called tool when the error is an "Idle detected" failure.
-    For all other error strings the input is returned unchanged.
-
-    Exposed at module level so it can be unit-tested independently of
-    the network-bound [run] function. *)
-let enrich_idle_detail =
-  Runtime_oas_checkpoint.enrich_idle_detail
 
 let run_duration_ms_since started_at =
   Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)
@@ -997,19 +900,10 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
 (* Resume from checkpoint                                            *)
 (* ================================================================ *)
 
-(** Build an Agent.t from a checkpoint via [Agent.resume], overriding
-    per-turn config values from the MASC config.
-
-    The checkpoint provides: messages, turn_count, usage_stats.
-    The MASC config provides: provider, model_id, system_prompt,
-    temperature, tools, hooks, and host-owned checkpoint persistence.
-
-    @boundary-contract
-    - MASC owns: per-turn config selection (model, temperature, tools,
-      system_prompt), checkpoint field patching to align MASC intent with
-      OAS resume semantics.
-    - OAS owns: cumulative token/cost telemetry, turn_count tracking, and
-      Agent.resume state restoration. Usage is observation only. *)
+(** Build an Agent.t from an exact checkpoint via [Agent.resume]. The typed
+    provider supplies endpoint identity and credentials; the checkpoint is the
+    sole source for conversation, model inference settings, usage, and turn
+    count. MASC supplies only current host tools/hooks/context and persistence. *)
 let resume_from_checkpoint
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -1025,24 +919,23 @@ let resume_from_checkpoint
          ~net
          ?clock
          ?body_timeout_s:config.body_timeout_s
-         ~provider_cfg:config.provider_cfg
          ()
      with
      | Error _ as e -> e
      | Ok transport ->
-      let prepared_resume =
-        Runtime_agent_context.prepare_resume ~config ~checkpoint
-      in
-      Log.Misc.info
-        "oas_worker %s: resume checkpoint_turn_count=%d"
-        config.name checkpoint.turn_count;
-      let options = { prepared_resume.options with transport } in
-      Ok
-        (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
-           ~tools:config.tools ?context:config.context
-           ~options ~config:prepared_resume.agent_config
-           ?checkpoint_sink:config.checkpoint_sink
-           ()))
+      (match Runtime_agent_context.prepare_resume ~config ~checkpoint with
+       | Error _ as error -> error
+       | Ok prepared_resume ->
+         Log.Misc.info
+           "oas_worker %s: resume checkpoint_turn_count=%d"
+           config.name checkpoint.turn_count;
+         let options = { prepared_resume.options with transport } in
+         Ok
+           (Agent_sdk.Agent.resume ~net ~checkpoint
+              ~tools:config.tools ?context:config.context
+              ~options ~provider_config:config.provider_cfg
+              ?checkpoint_sink:config.checkpoint_sink
+              ())))
 
 (* ================================================================ *)
 (* Run                                                               *)
@@ -1128,14 +1021,7 @@ let run_blocks
     ~attrs:(provider_lifecycle_attrs config)
     ();
   let agent_result = match oas_checkpoint with
-    | Some checkpoint ->
-      (try resume_from_checkpoint ~sw ~net ~config ~checkpoint
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Misc.warn "oas_worker %s: resume_from_checkpoint failed (%s), falling back to build"
-           config.name (Printexc.to_string exn);
-         build ~sw ~net ~config)
+    | Some checkpoint -> resume_from_checkpoint ~sw ~net ~config ~checkpoint
     | None -> build ~sw ~net ~config
   in
   match agent_result with
@@ -1182,7 +1068,7 @@ let run_blocks
         Otel_spans.with_span
           ~name:"llm_call"
           ~attrs:
-            [ "gen_ai.request.model", `String config.model_id
+            [ "gen_ai.request.model", `String config.provider_cfg.model_id
             ; ( "gen_ai.provider.name"
               , `String
                   (Llm_provider.Provider_config.string_of_provider_kind
@@ -1276,13 +1162,6 @@ let run_blocks
                | None -> yielded_checkpoint.working_context)
           }
       in
-      (match config.checkpoint_dir with
-       | Some dir ->
-         (match persist_checkpoint ~dir ~session_id ckpt with
-          | Ok () -> ()
-          | Error err ->
-            Log.Misc.error "oas_worker: %s" err)
-       | None -> ());
       Some ckpt
     in
     let lifecycle =
@@ -1383,9 +1262,6 @@ let run_blocks
         }
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
-      let detail =
-        enrich_idle_detail detail (Agent_sdk.Agent.state agent).messages
-      in
       let error_response =
         partial_response_of_stop ~session_id ~text:detail
       in

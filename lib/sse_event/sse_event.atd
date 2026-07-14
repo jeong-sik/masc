@@ -2,7 +2,7 @@
 
    Scope: agent_started payload only.  Subsequent PRs extend with
    agent_completed, agent_failed, tool_*, turn_*, handoff_*,
-   context_*, content_replacement_*, slot_scheduler_observed.
+   handoff_*.
 
    Envelope (type, event_type, ts_unix, correlation_id, run_id,
    agent_name, task_id, turn, tool_name, payload) is wrapped by
@@ -48,13 +48,7 @@ type turn_ready_payload = {
   tool_names: string list;
 }
 
-(* PR-4 events: handoff_requested, handoff_completed, context_compacted,
-   context_overflow_imminent, context_compact_started,
-   content_replacement_replaced, content_replacement_kept,
-   slot_scheduler_observed.  All simple records.  Side effects in the
-   runtime arms (Context_overflow_action_tracker, metric counters)
-   remain in runtime_event_bridge.ml -- typed constructors emit JSON
-   only. *)
+(* PR-4 events: handoff_requested and handoff_completed. *)
 
 type handoff_requested_payload = {
   from_agent: string;
@@ -66,45 +60,6 @@ type handoff_completed_payload = {
   from_agent: string;
   to_agent: string;
   elapsed_s: float;
-}
-
-type context_compacted_payload = {
-  agent_name: string;
-  before_tokens: int;
-  after_tokens: int;
-  phase: string;
-}
-
-type context_overflow_imminent_payload = {
-  agent_name: string;
-  estimated_tokens: int;
-  limit_tokens: int;
-  ratio: float;
-}
-
-type context_compact_started_payload = {
-  agent_name: string;
-  trigger: string;
-}
-
-type content_replacement_replaced_payload = {
-  tool_use_id: string;
-  preview: string;
-  original_chars: int;
-  seen_count_after: int;
-}
-
-type content_replacement_kept_payload = {
-  tool_use_id: string;
-  seen_count_after: int;
-}
-
-type slot_scheduler_observed_payload = {
-  max_slots: int;
-  active: int;
-  available: int;
-  queue_length: int;
-  state: string;
 }
 
 (* PR-3b events: agent_completed, agent_failed.

@@ -35,14 +35,6 @@ let workspace_path_of_spec (spec : Worker_execution_spec.t) =
   | Some dir when String.trim dir <> "" -> dir
   | _ -> spec.base_path
 
-let effective_model_of_resume ~existing_meta spec =
-  match existing_meta with
-  | Some meta when String.trim meta.effective_model <> "" ->
-      Ok meta.effective_model
-  | _ ->
-      resolve_oas_provider_of_label spec.Worker_execution_spec.model_label
-      |> Result.map snd
-
 let dedupe_tools_by_name (tools : Agent_sdk.Tool.t list) =
   let rec loop seen acc = function
     | [] -> List.rev acc
@@ -79,21 +71,15 @@ let run_worker_oas ~sw ?net ~workspace_config:_
     let mcp_session_id =
       resolved_mcp_session_id ~base_path ~worker_name
     in
-    let existing_meta = load_worker_meta ~base_path ~worker_name in
     let checkpoint = load_worker_checkpoint ~base_path ~worker_name in
-    let* effective_model =
-      match checkpoint with
-      | Some _ -> effective_model_of_resume ~existing_meta spec
-      | None ->
-          resolve_oas_provider_of_label spec.model_label
-          |> Result.map snd
-    in
+    let* provider_config = oas_provider_of_label spec.model_label in
+    let model_id = provider_config.Llm_provider.Provider_config.model_id in
     let meta =
       make_worker_meta ~base_path ~workspace_path ~worker_name
         ~mcp_session_id ~role:spec.role
         ~selection_note:spec.selection_note
         ~runtime_backend:spec.runtime_backend
-        ~effective_model ~thinking_enabled:spec.thinking_enabled
+        ~effective_model:model_id ~thinking_enabled:spec.thinking_enabled
         ~timeout_seconds:(Some spec.timeout_sec)
     in
     let* auth_token =
@@ -108,19 +94,15 @@ let run_worker_oas ~sw ?net ~workspace_config:_
     match checkpoint with
     | Some checkpoint ->
         Worker_oas.resume_worker_via_oas ~sw ~net ~base_path ~auth_token
-          ~meta ~checkpoint ~prompt:spec.prompt ~tools ~raw_trace
+          ~meta ~provider_config ~checkpoint ~prompt:spec.prompt ~tools ~raw_trace
           ?worker_run_id:spec.worker_run_id ()
     | None ->
-        let* provider, model_id =
-          resolve_oas_provider_of_label spec.model_label
-        in
         let system_prompt =
           default_system_prompt ~worker_name ~model_id
             ?role:spec.role
             ?selection_note:spec.selection_note ()
         in
         Worker_oas.run_worker_via_oas ~sw ~net ~base_path ~auth_token
-          ~meta:{ meta with effective_model = model_id }
-          ~provider ~system_prompt ~prompt:spec.prompt ~tools
+          ~meta ~provider_config ~system_prompt ~prompt:spec.prompt ~tools
           ~raw_trace
           ?worker_run_id:spec.worker_run_id ()

@@ -29,9 +29,8 @@ type t =
   | External_cancel
   (** Turn cancelled before completion (operator stop, switch_keeper, …). *)
   | Input_required
-  (** Agent paused to request human input. Not a failure — a special
-          stop condition analogous to [ExitConditionMet]. Operator action:
-          provide input or decline. *)
+  (** Agent requested human input. Not a failure. Operator action: provide
+      input or decline; the Keeper lane remains available meanwhile. *)
   | Turn_wall_clock_timeout (** Turn exceeded its wall-clock budget. *)
   | Runtime_attempts_exhausted
   (** Runtime aggregate outcome: all candidate attempts were exhausted.

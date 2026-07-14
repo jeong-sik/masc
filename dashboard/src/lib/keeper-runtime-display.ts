@@ -447,6 +447,7 @@ function isHeartbeatAlive(heartbeat: string): boolean {
 const runtimeBlockerLabels = {
   turn_timeout: '턴 응답 만료',
   runtime_exhausted: '런타임 후보 소진',
+  capacity_backpressure: '런타임 용량 압력',
   provider_runtime_error: '런타임 호출 오류',
   fiber_unresolved: 'Fiber 미해결',
   stale_turn_timeout: '오래된 턴 만료',
@@ -462,10 +463,10 @@ const runtimeBlockerLabels = {
   self_imposed_idle: '자체 대기',
   sdk_context_window_exceeded: 'SDK 컨텍스트 윈도 초과',
   sdk_unrecognized_stop_reason: 'SDK 미식별 정지 사유',
-  sdk_idle_detected: 'SDK Idle 감지',
+  sdk_hook_execution_failed: 'SDK 훅 실행 실패',
   sdk_guardrail_violation: 'SDK 가드레일 위반',
   sdk_tripwire_violation: 'SDK Tripwire 위반',
-  sdk_exit_condition_met: 'SDK 종료 조건 충족',
+  sdk_input_required: 'SDK 입력 필요',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(

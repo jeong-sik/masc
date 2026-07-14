@@ -23,9 +23,6 @@ type runtime_manifest_scan =
   ; mutable event_bus_count : int
   ; mutable event_bus_correlation_ids : string list
   ; mutable event_bus_run_ids : string list
-  ; mutable context_compact_started_count : int
-  ; mutable context_compacted_count : int
-  ; mutable last_compaction : Yojson.Safe.t option
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option

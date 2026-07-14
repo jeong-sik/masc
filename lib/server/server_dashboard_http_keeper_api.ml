@@ -598,79 +598,6 @@ let compaction_saved_tokens before_tokens after_tokens =
   | _ -> None
 ;;
 
-let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t) =
-  match Json_util.assoc_member_opt "last_compaction" row.decision with
-  | Some (`Assoc _ as compaction) ->
-    let before_tokens = Json_util.get_int compaction "before_tokens" in
-    let after_tokens = Json_util.get_int compaction "after_tokens" in
-    let saved_tokens =
-      match Json_util.get_int compaction "tokens_freed" with
-      | Some tokens -> Some tokens
-      | None -> compaction_saved_tokens before_tokens after_tokens
-    in
-    let trigger =
-      Json_util.get_string compaction "phase_hint"
-      (* DET-OK: manifest projection fallback only; a missing phase hint maps to
-         a stable UI label and does not drive keeper policy. *)
-      |> Option.value ~default:"event_bus_context_compacted"
-    in
-    Some
-      (compaction_snapshot_item_json
-         { id =
-             Printf.sprintf "manifest:%s:%s:%s" row.trace_id
-               (Keeper_runtime_manifest.event_kind_to_string row.event)
-               row.ts
-         ; keeper_id
-         ; ts_iso = row.ts
-         ; ts_unix = Masc_domain.parse_iso8601_opt row.ts
-         ; trace_id = Some row.trace_id
-         ; keeper_turn_id = row.keeper_turn_id
-         ; source = "runtime_manifest"
-         ; trigger
-         ; runtime_id = row.runtime_id
-         ; before_tokens
-         ; after_tokens
-         ; saved_tokens
-         ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
-         ; compaction_source =
-             compaction_snapshot_clock_string row.decision "compaction_source"
-         ; status = row.status
-         ; links = compaction_snapshot_links_json row.links
-         })
-  | _ ->
-    (match Json_util.get_int row.decision "context_compacted_count" with
-     | Some count when count > 0 ->
-       let compaction_source =
-         compaction_snapshot_clock_string row.decision "compaction_source"
-       in
-       Some
-         (compaction_snapshot_item_json
-            { id =
-                Printf.sprintf "manifest:%s:%s:%s" row.trace_id
-                  (Keeper_runtime_manifest.event_kind_to_string row.event)
-                  row.ts
-            ; keeper_id
-            ; ts_iso = row.ts
-            ; ts_unix = Masc_domain.parse_iso8601_opt row.ts
-            ; trace_id = Some row.trace_id
-            ; keeper_turn_id = row.keeper_turn_id
-            ; source = "runtime_manifest"
-            ; trigger =
-                Option.value
-                  ~default:"event_bus_context_compacted"
-                  compaction_source
-            ; runtime_id = row.runtime_id
-            ; before_tokens = None
-            ; after_tokens = None
-            ; saved_tokens = None
-            ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
-            ; compaction_source
-            ; status = row.status
-            ; links = compaction_snapshot_links_json row.links
-            })
-     | Some _ | None -> None)
-;;
-
 let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t) =
   (* TEL-OK: read-only dashboard projection; compaction telemetry is emitted by
      the keeper runtime/event bridge that produced the manifest row. *)
@@ -721,8 +648,6 @@ let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t
 
 let compaction_snapshot_of_manifest_row ~keeper_id (row : Keeper_runtime_manifest.t) =
   match row.event with
-  | Keeper_runtime_manifest.Event_bus_correlated ->
-    compaction_event_bus_snapshot_json ~keeper_id row
   | Keeper_runtime_manifest.Context_compacted ->
     compaction_context_snapshot_json ~keeper_id row
   | _ -> None

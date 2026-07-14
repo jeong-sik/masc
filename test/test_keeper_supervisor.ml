@@ -1291,9 +1291,7 @@ let with_reap_ready_dead_keeper name f =
        | Error err -> fail err);
       ignore (Reg.register ~base_path:config.base_path name meta);
       Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
-      let completion_bus =
-        Agent_sdk.Event_bus.create ~policy:Agent_sdk.Event_bus.Drop_oldest ()
-      in
+      let completion_bus = Agent_sdk.Event_bus.create () in
       Masc_event_bus.set completion_bus;
       Subprocess_registry.register_default_cleanup_hook ();
       Shutdown_finalize.register_remove_pending_confirms_by_target

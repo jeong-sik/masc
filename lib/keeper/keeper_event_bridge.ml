@@ -615,7 +615,9 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (oas_event_store ~config) in
   let sub =
     Agent_sdk_metrics_bridge.subscribe
-      ~purpose:"sse_bridge"
+      ~contract:
+        (Masc_event_bus_subscription.for_subscriber
+           Masc_event_bus_subscription.Sse_bridge)
       ~filter:Agent_sdk.Event_bus.accept_all
       bus
   in

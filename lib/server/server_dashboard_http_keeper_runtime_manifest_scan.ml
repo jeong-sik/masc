@@ -25,9 +25,6 @@ type runtime_manifest_scan =
   ; mutable event_bus_count : int
   ; mutable event_bus_correlation_ids : string list
   ; mutable event_bus_run_ids : string list
-  ; mutable context_compact_started_count : int
-  ; mutable context_compacted_count : int
-  ; mutable last_compaction : Yojson.Safe.t option
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
@@ -79,9 +76,6 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; event_bus_count = 0
   ; event_bus_correlation_ids = []
   ; event_bus_run_ids = []
-  ; context_compact_started_count = 0
-  ; context_compacted_count = 0
-  ; last_compaction = None
   ; latest_provider_lane_decision = None
   ; latest_provider_lane_row = None
   ; latest_pre_dispatch_blocked_row = None
@@ -306,19 +300,7 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
       | None -> ());
      (match Json_util.get_string decision "run_id" with
       | Some value -> scan.event_bus_run_ids <- value :: scan.event_bus_run_ids
-      | None -> ());
-     scan.context_compact_started_count <-
-       scan.context_compact_started_count
-       + Option.value
-           (Json_util.get_int decision "context_compact_started_count")
-           ~default:0;
-     scan.context_compacted_count <-
-       scan.context_compacted_count
-       + Option.value (Json_util.get_int decision "context_compacted_count")
-           ~default:0;
-     (match Json_util.assoc_member_opt "last_compaction" decision with
-      | Some (`Assoc _ as obj) -> scan.last_compaction <- Some obj
-      | _ -> ())
+      | None -> ())
    | Keeper_runtime_manifest.Provider_attempt_started ->
      scan.provider_started_count <- scan.provider_started_count + 1;
      push_bounded scan.provider_attempt_rows scan.limit row

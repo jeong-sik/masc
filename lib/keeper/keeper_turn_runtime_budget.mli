@@ -170,28 +170,12 @@ val run_direct_no_progress_retry_loop :
     effects. Rotation is bounded only by the typed, finite runtime candidate
     set; no numeric Keeper budget participates in admission or retry. *)
 
-type turn_event_bus_overflow = {
-  estimated_tokens : int;
-  limit_tokens : int;
-}
-
-type turn_event_bus_compaction = {
-  before_tokens : int;
-  after_tokens : int;
-  tokens_freed : int;
-  phase_hint : string;
-}
-
 type turn_event_bus_summary = {
   correlation_id : string option;
   run_id : string option;
   caused_by : string option;
   event_count : int;
   payload_kinds : string list;
-  overflow_imminent : turn_event_bus_overflow option;
-  context_compact_started_count : int;
-  context_compacted_count : int;
-  last_compaction : turn_event_bus_compaction option;
 }
 
 val empty_turn_event_bus_summary : turn_event_bus_summary
@@ -202,16 +186,10 @@ val merge_turn_event_bus_summary :
 val summarize_turn_event_bus :
   Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
-val turn_event_bus_overflow_evidence_detail :
+val turn_event_bus_evidence_detail :
   turn_event_bus_summary -> string
-(** Compact forensic string for preserving OAS compaction/retry event-bus
-    evidence inside the keeper overflow blocker detail. *)
-
-val context_overflow_event_of_error :
-  fallback_tokens:int ->
-  ?turn_event_bus:turn_event_bus_summary ->
-  Agent_sdk.Error.sdk_error ->
-  Keeper_state_machine.event
+(** Compact forensic string for preserving the exact OAS events observed during
+    a turn. It is display evidence only and is never parsed for control flow. *)
 
 val record_overflow_failure :
   config:Workspace.config ->

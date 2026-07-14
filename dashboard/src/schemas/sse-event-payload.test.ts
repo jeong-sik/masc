@@ -10,14 +10,8 @@ import {
   writeAgentCompletedPayload,
   writeAgentFailedPayload,
   writeAgentStartedPayload,
-  writeContentReplacementKeptPayload,
-  writeContentReplacementReplacedPayload,
-  writeContextCompactStartedPayload,
-  writeContextCompactedPayload,
-  writeContextOverflowImminentPayload,
   writeHandoffCompletedPayload,
   writeHandoffRequestedPayload,
-  writeSlotSchedulerObservedPayload,
   writeToolCalledPayload,
   writeToolCompletedPayload,
   writeTurnCompletedPayload,
@@ -70,51 +64,6 @@ const ALL_PAYLOAD_CASES: TypedOasPayload[] = [
     kind: 'handoff_completed',
     payload: { from_agent: 'a', to_agent: 'b', elapsed_s: 1 },
   },
-  {
-    kind: 'context_compacted',
-    payload: {
-      agent_name: 'a',
-      before_tokens: 10,
-      after_tokens: 5,
-      phase: 'p',
-    },
-  },
-  {
-    kind: 'context_overflow_imminent',
-    payload: {
-      agent_name: 'a',
-      estimated_tokens: 9000,
-      limit_tokens: 10000,
-      ratio: 0.9,
-    },
-  },
-  {
-    kind: 'context_compact_started',
-    payload: { agent_name: 'a', trigger: 'threshold' },
-  },
-  {
-    kind: 'content_replacement_replaced',
-    payload: {
-      tool_use_id: 'tu1',
-      preview: 'preview',
-      original_chars: 100,
-      seen_count_after: 1,
-    },
-  },
-  {
-    kind: 'content_replacement_kept',
-    payload: { tool_use_id: 'tu1', seen_count_after: 1 },
-  },
-  {
-    kind: 'slot_scheduler_observed',
-    payload: {
-      max_slots: 4,
-      active: 2,
-      available: 2,
-      queue_length: 0,
-      state: 'healthy',
-    },
-  },
 ]
 
 function serializePayload(payload: TypedOasPayload): Record<string, unknown> {
@@ -139,18 +88,6 @@ function serializePayload(payload: TypedOasPayload): Record<string, unknown> {
       return writeHandoffRequestedPayload(payload.payload)
     case 'handoff_completed':
       return writeHandoffCompletedPayload(payload.payload)
-    case 'context_compacted':
-      return writeContextCompactedPayload(payload.payload)
-    case 'context_overflow_imminent':
-      return writeContextOverflowImminentPayload(payload.payload)
-    case 'context_compact_started':
-      return writeContextCompactStartedPayload(payload.payload)
-    case 'content_replacement_replaced':
-      return writeContentReplacementReplacedPayload(payload.payload)
-    case 'content_replacement_kept':
-      return writeContentReplacementKeptPayload(payload.payload)
-    case 'slot_scheduler_observed':
-      return writeSlotSchedulerObservedPayload(payload.payload)
   }
 }
 
@@ -327,95 +264,6 @@ describe('parseOasPayload', () => {
     expect(data.kind).toBe('handoff_completed')
     if (data.kind !== 'handoff_completed') return
     expect(data.payload.elapsed_s).toBe(0.5)
-  })
-
-  it('parses oas:context_compacted to the 4 wire fields and does not surface an unmodeled runtime', () => {
-    // The context_compacted wire format has exactly 4 fields
-    // (lib/sse_event/sse_event.atd context_compacted_payload). A stray runtime
-    // key on the wire must be ignored, not surfaced as a phantom field.
-    const result = parseOasPayload('oas:context_compacted', {
-      agent_name: 'alpha',
-      before_tokens: 1000,
-      after_tokens: 800,
-      phase: 'summarize',
-      runtime: 'oas-runtime',
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    const { data } = result
-    expect(data.kind).toBe('context_compacted')
-    if (data.kind !== 'context_compacted') return
-    expect(data.payload.before_tokens).toBe(1000)
-    expect(data.payload.after_tokens).toBe(800)
-    expect(data.payload.phase).toBe('summarize')
-    expect('runtime' in data.payload).toBe(false)
-  })
-
-  it('parses oas:context_overflow_imminent payload', () => {
-    const result = parseOasPayload('oas:context_overflow_imminent', {
-      agent_name: 'alpha',
-      estimated_tokens: 9000,
-      limit_tokens: 10000,
-      ratio: 0.9,
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.kind).toBe('context_overflow_imminent')
-    if (result.data.kind !== 'context_overflow_imminent') return
-    expect(result.data.payload.ratio).toBe(0.9)
-  })
-
-  it('parses oas:context_compact_started payload', () => {
-    const result = parseOasPayload('oas:context_compact_started', {
-      agent_name: 'alpha',
-      trigger: 'threshold',
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.kind).toBe('context_compact_started')
-    if (result.data.kind !== 'context_compact_started') return
-    expect(result.data.payload.trigger).toBe('threshold')
-  })
-
-  it('parses oas:content_replacement_replaced payload', () => {
-    const result = parseOasPayload('oas:content_replacement_replaced', {
-      tool_use_id: 'tu1',
-      preview: 'preview',
-      original_chars: 100,
-      seen_count_after: 1,
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.kind).toBe('content_replacement_replaced')
-    if (result.data.kind !== 'content_replacement_replaced') return
-    expect(result.data.payload.preview).toBe('preview')
-  })
-
-  it('parses oas:content_replacement_kept payload', () => {
-    const result = parseOasPayload('oas:content_replacement_kept', {
-      tool_use_id: 'tu1',
-      seen_count_after: 1,
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.kind).toBe('content_replacement_kept')
-    if (result.data.kind !== 'content_replacement_kept') return
-    expect(result.data.payload.seen_count_after).toBe(1)
-  })
-
-  it('parses oas:slot_scheduler_observed payload', () => {
-    const result = parseOasPayload('oas:slot_scheduler_observed', {
-      max_slots: 4,
-      active: 2,
-      available: 2,
-      queue_length: 0,
-      state: 'healthy',
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.kind).toBe('slot_scheduler_observed')
-    if (result.data.kind !== 'slot_scheduler_observed') return
-    expect(result.data.payload.state).toBe('healthy')
   })
 
   it('rejects an unknown event type', () => {

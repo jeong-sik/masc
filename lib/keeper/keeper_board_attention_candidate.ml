@@ -803,7 +803,7 @@ let reject_unregistered_tool ~name ~args:_ =
     "Board attention judgment is a tool-free boundary"
 ;;
 
-let run_judge ~base_path candidate =
+let run_judge candidate =
   let runtime_id_result =
     try Ok (Runtime.runtime_id_for_structured_judge ()) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -826,7 +826,6 @@ let run_judge ~base_path candidate =
                ~runtime_id
                ~keeper_name:candidate.keeper_name
                ~goal:prompt
-               ~base_path
                ~masc_tools:[]
                ~dispatch:reject_unregistered_tool
                ~provider_config_transform:apply_output_schema
@@ -875,7 +874,7 @@ let rec process_with_judge ~base_path ~judge candidate =
 ;;
 
 let process ~base_path candidate =
-  process_with_judge ~base_path ~judge:(run_judge ~base_path) candidate
+  process_with_judge ~base_path ~judge:run_judge candidate
 ;;
 
 let active_candidates = Atomic.make Active_set.empty

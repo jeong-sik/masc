@@ -12,8 +12,7 @@
     {!Runtime_observation} and {!Keeper_turn_driver}.
 
     Internal helpers stay private at this boundary
-    ([invalid_runtime_config], [persist_checkpoint], [build_checkpoint],
-    [partial_response_of_stop]). *)
+    ([invalid_runtime_config], [build_checkpoint], [partial_response_of_stop]). *)
 
 (** {1 Stop reason} *)
 
@@ -61,34 +60,22 @@ val stop_reason_of_cooperative_yield :
 type config = Runtime_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Agent_sdk.Provider.config;
-  model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
   stream_idle_timeout_s : float option;
   body_timeout_s : float option;
-  max_tokens : int option;
-  temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
   event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_dir : string option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
-  enable_thinking : bool option;
-  preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
   checkpoint_sidecar : Yojson.Safe.t option;
-  cache_system_prompt : bool;
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  thinking_budget : int option;
-  top_p : float option;
-  top_k : int option;
-  min_p : float option;
   on_run_complete : (bool -> unit) option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
@@ -99,11 +86,9 @@ val default_config :
   system_prompt:string ->
   tools:Agent_sdk.Tool.t list ->
   config
-(** Builds a {!config} populated with sensible defaults
-    for every field except the four required ones.
-    Caller mutates fields in place via record copy
-    ([\{ cfg with ... \}]) before passing to {!build} or
-    {!resume_from_checkpoint}. *)
+(** Builds a {!config} around one exact typed provider carrier. Provider and
+    model inference fields remain owned by [provider_cfg]; MASC adds only host
+    execution concerns before {!build} or {!resume_from_checkpoint}. *)
 
 (** {1 Run result} *)
 
@@ -253,11 +238,6 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
-  val request_runtime_fields_on_base_config :
-    base:Llm_provider.Provider_config.t ->
-    Llm_provider.Provider_config.t ->
-    Llm_provider.Provider_config.t
-
   val provider_http_observation_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 
@@ -362,9 +342,6 @@ val publish_lifecycle :
   ?attrs:(string * Yojson.Safe.t) list ->
   unit ->
   unit
-val enrich_idle_detail :
-  string -> Agent_sdk.Types.message list -> string
-
 (** {1 Build / resume / run} *)
 
 val build :
@@ -372,9 +349,8 @@ val build :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
-(** Builds an [Agent_sdk.Agent.t] from a {!config} ready for a
-    fresh run over the HTTP provider transport; threads
-    [config.approval] into the OAS builder when present. *)
+(** Builds an [Agent_sdk.Agent.t] from a {!config} ready for a fresh run over
+    the exact typed HTTP provider transport. *)
 
 val resume_from_checkpoint :
   sw:Eio.Switch.t ->
@@ -382,9 +358,9 @@ val resume_from_checkpoint :
   config:config ->
   checkpoint:Agent_sdk.Checkpoint.t ->
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
-(** Resumes from a persisted checkpoint.  Uses
-    [Runtime_agent_context.prepare_resume] to reconcile
-    [checkpoint.turn_count] with the current config. *)
+(** Resumes from a persisted checkpoint without rewriting it. The selected
+    provider must name the checkpoint's exact model; a mismatch is an explicit
+    configuration error. *)
 
 val run :
   sw:Eio.Switch.t ->

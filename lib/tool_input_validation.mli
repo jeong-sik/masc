@@ -2,7 +2,7 @@
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 
     Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for strict
-    type coercion and structured error feedback.  The pre-hook preserves the
+    validation and structured error feedback.  The pre-hook preserves the
     MASC transport contract by stripping underscore-prefixed protocol markers
     before validation. *)
 

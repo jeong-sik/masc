@@ -8,8 +8,7 @@
     [include module type of struct include M end]
     (cycle 187 rationale).
 
-    External surface (15 entries — 11 dotted callers + 4
-    additional helpers consumed unqualified by
+    External surface consumed by dotted callers and by
     {!Worker_container_runners} through the runtime):
     - File paths: {!worker_container_dir},
       {!worker_raw_trace_path},
@@ -22,10 +21,9 @@
       {!evidence_session_id_of_worker_run}.
     - Tool catalogue: {!session_min_tool_names}.
     - Tool builders: {!build_oas_mcp_tools}.
-    - Provider: {!oas_provider_of_label},
-      {!resolve_oas_provider_of_label}.
+    - Provider: {!oas_provider_of_label}.
     - Audit + run helpers: {!append_worker_completion_log},
-      {!build_resume_config}, {!materialize_direct_evidence}.
+      {!materialize_direct_evidence}.
 
     Internal helpers stay private at this boundary
     ([worker_container_root], [safe_worker_token],
@@ -158,17 +156,10 @@ val build_oas_mcp_tools :
 (** {1 Provider resolution} *)
 
 val oas_provider_of_label :
-  string -> (Agent_sdk.Provider.config, string) result
+  string -> (Llm_provider.Provider_config.t, string) result
 (** Parses a model label (e.g. ["openai:gpt-4.1"]) into an
-    {!Agent_sdk.Provider.config}.  Errors when
+    exact {!Llm_provider.Provider_config.t}. Errors when
     {!Runtime_model_string.parse_model_string} returns [None]. *)
-
-val resolve_oas_provider_of_label :
-  string -> (Agent_sdk.Provider.config * string, string) result
-(** Like {!oas_provider_of_label} but additionally returns
-    the parsed [model_id] so callers do not have to
-    re-parse the label to feed both fields into
-    {!build_resume_config}. *)
 
 (** {1 Turn-log audit trail} *)
 
@@ -189,30 +180,6 @@ val append_worker_completion_log :
 (** Appends one line to [turns.jsonl] summarising a
     completed run.  [prompt] / [output] are length-capped
     via {!safe_text_for_followup}. *)
-
-(** {1 Resume config builder} *)
-
-val build_resume_config :
-  worker_name:string ->
-  provider:Agent_sdk.Provider.config ->
-  model_id:string ->
-  system_prompt:string ->
-  tools:Agent_sdk.Tool.t list ->
-  max_turns:int ->
-  thinking_enabled:bool ->
-  hooks:Agent_sdk.Hooks.hooks ->
-  raw_trace:Agent_sdk.Raw_trace.t ->
-  ?periodic_callbacks:Agent_sdk.Agent.periodic_callback list ->
-  ?guardrails:Agent_sdk.Guardrails.t ->
-  unit ->
-  Agent_sdk.Types.agent_config * Agent_sdk.Agent.options
-(** Assembles the [(config, options)] pair consumed by
-    [Agent_sdk.Agent.resume].  [config] inherits
-    {!Agent_sdk.Types.default_config} and overrides
-    [name] / [model] / [system_prompt] / [max_turns] /
-    [enable_thinking] / [tool_choice = Auto]. Provider/model sampling and
-    output defaults remain OAS-owned. [guardrails] defaults to the unrestricted
-    worker surface; the concrete [tools] list is the exposure SSOT. *)
 
 (** {1 Direct-evidence persistence} *)
 

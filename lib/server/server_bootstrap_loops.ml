@@ -937,13 +937,9 @@ let start_keeper_loops_owned
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
-  (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
-     Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
-     buffer-size/policy choice is auditable in source rather than implicit in
-     OAS defaults, and the chosen capacity is published through OTel. *)
-  let event_bus =
-    Masc_event_bus_policy.create_bus Masc_event_bus_policy.oas_runtime
-  in
+  (* OAS owns only the non-blocking transport. Every queue resource contract is
+     selected by the MASC subscriber that owns it. *)
+  let event_bus = Agent_sdk.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
      If one crashes, others keep running — Eio's structured concurrency.
      Subsystem_health tracks liveness at module level (no init timing dependency). *)
@@ -1081,9 +1077,7 @@ let start_keeper_loops_owned
      masc.harness.*, ...) publish here per OAS event_bus.mli:103-107
      boundary. Dashboard SSE consumers see both channels as one stream and
      consume the canonical dot-separated event names unchanged. *)
-  let masc_event_bus =
-    Masc_event_bus_policy.create_bus Masc_event_bus_policy.masc_domain
-  in
+  let masc_event_bus = Agent_sdk.Event_bus.create () in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
@@ -1094,11 +1088,10 @@ let start_keeper_loops_owned
     ~sw ~clock ~base_path:(Env_config.base_path ()) ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk_metrics_bridge.subscribe
-      ~purpose:"lifecycle_listener"
-      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
-        match evt.payload with
-        | Agent_sdk.Event_bus.Custom ("masc.keeper.lifecycle", _) -> true
-        | _ -> false)
+      ~contract:
+        (Masc_event_bus_subscription.for_subscriber
+           Masc_event_bus_subscription.Keeper_lifecycle_listener)
+      ~filter:(Agent_sdk.Event_bus.filter_topic "masc.keeper.lifecycle")
       masc_event_bus
   in
   Eio.Switch.on_release sw (fun () ->
@@ -1144,22 +1137,6 @@ let start_keeper_loops_owned
                    (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
                    (Printexc.to_string exn)))
           restored.operations));
-  (* Spawn the OAS bus depth sampler so warnings surface on stdout
-     even when no external telemetry backend is attached.
-
-     [MASC_OAS_BUS_WARN_DEPTH] lets operators raise the threshold without
-     a rebuild — fleet-wide keeper load legitimately pushes depth past
-     the 200 default at peak (issue #8517). Invalid values fall back to
-     the compile-time default. *)
-  let warn_threshold =
-    match Sys.getenv_opt "MASC_OAS_BUS_WARN_DEPTH" with
-    | Some v ->
-      (match int_of_string_opt (String.trim v) with
-       | Some n when n > 0 -> n
-       | _ -> 200)
-    | None -> 200
-  in
-  Agent_sdk_metrics_bridge.start_sampler ~sw ~clock ~warn_threshold ();
   fork_logged_fiber
     ~sw
     ~on_error:(log_dashboard_fiber_crash "keeper lifecycle listener")
@@ -1170,7 +1147,7 @@ let start_keeper_loops_owned
          List.iter
            (fun (evt : Agent_sdk.Event_bus.event) ->
               match evt.payload with
-              | Agent_sdk.Event_bus.Custom ("masc.keeper.lifecycle", payload) ->
+              | Agent_sdk.Event_bus.Custom (_, payload) ->
                 (match
                    ( Safe_ops.json_string_opt "event" payload
                    , Safe_ops.json_string_opt "keeper_name" payload )

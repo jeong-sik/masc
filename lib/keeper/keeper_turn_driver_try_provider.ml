@@ -41,7 +41,6 @@ type try_provider_ctx =
     checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
-  ; checkpoint_dir : string option
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
   ; checkpoint_stage_observed : bool Atomic.t
   ; context_injector : Agent_sdk.Hooks.context_injector option
@@ -203,32 +202,38 @@ let run_try_provider
     | None -> Ok ()
   in
   let config_result =
+    let base_provider_cfg = Runtime_candidate.provider_cfg candidate in
+    let enable_thinking =
+      match enable_thinking_override with
+      | Some value -> Some value
+      | None -> ctx.enable_thinking
+    in
+    let provider_cfg =
+      { base_provider_cfg with
+        Llm_provider.Provider_config.temperature = Some ctx.temperature
+      ; enable_thinking
+      ; preserve_thinking = ctx.preserve_thinking
+      ; cache_system_prompt = ctx.cache_system_prompt
+      }
+    in
     Ok
-      { (Runtime_candidate.default_config
+      { (Runtime_agent.default_config
            ~name:ctx.name
+           ~provider_cfg
            ~system_prompt:ctx.system_prompt
-           ~tools:ctx.tools
-           candidate)
+           ~tools:ctx.tools)
             with
             stream_idle_timeout_s = ctx.stream_idle_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
-          ; temperature = ctx.temperature
           ; hooks = ctx.hooks
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = ctx.session_id
-          ; cache_system_prompt = ctx.cache_system_prompt
-          ; checkpoint_dir = ctx.checkpoint_dir
           ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
           ; context = ctx.context
-          ; enable_thinking =
-              (match enable_thinking_override with
-               | Some v -> Some v
-               | None -> ctx.enable_thinking)
-          ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
           ; raw_trace = ctx.raw_trace

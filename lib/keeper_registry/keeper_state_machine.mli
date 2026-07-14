@@ -184,9 +184,8 @@ type event =
     (** Provider rejected prompt for exceeding max context.
         [`Prompt_rejected] is sourced from a failed unified turn
         (see [Keeper_error_classify.is_context_overflow]);
-        [`Oas_signal] is sourced either from structured OAS overflow
-        diagnostics or from the drained OAS [Event_bus]
-        [ContextOverflowImminent] signal for the same turn. *)
+        [`Oas_signal] is reserved for a structured OAS overflow diagnostic
+        that does not originate as a provider prompt rejection. *)
   | Auto_compact_triggered
     (** Emitted as part of [Overflowed] entry actions to mark the
         start of auto-recovery. Sets [compaction_active] so the next

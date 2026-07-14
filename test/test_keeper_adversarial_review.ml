@@ -1,6 +1,6 @@
 (** Tests for [Keeper_adversarial_review] wake-on-fail routing.
 
-    The LLM judgment ([run_review]) needs a runtime and is exercised through
+    The LLM judgment ([run_grounded_review]) needs a runtime and is exercised through
     the shared engine elsewhere; here we verify the deterministic part: a [Fail]
     verdict records an attention item for the author keeper, [Pass]/[Warn] do
     not, and repeated task-level FAIL verdicts deduplicate. *)

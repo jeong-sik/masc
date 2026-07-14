@@ -16,8 +16,9 @@
       failure becomes a typed stimulus
       ([Keeper_event_queue.Failure_judgment]) for an LLM-boundary verdict.
 
-    Classification is typed-only: a quota error routes by its typed class.
-    Divergence between this route and the legacy
+    Classification is typed-only: [PaymentRequired] is hard quota and
+    [RateLimited] is soft throttling. Divergence between this route and the
+    legacy
     [Keeper_error_classify.recoverable_runtime_failure_reason] opinion is
     an explicit typed-boundary mismatch, not scheduling authority.
 
@@ -72,14 +73,10 @@ type judgment_class =
 
 (** Typed origin of a judgment request. The route class says what kind of
     decision is needed; this provenance says which execution boundary produced
-    it. [Oas_agent_idle_detected] retains the behavioral counter that was
-    previously collapsed into [Contract_violation]. [Legacy_unattributed] is a
-    decode-only state for persisted pre-provenance stimuli and is never emitted
-    by current producers. *)
+    it. Persisted stimuli must carry one of these current, exact origins. *)
 type judgment_provenance =
   | Oas_api_error
   | Oas_provider_error
-  | Oas_agent_idle_detected of { consecutive_idle_turns : int }
   | Oas_agent_error
   | Oas_mcp_error
   | Oas_config_error
@@ -89,7 +86,6 @@ type judgment_provenance =
   | Oas_internal_error
   | Masc_internal_error
   | Completion_contract
-  | Legacy_unattributed
 
 type error_boundary =
   | Masc_execution
@@ -131,21 +127,19 @@ val rotate_class_label : rotate_class -> string
 val judgment_class_label : judgment_class -> string
 
 val judgment_provenance_label : judgment_provenance -> string
-(** Stable wire/telemetry label. The idle counter remains a typed field and is
-    not embedded in this label. *)
+(** Stable wire/telemetry label. *)
 
 val judgment_provenance_same_boundary :
   judgment_provenance -> judgment_provenance -> bool
-(** Typed durable-identity comparison. Two idle-detected values share the same
-    producer boundary even when their observation counts differ; no routing
-    decision is derived from wire labels. *)
+(** Typed durable-identity comparison. No routing decision is derived from wire
+    labels. *)
 
 val judgment_provenance_to_yojson : judgment_provenance -> Yojson.Safe.t
 
 val judgment_provenance_of_yojson :
   Yojson.Safe.t -> (judgment_provenance, string) result
-(** Total codec for durable queue stimuli. Unknown kinds and invalid idle
-    counters are explicit [Error] values. *)
+(** Total codec for durable queue stimuli. Unknown kinds are explicit [Error]
+    values. *)
 
 val route_class_label : route -> string
 (** The route's class label ([retry_class_label] / [rotate_class_label] /

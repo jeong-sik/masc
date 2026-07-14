@@ -19,7 +19,7 @@ describe('SSEEventTypeSchema', () => {
 
   it('accepts current and future oas-prefixed event types', () => {
     expect(SSEEventTypeSchema.parse('oas:agent_failed')).toBe('oas:agent_failed')
-    expect(SSEEventTypeSchema.parse('oas:context_overflow_imminent')).toBe('oas:context_overflow_imminent')
+    expect(SSEEventTypeSchema.parse('oas:turn_completed')).toBe('oas:turn_completed')
     expect(SSEEventTypeSchema.parse('oas:masc:keeper_gate')).toBe('oas:masc:keeper_gate')
     expect(SSEEventTypeSchema.parse('oas:future:event')).toBe('oas:future:event')
   })
@@ -269,11 +269,11 @@ describe('parseSSEMessage', () => {
 
   it('keeps unknown oas-prefixed events instead of dropping them', () => {
     const msg = parseSSEMessage({
-      type: 'oas:slot_scheduler_observed',
-      payload: { state: 'saturated', active: 3, max_slots: 3 },
+      type: 'oas:future:event',
+      payload: { revision: 1 },
     })
     expect(msg).not.toBeNull()
-    expect(msg?.type).toBe('oas:slot_scheduler_observed')
+    expect(msg?.type).toBe('oas:future:event')
   })
 
   it('keeps oas telemetry tuple payloads instead of logging schema drift', () => {

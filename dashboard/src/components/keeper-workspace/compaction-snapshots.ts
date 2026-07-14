@@ -174,7 +174,7 @@ export function recordSseCompaction(
   const before = finiteNumberOrNull(beforeTokens)
   const after = finiteNumberOrNull(afterTokens)
   pushCompactionSnapshot(keeperName, {
-    trigger: trigger || '자동 — SSE context_compacted',
+    trigger: trigger || '자동 — keeper_compaction',
     runtime: runtime || '—',
     before: { tok: before },
     after: { tok: after },

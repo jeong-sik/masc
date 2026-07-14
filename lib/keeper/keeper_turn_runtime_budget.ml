@@ -346,20 +346,6 @@ let run_direct_no_progress_retry_loop
     ~is_retry:false
     ()
 
-type turn_event_bus_overflow =
-  Keeper_turn_runtime_budget_event_bus.turn_event_bus_overflow = {
-  estimated_tokens : int;
-  limit_tokens : int;
-}
-
-type turn_event_bus_compaction =
-  Keeper_turn_runtime_budget_event_bus.turn_event_bus_compaction = {
-  before_tokens : int;
-  after_tokens : int;
-  tokens_freed : int;
-  phase_hint : string;
-}
-
 type turn_event_bus_summary =
   Keeper_turn_runtime_budget_event_bus.turn_event_bus_summary = {
   correlation_id : string option;
@@ -367,10 +353,6 @@ type turn_event_bus_summary =
   caused_by : string option;
   event_count : int;
   payload_kinds : string list;
-  overflow_imminent : turn_event_bus_overflow option;
-  context_compact_started_count : int;
-  context_compacted_count : int;
-  last_compaction : turn_event_bus_compaction option;
 }
 
 let empty_turn_event_bus_summary =
@@ -401,114 +383,24 @@ let summarize_turn_event_bus
         | Some _ -> acc.caused_by
         | None -> evt.meta.caused_by
       in
-      let acc =
-        { acc with
-          correlation_id;
-          run_id;
-          caused_by;
-          event_count = acc.event_count + 1;
-          payload_kinds =
-            add_payload_kind acc.payload_kinds
-              (Agent_sdk.Event_bus.payload_kind evt.payload);
-        }
-      in
-      match evt.payload with
-      | Agent_sdk.Event_bus.ContextOverflowImminent
-          { estimated_tokens; limit_tokens; _ } ->
-          {
-            acc with
-            overflow_imminent =
-              Some { estimated_tokens; limit_tokens };
-          }
-      | Agent_sdk.Event_bus.ContextCompactStarted _ ->
-          {
-            acc with
-            context_compact_started_count =
-              acc.context_compact_started_count + 1;
-          }
-      | Agent_sdk.Event_bus.ContextCompacted
-          { before_tokens; after_tokens; phase; _ } ->
-          {
-            acc with
-            context_compacted_count = acc.context_compacted_count + 1;
-            last_compaction =
-              Some
-                {
-                  before_tokens;
-                  after_tokens;
-                  tokens_freed = max 0 (before_tokens - after_tokens);
-                  phase_hint = phase;
-                };
-          }
-      | _ -> acc)
+      { correlation_id
+      ; run_id
+      ; caused_by
+      ; event_count = acc.event_count + 1
+      ; payload_kinds =
+          add_payload_kind
+            acc.payload_kinds
+            (Agent_sdk.Event_bus.payload_kind evt.payload)
+      })
     empty_turn_event_bus_summary
     events
 
-let turn_event_bus_overflow_evidence_detail
+let turn_event_bus_evidence_detail
     (summary : turn_event_bus_summary) : string =
-  let option_int = function
-    | Some value -> string_of_int value
-    | None -> "none"
-  in
-  let overflow_estimated_tokens, overflow_limit_tokens =
-    match summary.overflow_imminent with
-    | Some overflow ->
-      Some overflow.estimated_tokens, Some overflow.limit_tokens
-    | None -> None, None
-  in
-  let last_compaction_detail =
-    match summary.last_compaction with
-    | None -> "last_compaction=none"
-    | Some compaction ->
-      Printf.sprintf
-        "last_compaction_before_tokens=%d,last_compaction_after_tokens=%d,\
-         last_compaction_tokens_freed=%d,last_compaction_phase=%s"
-        compaction.before_tokens
-        compaction.after_tokens
-        compaction.tokens_freed
-        compaction.phase_hint
-  in
   Printf.sprintf
-    "oas_retry_evidence(events=%d,payload_kinds=[%s],\
-     context_compact_started=%d,context_compacted=%d,%s,\
-     overflow_estimated_tokens=%s,overflow_limit_tokens=%s)"
+    "oas_event_bus_evidence(events=%d,payload_kinds=[%s])"
     summary.event_count
     (String.concat "," summary.payload_kinds)
-    summary.context_compact_started_count
-    summary.context_compacted_count
-    last_compaction_detail
-    (option_int overflow_estimated_tokens)
-    (option_int overflow_limit_tokens)
-
-let context_overflow_event_of_error
-    ~(fallback_tokens : int)
-    ?(turn_event_bus : turn_event_bus_summary =
-      empty_turn_event_bus_summary)
-    (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event =
-  match turn_event_bus.overflow_imminent with
-  | Some { estimated_tokens; limit_tokens } ->
-      Keeper_state_machine.Context_overflow_detected
-        {
-          source = `Oas_signal;
-          token_count = max 0 estimated_tokens;
-          limit_tokens = Some limit_tokens;
-        }
-  | None ->
-      match err with
-      | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
-          Keeper_state_machine.Context_overflow_detected
-            {
-              source = `Prompt_rejected;
-              token_count = Option.value ~default:(max 0 fallback_tokens) limit;
-              limit_tokens = limit;
-            }
-      | _ ->
-          Keeper_state_machine.Context_overflow_detected
-            {
-              source = `Oas_signal;
-              token_count = max 0 fallback_tokens;
-              limit_tokens = None;
-            }
 
 let record_overflow_failure
     ~(config : Workspace.config)

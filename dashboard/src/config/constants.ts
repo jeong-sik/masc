@@ -9,7 +9,7 @@ export const DEFAULT_MASC_ORIGIN = `http://${DEFAULT_MASC_HOST}:${DEFAULT_MASC_P
 
 // --- OAS event namespace ---
 // SSE event types emitted by the OAS keeper runtime are namespaced with this
-// prefix (e.g. "oas:context_compacted"). Single source so the prefix string and
+// prefix (e.g. "oas:turn_completed"). Single source so the prefix string and
 // its strip length stay in sync across the parser and ingress guards.
 export const OAS_EVENT_PREFIX = 'oas:'
 

@@ -44,7 +44,6 @@ val build_prompt :
     injected as one JSON value so error text cannot become prompt authority. *)
 
 val run :
-  base_path:string ->
   keeper_name:string ->
   Keeper_event_queue.failure_judgment ->
   (run_result, run_error) result

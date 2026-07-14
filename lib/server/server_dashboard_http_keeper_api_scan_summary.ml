@@ -52,18 +52,10 @@ let event_bus_summary_json
     scan.event_bus_correlation_ids |> List.rev |> Json_util.dedupe_keep_order
   in
   let run_ids = scan.event_bus_run_ids |> List.rev |> Json_util.dedupe_keep_order in
-  let last_compaction =
-    match scan.last_compaction with
-    | Some value -> value
-    | None -> `Null
-  in
   `Assoc
     [ "event_bus_correlated_count", `Int scan.event_bus_count
     ; "correlation_ids", Json_util.json_string_list correlation_ids
     ; "run_ids", Json_util.json_string_list run_ids
-    ; "context_compact_started_count", `Int scan.context_compact_started_count
-    ; "context_compacted_count", `Int scan.context_compacted_count
-    ; "last_compaction", last_compaction
     ]
 ;;
 

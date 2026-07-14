@@ -18,16 +18,16 @@ let metric_fd_resource_errors = "masc_fd_resource_errors_total"
 let metric_store_bytes = "masc_store_bytes"
 let metric_store_files = "masc_store_files"
 
-(* Event-bus health (#20676): under Drop_oldest the oas_runtime bus sheds
-   events silently; under Block the masc_domain bus accumulates publish
-   wait. Labels: [bus] (masc_domain | oas_runtime), [purpose] (subscriber
-   purpose, "unspecified" when absent). dropped_total sums over the
-   currently-live subscriptions, so it can step down when a subscriber
-   leaves — long-lived keeper bridges make that rare; rate() spikes at
-   churn points are acceptable against having no shed signal at all. *)
-let metric_bus_subscriber_dropped = "masc_event_bus_subscriber_dropped_total"
+(* Event-bus health is projected from OAS's live per-subscription statistics.
+   Values are gauges because subscriptions have process-local lifetimes: a
+   stopped subscriber disappears from the OAS snapshot, so an aggregate of
+   currently-live monotonic counters is not itself a monotonic OTel counter.
+   Labels: [bus], [purpose], and the typed [overflow] policy. *)
+let metric_bus_subscriber_capacity = "masc_event_bus_subscriber_capacity"
 let metric_bus_subscriber_depth = "masc_event_bus_subscriber_depth"
-let metric_bus_publish_blocked = "masc_event_bus_publish_blocked_seconds_total"
+let metric_bus_subscriber_published = "masc_event_bus_subscriber_published"
+let metric_bus_subscriber_drained = "masc_event_bus_subscriber_drained"
+let metric_bus_subscriber_dropped = "masc_event_bus_subscriber_dropped"
 let metric_bus_subscribers = "masc_event_bus_subscribers"
 
 (* HTTP connection pool: the export hook for Pool_metrics.current_snapshot.
@@ -158,30 +158,42 @@ let fd_samples () =
 let bus_samples_of ~bus_label bus =
   let stats = Agent_sdk.Event_bus.stats bus in
   let by_purpose =
-    (* Aggregate per purpose: several subscriptions can share one. *)
+    (* Several turn-scoped subscriptions can share one bounded purpose label.
+       Aggregate only contracts with the same overflow behaviour. *)
     List.fold_left
       (fun acc (s : Agent_sdk.Event_bus.subscription_stats) ->
         let purpose = Option.value s.purpose ~default:"unspecified" in
-        let depth, dropped =
-          match List.assoc_opt purpose acc with
-          | Some (d, dr) -> d + s.depth, dr + s.dropped_total
-          | None -> s.depth, s.dropped_total
+        let key = purpose, Masc_event_bus_subscription.overflow_label s.overflow in
+        let capacity, depth, published, drained, dropped =
+          match List.assoc_opt key acc with
+          | Some (capacity, depth, published, drained, dropped) ->
+            ( capacity + s.capacity
+            , depth + s.depth
+            , published + s.published_total
+            , drained + s.drained_total
+            , dropped + s.dropped_total )
+          | None ->
+            ( s.capacity
+            , s.depth
+            , s.published_total
+            , s.drained_total
+            , s.dropped_total )
         in
-        (purpose, (depth, dropped)) :: List.remove_assoc purpose acc)
+        (key, (capacity, depth, published, drained, dropped))
+        :: List.remove_assoc key acc)
       []
       stats.subscriptions
   in
   let base = [ "bus", bus_label ] in
   gauge ~labels:base metric_bus_subscribers (Float.of_int stats.subscriber_count)
-  :: counter_labeled
-       ~labels:base
-       metric_bus_publish_blocked
-       stats.total_publish_blocked_seconds
   :: List.concat_map
-       (fun (purpose, (depth, dropped)) ->
-         let labels = ("purpose", purpose) :: base in
-         [ gauge ~labels metric_bus_subscriber_depth (Float.of_int depth)
-         ; counter_labeled ~labels metric_bus_subscriber_dropped (Float.of_int dropped)
+       (fun ((purpose, overflow), (capacity, depth, published, drained, dropped)) ->
+         let labels = [ "bus", bus_label; "purpose", purpose; "overflow", overflow ] in
+         [ gauge ~labels metric_bus_subscriber_capacity (Float.of_int capacity)
+         ; gauge ~labels metric_bus_subscriber_depth (Float.of_int depth)
+         ; gauge ~labels metric_bus_subscriber_published (Float.of_int published)
+         ; gauge ~labels metric_bus_subscriber_drained (Float.of_int drained)
+         ; gauge ~labels metric_bus_subscriber_dropped (Float.of_int dropped)
          ])
        by_purpose
 ;;
@@ -236,5 +248,6 @@ let register_once ~masc_root () =
 
 module For_testing = struct
   let samples = samples
+  let bus_samples_of = bus_samples_of
   let reset_store_cache () = store_cache := neg_infinity, []
 end

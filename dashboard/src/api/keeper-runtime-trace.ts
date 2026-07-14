@@ -25,9 +25,6 @@ export interface KeeperRuntimeTraceEventBusSummary {
   event_bus_correlated_count: number
   correlation_ids: string[]
   run_ids: string[]
-  context_compact_started_count: number
-  context_compacted_count: number
-  last_compaction: unknown | null
 }
 
 export interface KeeperRuntimeTraceMemorySummary {
@@ -173,11 +170,8 @@ export interface KeeperRuntimeLensContextAxis {
   context_injected_count: number
   context_compacted_event_count: number
   event_bus_correlated_count: number
-  context_compact_started_count: number
-  context_compacted_count: number
   checkpoint_loaded_count: number
   checkpoint_saved_count: number
-  last_compaction: unknown
 }
 
 export interface KeeperRuntimeLensMemoryAxis extends KeeperRuntimeTraceMemorySummary {}
@@ -507,9 +501,6 @@ function parseRuntimeTraceEventBus(raw: unknown): KeeperRuntimeTraceEventBusSumm
     event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
     correlation_ids: stringListField(obj, 'correlation_ids'),
     run_ids: stringListField(obj, 'run_ids'),
-    context_compact_started_count: numberField(obj, 'context_compact_started_count'),
-    context_compacted_count: numberField(obj, 'context_compacted_count'),
-    last_compaction: obj.last_compaction ?? null,
   }
 }
 
@@ -665,11 +656,8 @@ function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis
     context_injected_count: numberField(obj, 'context_injected_count'),
     context_compacted_event_count: numberField(obj, 'context_compacted_event_count'),
     event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
-    context_compact_started_count: numberField(obj, 'context_compact_started_count'),
-    context_compacted_count: numberField(obj, 'context_compacted_count'),
     checkpoint_loaded_count: numberField(obj, 'checkpoint_loaded_count'),
     checkpoint_saved_count: numberField(obj, 'checkpoint_saved_count'),
-    last_compaction: obj.last_compaction ?? null,
   }
 }
 

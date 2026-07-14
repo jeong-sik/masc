@@ -177,16 +177,6 @@ function runtimeProviderAttemptLabel(trace: KeeperRuntimeTraceResponse): string 
   return ['prov', status].filter(Boolean).join(' ')
 }
 
-function formatRuntimeTraceUnknown(value: unknown): string {
-  if (value == null) return ''
-  if (typeof value === 'string') return shortText(value, 160)
-  try {
-    return shortText(JSON.stringify(value), 160)
-  } catch {
-    return String(value)
-  }
-}
-
 function runtimeTraceTurnLabel(trace: KeeperRuntimeTraceResponse): string {
   const keeperTurn = trace.turn_identity.requested_keeper_turn_id
     ?? trace.turn_identity.manifest_keeper_turn_ids.at(-1)
@@ -219,9 +209,6 @@ function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
 	    provider.terminal_error ? `provider error: ${shortText(provider.terminal_error, 220)}` : '',
 	    eventBus.correlation_ids.length > 0 ? `correlation_ids: ${eventBus.correlation_ids.join(', ')}` : '',
     eventBus.run_ids.length > 0 ? `run_ids: ${eventBus.run_ids.join(', ')}` : '',
-    // context_compacted ≤ context_compact_started is a true invariant pair.
-    `context compaction: ${formatRatioPair({ numerator: eventBus.context_compacted_count, denominator: eventBus.context_compact_started_count })}`,
-    formatRuntimeTraceUnknown(eventBus.last_compaction),
     // memory_injected_count and memory_flushed_count are independent monotonic
     // lifetime counters — no invariant relation between them. Avoid slash UI
     // (e.g. "909/722" would read as 126% ratio).
@@ -263,7 +250,7 @@ function RuntimeEvidenceSummary({
 	      ${runtimeProviderAttemptLabel(trace)}
 	    </span>
 	    <span class=${`${commonClass} border-[var(--info-border)] text-[var(--info-fg)]`} title=${title}>
-      evt ${eventBus.event_bus_correlated_count} · ctx ${formatRatioPair({ numerator: eventBus.context_compacted_count, denominator: eventBus.context_compact_started_count })}
+      evt ${eventBus.event_bus_correlated_count}
     </span>
     <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-muted)]`} title=${title}>
       mem ${formatIndependentCounters({ leftLabel: 'inj', leftValue: memory.memory_injected_count, rightLabel: 'flush', rightValue: memory.memory_flushed_count })}

@@ -880,8 +880,6 @@ describe('keeper runtime trace', () => {
         event_bus_correlated_count: 1,
         correlation_ids: ['corr-1'],
         run_ids: ['run-1'],
-        context_compact_started_count: 1,
-        context_compacted_count: 1,
       },
       memory: {
         memory_injected_count: 1,
@@ -1096,8 +1094,6 @@ describe('keeper runtime trace', () => {
 	        },
 	        event_bus: {
           event_bus_correlated_count: 1,
-          context_compact_started_count: 0,
-          context_compacted_count: 0,
         },
         memory: {
           memory_injected_count: 1,

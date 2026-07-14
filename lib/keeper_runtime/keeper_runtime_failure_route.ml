@@ -29,7 +29,6 @@ type judgment_class =
 type judgment_provenance =
   | Oas_api_error
   | Oas_provider_error
-  | Oas_agent_idle_detected of { consecutive_idle_turns : int }
   | Oas_agent_error
   | Oas_mcp_error
   | Oas_config_error
@@ -39,7 +38,6 @@ type judgment_provenance =
   | Oas_internal_error
   | Masc_internal_error
   | Completion_contract
-  | Legacy_unattributed
 
 type error_boundary =
   | Masc_execution
@@ -184,17 +182,6 @@ let route_of_error_family ~boundary (err : Agent_sdk.Error.sdk_error) : route =
       ~err
       ~provenance:(provenance_for_boundary boundary Oas_config_error)
       Config_mismatch
-  | Agent_sdk.Error.Agent
-      (Agent_sdk.Error.IdleDetected { consecutive_idle_turns }) ->
-    (* A repeated no-usable-progress observation becomes a behavioral contract
-       judgment, not a lifecycle transition or opaque internal error. *)
-    judge
-      ~err
-      ~provenance:
-        (provenance_for_boundary
-           boundary
-           (Oas_agent_idle_detected { consecutive_idle_turns }))
-      Contract_violation
   | Agent_sdk.Error.Agent _ ->
     judge
       ~err
@@ -269,7 +256,6 @@ let judgment_class_label = function
 let judgment_provenance_label = function
   | Oas_api_error -> "oas_api_error"
   | Oas_provider_error -> "oas_provider_error"
-  | Oas_agent_idle_detected _ -> "oas_agent_idle_detected"
   | Oas_agent_error -> "oas_agent_error"
   | Oas_mcp_error -> "oas_mcp_error"
   | Oas_config_error -> "oas_config_error"
@@ -279,12 +265,10 @@ let judgment_provenance_label = function
   | Oas_internal_error -> "oas_internal_error"
   | Masc_internal_error -> "masc_internal_error"
   | Completion_contract -> "completion_contract"
-  | Legacy_unattributed -> "legacy_unattributed"
 
 type judgment_provenance_boundary =
   | Boundary_oas_api
   | Boundary_oas_provider
-  | Boundary_oas_agent_idle
   | Boundary_oas_agent
   | Boundary_oas_mcp
   | Boundary_oas_config
@@ -294,12 +278,10 @@ type judgment_provenance_boundary =
   | Boundary_oas_internal
   | Boundary_masc_internal
   | Boundary_completion_contract
-  | Boundary_legacy_unattributed
 
 let judgment_provenance_boundary = function
   | Oas_api_error -> Boundary_oas_api
   | Oas_provider_error -> Boundary_oas_provider
-  | Oas_agent_idle_detected _ -> Boundary_oas_agent_idle
   | Oas_agent_error -> Boundary_oas_agent
   | Oas_mcp_error -> Boundary_oas_mcp
   | Oas_config_error -> Boundary_oas_config
@@ -309,7 +291,6 @@ let judgment_provenance_boundary = function
   | Oas_internal_error -> Boundary_oas_internal
   | Masc_internal_error -> Boundary_masc_internal
   | Completion_contract -> Boundary_completion_contract
-  | Legacy_unattributed -> Boundary_legacy_unattributed
 ;;
 
 let judgment_provenance_same_boundary left right =
@@ -319,8 +300,6 @@ let judgment_provenance_same_boundary left right =
 let judgment_provenance_to_yojson provenance =
   let kind = "kind", `String (judgment_provenance_label provenance) in
   match provenance with
-  | Oas_agent_idle_detected { consecutive_idle_turns } ->
-    `Assoc [ kind; "consecutive_idle_turns", `Int consecutive_idle_turns ]
   | Oas_api_error
   | Oas_provider_error
   | Oas_agent_error
@@ -331,8 +310,7 @@ let judgment_provenance_to_yojson provenance =
   | Oas_orchestration_error
   | Oas_internal_error
   | Masc_internal_error
-  | Completion_contract
-  | Legacy_unattributed ->
+  | Completion_contract ->
     `Assoc [ kind ]
 
 let require_exact_provenance_fields expected fields =
@@ -361,21 +339,6 @@ let judgment_provenance_of_yojson = function
        provenance_without_payload fields Oas_api_error
      | Some (`String "oas_provider_error") ->
        provenance_without_payload fields Oas_provider_error
-     | Some (`String "oas_agent_idle_detected") ->
-       (match
-          require_exact_provenance_fields
-            [ "kind"; "consecutive_idle_turns" ]
-            fields
-        with
-        | Error _ as error -> error
-        | Ok () ->
-          (match List.assoc_opt "consecutive_idle_turns" fields with
-           | Some (`Int value) when value > 0 ->
-             Ok (Oas_agent_idle_detected { consecutive_idle_turns = value })
-           | Some (`Int _) ->
-             Error "failure judgment idle provenance count must be positive"
-           | Some _ | None ->
-             Error "failure judgment idle provenance requires an integer count"))
      | Some (`String "oas_agent_error") ->
        provenance_without_payload fields Oas_agent_error
      | Some (`String "oas_mcp_error") ->
@@ -394,8 +357,6 @@ let judgment_provenance_of_yojson = function
        provenance_without_payload fields Masc_internal_error
      | Some (`String "completion_contract") ->
        provenance_without_payload fields Completion_contract
-     | Some (`String "legacy_unattributed") ->
-       provenance_without_payload fields Legacy_unattributed
      | Some (`String kind) ->
        Error (Printf.sprintf "unknown failure judgment provenance: %s" kind)
      | Some _ | None ->

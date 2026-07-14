@@ -139,10 +139,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     `Int scan.context_compacted_event_count );
                   ( "event_bus_correlated_count",
                     `Int scan.event_bus_count );
-                  ( "context_compact_started_count",
-                    `Int scan.context_compact_started_count );
-                  ( "context_compacted_count",
-                    `Int scan.context_compacted_count );
                   ( "checkpoint_loaded_count",
                     `Int
                       (runtime_lens_event_count scan
@@ -151,10 +147,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     `Int
                       (runtime_lens_event_count scan
                          Keeper_runtime_manifest.Checkpoint_saved) );
-                  ( "last_compaction",
-                    match scan.last_compaction with
-                    | Some value -> value
-                    | None -> `Null );
                 ] );
           ] );
       ( "swimlanes",

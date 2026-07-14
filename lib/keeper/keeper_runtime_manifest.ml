@@ -374,8 +374,6 @@ let decision_public_allowlist =
     ; "matched_started_status"; "error"; "exception_kind"; "latency_ms"
     ; "checkpoint_after_present"; "is_last"
     ; "liveness_mode"; "liveness_budget_source"
-    ; "context_compact_started_count"; "context_compacted_count"
-    ; "last_compaction"
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
     ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"

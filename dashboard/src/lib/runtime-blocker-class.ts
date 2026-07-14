@@ -25,9 +25,8 @@ export function asKeeperRuntimeBlockerClass(
 // Source of truth: `lib/keeper/keeper_meta_contract.ml:91 type blocker_class`
 //   + `blocker_class_to_string` (`lib/keeper/keeper_meta_contract.ml:137–164`).
 //
-// Backend can still decode these 24 lowercase wire strings (verified by
-// `Keeper_synthetic_marker` audit, 2026-05-19). The list below is the
-// *frozen* mirror — keep it 1:1 with `keeper_meta_contract.ml`.//
+// The list below is the exact current mirror; keep it 1:1 with
+// `keeper_meta_contract.ml`.
 // Status bridge (`lib/keeper/keeper_status_bridge.ml`) emits two
 // additional dashboard-only synthetic classes (`synthetic_stall`,
 // `self_imposed_idle`) and the runtime trust pipeline emits
@@ -49,16 +48,17 @@ export function asKeeperRuntimeBlockerClass(
 
 const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'runtime_exhausted',
+  'capacity_backpressure',
   'turn_timeout',
   'fiber_unresolved',
   'stale_turn_timeout',
   'stale_fleet_batch',
   'sdk_context_window_exceeded',
   'sdk_unrecognized_stop_reason',
-  'sdk_idle_detected',
+  'sdk_hook_execution_failed',
   'sdk_guardrail_violation',
   'sdk_tripwire_violation',
-  'sdk_exit_condition_met',
+  'sdk_input_required',
 ] as const
 
 type BackendKeeperMetaBlockerClass = typeof BACKEND_KEEPER_META_BLOCKER_CLASSES[number]

@@ -473,84 +473,86 @@ let run (ctx : ctx)
                    next_execution_runtime_id :: attempted_runtimes
                }
                turn_state
-        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed
-          when EC.is_context_overflow err ->
-          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-            ~keeper_name:meta.name
-            ~runtime_id:execution.runtime_id
-            ~decision:No_degraded_retry
-            ~reason:"context_overflow_after_oas_retry"
-            ~next_runtime:None
-            ~attempt
-            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err));
-          let current_turn_event_bus =
-            drain_turn_event_bus ~site:"context_overflow_capture" ()
-          in
-          let overflow_event =
-            context_overflow_event_of_error
-              ~fallback_tokens:execution.max_context
-              ~turn_event_bus:current_turn_event_bus
-              err
-          in
-          let overflow_evidence_detail =
-            turn_event_bus_overflow_evidence_detail current_turn_event_bus
-          in
-          let turn_state =
-            { turn_state with
-              current_turn_blocker_info =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:
-                       (Keeper_state_machine.event_to_string overflow_event
-                        ^ ": "
-                        ^ overflow_evidence_detail
-                        ^ ": "
-                        ^ Agent_sdk.Error.to_string err)
-                     Sdk_context_window_exceeded)
-            }
-          in
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string OasExecutionErrors)
-            ~labels:
-              [ "keeper", meta.name
-              ; "phase",
-                Keeper_oas_execution_error_phase.(
-                  to_label Context_overflow_after_oas_retry)
-              ]
-            ();
-          Log.Keeper.warn
-            "%s: OAS returned context overflow after its own retry \
-             path; MASC will not compact/retry within this turn — \
-             recording explicit overflow failure evidence: %s"
-            meta.name
-            (short_preview (Agent_sdk.Error.to_string err));
-          (* OAS already exhausted its own proactive + emergency compaction
-             for this turn, so MASC records the terminal failure and returns.
-             The next Keeper cycle remains available. *)
-          record_overflow_failure
-            ~config
-            ~meta
-            ~reason:"context_overflow_after_oas_retry";
-          mark_terminal_error err;
-          Error err, turn_state
         | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed ->
-          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-            ~keeper_name:meta.name
-            ~runtime_id:execution.runtime_id
-            ~decision:No_degraded_retry
-            ~reason:"terminal_error_no_degraded_retry"
-            ~next_runtime:None
-            ~attempt
-            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err));
-          mark_terminal_error err;
-          Error err, turn_state
+          (match err with
+           | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
+             Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+               ~keeper_name:meta.name
+               ~runtime_id:execution.runtime_id
+               ~decision:No_degraded_retry
+               ~reason:"context_overflow_after_oas_retry"
+               ~next_runtime:None
+               ~attempt
+               ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+               ~error_message:(Some (Agent_sdk.Error.to_string err));
+             let current_turn_event_bus =
+               drain_turn_event_bus ~site:"context_overflow_capture" ()
+             in
+             let overflow_event =
+               Keeper_state_machine.Context_overflow_detected
+                 { source = `Prompt_rejected
+                 ; token_count =
+                     Option.value ~default:(max 0 execution.max_context) limit
+                 ; limit_tokens = limit
+                 }
+             in
+             let event_bus_evidence_detail =
+               turn_event_bus_evidence_detail current_turn_event_bus
+             in
+             let turn_state =
+               { turn_state with
+                 current_turn_blocker_info =
+                   Some
+                     (Keeper_meta_contract.blocker_info_of_class
+                        ~detail:
+                          (Keeper_state_machine.event_to_string overflow_event
+                           ^ ": "
+                           ^ event_bus_evidence_detail
+                           ^ ": "
+                           ^ Agent_sdk.Error.to_string err)
+                        Sdk_context_window_exceeded)
+               }
+             in
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string OasExecutionErrors)
+               ~labels:
+                 [ "keeper", meta.name
+                 ; "phase",
+                   Keeper_oas_execution_error_phase.(
+                     to_label Context_overflow_after_oas_retry)
+                 ]
+               ();
+             Log.Keeper.warn
+               "%s: OAS returned typed context overflow; MASC will not \
+                invent a compaction or retry within this turn — recording \
+                explicit overflow failure evidence: %s"
+               meta.name
+               (short_preview (Agent_sdk.Error.to_string err));
+             (* This turn ends with explicit evidence. The Keeper lane remains
+                available for a later durable stimulus. *)
+             record_overflow_failure
+               ~config
+               ~meta
+               ~reason:"context_overflow_after_oas_retry";
+             mark_terminal_error err;
+             Error err, turn_state
+           | _ ->
+             Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+               ~keeper_name:meta.name
+               ~runtime_id:execution.runtime_id
+               ~decision:No_degraded_retry
+               ~reason:"terminal_error_no_degraded_retry"
+               ~next_runtime:None
+               ~attempt
+               ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+               ~error_message:(Some (Agent_sdk.Error.to_string err));
+             mark_terminal_error err;
+             Error err, turn_state)
   in
   (* Do not wrap the full keeper turn in a cumulative wall-clock timeout.
      Long voice/OAS turns can keep making stream or tool progress beyond the
      legacy 600s cap. Runaway detection is owned by stream idle, provider
-     attempt liveness, tool-level timeouts, max-turn limits, and the optional
+     attempt liveness, tool-level timeouts, and the optional
      supervisor stale-turn watchdog. Retry admission must not reintroduce the
      cumulative wall-clock cap between provider attempts. *)
   let result, turn_state =

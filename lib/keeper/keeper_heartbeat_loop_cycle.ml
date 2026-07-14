@@ -94,7 +94,7 @@ let prepare_failure_judgment_turn
       ~(request : Keeper_event_queue.failure_judgment)
       (obs : Keeper_world_observation.world_observation)
   =
-  match Keeper_failure_judge.run ~base_path ~keeper_name request with
+  match Keeper_failure_judge.run ~keeper_name request with
   | Error error ->
     let detail =
       Keeper_failure_judge.error_detail error

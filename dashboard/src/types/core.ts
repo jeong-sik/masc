@@ -411,6 +411,7 @@ export interface ProviderHealth {
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'turn_timeout',
   'runtime_exhausted',
+  'capacity_backpressure',
   'provider_runtime_error',
   'fiber_unresolved',
   'stale_turn_timeout',
@@ -426,10 +427,10 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'self_imposed_idle',
   'sdk_context_window_exceeded',
   'sdk_unrecognized_stop_reason',
-  'sdk_idle_detected',
+  'sdk_hook_execution_failed',
   'sdk_guardrail_violation',
   'sdk_tripwire_violation',
-  'sdk_exit_condition_met',
+  'sdk_input_required',
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]

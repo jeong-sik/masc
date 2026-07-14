@@ -16,14 +16,8 @@ import {
   readAgentCompletedPayload,
   readAgentFailedPayload,
   readAgentStartedPayload,
-  readContentReplacementKeptPayload,
-  readContentReplacementReplacedPayload,
-  readContextCompactStartedPayload,
-  readContextCompactedPayload,
-  readContextOverflowImminentPayload,
   readHandoffCompletedPayload,
   readHandoffRequestedPayload,
-  readSlotSchedulerObservedPayload,
   readToolCalledPayload,
   readToolCompletedPayload,
   readTurnCompletedPayload,
@@ -32,14 +26,8 @@ import {
   type AgentCompletedPayload,
   type AgentFailedPayload,
   type AgentStartedPayload,
-  type ContentReplacementKeptPayload,
-  type ContentReplacementReplacedPayload,
-  type ContextCompactStartedPayload,
-  type ContextCompactedPayload,
-  type ContextOverflowImminentPayload,
   type HandoffCompletedPayload,
   type HandoffRequestedPayload,
-  type SlotSchedulerObservedPayload,
   type ToolCalledPayload,
   type ToolCompletedPayload,
   type TurnCompletedPayload,
@@ -79,12 +67,6 @@ export type TypedOasPayload =
   | { kind: 'turn_ready'; payload: TurnReadyPayload }
   | { kind: 'handoff_requested'; payload: HandoffRequestedPayload }
   | { kind: 'handoff_completed'; payload: HandoffCompletedPayload }
-  | { kind: 'context_compacted'; payload: ContextCompactedPayload }
-  | { kind: 'context_overflow_imminent'; payload: ContextOverflowImminentPayload }
-  | { kind: 'context_compact_started'; payload: ContextCompactStartedPayload }
-  | { kind: 'content_replacement_replaced'; payload: ContentReplacementReplacedPayload }
-  | { kind: 'content_replacement_kept'; payload: ContentReplacementKeptPayload }
-  | { kind: 'slot_scheduler_observed'; payload: SlotSchedulerObservedPayload }
 
 /** Discriminant extracted from the closed union.  Keeping the kind literal in
  *  one place (the union above) eliminates the manual array/switch duplication
@@ -111,12 +93,6 @@ const READERS: ReaderMap = {
   turn_ready: readTurnReadyPayload,
   handoff_requested: readHandoffRequestedPayload,
   handoff_completed: readHandoffCompletedPayload,
-  context_compacted: readContextCompactedPayload,
-  context_overflow_imminent: readContextOverflowImminentPayload,
-  context_compact_started: readContextCompactStartedPayload,
-  content_replacement_replaced: readContentReplacementReplacedPayload,
-  content_replacement_kept: readContentReplacementKeptPayload,
-  slot_scheduler_observed: readSlotSchedulerObservedPayload,
 }
 
 /** Runtime inventory derived from the reader keys.  The type assertion is
@@ -172,7 +148,6 @@ export function parseOasPayload(
   }
 
   switch (suffix) {
-    case 'context_compacted':
     case 'agent_started':
     case 'agent_completed':
     case 'agent_failed':
@@ -182,12 +157,7 @@ export function parseOasPayload(
     case 'turn_completed':
     case 'turn_ready':
     case 'handoff_requested':
-    case 'handoff_completed':
-    case 'context_overflow_imminent':
-    case 'context_compact_started':
-    case 'content_replacement_replaced':
-    case 'content_replacement_kept':
-    case 'slot_scheduler_observed': {
+    case 'handoff_completed': {
       const result = tryRead(eventType, READERS[suffix] as PayloadReader<unknown>, raw)
       if (!result.success) return result
       return ok(buildPayload(suffix, result.data as TypedOasPayload['payload']))

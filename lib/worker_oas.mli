@@ -10,7 +10,7 @@
 val build_agent :
   net:([ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t) ->
   meta:Worker_container_types.worker_container_meta ->
-  provider:Agent_sdk.Provider.config ->
+  provider_config:Llm_provider.Provider_config.t ->
   system_prompt:string ->
   tools:Agent_sdk.Tool.t list ->
   hooks:Agent_sdk.Hooks.hooks ->
@@ -18,7 +18,6 @@ val build_agent :
   heartbeat_callbacks:Agent_sdk.Agent.periodic_callback list ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
-  ?approval:Agent_sdk.Hooks.approval_callback ->
   unit ->
   (Agent_sdk.Agent.t, string) result
 (** [build_agent] constructs an OAS agent for the given worker meta. *)
@@ -38,7 +37,7 @@ val run_worker_via_oas :
   base_path:string ->
   auth_token:string option ->
   meta:Worker_container_types.worker_container_meta ->
-  provider:Agent_sdk.Provider.config ->
+  provider_config:Llm_provider.Provider_config.t ->
   system_prompt:string ->
   prompt:string ->
   tools:Agent_sdk.Tool.t list ->
@@ -53,21 +52,14 @@ val resume_worker_via_oas :
   base_path:string ->
   auth_token:string option ->
   meta:Worker_container_types.worker_container_meta ->
+  provider_config:Llm_provider.Provider_config.t ->
   checkpoint:Agent_sdk.Checkpoint.t ->
   prompt:string ->
   tools:Agent_sdk.Tool.t list ->
   raw_trace:Agent_sdk.Raw_trace.t ->
   ?worker_run_id:string ->
-  ?approval:Agent_sdk.Hooks.approval_callback ->
   unit ->
   (Worker_container_types.run_result, string) result
-
-(** {1 Checkpoint Helpers} *)
-
-val resume_model_id_of_checkpoint :
-  Worker_container_types.worker_container_meta ->
-  Agent_sdk.Checkpoint.t ->
-  string
 
 module For_testing : sig
   val begin_worker_mcp_client_session :

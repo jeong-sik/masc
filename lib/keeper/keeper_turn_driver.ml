@@ -335,7 +335,6 @@ let run_named
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?context_window_tokens
-    ?checkpoint_dir
     ?checkpoint_sink
     ?context_injector
     ?context
@@ -649,7 +648,6 @@ let run_named
             ; checkpoint_sidecar
             ; cache_system_prompt
             ; yield_on_tool
-            ; checkpoint_dir
             ; checkpoint_sink
             ; checkpoint_stage_observed
             ; context_injector

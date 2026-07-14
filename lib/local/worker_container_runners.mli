@@ -11,10 +11,10 @@
     {!Worker_container_types} surfaces into scope (notably
     [list_masc_tools], [parse_text_tool_calls], [run_result]).
 
-    Internal: 6 helpers stay private — \[resolve_net\],
+    Internal helpers stay private — \[resolve_net\],
     \[build_execution_spec\],
-    \[workspace_path_of_spec\], \[effective_model_of_resume\],
-    \[dedupe_tools_by_name\], \[create_raw_trace\].  All consumed
+    \[workspace_path_of_spec\], \[dedupe_tools_by_name\],
+    \[create_raw_trace\]. All consumed
     inside the run / preflight pipelines. *)
 
 include module type of struct
@@ -34,9 +34,8 @@ val run_worker_oas :
     that runs (or resumes) the worker via OAS:
 
     - Resolve net (from [?net] or {!Eio_context}).
-    - Resolve effective model from
-      {!Worker_container.load_worker_meta} when checkpoint
-      exists, otherwise from the spec.
+    - Resolve the exact typed provider config from the explicit spec label.
+      A resumed checkpoint must carry the same exact model id.
     - Build the MASC/OAS tool set and dedupe by tool name.
     - Create / open raw trace under
       [<base_path>/workers/<worker_name>/raw_trace.jsonl].

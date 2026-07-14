@@ -115,16 +115,13 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
         (sprintf "Invalid verdict format: %s" msg)
   in
   let runtime_id = Runtime.runtime_id_for_structured_judge () in
-  let base_path = Env_config_core.base_path () in
   match
     Keeper_turn_driver_wrappers.run_named_with_masc_tools
       ~runtime_id
-      ~base_path
       ~goal:prompt
       ~masc_tools:[ Core.report_verdict_schema ]
       ~dispatch
       ~temperature:Runtime_provider_defaults.deterministic_temperature
-      ~approval:Approval_callbacks.auto_approve
       ~provider_config_transform:apply_report_verdict_output_schema
       ()
   with

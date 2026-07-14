@@ -203,7 +203,7 @@ let metric_timeout_policy_overshoot = Otel_metric_store_core.declare_counter "ma
    [masc_keeper_compactions_total] hides because that counter
    is incremented on the trigger rather than the savings.  This
    counter labels by [keeper, trigger] so dashboards separate
-   "context_overflow_imminent triggered noop" from "manual
+   "automatic overflow trigger noop" from "manual
    trigger noop" etc. and operators can attribute blame.  Pair
    with [masc_keeper_compaction_saved_tokens_total] (already
    shipping) — that one tracks the bytes saved by the 1.6%

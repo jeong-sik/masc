@@ -104,7 +104,6 @@ include Otel_policy_metric_names
    [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without
    the strike→crash promotion these failures repeated silently for
    hours (4h+ zombie keepers observed 2026-04-26). *)
-let metric_oas_bus_capacity = "masc_oas_bus_capacity"
 let metric_oas_bridge_unmigrated_payload_kind =
   Otel_metric_store_core.declare_counter "masc_oas_bridge_unmigrated_payload_kind_total"
 ;;

@@ -105,9 +105,6 @@ function runtimeTrace(): KeeperRuntimeTraceResponse {
       event_bus_correlated_count: 1,
       correlation_ids: ['corr-1'],
       run_ids: ['run-1'],
-      context_compact_started_count: 0,
-      context_compacted_count: 0,
-      last_compaction: null,
     },
     memory: {
       memory_injected_count: 1,

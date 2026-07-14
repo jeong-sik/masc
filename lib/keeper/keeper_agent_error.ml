@@ -233,13 +233,9 @@ let terminal_reason_code_of_sdk_error = function
     | None -> "internal_error")
 ;;
 
-(* RFC-0042 PR-2.5: typed bridge for SDK errors. The wire format is the
-   existing parametrised string (kept by [terminal_reason_code_of_sdk_error]
-   above) wrapped in [Keeper_turn_terminal_code.Sdk_error]. PR-3 swaps
-   [Keeper_turn_terminal.t.code] from [string] to [Keeper_turn_terminal_code.t]
-   and uses these typed accessors at every emit site. RFC §5.2 defers the
-   sub-sum split (per-variant constructors for [MaxTurnsExceeded] etc.) to
-   a follow-up RFC. *)
+(* Typed bridge from the current closed SDK error sum into the Keeper terminal
+   code. The inner wire value remains display evidence; routing matches the SDK
+   variants above and never parses this string. *)
 let terminal_reason_code_of_sdk_error_typed err =
   Keeper_turn_terminal_code.of_sdk_error_wire (terminal_reason_code_of_sdk_error err)
 ;;

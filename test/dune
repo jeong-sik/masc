@@ -52,7 +52,6 @@
   test_board_collect_pause_gate
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
-  test_runtime_request_config_merge
   test_keeper_context_layers
   test_keeper_hooks_oas_introspection
   test_keeper_run_tools_hooks
@@ -374,7 +373,6 @@
   test_board_collect_pause_gate
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
-  test_runtime_request_config_merge
   test_keeper_context_layers
   test_keeper_hooks_oas_introspection
   test_keeper_run_tools_hooks
@@ -2063,7 +2061,7 @@
 
 (include stanzas/test_timeout_policy.inc)
 
-(include stanzas/test_masc_event_bus_policy.inc)
+(include stanzas/test_masc_event_bus_subscription.inc)
 
 (include stanzas/test_timeout_policy_overshoot_counter.inc)
 

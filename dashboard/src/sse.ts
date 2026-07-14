@@ -1005,34 +1005,6 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:context_compacted': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
-      if (!parsed || parsed.kind !== 'context_compacted') break
-      const { payload } = parsed
-      const trigger = payload.phase ? `OAS ${payload.phase}` : 'OAS context_compacted'
-      // The OAS context_compacted wire carries no runtime field
-      // (lib/sse_event/sse_event.atd context_compacted_payload has 4 fields),
-      // so the snapshot runtime is unknown on this path.
-      recordSseCompaction(
-        payload.agent_name,
-        payload.before_tokens,
-        payload.after_tokens,
-        trigger,
-        '—',
-      )
-      addTypedJournalEntry(
-        payload.agent_name,
-        `OAS compact · ${payload.before_tokens}→${payload.after_tokens} · ${payload.phase}`,
-        'oas',
-        'oas_context',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText: `${actorLabel(payload.agent_name)} OAS context compact (${payload.phase})`,
-        },
-      )
-      break
-    }
     case 'oas:task_state_changed': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const taskId = asString(p.task_id) ?? event.task_id ?? 'unknown'

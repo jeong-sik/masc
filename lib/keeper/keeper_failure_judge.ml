@@ -95,7 +95,7 @@ let parse_response ~runtime_id response =
      | Error detail -> Error (Response_contract_error { runtime_id; detail }))
 ;;
 
-let run ~base_path ~keeper_name request =
+let run ~keeper_name request =
   match resolve_runtime_id () with
   | Error _ as error -> error
   | Ok runtime_id ->
@@ -107,7 +107,6 @@ let run ~base_path ~keeper_name request =
             ~runtime_id
             ~keeper_name
             ~goal:prompt
-            ~base_path
             ~masc_tools:[]
             ~dispatch:reject_unregistered_tool
             ~temperature:Runtime_provider_defaults.deterministic_temperature

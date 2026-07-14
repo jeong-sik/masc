@@ -13,7 +13,6 @@
   keeper_memory_llm_summary_outcome
   keeper_memory_recall_exn_class
   keeper_chat_store_operation
-  keeper_compact_audit_retention_outcome
   keeper_execution_receipt_outcome_kind
   keeper_oas_execution_error_phase
   keeper_operator_compact_result

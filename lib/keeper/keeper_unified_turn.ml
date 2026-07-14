@@ -611,14 +611,7 @@ let run_keeper_cycle
                     correlation_id
                 | None -> ());
                let event_bus_manifest_status =
-                 match turn_event_bus.correlation_id with
-                 | Some _ -> "observed"
-                 | None ->
-                   if turn_event_bus.context_compact_started_count > 0
-                      || turn_event_bus.context_compacted_count > 0
-                      || turn_event_bus.overflow_imminent <> None
-                   then "observed"
-                   else "empty"
+                 if turn_event_bus.event_count > 0 then "observed" else "empty"
                in
                let turn_state =
                  Keeper_unified_turn_manifest.append_manifest

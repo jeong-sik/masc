@@ -234,7 +234,7 @@ function RuntimeEvidenceStrip({
         attempts ${evidence.providerAttemptStartedCount}/${evidence.providerAttemptFinishedCount}
       </span>
       <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
-        ctx ${evidence.contextCompactedCount}/${evidence.contextCompactStartedCount}
+        events ${evidence.eventBusCorrelatedCount}
       </span>
       <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
         mem ${formatIndependentCounters({

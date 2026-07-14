@@ -25,7 +25,7 @@
     [followup_prompt], [split_top_level],
     [find_top_level_char], [parse_text_tool_args],
     [parse_text_tool_calls], [make_usage],
-    [estimate_cost_usd], [worker_session_id],
+    [worker_session_id],
     [worker_auth_token]) stay private.
 
     {!Worker_container} does [include Worker_container_types]

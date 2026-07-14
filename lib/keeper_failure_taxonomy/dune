@@ -9,7 +9,6 @@
   keeper_approval_queue_failure_site
   keeper_checkpoint_failure_operation
   keeper_checkpoint_store_failure_site
-  keeper_compact_audit_failure_site
   keeper_crash_persistence_failure_site
   keeper_execution_receipt_failure_site
   keeper_fs_failure_site

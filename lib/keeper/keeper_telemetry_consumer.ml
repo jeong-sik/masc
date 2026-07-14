@@ -26,11 +26,10 @@ let spawn_subscriber ~sw ~clock ~base_path ~bus =
   in
   let sub =
     Agent_sdk_metrics_bridge.subscribe
-      ~purpose:"telemetry_consumer"
-      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
-        match evt.payload with
-        | Agent_sdk.Event_bus.Custom ("telemetry_event", _) -> true
-        | _ -> false)
+      ~contract:
+        (Masc_event_bus_subscription.for_subscriber
+           Masc_event_bus_subscription.Telemetry_consumer)
+      ~filter:(Agent_sdk.Event_bus.filter_topic "telemetry_event")
       bus
   in
   Eio.Switch.on_release sw (fun () ->
@@ -42,7 +41,7 @@ let spawn_subscriber ~sw ~clock ~base_path ~bus =
          List.iter
            (fun (evt : Agent_sdk.Event_bus.event) ->
               match evt.payload with
-              | Agent_sdk.Event_bus.Custom ("telemetry_event", json) ->
+              | Agent_sdk.Event_bus.Custom (_, json) ->
                   Otel_metric_store.inc_counter
                     telemetry_event_counter
                     ~labels:[ "result", "observed" ]

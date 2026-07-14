@@ -39,16 +39,26 @@ let config_for_label
     | None -> Ok provider
     | Some transform -> transform provider
   in
+  let provider =
+    { provider with
+      Llm_provider.Provider_config.max_tokens =
+        (match max_tokens with
+         | Some _ as explicit -> explicit
+         | None -> provider.max_tokens)
+    ; temperature = Some temperature
+    ; enable_thinking =
+        (match enable_thinking with
+         | Some _ as explicit -> explicit
+         | None -> provider.enable_thinking)
+    }
+  in
   Ok
     {
       (Runtime_agent.default_config ~name ~provider_cfg:provider
          ~system_prompt ~tools)
       with
-      max_tokens;
-      temperature;
       stream_idle_timeout_s;
       hooks;
-      enable_thinking;
       description;
     }
 

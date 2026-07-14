@@ -16,35 +16,6 @@ open Printf
 open Result.Syntax
 
 (* ================================================================ *)
-(* worker_container_meta -> OAS Masc_domain.model                          *)
-(* ================================================================ *)
-
-(** Convert an effective_model string to an OAS model identifier.
-    MASC workers use local Ollama/llama-server models, so all model IDs
-    go through Custom. *)
-let oas_model_of_effective_model (model_id : string) : string = model_id
-
-(* ================================================================ *)
-(* worker_container_meta -> OAS Masc_domain.agent_config                   *)
-(* ================================================================ *)
-
-(** Convert MASC worker_container_meta to OAS agent_config.
-    Maps worker_name, model, and thinking. OAS owns provider/model defaults;
-    MASC does not synthesize token, turn, or sampling limits. *)
-let agent_config_of_worker_meta
-      (meta : Worker_container_types.worker_container_meta)
-      ~(system_prompt : string)
-  : Agent_sdk.Types.agent_config
-  =
-  { Agent_sdk.Types.default_config with
-    name = meta.worker_name
-  ; model = oas_model_of_effective_model meta.effective_model
-  ; system_prompt = Some system_prompt
-  ; enable_thinking = Some (Option.value ~default:false meta.thinking_enabled)
-  }
-;;
-
-(* ================================================================ *)
 (* Metadata -> key-value pairs for description/context               *)
 (* ================================================================ *)
 
@@ -71,28 +42,20 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
 ;;
 
 (* ================================================================ *)
-(* OAS Provider from MASC model_spec                                 *)
-(* ================================================================ *)
-
-(** Re-use the existing provider mapping from worker_container. *)
-let oas_provider_of_label = Worker_container.oas_provider_of_label
-
-(* ================================================================ *)
 (* Build OAS Agent.t via Builder                                     *)
 (* ================================================================ *)
 
 (** Build an OAS Agent.t from MASC worker metadata using the Builder pattern.
 
     This is the central adapter function. It:
-    1. Converts worker_meta to agent_config
-    2. Attaches the MODEL provider
-    3. Wires tools, hooks, guardrails, raw_trace
-    4. Adds MASC heartbeat as an OAS periodic_callback
-    5. Embeds MASC metadata in the agent description *)
+    1. Selects the exact worker model and provider
+    2. Wires tools, hooks, and raw_trace
+    3. Adds MASC heartbeat as an OAS periodic_callback
+    4. Embeds MASC metadata in the agent description *)
 let build_agent
       ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
       ~(meta : Worker_container_types.worker_container_meta)
-      ~(provider : Agent_sdk.Provider.config)
+      ~(provider_config : Llm_provider.Provider_config.t)
       ~(system_prompt : string)
       ~(tools : Agent_sdk.Tool.t list)
       ~(hooks : Agent_sdk.Hooks.hooks)
@@ -100,28 +63,24 @@ let build_agent
       ~(heartbeat_callbacks : Agent_sdk.Agent.periodic_callback list)
       ?context_injector
       ?context
-      ?(approval : Agent_sdk.Hooks.approval_callback =
-        Approval_callbacks.auto_approve)
       ()
   : (Agent_sdk.Agent.t, string) result
   =
-  let config = agent_config_of_worker_meta meta ~system_prompt in
   let builder =
-    Agent_sdk.Builder.create ~net ~model:config.model
-    |> Agent_sdk.Builder.with_name config.name
+    Agent_sdk.Builder.create ~net ~model:provider_config.model_id
+    |> Agent_sdk.Builder.with_provider_config provider_config
+    |> Agent_sdk.Builder.with_name meta.worker_name
     |> Agent_sdk.Builder.with_system_prompt system_prompt
-    |> Agent_sdk.Builder.with_max_turns config.max_turns
-    |> Agent_sdk.Builder.with_enable_thinking
-         (Option.value ~default:false meta.thinking_enabled)
-    |> Agent_sdk.Builder.with_provider provider
     |> Agent_sdk.Builder.with_tools tools
     |> Agent_sdk.Builder.with_hooks hooks
-    |> Agent_sdk.Builder.with_guardrails Agent_sdk.Guardrails.permissive
     |> Agent_sdk.Builder.with_raw_trace raw_trace
     |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Agent_sdk.Builder.with_description (description_of_meta meta)
-    (* #7883 *)
-    |> Agent_sdk.Builder.with_approval approval
+  in
+  let builder =
+    match meta.thinking_enabled with
+    | Some enabled -> Agent_sdk.Builder.with_enable_thinking enabled builder
+    | None -> builder
   in
   let builder =
     match context_injector with
@@ -189,13 +148,8 @@ let make_tool_tracking_hooks ?context () =
             | Agent_sdk.Hooks.PostToolUse _
             | Agent_sdk.Hooks.PostToolUseFailure _
             | Agent_sdk.Hooks.OnStop _
-            | Agent_sdk.Hooks.OnIdle _
-            | Agent_sdk.Hooks.OnIdleEscalated _
             | Agent_sdk.Hooks.OnError _
-            | Agent_sdk.Hooks.OnToolError _
-            | Agent_sdk.Hooks.PreCompact _
-            | Agent_sdk.Hooks.PostCompact _
-            | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue)
+            | Agent_sdk.Hooks.OnToolError _ -> Agent_sdk.Hooks.Continue)
     ; on_error =
         Some
           (function
@@ -209,12 +163,8 @@ let make_tool_tracking_hooks ?context () =
             | Agent_sdk.Hooks.PostToolUse _
             | Agent_sdk.Hooks.PostToolUseFailure _
             | Agent_sdk.Hooks.OnStop _
-            | Agent_sdk.Hooks.OnIdle _
-            | Agent_sdk.Hooks.OnIdleEscalated _
             | Agent_sdk.Hooks.OnToolError _
-            | Agent_sdk.Hooks.PreCompact _
-            | Agent_sdk.Hooks.PostCompact _
-            | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue)
+              -> Agent_sdk.Hooks.Continue)
     ; on_tool_error =
         Some
           (function
@@ -228,12 +178,8 @@ let make_tool_tracking_hooks ?context () =
             | Agent_sdk.Hooks.PostToolUse _
             | Agent_sdk.Hooks.PostToolUseFailure _
             | Agent_sdk.Hooks.OnStop _
-            | Agent_sdk.Hooks.OnIdle _
-            | Agent_sdk.Hooks.OnIdleEscalated _
             | Agent_sdk.Hooks.OnError _
-            | Agent_sdk.Hooks.PreCompact _
-            | Agent_sdk.Hooks.PostCompact _
-            | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue)
+              -> Agent_sdk.Hooks.Continue)
     }
   in
   let hooks =
@@ -261,26 +207,14 @@ let make_tool_tracking_hooks ?context () =
                 | Agent_sdk.Hooks.PostToolUse _
                 | Agent_sdk.Hooks.PostToolUseFailure _
                 | Agent_sdk.Hooks.OnStop _
-                | Agent_sdk.Hooks.OnIdle _
-                | Agent_sdk.Hooks.OnIdleEscalated _
                 | Agent_sdk.Hooks.OnError _
-                | Agent_sdk.Hooks.OnToolError _
-                | Agent_sdk.Hooks.PreCompact _
-                | Agent_sdk.Hooks.PostCompact _
-                | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue)
+                | Agent_sdk.Hooks.OnToolError _ -> Agent_sdk.Hooks.Continue)
         }
       in
       Agent_sdk.Hooks.compose ~outer:temporal ~inner:tracking
     | None -> tracking
   in
   tool_names_ref, hooks
-;;
-
-let resume_model_id_of_checkpoint
-      (meta : Worker_container_types.worker_container_meta)
-      (checkpoint : Agent_sdk.Checkpoint.t)
-  =
-  if checkpoint.model <> "" then checkpoint.model else meta.effective_model
 ;;
 
 let record_worker_mcp_client_session_duration
@@ -331,8 +265,7 @@ end
     (join/leave, heartbeat, checkpoint persistence, turn log, evidence).
 
     This function mirrors run_worker_oas in local_agent_eio_runners.ml,
-    but constructs the agent using the Builder pattern instead of
-    build_resume_config + Agent.create directly.
+    but constructs the agent using the Builder pattern.
 
     Returns a run_result on success, or an error string on failure. *)
 let rec run_worker_via_oas
@@ -341,7 +274,7 @@ let rec run_worker_via_oas
           ~(base_path : string)
           ~(auth_token : string option)
           ~(meta : Worker_container_types.worker_container_meta)
-          ~(provider : Agent_sdk.Provider.config)
+          ~(provider_config : Llm_provider.Provider_config.t)
           ~(system_prompt : string)
           ~(prompt : string)
           ~(tools : Agent_sdk.Tool.t list)
@@ -365,7 +298,7 @@ let rec run_worker_via_oas
     build_agent
       ~net
       ~meta
-      ~provider
+      ~provider_config
       ~system_prompt
       ~tools
       ~hooks
@@ -398,13 +331,12 @@ and resume_worker_via_oas
       ~(base_path : string)
       ~(auth_token : string option)
       ~(meta : Worker_container_types.worker_container_meta)
+      ~(provider_config : Llm_provider.Provider_config.t)
       ~(checkpoint : Agent_sdk.Checkpoint.t)
       ~(prompt : string)
       ~(tools : Agent_sdk.Tool.t list)
       ~(raw_trace : Agent_sdk.Raw_trace.t)
       ?worker_run_id
-      ?(approval : Agent_sdk.Hooks.approval_callback =
-        Approval_callbacks.auto_approve)
       ()
   : (Worker_container_types.run_result, string) result
   =
@@ -412,6 +344,17 @@ and resume_worker_via_oas
   @@ fun () ->
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
+  let* () =
+    if String.equal provider_config.model_id checkpoint.model
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "checkpoint/provider model mismatch for worker %S: checkpoint=%S provider=%S"
+           worker_name
+           checkpoint.model
+           provider_config.model_id)
+  in
   let heartbeat_cbs = make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name in
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
@@ -419,42 +362,12 @@ and resume_worker_via_oas
   let tool_names_ref, hooks =
     make_tool_tracking_hooks ~context:shared_context ()
   in
-  let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
-  let* resume_provider =
-    oas_provider_of_label (resume_model_id)
-    |> Result.map_error (fun e ->
-      Printf.sprintf "checkpoint resume (model %S): %s" resume_model_id e)
-  in
-  let system_prompt =
-    Worker_container_types.default_system_prompt
-      ~worker_name
-      ~model_id:resume_model_id
-      ?role:meta.role
-      ?selection_note:meta.selection_note
-      ()
-  in
-  let max_turns = Runtime_agent_context.unbounded_max_turns in
-  let thinking_enabled = Option.value ~default:false meta.thinking_enabled in
-  let config, options =
-    Worker_container.build_resume_config
-      ~worker_name
-      ~provider:resume_provider
-      ~model_id:resume_model_id
-      ~system_prompt
-      ~tools
-      ~max_turns
-      ~thinking_enabled
-      ~hooks
-      ~raw_trace
-      ~periodic_callbacks:heartbeat_cbs
-      ~guardrails:Agent_sdk.Guardrails.permissive
-      ()
-  in
   let options =
-    { options with
-      Agent_sdk.Agent_types.context_injector = Some context_injector
-    ; (* #7883 *)
-      approval = Some approval
+    { Agent_sdk.Agent.default_options with
+      hooks
+    ; raw_trace = Some raw_trace
+    ; periodic_callbacks = heartbeat_cbs
+    ; context_injector = Some context_injector
     }
   in
   let agent =
@@ -463,7 +376,7 @@ and resume_worker_via_oas
       ~checkpoint
       ~tools
       ~options
-      ~config
+      ~provider_config
       ~context:shared_context
       ()
   in

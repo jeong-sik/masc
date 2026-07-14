@@ -64,7 +64,6 @@ export type SSEEventType =
   | 'oas:turn_completed'
   | 'oas:handoff_requested'
   | 'oas:handoff_completed'
-  | 'oas:context_compacted'
   | 'oas:task_state_changed'
   // Harness observability events (#3165)
   | 'oas:masc:harness:verdict_recorded'

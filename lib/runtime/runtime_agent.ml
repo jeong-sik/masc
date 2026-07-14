@@ -976,19 +976,6 @@ let build
       in
       Agent_sdk.Builder.build_safe builder)
 
-(* ================================================================ *)
-(* Idle-detail enrichment                                           *)
-(* ================================================================ *)
-
-(** Enrich an [Agent_sdk.Error.to_string] detail with the name of the most
-    recently called tool when the error is an "Idle detected" failure.
-    For all other error strings the input is returned unchanged.
-
-    Exposed at module level so it can be unit-tested independently of
-    the network-bound [run] function. *)
-let enrich_idle_detail =
-  Runtime_oas_checkpoint.enrich_idle_detail
-
 let run_duration_ms_since started_at =
   Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)
 
@@ -1496,9 +1483,6 @@ let run_blocks
         }
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
-      let detail =
-        enrich_idle_detail detail (Agent_sdk.Agent.state agent).messages
-      in
       let error_response =
         partial_response_of_stop ~session_id ~text:detail
       in

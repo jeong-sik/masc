@@ -46,8 +46,9 @@ val set_system_prompt :
 val append : working_context -> Agent_sdk.Types.message -> working_context
 val append_many : working_context -> Agent_sdk.Types.message list -> working_context
 
-(** Push the working-context's derived counters into the OAS
-    [Context.t] (Session scope). *)
+(** Push the exact working-context message count into the OAS [Context.t]
+    (Session scope). Provider token usage is response telemetry and is not a
+    measure of the current checkpoint's context size. *)
 val sync_oas_context : working_context -> working_context
 
 (** {1 Working-context projections} *)

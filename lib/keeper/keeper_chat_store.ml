@@ -127,6 +127,11 @@ type append_once_result =
   | Appended of { row_id : string }
   | Already_present of { row_id : string }
 
+type user_row_origin =
+  | Needs_append
+  | Already_persisted of { row_id : string }
+  | Already_persisted_upstream
+
 let stream_lifecycle_event_to_label = function
   | Run_started -> "RUN_STARTED"
   | Text_message_start -> "TEXT_MESSAGE_START"

@@ -4,6 +4,16 @@ type lane =
   | Autonomous
   | Chat
 
+type slot_transition =
+  | Turn_released
+  | Shutdown_rolled_back
+
+type slot_transition_observer =
+  base_path:string ->
+  keeper_name:string ->
+  transition:slot_transition ->
+  unit
+
 type in_flight_info =
   { lane : lane
   ; started_at : float
@@ -84,6 +94,29 @@ type slot =
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
+let slot_transition_observer : slot_transition_observer option Atomic.t =
+  Atomic.make None
+
+let set_slot_transition_observer observer =
+  Atomic.set slot_transition_observer observer
+
+let notify_slot_transition slot transition =
+  match Atomic.get slot_transition_observer with
+  | None -> ()
+  | Some observer ->
+    (try
+       observer
+         ~base_path:slot.base_path
+         ~keeper_name:slot.keeper_name
+         ~transition
+     with
+     | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+     | exn ->
+       Log.Keeper.error
+         "keeper_turn_admission: slot transition observer failed keeper=%s error=%s"
+         slot.keeper_name
+         (Printexc.to_string exn))
+
 let slots : (string, slot) Hashtbl.t = Hashtbl.create 16
 
 (* Module-level singleton table: Stdlib.Mutex because lookup can be reached
@@ -137,14 +170,17 @@ let run_locked slot ~lane f =
     Eio.Mutex.unlock slot.turn_mu;
     `Shutdown_requested operation_id
   | Ok () ->
+    let release () =
+      set_info slot None;
+      Eio.Mutex.unlock slot.turn_mu;
+      notify_slot_transition slot Turn_released
+    in
     (match f () with
      | v ->
-       set_info slot None;
-       Eio.Mutex.unlock slot.turn_mu;
+       release ();
        `Ran v
      | exception exn ->
-       set_info slot None;
-       Eio.Mutex.unlock slot.turn_mu;
+       release ();
        raise exn)
 ;;
 
@@ -312,13 +348,21 @@ let begin_shutdown ~base_path ~keeper_name ~operation_id =
 
 let rollback_shutdown ~base_path ~keeper_name ~operation_id =
   let slot = slot_for ~base_path ~keeper_name in
-  Stdlib.Mutex.protect slot.state_mu (fun () ->
-    match slot.shutdown_operation_id with
-    | None -> Shutdown_not_reserved
-    | Some existing when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
-      slot.shutdown_operation_id <- None;
-      Shutdown_rolled_back
-    | Some existing -> Shutdown_reserved_by_other existing)
+  let result =
+    Stdlib.Mutex.protect slot.state_mu (fun () ->
+      match slot.shutdown_operation_id with
+      | None -> Shutdown_not_reserved
+      | Some existing
+        when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
+        slot.shutdown_operation_id <- None;
+        Shutdown_rolled_back
+      | Some existing -> Shutdown_reserved_by_other existing)
+  in
+  (match result with
+   | Shutdown_rolled_back ->
+     notify_slot_transition slot Shutdown_rolled_back
+   | Shutdown_not_reserved | Shutdown_reserved_by_other _ -> ());
+  result
 ;;
 
 let restore_shutdown ~base_path ~keeper_name ~operation_id =
@@ -492,7 +536,9 @@ let fleet_health_json ~base_path ~keeper_names =
 ;;
 
 module For_testing = struct
-  let reset () = Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.reset slots)
+  let reset () =
+    Atomic.set slot_transition_observer None;
+    Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.reset slots)
 
   let with_unpublished_turn_lock ~base_path ~keeper_name f =
     let slot = slot_for ~base_path ~keeper_name in

@@ -617,7 +617,10 @@ let test_status_surfaces_chat_queue_runtime () =
              user_blocks = [];
              attachments = [];
              timestamp = 1.0;
-             source = Masc.Keeper_chat_queue.Dashboard;
+             source =
+               Masc.Keeper_chat_queue.Dashboard
+                 { thread_id = "keeper:meta-overlay" };
+             user_row_origin = Masc.Keeper_chat_store.Needs_append;
            }
        with
        | Ok _receipt -> ()

@@ -121,6 +121,9 @@ let test_busy_discord_enqueues () =
                 = Some "keeper_chat_queue");
              check "busy connector ACK carries queue revision"
                (List.assoc_opt "queue_revision" request.metadata <> None);
+             check "busy connector ACK carries recovery-required depth"
+               (List.assoc_opt "recovery_required_count" request.metadata
+                = Some "0");
              check "busy ACK text is non-empty" (String.length content > 0)
          | Gate_protocol.Reply { message_request = None; _ } ->
              check "busy connector ACK carries durable receipt" false
@@ -154,10 +157,14 @@ let test_busy_discord_enqueues () =
              check "queued content is the user's message"
                (content = "are you there?")
          | _ -> check "queue holds one Discord receipt" false);
-        (match Keeper_chat_queue.lease_batch ~keeper_name with
+        (match Keeper_chat_queue.lease_next ~keeper_name with
          | `Leased lease ->
              check "lease carries the pending receipt"
-               (List.length lease.items = 1);
+               (match snapshot.pending with
+                | [ receipt ] ->
+                  Keeper_chat_queue.Receipt_id.equal
+                    lease.item.receipt_id receipt.receipt_id
+                | [] | _ :: _ :: _ -> false);
              (match
                 Keeper_chat_queue.finalize ~keeper_name
                   ~lease_id:lease.lease_id
@@ -165,12 +172,13 @@ let test_busy_discord_enqueues () =
                     (Keeper_chat_queue.Mark_delivered
                        { completed_at = Time_compat.now (); outcome_ref = None })
               with
-              | `Finalized receipt_ids ->
+              | `Finalized receipt_id ->
                   check "finalize records the delivered receipt"
-                    (List.length receipt_ids = 1)
+                    (Keeper_chat_queue.Receipt_id.equal
+                       receipt_id lease.item.receipt_id)
               | `Unknown_lease | `Error _ ->
                   check "leased receipt finalizes" false)
-         | `Empty | `Already_leased _ | `Error _ ->
+         | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
              check "pending receipt leases" false);
         (* Ownership invariant (RFC §3.4): the gate inbound boundary recorded the
            user line exactly once; no paired assistant row exists yet because the
@@ -249,7 +257,8 @@ let test_busy_discord_persist_failure_is_explicit () =
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
           with_busy_slot ~base ~sw (fun () ->
-            Keeper_chat_queue.For_testing.fail_next_persist ();
+            Keeper_chat_queue.For_testing.fail_transaction_at_stages
+              [ Mutation_applied ];
             Gate_keeper_backend.dispatch
               ~connector_kind:Gate_keeper_backend.Discord
               ~submission_owner:Gate_keeper_backend.Channel_actor
@@ -299,6 +308,7 @@ let test_pending_receipt_prevents_direct_overtake () =
            ; source =
                Keeper_chat_queue.Discord
                  { channel_id = "chan-777"; user_id = "user-42" }
+           ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
            });
       Eio.Switch.run @@ fun sw ->
       let reply =
@@ -471,7 +481,7 @@ let test_shutdown_fenced_discord_ack () =
     ~source_matches:(function
       | Keeper_chat_queue.Discord { channel_id; user_id } ->
         channel_id = "discord-channel" && user_id = "discord-user"
-      | Keeper_chat_queue.Dashboard | Keeper_chat_queue.Slack _ -> false)
+      | Keeper_chat_queue.Dashboard _ | Keeper_chat_queue.Slack _ -> false)
 
 let test_shutdown_fenced_slack_ack () =
   test_shutdown_fenced_connector_ack
@@ -490,7 +500,7 @@ let test_shutdown_fenced_slack_ack () =
         && user_id = "U-SHUTDOWN"
         && team_id = Some "T-SHUTDOWN"
         && thread_ts = Some "171.999"
-      | Keeper_chat_queue.Dashboard | Keeper_chat_queue.Discord _ -> false)
+      | Keeper_chat_queue.Dashboard _ | Keeper_chat_queue.Discord _ -> false)
 
 let () =
   test_busy_discord_enqueues ();

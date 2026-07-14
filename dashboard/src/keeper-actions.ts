@@ -871,6 +871,7 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
       switch (receipt.state.kind) {
         case 'pending':
         case 'inflight':
+        case 'recovery_required':
           finalizeAssistantEntry(keeperName, entry.id, {
             delivery: 'queued',
             streamState: null,

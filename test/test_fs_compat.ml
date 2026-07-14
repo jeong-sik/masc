@@ -109,8 +109,6 @@ let test_open_atomic_temp_file_uses_canonical_shape () =
          (String.starts_with name ~prefix:".atomic_");
        check bool "shared orphan matcher recognizes writer output" true
          (Fs_compat.is_atomic_orphan_name name);
-       check bool "retired Keeper prefix is not generated" false
-         (String.starts_with name ~prefix:".keeper_atomic_");
        output_string channel "payload";
        close_out channel;
        check string "returned channel writes the temp file" "payload"

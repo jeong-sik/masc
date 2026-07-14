@@ -1158,76 +1158,6 @@ let install_keeper_gate_persistence state =
       resume_report.failures
 ;;
 
-let run_legacy_atomic_orphan_migration ~clock state =
-  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-  try
-    let started = Eio.Time.now clock in
-    let report = Keeper_msg_async.migrate_legacy_atomic_orphans ~base_path in
-    let elapsed_seconds = Eio.Time.now clock -. started in
-    let examined = report.atomic_orphans_inspected in
-    let labels = [ "stage", "legacy_atomic_orphan_migration" ] in
-    Otel_metric_store.observe_histogram
-      Keeper_metrics.(to_string PersistencePreparationStageDuration)
-      ~labels
-      elapsed_seconds;
-    Otel_metric_store.observe_histogram
-      Keeper_metrics.(to_string PersistencePreparationExamined)
-      ~labels
-      (Float.of_int examined);
-    List.iter
-      (fun (error : Keeper_msg_async.recovery_store_error) ->
-         Log.Server.error
-           "boot: legacy atomic orphan migration store failure path=%s reason=%s"
-           error.path
-           error.reason)
-      report.store_errors;
-    List.iter
-      (fun (error : Keeper_msg_async.recovery_record_error) ->
-         Log.Server.error
-           "boot: legacy atomic orphan migration record failure path=%s request_id=%s keeper=%s"
-           error.path
-           error.request_id
-           (* DET-OK: this is an observation-only label for an absent typed
-              attribution; it cannot select recovery or execution behavior. *)
-           (Option.value error.keeper_name ~default:"<unattributed>"))
-      report.record_errors;
-    Log.Server.info
-      "boot: legacy atomic orphan migration elapsed_seconds=%.6f examined=%d deleted=%d preserved=%d failed=%d store_errors=%d record_errors=%d"
-      elapsed_seconds
-      examined
-      report.atomic_orphans_deleted
-      report.atomic_orphans_preserved
-      report.failed
-      (List.length report.store_errors)
-      (List.length report.record_errors)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Server.error
-      "boot: legacy atomic orphan migration raised: %s"
-      (Printexc.to_string exn)
-;;
-
-let start_legacy_atomic_orphan_migration ~sw ~clock state =
-  try
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      run_legacy_atomic_orphan_migration ~clock state;
-      `Stop_daemon)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string FsFailures)
-      ~labels:
-        [ "subsystem", "server_runtime_bootstrap"
-        ; "operation", "legacy_atomic_orphan_migration_fork"
-        ]
-      ();
-    Log.Server.error
-      "boot: legacy atomic orphan migration fiber was not started: %s"
-      (Printexc.to_string exn)
-;;
-
 let activate_owner_state
       ~sw
       ~clock
@@ -1242,12 +1172,6 @@ let activate_owner_state
      function. Each composition root publishes readiness only after its own
      required transport surfaces are installed. *)
   install_keeper_gate_persistence state;
-  (* Retired temp names and current writes occupy disjoint namespaces: current
-     request writes stage only below [.atomic-staging-v1]. Keep the bounded
-     forensic migration under the exclusive BasePath lease, but outside the
-     readiness critical path. Its failures remain observations and never gain
-     Keeper lifecycle authority. *)
-  start_legacy_atomic_orphan_migration ~sw ~clock state;
   start_owner_lazy_tasks ~sw state;
   claim_and_start_keeper_persistence
     ~prepared_persistence:initialized.prepared_keeper_persistence

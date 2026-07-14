@@ -165,7 +165,7 @@ let discord_channel_label = "discord"
 
 let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
   match queued_message.source with
-  | Keeper_chat_queue.Dashboard ->
+  | Keeper_chat_queue.Dashboard _ ->
     {
       payload_channel = "";
       payload_channel_user_id = "";
@@ -219,17 +219,10 @@ let payload_of_queued_message ~keeper_name
   ; attachments = queued_message.attachments
   }
 
-let connector_user_line_recorded_upstream_of_source
-    (source : Keeper_chat_queue.message_source) =
-  (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
-     line recorded at the gate inbound boundary before the message was
-     enqueued, so the turn records the assistant reply only and does not
-     re-write the user line. Dashboard ownership is resolved later from exact
-     direct-request handoff journals, allowing legacy receipts to append their
-     missing user row without duplicating current receipts. *)
-  match source with
-  | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
-  | Keeper_chat_queue.Dashboard -> false
+let user_line_recorded_upstream = function
+  | Keeper_chat_store.Needs_append -> false
+  | Keeper_chat_store.Already_persisted _
+  | Keeper_chat_store.Already_persisted_upstream -> true
 
 let trimmed_env_opt name =
   match Sys.getenv_opt name with
@@ -547,15 +540,13 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     queue_recovery.load_errors;
   if
     queue_recovery.restored_keeper_count > 0
-    || queue_recovery.migrated_keeper_count > 0
-    || queue_recovery.recovered_receipt_count > 0
+    || queue_recovery.recovery_required_receipt_count > 0
     || queue_recovery.load_errors <> []
   then
     Log.Keeper.warn
-      "keeper_chat_queue: recovery restored_keepers=%d migrated_keepers=%d recovered_receipts=%d failures=%d"
+      "keeper_chat_queue: recovery restored_keepers=%d recovery_required_receipts=%d failures=%d"
       queue_recovery.restored_keeper_count
-      queue_recovery.migrated_keeper_count
-      queue_recovery.recovered_receipt_count
+      queue_recovery.recovery_required_receipt_count
       (List.length queue_recovery.load_errors);
   (* Request status is recovered only after queue receipts converge: a poller
      must never observe a final Lost status while its durable terminal row is
@@ -573,10 +564,9 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     ~started:request_started
     ~examined:
       (keeper_msg_recovery.lost
-       + keeper_msg_recovery.migrated
+       + keeper_msg_recovery.finalized
        + keeper_msg_recovery.cleaned
-       + keeper_msg_recovery.atomic_orphans_inspected
-       + keeper_msg_recovery.deferred
+       + keeper_msg_recovery.staging_files_inspected
        + keeper_msg_recovery.unreadable
        + keeper_msg_recovery.failed)
     ~failures:
@@ -585,21 +575,20 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
        + List.length keeper_msg_recovery.store_errors);
   if
     keeper_msg_recovery.lost > 0
-    || keeper_msg_recovery.migrated > 0
+    || keeper_msg_recovery.finalized > 0
     || keeper_msg_recovery.cleaned > 0
-    || keeper_msg_recovery.atomic_orphans_inspected > 0
+    || keeper_msg_recovery.staging_files_inspected > 0
     || keeper_msg_recovery.unreadable > 0
     || keeper_msg_recovery.failed > 0
   then
     Log.Keeper.warn
-      "keeper_msg_async: recovery lost=%d migrated=%d cleaned=%d atomic_orphans_inspected=%d atomic_orphans_deleted=%d atomic_orphans_preserved=%d deferred=%d unreadable=%d failed=%d"
+      "keeper_msg_async: recovery lost=%d finalized=%d cleaned=%d staging_files_inspected=%d staging_files_deleted=%d staging_files_preserved=%d unreadable=%d failed=%d"
       keeper_msg_recovery.lost
-      keeper_msg_recovery.migrated
+      keeper_msg_recovery.finalized
       keeper_msg_recovery.cleaned
-      keeper_msg_recovery.atomic_orphans_inspected
-      keeper_msg_recovery.atomic_orphans_deleted
-      keeper_msg_recovery.atomic_orphans_preserved
-      keeper_msg_recovery.deferred
+      keeper_msg_recovery.staging_files_inspected
+      keeper_msg_recovery.staging_files_deleted
+      keeper_msg_recovery.staging_files_preserved
       keeper_msg_recovery.unreadable
       keeper_msg_recovery.failed;
   let prepared =
@@ -1749,7 +1738,7 @@ let start_keeper_loops_owned
                               label )))
              in
              (match queued_message.source with
-              | Keeper_chat_queue.Dashboard ->
+              | Keeper_chat_queue.Dashboard _ ->
                   Log.Keeper.info
                     "keeper_chat_consumer: processing dashboard queue \
                      message for keeper=%s"
@@ -1836,16 +1825,14 @@ let start_keeper_loops_owned
                           (queued reply will not be delivered)"
                          keeper_name));
              let connector_user_line_recorded_upstream =
-               connector_user_line_recorded_upstream_of_source queued_message.source
+               user_line_recorded_upstream queued_message.user_row_origin
              in
              (* Derive the typed reply-continuation channel from the queued
                 message source so [process_single_turn] can route the
                 assistant reply to the originating connector (Discord/Slack)
-                or dashboard thread. [dashboard_thread_id] is the same
-                [thread_id] the turn itself uses. *)
+                or exact dashboard thread. *)
              let continuation_channel =
                Keeper_chat_queue.continuation_channel_of_message_source
-                 ~dashboard_thread_id:thread_id
                  queued_message.source
              in
              let turn_outcome =

@@ -688,6 +688,7 @@ export function applyKeeperStreamEvent(
         const revision = asNumber(queued?.queue_revision)
         const pendingCount = asNumber(queued?.pending_count)
         const inflightCount = asNumber(queued?.inflight_count)
+        const recoveryRequiredCount = asNumber(queued?.recovery_required_count)
         const shutdownOperationId = (() => {
           const raw = queued?.shutdown_operation_id
           if (raw === null) return null
@@ -706,6 +707,9 @@ export function applyKeeperStreamEvent(
           || typeof inflightCount !== 'number'
           || !Number.isSafeInteger(inflightCount)
           || inflightCount < 0
+          || typeof recoveryRequiredCount !== 'number'
+          || !Number.isSafeInteger(recoveryRequiredCount)
+          || recoveryRequiredCount < 0
         ) {
           return 'Keeper queue acceptance is missing its durable receipt metadata.'
         }
@@ -723,6 +727,7 @@ export function applyKeeperStreamEvent(
             queueRevision: revision,
             queuePendingCount: pendingCount,
             queueInflightCount: inflightCount,
+            queueRecoveryRequiredCount: recoveryRequiredCount,
             queueState: 'pending',
           },
           streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {

@@ -45,6 +45,7 @@ type turn_stats = {
     another route shape. *)
 type message_request_status =
   | Accepted
+  | Acceptance_uncertain
   | Queued
   | Running
   | Done

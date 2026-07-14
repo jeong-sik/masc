@@ -304,7 +304,7 @@ let chat_queue_status_to_json observation =
     `Assoc
       [ "pending_messages", `Int (List.length snapshot.pending)
       ; "inflight_messages", `Int (List.length snapshot.inflight)
-      ; "revision", `Intlit (Int64.to_string snapshot.revision)
+      ; "revision", `String (Int64.to_string snapshot.revision)
       ; ( "load_errors"
         , `List (List.map chat_queue_load_error_to_json snapshot.load_errors) )
       ; "snapshot_available", `Bool true

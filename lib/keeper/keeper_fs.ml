@@ -110,8 +110,213 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
 let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) result =
   save_atomic path (Yojson.Safe.pretty_to_string json)
 
+type owned_regular_file_read_operation =
+  | Inspect_parent
+  | Inspect_path
+  | Open_path
+  | Inspect_descriptor
+  | Read_contents
+  | Close_descriptor
+
+type owned_regular_file_read_error =
+  | Ownership_boundary_rejected of
+      { path : string
+      ; rejection : Fs_compat.owned_directory_chain_rejection
+      }
+  | Path_is_not_regular_file of
+      { path : string
+      ; kind : Unix.file_kind
+      }
+  | Filesystem_identity_changed of { path : string }
+  | Owned_file_operation_failed of
+      { path : string
+      ; operation : owned_regular_file_read_operation
+      ; detail : string
+      }
+
+let owned_regular_file_read_operation_to_string = function
+  | Inspect_parent -> "inspect_parent"
+  | Inspect_path -> "inspect_path"
+  | Open_path -> "open_path"
+  | Inspect_descriptor -> "inspect_descriptor"
+  | Read_contents -> "read_contents"
+  | Close_descriptor -> "close_descriptor"
+;;
+
+let file_kind_to_string = function
+  | Unix.S_REG -> "regular_file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character_device"
+  | Unix.S_BLK -> "block_device"
+  | Unix.S_LNK -> "symbolic_link"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_SOCK -> "socket"
+;;
+
+let owned_regular_file_read_error_to_string = function
+  | Ownership_boundary_rejected { path; rejection } ->
+    Printf.sprintf
+      "owned file boundary rejected path=%s reason=%s"
+      path
+      (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+  | Path_is_not_regular_file { path; kind } ->
+    Printf.sprintf
+      "owned file path is not a regular file path=%s kind=%s"
+      path
+      (file_kind_to_string kind)
+  | Filesystem_identity_changed { path } ->
+    Printf.sprintf "owned file identity changed during read path=%s" path
+  | Owned_file_operation_failed { path; operation; detail } ->
+    Printf.sprintf
+      "owned file operation failed path=%s operation=%s reason=%s"
+      path
+      (owned_regular_file_read_operation_to_string operation)
+      detail
+;;
+
+let same_file_identity (left : Unix.stats) (right : Unix.stats) =
+  left.st_dev = right.st_dev && left.st_ino = right.st_ino
+;;
+
+let same_file_snapshot (left : Unix.stats) (right : Unix.stats) =
+  same_file_identity left right
+  && left.st_kind = right.st_kind
+  && left.st_size = right.st_size
+  && left.st_mtime = right.st_mtime
+  && left.st_ctime = right.st_ctime
+;;
+
+let owned_file_operation_failed ~path operation exn =
+  Owned_file_operation_failed
+    { path; operation; detail = Printexc.to_string exn }
+;;
+
+let read_exact_file_descriptor ~path fd length =
+  try
+    let bytes = Bytes.create length in
+    let rec read offset =
+      if offset = length
+      then Ok (Bytes.unsafe_to_string bytes)
+      else
+        match Unix.read fd bytes offset (length - offset) with
+        | 0 -> Error (Filesystem_identity_changed { path })
+        | count -> read (offset + count)
+    in
+    read 0
+  with
+  | exn -> Error (owned_file_operation_failed ~path Read_contents exn)
+;;
+
+let load_owned_regular_file ~ownership_root path =
+  let load_blocking () =
+    let parent = Filename.dirname path in
+    let inspect_parent () =
+      try
+        match Fs_compat.inspect_owned_directory_chain ~ownership_root parent with
+        | Ok observation -> Ok observation
+        | Error rejection ->
+          Error (Ownership_boundary_rejected { path; rejection })
+      with
+      | exn -> Error (owned_file_operation_failed ~path Inspect_parent exn)
+    in
+    match inspect_parent () with
+    | Error _ as error -> error
+    | Ok Fs_compat.Owned_directory_missing -> Ok None
+    | Ok (Fs_compat.Owned_directory parent_before) ->
+      let before_open =
+        try Ok (Some (Unix.lstat path)) with
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+        | exn -> Error (owned_file_operation_failed ~path Inspect_path exn)
+      in
+      (match before_open with
+       | Error _ as error -> error
+       | Ok None -> Ok None
+       | Ok (Some before_open) when before_open.st_kind <> Unix.S_REG ->
+         Error (Path_is_not_regular_file { path; kind = before_open.st_kind })
+       | Ok (Some before_open) ->
+         let opened =
+           try
+             Ok
+               (Unix.openfile
+                  path
+                  [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ]
+                  0)
+           with
+           | exn -> Error (owned_file_operation_failed ~path Open_path exn)
+         in
+         (match opened with
+          | Error _ as error -> error
+          | Ok fd ->
+            let result =
+              let opened =
+                try Ok (Unix.fstat fd) with
+                | exn ->
+                  Error
+                    (owned_file_operation_failed ~path Inspect_descriptor exn)
+              in
+              match opened with
+              | Error _ as error -> error
+              | Ok opened ->
+                let boundary_is_current =
+                  match inspect_parent () with
+                  | Error _ | Ok Fs_compat.Owned_directory_missing -> false
+                  | Ok (Fs_compat.Owned_directory parent_now) ->
+                    same_file_identity parent_before parent_now
+                    && (match Unix.lstat path with
+                        | current ->
+                          current.st_kind = Unix.S_REG
+                          && same_file_identity opened current
+                        | exception _ -> false)
+                in
+                if
+                  opened.st_kind <> Unix.S_REG
+                  || not (same_file_identity before_open opened)
+                  || not boundary_is_current
+                then Error (Filesystem_identity_changed { path })
+                else
+                  (match read_exact_file_descriptor ~path fd opened.st_size with
+                   | Error _ as error -> error
+                   | Ok content ->
+                     (match Unix.fstat fd with
+                      | after_read when same_file_snapshot opened after_read ->
+                        Ok (Some content)
+                      | _ -> Error (Filesystem_identity_changed { path })
+                      | exception exn ->
+                        Error
+                          (owned_file_operation_failed
+                             ~path
+                             Inspect_descriptor
+                             exn)))
+            in
+            let close_result =
+              try Unix.close fd; Ok () with
+              | exn ->
+                Error (owned_file_operation_failed ~path Close_descriptor exn)
+            in
+            (match result, close_result with
+             | Ok value, Ok () -> Ok value
+             | Error error, Ok () -> Error error
+             | Ok _, Error close_error -> Error close_error
+             | Error error, Error close_error ->
+               Log.Keeper.error
+                 "filesystem_runtime: owned file read and close both failed path=%s read_error=%s close_error=%s"
+                 path
+                 (owned_regular_file_read_error_to_string error)
+                 (owned_regular_file_read_error_to_string close_error);
+               Error error)))
+  in
+  try
+    let result = Eio_guard.run_in_systhread load_blocking in
+    Eio_guard.check_if_ready ();
+    result
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (owned_file_operation_failed ~path Read_contents exn)
+;;
+
 type durable_write_stage =
   | Directory_prepare
+  | Payload_encode
   | Temp_file_create
   | Payload_write
   | Payload_fsync
@@ -122,6 +327,7 @@ type durable_write_stage =
 
 let durable_write_stage_to_string = function
   | Directory_prepare -> "directory_prepare"
+  | Payload_encode -> "payload_encode"
   | Temp_file_create -> "temp_file_create"
   | Payload_write -> "payload_write"
   | Payload_fsync -> "payload_fsync"
@@ -271,20 +477,28 @@ let ensure_dir_durable
          })
 ;;
 
-let save_json_durable_atomic_with
+let save_json_durable_atomic_from_with
       ~before_stage
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
       path
-      json
+      json_source
   =
   let dir = Filename.dirname path in
   (* DET-OK: an omitted staging directory means the destination directory;
      both paths are derived from the same explicit destination [path]. *)
   let temp_dir = Option.value temp_dir ~default:dir in
-  let content = Yojson.Safe.pretty_to_string json in
   try
+    let content =
+      run_durable_write_stage
+        ~renamed:false
+        ~before_stage
+        Payload_encode
+        (fun () ->
+           Executor_pool_ref.submit_or_inline (fun () ->
+             Yojson.Safe.pretty_to_string (json_source ())))
+    in
     let directory_lease =
       ensure_dir_durable
         ~renamed:false
@@ -418,7 +632,24 @@ let save_json_durable_atomic_with
       { renamed = false
       ; stage = Directory_prepare
       ; failure = Operation_failed (Printexc.to_string exn)
-      }
+    }
+;;
+
+let save_json_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      json
+  =
+  save_json_durable_atomic_from_with
+    ~before_stage
+    ?before_directory_fsync
+    ?ownership_root
+    ?temp_dir
+    path
+    (fun () -> json)
 ;;
 
 let save_json_durable_atomic ?ownership_root ?temp_dir path json =
@@ -428,6 +659,15 @@ let save_json_durable_atomic ?ownership_root ?temp_dir path json =
     ?temp_dir
     path
     json
+;;
+
+let save_json_durable_atomic_from ?ownership_root ?temp_dir path json_source =
+  save_json_durable_atomic_from_with
+    ~before_stage:(fun _ -> ())
+    ?ownership_root
+    ?temp_dir
+    path
+    json_source
 ;;
 
 type durable_remove_stage =
@@ -522,6 +762,23 @@ module For_testing = struct
       ?temp_dir
       path
       json
+  ;;
+
+  let save_json_durable_atomic_from
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        path
+        json_source
+    =
+    save_json_durable_atomic_from_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      json_source
   ;;
 
   let remove_file_durable ~before_stage ?ownership_root path =

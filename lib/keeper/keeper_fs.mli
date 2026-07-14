@@ -28,8 +28,47 @@ val save_atomic : string -> string -> (unit, string) result
     Returns [Error msg] on I/O failure. Cancellation still re-raises. *)
 val save_json_atomic : string -> Yojson.Safe.t -> (unit, string) result
 
+type owned_regular_file_read_operation =
+  | Inspect_parent
+  | Inspect_path
+  | Open_path
+  | Inspect_descriptor
+  | Read_contents
+  | Close_descriptor
+
+type owned_regular_file_read_error =
+  | Ownership_boundary_rejected of
+      { path : string
+      ; rejection : Fs_compat.owned_directory_chain_rejection
+      }
+  | Path_is_not_regular_file of
+      { path : string
+      ; kind : Unix.file_kind
+      }
+  | Filesystem_identity_changed of { path : string }
+  | Owned_file_operation_failed of
+      { path : string
+      ; operation : owned_regular_file_read_operation
+      ; detail : string
+      }
+
+(** Read one process-owned regular file without accepting symbolic links or a
+    changed parent chain. [Ok None] means that the owned directory or file is
+    absent. OCaml 5.4 does not expose [O_NOFOLLOW], so the implementation
+    validates [lstat]/[fstat] identity before reading and revalidates the
+    no-follow parent boundary. Blocking Unix operations run in a systhread. *)
+val load_owned_regular_file
+  :  ownership_root:string
+  -> string
+  -> (string option, owned_regular_file_read_error) result
+
+val owned_regular_file_read_error_to_string
+  :  owned_regular_file_read_error
+  -> string
+
 type durable_write_stage =
   | Directory_prepare
+  | Payload_encode
   | Temp_file_create
   | Payload_write
   | Payload_fsync
@@ -72,6 +111,18 @@ val save_json_durable_atomic
   -> Yojson.Safe.t
   -> (unit, durable_write_error) result
 
+(** Strict durable JSON write whose value is constructed and encoded through
+    the process executor pool when it is available. [json_source] must be a
+    pure closure. This keeps large queue snapshots from monopolizing the Eio
+    scheduler while preserving the same atomic publication and ownership
+    contract; blocking filesystem operations still run in a systhread. *)
+val save_json_durable_atomic_from
+  :  ?ownership_root:string
+  -> ?temp_dir:string
+  -> string
+  -> (unit -> Yojson.Safe.t)
+  -> (unit, durable_write_error) result
+
 val durable_write_error_to_string : durable_write_error -> string
 
 type durable_remove_stage =
@@ -104,6 +155,15 @@ module For_testing : sig
     -> ?temp_dir:string
     -> string
     -> Yojson.Safe.t
+    -> (unit, durable_write_error) result
+
+  val save_json_durable_atomic_from
+    :  before_stage:(durable_write_stage -> unit)
+    -> ?before_directory_fsync:(string -> unit)
+    -> ?ownership_root:string
+    -> ?temp_dir:string
+    -> string
+    -> (unit -> Yojson.Safe.t)
     -> (unit, durable_write_error) result
 
   val remove_file_durable

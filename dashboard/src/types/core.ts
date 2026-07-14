@@ -693,18 +693,19 @@ export type KeeperTurnOutcome =
 export type KeeperQueueReceiptLifecycle =
   | 'pending'
   | 'inflight'
+  | 'recovery_required'
   | 'delivered'
   | 'failed'
 
 export type KeeperQueueReceiptFailureKind =
   | 'turn_failed'
-  | 'legacy_request_timeout'
   | 'no_visible_reply'
   | 'transcript_persist_failed'
   | 'connector_unavailable'
   | 'delivery_failed'
   | 'cancelled'
   | 'internal_error'
+  | 'recovery_interrupted'
 
 export interface KeeperConversationDetails {
   traceId?: string | null
@@ -726,6 +727,7 @@ export interface KeeperConversationDetails {
   queueRevision?: number | null
   queuePendingCount?: number | null
   queueInflightCount?: number | null
+  queueRecoveryRequiredCount?: number | null
   queueState?: KeeperQueueReceiptLifecycle | null
   queueFailureKind?: KeeperQueueReceiptFailureKind | null
   queueCorrelationError?: 'missing_outcome_ref' | null

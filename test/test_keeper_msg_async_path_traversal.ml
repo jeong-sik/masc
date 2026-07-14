@@ -13,7 +13,6 @@ let is_safe = Keeper_msg_async.For_testing.is_safe_request_id
 let record_paths =
   [ Keeper_msg_async.For_testing.active_record_path
   ; Keeper_msg_async.For_testing.terminal_record_path
-  ; Keeper_msg_async.For_testing.legacy_record_path
   ]
 ;;
 

@@ -236,6 +236,29 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatReceipt.mockReset()
   })
 
+  it('retains the queued message while exact delivery recovery is required', async () => {
+    fetchKeeperChatReceipt.mockResolvedValue({
+      keeperName: 'echo',
+      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+      revision: 3,
+      state: {
+        kind: 'recovery_required',
+        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
+        startedAt: 42,
+        dispatchable: false,
+      },
+    })
+
+    await reconcileKeeperChatReceipts('echo')
+
+    const entry = keeperThreads.value.echo?.find(candidate => (
+      candidate.details?.queueReceiptId === 'chatq_00000000-0000-4000-8000-000000000001'
+    ))
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.details?.queueState).toBe('recovery_required')
+    expect(entry?.error).toBeFalsy()
+  })
+
   it('moves a busy ACK to delivered only after the durable terminal receipt', async () => {
     fetchKeeperChatReceipt.mockResolvedValue({
       keeperName: 'echo',
@@ -1555,6 +1578,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           queue_revision: 4,
           pending_count: 1,
           inflight_count: 0,
+          recovery_required_count: 0,
           shutdown_operation_id: null,
         },
       },
@@ -1572,6 +1596,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       queueRevision: 4,
       queuePendingCount: 1,
       queueInflightCount: 0,
+      queueRecoveryRequiredCount: 0,
     })
     expect(fetchKeeperChatReceipt).toHaveBeenCalledWith(
       'echo',
@@ -1606,6 +1631,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
           queue_revision: 4,
           pending_count: 1,
           inflight_count: 0,
+          recovery_required_count: 0,
           shutdown_operation_id: null,
         },
       },

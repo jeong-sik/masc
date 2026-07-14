@@ -275,6 +275,8 @@ let check_status_parse label raw expected =
 
 let test_message_request_status_of_string () =
   check_status_parse "accepted" "accepted" (Some Gate_protocol.Accepted);
+  check_status_parse "acceptance uncertain" "acceptance_uncertain"
+    (Some Gate_protocol.Acceptance_uncertain);
   check_status_parse "queued" "queued" (Some Gate_protocol.Queued);
   check_status_parse "running" "running" (Some Gate_protocol.Running);
   check_status_parse "done" "done" (Some Gate_protocol.Done);

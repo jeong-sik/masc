@@ -573,6 +573,16 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       check bool "keepalive registry rejection metric increments" true
         (after > before))
 
+let test_compaction_recovery_error_preserves_superseded_counts () =
+  let error =
+    KEC.Checkpoint_superseded { incoming_turn_count = 4; known_turn_count = 6 }
+  in
+  check string "typed tag" "checkpoint_superseded"
+    (KEC.compaction_recovery_error_to_tag error);
+  check string "receipt counts"
+    "checkpoint superseded: incoming_turn_count=4 known_turn_count=6"
+    (KEC.compaction_recovery_error_to_string error)
+
 let () =
   run "keeper_lifecycle_registry_dispatch"
     [
@@ -594,6 +604,8 @@ let () =
             test_dispatch_keeper_phase_event_rejection_increments_metric;
           test_case "keepalive event rejection increments metric" `Quick
             test_keepalive_dispatch_event_rejection_increments_metric;
+          test_case "superseded checkpoint error keeps counts" `Quick
+            test_compaction_recovery_error_preserves_superseded_counts;
           test_case "registry rejects mismatched meta update" `Quick
             test_registry_rejects_meta_name_mismatch_update;
           test_case "registry canonicalizes mismatched meta on register" `Quick

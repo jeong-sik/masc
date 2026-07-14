@@ -1842,6 +1842,8 @@
 
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 
+(include stanzas/test_keeper_compact_recovery_tool_surface.inc)
+
 (include stanzas/test_keeper_compaction_noop_counter_9943.inc)
 
 (include stanzas/test_keeper_context_bounds_ssot.inc)

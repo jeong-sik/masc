@@ -32,6 +32,23 @@ let resolve_active_goal_ids config p old_ids =
           (Printf.sprintf "unknown active_goal_ids: %s"
              (String.concat ", " missing))
 
+type revival_decision = {
+  dead_revival_requested : bool;
+  clear_pause_state : bool;
+}
+
+let revival_decision ~(latched_reason : Keeper_latched_reason.t option)
+    ~(paused : bool) : revival_decision =
+  let dead_revival_requested =
+    match latched_reason with
+    | Some Keeper_latched_reason.Dead_tombstone -> true
+    | Some (Keeper_latched_reason.Operator_paused _) | None -> false
+  in
+  {
+    dead_revival_requested;
+    clear_pause_state = paused || dead_revival_requested;
+  }
+
 let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
@@ -104,21 +121,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
       ~fallback_message:old.compaction.message_gate
       ~fallback_token:old.compaction.token_gate
   in
-  let resume_paused_keeper = old.paused in
-  let dead_revival_requested =
-    match old.latched_reason with
-    | Some Keeper_latched_reason.Dead_tombstone -> true
-    | Some (Keeper_latched_reason.Operator_paused _)
-    | None -> false
+  let { dead_revival_requested; clear_pause_state } =
+    revival_decision ~latched_reason:old.latched_reason ~paused:old.paused
   in
-  (* An explicit operator keeper_up revives a Dead_tombstone keeper even when
-     [old.paused = false]. The canonical setter pairs Dead_tombstone with
-     [paused = true], but a resume writer that cleared [paused] without clearing
-     the latch can strand a keeper in paused=false + Dead_tombstone; lifecycle
-     admission denies it by the latch regardless of [paused], so revival must
-     not require [paused = true]. update_keeper has no automated callers, so
-     this does not open an autonomous-revival hole. *)
-  let clear_pause_state = resume_paused_keeper || dead_revival_requested in
   if clear_pause_state then (
     let blocker_class, blocker_detail =
       match old.runtime.last_blocker with

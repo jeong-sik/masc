@@ -406,6 +406,60 @@ let test_dead_tombstone_pause_violation_classifies () =
   check bool "unpaused+no-latch is valid" true
     (Option.is_none (Keeper_meta_contract.dead_tombstone_pause_violation unpaused_none))
 
+(* PR #24351 review (P1): [Keeper_turn_up_update.revival_decision] is the
+   extracted decision that used to be inlined in [update_keeper]. Before
+   this PR, [dead_revival_requested] required [old.paused = true]; this PR
+   decoupled it to trigger on the [Dead_tombstone] latch alone -- the
+   single riskiest behavior change in the PR, and until now the only tests
+   touching this area were store/contract-level (rejecting the split on
+   write, [mark_resumed] clearing it). Neither exercised the decision
+   itself. These pin the full [latched_reason] x [paused] matrix directly
+   against the pure function, no store/disk involved. *)
+let grpc_directive_pause =
+  Keeper_latched_reason.Operator_paused
+    { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive }
+
+(* The scenario the PR title promises: a keeper stranded at
+   paused=false + Dead_tombstone (the split
+   [test_store_rejects_unpaused_dead_tombstone] shows the store now refuses
+   to persist, but which legacy writers predating this PR could already
+   have left on disk) must still be revivable via masc_keeper_up, not
+   permanently stuck. *)
+let test_revival_decision_stranded_dead_tombstone_is_revivable () =
+  let decision =
+    Keeper_turn_up_update.revival_decision
+      ~latched_reason:(Some Keeper_latched_reason.Dead_tombstone) ~paused:false
+  in
+  check bool "stranded dead_tombstone requests dead-revival" true
+    decision.dead_revival_requested;
+  check bool "stranded dead_tombstone clears pause state" true
+    decision.clear_pause_state
+
+let test_revival_decision_matrix () =
+  let case ~label ~latched_reason ~paused ~expect_dead_revival ~expect_clear =
+    let decision = Keeper_turn_up_update.revival_decision ~latched_reason ~paused in
+    check bool (label ^ ": dead_revival_requested") expect_dead_revival
+      decision.dead_revival_requested;
+    check bool (label ^ ": clear_pause_state") expect_clear
+      decision.clear_pause_state
+  in
+  case ~label:"no latch, not paused" ~latched_reason:None ~paused:false
+    ~expect_dead_revival:false ~expect_clear:false;
+  case ~label:"no latch, paused (plain resume)" ~latched_reason:None ~paused:true
+    ~expect_dead_revival:false ~expect_clear:true;
+  case ~label:"operator_paused latch, not paused (inconsistent state, not dead-revival)"
+    ~latched_reason:(Some grpc_directive_pause) ~paused:false
+    ~expect_dead_revival:false ~expect_clear:false;
+  case ~label:"operator_paused latch, paused (canonical operator-pause resume)"
+    ~latched_reason:(Some grpc_directive_pause) ~paused:true
+    ~expect_dead_revival:false ~expect_clear:true;
+  case ~label:"dead_tombstone latch, not paused (stranded -- must still revive)"
+    ~latched_reason:(Some Keeper_latched_reason.Dead_tombstone) ~paused:false
+    ~expect_dead_revival:true ~expect_clear:true;
+  case ~label:"dead_tombstone latch, paused (canonical dead-revival)"
+    ~latched_reason:(Some Keeper_latched_reason.Dead_tombstone) ~paused:true
+    ~expect_dead_revival:true ~expect_clear:true
+
 let () =
   run "Keeper_types CAS retry (#9764/#9733/#9769)"
     [
@@ -417,6 +471,13 @@ let () =
             test_mark_resumed_clears_dead_tombstone_and_persists;
           test_case "dead_tombstone_pause_violation classifies states" `Quick
             test_dead_tombstone_pause_violation_classifies;
+        ] );
+      ( "update_keeper revival_decision (#24351)",
+        [
+          test_case "stranded paused=false + Dead_tombstone is still revivable" `Quick
+            test_revival_decision_stranded_dead_tombstone_is_revivable;
+          test_case "latched_reason x paused decision matrix" `Quick
+            test_revival_decision_matrix;
         ] );
       ( "write_meta_with_merge caller_wins",
         [

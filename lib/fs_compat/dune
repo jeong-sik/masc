@@ -11,11 +11,15 @@
   capability_leaf
   capability_mutation_lease
   capability_recovery_obligation
+  publication_recovery_access
   atomic_write
   blocking_write
   fd_write_all
   atomic_orphan_size_class)
- (private_modules capability_recovery_obligation)
+ (private_modules
+  capability_recovery_obligation
+  publication_recovery_access
+  atomic_write)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))

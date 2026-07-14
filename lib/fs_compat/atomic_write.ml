@@ -38,18 +38,92 @@ let open_atomic_temp_file ~temp_dir () =
     atomic_tmp_suffix
 ;;
 
-type capability_write_intent =
-  | Atomic_replace
-  | Create_exclusive
+module Recovery = Capability_recovery_obligation
+module Recovery_access = Publication_recovery_access
+
+type atomic_replace_recovery_target_error =
+  | Recovery_target_validation_failed of Recovery.validation_error
+
+type atomic_replace_recovery_target =
+  { allowed_root_path : string
+  ; allowed_root : Recovery.identity
+  ; parent_components : string list
+  ; target_leaf : string
+  ; permissions : Recovery.permissions
+  }
+
+type publication_recovery_access = Recovery_access.t
+type publication_recovery_registry = Recovery_access.registry
+type publication_recovery_registry_error = Recovery.transition_error
+type publication_recovery_lane_open_error = Recovery_access.lane_open_error
+
+let open_publication_recovery_registry = Recovery_access.open_registry
+let publication_recovery_registry_error_to_string = Recovery.transition_error_to_string
+let with_publication_recovery_lane = Recovery_access.with_lane
+
+let publication_recovery_lane_open_error_to_string =
+  Recovery_access.lane_open_error_to_string
+;;
+
+let atomic_replace_recovery_target_error_to_string = function
+  | Recovery_target_validation_failed error ->
+    Recovery.validation_error_to_string error
+;;
+
+let atomic_replace_recovery_target
+      ~allowed_root_path
+      ~allowed_root_device
+      ~allowed_root_inode
+      ~parent_components
+      ~target_leaf
+      ~permissions
+  =
+  match
+    Recovery.identity ~dev:allowed_root_device ~ino:allowed_root_inode
+  with
+  | Error error -> Error (Recovery_target_validation_failed error)
+  | Ok allowed_root ->
+    (match Recovery.permissions_of_int permissions with
+     | Error error -> Error (Recovery_target_validation_failed error)
+     | Ok permissions ->
+       (match
+          Recovery.locator
+            ~allowed_root_path
+            ~allowed_root
+            ~parent_components
+            ~parent:allowed_root
+            ~target_leaf
+            ~initial_target:Recovery.Absent
+        with
+        | Error error -> Error (Recovery_target_validation_failed error)
+        | Ok validated ->
+          Ok
+            { allowed_root_path =
+                Recovery.locator_allowed_root_path validated
+            ; allowed_root
+            ; parent_components =
+                Recovery.locator_parent_components validated
+            ; target_leaf = Recovery.locator_target_leaf validated
+            ; permissions
+            }))
+;;
+
+type capability_write_operation =
+  | Atomic_replace_operation
+  | Create_exclusive_operation
 
 type capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
+  | Inspect_target_entry
+  | Prepare_recovery_obligation
   | Create_staging_directory
   | Inspect_staging_directory
   | Acquire_staging_directory
   | Apply_staging_directory_permissions
   | Verify_staging_directory_identity
+  | Preserve_unbound_recovery_obligation
+  | Bind_recovery_obligation
   | Create_staging_entry
   | Create_target_entry
   | Inspect_open_resource
@@ -63,6 +137,8 @@ type capability_write_stage =
   | Sync_parent
   | Remove_staging_directory
   | Close_staging_directory
+  | Discharge_prepared_recovery_obligation
+  | Discharge_bound_recovery_obligation
   | Cleanup_close
   | Cleanup_verify_identity
   | Cleanup_unlink
@@ -92,6 +168,7 @@ type capability_write_payload_failure =
 
 type capability_write_cause =
   | Invalid_leaf of string
+  | Invalid_recovery_target of atomic_replace_recovery_target_error
   | Mutation_contended
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
@@ -105,11 +182,70 @@ type capability_write_failure =
   ; cause : capability_write_cause
   }
 
+type capability_recovery_phase =
+  | Recovery_validate_owner
+  | Recovery_open_registry
+  | Recovery_open_store
+  | Recovery_prepare
+  | Recovery_preserve_unbound
+  | Recovery_bind
+  | Recovery_discharge_prepared
+  | Recovery_discharge_bound
+
+type capability_recovery_removal_transition =
+  | Recovery_discharge_active
+  | Recovery_discharge_owned
+  | Recovery_active_to_owned
+  | Recovery_active_to_forensic
+  | Recovery_owned_to_forensic
+
+type capability_recovery_effect =
+  | Recovery_no_record_change
+  | Recovery_layout_may_be_incomplete
+  | Recovery_layout_ready
+  | Recovery_active_record_state_unknown
+  | Recovery_active_record_durable
+  | Recovery_active_record_discharged
+  | Recovery_owned_record_state_unknown_with_active
+  | Recovery_owned_record_durable_with_active
+  | Recovery_owned_record_durable
+  | Recovery_owned_record_discharged
+  | Recovery_forensic_record_state_unknown_with_source
+  | Recovery_forensic_record_durable_with_source
+  | Recovery_forensic_record_durable
+  | Recovery_source_removal_durability_unknown of
+      capability_recovery_removal_transition
+
+type recovery_failure_detail =
+  | Recovery_transition_failed of Recovery.transition_error
+  | Recovery_validation_failed of Recovery.validation_error
+  | Recovery_transition_interrupted of
+      { reason : exn
+      ; cleanup_failures : Recovery.failure list
+      }
+
+type capability_recovery_failure =
+  { recovery_phase : capability_recovery_phase
+  ; recovery_effect : capability_recovery_effect
+  ; recovery_detail : recovery_failure_detail
+  }
+
+type capability_recovery_access_failure = Recovery_access_not_available
+
+type capability_write_primary_failure =
+  | Write_primary_failure of capability_write_failure
+  | Recovery_primary_failure of capability_recovery_failure
+  | Recovery_access_primary_failure of capability_recovery_access_failure
+
+type capability_write_cleanup_failure =
+  | Write_cleanup_failure of capability_write_failure
+  | Recovery_cleanup_failure of capability_recovery_failure
+
 type capability_write_error =
-  { intent : capability_write_intent
+  { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
-  ; failure : capability_write_failure
-  ; cleanup_failures : capability_write_failure list
+  ; primary_failure : capability_write_primary_failure
+  ; cleanup_failures : capability_write_cleanup_failure list
   }
 
 type capability_directory_sync_error =
@@ -118,9 +254,11 @@ type capability_directory_sync_error =
   }
 
 type capability_write_cancellation =
-  { intent : capability_write_intent
+  { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
-  ; cleanup_failures : capability_write_failure list
+  ; interrupted_primary_failure : capability_write_primary_failure option
+  ; interrupted_recovery : capability_recovery_failure option
+  ; cleanup_failures : capability_write_cleanup_failure list
   }
 
 exception Capability_write_failed of
@@ -131,14 +269,16 @@ exception Capability_write_cancelled of exn * capability_write_cancellation
 exception Parent_sync_cleanup_failed_on_cancellation of
   exn * capability_write_failure list
 
-let capability_write_intent_to_string = function
-  | Atomic_replace -> "atomic_replace"
-  | Create_exclusive -> "create_exclusive"
+let capability_write_operation_to_string = function
+  | Atomic_replace_operation -> "atomic_replace"
+  | Create_exclusive_operation -> "create_exclusive"
 ;;
 
 let capability_write_stage_to_string = function
   | Validate_leaf -> "validate_leaf"
   | Acquire_mutation_lease -> "acquire_mutation_lease"
+  | Inspect_target_entry -> "inspect_target_entry"
+  | Prepare_recovery_obligation -> "prepare_recovery_obligation"
   | Create_staging_directory -> "create_staging_directory"
   | Inspect_staging_directory -> "inspect_staging_directory"
   | Acquire_staging_directory -> "acquire_staging_directory"
@@ -146,6 +286,9 @@ let capability_write_stage_to_string = function
     "apply_staging_directory_permissions"
   | Verify_staging_directory_identity ->
     "verify_staging_directory_identity"
+  | Preserve_unbound_recovery_obligation ->
+    "preserve_unbound_recovery_obligation"
+  | Bind_recovery_obligation -> "bind_recovery_obligation"
   | Create_staging_entry -> "create_staging_entry"
   | Create_target_entry -> "create_target_entry"
   | Inspect_open_resource -> "inspect_open_resource"
@@ -159,6 +302,10 @@ let capability_write_stage_to_string = function
   | Sync_parent -> "sync_parent"
   | Remove_staging_directory -> "remove_staging_directory"
   | Close_staging_directory -> "close_staging_directory"
+  | Discharge_prepared_recovery_obligation ->
+    "discharge_prepared_recovery_obligation"
+  | Discharge_bound_recovery_obligation ->
+    "discharge_bound_recovery_obligation"
   | Cleanup_close -> "cleanup_close"
   | Cleanup_verify_identity -> "cleanup_verify_identity"
   | Cleanup_unlink -> "cleanup_unlink"
@@ -180,6 +327,10 @@ let capability_write_target_effect_to_string = function
 
 let capability_write_cause_to_string = function
   | Invalid_leaf leaf -> Printf.sprintf "invalid leaf component: %S" leaf
+  | Invalid_recovery_target error ->
+    Printf.sprintf
+      "invalid recovery target: %s"
+      (atomic_replace_recovery_target_error_to_string error)
   | Mutation_contended -> "another cooperative writer owns this entry"
   | Posix_descriptor_unavailable -> "POSIX descriptor unavailable"
   | Unexpected_resource_kind kind ->
@@ -201,21 +352,162 @@ let capability_write_failure_to_string failure =
     (capability_write_cause_to_string failure.cause)
 ;;
 
+let capability_recovery_phase_to_string = function
+  | Recovery_validate_owner -> "validate_owner"
+  | Recovery_open_registry -> "open_registry"
+  | Recovery_open_store -> "open_store"
+  | Recovery_prepare -> "prepare"
+  | Recovery_preserve_unbound -> "preserve_unbound"
+  | Recovery_bind -> "bind"
+  | Recovery_discharge_prepared -> "discharge_prepared"
+  | Recovery_discharge_bound -> "discharge_bound"
+;;
+
+let capability_recovery_removal_transition_to_string = function
+  | Recovery_discharge_active -> "discharge_active"
+  | Recovery_discharge_owned -> "discharge_owned"
+  | Recovery_active_to_owned -> "active_to_owned"
+  | Recovery_active_to_forensic -> "active_to_forensic"
+  | Recovery_owned_to_forensic -> "owned_to_forensic"
+;;
+
+let capability_recovery_effect_of_core = function
+  | Recovery.No_record_change -> Recovery_no_record_change
+  | Recovery.Layout_may_be_incomplete -> Recovery_layout_may_be_incomplete
+  | Recovery.Layout_ready -> Recovery_layout_ready
+  | Recovery.Active_record_state_unknown ->
+    Recovery_active_record_state_unknown
+  | Recovery.Active_record_durable -> Recovery_active_record_durable
+  | Recovery.Active_record_discharged -> Recovery_active_record_discharged
+  | Recovery.Owned_record_state_unknown_with_active ->
+    Recovery_owned_record_state_unknown_with_active
+  | Recovery.Owned_record_durable_with_active ->
+    Recovery_owned_record_durable_with_active
+  | Recovery.Owned_record_durable -> Recovery_owned_record_durable
+  | Recovery.Owned_record_discharged -> Recovery_owned_record_discharged
+  | Recovery.Forensic_record_state_unknown_with_source ->
+    Recovery_forensic_record_state_unknown_with_source
+  | Recovery.Forensic_record_durable_with_source ->
+    Recovery_forensic_record_durable_with_source
+  | Recovery.Forensic_record_durable -> Recovery_forensic_record_durable
+  | Recovery.Source_removal_durability_unknown transition ->
+    let transition =
+      match transition with
+      | Recovery.Discharge_active -> Recovery_discharge_active
+      | Recovery.Discharge_owned -> Recovery_discharge_owned
+      | Recovery.Active_to_owned -> Recovery_active_to_owned
+      | Recovery.Active_to_forensic -> Recovery_active_to_forensic
+      | Recovery.Owned_to_forensic -> Recovery_owned_to_forensic
+    in
+    Recovery_source_removal_durability_unknown transition
+;;
+
+let capability_recovery_effect_to_string = function
+  | Recovery_no_record_change -> "no_record_change"
+  | Recovery_layout_may_be_incomplete -> "layout_may_be_incomplete"
+  | Recovery_layout_ready -> "layout_ready"
+  | Recovery_active_record_state_unknown -> "active_record_state_unknown"
+  | Recovery_active_record_durable -> "active_record_durable"
+  | Recovery_active_record_discharged -> "active_record_discharged"
+  | Recovery_owned_record_state_unknown_with_active ->
+    "owned_record_state_unknown_with_active"
+  | Recovery_owned_record_durable_with_active ->
+    "owned_record_durable_with_active"
+  | Recovery_owned_record_durable -> "owned_record_durable"
+  | Recovery_owned_record_discharged -> "owned_record_discharged"
+  | Recovery_forensic_record_state_unknown_with_source ->
+    "forensic_record_state_unknown_with_source"
+  | Recovery_forensic_record_durable_with_source ->
+    "forensic_record_durable_with_source"
+  | Recovery_forensic_record_durable -> "forensic_record_durable"
+  | Recovery_source_removal_durability_unknown transition ->
+    Printf.sprintf
+      "source_removal_durability_unknown(%s)"
+      (capability_recovery_removal_transition_to_string transition)
+;;
+
+let capability_recovery_failure_phase failure = failure.recovery_phase
+let capability_recovery_failure_effect failure = failure.recovery_effect
+
+let capability_recovery_failure_to_string failure =
+  let detail =
+    match failure.recovery_detail with
+    | Recovery_transition_failed error ->
+      Recovery.transition_error_to_string error
+    | Recovery_validation_failed error ->
+      Recovery.validation_error_to_string error
+  | Recovery_transition_interrupted { reason; cleanup_failures } ->
+      let cleanup =
+        match cleanup_failures with
+        | [] -> ""
+        | failures ->
+          failures
+          |> List.map Recovery.failure_to_string
+          |> String.concat "; "
+          |> Printf.sprintf " cleanup_failures=[%s]"
+      in
+      Printf.sprintf
+        "transition interrupted reason=%s%s"
+        (Printexc.to_string reason)
+        cleanup
+  in
+  Printf.sprintf
+    "phase=%s effect=%s reason=%s"
+    (capability_recovery_phase_to_string failure.recovery_phase)
+    (capability_recovery_effect_to_string failure.recovery_effect)
+    detail
+;;
+
+let recovery_transition_failure recovery_phase error =
+  { recovery_phase
+  ; recovery_effect = capability_recovery_effect_of_core error.Recovery.store_effect
+  ; recovery_detail = Recovery_transition_failed error
+  }
+;;
+
+let recovery_validation_failure recovery_phase error =
+  { recovery_phase
+  ; recovery_effect = Recovery_no_record_change
+  ; recovery_detail = Recovery_validation_failed error
+  }
+;;
+
+let recovery_interruption recovery_phase store_effect reason cleanup_failures =
+  { recovery_phase
+  ; recovery_effect = capability_recovery_effect_of_core store_effect
+  ; recovery_detail = Recovery_transition_interrupted { reason; cleanup_failures }
+  }
+;;
+
+let capability_write_primary_failure_to_string = function
+  | Write_primary_failure failure -> capability_write_failure_to_string failure
+  | Recovery_primary_failure failure ->
+    capability_recovery_failure_to_string failure
+  | Recovery_access_primary_failure Recovery_access_not_available ->
+    "publication recovery access is not available for this Keeper lane"
+;;
+
+let capability_write_cleanup_failure_to_string = function
+  | Write_cleanup_failure failure -> capability_write_failure_to_string failure
+  | Recovery_cleanup_failure failure ->
+    capability_recovery_failure_to_string failure
+;;
+
 let capability_write_error_to_string (error : capability_write_error) =
   let cleanup =
     match error.cleanup_failures with
     | [] -> ""
     | failures ->
       failures
-      |> List.map capability_write_failure_to_string
+      |> List.map capability_write_cleanup_failure_to_string
       |> String.concat "; "
       |> Printf.sprintf " cleanup_failures=[%s]"
   in
   Printf.sprintf
-    "intent=%s target_effect=%s failure=(%s)%s"
-    (capability_write_intent_to_string error.intent)
+    "operation=%s target_effect=%s failure=(%s)%s"
+    (capability_write_operation_to_string error.operation)
     (capability_write_target_effect_to_string error.target_effect)
-    (capability_write_failure_to_string error.failure)
+    (capability_write_primary_failure_to_string error.primary_failure)
     cleanup
 ;;
 
@@ -296,24 +588,8 @@ let identity_of_open_file ~before_stage file =
     file
 ;;
 
-(* UUID entropy names an exclusive per-write staging directory;
-   correctness comes from exclusive mkdir and typed collision retry, and the
-   nonce never drives publication policy. NDT-OK *)
-let capability_staging_rng = Domain.DLS.new_key Random.State.make_self_init
-let capability_staging_directory_prefix = ".masc_atomic_stage_"
-let capability_staging_directory_suffix = ".dir"
 let capability_staging_payload_leaf = "payload"
 let capability_staging_directory_permissions = 0o700
-
-let fresh_capability_staging_directory_name () =
-  let generator = Uuidm.v4_gen (Domain.DLS.get capability_staging_rng) in
-  let nonce = generator () |> Uuidm.to_string in
-  Printf.sprintf
-    "%s%s%s"
-    capability_staging_directory_prefix
-    nonce
-    capability_staging_directory_suffix
-;;
 
 let validate_leaf ~before_stage leaf =
   run_stage ~before_stage Validate_leaf (fun () ->
@@ -459,6 +735,15 @@ let close_open_entry ~before_stage open_file =
   close_open_resource ~before_stage ~stage:Close_payload open_file
 ;;
 
+let close_open_directory ~before_stage ~stage open_directory =
+  match !open_directory with
+  | None -> ()
+  | Some (directory_resource, _) ->
+    run_stage ~before_stage stage (fun () ->
+      Eio.Resource.close directory_resource);
+    open_directory := None
+;;
+
 let verify_path_identity
       ~before_stage
       ~stage
@@ -502,6 +787,18 @@ let cleanup_open_file ~before_stage open_file =
   cleanup_open_resource ~before_stage ~stage:Cleanup_close open_file
 ;;
 
+let cleanup_open_directory ~before_stage ~stage open_directory =
+  match !open_directory with
+  | None -> []
+  | Some (directory_resource, _) ->
+    let failures =
+      capture_cleanup ~before_stage stage (fun () ->
+        Eio.Resource.close directory_resource)
+    in
+    open_directory := None;
+    failures
+;;
+
 let cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty =
   if not !parent_dirty
   then []
@@ -518,11 +815,112 @@ let cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty =
     failures
 ;;
 
+exception Capability_recovery_failed of capability_recovery_failure
+
+exception Capability_recovery_operation_cancelled of
+  exn * capability_recovery_failure
+
+let run_recovery_transition
+      ~before_stage
+      ~stage
+      ~recovery_phase
+      operation
+  =
+  run_stage ~before_stage stage (fun () -> ());
+  try
+    match operation () with
+    | Ok value -> value
+    | Error error ->
+      raise
+        (Capability_recovery_failed
+           (recovery_transition_failure recovery_phase error))
+  with
+  | Eio.Cancel.Cancelled reason ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    let original_reason, store_effect, cleanup_failures =
+      match reason with
+      | Recovery.Recovery_store_cancelled
+          (original_reason, store_effect, cleanup_failures) ->
+        original_reason, store_effect, cleanup_failures
+      | original_reason -> original_reason, Recovery.No_record_change, []
+    in
+    let interruption =
+      recovery_interruption
+        recovery_phase
+        store_effect
+        original_reason
+        cleanup_failures
+    in
+    Printexc.raise_with_backtrace
+      (Eio.Cancel.Cancelled
+         (Capability_recovery_operation_cancelled
+            (original_reason, interruption)))
+      backtrace
+;;
+
+let recovery_identity ~stage (identity : resource_identity) =
+  match Recovery.identity ~dev:identity.dev ~ino:identity.ino with
+  | Ok identity -> identity
+  | Error _ -> raise_failure stage Resource_identity_unavailable
+;;
+
+let recovery_identity_of_stat ~stage (stat : Eio.File.Stat.t) =
+  recovery_identity ~stage { dev = stat.dev; ino = stat.ino }
+;;
+
+let observe_target_entry ~before_stage target =
+  run_stage ~before_stage Inspect_target_entry (fun () ->
+    try
+      let stat = Eio.Path.stat ~follow:false target in
+      (match stat.kind with
+       | `Regular_file | `Symbolic_link ->
+         Recovery.Present
+           { kind = stat.kind
+           ; identity =
+               recovery_identity_of_stat ~stage:Inspect_target_entry stat
+           }
+       | kind ->
+         raise_failure Inspect_target_entry (Unexpected_resource_kind kind))
+    with
+    | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Recovery.Absent)
+;;
+
+let write_cleanup_failures failures =
+  List.map (fun failure -> Write_cleanup_failure failure) failures
+;;
+
+let capture_recovery_cleanup ~recovery_phase operation =
+  try
+    match operation () with
+    | Ok _ -> []
+    | Error error ->
+      [ Recovery_cleanup_failure
+          (recovery_transition_failure recovery_phase error)
+      ]
+  with
+  | Eio.Cancel.Cancelled reason ->
+    let original_reason, store_effect, cleanup_failures =
+      match reason with
+      | Recovery.Recovery_store_cancelled
+          (original_reason, store_effect, cleanup_failures) ->
+        original_reason, store_effect, cleanup_failures
+      | original_reason -> original_reason, Recovery.No_record_change, []
+    in
+    [ Recovery_cleanup_failure
+        (recovery_interruption
+           recovery_phase
+           store_effect
+           original_reason
+           cleanup_failures)
+    ]
+;;
+
 let cleanup_owned_staging_directory
       ~before_stage
       ~sw
       ~parent
       ~staging_path
+      ~staging_directory
       ~staging_directory_file
       ~staging_directory_identity
       ~staging_directory_created
@@ -637,23 +1035,524 @@ let cleanup_owned_staging_directory
       then (
         staging_directory_removed := true;
         parent_dirty := true));
+    add
+      (cleanup_open_directory
+         ~before_stage
+         ~stage:Cleanup_close_staging_directory
+         staging_directory);
     add (cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty);
     !failures)
 ;;
 
-let publish_capability_file_with
+let replace_capability_file_with
+      ~before_stage
+      ~recovery
+      ~parent
+      ~target:recovery_target
+      content
+  =
+  let operation = Atomic_replace_operation in
+  let target_effect = ref Target_unchanged in
+  let callback_result = ref None in
+  try
+    let leaf =
+      match Capability_leaf.of_string recovery_target.target_leaf with
+      | Some leaf -> leaf
+      | None ->
+        raise_failure
+          Validate_leaf
+          (Invalid_recovery_target
+             (Recovery_target_validation_failed
+                (Recovery.Invalid_target_leaf recovery_target.target_leaf)))
+    in
+    Eio.Switch.run @@ fun sw ->
+    let parent_stat, mutation_lease =
+      run_stage ~before_stage Acquire_mutation_lease (fun () ->
+        let parent_stat = Eio.Path.stat ~follow:true parent in
+        if parent_stat.kind <> `Directory
+        then
+          raise_failure
+            Acquire_mutation_lease
+            (Unexpected_resource_kind parent_stat.kind);
+        match
+          Capability_mutation_lease.try_acquire
+            ~parent_dev:parent_stat.dev
+            ~parent_ino:parent_stat.ino
+            ~leaf
+        with
+        | Some lease -> parent_stat, lease
+        | None -> raise_failure Acquire_mutation_lease Mutation_contended)
+    in
+    Eio.Switch.on_release sw (fun () ->
+      Capability_mutation_lease.release mutation_lease);
+    let target_path = Eio.Path.(parent / recovery_target.target_leaf) in
+    let parent_identity =
+      recovery_identity_of_stat ~stage:Inspect_target_entry parent_stat
+    in
+    let initial_target = observe_target_entry ~before_stage target_path in
+    let locator =
+      match
+        Recovery.locator
+          ~allowed_root_path:recovery_target.allowed_root_path
+          ~allowed_root:recovery_target.allowed_root
+          ~parent_components:recovery_target.parent_components
+          ~parent:parent_identity
+          ~target_leaf:recovery_target.target_leaf
+          ~initial_target
+      with
+      | Ok locator -> locator
+      | Error error ->
+        raise_failure
+          Inspect_target_entry
+          (Invalid_recovery_target
+             (Recovery_target_validation_failed error))
+    in
+    let staging_path = ref None in
+    let staging_directory = ref None in
+    let staging_directory_file = ref None in
+    let staging_directory_identity = ref None in
+    let staging_directory_created = ref false in
+    let staging_directory_removed = ref false in
+    let payload_entry = ref None in
+    let open_file = ref None in
+    let payload_identity = ref None in
+    let payload_created = ref false in
+    let published = ref false in
+    let parent_dirty = ref false in
+    let prepared = ref None in
+    let bound = ref None in
+    let bind_started = ref false in
+    let prepared_discharge_started = ref false in
+    let bound_discharge_started = ref false in
+    let cleanup () =
+      Eio.Cancel.protect (fun () ->
+        let write_failures =
+          cleanup_owned_staging_directory
+            ~before_stage
+            ~sw
+            ~parent
+            ~staging_path
+            ~staging_directory
+            ~staging_directory_file
+            ~staging_directory_identity
+            ~staging_directory_created
+            ~staging_directory_removed
+            ~payload_entry
+            ~payload_file:open_file
+            ~payload_identity
+            ~payload_created
+            ~payload_published:published
+            ~parent_dirty
+        in
+        let cleanup_failures = ref (write_cleanup_failures write_failures) in
+        let exact_stage_absent_and_synced = ref false in
+        if (not !staging_directory_created) && write_failures = []
+        then (
+          let absent = ref false in
+          let inspect_failures =
+            capture_cleanup
+              ~before_stage
+              Cleanup_verify_staging_directory_identity
+              (fun () ->
+                 match !staging_path with
+                 | None -> ()
+                 | Some path ->
+                   (try ignore (Eio.Path.stat ~follow:false path) with
+                    | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+                      absent := true))
+          in
+          cleanup_failures :=
+            !cleanup_failures @ write_cleanup_failures inspect_failures;
+          if !absent && inspect_failures = []
+          then (
+            let sync_failures =
+              capture_cleanup ~before_stage Cleanup_sync_parent (fun () ->
+                sync_parent_capability
+                  ~before_stage:(fun _ -> ())
+                  ~stage:Cleanup_sync_parent
+                  ~sw
+                  parent)
+            in
+            cleanup_failures :=
+              !cleanup_failures @ write_cleanup_failures sync_failures;
+            exact_stage_absent_and_synced := sync_failures = []))
+        else
+          exact_stage_absent_and_synced :=
+            !staging_directory_removed
+            && not !parent_dirty
+            && write_failures = [];
+        if !cleanup_failures = []
+           && !exact_stage_absent_and_synced
+           && !target_effect <> Target_state_unknown
+        then (
+          match !bound with
+          | Some obligation when not !bound_discharge_started ->
+            bound_discharge_started := true;
+            cleanup_failures :=
+              !cleanup_failures
+              @ capture_recovery_cleanup
+                  ~recovery_phase:Recovery_discharge_bound
+                  (fun () -> Recovery.discharge_bound ~store:recovery ~bound:obligation)
+          | None when (not !bind_started) && not !prepared_discharge_started ->
+            (match !prepared with
+             | None -> ()
+             | Some obligation ->
+               prepared_discharge_started := true;
+               cleanup_failures :=
+                 !cleanup_failures
+                 @ capture_recovery_cleanup
+                     ~recovery_phase:Recovery_discharge_prepared
+                     (fun () ->
+                        Recovery.discharge_prepared
+                          ~store:recovery
+                          ~prepared:obligation))
+          | Some _ | None -> ());
+        !cleanup_failures)
+    in
+    let error primary_failure additional =
+      let cleanup_failures = additional @ cleanup () in
+      Error
+        { operation
+        ; target_effect = !target_effect
+        ; primary_failure
+        ; cleanup_failures
+        }
+    in
+    let result =
+      try
+       let rec prepare_and_create_stage () =
+         let obligation =
+           run_recovery_transition
+             ~before_stage
+             ~stage:Prepare_recovery_obligation
+             ~recovery_phase:Recovery_prepare
+             (fun () ->
+                Recovery.prepare
+                  ~store:recovery
+                  ~locator
+                  ~permissions:recovery_target.permissions)
+         in
+         prepared := Some obligation;
+         let path =
+           Eio.Path.
+             (parent
+              / Recovery.stage_name
+                  (Recovery.prepared_operation_id obligation))
+         in
+         staging_path := Some path;
+         let creation =
+           Eio.Cancel.protect (fun () ->
+             run_stage ~before_stage Create_staging_directory (fun () ->
+               try
+                 Eio.Path.mkdir
+                   ~perm:capability_staging_directory_permissions
+                   path;
+                 staging_directory_created := true;
+                 parent_dirty := true;
+                 `Created
+               with
+               | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
+                 `Collision))
+         in
+         match creation with
+         | `Created -> obligation, path
+         | `Collision ->
+           let collision =
+             run_stage ~before_stage Inspect_staging_directory (fun () ->
+               Eio.Path.stat ~follow:false path)
+           in
+           let collision_identity =
+             recovery_identity_of_stat
+               ~stage:Inspect_staging_directory
+               collision
+           in
+           ignore
+             (run_recovery_transition
+                ~before_stage
+                ~stage:Preserve_unbound_recovery_obligation
+                ~recovery_phase:Recovery_preserve_unbound
+                (fun () ->
+                   Recovery.preserve_unbound
+                     ~store:recovery
+                     ~prepared:obligation
+                     ~kind:collision.kind
+                     ~stage_identity:collision_identity));
+           prepared := None;
+           staging_path := None;
+           Eio.Fiber.check ();
+           prepare_and_create_stage ()
+       in
+       let obligation, path = prepare_and_create_stage () in
+       let created_identity =
+         run_stage ~before_stage Inspect_staging_directory (fun () ->
+           let lexical = Eio.Path.stat ~follow:false path in
+           if lexical.kind <> `Directory
+           then
+             raise_failure
+               Inspect_staging_directory
+               (Unexpected_resource_kind lexical.kind);
+           { dev = lexical.dev; ino = lexical.ino })
+       in
+       staging_directory_identity := Some created_identity;
+       run_stage ~before_stage Acquire_staging_directory (fun () ->
+         let directory = Eio.Path.open_dir ~sw path in
+         staging_directory := Some directory;
+         let directory_file =
+           Eio.Path.open_in ~sw Eio.Path.(directory / ".")
+         in
+         staging_directory_file := Some directory_file;
+         let opened = Eio.File.stat directory_file in
+         if opened.kind <> `Directory
+         then
+           raise_failure
+             Acquire_staging_directory
+             (Unexpected_resource_kind opened.kind);
+         if not (same_resource_identity created_identity opened)
+         then raise_failure Acquire_staging_directory Resource_identity_changed);
+       (match !staging_directory_file with
+        | None ->
+          raise_failure
+            Apply_staging_directory_permissions
+            Resource_identity_unavailable
+        | Some directory_file ->
+          set_open_directory_permissions ~before_stage directory_file);
+       verify_path_identity
+         ~before_stage
+         ~stage:Verify_staging_directory_identity
+         ~expected_kind:`Directory
+         path
+         staging_directory_identity;
+       bind_started := true;
+       let bound_obligation =
+         run_recovery_transition
+           ~before_stage
+           ~stage:Bind_recovery_obligation
+           ~recovery_phase:Recovery_bind
+           (fun () ->
+              Recovery.bind
+                ~store:recovery
+                ~prepared:obligation
+                ~stage_identity:
+                  (recovery_identity
+                     ~stage:Bind_recovery_obligation
+                     created_identity))
+       in
+       bound := Some bound_obligation;
+       let entry, file =
+         run_stage ~before_stage Create_staging_entry (fun () ->
+           match !staging_directory with
+           | None ->
+             raise_failure
+               Create_staging_entry
+               Resource_identity_unavailable
+           | Some directory ->
+             let entry =
+               Eio.Path.
+                 ( (directory :> Eio.Fs.dir_ty Eio.Path.t)
+                   / capability_staging_payload_leaf )
+             in
+             entry, Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) entry)
+       in
+       payload_entry := Some entry;
+       open_file := Some file;
+       payload_created := true;
+       payload_identity := Some (identity_of_open_file ~before_stage file);
+       write_open_file_payload ~before_stage file content;
+       set_open_file_permissions
+         ~before_stage
+         file
+         (Recovery.permissions_to_int recovery_target.permissions);
+       run_stage ~before_stage Sync_payload (fun () -> Eio.File.sync file);
+       close_open_entry ~before_stage open_file;
+       Eio.Fiber.check ();
+       Eio.Cancel.protect (fun () ->
+         run_stage ~before_stage Publish_replace (fun () -> ());
+         verify_entry_identity
+           ~before_stage
+           ~stage:Verify_entry_identity
+           entry
+           payload_identity;
+         (try Eio.Path.rename entry target_path with
+          | Eio.Cancel.Cancelled _ as cancellation ->
+            target_effect := Target_state_unknown;
+            raise cancellation
+          | exception_ ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            target_effect := Target_state_unknown;
+            raise
+              (Capability_write_failed
+                 (operation_failure Publish_replace exception_ backtrace, [])));
+         published := true;
+         target_effect := Target_replaced;
+         parent_dirty := true;
+         (match !staging_directory_file with
+          | None ->
+            raise_failure
+              Sync_staging_directory
+              Resource_identity_unavailable
+          | Some directory_file ->
+            sync_open_directory_file
+              ~before_stage
+              ~stage:Sync_staging_directory
+              directory_file);
+         verify_path_identity
+           ~before_stage
+           ~stage:Verify_staging_directory_identity
+           ~expected_kind:`Directory
+           path
+           staging_directory_identity;
+         run_stage ~before_stage Remove_staging_directory (fun () ->
+           Eio.Path.rmdir path);
+         staging_directory_removed := true;
+         close_open_resource
+           ~before_stage
+           ~stage:Close_staging_directory
+           staging_directory_file;
+         close_open_directory
+           ~before_stage
+           ~stage:Close_staging_directory
+           staging_directory;
+         sync_parent_capability ~before_stage ~stage:Sync_parent ~sw parent;
+         parent_dirty := false;
+         bound_discharge_started := true;
+         ignore
+           (run_recovery_transition
+              ~before_stage
+              ~stage:Discharge_bound_recovery_obligation
+              ~recovery_phase:Recovery_discharge_bound
+              (fun () ->
+                 Recovery.discharge_bound
+                   ~store:recovery
+                   ~bound:bound_obligation)));
+       Eio.Fiber.check ();
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled reason as cancellation ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       let reason, interrupted_recovery, additional =
+         match reason with
+         | Capability_recovery_operation_cancelled (reason, interruption) ->
+           reason, Some interruption, []
+         | Parent_sync_cleanup_failed_on_cancellation (reason, failures) ->
+           reason, None, write_cleanup_failures failures
+         | reason -> reason, None, []
+       in
+       let cleanup_failures = additional @ cleanup () in
+       if
+         !target_effect = Target_unchanged
+         && Option.is_none interrupted_recovery
+         && cleanup_failures = []
+       then Printexc.raise_with_backtrace cancellation backtrace
+       else
+         Printexc.raise_with_backtrace
+           (Eio.Cancel.Cancelled
+              (Capability_write_cancelled
+                 ( reason
+                 , { operation
+                   ; target_effect = !target_effect
+                   ; interrupted_primary_failure = None
+                   ; interrupted_recovery
+                   ; cleanup_failures
+                   } )))
+           backtrace
+     | Capability_recovery_failed failure ->
+       error (Recovery_primary_failure failure) []
+     | Capability_write_failed (failure, additional) ->
+       error
+         (Write_primary_failure failure)
+         (write_cleanup_failures additional)
+     | exception_ ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       error
+         (Write_primary_failure
+            (operation_failure Create_staging_directory exception_ backtrace))
+         []
+    in
+    callback_result := Some result;
+    result
+  with
+  | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
+    raise cancellation
+  | Eio.Cancel.Cancelled reason as cancellation ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match !callback_result with
+     | Some (Error error) ->
+       Printexc.raise_with_backtrace
+         (Eio.Cancel.Cancelled
+            (Capability_write_cancelled
+               ( reason
+               , { operation
+                 ; target_effect = !target_effect
+                 ; interrupted_primary_failure = Some error.primary_failure
+                 ; interrupted_recovery = None
+                 ; cleanup_failures = error.cleanup_failures
+                 } )))
+         backtrace
+     | Some (Ok ()) | None ->
+       if !target_effect = Target_unchanged
+       then Printexc.raise_with_backtrace cancellation backtrace
+       else
+         Printexc.raise_with_backtrace
+           (Eio.Cancel.Cancelled
+              (Capability_write_cancelled
+                 ( reason
+                 , { operation
+                   ; target_effect = !target_effect
+                   ; interrupted_primary_failure = None
+                   ; interrupted_recovery = None
+                   ; cleanup_failures = []
+                   } )))
+           backtrace)
+  | Capability_write_failed (failure, cleanup_failures) ->
+    (match !callback_result with
+     | Some (Error error) ->
+       Error
+         { error with
+           cleanup_failures =
+             error.cleanup_failures
+             @ write_cleanup_failures (failure :: cleanup_failures)
+         }
+     | Some (Ok ()) | None ->
+       Error
+         { operation
+         ; target_effect = !target_effect
+         ; primary_failure = Write_primary_failure failure
+         ; cleanup_failures = write_cleanup_failures cleanup_failures
+         })
+  | exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    let release_failure = operation_failure Cleanup_close exception_ backtrace in
+    (match !callback_result with
+     | Some (Error error) ->
+       Error
+         { error with
+           cleanup_failures =
+             error.cleanup_failures
+             @ [ Write_cleanup_failure release_failure ]
+         }
+     | Some (Ok ()) | None ->
+       Error
+         { operation
+         ; target_effect = !target_effect
+         ; primary_failure = Write_primary_failure release_failure
+         ; cleanup_failures = []
+         })
+;;
+
+let create_capability_file_exclusive_with
       ~before_stage
       ~parent
       ~leaf
-      ~intent
       ~permissions
-  content
+      content
   =
+  let operation = Create_exclusive_operation in
+  let target_effect = ref Target_unchanged in
+  let callback_result = ref None in
   try
     let leaf = validate_leaf ~before_stage leaf in
-    let leaf_name = Capability_leaf.to_string leaf in
     Eio.Switch.run @@ fun sw ->
-    let target = Eio.Path.(parent / leaf_name) in
+    let target = Eio.Path.(parent / Capability_leaf.to_string leaf) in
     let mutation_lease =
       run_stage ~before_stage Acquire_mutation_lease (fun () ->
         let parent_stat = Eio.Path.stat ~follow:true parent in
@@ -671,246 +1570,52 @@ let publish_capability_file_with
         | Some lease -> lease
         | None -> raise_failure Acquire_mutation_lease Mutation_contended)
     in
-    Fun.protect
-      ~finally:(fun () -> Capability_mutation_lease.release mutation_lease)
-    @@ fun () ->
-    let staging_path = ref None in
-    let staging_directory = ref None in
-    let staging_directory_file = ref None in
-    let staging_directory_identity = ref None in
-    let staging_directory_created = ref false in
-    let staging_directory_removed = ref false in
-    let payload_entry = ref None in
+    Eio.Switch.on_release sw (fun () ->
+      Capability_mutation_lease.release mutation_lease);
     let open_file = ref None in
     let identity = ref None in
-    let entry_created = ref false in
-    let target_effect = ref Target_unchanged in
-    let published = ref false in
     let parent_dirty = ref false in
-    let create_stage =
-      match intent with
-      | Atomic_replace -> Create_staging_directory
-      | Create_exclusive -> Create_target_entry
-    in
     let cleanup () =
-      match intent with
-      | Atomic_replace ->
-        cleanup_owned_staging_directory
-          ~before_stage
-          ~sw
-          ~parent
-          ~staging_path
-          ~staging_directory_file
-          ~staging_directory_identity
-          ~staging_directory_created
-          ~staging_directory_removed
-          ~payload_entry
-          ~payload_file:open_file
-          ~payload_identity:identity
-          ~payload_created:entry_created
-          ~payload_published:published
-          ~parent_dirty
-      | Create_exclusive ->
-        Eio.Cancel.protect (fun () ->
-          let close_failures = cleanup_open_file ~before_stage open_file in
-          close_failures
-          @ cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty)
+      Eio.Cancel.protect (fun () ->
+        write_cleanup_failures
+          (cleanup_open_file ~before_stage open_file
+           @ cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty))
     in
-    let error ~failure ~additional =
-      let cleanup_failures = additional @ cleanup () in
-      let target_effect =
-        match intent with
-        | Atomic_replace -> !target_effect
-        | Create_exclusive -> !target_effect
-      in
-      Error { intent; target_effect; failure; cleanup_failures }
+    let error failure additional =
+      Error
+        { operation
+        ; target_effect = !target_effect
+        ; primary_failure = Write_primary_failure failure
+        ; cleanup_failures = write_cleanup_failures additional @ cleanup ()
+        }
     in
-    (try
-       let create_owned_staging_directory () =
-         let rec create_fresh () =
-           let path =
-             Eio.Path.(parent / fresh_capability_staging_directory_name ())
+    let result =
+      try
+       let file =
+         Eio.Cancel.protect (fun () ->
+           let file =
+             run_stage ~before_stage Create_target_entry (fun () ->
+               Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) target)
            in
-           let result =
-             Eio.Cancel.protect (fun () ->
-               let creation =
-                 run_stage ~before_stage Create_staging_directory (fun () ->
-                   try
-                     Eio.Path.mkdir
-                       ~perm:capability_staging_directory_permissions
-                       path;
-                     `Created
-                   with
-                   | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
-                     `Collision)
-               in
-               match creation with
-               | `Collision -> `Collision
-               | `Created ->
-                 staging_path := Some path;
-                 staging_directory_created := true;
-                 parent_dirty := true;
-                 let created_identity =
-                   run_stage ~before_stage Inspect_staging_directory (fun () ->
-                     let lexical = Eio.Path.stat ~follow:false path in
-                     if lexical.kind <> `Directory
-                     then
-                       raise_failure
-                         Inspect_staging_directory
-                         (Unexpected_resource_kind lexical.kind);
-                     { dev = lexical.dev; ino = lexical.ino })
-                 in
-                 staging_directory_identity := Some created_identity;
-                 run_stage ~before_stage Acquire_staging_directory (fun () ->
-                   let directory = Eio.Path.open_dir ~sw path in
-                   staging_directory := Some directory;
-                   let directory_file =
-                     Eio.Path.open_in ~sw Eio.Path.(directory / ".")
-                   in
-                   staging_directory_file := Some directory_file;
-                   let opened = Eio.File.stat directory_file in
-                   if opened.kind <> `Directory
-                   then
-                     raise_failure
-                       Acquire_staging_directory
-                       (Unexpected_resource_kind opened.kind);
-                   let opened_identity =
-                     { dev = opened.dev; ino = opened.ino }
-                   in
-                   if
-                     not
-                       (Int64.equal opened_identity.dev created_identity.dev
-                        && Int64.equal opened_identity.ino created_identity.ino)
-                   then
-                     raise_failure
-                       Acquire_staging_directory
-                       Resource_identity_changed);
-                 (match !staging_directory_file with
-                  | None ->
-                    raise_failure
-                      Apply_staging_directory_permissions
-                      Resource_identity_unavailable
-                  | Some directory_file ->
-                    set_open_directory_permissions
-                      ~before_stage
-                      directory_file);
-                 verify_path_identity
-                   ~before_stage
-                   ~stage:Verify_staging_directory_identity
-                   ~expected_kind:`Directory
-                   path
-                   staging_directory_identity;
-                 `Created)
-           in
-           Eio.Fiber.check ();
-           match result with
-           | `Created -> ()
-           | `Collision -> create_fresh ()
-         in
-         create_fresh ()
+           open_file := Some file;
+           parent_dirty := true;
+           target_effect := Target_created_incomplete;
+           file)
        in
-       let entry, file =
-         match intent with
-         | Atomic_replace ->
-           create_owned_staging_directory ();
-           run_stage ~before_stage Create_staging_entry (fun () ->
-             match !staging_directory with
-             | None ->
-               raise_failure
-                 Create_staging_entry
-                 Resource_identity_unavailable
-             | Some directory ->
-               let entry =
-                 Eio.Path.
-                   ( (directory :> Eio.Fs.dir_ty Eio.Path.t)
-                     / capability_staging_payload_leaf )
-               in
-               entry, Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) entry)
-         | Create_exclusive ->
-           ( target
-           , run_stage ~before_stage Create_target_entry (fun () ->
-               Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) target) )
-       in
-       payload_entry := Some entry;
-       open_file := Some file;
-       entry_created := true;
-       if intent = Create_exclusive then parent_dirty := true;
-       if intent = Create_exclusive
-       then target_effect := Target_created_incomplete;
        identity := Some (identity_of_open_file ~before_stage file);
        write_open_file_payload ~before_stage file content;
        set_open_file_permissions ~before_stage file permissions;
        run_stage ~before_stage Sync_payload (fun () -> Eio.File.sync file);
        close_open_entry ~before_stage open_file;
-       (match intent with
-        | Atomic_replace ->
-          Eio.Fiber.check ();
-          Eio.Cancel.protect (fun () ->
-            run_stage ~before_stage Publish_replace (fun () -> ());
-            verify_entry_identity
-              ~before_stage
-              ~stage:Verify_entry_identity
-              entry
-              identity;
-            let () =
-              try Eio.Path.rename entry target with
-              | Eio.Cancel.Cancelled _ as cancellation ->
-                target_effect := Target_state_unknown;
-                raise cancellation
-              | exception_ ->
-                let backtrace = Printexc.get_raw_backtrace () in
-                target_effect := Target_state_unknown;
-                raise
-                  (Capability_write_failed
-                     ( operation_failure Publish_replace exception_ backtrace
-                     , [] ))
-            in
-            published := true;
-            target_effect := Target_replaced;
-            parent_dirty := true;
-            (match !staging_directory_file with
-             | None ->
-               raise_failure
-                 Sync_staging_directory
-                 Resource_identity_unavailable
-             | Some directory_file ->
-               sync_open_directory_file
-                 ~before_stage
-                 ~stage:Sync_staging_directory
-                 directory_file);
-            (match !staging_path with
-             | None ->
-               raise_failure
-                 Verify_staging_directory_identity
-                 Resource_identity_unavailable
-             | Some path ->
-               verify_path_identity
-                 ~before_stage
-                 ~stage:Verify_staging_directory_identity
-                 ~expected_kind:`Directory
-                 path
-                 staging_directory_identity;
-               run_stage ~before_stage Remove_staging_directory (fun () ->
-                 Eio.Path.rmdir path);
-               staging_directory_removed := true;
-               parent_dirty := true);
-            sync_parent_capability ~before_stage ~stage:Sync_parent ~sw parent;
-            parent_dirty := false;
-            close_open_resource
-              ~before_stage
-              ~stage:Close_staging_directory
-              staging_directory_file)
-        | Create_exclusive ->
-          verify_entry_identity
-            ~before_stage
-            ~stage:Verify_entry_identity
-            entry
-            identity;
-          published := true;
-          target_effect := Target_created;
-          Eio.Cancel.protect (fun () ->
-            sync_parent_capability ~before_stage ~stage:Sync_parent ~sw parent;
-            parent_dirty := false));
+       verify_entry_identity
+         ~before_stage
+         ~stage:Verify_entry_identity
+         target
+         identity;
+       target_effect := Target_created;
+       Eio.Cancel.protect (fun () ->
+         sync_parent_capability ~before_stage ~stage:Sync_parent ~sw parent;
+         parent_dirty := false);
        Eio.Fiber.check ();
        Ok ()
      with
@@ -919,62 +1624,129 @@ let publish_capability_file_with
        let reason, additional =
          match reason with
          | Parent_sync_cleanup_failed_on_cancellation (reason, failures) ->
-           reason, failures
+           reason, write_cleanup_failures failures
          | reason -> reason, []
        in
        let cleanup_failures = additional @ cleanup () in
-       let target_effect =
-         match intent with
-         | Atomic_replace -> !target_effect
-         | Create_exclusive -> !target_effect
-       in
-       (match target_effect, cleanup_failures with
-        | Target_unchanged, [] ->
-          Printexc.raise_with_backtrace cancellation backtrace
-        | ( Target_unchanged
-          | Target_created
-          | Target_created_incomplete
-          | Target_replaced
-          | Target_state_unknown )
-          , _ ->
+       if !target_effect = Target_unchanged && cleanup_failures = []
+       then Printexc.raise_with_backtrace cancellation backtrace
+       else
          Printexc.raise_with_backtrace
            (Eio.Cancel.Cancelled
               (Capability_write_cancelled
                  ( reason
-                 , { intent; target_effect; cleanup_failures } )))
-           backtrace)
+                 , { operation
+                   ; target_effect = !target_effect
+                   ; interrupted_primary_failure = None
+                   ; interrupted_recovery = None
+                   ; cleanup_failures
+                   } )))
+           backtrace
      | Capability_write_failed (failure, additional) ->
-       error ~failure ~additional
+       error failure additional
      | exception_ ->
        let backtrace = Printexc.get_raw_backtrace () in
        error
-         ~failure:(operation_failure create_stage exception_ backtrace)
-         ~additional:[])
+         (operation_failure Create_target_entry exception_ backtrace)
+         []
+    in
+    callback_result := Some result;
+    result
   with
-  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
+    raise cancellation
+  | Eio.Cancel.Cancelled reason as cancellation ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match !callback_result with
+     | Some (Error error) ->
+       Printexc.raise_with_backtrace
+         (Eio.Cancel.Cancelled
+            (Capability_write_cancelled
+               ( reason
+               , { operation
+                 ; target_effect = !target_effect
+                 ; interrupted_primary_failure = Some error.primary_failure
+                 ; interrupted_recovery = None
+                 ; cleanup_failures = error.cleanup_failures
+                 } )))
+         backtrace
+     | Some (Ok ()) | None ->
+       if !target_effect = Target_unchanged
+       then Printexc.raise_with_backtrace cancellation backtrace
+       else
+         Printexc.raise_with_backtrace
+           (Eio.Cancel.Cancelled
+              (Capability_write_cancelled
+                 ( reason
+                 , { operation
+                   ; target_effect = !target_effect
+                   ; interrupted_primary_failure = None
+                   ; interrupted_recovery = None
+                   ; cleanup_failures = []
+                   } )))
+           backtrace)
   | Capability_write_failed (failure, cleanup_failures) ->
-    Error
-      { intent
-      ; target_effect = Target_unchanged
-      ; failure
-      ; cleanup_failures
-      }
+    (match !callback_result with
+     | Some (Error error) ->
+       Error
+         { error with
+           cleanup_failures =
+             error.cleanup_failures
+             @ write_cleanup_failures (failure :: cleanup_failures)
+         }
+     | Some (Ok ()) | None ->
+       Error
+         { operation
+         ; target_effect = !target_effect
+         ; primary_failure = Write_primary_failure failure
+         ; cleanup_failures = write_cleanup_failures cleanup_failures
+         })
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
+    let release_failure = operation_failure Cleanup_close exception_ backtrace in
+    (match !callback_result with
+     | Some (Error error) ->
+       Error
+         { error with
+           cleanup_failures =
+             error.cleanup_failures
+             @ [ Write_cleanup_failure release_failure ]
+         }
+     | Some (Ok ()) | None ->
+       Error
+         { operation
+         ; target_effect = !target_effect
+         ; primary_failure = Write_primary_failure release_failure
+         ; cleanup_failures = []
+         })
+;;
+
+let replace_capability_file ~recovery ~parent ~target content =
+  match
+    Recovery_access.with_store recovery (fun recovery ->
+      replace_capability_file_with
+        ~before_stage:(fun _ -> ())
+        ~recovery
+        ~parent
+        ~target
+        content)
+  with
+  | Ok result -> result
+  | Error Recovery_access.Keeper_lane_not_available ->
     Error
-      { intent
+      { operation = Atomic_replace_operation
       ; target_effect = Target_unchanged
-      ; failure = operation_failure Validate_leaf exception_ backtrace
+      ; primary_failure =
+          Recovery_access_primary_failure Recovery_access_not_available
       ; cleanup_failures = []
       }
 ;;
 
-let publish_capability_file ~parent ~leaf ~intent ~permissions content =
-  publish_capability_file_with
+let create_capability_file_exclusive ~parent ~leaf ~permissions content =
+  create_capability_file_exclusive_with
     ~before_stage:(fun _ -> ())
     ~parent
     ~leaf
-    ~intent
     ~permissions
     content
 ;;
@@ -1005,21 +1777,49 @@ let sync_directory_capability directory =
 ;;
 
 module Capability_write_for_testing = struct
-  let publish_capability_file
+  let replace_capability_file
         ~before_stage
+        ~recovery
         ~parent
-        ~leaf
-        ~intent
-        ~permissions
+        ~target
         content
     =
-    publish_capability_file_with
-      ~before_stage
-      ~parent
-      ~leaf
-      ~intent
-      ~permissions
-      content
+    match
+      Recovery_access.with_store recovery (fun recovery ->
+        replace_capability_file_with
+          ~before_stage
+          ~recovery
+          ~parent
+          ~target
+          content)
+    with
+    | Ok result -> result
+    | Error Recovery_access.Keeper_lane_not_available ->
+      Error
+        { operation = Atomic_replace_operation
+        ; target_effect = Target_unchanged
+        ; primary_failure =
+            Recovery_access_primary_failure Recovery_access_not_available
+        ; cleanup_failures = []
+        }
+  ;;
+
+  let create_capability_file_exclusive =
+    create_capability_file_exclusive_with
+  ;;
+
+  let with_publication_recovery_access ~registry_root ~owner f =
+    Eio.Switch.run @@ fun sw ->
+    match Recovery_access.open_registry ~sw ~registry_root with
+    | Error error ->
+      Error (recovery_transition_failure Recovery_open_registry error)
+    | Ok registry ->
+      (match Recovery_access.with_lane ~registry ~owner f with
+       | Ok value -> Ok value
+       | Error (Recovery_access.Invalid_owner error) ->
+         Error (recovery_validation_failure Recovery_validate_owner error)
+       | Error (Recovery_access.Store_failed error) ->
+         Error (recovery_transition_failure Recovery_open_store error))
   ;;
 
   let sync_directory_capability = sync_directory_capability_with

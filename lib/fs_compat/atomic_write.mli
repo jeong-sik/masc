@@ -35,18 +35,66 @@ val save_file_atomic
     filename shape. The caller owns the returned channel and file. *)
 val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
 
-type capability_write_intent =
-  | Atomic_replace
-  | Create_exclusive
+type atomic_replace_recovery_target
+type atomic_replace_recovery_target_error
+type publication_recovery_access
+type publication_recovery_registry
+type publication_recovery_registry_error
+type publication_recovery_lane_open_error
+
+val open_publication_recovery_registry
+  :  sw:Eio.Switch.t
+  -> registry_root:Eio.Fs.dir_ty Eio.Path.t
+  -> (publication_recovery_registry, publication_recovery_registry_error) result
+
+val publication_recovery_registry_error_to_string
+  :  publication_recovery_registry_error
+  -> string
+
+val with_publication_recovery_lane
+  :  registry:publication_recovery_registry
+  -> owner:string
+  -> (publication_recovery_access -> 'a)
+  -> ('a, publication_recovery_lane_open_error) result
+
+val publication_recovery_lane_open_error_to_string
+  :  publication_recovery_lane_open_error
+  -> string
+
+(** Build the immutable recovery locator projection used by
+    [replace_capability_file]. The allowed-root identity is caller-certified;
+    the final parent identity and initial no-follow target observation are
+    captured under the publication mutation lease. Every component and the
+    target permissions are validated before a target value is returned. *)
+val atomic_replace_recovery_target
+  :  allowed_root_path:string
+  -> allowed_root_device:int64
+  -> allowed_root_inode:int64
+  -> parent_components:string list
+  -> target_leaf:string
+  -> permissions:int
+  -> (atomic_replace_recovery_target, atomic_replace_recovery_target_error) result
+
+val atomic_replace_recovery_target_error_to_string
+  :  atomic_replace_recovery_target_error
+  -> string
+
+type capability_write_operation =
+  | Atomic_replace_operation
+  | Create_exclusive_operation
 
 type capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
+  | Inspect_target_entry
+  | Prepare_recovery_obligation
   | Create_staging_directory
   | Inspect_staging_directory
   | Acquire_staging_directory
   | Apply_staging_directory_permissions
   | Verify_staging_directory_identity
+  | Preserve_unbound_recovery_obligation
+  | Bind_recovery_obligation
   | Create_staging_entry
   | Create_target_entry
   | Inspect_open_resource
@@ -60,6 +108,8 @@ type capability_write_stage =
   | Sync_parent
   | Remove_staging_directory
   | Close_staging_directory
+  | Discharge_prepared_recovery_obligation
+  | Discharge_bound_recovery_obligation
   | Cleanup_close
   | Cleanup_verify_identity
   | Cleanup_unlink
@@ -89,6 +139,7 @@ type capability_write_payload_failure =
 
 type capability_write_cause =
   | Invalid_leaf of string
+  | Invalid_recovery_target of atomic_replace_recovery_target_error
   | Mutation_contended
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
@@ -102,11 +153,70 @@ type capability_write_failure =
   ; cause : capability_write_cause
   }
 
+type capability_recovery_phase =
+  | Recovery_validate_owner
+  | Recovery_open_registry
+  | Recovery_open_store
+  | Recovery_prepare
+  | Recovery_preserve_unbound
+  | Recovery_bind
+  | Recovery_discharge_prepared
+  | Recovery_discharge_bound
+
+type capability_recovery_removal_transition =
+  | Recovery_discharge_active
+  | Recovery_discharge_owned
+  | Recovery_active_to_owned
+  | Recovery_active_to_forensic
+  | Recovery_owned_to_forensic
+
+type capability_recovery_effect =
+  | Recovery_no_record_change
+  | Recovery_layout_may_be_incomplete
+  | Recovery_layout_ready
+  | Recovery_active_record_state_unknown
+  | Recovery_active_record_durable
+  | Recovery_active_record_discharged
+  | Recovery_owned_record_state_unknown_with_active
+  | Recovery_owned_record_durable_with_active
+  | Recovery_owned_record_durable
+  | Recovery_owned_record_discharged
+  | Recovery_forensic_record_state_unknown_with_source
+  | Recovery_forensic_record_durable_with_source
+  | Recovery_forensic_record_durable
+  | Recovery_source_removal_durability_unknown of
+      capability_recovery_removal_transition
+
+type capability_recovery_failure
+
+val capability_recovery_failure_phase
+  :  capability_recovery_failure
+  -> capability_recovery_phase
+
+val capability_recovery_failure_effect
+  :  capability_recovery_failure
+  -> capability_recovery_effect
+
+val capability_recovery_failure_to_string
+  :  capability_recovery_failure
+  -> string
+
+type capability_recovery_access_failure = Recovery_access_not_available
+
+type capability_write_primary_failure =
+  | Write_primary_failure of capability_write_failure
+  | Recovery_primary_failure of capability_recovery_failure
+  | Recovery_access_primary_failure of capability_recovery_access_failure
+
+type capability_write_cleanup_failure =
+  | Write_cleanup_failure of capability_write_failure
+  | Recovery_cleanup_failure of capability_recovery_failure
+
 type capability_write_error =
-  { intent : capability_write_intent
+  { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
-  ; failure : capability_write_failure
-  ; cleanup_failures : capability_write_failure list
+  ; primary_failure : capability_write_primary_failure
+  ; cleanup_failures : capability_write_cleanup_failure list
   }
 
 type capability_directory_sync_error =
@@ -115,51 +225,41 @@ type capability_directory_sync_error =
   }
 
 type capability_write_cancellation =
-  { intent : capability_write_intent
+  { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
-  ; cleanup_failures : capability_write_failure list
+  ; interrupted_primary_failure : capability_write_primary_failure option
+  ; interrupted_recovery : capability_recovery_failure option
+  ; cleanup_failures : capability_write_cleanup_failure list
   }
 
 exception Capability_write_cancelled of exn * capability_write_cancellation
 
-(** Publish [content] below an already-open, caller-validated directory
-    capability. No path is reopened from a process-global root.
+(** Durable replacement below an already-open target-parent capability.
+    Recovery access and the immutable target projection are mandatory. A
+    durable Prepared obligation precedes exact staging-directory creation; a
+    durable Bound obligation precedes payload creation. The Bound obligation
+    is discharged only after rename, staging-directory sync and removal, and
+    target-parent sync all complete. No target tree is scanned during failure
+    handling. *)
+val replace_capability_file
+  :  recovery:publication_recovery_access
+  -> parent:Eio.Fs.dir_ty Eio.Path.t
+  -> target:atomic_replace_recovery_target
+  -> string
+  -> (unit, capability_write_error) result
 
-    [Atomic_replace] creates a unique 0700 staging directory below [parent],
-    pins it as a directory capability, and creates a fixed private payload
-    inside that capability. It applies [permissions], fsyncs and closes the
-    payload, then cancellation-protects rename, source-directory fsync,
-    staging-directory removal, and parent fsync. The parent is synced once,
-    after removal, so that one durability barrier covers both the target rename
-    and removal of the staging entry.
-    [Create_exclusive] opens the final leaf exclusively, so the entry is
-    visible before its payload is complete. A failure before payload sync,
-    close, and identity verification completes leaves the public leaf in place
-    and reports [Target_created_incomplete]. Once those steps complete,
-    parent-sync failure reports [Target_created] while the failure stage keeps
-    the missing durability acknowledgement explicit.
-
-    Parent-fsync and cleanup failures are never downgraded to success. A
-    cancellation is re-raised after cleanup or after the protected commit; if
-    cancellation cleanup itself fails, the typed failures are preserved in
-    [Capability_write_cancelled]. Exclusive-create failures never unlink the
-    public leaf: OCaml 5.4/Eio has no conditional unlink primitive, so an
-    identity check followed by unlink would still have a swap race.
-
-    The unique directory and pinned source capability prevent cooperative MASC
-    writers from sharing a staging namespace. Its 0700 mode excludes other OS
-    users; it is not a security boundary against a hostile process running as
-    the same OS user. No legacy [.atomic_*.tmp] pathname is used by this API. *)
-val publish_capability_file
+(** Exclusive creation is physically separate from replacement and has no
+    recovery-obligation argument. Once the public leaf is created it is never
+    unlinked by failure cleanup. *)
+val create_capability_file_exclusive
   :  parent:Eio.Fs.dir_ty Eio.Path.t
   -> leaf:string
-  -> intent:capability_write_intent
   -> permissions:int
   -> string
   -> (unit, capability_write_error) result
 
 val capability_write_error_to_string : capability_write_error -> string
-val capability_write_intent_to_string : capability_write_intent -> string
+val capability_write_operation_to_string : capability_write_operation -> string
 val capability_write_stage_to_string : capability_write_stage -> string
 
 val capability_write_target_effect_to_string
@@ -181,14 +281,29 @@ val capability_directory_sync_error_to_string
   -> string
 
 module Capability_write_for_testing : sig
-  val publish_capability_file
+  val replace_capability_file
+    :  before_stage:(capability_write_stage -> unit)
+    -> recovery:publication_recovery_access
+    -> parent:Eio.Fs.dir_ty Eio.Path.t
+    -> target:atomic_replace_recovery_target
+    -> string
+    -> (unit, capability_write_error) result
+
+  val create_capability_file_exclusive
     :  before_stage:(capability_write_stage -> unit)
     -> parent:Eio.Fs.dir_ty Eio.Path.t
     -> leaf:string
-    -> intent:capability_write_intent
     -> permissions:int
     -> string
     -> (unit, capability_write_error) result
+
+  (** Testing-only lifetime owner for an opaque lane store. Production code
+      obtains the same access from the Keeper lane lifecycle, not per write. *)
+  val with_publication_recovery_access
+    :  registry_root:Eio.Fs.dir_ty Eio.Path.t
+    -> owner:string
+    -> (publication_recovery_access -> 'a)
+    -> ('a, capability_recovery_failure) result
 
   val sync_directory_capability
     :  before_stage:(capability_write_stage -> unit)

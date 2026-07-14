@@ -249,18 +249,55 @@ let open_atomic_temp_file ~temp_dir () =
 
 let is_capability_leaf = Capability_leaf.is_valid
 
-type capability_write_intent = Atomic_write.capability_write_intent =
-  | Atomic_replace
-  | Create_exclusive
+type atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+
+type atomic_replace_recovery_target_error =
+  Atomic_write.atomic_replace_recovery_target_error
+
+type publication_recovery_access = Atomic_write.publication_recovery_access
+
+type publication_recovery_registry = Atomic_write.publication_recovery_registry
+type publication_recovery_registry_error = Atomic_write.publication_recovery_registry_error
+
+type publication_recovery_lane_open_error =
+  Atomic_write.publication_recovery_lane_open_error
+
+let open_publication_recovery_registry =
+  Atomic_write.open_publication_recovery_registry
+;;
+
+let publication_recovery_registry_error_to_string =
+  Atomic_write.publication_recovery_registry_error_to_string
+;;
+
+let with_publication_recovery_lane = Atomic_write.with_publication_recovery_lane
+
+let publication_recovery_lane_open_error_to_string =
+  Atomic_write.publication_recovery_lane_open_error_to_string
+;;
+
+let atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+
+let atomic_replace_recovery_target_error_to_string =
+  Atomic_write.atomic_replace_recovery_target_error_to_string
+;;
+
+type capability_write_operation = Atomic_write.capability_write_operation =
+  | Atomic_replace_operation
+  | Create_exclusive_operation
 
 type capability_write_stage = Atomic_write.capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
+  | Inspect_target_entry
+  | Prepare_recovery_obligation
   | Create_staging_directory
   | Inspect_staging_directory
   | Acquire_staging_directory
   | Apply_staging_directory_permissions
   | Verify_staging_directory_identity
+  | Preserve_unbound_recovery_obligation
+  | Bind_recovery_obligation
   | Create_staging_entry
   | Create_target_entry
   | Inspect_open_resource
@@ -274,6 +311,8 @@ type capability_write_stage = Atomic_write.capability_write_stage =
   | Sync_parent
   | Remove_staging_directory
   | Close_staging_directory
+  | Discharge_prepared_recovery_obligation
+  | Discharge_bound_recovery_obligation
   | Cleanup_close
   | Cleanup_verify_identity
   | Cleanup_unlink
@@ -304,6 +343,7 @@ type capability_write_payload_failure = Atomic_write.capability_write_payload_fa
 
 type capability_write_cause = Atomic_write.capability_write_cause =
   | Invalid_leaf of string
+  | Invalid_recovery_target of atomic_replace_recovery_target_error
   | Mutation_contended
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
@@ -317,11 +357,75 @@ type capability_write_failure = Atomic_write.capability_write_failure =
   ; cause : capability_write_cause
   }
 
+type capability_recovery_phase = Atomic_write.capability_recovery_phase =
+  | Recovery_validate_owner
+  | Recovery_open_registry
+  | Recovery_open_store
+  | Recovery_prepare
+  | Recovery_preserve_unbound
+  | Recovery_bind
+  | Recovery_discharge_prepared
+  | Recovery_discharge_bound
+
+type capability_recovery_removal_transition =
+  Atomic_write.capability_recovery_removal_transition =
+  | Recovery_discharge_active
+  | Recovery_discharge_owned
+  | Recovery_active_to_owned
+  | Recovery_active_to_forensic
+  | Recovery_owned_to_forensic
+
+type capability_recovery_effect = Atomic_write.capability_recovery_effect =
+  | Recovery_no_record_change
+  | Recovery_layout_may_be_incomplete
+  | Recovery_layout_ready
+  | Recovery_active_record_state_unknown
+  | Recovery_active_record_durable
+  | Recovery_active_record_discharged
+  | Recovery_owned_record_state_unknown_with_active
+  | Recovery_owned_record_durable_with_active
+  | Recovery_owned_record_durable
+  | Recovery_owned_record_discharged
+  | Recovery_forensic_record_state_unknown_with_source
+  | Recovery_forensic_record_durable_with_source
+  | Recovery_forensic_record_durable
+  | Recovery_source_removal_durability_unknown of
+      capability_recovery_removal_transition
+
+type capability_recovery_failure = Atomic_write.capability_recovery_failure
+
+let capability_recovery_failure_phase =
+  Atomic_write.capability_recovery_failure_phase
+;;
+
+let capability_recovery_failure_effect =
+  Atomic_write.capability_recovery_failure_effect
+;;
+
+let capability_recovery_failure_to_string =
+  Atomic_write.capability_recovery_failure_to_string
+;;
+
+type capability_recovery_access_failure =
+  Atomic_write.capability_recovery_access_failure =
+  | Recovery_access_not_available
+
+type capability_write_primary_failure =
+  Atomic_write.capability_write_primary_failure =
+  | Write_primary_failure of capability_write_failure
+  | Recovery_primary_failure of capability_recovery_failure
+  | Recovery_access_primary_failure of capability_recovery_access_failure
+
+type capability_write_cleanup_failure =
+  Atomic_write.capability_write_cleanup_failure =
+  | Write_cleanup_failure of capability_write_failure
+  | Recovery_cleanup_failure of capability_recovery_failure
+
 type capability_write_error = Atomic_write.capability_write_error =
-  { intent : capability_write_intent
+  { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
-  ; failure : capability_write_failure
-  ; cleanup_failures : capability_write_failure list
+  ; primary_failure : capability_write_primary_failure
+  ; cleanup_failures : capability_write_cleanup_failure list
   }
 
 type capability_directory_sync_error = Atomic_write.capability_directory_sync_error =
@@ -330,16 +434,27 @@ type capability_directory_sync_error = Atomic_write.capability_directory_sync_er
   }
 
 type capability_write_cancellation = Atomic_write.capability_write_cancellation =
-  { intent : capability_write_intent
+  { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
-  ; cleanup_failures : capability_write_failure list
+  ; interrupted_primary_failure : capability_write_primary_failure option
+  ; interrupted_recovery : capability_recovery_failure option
+  ; cleanup_failures : capability_write_cleanup_failure list
   }
 
 exception Capability_write_cancelled = Atomic_write.Capability_write_cancelled
 
-let publish_capability_file = Atomic_write.publish_capability_file
+let replace_capability_file = Atomic_write.replace_capability_file
+
+let create_capability_file_exclusive =
+  Atomic_write.create_capability_file_exclusive
+;;
+
 let capability_write_error_to_string = Atomic_write.capability_write_error_to_string
-let capability_write_intent_to_string = Atomic_write.capability_write_intent_to_string
+
+let capability_write_operation_to_string =
+  Atomic_write.capability_write_operation_to_string
+;;
+
 let capability_write_stage_to_string = Atomic_write.capability_write_stage_to_string
 
 let capability_write_target_effect_to_string =
@@ -355,8 +470,16 @@ let capability_directory_sync_error_to_string =
 ;;
 
 module Capability_write_for_testing = struct
-  let publish_capability_file =
-    Atomic_write.Capability_write_for_testing.publish_capability_file
+  let replace_capability_file =
+    Atomic_write.Capability_write_for_testing.replace_capability_file
+  ;;
+
+  let create_capability_file_exclusive =
+    Atomic_write.Capability_write_for_testing.create_capability_file_exclusive
+  ;;
+
+  let with_publication_recovery_access =
+    Atomic_write.Capability_write_for_testing.with_publication_recovery_access
   ;;
 
   let sync_directory_capability =

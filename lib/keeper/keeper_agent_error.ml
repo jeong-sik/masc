@@ -84,10 +84,6 @@ let user_message_of_sdk_error = function
 
 type sdk_termination_semantics =
   | Provider_wall_clock_timeout
-  | Oas_execution_timeout_observed
-  | Oas_turn_limit_observed
-  | Oas_idle_detected_failure
-  | Oas_exit_condition_reached
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
@@ -99,19 +95,13 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
     Provider_wall_clock_timeout
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
-    Oas_execution_timeout_observed
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
-    Oas_turn_limit_observed
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) ->
-    Oas_exit_condition_reached
   | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
     Oas_guardrail_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
     Oas_tripwire_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> Oas_input_required
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) ->
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _)
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.HookExecutionFailed _) ->
     Sdk_error_failure
   | Agent_sdk.Error.Provider _ -> Sdk_error_failure
   | Agent_sdk.Error.Api _ -> Sdk_error_failure
@@ -125,10 +115,6 @@ let sdk_termination_semantics = function
 
 let sdk_termination_semantics_to_string = function
   | Provider_wall_clock_timeout -> "provider_wall_clock_timeout"
-  | Oas_execution_timeout_observed -> "oas_execution_timeout_observed"
-  | Oas_turn_limit_observed -> "oas_turn_limit_observed"
-  | Oas_idle_detected_failure -> "oas_idle_detected_failure"
-  | Oas_exit_condition_reached -> "oas_exit_condition_reached"
   | Oas_guardrail_violation -> "oas_guardrail_violation"
   | Oas_tripwire_violation -> "oas_tripwire_violation"
   | Oas_input_required -> "oas_input_required"
@@ -166,31 +152,13 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
 let agent_error_terminal_reason_code = function
-  | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
-    Printf.sprintf
-      "agent_error_max_turns_exceeded:turns=%d,limit=%d"
-      turns
-      limit
-  | Agent_sdk.Error.AgentExecutionTimeout
-      { elapsed_sec; timeout_sec; turn_count; max_turns } ->
-    Printf.sprintf
-      "agent_error_execution_timeout:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
-      elapsed_sec
-      timeout_sec
-      turn_count
-      max_turns
-  | Agent_sdk.Error.AgentExecutionIdleTimeout
-      { idle_sec; idle_timeout_sec; turn_count; max_turns } ->
-    Printf.sprintf
-      "agent_error_idle_timeout:idle_sec=%.1f,idle_timeout_sec=%.1f,turn_count=%d,max_turns=%d"
-      idle_sec
-      idle_timeout_sec
-      turn_count
-      max_turns
-  | Agent_sdk.Error.ExitConditionMet { turn } ->
-    Printf.sprintf "agent_error_exit_condition_met:turn=%d" turn
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
     Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
+  | Agent_sdk.Error.HookExecutionFailed { hook_name; stage; _ } ->
+    Printf.sprintf
+      "agent_error_hook_execution_failed:hook=%s,stage=%s"
+      hook_name
+      stage
   | Agent_sdk.Error.GuardrailViolation { validator; reason = _ } ->
     Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
   | Agent_sdk.Error.TripwireViolation { tripwire; reason = _ } ->
@@ -267,7 +235,7 @@ let terminal_reason_code_of_sdk_error = function
    above) wrapped in [Keeper_turn_terminal_code.Sdk_error]. PR-3 swaps
    [Keeper_turn_terminal.t.code] from [string] to [Keeper_turn_terminal_code.t]
    and uses these typed accessors at every emit site. RFC §5.2 defers the
-   sub-sum split (per-variant constructors for [MaxTurnsExceeded] etc.) to
+   sub-sum split (per-variant constructors for Agent errors) to
    a follow-up RFC. *)
 let terminal_reason_code_of_sdk_error_typed err =
   Keeper_turn_terminal_code.of_sdk_error_wire (terminal_reason_code_of_sdk_error err)
@@ -279,10 +247,7 @@ let api_error_terminal_reason_code_typed err =
 
 let receipt_outcome_kind_of_sdk_error err =
   match sdk_termination_semantics err with
-  | Provider_wall_clock_timeout | Oas_exit_condition_reached -> `Cancelled
-  | Oas_execution_timeout_observed
-  | Oas_turn_limit_observed -> `Ok
-  | Oas_idle_detected_failure -> `Error
+  | Provider_wall_clock_timeout -> `Cancelled
   | Oas_input_required -> `Cancelled
   | Oas_guardrail_violation
   | Oas_tripwire_violation

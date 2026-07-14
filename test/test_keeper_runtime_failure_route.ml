@@ -189,22 +189,6 @@ let test_non_provider_families_judge () =
      Alcotest.failf
        "MASC-produced raw Internal must preserve its actual boundary, got %s"
        (KFR.route_kind_label other));
-  (* An idle loop is a behavioral contract judgment, not an opaque internal
-     error or lifecycle transition. *)
-  (match
-     route_of_oas_error
-       (Agent_sdk.Error.Agent
-          (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 3 }))
-   with
-   | KFR.Escalate_judgment
-       { judgment = KFR.Contract_violation
-       ; provenance = KFR.Oas_agent_idle_detected { consecutive_idle_turns = 3 }
-       ; _
-       } ->
-     ()
-   | other ->
-     Alcotest.failf "idle loop should judge contract, got %s"
-       (KFR.route_kind_label other));
   match
     route_of_oas_error
       (Agent_sdk.Error.Mcp (Agent_sdk.Error.InitializeFailed { detail = "handshake" }))

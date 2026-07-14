@@ -688,21 +688,23 @@ let agent_completed_ok_fields : (string * Yojson.Safe.t) list =
 let agent_completed_error_fields : (string * Yojson.Safe.t) list =
   [ "success", `Bool false
   ; "result", `String "error"
-  ; "error", `String "MaxTurnsExceeded { turns = 20; limit = 20 }"
+  ; "error", `String "HookExecutionFailed { hook_name = post_tool_use }"
   ; "usage_reported", `Bool false
   ]
 ;;
 
-let agent_failed_error : string = "MaxTurnsExceeded { turns = 20; limit = 20 }"
-let agent_failed_error_domain : string = "max_turns"
-let agent_failed_error_code : string = "max_turns_exceeded"
+let agent_failed_error : string =
+  "HookExecutionFailed { hook_name = post_tool_use }"
+
+let agent_failed_error_domain : string = "agent"
+let agent_failed_error_code : string = "hook_execution_failed"
 let agent_failed_error_retryable : bool = false
 
 let agent_failed_error_detail : Yojson.Safe.t =
   `Assoc
-    [ "variant", `String "max_turns_exceeded"
-    ; "turns", `Int 20
-    ; "limit", `Int 20
+    [ "variant", `String "hook_execution_failed"
+    ; "hook_name", `String "post_tool_use"
+    ; "stage", `String "execute"
     ]
 ;;
 

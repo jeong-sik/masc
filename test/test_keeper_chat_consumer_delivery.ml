@@ -28,7 +28,7 @@ let discord_msg ~content ~channel_id ~user_id ~timestamp =
   ; attachments = []
   ; timestamp
   ; source = Keeper_chat_queue.Discord { channel_id; user_id }
-  ; user_row_origin = Keeper_chat_delivery_journal.Already_persisted_upstream
+  ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
   }
 
 let rec rm_rf path =
@@ -106,19 +106,19 @@ let await_receipt ~clock ~seconds ~keeper_name ~receipt_id ~accept =
 
 let is_delivered = function
   | Keeper_chat_queue.Delivered _ -> true
-  | Pending | Inflight _ | Failed _ -> false
+  | Pending | Inflight _ | Recovery_required _ | Failed _ -> false
 
 let is_failed = function
   | Keeper_chat_queue.Failed _ -> true
-  | Pending | Inflight _ | Delivered _ -> false
+  | Pending | Inflight _ | Recovery_required _ | Delivered _ -> false
 
 let is_inflight = function
   | Keeper_chat_queue.Inflight _ -> true
-  | Pending | Delivered _ | Failed _ -> false
+  | Pending | Recovery_required _ | Delivered _ | Failed _ -> false
 
 let is_pending = function
   | Keeper_chat_queue.Pending -> true
-  | Inflight _ | Delivered _ | Failed _ -> false
+  | Inflight _ | Recovery_required _ | Delivered _ | Failed _ -> false
 
 let receipt_id_in_active receipt_id receipts =
   List.exists
@@ -139,7 +139,13 @@ let receipt_id_is_terminal ~keeper_name receipt_id =
       ; _
       } ->
     true
-  | Ok { receipt = None | Some { state = Pending | Inflight _; _ }; _ }
+  | Ok
+      { receipt =
+          None
+          | Some
+              { state = Pending | Inflight _ | Recovery_required _; _ }
+      ; _
+      }
   | Error _ ->
     false
 
@@ -207,7 +213,7 @@ let test_delivery_finalizes_terminal_receipt () =
            | Keeper_chat_queue.Delivered completion ->
              check "delivery stores the typed outcome reference"
                (completion.outcome_ref = Some "trace-delivered#1")
-           | Pending | Inflight _ | Failed _ ->
+           | Pending | Inflight _ | Recovery_required _ | Failed _ ->
              check "delivery state is Delivered" false));
       (match !captured with
        | Some (dispatched_keeper, queued_message) ->
@@ -260,7 +266,7 @@ let test_explicit_failure_finalizes_failed_receipt () =
                   "connector rejected outbound delivery");
              check "failure outcome reference is preserved"
                (failure.outcome_ref = Some "trace-delivery-failed#1")
-           | Pending | Inflight _ | Delivered _ ->
+           | Pending | Inflight _ | Recovery_required _ | Delivered _ ->
              check "explicit failure state is Failed" false));
       check_terminal_snapshot ~label:"explicit failure" ~keeper_name
         ~receipt_id:accepted.receipt_id)
@@ -304,7 +310,11 @@ let test_structured_cancellation_nacks_and_preserves_receipt () =
            (Keeper_chat_queue.Receipt_id.equal receipt_id accepted.receipt_id)
        | Ok
            { receipt =
-               Some { state = Inflight _ | Delivered _ | Failed _; _ }
+               Some
+                 { state =
+                     Inflight _ | Recovery_required _ | Delivered _ | Failed _
+                 ; _
+                 }
              | None
            ; _
            }
@@ -440,7 +450,7 @@ let test_finalization_persistence_retry_does_not_redeliver () =
            | Keeper_chat_queue.Delivered completion ->
              check "retried finalization preserves the outcome reference"
                (completion.outcome_ref = Some "trace-finalized-after-retry#3")
-           | Pending | Inflight _ | Failed _ ->
+           | Pending | Inflight _ | Recovery_required _ | Failed _ ->
              check "retried finalization reaches Delivered" false));
       check "finalization retry does not re-run handle_turn" (!calls = 1);
       check_terminal_snapshot ~label:"retried finalization" ~keeper_name
@@ -519,7 +529,11 @@ let test_invalid_delivered_turn_ref_fails_closed () =
             (failure.outcome_ref = None);
           check "invalid Delivered ref has diagnostic detail"
             (String.trim failure.detail <> "")
-        | Some { state = Pending | Inflight _ | Delivered _; _ } | None ->
+        | Some
+            { state = Pending | Inflight _ | Recovery_required _ | Delivered _
+            ; _
+            }
+        | None ->
           check "invalid Delivered ref never reaches Delivered" false);
       check_terminal_snapshot ~label:"invalid delivered ref" ~keeper_name
         ~receipt_id:accepted.receipt_id)
@@ -575,7 +589,12 @@ let test_invalid_delivery_diagnostic_does_not_block_lane () =
                (failure.kind = Keeper_chat_queue.Delivery_failed);
              check "invalid failure turn_ref is omitted, never repaired"
                (failure.outcome_ref = None)
-           | Some { state = Pending | Inflight _ | Delivered _; _ } | None ->
+           | Some
+               { state =
+                   Pending | Inflight _ | Recovery_required _ | Delivered _
+               ; _
+               }
+           | None ->
              check "malformed diagnostic reaches terminal Failed" false);
           check "next queued turn dispatches after repaired terminal outcome"
             (match
@@ -621,7 +640,19 @@ let test_shutdown_fence_keeps_receipt_pending_until_rollback () =
                ~receipt_id:accepted.receipt_id
            with
            | Ok { receipt = Some { state = Pending; _ }; _ } -> true
-           | Ok { receipt = Some { state = Inflight _ | Delivered _ | Failed _; _ } | None; _ }
+           | Ok
+               { receipt =
+                   Some
+                     { state =
+                         Inflight _
+                         | Recovery_required _
+                         | Delivered _
+                         | Failed _
+                     ; _
+                     }
+                   | None
+               ; _
+               }
            | Error _ -> false);
         (match
            Keeper_turn_admission.rollback_shutdown ~base_path:base ~keeper_name

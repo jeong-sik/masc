@@ -505,27 +505,9 @@ let test_restart_requires_explicit_recovery_without_journal () =
   ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
   let receipt = enqueue_exn ~keeper_name (message "recover me") in
   let lease = lease_exn ~keeper_name in
-  let delivery_key =
-    match
-      Keeper_chat_delivery_identity.Receipt_ids.of_list [ receipt.receipt_id ]
-    with
-    | Ok receipt_ids -> Keeper_chat_delivery_identity.Queue_receipts receipt_ids
-    | Error Keeper_chat_delivery_identity.Receipt_ids.Empty ->
-      failwith "singleton receipt identity was empty"
-  in
-  let corrupt_journal =
-    match
-      Keeper_chat_delivery_journal.For_testing.path
-        ~base_path ~keeper_name delivery_key
-    with
-    | Ok path -> path
-    | Error error ->
-      failwith (Keeper_chat_delivery_journal.error_to_string error)
-  in
-  save_text corrupt_journal "not-json";
   Keeper_chat_queue.For_testing.reset ();
   let report = configure base_path in
-  check "corrupt external journal is never read" (report.load_errors = []);
+  check "restart needs no external delivery authority" (report.load_errors = []);
   check "restart reports one recovery-required receipt"
     (report.recovery_required_receipt_count = 1);
   let snapshot = Keeper_chat_queue.snapshot ~keeper_name in

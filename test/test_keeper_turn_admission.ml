@@ -59,7 +59,7 @@ let queued_message : Keeper_chat_queue.queued_message =
   ; attachments = []
   ; timestamp = 1.0
   ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
-  ; user_row_origin = Keeper_chat_delivery_journal.Needs_append
+  ; user_row_origin = Keeper_chat_store.Needs_append
   }
 ;;
 
@@ -208,7 +208,7 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
     ; attachments = []
     ; timestamp = Time_compat.now ()
     ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
-    ; user_row_origin = Keeper_chat_delivery_journal.Needs_append
+    ; user_row_origin = Keeper_chat_store.Needs_append
     }
   in
   let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
@@ -225,7 +225,7 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
   let lease =
     match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> lease
-    | `Empty | `Already_leased _ | `Error _ ->
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
       failwith "expected the committed receipt to lease"
   in
   (match
@@ -562,7 +562,7 @@ let test_autonomous_yields_to_queued_connector_message () =
              ; team_id = Some "T-test"
              ; thread_ts = Some "171.001"
              }
-       ; user_row_origin = Keeper_chat_delivery_journal.Already_persisted_upstream
+       ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
        }
    with
    | Ok _ -> ()
@@ -585,7 +585,7 @@ let test_autonomous_yields_to_queued_connector_message () =
   let lease =
     match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> Some lease
-    | `Empty | `Already_leased _ | `Error _ ->
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
       check "lease_next leases the queued connector message" false;
       None
   in

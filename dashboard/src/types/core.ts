@@ -709,6 +709,7 @@ export type KeeperTurnOutcome =
 export type KeeperQueueReceiptLifecycle =
   | 'pending'
   | 'inflight'
+  | 'recovery_required'
   | 'delivered'
   | 'failed'
 
@@ -742,6 +743,7 @@ export interface KeeperConversationDetails {
   queueRevision?: number | null
   queuePendingCount?: number | null
   queueInflightCount?: number | null
+  queueRecoveryRequiredCount?: number | null
   queueState?: KeeperQueueReceiptLifecycle | null
   queueFailureKind?: KeeperQueueReceiptFailureKind | null
   queueCorrelationError?: 'missing_outcome_ref' | null

@@ -620,7 +620,7 @@ let test_status_surfaces_chat_queue_runtime () =
              source =
                Masc.Keeper_chat_queue.Dashboard
                  { thread_id = "keeper:meta-overlay" };
-             user_row_origin = Masc.Keeper_chat_delivery_journal.Needs_append;
+             user_row_origin = Masc.Keeper_chat_store.Needs_append;
            }
        with
        | Ok _receipt -> ()

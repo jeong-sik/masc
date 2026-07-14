@@ -68,15 +68,17 @@ type turn_outcome =
     keeper-local dispatch gate preserves the single follow-up turn contract
     for messages sent during an existing queued turn.
 
-    Delivery is at-least-once. [handle_turn]'s typed terminal outcome is durably
-    finalized as [Delivered] or [Failed]. [Deferred] and structured cancellation
-    nack the unchanged receipt back to [Pending]; [Deferred] is reserved for a
-    typed admission rejection such as an active shutdown fence, so the same
-    accepted receipt is retried after the lane reopens. An unexpected handler
-    exception becomes a durable [Internal_error] failure instead of a
-    poison-message retry loop. There is deliberately no second wall-clock
-    watchdog: the turn runtime owns timeout/cancellation and must return the
-    typed outcome.
+    [handle_turn]'s typed terminal outcome is durably finalized as [Delivered]
+    or [Failed]. [Deferred] and structured cancellation nack the unchanged
+    receipt back to [Pending]; [Deferred] is reserved for a typed admission
+    rejection such as an active shutdown fence, so the same accepted receipt is
+    retried after the lane reopens. A lease found after process restart is
+    [Recovery_required] and is never automatically dispatched: an operator must
+    explicitly requeue or cancel its exact receipt/revision/lease evidence. An
+    unexpected handler exception becomes a durable [Internal_error] failure
+    instead of a poison-message retry loop. There is deliberately no second
+    wall-clock watchdog: the turn runtime owns timeout/cancellation and must
+    return the typed outcome.
 
     If finalization persistence fails before publication, the exact decision is
     retained and retried before another turn starts after the next durable

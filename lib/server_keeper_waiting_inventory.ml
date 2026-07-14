@@ -3,6 +3,7 @@ type waiting_source =
   | Event_queue_inflight
   | Chat_queue_pending
   | Chat_queue_inflight
+  | Chat_queue_recovery_required
   | Chat_queue_persistence_blocked
   | Hitl_pending
   | External_attention
@@ -56,6 +57,7 @@ let source_to_string = function
   | Event_queue_inflight -> "event_queue_inflight"
   | Chat_queue_pending -> "chat_queue_pending"
   | Chat_queue_inflight -> "chat_queue_inflight"
+  | Chat_queue_recovery_required -> "chat_queue_recovery_required"
   | Chat_queue_persistence_blocked -> "chat_queue_persistence_blocked"
   | Hitl_pending -> "hitl_pending"
   | External_attention -> "external_attention"
@@ -73,6 +75,7 @@ let all_waiting_sources =
   ; Event_queue_inflight
   ; Chat_queue_pending
   ; Chat_queue_inflight
+  ; Chat_queue_recovery_required
   ; Chat_queue_persistence_blocked
   ; Hitl_pending
   ; External_attention
@@ -366,6 +369,7 @@ let chat_queue_rows ~base_path keeper_name =
                  ~lifecycle_fields:[ "state", `String "pending" ] keeper_name
                  queue_index receipt
            | Keeper_chat_queue.Inflight _ | Keeper_chat_queue.Delivered _
+           | Keeper_chat_queue.Recovery_required _
            | Keeper_chat_queue.Failed _ ->
                chat_queue_invariant_error_row keeper_name queue_index receipt
                  "pending")
@@ -386,11 +390,35 @@ let chat_queue_rows ~base_path keeper_name =
                    ]
                  keeper_name queue_index receipt
            | Keeper_chat_queue.Pending | Keeper_chat_queue.Delivered _
+           | Keeper_chat_queue.Recovery_required _
            | Keeper_chat_queue.Failed _ ->
                chat_queue_invariant_error_row keeper_name queue_index receipt
                  "inflight")
   in
-  pending @ inflight
+  let recovery_required =
+    snapshot.recovery_required
+    |> List.mapi (fun queue_index
+                       (receipt : Keeper_chat_queue.active_receipt) ->
+           match receipt.Keeper_chat_queue.state with
+           | Keeper_chat_queue.Recovery_required { lease_id; started_at } ->
+             chat_queue_active_row ~source:Chat_queue_recovery_required
+               ~next_action:"resolve_keeper_chat_queue_recovery"
+               ~lifecycle_fields:
+                 [ "state", `String "recovery_required"
+                 ; "lease_id", `String lease_id
+                 ; "started_at", `Float started_at
+                 ; "started_at_iso", unix_iso_json (Some started_at)
+                 ; "dispatchable", `Bool false
+                 ]
+               keeper_name queue_index receipt
+           | Keeper_chat_queue.Pending
+           | Keeper_chat_queue.Inflight _
+           | Keeper_chat_queue.Delivered _
+           | Keeper_chat_queue.Failed _ ->
+             chat_queue_invariant_error_row keeper_name queue_index receipt
+               "recovery_required")
+  in
+  pending @ inflight @ recovery_required
   @ chat_queue_persistence_blocked_rows ~base_path keeper_name
   @ List.map (chat_queue_load_error_row keeper_name) snapshot.load_errors
 ;;

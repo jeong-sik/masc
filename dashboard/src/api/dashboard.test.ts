@@ -839,6 +839,8 @@ describe('fetchTlcResults', () => {
 describe('fetchDashboardTools', () => {
   it('parses the shutdown admission source without accepting source drift', () => {
     expect(parseDashboardKeeperWaitingSource('turn_admission_shutdown')).toBe('turn_admission_shutdown')
+    expect(parseDashboardKeeperWaitingSource('chat_queue_recovery_required')).toBe('chat_queue_recovery_required')
+    expect(parseDashboardKeeperWaitingSource('chat_queue_persistence_blocked')).toBe('chat_queue_persistence_blocked')
     expect(parseDashboardKeeperWaitingSource(' turn_admission_shutdown ')).toBeNull()
     expect(parseDashboardKeeperWaitingSource('turn_admission_stopping')).toBeNull()
     expect(parseDashboardKeeperWaitingSource(null)).toBeNull()

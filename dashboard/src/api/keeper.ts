@@ -706,6 +706,12 @@ export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind
 export type KeeperChatReceiptState =
   | { kind: 'pending' }
   | { kind: 'inflight'; leaseId: string; startedAt: number }
+  | {
+      kind: 'recovery_required'
+      leaseId: string
+      startedAt: number
+      dispatchable: false
+    }
   | { kind: 'delivered'; completedAt: number; outcomeRef: string | null }
   | {
       kind: 'failed'
@@ -734,7 +740,7 @@ const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>(
 ])
 
 export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
-  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v1') {
+  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v2') {
     throw new Error('Keeper chat receipt response has an unsupported schema')
   }
   const keeperName = asString(value.keeper_name, '').trim()
@@ -775,6 +781,15 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
         throw new Error('Keeper chat inflight receipt is missing lease metadata')
       }
       state = { kind, leaseId, startedAt }
+      break
+    }
+    case 'recovery_required': {
+      const leaseId = asString(rawState.lease_id, '').trim()
+      const startedAt = asNumber(rawState.started_at)
+      if (!leaseId || typeof startedAt !== 'number' || rawState.dispatchable !== false) {
+        throw new Error('Keeper chat recovery-required receipt has invalid recovery evidence')
+      }
+      state = { kind, leaseId, startedAt, dispatchable: false }
       break
     }
     case 'delivered': {

@@ -250,8 +250,7 @@ let test_chat_queue_pending_rows_are_visible () =
     ; attachments = []
     ; timestamp = 150.0
     ; source = Keeper_chat_queue.Discord { channel_id = "chan-42"; user_id = "user-7" }
-    ; user_row_origin =
-        Masc.Keeper_chat_delivery_journal.Already_persisted_upstream
+    ; user_row_origin = Masc.Keeper_chat_store.Already_persisted_upstream
     }
   in
   let receipt =
@@ -304,7 +303,7 @@ let test_chat_queue_pending_rows_are_visible () =
   let lease =
     match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> lease
-    | `Empty | `Already_leased _ | `Error _ ->
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
       fail "pending chat receipt should lease"
   in
   let inflight_json = Server_keeper_waiting_inventory.dashboard_json config in
@@ -327,6 +326,95 @@ let test_chat_queue_pending_rows_are_visible () =
          U.(row |> member "detail" |> member "lifecycle" |> member "lease_id"
             |> to_string)
      | rows -> failf "expected one inflight chat row, got %d" (List.length rows))
+;;
+
+let test_chat_queue_recovery_required_row_is_visible () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "queued-chat-recovery-keeper" in
+  ensure_keeper config keeper_name;
+  let receipt =
+    match
+      Keeper_chat_queue.enqueue ~keeper_name
+        { content = "delivery outcome is unproven"
+        ; user_blocks = []
+        ; attachments = []
+        ; timestamp = 160.0
+        ; source =
+            Keeper_chat_queue.Dashboard
+              { thread_id = "keeper:queued-chat-recovery-keeper" }
+        ; user_row_origin = Keeper_chat_store.Needs_append
+        }
+    with
+    | Ok receipt -> receipt
+    | Error error ->
+      fail
+        ("chat queue recovery enqueue failed: "
+         ^ Keeper_chat_queue.mutation_error_to_string error)
+  in
+  let lease =
+    match Keeper_chat_queue.lease_next ~keeper_name with
+    | `Leased lease -> lease
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+      fail "chat queue recovery receipt should lease"
+  in
+  Keeper_chat_queue.For_testing.reset ();
+  let report =
+    Keeper_chat_queue.configure_persistence
+      ~base_path:config.Workspace_utils_backend_setup.base_path
+  in
+  check int "one receipt requires explicit recovery" 1
+    report.recovery_required_receipt_count;
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  check_metric_float "chat queue recovery metric"
+    Otel_metric_store.metric_keeper_waiting_count
+    ~labels:[ "scope", "keeper"; "source", "chat_queue_recovery_required" ]
+    1.0;
+  match find_keeper json keeper_name with
+  | None -> fail "recovery-required keeper row missing"
+  | Some keeper ->
+    check int "recovery-required waiting count" 1
+      (json_int_member "waiting_count" keeper);
+    check int "recovery-required source count" 1
+      U.(
+        keeper
+        |> member "sources"
+        |> member "chat_queue_recovery_required"
+        |> to_int);
+    (match U.(keeper |> member "waiting_on" |> to_list) with
+     | [ row ] ->
+       check string "recovery-required source row"
+         "chat_queue_recovery_required"
+         (json_string_member "source" row);
+       check string "recovery requires explicit operator action"
+         "resolve_keeper_chat_queue_recovery"
+         (json_string_member "next_action" row);
+       check string "recovery receipt is correlated"
+         (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id)
+         U.(row |> member "detail" |> member "receipt_id" |> to_string);
+       check string "recovery lifecycle is explicit" "recovery_required"
+         U.(
+           row
+           |> member "detail"
+           |> member "lifecycle"
+           |> member "state"
+           |> to_string);
+       check string "recovery lease is correlated" lease.lease_id
+         U.(
+           row
+           |> member "detail"
+           |> member "lifecycle"
+           |> member "lease_id"
+           |> to_string);
+       check bool "recovery row is non-dispatchable" false
+         U.(
+           row
+           |> member "detail"
+           |> member "lifecycle"
+           |> member "dispatchable"
+           |> to_bool)
+     | rows ->
+       failf "expected one recovery-required chat row, got %d" (List.length rows))
 ;;
 
 let test_turn_admission_waiting_row_is_visible () =
@@ -855,6 +943,8 @@ let () =
             test_event_queue_pending_and_inflight_are_visible
         ; test_case "chat queue pending rows are visible" `Quick
             test_chat_queue_pending_rows_are_visible
+        ; test_case "chat queue recovery-required row is visible" `Quick
+            test_chat_queue_recovery_required_row_is_visible
         ; test_case "turn admission waiting row is visible" `Quick
             test_turn_admission_waiting_row_is_visible
         ; test_case "turn admission shutdown row is deferred" `Quick

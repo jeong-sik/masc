@@ -289,6 +289,11 @@ module For_testing : sig
     ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option
   val queued_delivery_outcome_of_turn_ref :
     Ids.Turn_ref.t option -> queued_turn_outcome
+  val committed_delivery_outcome :
+    queued_turn:bool ->
+    turn_ref:Ids.Turn_ref.t option ->
+    (unit, string) result ->
+    (queued_turn_outcome option, string) result
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val empty_stream_bridge_state : keeper_stream_bridge_state

@@ -1403,6 +1403,14 @@ let queued_delivery_outcome_of_turn_ref = function
             "queued turn persisted a reply but the reply payload had no valid turn_ref"
         }
 
+let committed_delivery_outcome ~queued_turn ~turn_ref = function
+  | Error persist_error -> Error persist_error
+  | Ok () ->
+      Ok
+        (if queued_turn
+         then Some (queued_delivery_outcome_of_turn_ref turn_ref)
+         else None)
+
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 
 type translated_keeper_stream_event =
@@ -2168,26 +2176,17 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ()
                  in
                  let delivered_after_persist ?content persisted =
-                   match persisted with
-                   | Ok () ->
+                   match
+                     committed_delivery_outcome ~queued_turn ~turn_ref persisted
+                   with
+                   | Ok queued_outcome ->
                        Keeper_chat_broadcast.chat_appended
                          ~keeper_name:payload.name ~source:chat_source ?content ();
-                       if queued_turn
-                       then
-                         Some (queued_delivery_outcome_of_turn_ref turn_ref)
-                       else None
-                   | Error persist_error ->
-                       if queued_turn
-                       then
-                         Some
-                           (Failed
-                              { kind = Transcript_persist_failed
-                              ; detail = persist_error
-                              })
-                       else None
+                       Ok queued_outcome
+                   | Error _ as error -> error
                  in
                  let turn_outcome = canonical_reply.turn_outcome in
-                 let queued_outcome =
+                 let delivery_result =
                    match turn_outcome, String_util.trim_to_option visible_reply with
                    | Keeper_turn_outcome.Continuation_checkpoint, _ when queued_turn ->
                        let detail =
@@ -2195,35 +2194,25 @@ let process_single_turn ~user_row_origin ~queued_turn
                        in
                        (match persist_failure_reply detail with
                         | Ok () ->
-                            Some
-                              (Failed
-                                 { kind = Continuation_checkpoint_without_reply
-                                 ; detail
-                                 })
-                        | Error persist_error ->
-                            Some
-                              (Failed
-                                 { kind = Transcript_persist_failed
-                                 ; detail = persist_error
-                                 }))
+                            Ok
+                              (Some
+                                 (Failed
+                                    { kind = Continuation_checkpoint_without_reply
+                                    ; detail
+                                    }))
+                        | Error persist_error -> Error persist_error)
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                        (match !direct_delivery_checkpoint with
                         | Some _ ->
-                          (match
-                             commit_direct_terminal
-                               ~ok:true
-                               ~body
-                               ~data:payload_json_opt
-                               Keeper_chat_direct_delivery.No_assistant_reply
-                           with
-                           | Ok () -> None
-                           | Error detail ->
-                             Some
-                               (Failed
-                                  { kind = Transcript_persist_failed; detail }))
+                          commit_direct_terminal
+                            ~ok:true
+                            ~body
+                            ~data:payload_json_opt
+                            Keeper_chat_direct_delivery.No_assistant_reply
+                          |> Result.map (fun () -> None)
                         | None ->
                           persist_user_message_only ();
-                          None)
+                          Ok None)
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
                        if has_visible_blocks
@@ -2236,21 +2225,40 @@ let process_single_turn ~user_row_origin ~queued_turn
                            "no visible reply was produced for this queued message"
                          in
                          (match persist_failure_reply detail with
-                          | Ok () -> Some (Failed { kind = No_visible_reply; detail })
-                          | Error persist_error ->
-                              Some
-                                (Failed
-                                   { kind = Transcript_persist_failed
-                                   ; detail = persist_error
-                                   }))
+                          | Ok () ->
+                            Ok (Some (Failed { kind = No_visible_reply; detail }))
+                          | Error persist_error -> Error persist_error)
                        else (
                          persist_user_message_only ();
-                         None)
+                         Ok None)
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
                  in
-                 (match queued_outcome with
+                 (match delivery_result with
+                  | Error persist_error ->
+                      let queued_outcome =
+                        if queued_turn
+                        then
+                          Some
+                            (Failed
+                               { kind = Transcript_persist_failed
+                               ; detail = persist_error
+                               })
+                        else None
+                      in
+                      push_worker_event
+                        (Stream_terminal
+                           { status = Stream_error
+                           ; body = persist_error
+                           ; queued_outcome
+                           });
+                      Tool_result.error
+                        ~tool_name:"masc_keeper_msg"
+                        ~start_time
+                        persist_error
+                  | Ok queued_outcome ->
+                   (match queued_outcome with
                   | Some (Failed { detail; _ }) ->
                       push_worker_event
                         (Stream_terminal
@@ -3076,6 +3084,7 @@ module For_testing = struct
   let direct_reply_terminal_error = direct_reply_terminal_error
   let queued_delivery_outcome_of_turn_ref =
     queued_delivery_outcome_of_turn_ref
+  let committed_delivery_outcome = committed_delivery_outcome
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let empty_stream_bridge_state = empty_keeper_stream_bridge_state

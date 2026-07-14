@@ -115,3 +115,15 @@ val recover_latest_checkpoint_for_overflow_retry :
   trigger:Compaction_trigger.t ->
   primary_model_max_tokens:int ->
   overflow_retry_recovery option
+
+module For_testing : sig
+  (** Promote a structurally [Prepared] trigger only after [save] reports an
+      actual durable write. Callers with a classified store result must not
+      map a stale no-op to [Ok]. *)
+  val commit_prepared_after_save :
+    trigger:Compaction_trigger.t ->
+    save:(unit -> ('checkpoint, 'error) result) ->
+    ( 'checkpoint * Keeper_compact_policy.compaction_decision
+    , 'error )
+    result
+end

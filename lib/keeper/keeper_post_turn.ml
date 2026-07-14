@@ -533,6 +533,13 @@ let apply_post_turn_lifecycle_with_resilience_handles
   let body = apply_tool_emission_wirein ~now:now_ts body in
   apply_multimodal_wirein ~now:now_ts body
 
+let commit_prepared_after_save ~trigger ~save =
+  match save () with
+  | Error _ as error -> error
+  | Ok checkpoint ->
+    Ok (checkpoint, Keeper_compact_policy.Applied trigger)
+;;
+
 let recover_latest_checkpoint_for_overflow_retry
     ~(base_dir : string)
     ~(meta : keeper_meta)
@@ -597,14 +604,19 @@ let recover_latest_checkpoint_for_overflow_retry
       match base_decision with
       | Keeper_compact_policy.Prepared prepared_trigger ->
         (try
-          (match save_oas_checkpoint
-              ~multimodal_policy:meta.multimodal_policy
-              ~keeper_name:meta.name
-              ~session
-              ~agent_name:retry_meta.agent_name
-              ~ctx:compacted_ctx ~generation:turn_generation
-          with
-          | Ok checkpoint ->
+          (match
+             commit_prepared_after_save
+               ~trigger:prepared_trigger
+               ~save:(fun () ->
+                 save_oas_checkpoint
+                   ~multimodal_policy:meta.multimodal_policy
+                   ~keeper_name:meta.name
+                   ~session
+                   ~agent_name:retry_meta.agent_name
+                   ~ctx:compacted_ctx
+                   ~generation:turn_generation)
+           with
+          | Ok (checkpoint, decision) ->
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string Compactions)
                 ~labels:[ "keeper", retry_meta.name ]
@@ -617,7 +629,7 @@ let recover_latest_checkpoint_for_overflow_retry
                     ; started_dispatched = false
                     ; failure_reason = None
                     ; trigger = Some prepared_trigger
-                    ; decision = Keeper_compact_policy.Applied prepared_trigger
+                    ; decision
                     ; before_tokens
                     ; after_tokens
                     ; saved_tokens = before_tokens - after_tokens
@@ -640,3 +652,7 @@ let recover_latest_checkpoint_for_overflow_retry
               exn;
             None)
       | _ -> None
+
+module For_testing = struct
+  let commit_prepared_after_save = commit_prepared_after_save
+end

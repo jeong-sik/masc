@@ -128,7 +128,7 @@ type config = {
   context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_dir : string option;
+  checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
@@ -148,7 +148,7 @@ run(~sw, ~net, ~config, goal) -> run_result
   2. Event_bus에 "build" 이벤트 publish
   3. Builder 패턴으로 Agent.t 구성
   4. Agent.run 또는 Agent.run_stream 호출
-  5. checkpoint 저장 (checkpoint_dir 설정 시)
+  5. OAS turn boundary에서 caller-owned checkpoint_sink 호출
   6. Event_bus에 "completed"/"failed" publish
   7. Agent.close
 ```

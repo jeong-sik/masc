@@ -106,7 +106,6 @@ type config =
   context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_dir : string option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
@@ -938,9 +937,6 @@ end
 (* Internal: checkpoint persistence                                  *)
 (* ================================================================ *)
 
-let persist_checkpoint =
-  Runtime_oas_checkpoint.persist_checkpoint
-
 let build_checkpoint =
   Runtime_oas_checkpoint.build_checkpoint
 
@@ -1230,13 +1226,6 @@ let run_blocks
         build_checkpoint ~session_id
           ?checkpoint_sidecar:config.checkpoint_sidecar agent
       in
-      (match config.checkpoint_dir with
-       | Some dir ->
-         (match persist_checkpoint ~dir ~session_id ckpt with
-          | Ok () -> ()
-          | Error err ->
-            Log.Misc.error "oas_worker: %s" err)
-       | None -> ());
       Some ckpt
     in
     let lifecycle = worker_lifecycle_classification_of_result result in

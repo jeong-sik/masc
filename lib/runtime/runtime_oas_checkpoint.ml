@@ -31,27 +31,6 @@ let publish_lifecycle ~name ~event ~detail ?error ?session_id ?status
                    @ optional_string_field "status" status
                    @ attrs) )))
 
-let persist_checkpoint ~dir ~session_id (ckpt : Agent_sdk.Checkpoint.t)
-    : (unit, string) result =
-  let path = Filename.concat dir (session_id ^ ".json") in
-  try
-    Fs_compat.mkdir_p dir;
-    Result.map_error
-      (fun err ->
-         Printf.sprintf "checkpoint persist failed for %s: %s" session_id err)
-      (Fs_compat.save_file_atomic path (Agent_sdk.Checkpoint.to_string ckpt))
-  with
-  (* CancelledNeverAbsorbed (KeeperOASAdvanced.tla): re-raise [Cancelled]
-     before the catch-all so a cancelled checkpoint fiber propagates the
-     cancel to its parent switch instead of returning a normal [Error]
-     result.  Absorbing it would create the spec's "zombie" — the parent
-     believes the child completed cleanly while the cancel signal is lost.
-     Regression guard: test/test_oas_checkpoint_cancelled_never_absorbed.ml *)
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Error (Printf.sprintf "checkpoint persist failed for %s: %s"
-             session_id (Printexc.to_string exn))
-
 let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Agent_sdk.Agent.t) =
   match checkpoint_sidecar with
   | None -> Agent_sdk.Agent.checkpoint ~session_id agent

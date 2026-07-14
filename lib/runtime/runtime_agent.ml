@@ -1217,7 +1217,7 @@ let run_blocks
               in
               (match !probe_error, advanced_result with
                | Some error, _ -> Error error
-               | None, Error _ as error -> error
+               | None, Error e -> Error e
                | None, Ok (Agent_sdk.Agent.Advanced.Completed response) ->
                  Ok (`Completed response)
                | None, Ok (Agent_sdk.Agent.Advanced.Yielded yielded) ->

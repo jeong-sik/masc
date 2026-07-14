@@ -54,7 +54,7 @@ describe('NavRailV2 schedule item', () => {
     expect(walk).toEqual([
       'brand',
       '개요', '|',
-      'Keepers', 'Monitor', '|',
+      'Keepers', '레지스트리', 'Monitor', '|',
       '작업', '승인', '예약', '|',
       '보드', 'Fusion', '로그', '|',
       'IDE', '커넥터',

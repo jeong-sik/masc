@@ -7,24 +7,25 @@ import { html } from 'htm/preact'
 import { useState, useEffect } from 'preact/hooks'
 import { navigate, route } from '../../router'
 import type { TabId } from '../../types'
-import { ICONS, ICON_MORE } from './icons-v2'
+import { ICONS, ICON_MORE, type IconKey } from './icons-v2'
 
 interface SurfaceEntry {
   readonly tab: TabId
   readonly label: string
-  readonly icon: keyof typeof ICONS
+  readonly icon: IconKey
 }
 type NavEntry = SurfaceEntry | 'sep'
 
 // Prototype SURFACES order/labels/icons, mapped to live TabIds.
 //   prototype work→workspace, monitor→monitoring, ide→code; rest 1:1.
 // Groups mirror the 2026-07 standalone export's rail DOM: 개요 |
-// Keepers · Monitor | 작업 · 승인 · 예약 | 보드 · Fusion · 로그 |
+// Keepers · Registry · Monitor | 작업 · 승인 · 예약 | 보드 · Fusion · 로그 |
 // IDE · 커넥터 (설정 stays in the footer slot below the spacer).
-const SURFACES: readonly NavEntry[] = [
+const SURFACES = [
   { tab: 'overview', label: '개요', icon: 'grid' },
   'sep',
   { tab: 'keepers', label: 'Keepers', icon: 'users' },
+  { tab: 'registry', label: '레지스트리', icon: 'layers' },
   { tab: 'monitoring', label: 'Monitor', icon: 'monitor' },
   'sep',
   { tab: 'workspace', label: '작업', icon: 'target' },
@@ -37,26 +38,42 @@ const SURFACES: readonly NavEntry[] = [
   'sep',
   { tab: 'code', label: 'IDE', icon: 'code' },
   { tab: 'connectors', label: '커넥터', icon: 'plug' },
-]
+] as const satisfies readonly NavEntry[]
 
 export interface NavBadges {
   readonly approvals?: number
 }
 
-const SURFACE_LABEL: Readonly<Record<string, string>> = Object.fromEntries(
-  SURFACES.filter((e): e is SurfaceEntry => e !== 'sep').map((e) => [e.tab, e.label]),
-)
+type RailEntry = Exclude<(typeof SURFACES)[number], 'sep'>
+type RailTabId = RailEntry['tab']
+type NonRailTabId = Exclude<TabId, RailTabId>
 
-/** Crumb label for a tab (prototype SURFACE_LABEL); settings + unknowns fall back. */
+const SURFACE_LABEL = Object.fromEntries(
+  SURFACES.filter((entry): entry is RailEntry => entry !== 'sep')
+    .map(entry => [entry.tab, entry.label]),
+) as Readonly<Record<RailTabId, string>>
+
+const NON_RAIL_SURFACE_LABEL: Readonly<Record<NonRailTabId, string>> = {
+  cockpit: 'MASC Cockpit',
+  command: 'Command',
+  lab: 'Lab',
+  settings: '설정',
+}
+
+function isRailTab(tab: TabId): tab is RailTabId {
+  return Object.hasOwn(SURFACE_LABEL, tab)
+}
+
+/** Crumb label for a tab. The table is exhaustive over every routable tab. */
 export function surfaceLabel(tab: TabId): string {
-  return SURFACE_LABEL[tab] ?? (tab === 'settings' ? '설정' : tab)
+  return isRailTab(tab) ? SURFACE_LABEL[tab] : NON_RAIL_SURFACE_LABEL[tab]
 }
 
 // On phones the rail collapses to a bottom tab bar: the operator's daily loop
 // (home / agents / work / approvals) gets first-class tabs; the rest live behind
 // a 더보기 sheet so no tab drops below the 44px hit target (prototype shell.jsx).
 const MOBILE_PRIMARY: readonly TabId[] = ['overview', 'workspace', 'keepers', 'approvals']
-const SURFACE_ENTRIES: readonly SurfaceEntry[] = SURFACES.filter((e): e is SurfaceEntry => e !== 'sep')
+const SURFACE_ENTRIES: readonly SurfaceEntry[] = SURFACES.filter((entry): entry is RailEntry => entry !== 'sep')
 
 export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobile?: boolean }) {
   const active = route.value.tab

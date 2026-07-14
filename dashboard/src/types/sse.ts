@@ -315,28 +315,12 @@ export interface RouteState {
   postId: string | null
 }
 
-export type TabId =
-  | 'cockpit'
-  | 'overview'
-  | 'monitoring'
-  | 'keepers'
-  | 'board'
-  | 'schedule'
-  | 'fusion'
-  | 'command'
-  | 'connectors'
-  | 'workspace'
-  | 'lab'
-  | 'code'
-  | 'logs'
-  | 'settings'
-  | 'approvals'
-
-export const VALID_TABS: TabId[] = [
+export const VALID_TABS = [
   'cockpit',
   'overview',
   'monitoring',
   'keepers',
+  'registry',
   'board',
   'schedule',
   'fusion',
@@ -348,4 +332,6 @@ export const VALID_TABS: TabId[] = [
   'logs',
   'settings',
   'approvals',
-]
+] as const
+
+export type TabId = typeof VALID_TABS[number]

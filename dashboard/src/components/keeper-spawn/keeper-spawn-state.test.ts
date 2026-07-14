@@ -21,8 +21,8 @@ vi.mock('../../store', () => ({
 import {
   createPersona,
   deletePersona,
-  normalizePersonaSummaries,
-  normalizePersonaSummary,
+  loadPersonas,
+  personasResource,
   spawnKeeperFromPersona,
   spawnResult,
   updatePersona,
@@ -30,64 +30,41 @@ import {
 
 afterEach(() => {
   spawnResult.value = null
+  personasResource.reset()
   vi.clearAllMocks()
 })
 
-describe('normalizePersonaSummary', () => {
-  it('accepts backend persona summary fields and keeps the handle for spawning', () => {
-    expect(
-      normalizePersonaSummary({
-        persona_name: 'sonsukku',
-        display_name: '손석구',
-        role: '무심한 로코형 동네 형',
-        trait: '건조한 농담과 낮은 텐션',
-      }),
-    ).toEqual({
-      name: 'sonsukku',
-      displayName: '손석구',
-      role: '무심한 로코형 동네 형',
-      mode: undefined,
-      description: '건조한 농담과 낮은 텐션',
+describe('loadPersonas', () => {
+  it('requests and stores only the detailed backend contract', async () => {
+    callMcpTool.mockResolvedValue(JSON.stringify({
+      count: 1,
+      personas: [{
+        persona_name: 'reviewer',
+        display_name: 'Reviewer',
+        role: null,
+        trait: 'strict',
+        profile_path: '/personas/reviewer/profile.json',
+        has_keeper_defaults: true,
+      }],
+    }))
+
+    await loadPersonas()
+
+    expect(callMcpTool).toHaveBeenCalledWith('masc_persona_list', { detailed: true })
+    expect(personasResource.state.value).toMatchObject({
+      status: 'loaded',
+      data: [{ persona_name: 'reviewer', has_keeper_defaults: true }],
     })
   })
 
-  it('falls back to existing dashboard-shaped fields when they already match', () => {
-    expect(
-      normalizePersonaSummary({
-        name: 'sangsu',
-        displayName: '상수',
-        role: '찌질한 영화감독',
-        description: '직설적이고 현실 감각 있는 동네 형',
-      }),
-    ).toEqual({
-      name: 'sangsu',
-      displayName: '상수',
-      role: '찌질한 영화감독',
-      mode: undefined,
-      description: '직설적이고 현실 감각 있는 동네 형',
-    })
-  })
-})
+  it('surfaces malformed entries through the resource error state', async () => {
+    callMcpTool.mockResolvedValue(JSON.stringify({ count: 1, personas: ['legacy-name'] }))
 
-describe('normalizePersonaSummaries', () => {
-  it('reads both wrapped and bare arrays and filters invalid entries', () => {
-    expect(
-      normalizePersonaSummaries({
-        personas: [
-          { persona_name: 'sonsukku', display_name: '손석구' },
-          { name: '' },
-          'skip-me',
-        ],
-      }),
-    ).toEqual([
-      {
-        name: 'sonsukku',
-        displayName: '손석구',
-        role: undefined,
-        mode: undefined,
-        description: undefined,
-      },
-    ])
+    await loadPersonas()
+
+    expect(personasResource.state.value).toMatchObject({
+      status: 'error',
+    })
   })
 })
 

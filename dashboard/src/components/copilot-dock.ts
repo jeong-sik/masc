@@ -176,6 +176,7 @@ export function getSurfaceContext(selectedKeeperId?: string | null): SurfaceCont
       ]
       break
     case 'fusion':
+    case 'registry':
     case 'settings':
       base.fields = fleetFields
       break

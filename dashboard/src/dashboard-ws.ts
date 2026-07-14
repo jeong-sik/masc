@@ -403,6 +403,10 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
     slices.add('execution')
     slices.add('composite')
   }
+  if (routeState.tab === 'registry') {
+    slices.add('execution')
+    slices.add('composite')
+  }
   if (routeState.tab === 'board') {
     return Array.from(slices).sort()
   }

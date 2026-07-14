@@ -122,8 +122,6 @@ type config =
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;
@@ -1039,10 +1037,6 @@ let content_blocks_detail (blocks : Agent_sdk.Types.content_block list) =
   |> String.concat "\n"
   |> String.trim
 
-type boundary_yield =
-  | Cooperative_yield of cooperative_yield_reason
-  | Legacy_exit of stop_reason
-
 let config_with_boundary_response_capture
       (config : config)
       response_ref
@@ -1089,11 +1083,9 @@ let run_blocks
   | Ok () ->
   let boundary_response = ref None in
   let config =
-    match cooperative_yield_probe, config.exit_condition with
-    | None, None -> config
-    | Some _, None | None, Some _ ->
-      config_with_boundary_response_capture config boundary_response
-    | Some _, Some _ -> config
+    match cooperative_yield_probe with
+    | None -> config
+    | Some _ -> config_with_boundary_response_capture config boundary_response
   in
   let goal_detail =
     match goal_detail with
@@ -1152,41 +1144,18 @@ let run_blocks
         ]
         (fun _trace_id ->
           let boundary_probe =
-            match cooperative_yield_probe, config.exit_condition with
-            | Some _, Some _ ->
-              Error
-                (Agent_sdk.Error.Config
-                   (Agent_sdk.Error.InvalidConfig
-                      { field = "cooperative_yield_probe/exit_condition"
-                      ; detail = "callbacks are mutually exclusive"
-                      }))
-            | Some probe, None ->
-              Ok
-                (Some
-                   (fun (boundary : Agent_sdk.Agent.Advanced.tool_boundary) ->
-                      Result.map
-                        (function
-                          | Continue -> None
-                          | Yield reason -> Some (Cooperative_yield reason))
-                        (probe boundary)))
-            | None, Some predicate ->
-              Ok
-                (Some
-                   (fun (boundary : Agent_sdk.Agent.Advanced.tool_boundary) ->
-                      if not (predicate boundary.Agent_sdk.Agent.Advanced.turn)
-                      then Ok None
-                      else
-                        match config.exit_condition_result with
-                        | Some render ->
-                          let stop_reason, _ = render boundary.turn in
-                          Ok (Some (Legacy_exit stop_reason))
-                        | None ->
-                          Error
-                            (Agent_sdk.Error.Internal
-                               "exit condition matched without a typed result")))
-            | None, None -> Ok None
+            match cooperative_yield_probe with
+            | None -> None
+            | Some probe ->
+              Some
+                (fun (boundary : Agent_sdk.Agent.Advanced.tool_boundary) ->
+                   Result.map
+                     (function
+                       | Continue -> None
+                       | Yield reason -> Some reason)
+                     (probe boundary))
           in
-          Result.bind boundary_probe (function
+          match boundary_probe with
             | None ->
               (match on_event with
                | Some cb ->
@@ -1262,7 +1231,7 @@ let run_blocks
                   | Some _, None ->
                     Error
                       (Agent_sdk.Error.Internal
-                         "cooperative yield returned without its provider response")))))
+                         "cooperative yield returned without its provider response"))))
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =
@@ -1339,11 +1308,10 @@ let run_blocks
       close_after_success ();
       let stop_reason =
         match decision with
-        | Cooperative_yield Chat_waiting ->
+        | Chat_waiting ->
           Yielded_to_chat_waiting { turns_used = yielded.turn }
-        | Cooperative_yield Durable_stimulus_waiting ->
+        | Durable_stimulus_waiting ->
           Yielded_to_durable_stimulus { turns_used = yielded.turn }
-        | Legacy_exit stop_reason -> stop_reason
       in
       record_dashboard_oas_response
         ~config

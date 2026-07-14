@@ -83,8 +83,6 @@ type config =
   ; yield_on_tool : bool
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
-  ; exit_condition : (int -> bool) option
-  ; exit_condition_result : (int -> stop_reason * string option) option
   ; thinking_budget : int option
     (** Token budget for extended thinking, forwarded to OAS
         [Builder.with_thinking_budget]. Only meaningful when
@@ -141,8 +139,6 @@ let default_config
   ; yield_on_tool = false
   ; context_injector = None
   ; context = None
-  ; exit_condition = None
-  ; exit_condition_result = None
   ; thinking_budget = None
   ; top_p = provider_cfg.top_p
   ; top_k = provider_cfg.top_k

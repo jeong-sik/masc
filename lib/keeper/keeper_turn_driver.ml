@@ -287,8 +287,6 @@ let run_named
     ?context_injector
     ?context
     ?enable_thinking
-    ?exit_condition
-    ?exit_condition_result
     ?cooperative_yield_probe
     ?oas_checkpoint
     ?trace_link
@@ -576,8 +574,6 @@ let run_named
             ; context
             ; enable_thinking = inference_policy.attempt_enable_thinking
             ; preserve_thinking = inference_policy.attempt_preserve_thinking
-            ; exit_condition
-            ; exit_condition_result
             ; cooperative_yield_probe
             ; oas_checkpoint
             ; trace_link

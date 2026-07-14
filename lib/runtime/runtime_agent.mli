@@ -97,8 +97,6 @@ type config = Runtime_agent_context.config = {
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;

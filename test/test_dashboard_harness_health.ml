@@ -36,12 +36,10 @@ let record_wake_payload ~trace_id =
     ~keeper_name:"keeper-harness"
     ~trace_id
     ~turn_index:7
-    ~model_id:"provider/private-model"
     ~context_window:4096
-    ~approx_body_bytes:100
     ~system_prompt_bytes:10
-    ~tool_defs_bytes:20
-    ~messages_bytes:70
+    ~tool_schema_json_bytes:20
+    ~message_content_bytes:70
     ~message_count:3
     ~role_counts:[ "user", 1; "assistant", 2 ]
     ~tool_count:4
@@ -59,7 +57,9 @@ let test_wake_payload_store_round_trip () =
     check string "trace" "trace-round-trip" event.trace_id;
     check int "turn index" 7 event.turn_index;
     check int "context window" 4096 event.context_window;
-    check int "approx bytes" 100 event.approx_body_bytes;
+    check int "system prompt bytes" 10 event.system_prompt_bytes;
+    check int "tool schema JSON bytes" 20 event.tool_schema_json_bytes;
+    check int "message content bytes" 70 event.message_content_bytes;
     check int "tool count" 4 event.tool_count;
     check bool "compact flag" false event.has_compact_happened
   | events ->

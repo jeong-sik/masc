@@ -39,7 +39,7 @@ let sum_counts counts =
 
 let test_text_only_message () =
   let m = text_msg Types.User "hello" in
-  check int "text length only" 5 (WT.bytes_of_message m)
+  check int "text length only" 5 (WT.bytes_of_message_content m)
 
 let test_tool_use_bytes () =
   let m = tool_use_msg "abc" "grep" (`Assoc [ ("q", `String "foo") ]) in
@@ -48,13 +48,13 @@ let test_tool_use_bytes () =
     + String.length "grep"
     + String.length (Yojson.Safe.to_string (`Assoc [ ("q", `String "foo") ]))
   in
-  check int "tool_use bytes" expected (WT.bytes_of_message m)
+  check int "tool_use bytes" expected (WT.bytes_of_message_content m)
 
 let test_tool_result_bytes () =
   let m = tool_result_msg ~tool_use_id:"abc" ~content:"hello world" in
   check int "tool_result bytes"
     (String.length "abc" + String.length "hello world")
-    (WT.bytes_of_message m)
+    (WT.bytes_of_message_content m)
 
 let test_thinking_and_redacted () =
   let m : Types.message =
@@ -72,7 +72,7 @@ let test_thinking_and_redacted () =
   in
   check int "thinking uses content; redacted uses literal length"
     (String.length "ponder" + String.length "redacted-blob")
-    (WT.bytes_of_message m)
+    (WT.bytes_of_message_content m)
 
 let test_role_key_mapping () =
   check string "system -> system" "system" (WT.role_key Types.System);
@@ -100,6 +100,7 @@ let test_role_counts_sum_matches_message_count () =
   let sizes =
     WT.compute_sizes ~system_prompt:"" ~tools:[] ~history_messages:history
       ~user_message:"third"
+      ()
   in
   check int "message_count equals sum of role_counts" sizes.message_count
     (sum_counts sizes.role_counts);
@@ -120,13 +121,34 @@ let test_compute_sizes_bytes_breakdown () =
   let sizes =
     WT.compute_sizes ~system_prompt:"sys" ~tools ~history_messages:history
       ~user_message:"CCCC" (* 4 bytes *)
+      ()
   in
   check int "system_prompt_bytes" 3 sizes.system_prompt_bytes;
-  check int "tool_defs_bytes (empty)" 0 sizes.tool_defs_bytes;
-  check int "messages_bytes (1 + 2 + 4)" 7 sizes.messages_bytes;
-  check int "approx_body_bytes = sp + tools + msgs" (3 + 0 + 7)
-    sizes.approx_body_bytes;
+  check int "tool_schema_json_bytes (empty)" 0 sizes.tool_schema_json_bytes;
+  check int "message_content_bytes (1 + 2 + 4)" 7 sizes.message_content_bytes;
   check int "tool_count" 0 sizes.tool_count
+
+let test_compute_sizes_uses_structured_pending_user_blocks () =
+  let user_blocks =
+    [ Types.Image
+        { media_type = "image/png"; data = "abc123"; source_type = Types.Base64 }
+    ; Types.Text "describe"
+    ]
+  in
+  let sizes =
+    WT.compute_sizes
+      ~system_prompt:""
+      ~tools:[]
+      ~history_messages:[]
+      ~user_blocks
+      ~user_message:"display-only fallback must not be counted"
+      ()
+  in
+  check int
+    "structured blocks replace the display-only fallback"
+    (String.length "abc123" + String.length "describe")
+    sizes.message_content_bytes;
+  check int "pending structured input is one User message" 1 sizes.message_count
 
 let test_compute_sizes_invariant_across_shapes () =
   (* Random-ish mixtures: every call must satisfy the invariant. *)
@@ -151,6 +173,7 @@ let test_compute_sizes_invariant_across_shapes () =
       let sizes =
         WT.compute_sizes ~system_prompt:"p" ~tools:[] ~history_messages:history
           ~user_message:"u"
+          ()
       in
       check int
         (Printf.sprintf
@@ -190,19 +213,17 @@ let test_phase0_record_always_emits_observation () =
   let observed = ref None in
   let restore () =
     Masc.Keeper_keepalive_signal.register_record_wake_payload
-      (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_
-        ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_
-        ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_
-        ~tool_count:_ ~has_compact_happened:_ -> ())
+      (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~context_window:_
+        ~system_prompt_bytes:_ ~tool_schema_json_bytes:_ ~message_content_bytes:_
+        ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ())
   in
   Fun.protect
     ~finally:restore
     (fun () ->
        Masc.Keeper_keepalive_signal.register_record_wake_payload
-         (fun ~keeper_name ~trace_id:_ ~turn_index:_ ~model_id:_
-           ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes
-           ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count ~role_counts:_
-           ~tool_count:_ ~has_compact_happened:_ ->
+         (fun ~keeper_name ~trace_id:_ ~turn_index:_ ~context_window:_
+           ~system_prompt_bytes ~tool_schema_json_bytes:_ ~message_content_bytes:_
+           ~message_count ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ ->
             observed := Some (keeper_name, system_prompt_bytes, message_count));
        Masc.Keeper_agent_run_phase0_telemetry.record
          ~meta
@@ -212,7 +233,8 @@ let test_phase0_record_always_emits_observation () =
          ~user_message:"next"
          ~start_turn_count:3
          ~max_context:4096
-         ~pre_dispatch_compacted:false;
+         ~pre_dispatch_compacted:false
+         ();
        check
          (option (triple string int int))
          "phase-0 emits exact observation without an admission switch"
@@ -222,7 +244,7 @@ let test_phase0_record_always_emits_observation () =
 let () =
   run "Keeper_wake_telemetry"
     [
-      ( "bytes_of_message",
+      ( "bytes_of_message_content",
         [
           test_case "text-only content" `Quick test_text_only_message;
           test_case "tool_use serialization bytes" `Quick test_tool_use_bytes;
@@ -244,6 +266,8 @@ let () =
         [
           test_case "byte breakdown matches inputs" `Quick
             test_compute_sizes_bytes_breakdown;
+          test_case "structured pending User blocks win over fallback text" `Quick
+            test_compute_sizes_uses_structured_pending_user_blocks;
           test_case "role_counts sum matches message_count" `Quick
             test_role_counts_sum_matches_message_count;
           test_case "invariant holds across mixed content shapes" `Quick

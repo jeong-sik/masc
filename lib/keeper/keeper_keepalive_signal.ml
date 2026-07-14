@@ -31,12 +31,10 @@ let record_wake_payload_callback
     : (keeper_name:string ->
        trace_id:string ->
        turn_index:int ->
-       model_id:string ->
        context_window:int ->
-       approx_body_bytes:int ->
        system_prompt_bytes:int ->
-       tool_defs_bytes:int ->
-       messages_bytes:int ->
+       tool_schema_json_bytes:int ->
+       message_content_bytes:int ->
        message_count:int ->
        role_counts:(string * int) list ->
        tool_count:int ->
@@ -45,30 +43,27 @@ let record_wake_payload_callback
       Atomic.t
   =
   Atomic.make
-    (fun ~keeper_name:_
+    (fun ~keeper_name
       ~trace_id:_
       ~turn_index:_
-      ~model_id:_
       ~context_window:_
-      ~approx_body_bytes:_
       ~system_prompt_bytes:_
-      ~tool_defs_bytes:_
-      ~messages_bytes:_
+      ~tool_schema_json_bytes:_
+      ~message_content_bytes:_
       ~message_count:_
       ~role_counts:_
       ~tool_count:_
-      ~has_compact_happened:_ -> ())
+      ~has_compact_happened:_ ->
+      Log.Keeper.warn "wake-payload observer unavailable: keeper=%s" keeper_name)
 
 let record_wake_payload
     ~keeper_name
     ~trace_id
     ~turn_index
-    ~model_id
     ~context_window
-    ~approx_body_bytes
     ~system_prompt_bytes
-    ~tool_defs_bytes
-    ~messages_bytes
+    ~tool_schema_json_bytes
+    ~message_content_bytes
     ~message_count
     ~role_counts
     ~tool_count
@@ -78,12 +73,10 @@ let record_wake_payload
     ~keeper_name
     ~trace_id
     ~turn_index
-    ~model_id
     ~context_window
-    ~approx_body_bytes
     ~system_prompt_bytes
-    ~tool_defs_bytes
-    ~messages_bytes
+    ~tool_schema_json_bytes
+    ~message_content_bytes
     ~message_count
     ~role_counts
     ~tool_count

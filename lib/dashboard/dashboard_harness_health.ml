@@ -35,15 +35,8 @@ type pre_compact_event =
 (** Wake-time payload observation.
 
     Captured once per keeper turn, just before [Keeper_turn_driver.run_named] fires.
-    Phase 0 baseline for the tiered-hydration redesign (Option C).
-
-    [approx_body_bytes] is a MASC-side estimate (sum of content text,
-    tool definition JSON, system prompt, plus the pending user turn).
-    It is NOT the exact HTTP body wire size — provider layers add JSON
-    structural overhead (role keys, content block wrappers, array
-    brackets, escaping). Expect the real body to be ~1.3–1.5× this
-    estimate depending on tool-call density. Use [approx_body_bytes]
-    for trend detection, not for absolute thresholds.
+    Component byte fields are exact measurements of the canonical values MASC
+    owns; they do not claim to represent a provider-specific HTTP request body.
 
     [message_count] and [role_counts] include the synthesized user turn
     that OAS will append from [~goal], matching the wire-level message
@@ -56,12 +49,10 @@ type wake_payload_event =
   ; keeper_name : string
   ; trace_id : string
   ; turn_index : int
-  ; model_id : string
   ; context_window : int
-  ; approx_body_bytes : int
   ; system_prompt_bytes : int
-  ; tool_defs_bytes : int
-  ; messages_bytes : int
+  ; tool_schema_json_bytes : int
+  ; message_content_bytes : int
   ; message_count : int
   ; role_counts : (string * int) list
   ; tool_count : int
@@ -314,8 +305,6 @@ let role_counts_of_json json : (string * int) list =
     | _ -> None)
 ;;
 
-let public_runtime_model_id = "runtime"
-
 let wake_payload_record_json (event : wake_payload_event) =
   `Assoc
     [ "record_type", `String "wake_payload"
@@ -323,12 +312,10 @@ let wake_payload_record_json (event : wake_payload_event) =
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
     ; "turn_index", `Int event.turn_index
-    ; "model_id", `String public_runtime_model_id
     ; "context_window", `Int event.context_window
-    ; "approx_body_bytes", `Int event.approx_body_bytes
     ; "system_prompt_bytes", `Int event.system_prompt_bytes
-    ; "tool_defs_bytes", `Int event.tool_defs_bytes
-    ; "messages_bytes", `Int event.messages_bytes
+    ; "tool_schema_json_bytes", `Int event.tool_schema_json_bytes
+    ; "message_content_bytes", `Int event.message_content_bytes
     ; "message_count", `Int event.message_count
     ; "role_counts", role_counts_to_json event.role_counts
     ; "tool_count", `Int event.tool_count
@@ -342,12 +329,10 @@ let wake_payload_event_json (event : wake_payload_event) =
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
     ; "turn_index", `Int event.turn_index
-    ; "model_id", `String public_runtime_model_id
     ; "context_window", `Int event.context_window
-    ; "approx_body_bytes", `Int event.approx_body_bytes
     ; "system_prompt_bytes", `Int event.system_prompt_bytes
-    ; "tool_defs_bytes", `Int event.tool_defs_bytes
-    ; "messages_bytes", `Int event.messages_bytes
+    ; "tool_schema_json_bytes", `Int event.tool_schema_json_bytes
+    ; "message_content_bytes", `Int event.message_content_bytes
     ; "message_count", `Int event.message_count
     ; "role_counts", role_counts_to_json event.role_counts
     ; "tool_count", `Int event.tool_count
@@ -365,16 +350,16 @@ let wake_payload_event_of_json json =
       ; keeper_name = string_field json "keeper_name"
       ; trace_id = string_field json "trace_id"
       ; turn_index = Safe_ops.json_int ~default:0 "turn_index" json
-      ; model_id = public_runtime_model_id
       ; context_window =
           Safe_ops.json_int
             ~default:Runtime_constants.fallback_context_window
             "context_window"
             json
-      ; approx_body_bytes = Safe_ops.json_int ~default:0 "approx_body_bytes" json
       ; system_prompt_bytes = Safe_ops.json_int ~default:0 "system_prompt_bytes" json
-      ; tool_defs_bytes = Safe_ops.json_int ~default:0 "tool_defs_bytes" json
-      ; messages_bytes = Safe_ops.json_int ~default:0 "messages_bytes" json
+      ; tool_schema_json_bytes =
+          Safe_ops.json_int ~default:0 "tool_schema_json_bytes" json
+      ; message_content_bytes =
+          Safe_ops.json_int ~default:0 "message_content_bytes" json
       ; message_count = Safe_ops.json_int ~default:0 "message_count" json
       ; role_counts = role_counts_of_json json
       ; tool_count = Safe_ops.json_int ~default:0 "tool_count" json
@@ -709,31 +694,26 @@ let record_wake_payload_at
       ~keeper_name
       ~trace_id
       ~turn_index
-      ~model_id
       ~context_window
-      ~approx_body_bytes
       ~system_prompt_bytes
-      ~tool_defs_bytes
-      ~messages_bytes
+      ~tool_schema_json_bytes
+      ~message_content_bytes
       ~message_count
       ~role_counts
       ~tool_count
       ~has_compact_happened
   =
-  let model_id = public_runtime_model_id in
   (* Project World Building: Broadcast live Yjs telemetry *)
-  Dashboard_yjs.broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id;
+  Dashboard_yjs.broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index;
   let event =
     { timestamp
     ; keeper_name
     ; trace_id
     ; turn_index
-    ; model_id
     ; context_window
-    ; approx_body_bytes
     ; system_prompt_bytes
-    ; tool_defs_bytes
-    ; messages_bytes
+    ; tool_schema_json_bytes
+    ; message_content_bytes
     ; message_count
     ; role_counts
     ; tool_count
@@ -752,12 +732,10 @@ let record_wake_payload
       ~keeper_name
       ~trace_id
       ~turn_index
-      ~model_id
       ~context_window
-      ~approx_body_bytes
       ~system_prompt_bytes
-      ~tool_defs_bytes
-      ~messages_bytes
+      ~tool_schema_json_bytes
+      ~message_content_bytes
       ~message_count
       ~role_counts
       ~tool_count
@@ -768,12 +746,10 @@ let record_wake_payload
     ~keeper_name
     ~trace_id
     ~turn_index
-    ~model_id
     ~context_window
-    ~approx_body_bytes
     ~system_prompt_bytes
-    ~tool_defs_bytes
-    ~messages_bytes
+    ~tool_schema_json_bytes
+    ~message_content_bytes
     ~message_count
     ~role_counts
     ~tool_count
@@ -895,8 +871,13 @@ let json ~(config : Workspace.config) ?since ?until () =
 ;;
 
 let () =
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ->
-    ignore (record_wake_payload ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened)
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~context_window ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ->
+    let (_recorded : wake_payload_event) =
+      record_wake_payload ~keeper_name ~trace_id ~turn_index ~context_window
+        ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes
+        ~message_count ~role_counts ~tool_count ~has_compact_happened
+    in
+    ()
   );
 
   Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger ->

@@ -94,9 +94,6 @@ type compaction_event = Keeper_post_turn.compaction_event = {
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
-  before_tokens : int;
-  after_tokens : int;
-  saved_tokens : int;
 }
 
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
@@ -210,59 +207,14 @@ let dispatch_keeper_phase_event
         event
         ~error:(Printexc.to_string exn)
 
-(* #9988 Option B follow-up: centralize [Compaction_completed] dispatch
-   so both emit paths (manual recovery in [keeper_tool_surface] and automatic
-   post-turn lifecycle) share the same outcome counter + warn log.
-
-   [masc_keeper_compaction_outcome_total{keeper,outcome}] splits into
-   [outcome=ok] (real savings) and [outcome=noop] (before==after or
-   after>before).  The FSM (#9993) already refuses to clear
-   [context_overflow] in the noop branch; the counter exposes the
-   surface so dashboards/Grafana can alert on rising noop rate —
-   the operational signal for "reducer has nothing to strip, switch
-   profile or hand off". *)
-let compaction_outcome_metric = "masc_keeper_compaction_outcome_total"
-
-let () =
-  Otel_metric_store.register_counter
-    ~name:compaction_outcome_metric
-    ~help:
-      "Total Compaction_completed dispatches classified by token \
-       savings. Labels: keeper, outcome (ok = saved_tokens > 0, \
-       noop = before == after or after > before). Rising noop \
-       rate is the operational signal for \"reducer has nothing \
-       to strip, switch profile or hand off\" (#9988)."
-    ()
-
-(* Observability-only: bump the outcome counter and log the warn
-   when saved_tokens <= 0.  Split from [dispatch_compaction_completed]
-   so unit tests can verify classification without needing a full
-   [Workspace.config] / [Keeper_registry] setup. *)
-let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
-  let saved_tokens = before_tokens - after_tokens in
-  let outcome = if saved_tokens > 0 then "ok" else "noop" in
-  Otel_metric_store.inc_counter compaction_outcome_metric
-    ~labels:[ ("keeper", keeper_name); ("outcome", outcome) ] ();
-  if saved_tokens <= 0 then
-    Log.Keeper.warn
-      "#9988 compaction_completed but saved_tokens=%d \
-       (before=%d after=%d) keeper=%s — context_overflow will stay set \
-       (FSM noop branch).  If this repeats, switch to a stronger \
-       compaction profile or escalate to operator."
-      saved_tokens before_tokens after_tokens keeper_name
-
 let dispatch_compaction_completed
     ~(config : Workspace.config)
     ~origin
-    ~keeper_name
-    ~before_tokens
-    ~after_tokens =
-  record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
+    ~keeper_name =
   Otel_metric_store.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
   dispatch_keeper_phase_event ~config ~origin ~keeper_name
-    (Keeper_state_machine.Compaction_completed
-       { before_tokens; after_tokens })
+    Keeper_state_machine.Compaction_completed
 
 let dispatch_post_turn_lifecycle_events
     ~(config : Workspace.config)
@@ -296,8 +248,6 @@ let dispatch_post_turn_lifecycle_events
         ~config
         ~origin:Keeper_registry.Post_turn_lifecycle
         ~keeper_name
-        ~before_tokens:lifecycle.compaction.before_tokens
-        ~after_tokens:lifecycle.compaction.after_tokens
     end
     else
       dispatch_keeper_phase_event

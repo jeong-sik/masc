@@ -16,15 +16,6 @@ open Printf
 open Result.Syntax
 
 (* ================================================================ *)
-(* worker_container_meta -> OAS Masc_domain.model                          *)
-(* ================================================================ *)
-
-(** Convert an effective_model string to an OAS model identifier.
-    MASC workers use local Ollama/llama-server models, so all model IDs
-    go through Custom. *)
-let oas_model_of_effective_model (model_id : string) : string = model_id
-
-(* ================================================================ *)
 (* worker_container_meta -> OAS Masc_domain.agent_config                   *)
 (* ================================================================ *)
 
@@ -33,12 +24,12 @@ let oas_model_of_effective_model (model_id : string) : string = model_id
     MASC does not synthesize token, turn, or sampling limits. *)
 let agent_config_of_worker_meta
       (meta : Worker_container_types.worker_container_meta)
+      ~(model : string)
       ~(system_prompt : string)
   : Agent_sdk.Types.agent_config
   =
-  { Agent_sdk.Types.default_config with
+  { (Agent_sdk.Types.default_config ~model) with
     name = meta.worker_name
-  ; model = oas_model_of_effective_model meta.effective_model
   ; system_prompt = Some system_prompt
   ; enable_thinking = Some (Option.value ~default:false meta.thinking_enabled)
   }
@@ -71,13 +62,6 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
 ;;
 
 (* ================================================================ *)
-(* OAS Provider from MASC model_spec                                 *)
-(* ================================================================ *)
-
-(** Re-use the existing provider mapping from worker_container. *)
-let oas_provider_of_label = Worker_container.oas_provider_of_label
-
-(* ================================================================ *)
 (* Build OAS Agent.t via Builder                                     *)
 (* ================================================================ *)
 
@@ -92,7 +76,7 @@ let oas_provider_of_label = Worker_container.oas_provider_of_label
 let build_agent
       ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
       ~(meta : Worker_container_types.worker_container_meta)
-      ~(provider : Agent_sdk.Provider.config)
+      ~(provider_config : Llm_provider.Provider_config.t)
       ~(system_prompt : string)
       ~(tools : Agent_sdk.Tool.t list)
       ~(hooks : Agent_sdk.Hooks.hooks)
@@ -103,14 +87,19 @@ let build_agent
       ()
   : (Agent_sdk.Agent.t, string) result
   =
-  let config = agent_config_of_worker_meta meta ~system_prompt in
+  let config =
+    agent_config_of_worker_meta
+      meta
+      ~model:provider_config.model_id
+      ~system_prompt
+  in
   let builder =
     Agent_sdk.Builder.create ~net ~model:config.model
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt system_prompt
     |> Agent_sdk.Builder.with_enable_thinking
          (Option.value ~default:false meta.thinking_enabled)
-    |> Agent_sdk.Builder.with_provider provider
+    |> Agent_sdk.Builder.with_provider_config provider_config
     |> Agent_sdk.Builder.with_tools tools
     |> Agent_sdk.Builder.with_hooks hooks
     |> Agent_sdk.Builder.with_raw_trace raw_trace
@@ -183,13 +172,8 @@ let make_tool_tracking_hooks ?context () =
             | Agent_sdk.Hooks.PostToolUse _
             | Agent_sdk.Hooks.PostToolUseFailure _
             | Agent_sdk.Hooks.OnStop _
-            | Agent_sdk.Hooks.OnIdle _
-            | Agent_sdk.Hooks.OnIdleEscalated _
             | Agent_sdk.Hooks.OnError _
-            | Agent_sdk.Hooks.OnToolError _
-            | Agent_sdk.Hooks.PreCompact _
-            | Agent_sdk.Hooks.PostCompact _
-            | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue)
+            | Agent_sdk.Hooks.OnToolError _ -> Agent_sdk.Hooks.Continue)
     ; on_error =
         Some
           (function
@@ -203,12 +187,7 @@ let make_tool_tracking_hooks ?context () =
             | Agent_sdk.Hooks.PostToolUse _
             | Agent_sdk.Hooks.PostToolUseFailure _
             | Agent_sdk.Hooks.OnStop _
-            | Agent_sdk.Hooks.OnIdle _
-            | Agent_sdk.Hooks.OnIdleEscalated _
-            | Agent_sdk.Hooks.OnToolError _
-            | Agent_sdk.Hooks.PreCompact _
-            | Agent_sdk.Hooks.PostCompact _
-            | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue)
+            | Agent_sdk.Hooks.OnToolError _ -> Agent_sdk.Hooks.Continue)
     ; on_tool_error =
         Some
           (function
@@ -222,12 +201,7 @@ let make_tool_tracking_hooks ?context () =
             | Agent_sdk.Hooks.PostToolUse _
             | Agent_sdk.Hooks.PostToolUseFailure _
             | Agent_sdk.Hooks.OnStop _
-            | Agent_sdk.Hooks.OnIdle _
-            | Agent_sdk.Hooks.OnIdleEscalated _
-            | Agent_sdk.Hooks.OnError _
-            | Agent_sdk.Hooks.PreCompact _
-            | Agent_sdk.Hooks.PostCompact _
-            | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue)
+            | Agent_sdk.Hooks.OnError _ -> Agent_sdk.Hooks.Continue)
     }
   in
   let hooks =
@@ -255,13 +229,8 @@ let make_tool_tracking_hooks ?context () =
                 | Agent_sdk.Hooks.PostToolUse _
                 | Agent_sdk.Hooks.PostToolUseFailure _
                 | Agent_sdk.Hooks.OnStop _
-                | Agent_sdk.Hooks.OnIdle _
-                | Agent_sdk.Hooks.OnIdleEscalated _
                 | Agent_sdk.Hooks.OnError _
-                | Agent_sdk.Hooks.OnToolError _
-                | Agent_sdk.Hooks.PreCompact _
-                | Agent_sdk.Hooks.PostCompact _
-                | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue)
+                | Agent_sdk.Hooks.OnToolError _ -> Agent_sdk.Hooks.Continue)
         }
       in
       Agent_sdk.Hooks.compose ~outer:temporal ~inner:tracking
@@ -335,7 +304,7 @@ let rec run_worker_via_oas
           ~(base_path : string)
           ~(auth_token : string option)
           ~(meta : Worker_container_types.worker_container_meta)
-          ~(provider : Agent_sdk.Provider.config)
+          ~(provider_config : Llm_provider.Provider_config.t)
           ~(system_prompt : string)
           ~(prompt : string)
           ~(tools : Agent_sdk.Tool.t list)
@@ -359,7 +328,7 @@ let rec run_worker_via_oas
     build_agent
       ~net
       ~meta
-      ~provider
+      ~provider_config
       ~system_prompt
       ~tools
       ~hooks
@@ -392,6 +361,7 @@ and resume_worker_via_oas
       ~(base_path : string)
       ~(auth_token : string option)
       ~(meta : Worker_container_types.worker_container_meta)
+      ~(provider_config : Llm_provider.Provider_config.t)
       ~(checkpoint : Agent_sdk.Checkpoint.t)
       ~(prompt : string)
       ~(tools : Agent_sdk.Tool.t list)
@@ -412,10 +382,15 @@ and resume_worker_via_oas
     make_tool_tracking_hooks ~context:shared_context ()
   in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
-  let* resume_provider =
-    oas_provider_of_label (resume_model_id)
-    |> Result.map_error (fun e ->
-      Printf.sprintf "checkpoint resume (model %S): %s" resume_model_id e)
+  let* () =
+    if String.equal resume_model_id provider_config.model_id
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "checkpoint model %S does not match requested provider model %S"
+           resume_model_id
+           provider_config.model_id)
   in
   let system_prompt =
     Worker_container_types.default_system_prompt
@@ -429,10 +404,8 @@ and resume_worker_via_oas
   let config, options =
     Worker_container.build_resume_config
       ~worker_name
-      ~provider:resume_provider
       ~model_id:resume_model_id
       ~system_prompt
-      ~tools
       ~thinking_enabled
       ~hooks
       ~raw_trace
@@ -450,6 +423,7 @@ and resume_worker_via_oas
       ~checkpoint
       ~tools
       ~options
+      ~provider_config
       ~config
       ~context:shared_context
       ()

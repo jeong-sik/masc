@@ -117,7 +117,6 @@ type config =
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
-  tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
   approval : Agent_sdk.Hooks.approval_callback option;
@@ -1014,7 +1013,6 @@ let resume_from_checkpoint
            ~provider_config:config.provider_cfg
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
-           ?tool_failure_judge:config.tool_failure_judge
            ()))
 
 (* ================================================================ *)

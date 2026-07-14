@@ -507,11 +507,6 @@ let keeper_context_status_json
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
   =
-  let ctx_tokens = count_context_tokens ctx_work in
-  let ctx_max = Keeper_context_runtime.max_tokens_of_context ctx_work in
-  let ctx_ratio =
-    if ctx_max = 0 then 0.0 else float_of_int ctx_tokens /. float_of_int ctx_max
-  in
   (* RFC-0149 §3.1 — route through typed Result resolver so a memory
      bank IO fault surfaces as the sibling [memory_tier_error_class]
      field instead of an empty [memory_tier_summary] that is
@@ -549,9 +544,6 @@ let keeper_context_status_json
         ([ "name", `String meta.name
          ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
          ; "generation", `Int meta.runtime.generation
-         ; "context_ratio", `Float ctx_ratio
-         ; "context_tokens", `Int ctx_tokens
-         ; "context_max", `Int ctx_max
          ; "message_count", `Int (List.length (messages_of_context ctx_work))
          ; "last_model_used", `Null
          ]

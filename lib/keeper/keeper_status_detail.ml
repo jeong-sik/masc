@@ -412,8 +412,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              | Some c ->
                `Assoc [
                  ("has_checkpoint", `Bool true);
-                 ("context_ratio", `Float (Keeper_context_runtime.context_ratio c));
-                 ("context_tokens", `Int (Keeper_context_runtime.token_count c));
                  ("context_max", `Int (Keeper_context_runtime.max_tokens_of_context c));
                  ("message_count", `Int (Keeper_context_runtime.message_count c));
                ]

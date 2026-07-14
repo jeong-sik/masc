@@ -54,9 +54,8 @@ type compaction_event = {
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
-  before_tokens : int;
-  after_tokens : int;
-  saved_tokens : int;
+  before_messages : int;
+  after_messages : int;
 }
 
 type post_turn_lifecycle = {
@@ -67,8 +66,6 @@ type post_turn_lifecycle = {
   handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
-  context_ratio : float;
-  context_tokens : int;
   context_max : int;
   message_count : int;
 }
@@ -445,13 +442,10 @@ let apply_post_turn_lifecycle_with_resilience_handles
             failure_reason = None;
             trigger = None;
             decision = no_checkpoint_decision;
-            before_tokens = 0;
-            after_tokens = 0;
-            saved_tokens = 0;
-          };
+            before_messages = 0;
+            after_messages = 0;
+        };
         turn_generation = meta.runtime.generation;
-        context_ratio = 0.0;
-        context_tokens = 0;
         context_max = primary_model_max_tokens;
         message_count = 0;
       }
@@ -471,7 +465,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
             (fun rt -> { rt with generation = current_generation })
             meta
       in
-      let before_tokens = token_count ctx in
+      let before_messages = message_count ctx in
       let compacted_ctx = ctx in
       let trigger = None in
       let decision = Keeper_compact_policy.Not_requested in
@@ -554,8 +548,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
               (false, Some e, ctx, Some cp))
         )
       in
-      let after_tokens = token_count effective_ctx in
-      let saved_tokens = max 0 (before_tokens - after_tokens) in
+      let after_messages = message_count effective_ctx in
       let meta_after_compaction =
         map_runtime
           (fun rt ->
@@ -569,12 +562,8 @@ let apply_post_turn_lifecycle_with_resilience_handles
                   last_ts =
                     if effective_compaction_applied then now_ts
                     else rt.compaction_rt.last_ts;
-                  last_before_tokens =
-                    if effective_compaction_applied then before_tokens
-                    else rt.compaction_rt.last_before_tokens;
-                  last_after_tokens =
-                    if effective_compaction_applied then after_tokens
-                    else rt.compaction_rt.last_after_tokens;
+                  last_before_tokens = rt.compaction_rt.last_before_tokens;
+                  last_after_tokens = rt.compaction_rt.last_after_tokens;
                   last_check_ts = now_ts;
                   last_decision =
                     Keeper_compact_policy.compaction_decision_to_string
@@ -599,13 +588,10 @@ let apply_post_turn_lifecycle_with_resilience_handles
             failure_reason = compaction_failure_reason;
             trigger;
             decision;
-            before_tokens;
-            after_tokens;
-            saved_tokens;
-          };
+            before_messages;
+            after_messages;
+        };
         turn_generation = current_generation;
-        context_ratio = context_ratio effective_ctx;
-        context_tokens = token_count effective_ctx;
         context_max = max_tokens_of_context effective_ctx;
         message_count = message_count effective_ctx;
       }
@@ -684,7 +670,7 @@ let recover_latest_checkpoint_for_overflow_retry
             (with_max_tokens ctx
                (min (max_tokens_of_context ctx) primary_model_max_tokens))
       in
-      let before_tokens = token_count ctx in
+      let before_messages = message_count ctx in
       let retry_meta =
         if turn_generation = meta.runtime.generation then meta
         else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
@@ -700,12 +686,11 @@ let recover_latest_checkpoint_for_overflow_retry
         | Keeper_compact_policy.Prepared trigger -> Some trigger
         | _ -> None
       in
-      let after_tokens = token_count compacted_ctx in
+      let after_messages = message_count compacted_ctx in
       let compaction_applied =
         Keeper_compact_policy.compaction_decision_prepared base_decision
       in
-      let meaningful_reduction = after_tokens < before_tokens in
-      if not (compaction_applied && meaningful_reduction) then None
+      if not compaction_applied then None
       else
         let compaction =
           {
@@ -715,9 +700,8 @@ let recover_latest_checkpoint_for_overflow_retry
             failure_reason = None;
             trigger;
             decision = base_decision;
-            before_tokens;
-            after_tokens;
-            saved_tokens = max 0 (before_tokens - after_tokens);
+            before_messages;
+            after_messages;
           }
         in
         let compacted_ctx =

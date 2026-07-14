@@ -208,9 +208,12 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ( "current_work",
                         Json_util.string_opt_to_json
-                          (Dashboard_utils.string_list_of_json
-                             (member_assoc "active_goal_ids" keeper)
-                           |> List.hd_opt) );
+                          (match
+                             Dashboard_utils.string_list_of_json
+                               (member_assoc "active_goal_ids" keeper)
+                           with
+                           | current :: _ -> Some current
+                           | [] -> None) );
                       ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
                       ("proactive_enabled", member_assoc "proactive_enabled" keeper);
                       ("paused", member_assoc "paused" keeper);

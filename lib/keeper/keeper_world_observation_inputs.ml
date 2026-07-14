@@ -215,8 +215,10 @@ let read_context_ratio ~(config : Workspace.config) ~(meta : keeper_meta) : floa
         ~base_dir
     in
     match ctx_opt with
-    | Some c -> Keeper_context_runtime.context_ratio c
-    | None -> 0.0
+    | Some _ when primary_max_context > 0 ->
+      float_of_int meta.runtime.usage.last_input_tokens
+      /. float_of_int primary_max_context
+    | Some _ | None -> 0.0
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> 0.0

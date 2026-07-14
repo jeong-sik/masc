@@ -135,8 +135,6 @@ let append_metrics_snapshot
       ~turn_generation:lifecycle.KEC.turn_generation
       ~channel
       ~snapshot_source:"keeper_unified_turn"
-      ~context_ratio:lifecycle.context_ratio
-      ~context_tokens:lifecycle.context_tokens
       ~context_max:lifecycle.context_max
       ~message_count:lifecycle.message_count
       ~compaction:lifecycle.compaction
@@ -218,7 +216,6 @@ let emit_activity_graph
                         (fun reason -> `String reason)
                         (KUM.usage_trust_reasons usage_trust)) )
                ; "turn_mode", `String turn_mode_label
-               ; "context_ratio", `Float lifecycle.KEC.context_ratio
                ]
                @ (match wall_tokens_per_second with
                   | Some v -> [ "tokens_per_second", `Float v ]

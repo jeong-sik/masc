@@ -47,7 +47,7 @@ type event =
       token_count : int; context_actions : context_actions;
     }
   | Compaction_started
-  | Compaction_completed of { before_tokens : int; after_tokens : int; }
+  | Compaction_completed of { before_messages : int; after_messages : int; }
   | Compaction_failed of { reason : string; }
   | Handoff_started
   | Handoff_completed of { new_trace_id : string; generation : int; }

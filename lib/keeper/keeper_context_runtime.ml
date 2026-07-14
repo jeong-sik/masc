@@ -21,12 +21,8 @@ type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
 let text_of_message = Keeper_context_core.text_of_message
-let msg_tokens = Keeper_context_core.msg_tokens
-let count_tokens = Keeper_context_core.count_tokens
 let max_tokens_of_context = Keeper_context_core.max_tokens_of_context
-let token_count = Keeper_context_core.token_count
 let message_count = Keeper_context_core.message_count
-let context_ratio = Keeper_context_core.context_ratio
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
 let resume_checkpoint_of_context =
   Keeper_context_core.resume_checkpoint_of_context
@@ -94,9 +90,8 @@ type compaction_event = Keeper_post_turn.compaction_event = {
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
-  before_tokens : int;
-  after_tokens : int;
-  saved_tokens : int;
+  before_messages : int;
+  after_messages : int;
 }
 
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
@@ -107,8 +102,6 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
-  context_ratio : float;
-  context_tokens : int;
   context_max : int;
   message_count : int;
 }
@@ -255,14 +248,13 @@ let dispatch_compaction_completed
     ~(config : Workspace.config)
     ~origin
     ~keeper_name
-    ~before_tokens
-    ~after_tokens =
-  record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
+    ~before_messages
+    ~after_messages =
   Otel_metric_store.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
   dispatch_keeper_phase_event ~config ~origin ~keeper_name
     (Keeper_state_machine.Compaction_completed
-       { before_tokens; after_tokens })
+       { before_messages; after_messages })
 
 let dispatch_post_turn_lifecycle_events
     ~(config : Workspace.config)
@@ -296,8 +288,8 @@ let dispatch_post_turn_lifecycle_events
         ~config
         ~origin:Keeper_registry.Post_turn_lifecycle
         ~keeper_name
-        ~before_tokens:lifecycle.compaction.before_tokens
-        ~after_tokens:lifecycle.compaction.after_tokens
+        ~before_messages:lifecycle.compaction.before_messages
+        ~after_messages:lifecycle.compaction.after_messages
     end
     else
       dispatch_keeper_phase_event

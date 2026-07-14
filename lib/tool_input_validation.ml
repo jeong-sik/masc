@@ -560,10 +560,6 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
       Tool_dispatch.Pass
-    | Agent_sdk.Tool_middleware.Proceed coerced ->
-      emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
-      Log.Tool_validation.debug "tool_input_validation coerced args for %s" name;
-      Tool_dispatch.Proceed coerced
     | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;

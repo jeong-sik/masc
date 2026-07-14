@@ -264,7 +264,7 @@ let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Agent_sdk.Raw_trace.run_validation option =
   match result.run_validation with
-  | Some v when v.ok && (v.evidence <> [] || v.has_file_write) -> Some v
+  | Some v when v.ok && v.evidence <> [] -> Some v
   | _ -> None
 
 let telemetry_reported_of_result
@@ -305,13 +305,10 @@ let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
 
 let validated_evidence_preview
     (v : Agent_sdk.Raw_trace.run_validation) : string =
-  if v.has_file_write then "(validated evidence: file_write)"
-  else
-    match v.tool_names with
-    | [] -> "(validated evidence)"
-    | names ->
-      Printf.sprintf "(validated evidence: %s)"
-        (String.concat ", " names)
+  match v.tool_names with
+  | [] -> "(validated evidence)"
+  | names ->
+    Printf.sprintf "(validated evidence: %s)" (String.concat ", " names)
 
 (* RFC-0232: the scheduled-autonomous "what is this keeper doing" preview, by
    precedence. [is_visible_reply] is the typed reply-surface outcome
@@ -353,16 +350,10 @@ let accountability_evidence_refs
   let validation_refs =
     match validated_evidence with
     | Some validation ->
-        let base =
-          validation.evidence
-          |> List.map String.trim
-          |> List.filter (fun entry -> entry <> "")
-          |> List.map (fun entry -> "validation:" ^ entry)
-        in
-        if validation.has_file_write then
-          "validation:file_write" :: base
-        else
-          base
+      validation.evidence
+      |> List.map String.trim
+      |> List.filter (fun entry -> entry <> "")
+      |> List.map (fun entry -> "validation:" ^ entry)
     | None -> []
   in
   let turn_refs = [ Printf.sprintf "turn:%s:%d" trace_id turn_number ] in

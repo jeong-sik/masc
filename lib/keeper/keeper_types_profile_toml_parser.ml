@@ -106,8 +106,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     else Ok ()
   in
   let result =
-    Result.bind result (fun () -> runtime_assignment_result)
-    |> Result.bind (fun () -> legacy_goal_result)
+    Result.bind
+      (Result.bind result (fun () -> runtime_assignment_result))
+      (fun () -> legacy_goal_result)
   in
   Result.map
     (fun () ->

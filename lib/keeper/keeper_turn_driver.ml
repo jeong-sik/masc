@@ -313,45 +313,33 @@ let attempt_inference_policy
 let run_named
     ~runtime_id
     ?(keeper_name = "")
-    ~base_path
     ~goal
     ?goal_blocks
-    ?priority
     ?session_id
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
-    ?(max_turns = Agent_sdk.Types.unbounded_max_turns)
-    ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
-    ?context_reducer
     ?raw_trace
     ?on_event
     ?on_yield
     ?on_resume
+    ?cooperative_yield_decider
     ?agent_ref
     ?transport
-    ?(allowed_paths = [])
     ?checkpoint_sidecar
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
-    ?tool_failure_judge
-    ?compact_ratio
     ?context_window_tokens
-    ?(oas_auto_context_overflow_retry = true)
     ?checkpoint_dir
     ?checkpoint_sink
     ?context_injector
     ?context
     ?enable_thinking
-    ?approval
-    ?exit_condition
-    ?exit_condition_result
-    ?summarizer
     ?oas_checkpoint
     ?trace_link
     ?event_bus
@@ -624,7 +612,6 @@ let run_named
       match context_window_rebudget_res with
       | Error err -> Error err, None
       | Ok context_window_rebudget ->
-      let context_window_tokens = Some context_window_rebudget.resolved_context_window in
       (match
          match provider_config_transform with
          | None -> Ok runtime.Runtime.provider_config
@@ -644,34 +631,24 @@ let run_named
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
-            ; base_path
             ; keeper_name
             ; name
             ; goal
             ; goal_blocks
-            ; priority
             ; session_id
             ; system_prompt
             ; tools
             ; initial_messages
-            ; max_turns
-            ; max_idle_turns
             ; stream_idle_timeout_s
             ; body_timeout_s
             ; temperature = inference_policy.attempt_temperature
             ; accept
             ; hooks
-            ; context_reducer
             ; raw_trace
             ; transport_resolved
-            ; allowed_paths
             ; checkpoint_sidecar
             ; cache_system_prompt
             ; yield_on_tool
-            ; tool_failure_judge
-            ; compact_ratio
-            ; context_window_tokens
-            ; oas_auto_context_overflow_retry
             ; checkpoint_dir
             ; checkpoint_sink
             ; checkpoint_stage_observed
@@ -679,10 +656,6 @@ let run_named
             ; context
             ; enable_thinking = inference_policy.attempt_enable_thinking
             ; preserve_thinking = inference_policy.attempt_preserve_thinking
-            ; approval
-            ; exit_condition
-            ; exit_condition_result
-            ; summarizer
             ; oas_checkpoint
             ; trace_link
             ; sw
@@ -690,6 +663,7 @@ let run_named
             ; on_event
             ; on_yield
             ; on_resume
+            ; cooperative_yield_decider
             ; agent_ref
             ; on_runtime_observation
             ; event_bus

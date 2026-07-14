@@ -5,15 +5,9 @@ type finalized = {
 }
 
 let stop_reason_suppresses_visible_response = function
-  | Runtime_agent.ToolFailureRecoveryDeferred _
-  | Runtime_agent.ExecutionTimeoutObserved _
-  | Runtime_agent.ExecutionIdleTimeoutObserved _ -> true
-  | Runtime_agent.Completed
-  | Runtime_agent.TurnLimitObserved _
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.InputRequired _ ->
-    false
+  | Runtime_agent.Yielded_to_durable_stimulus _ -> true
+  | Runtime_agent.Completed | Runtime_agent.InputRequired _ -> false
 ;;
 
 let finalize ~completion_contract_result:_ ~stop_reason ~raw_response_text

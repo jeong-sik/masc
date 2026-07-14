@@ -57,10 +57,6 @@ type t =
   | ApprovalQueueFailures
   | ApprovalResolutionSignal
   | ProfileLoadFailures
-  | CompactAuditFailures
-  | CompactAuditRetentionParse
-  | CompactAuditDrainBatches
-  | CompactAuditDrainBatchSizeBucket
   | FsFailures
   | PersistencePreparationStageDuration
   | PersistencePreparationExamined

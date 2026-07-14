@@ -283,7 +283,6 @@
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
   test_cap_blocker_structured_error
-  test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
@@ -292,9 +291,7 @@
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
   test_tool_bridge_externalize
-  test_keeper_artifact_hydrator
   test_artifacts_endpoint
-  test_tool_output_washing_e2e
   test_keeper_context_core_dedup
   test_adversarial_eval
   test_tool_call_quality_benchmark
@@ -612,7 +609,6 @@
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
   test_cap_blocker_structured_error
-  test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
@@ -624,9 +620,7 @@
   ; test_risk_digest removed (team session cleanup)
   test_tool_blob_store
   test_tool_bridge_externalize
-  test_keeper_artifact_hydrator
   test_artifacts_endpoint
-  test_tool_output_washing_e2e
   test_keeper_context_core_dedup
   test_adversarial_eval
   test_tool_call_quality_benchmark
@@ -1023,7 +1017,6 @@
   test_pulse
   test_transport_metrics
   test_adaptive_cache_ttl
-  test_keeper_compact_audit
   test_keeper_telemetry_consumer
   test_oas_bus_instrument
   test_trajectory
@@ -1199,7 +1192,6 @@
   test_pulse
   test_transport_metrics
   test_adaptive_cache_ttl
-  test_keeper_compact_audit
   test_keeper_telemetry_consumer
   test_oas_bus_instrument
   test_trajectory

@@ -24,7 +24,6 @@ val runtime_id_of_label_or_raw : string -> string
 val normalize_runtime_name_for_bucket : string -> string
 val default_local_runtime_label : unit -> string
 val local_runtime_label : string -> string
-val labels_require_runtime_mcp_header_sync : string list -> bool
 val unknown_runtime_label : string
 
 val provider_label_of_runtime_label :
@@ -55,16 +54,6 @@ val effective_attempt_timeout_resolution :
 
 val effective_attempt_timeout_s :
   is_last:bool -> configured_timeout_s:float option -> t -> float option
-
-val resolve_tool_lane_for_oas_tools :
-  base_path:string ->
-  ?agent_name:string ->
-  tools:Agent_sdk.Tool.t list ->
-  t ->
-  ( Agent_sdk.Tool.t list
-    * Llm_provider.Llm_transport.runtime_mcp_policy option,
-    Agent_sdk.Error.sdk_error )
-  result
 
 val capacity_key : t -> string
 val capacity_keys : t list -> string list

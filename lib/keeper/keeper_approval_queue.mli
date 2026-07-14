@@ -196,7 +196,7 @@ val resolve_error_to_string : resolve_error -> string
     [Approve], then wake only the Keeper captured by the pending entry. *)
 val resolve_with_policy :
   id:string ->
-  decision:Agent_sdk.Hooks.approval_decision ->
+  decision:decision ->
   ?source:decision_source ->
   ?remember_rule:bool ->
   ?created_by:string ->
@@ -205,7 +205,7 @@ val resolve_with_policy :
 
 val resolve :
   id:string ->
-  decision:Agent_sdk.Hooks.approval_decision ->
+  decision:decision ->
   (unit, resolve_error) result
 
 (** {1 Query} *)

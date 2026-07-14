@@ -42,7 +42,10 @@ type pending_approval =
   ; summary_status : summary_status
   }
 
-type decision = Agent_sdk.Hooks.approval_decision
+type decision =
+  | Approve
+  | Reject of string
+  | Edit of Yojson.Safe.t
 
 type decision_source =
   | Always_allowed

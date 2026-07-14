@@ -24,14 +24,10 @@ let config_for_label
     ~(tools : Agent_sdk.Tool.t list)
     ~(max_tokens : int option)
     ~(temperature : float)
-    ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?hooks
-    ?context_reducer
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
-    ?approval
     ~(description : string option)
     () : (Runtime_agent.config, Agent_sdk.Error.sdk_error) result =
   let* provider =
@@ -50,37 +46,23 @@ let config_for_label
       with
       max_tokens;
       temperature;
-      max_idle_turns;
       stream_idle_timeout_s;
-      guardrails = Some Agent_sdk.Guardrails.permissive;
       hooks;
-      context_reducer;
       enable_thinking;
       description;
-      compact_ratio;
-      approval;
     }
-
-(* RFC-0206: the runtime CLI-preflight wrapper is gone; run the attempt
-   directly.  Kept as a thin pass-through so the two call sites read unchanged. *)
-let with_cli_preflight ~scope:(_ : string) ~config:(_ : Runtime_agent.config)
-    ~goal:(_ : string) (f : unit -> ('a, Agent_sdk.Error.sdk_error) result) =
-  f ()
 
 let run_model_by_label
     ~(model_label : string)
     ~goal
     ?(system_prompt = "")
     ?(tools = [])
-    ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
-    ?context_reducer
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
     ?on_event
     ?transport
@@ -91,9 +73,8 @@ let run_model_by_label
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_tokens ~temperature
-      ~max_idle_turns ?stream_idle_timeout_s ?hooks ?context_reducer
+      ?stream_idle_timeout_s ?hooks
       ?enable_thinking
-      ?compact_ratio
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
@@ -110,11 +91,7 @@ let run_model_by_label
           ~keeper_name:"oas-label-model"
           ~runtime_id:model_label
           (fun () ->
-            with_cli_preflight
-              ~scope:(Printf.sprintf "model_label:%s" model_label)
-              ~config ~goal
-              (fun () ->
-                match Runtime_agent.run ~sw ~net ~config ?on_event  goal with
+            match Runtime_agent.run ~sw ~net ~config ?on_event goal with
                 | Ok result when accept result.response -> Ok result
                 | Ok result ->
                     let rejection =
@@ -151,14 +128,12 @@ let run_model_by_label
                               stop_reason = Some result.response.stop_reason;
                               reason = rejection.reason;
                             }))
-                | Error e -> Error e))
+                | Error e -> Error e)
 
 let run_named_with_masc_tools
     ~runtime_id
     ?(keeper_name = "")
     ~goal
-    ~base_path
-    ?priority
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
@@ -172,10 +147,6 @@ let run_named_with_masc_tools
     ?on_resume
     ?transport
     ?(yield_on_tool = false)
-    ?compact_ratio
-    ?approval
-    ?max_turns
-    ?(max_idle_turns = 3)
     ?provider_config_transform
     ?sw
     ?net
@@ -187,21 +158,16 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ?priority ~system_prompt ~tools:oas_tools
-    ?max_turns
-    ~max_idle_turns
+  Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~system_prompt ~tools:oas_tools
     ~temperature
     ?stream_idle_timeout_s ?hooks
     ~accept
-    ?compact_ratio
-    ?approval
     ?raw_trace ?on_event ?on_yield ?on_resume 
     ?transport ~yield_on_tool ?provider_config_transform ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)
     ~goal
-    ~base_path
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
@@ -210,7 +176,6 @@ let run_model_with_masc_tools
     ?max_tokens
     ?hooks
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
     ?raw_trace
     ?on_event
@@ -223,7 +188,6 @@ let run_model_with_masc_tools
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_tokens ~temperature
       ?stream_idle_timeout_s ?hooks ?enable_thinking
-      ?compact_ratio
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
@@ -240,9 +204,5 @@ let run_model_with_masc_tools
           ~keeper_name:"oas-explicit-model"
           ~runtime_id:model_label
           (fun () ->
-            with_cli_preflight
-              ~scope:(Printf.sprintf "explicit_model:%s" model_label)
-              ~config ~goal
-              (fun () ->
-                Runtime_agent.run_with_masc_tools ~sw ~net ~base_path ~config ~masc_tools ~dispatch  ?on_event
-	                  goal))
+            Runtime_agent.run_with_masc_tools ~sw ~net ~config ~masc_tools
+              ~dispatch ?on_event goal)

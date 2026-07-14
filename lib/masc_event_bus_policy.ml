@@ -24,8 +24,8 @@ let oas_runtime =
     rationale =
       "Drop_oldest + 256 buffer: oas_runtime carries OBSERVATIONAL \
        turn-pipeline events (telemetry counter [Keeper_telemetry_consumer], \
-       SSE dashboard relay [Keeper_event_bridge], best-effort compaction \
-       audit [Keeper_compact_audit], metrics [Agent_sdk_metrics_bridge]). \
+       SSE dashboard relay [Keeper_event_bridge], metrics \
+       [Agent_sdk_metrics_bridge]). \
        Durable turn/event replay reads the JSONL telemetry surface \
        (dashboard_oas_bridge.durable_replay_surface, \
        /api/v1/dashboard/telemetry?source=oas_event), NOT this live bus, so \
@@ -35,9 +35,7 @@ let oas_runtime =
        until restart (RCA 2026-06-10: sustained multi-minute keeper freeze, \
        keepers wedged in turn-pipeline publish; not the HTTP/idle path). \
        Drop_oldest sheds the stalest observational event instead of freezing \
-       the fleet; the durable surface retains the data. Trade-off: a \
-       sustained >256 backlog can rarely orphan a compaction-audit \
-       start/complete pair (acceptable for a best-effort audit). \
+       the fleet; the durable surface retains the data. \
        masc_domain keeps Block (workspace-invariant events).";
   }
 ;;

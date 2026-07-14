@@ -340,8 +340,8 @@ let approval_resolve_decision_name = function
 ;;
 
 let approval_resolve_decision_to_hook = function
-  | Approval_resolve_approve -> Agent_sdk.Hooks.Approve
-  | Approval_resolve_reject reason -> Agent_sdk.Hooks.Reject reason
+  | Approval_resolve_approve -> Keeper_approval_queue.Approve
+  | Approval_resolve_reject reason -> Keeper_approval_queue.Reject reason
 ;;
 
 let approval_resolve_decision_of_json args =

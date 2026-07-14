@@ -146,15 +146,6 @@
  (modules env_knob_catalog)
  (libraries str))
 
-;; Compaction audit CLI: inspect .masc/data/harness-compact/ JSONL
-
-(executable
- (name masc_compaction_audit)
- (modules masc_compaction_audit)
- (public_name masc-compaction-audit)
- (package masc)
- (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
-
 ;; RFC-0232 P4: offline mention backfill for keeper chat lanes.
 ;; Stamps the [mentions] field onto pre-P4 user rows; run with the
 ;; server stopped.

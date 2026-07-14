@@ -63,7 +63,7 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_sdk.Raw_trace.t
   | Sink_degraded of Agent_sdk.Error.sdk_error
 
-type autonomous_yield_reason =
+type autonomous_yield_reason = Runtime_agent.cooperative_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
 
@@ -83,10 +83,7 @@ let autonomous_yield_allowed_at_turn ~start_turn ~turn request =
 ;;
 
 let stop_reason_of_autonomous_yield ~turn request =
-  match request.reason with
-  | Chat_waiting -> Runtime_agent.Yielded_to_chat_waiting { turns_used = turn }
-  | Durable_stimulus_waiting ->
-    Runtime_agent.Yielded_to_durable_stimulus { turns_used = turn }
+  Runtime_agent.stop_reason_of_cooperative_yield ~turn request.reason
 ;;
 
 let keeper_raw_trace_sink
@@ -144,8 +141,6 @@ let raw_trace_for_dispatch
     None
 ;;
 
-let keeper_max_turns = Agent_sdk.Types.unbounded_max_turns
-
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let sse_event_watchdog_progress_kind =
@@ -159,7 +154,6 @@ module For_testing = struct
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let autonomous_yield_allowed_at_turn = autonomous_yield_allowed_at_turn
   let stop_reason_of_autonomous_yield = stop_reason_of_autonomous_yield
-  let keeper_max_turns = keeper_max_turns
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -207,7 +201,6 @@ let run_turn
       ?temperature
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?priority
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
       ?fallback_reason
@@ -546,7 +539,6 @@ let run_turn
             ]))
       Keeper_runtime_manifest.Context_injected;
     let hooks = s.Keeper_run_tools.hooks in
-    let reducer = s.Keeper_run_tools.reducer in
     let acc = s.Keeper_run_tools.acc in
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
@@ -566,14 +558,6 @@ let run_turn
         ~downstream:on_event
         ~turn_id:manifest_keeper_turn_id
     in
-    let tool_failure_judge =
-      Keeper_tool_failure_recovery_judge.create
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
-    in
-    let priority =
-      Option.value priority ~default:Llm_provider.Request_priority.Proactive
-    in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =
@@ -586,7 +570,7 @@ let run_turn
          ~allowed_paths:effective_allowed_paths
      with
      | Error e -> Error (Agent_sdk.Error.Internal e)
-     | Ok oas_allowed_paths ->
+     | Ok _validated_allowed_paths ->
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
           only when the operator explicitly configures it. The deadline resets
           after each successful line, so this is gap detection, not a total run
@@ -610,95 +594,48 @@ let run_turn
          match pre_dispatch_error with
          | Some err -> Error err
          | None ->
-              (* Autonomous cooperative yield: OAS checks [exit_condition]
-                 before the first provider dispatch as well as between turns.
-                 A scheduled-idle waiting chat may preempt immediately, but a
-                 reactive chat or durable stimulus may stop this run only after
-                 [turn] advances beyond the checkpoint's [start_turn_count];
-                 otherwise the heartbeat would acknowledge the currently leased
-                 stimulus without the model ever observing it. [observed_request]
-                 bridges OAS's split bool / render callbacks and preserves the
-                 exact typed reason and boundary that made the predicate true,
-                 even if the waiting chat is cancelled before
-                 [exit_condition_result] runs. *)
-              let autonomous_yield_exit_condition,
-                  autonomous_yield_exit_condition_result =
-                match autonomous_yield_requested with
-                | None -> None, None
-                | Some requested ->
-                  let observed_request = ref None in
-                  ( Some
-                      (fun (turn : int) ->
-                         match requested () with
-                         | Some request
-                           when autonomous_yield_allowed_at_turn
-                                  ~start_turn:start_turn_count
-                                  ~turn
-                                  request ->
-                           observed_request := Some request;
-                           true
-                         | Some _ | None -> false)
-                  , Some
-                      (fun (turn : int) ->
-                         match !observed_request with
-                         | Some request ->
-                           let stop_reason =
-                             stop_reason_of_autonomous_yield ~turn request
-                           in
-                           let notice =
-                             match request.reason with
-                             | Chat_waiting ->
-                               Printf.sprintf
-                                 "[yielded turn slot at turn %d to a waiting \
-                                  chat request; keeper resumes on the next \
-                                  cycle]"
-                                 turn
-                             | Durable_stimulus_waiting ->
-                               Printf.sprintf
-                                 "[yielded autonomous run at turn %d because a \
-                                  durable stimulus is waiting; checkpoint saved \
-                                  and keeper resumes on the next cycle]"
-                                 turn
-                           in
-                           stop_reason, Some notice
-                         | None ->
-                           let message =
-                             "autonomous yield result requested without a \
-                              preceding typed yield decision"
-                           in
-                           Log.Keeper.error ~keeper_name:meta.name "%s" message;
-                           invalid_arg message) )
-              in
               let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
                 Keeper_checkpoint_store.save_oas
                   ~session_dir:session.session_dir
                   snapshot.checkpoint
               in
+              let cooperative_yield_decider =
+                Option.map
+                  (fun requested boundary ->
+                     let turn =
+                       match boundary with
+                       | Runtime_agent.Before_provider_dispatch { turn }
+                       | Runtime_agent.After_tool_boundary { turn; _ } -> turn
+                     in
+                     match requested () with
+                     | Some request
+                       when autonomous_yield_allowed_at_turn
+                              ~start_turn:start_turn_count
+                              ~turn
+                              request ->
+                       Some request.reason
+                     | Some _ | None -> None)
+                  autonomous_yield_requested
+              in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* Keeper does not impose a cumulative turn, time, token, or cost
-                   budget. OAS receives its unbounded turn sentinel; explicit
-                   cancellation and provider/tool progress boundaries settle the
-                   lane, while usage remains observational. *)
+                   budget. Typed cooperative boundaries can yield this lane;
+                   provider/tool liveness and caller cancellation remain explicit,
+                   while usage remains observational. *)
                 Keeper_turn_driver.run_named
                   ~runtime_id:runtime_id_string
-                  ~base_path:config.base_path
                   ~keeper_name:meta.name
                     ~goal:user_message
                     ?goal_blocks:user_blocks
-                    ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                     ?raw_trace
                     ~system_prompt:turn_system_prompt
                     ~tools
-                    ~compact_ratio:meta.compaction.ratio_gate
                     ~context_window_tokens:max_context
-                    ~oas_auto_context_overflow_retry:true
                     ~checkpoint_sink
                     ~initial_messages
-                    ~max_turns:keeper_max_turns
                     ~hooks
-                    ~context_reducer:reducer
                     ~runtime_manifest_context
                     ~runtime_manifest_append:
                       (fun manifest ->
@@ -713,7 +650,6 @@ let run_turn
                          decides whether to continue. OAS defines zero as the
                          unbounded idle-turn sentinel for this long-lived
                          Keeper lane. *)
-                    ~max_idle_turns:0
                     ?stream_idle_timeout_s
                     ?body_timeout_s:
                       (Keeper_runtime_resolved.body_timeout_override_sec ())
@@ -723,21 +659,13 @@ let run_turn
                     ?on_event
                     ?on_yield
                     ?on_resume
+                    ?cooperative_yield_decider
                     ~agent_ref
-                    ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
                     ~yield_on_tool
-                    ~tool_failure_judge
                     ~context_injector
                     ~context:shared_context
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-                      (* Mutation-boundary is native to OAS now;
-                         [exit_condition] is re-wired here solely for the typed
-                         autonomous cooperative yield above. Both callbacks are
-                         [None] on the chat lane, so chat runs to natural model
-                         completion unchanged. *)
-                    ?exit_condition:autonomous_yield_exit_condition
-                    ?exit_condition_result:autonomous_yield_exit_condition_result
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
                     ?trace_link

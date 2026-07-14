@@ -38,11 +38,3 @@ val metric_oas_inference_decode_tok_per_sec : string
 (** Histogram populated from [AgentCompleted] [usage.cost_usd].
     Labels: [provider] and [model_bucket]. *)
 val metric_oas_inference_cost_usd : string
-
-(** Gauge: context overflow ratio [estimated_tokens / limit_tokens] when
-    [ContextOverflowImminent] fires. Labels: [agent_name]. *)
-val metric_oas_context_overflow_ratio : string
-
-(** Counter: total context compaction actions from OAS event bus.
-    Labels: [agent_name, trigger]. *)
-val metric_oas_context_compaction_total : string

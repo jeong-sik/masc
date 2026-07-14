@@ -693,12 +693,6 @@ let run_keeper_cycle
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
                   (match err with
-                      | Agent_sdk.Error.Agent
-                          (AgentExecutionTimeout _ | AgentExecutionIdleTimeout _) ->
-                        Otel_metric_store.inc_counter
-                          Keeper_metrics.(to_string OasTimeoutClassifications)
-                          ~labels:[ "classification", "oas_execution_observed" ]
-                          ()
                       | Agent_sdk.Error.Api (Timeout _) ->
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string OasTimeoutClassifications)

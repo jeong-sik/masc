@@ -130,12 +130,10 @@ type blocker_class =
   | Stale_fleet_batch
   | Sdk_context_window_exceeded
   | Sdk_unrecognized_stop_reason
-  | Sdk_idle_detected
+  | Sdk_hook_execution_failed
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
-  | Sdk_exit_condition_met
   | Sdk_input_required
-  | Sdk_tool_failure_recovery_failed
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator

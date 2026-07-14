@@ -48,23 +48,13 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | None ->
     (match err with
      | Agent_sdk.Error.Internal _ -> None
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)
-     | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> None
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
-     | Agent_sdk.Error.Agent (IdleDetected _) -> Some Sdk_idle_detected
+     | Agent_sdk.Error.Agent (HookExecutionFailed _) ->
+       Some Sdk_hook_execution_failed
      | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
      | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
-     | Agent_sdk.Error.Agent (ExitConditionMet _) -> Some Sdk_exit_condition_met
      | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
-     | Agent_sdk.Error.Agent (ToolFailureRecoveryFailed _) ->
-       Some Sdk_tool_failure_recovery_failed
-     | Agent_sdk.Error.Agent (ToolFailureRecoveryDeferred _) ->
-       (* Runtime_agent converts this control result to a typed checkpoint
-          before the status bridge. If it is observed here, do not manufacture
-          a blocker class for a non-failure. *)
-       None
      (* Provider-level [Api] errors are surfaced via OAS retry / runtime
          layers and do not map to a typed blocker_class by themselves. *)
      | Agent_sdk.Error.Api _
@@ -145,12 +135,10 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Stale_fleet_batch
     | Sdk_context_window_exceeded
     | Sdk_unrecognized_stop_reason
-    | Sdk_idle_detected
+    | Sdk_hook_execution_failed
     | Sdk_guardrail_violation
     | Sdk_tripwire_violation
-    | Sdk_exit_condition_met
-    | Sdk_input_required
-    | Sdk_tool_failure_recovery_failed -> if summary = "" then str else summary
+    | Sdk_input_required -> if summary = "" then str else summary
   in
   { blocker_class = str; summary }
 ;;

@@ -30,49 +30,8 @@ val invalid_runtime_config : string -> string -> Agent_sdk.Error.sdk_error
 val provider_caps_of_config :
   Llm_provider.Provider_config.t -> Llm_provider.Capabilities.capabilities
 
-(** Whether a provider can accept inline tool definitions on a request.
-    Alias for {!Provider_tool_support.provider_supports_inline_tools}. *)
-val provider_supports_inline_tools :
-  ?override:Provider_tool_support.runtime_capabilities_override ->
-  Llm_provider.Provider_config.t -> bool
-
-(** Whether a provider supports the runtime MCP tool lane.  Alias for
-    {!Provider_tool_support.provider_supports_runtime_mcp_lane}. *)
-val provider_supports_runtime_mcp_lane :
-  ?override:Provider_tool_support.runtime_capabilities_override ->
-  Llm_provider.Provider_config.t -> bool
-
-(** Drop duplicates from a list while preserving the first-seen order. *)
-val dedupe_preserve_order : string list -> string list
-
-(** Build the runtime MCP policy that exposes the caller-supplied, non-empty
-    [tool_names] back to the provider's runtime MCP lane. The caller schemas are
-    the transport identity SSOT; no static product catalog reclassifies them.
-    Returns [None] for invalid names or when required workspace authentication
-    cannot be resolved. *)
-val runtime_mcp_policy_of_tool_names :
-  base_path:string ->
-  ?agent_name:string ->
-  string list ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option
-
 (** Human-readable [provider_kind:model_id] label. *)
 val provider_label : Llm_provider.Provider_config.t -> string
-
-(** Preserve the exact inline Keeper tool values. Provider capability and
-    credential state are execution concerns and never remove a model-visible
-    schema before invocation. The policy component is therefore always
-    [None]. *)
-val resolve_tool_lane_for_oas_tools :
-  base_path:string ->
-  ?agent_name:string ->
-  provider_cfg:Llm_provider.Provider_config.t ->
-  tools:Agent_sdk.Tool.t list ->
-  unit ->
-  ( Agent_sdk.Tool.t list
-    * Llm_provider.Llm_transport.runtime_mcp_policy option,
-    Agent_sdk.Error.sdk_error )
-  result
 
 (* CLI subprocess transport surface ([make_per_call_switch_transport],
    [non_http_transport_of_provider], [Json_stream_cli_transport_local]) was

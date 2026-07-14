@@ -27,7 +27,7 @@ type raw_trace_sink_outcome =
     reactive chat and durable backlog yield only after the current cycle has
     completed at least one provider turn, so a leased stimulus is never
     acknowledged without being observed by the model. *)
-type autonomous_yield_reason =
+type autonomous_yield_reason = Runtime_agent.cooperative_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
 
@@ -93,8 +93,6 @@ module For_testing : sig
     -> autonomous_yield_request
     -> Runtime_agent.stop_reason
 
-  val keeper_max_turns : int
-  (** OAS-owned unbounded sentinel used explicitly for every Keeper run. *)
 end
 
 (** {1 Turn execution} *)
@@ -122,7 +120,6 @@ end
            declaration takes precedence
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
-    @param priority Optional priority for scheduling
     @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared OAS context for cross-turn state
     @param event_bus Optional MASC event bus *)
@@ -145,7 +142,6 @@ val run_turn
   -> ?temperature:float
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
-  -> ?priority:Llm_provider.Request_priority.t
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
@@ -158,12 +154,11 @@ val run_turn
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?autonomous_yield_requested:(unit -> autonomous_yield_request option)
-       (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary
-          before the next model dispatch — never mid tool execution. A typed
-          request stops the run gracefully at the boundary allowed by
-          [autonomous_yield_reason], releasing the lane for queued chat or
-          durable stimulus work. Only the heartbeat-scheduled path passes it; a
-          chat turn never receives this hook. *)
+       (* Autonomous-lane hook: evaluated before the initial provider dispatch
+          and at OAS's typed post-tool boundary, never during tool execution.
+          A typed request cooperatively yields the lane for queued chat or a
+          durable stimulus. Only the heartbeat-scheduled path passes it; a chat
+          turn never receives this hook. *)
   -> ?on_checkpoint_stage:(Agent_sdk.Agent.checkpoint_stage -> unit)
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

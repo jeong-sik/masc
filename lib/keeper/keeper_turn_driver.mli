@@ -81,45 +81,33 @@ type context_window_rebudget =
 val run_named :
   runtime_id:string ->
   ?keeper_name:string ->
-  base_path:string ->
   goal:string ->
   ?goal_blocks:Agent_sdk.Types.content_block list ->
-  ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->
-  ?max_turns:int ->
-  max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
-  ?context_reducer:Agent_sdk.Context_reducer.t ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?cooperative_yield_decider:Runtime_agent.cooperative_yield_decider ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
   ?transport:Masc_grpc_transport.t ->
-  ?allowed_paths:string list ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
-  ?tool_failure_judge:Agent_sdk.Tool_failure_recovery.judge ->
-  ?compact_ratio:float ->
   ?context_window_tokens:int ->
-  ?oas_auto_context_overflow_retry:bool ->
   ?checkpoint_dir:string ->
   ?checkpoint_sink:Agent_sdk.Agent.checkpoint_sink ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
   ?enable_thinking:bool ->
-  ?approval:Agent_sdk.Hooks.approval_callback ->
-  ?exit_condition:(int -> bool) ->
-  ?exit_condition_result:(int -> Runtime_agent.stop_reason * string option) ->
-  ?summarizer:(Agent_sdk.Types.message list -> string) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
   ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->

@@ -19,7 +19,6 @@ open Keeper_context_runtime
 type error_classification =
   | Transient_network
   | Transient_internal_runner
-  | Oas_execution_observed
   | Transient_rate_limit
   | Transient_capacity
   | Non_transient
@@ -99,11 +98,6 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Provider (Llm_provider.Error.MissingApiKey _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidConfig _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
-  | Agent_sdk.Error.Agent
-      ( MaxTurnsExceeded _
-      | AgentExecutionTimeout _
-      | AgentExecutionIdleTimeout _ ) ->
-      Oas_execution_observed
   | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
     | AuthorizationError _
     | NotFound _ | PaymentRequired _ | ContextOverflow _) -> Non_transient
@@ -749,16 +743,10 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (Timeout _) -> false
   | Agent_sdk.Error.Provider _ -> false
   (* Other agent error variants. *)
-  | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
-  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
-  | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (IdleDetected _)
+  | Agent_sdk.Error.Agent (HookExecutionFailed _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _)
-  | Agent_sdk.Error.Agent (ToolFailureRecoveryFailed _)
-  | Agent_sdk.Error.Agent (ToolFailureRecoveryDeferred _) -> false
   | Agent_sdk.Error.Agent (InputRequired _) -> false
   (* Non-API / non-Agent error families. *)
   | Agent_sdk.Error.Mcp _
@@ -769,8 +757,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Internal _ -> false
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
-  classify_error err = Oas_execution_observed
-  || is_transient_network_error err
+  is_transient_network_error err
   || is_server_rejected_parse_error err
   || is_auto_recoverable_runtime_exhausted_error err
   (* Context overflow is handled explicitly by
@@ -818,16 +805,10 @@ let extract_input_required (err : Agent_sdk.Error.sdk_error)
 let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> true
-  | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
-  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
-  | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (IdleDetected _)
+  | Agent_sdk.Error.Agent (HookExecutionFailed _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
-  | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _)
-  | Agent_sdk.Error.Agent (ToolFailureRecoveryFailed _)
-  | Agent_sdk.Error.Agent (ToolFailureRecoveryDeferred _) -> false
+  | Agent_sdk.Error.Agent (TripwireViolation _) -> false
   | Agent_sdk.Error.Api _
   | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Mcp _

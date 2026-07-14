@@ -9,6 +9,29 @@
 
 type t
 
+type invalid_sha256 =
+  | Invalid_sha256_length of { actual : int }
+  | Invalid_sha256_character of { index : int; found : char }
+
+val validate_sha256 : string -> (unit, invalid_sha256) result
+val invalid_sha256_to_string : invalid_sha256 -> string
+
+type fetch_error =
+  | Invalid_sha256 of invalid_sha256
+  | Inspect_failed of { path : string; cause : exn }
+  | Unexpected_file_kind of {
+      path : string;
+      kind : Fs_compat.exact_path_kind;
+    }
+  | Read_failed of { path : string; cause : exn }
+  | Integrity_mismatch of {
+      path : string;
+      expected : string;
+      actual : string;
+    }
+
+val fetch_error_to_string : fetch_error -> string
+
 val create : base_path:string -> t
 (** Create a blob store rooted at [base_path/.masc/tool_blobs/].
     Directory creation is lazy (happens on first [put]). *)
@@ -23,14 +46,18 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     [preview] is the first ~200 sanitized chars of [bytes] (control bytes
     replaced with [?], whitespace collapsed to spaces).
 
-    Idempotent: re-putting the same bytes is a no-op (file already exists).
+    Idempotent: re-putting the same bytes atomically rewrites the same content
+    address, repairing any corrupt prior bytes without a duplicate read/hash.
 
     @raises Sys_error if the blob write fails (disk full, EACCES, ...). Callers
     that must not lose bytes should catch this and fall back to the inline
     payload rather than emitting a marker for bytes that were never persisted. *)
 
-val fetch : t -> sha256:string -> string option
-(** Retrieve bytes by sha256. Returns [None] if not in store. *)
+val fetch : t -> sha256:string -> (string option, fetch_error) result
+(** Validate and retrieve bytes by sha256. Returns [Ok None] only when the
+    validated path is absent. Validation, inspection, path-kind, read, and
+    content-integrity failures are distinct typed errors. Cancellation
+    propagates. *)
 
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.

@@ -10,22 +10,18 @@ let keep_recent_from_env () =
        | Some n when n >= 0 -> n
        | _ -> default_keep_recent)
 
-(* Try to fetch [sha256] from the store, returning the bytes on hit and
-   the original marker string on miss / store error. *)
-let try_hydrate ~store ~sha256 ~marker =
-  try
-    match Tool_blob_store.fetch store ~sha256 with
-    | Some bytes -> Some bytes
-    | None -> None
-  with
-  (* Issue #8619: re-raise Eio cancellation so shutdown / racing fibers
-     are not silently masked as a hydration miss. Other exceptions
-     (filesystem error, blob corruption) keep the prior degraded
-     behaviour: caller falls back to the marker string. *)
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ ->
-    ignore marker;
-    None
+(* Fetch [sha256] without conflating an absent blob with a storage failure.
+   A failed hydration keeps the durable marker so one corrupt artifact cannot
+   stop the Keeper lane, but the failure is always observable. *)
+let try_hydrate ~store ~sha256 =
+  match Tool_blob_store.fetch store ~sha256 with
+  | Ok bytes -> bytes
+  | Error error ->
+      Log.Misc.error
+        "keeper artifact hydration failed sha256=%S cause=%s"
+        sha256
+        (Tool_blob_store.fetch_error_to_string error);
+      None
 
 let hydrate_block ~store ~remaining
     (block : Agent_sdk.Types.content_block) : Agent_sdk.Types.content_block =
@@ -42,9 +38,7 @@ let hydrate_block ~store ~remaining
       else
         (match Tool_output.decode_from_oas result.Canonical_tool.content with
          | Tool_output.Stored { sha256; _ } ->
-             (match
-                try_hydrate ~store ~sha256 ~marker:result.Canonical_tool.content
-              with
+             (match try_hydrate ~store ~sha256 with
               | Some bytes ->
                   decr remaining;
                   Agent_sdk.Types.ToolResult

@@ -14,6 +14,12 @@ module O = Tool_output
 
 (* --- Helpers --- *)
 
+let fetch_ok store ~sha256 =
+  match B.fetch store ~sha256 with
+  | Ok value -> value
+  | Error error ->
+      Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error)
+
 let with_temp_dir f =
   let dir = Filename.temp_file "masc_blob_test" "" in
   Sys.remove dir;
@@ -134,17 +140,21 @@ let test_put_then_fetch () =
       match stored with
       | O.Stored { sha256; _ } -> (
           match B.fetch store ~sha256 with
-          | Some bytes ->
+          | Ok (Some bytes) ->
               Alcotest.(check string) "round-trip bytes" payload bytes
-          | None -> Alcotest.fail "fetch returned None")
+          | Ok None -> Alcotest.fail "fetch returned None"
+          | Error error ->
+              Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
       | O.Inline _ -> Alcotest.fail "put returned Inline")
 
 let test_fetch_miss () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
       match B.fetch store ~sha256:(String.make 64 '0') with
-      | None -> ()
-      | Some _ -> Alcotest.fail "expected None for unknown sha")
+      | Ok None -> ()
+      | Ok (Some _) -> Alcotest.fail "expected None for unknown sha"
+      | Error error ->
+          Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
 
 let test_idempotent_put () =
   (* Same content twice = same sha = same path, no error. *)
@@ -198,7 +208,7 @@ let test_gc_deletes_unkept () =
       Alcotest.(check (option string))
         "kept blob still fetchable"
         (Some "keep me")
-        (B.fetch store ~sha256:keep))
+        (fetch_ok store ~sha256:keep))
 
 let test_gc_empty_keep_clears_all () =
   with_temp_dir (fun dir ->
@@ -230,7 +240,7 @@ let test_repeated_put_no_dup () =
       let sha = List.hd (B.list_all store) in
       Alcotest.(check (option string))
         "fetched content matches" (Some payload)
-        (B.fetch store ~sha256:sha))
+        (fetch_ok store ~sha256:sha))
 
 (* --- Storage-failure contract --- *)
 
@@ -250,6 +260,78 @@ let test_put_raises_on_unwritable_store () =
   in
   (try Sys.remove file with _ -> ());
   Alcotest.(check bool) "put raises on unwritable store" true raised
+
+let test_fetch_rejects_non_regular_paths () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let assert_rejected character expected_kind create_path =
+        let sha256 = String.make 64 character in
+        let shard_dir =
+          Filename.concat (B.root_dir store) (String.make 2 character)
+        in
+        Fs_compat.mkdir_p shard_dir;
+        let path = Filename.concat shard_dir sha256 in
+        create_path path;
+        match B.fetch store ~sha256 with
+        | Error (B.Unexpected_file_kind { kind = Fs_compat.Exact_kind kind; _ }) ->
+            Alcotest.(check bool) "exact non-regular kind" true (kind = expected_kind)
+        | Error error ->
+            Alcotest.failf "unexpected fetch error: %s" (B.fetch_error_to_string error)
+        | Ok _ -> Alcotest.fail "non-regular path reached blob read"
+      in
+      let target = Filename.concat dir "symlink-target" in
+      Fs_compat.save_file target "outside blob store";
+      assert_rejected 'a' Unix.S_DIR (fun path -> Unix.mkdir path 0o755);
+      assert_rejected 'b' Unix.S_FIFO (fun path -> Unix.mkfifo path 0o600);
+      assert_rejected 'c' Unix.S_LNK (fun path -> Unix.symlink target path))
+
+let test_fetch_reports_inspection_failure () =
+  let base_path = Filename.temp_file "masc_blob_parent_file" "" in
+  let store = B.create ~base_path in
+  let sha256 = String.make 64 'b' in
+  let result = B.fetch store ~sha256 in
+  (try Sys.remove base_path with _ -> ());
+  match result with
+  | Error (B.Inspect_failed _) -> ()
+  | Error error ->
+      Alcotest.failf
+        "unexpected fetch error: %s"
+        (B.fetch_error_to_string error)
+  | Ok None -> Alcotest.fail "structural store failure was reported as missing"
+  | Ok (Some _) -> Alcotest.fail "structural store failure returned bytes"
+
+let test_fetch_reports_integrity_mismatch () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let original = "content-addressed bytes" in
+      match B.put store ~bytes:original ~mime:"text/plain" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+          let path =
+            Filename.concat
+              (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
+              sha256
+          in
+          Fs_compat.save_file path "tampered bytes";
+          (match B.fetch store ~sha256 with
+           | Error (B.Integrity_mismatch _) -> ()
+           | Error error ->
+               Alcotest.failf
+                 "unexpected fetch error: %s"
+                 (B.fetch_error_to_string error)
+           | Ok None -> Alcotest.fail "tampered blob was reported as missing"
+           | Ok (Some _) -> Alcotest.fail "tampered blob passed digest verification"))
+
+let test_sha256_rejects_path_component () =
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      match B.fetch store ~sha256:("../" ^ String.make 61 'a') with
+      | Error (B.Invalid_sha256 _) -> ()
+      | Error error ->
+          Alcotest.failf
+            "unexpected fetch error: %s"
+            (B.fetch_error_to_string error)
+      | Ok _ -> Alcotest.fail "path-like digest reached blob lookup")
 
 (* --- Entry point --- *)
 
@@ -293,5 +375,13 @@ let () =
         [
           Alcotest.test_case "put raises on unwritable store" `Quick
             test_put_raises_on_unwritable_store;
+          Alcotest.test_case "fetch rejects non-regular paths" `Quick
+            test_fetch_rejects_non_regular_paths;
+          Alcotest.test_case "fetch reports inspection failure" `Quick
+            test_fetch_reports_inspection_failure;
+          Alcotest.test_case "fetch reports integrity mismatch" `Quick
+            test_fetch_reports_integrity_mismatch;
+          Alcotest.test_case "sha256 rejects path component" `Quick
+            test_sha256_rejects_path_component;
         ] );
     ]

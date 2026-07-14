@@ -33,7 +33,6 @@ const RECENT_LIMIT = 50
 // keeper_fsm and verification (lib `Attribution.* ~gate:"..."`); the rest are
 // forward-declared and show zero until their source is wired.
 const KNOWN_GATES = [
-  'cdal_verdict',
   'verification',
   'exec_policy',
   'keeper_fsm',

@@ -1,6 +1,5 @@
 ; RFC-0056 Phase 1 — extract the Dashboard_tla_specs leaf from the flat masc
-; mega-library. Mirrors lib/cdal/dune (RFC-0056 §3.3 Phase 0 PoC) and the
-; sibling lib/dashboard_eval_feed/dune: the parent lib/dune uses
+; mega-library. Mirrors the sibling lib/dashboard_eval_feed/dune: the parent lib/dune uses
 ; (include_subdirs unqualified) which would otherwise absorb this .ml into the
 ; main masc library; (include_subdirs no) opts out so this directory compiles
 ; as its own unit. (wrapped false) keeps the bare Dashboard_tla_specs

@@ -21,8 +21,8 @@ module Types = Masc_domain
    11 shard categories each have a representative tool name
    that must round-trip through [find_entry]. *)
 
-(* Module init runs Cdal_verdict_gate.default_base_path at
-   startup — #9903 prod-guard raises under HOME.  Same dune
+(* Module init resolves the runtime base path at startup —
+   the #9903 prod-guard raises under HOME.  Same dune
    [setenv] pattern as #10091 / #10097. *)
 let () =
   let dir =

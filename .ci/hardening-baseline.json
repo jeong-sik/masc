@@ -4,73 +4,70 @@
     "content_type_substring_checks": [],
     "direct_env_reads": [
       "bin/keeper_feature_proof_report.ml:29:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/main_eio.ml:605:match Sys.getenv_opt \"MASC_BASE_PATH_RESOLUTION_SOURCE\" with",
-      "bin/main_eio.ml:609:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/main_eio.ml:1017:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
-      "bin/masc_completion_trust_audit.ml:40:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/main_eio.ml:1251:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
       "lib/auth/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
-      "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with"
+      "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with",
+      "lib/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
+      "lib/autonomous/wirein_helpers.ml:5:match Sys.getenv_opt \"MASC_AUTONOMOUS\" with",
+      "lib/config/config_boot_overrides.ml:39:match Sys.getenv_opt name with",
+      "lib/config/env_config_core.ml:25:match Unix.getenv name with"
     ],
     "direct_env_reads_outside_env_boundary": [
       "bin/keeper_feature_proof_report.ml:29:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/main_eio.ml:605:match Sys.getenv_opt \"MASC_BASE_PATH_RESOLUTION_SOURCE\" with",
-      "bin/main_eio.ml:609:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/main_eio.ml:1017:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
-      "bin/masc_completion_trust_audit.ml:40:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/main_eio.ml:1251:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
       "lib/auth/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
-      "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with"
+      "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with",
+      "lib/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
+      "lib/autonomous/wirein_helpers.ml:5:match Sys.getenv_opt \"MASC_AUTONOMOUS\" with",
+      "lib/config_dir_resolver/config_dir_resolver.ml:74:let initial_env_home = Sys.getenv_opt \"HOME\" |> trim_opt",
+      "lib/context_overflow_action_tracker.ml:4:match Sys.getenv_opt \"MASC_CONTEXT_OVERFLOW_GRACE_SEC\" with"
     ],
     "env_config_unclassified_typed_getters": [
-      "lib/config/env_config_core.ml:470:get_bool ~default:true \"MASC_RELAY_CALIBRATION_ENABLED\"",
-      "lib/config/env_config_core.ml:494:(get_float ~default:120.0 git_fetch_timeout_sec_env_key)",
-      "lib/config/env_config_core.ml:511:get_bool ~default:true telemetry_enabled_env_key",
-      "lib/config/env_config_core.ml:515:get_bool ~default:false parse_warn_env_key",
-      "lib/config/env_config_core.ml:520:get_string ~default:\"production\" governance_level_env_key",
-      "lib/config/env_config_core.ml:539:get_int ~default:1000 \"MASC_PUBSUB_MAX_MESSAGES\"",
-      "lib/config/env_config_core.ml:546:get_string ~default:\"local\" \"MASC_KEEPER_DEFAULT_SANDBOX_PROFILE\"",
-      "lib/config/env_config_governance.ml:8:get_float ~default:30.0 \"MASC_INFERENCE_TIMEOUT_SEC\""
+      "lib/config/env_config_core.ml:538:(get_float ~default:120.0 git_fetch_timeout_sec_env_key)",
+      "lib/config/env_config_core.ml:555:get_bool ~default:true telemetry_enabled_env_key",
+      "lib/config/env_config_core.ml:570:get_int ~default:1000 \"MASC_PUBSUB_MAX_MESSAGES\"",
+      "lib/config/env_config_core.ml:577:get_string ~default:\"local\" \"MASC_KEEPER_DEFAULT_SANDBOX_PROFILE\"",
+      "lib/config/env_config_keeper.ml:24:get_float_nonneg ~default:3600.0 \"MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC\"",
+      "lib/config/env_config_keeper.ml:28:let max_scan = get_int_nonneg ~default:10000 \"MASC_KEEPER_BOOTSTRAP_MAX_SCAN\"",
+      "lib/config/env_config_keeper.ml:41:(get_float ~default:0.25 \"MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC\")",
+      "lib/config/env_config_keeper.ml:53:(get_float ~default:0.25 \"MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC\")"
     ],
     "exception_message_classifiers": [
-      "bin/fusion_run.ml:50:| Fusion_types.Timeout -> \"timeout\"",
-      "lib/board/board_core_status_rollup.ml:107:; \"timeout\"",
+      "bin/fusion_run.ml:51:| Fusion_types.Timeout -> \"timeout\"",
       "lib/core/system_error_class.ml:20:[ \"too many open files\"",
       "lib/core/system_error_class.ml:45:let connection_refused_needles = [ \"connection refused\"; \"econnrefused\" ]",
       "lib/core/system_error_class.ml:47:let timeout_needles = [ \"etimedout\"; \"timed out\"; \"operation timed out\" ]",
       "lib/core/system_error_class.ml:82:| Timeout -> \"timeout\"",
       "lib/core/system_error_class.ml:90:| Timeout -> \"timeout\"",
-      "lib/dashboard/dashboard_briefing_agents.ml:116:if not (String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered) then"
+      "lib/dashboard/dashboard_briefing_agents.ml:116:if not (String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered) then",
+      "lib/dashboard/dashboard_briefing_agents.ml:129:let content = String.lowercase_ascii message.content in"
     ],
     "local_workspace_path_literals": [],
     "stub_markers": [
-      "lib/cdal/adversarial_eval.ml:240:(\"assert false\", \"runtime assertion instead of type safety\");",
-      "lib/keeper/keeper_tool_shared_runtime.ml:775:assert false",
-      "lib/tool_types/tool_args.ml:72:| Not_implemented       (** Feature exists in schema but not in runtime *)",
-      "lib/tool_types/tool_args.ml:84:| Not_implemented -> \"not_implemented\"",
+      "lib/tool_types/tool_args.ml:75:| Not_implemented       (** Feature exists in schema but not in runtime *)",
+      "lib/tool_types/tool_args.ml:87:| Not_implemented -> \"not_implemented\"",
       "lib/tool_types/tool_args.mli:59:| Not_implemented       (** Feature exists in schema but not in runtime. *)"
     ],
     "sys_getcwd_calls": [
-      "lib/build_identity.ml:37:let argv0 = if Array.length Sys.argv > 0 then Sys.argv.(0) else Sys.getcwd () in",
-      "lib/build_identity.ml:39:if Filename.is_relative argv0 then Filename.concat (Sys.getcwd ()) argv0 else argv0",
-      "lib/build_identity.ml:125:pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(Sys.getcwd ())",
-      "lib/build_identity.ml:133:pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(Sys.getcwd ())",
-      "lib/build_identity.ml:211:pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(Sys.getcwd ())",
-      "lib/config_dir_resolver/config_dir_resolver.ml:145:try Sys.getcwd () with",
-      "lib/dated_jsonl/dated_jsonl.ml:41:Filename.concat (Sys.getcwd ()) base_dir",
-      "lib/eval_calibration.ml:161:Filename.concat (match cwd with Some d -> d | None -> Sys.getcwd ()) raw"
+      "lib/config_dir_resolver/config_dir_resolver.ml:144:try Sys.getcwd () with",
+      "lib/keeper_voice_local.ml:14:| None -> Workspace_utils_backend_setup.find_git_root (Sys.getcwd ())",
+      "lib/server/server_dashboard_http_perf.ml:75:let cwd = Sys.getcwd () in",
+      "lib/server/server_runtime_bootstrap.ml:149:try Sys.getcwd () with Sys_error _ -> search_cwd",
+      "lib/voice_bridge_core/voice_bridge_core.ml:470:| None -> find_git_root_from (Sys.getcwd ())"
     ],
     "wildcard_silent_defaults": [
       "bin/env_knob_catalog.ml:314:| _ -> ())",
-      "bin/gen_shell_ir_walkers.ml:214:| _ -> None|}",
-      "bin/gen_shell_ir_walkers.ml:427:| _ -> None)",
-      "bin/gen_shell_ir_walkers.ml:437:| _ -> None)",
-      "bin/gen_shell_ir_walkers.ml:513:| _ -> ()",
-      "bin/gen_shell_ir_walkers.ml:941:| _ -> ()",
-      "bin/gen_shell_ir_walkers.ml:1058:| _ -> ()",
-      "bin/gen_shell_ir_walkers.ml:1254:| _ -> ()"
+      "bin/gen_tool_descriptors.ml:496:| _ -> ());",
+      "bin/gen_tool_descriptors.ml:508:| _ -> ());",
+      "bin/gen_tool_descriptors.ml:511:| _ -> ());",
+      "bin/gen_tool_descriptors.ml:514:| _ -> ());",
+      "bin/keeper_feature_proof_report.ml:31:| _ -> None",
+      "bin/masc_trace.ml:47:| _ -> None",
+      "bin/masc_trace.ml:418:| _ -> None"
     ]
   },
   "exemptionProcess": "A metric increase must either be removed or explicitly justified in the PR. Do not run --rebaseline only to silence CI; reviewer approval is required for accepted-risk increases.",
-  "lastUpdatedCommit": "8e496303b021f1964112be266f2338de8c574317",
+  "lastUpdatedCommit": "9002d927350e8729a0bff44c07dbffecb8bcdea8",
   "metricPolicies": {
     "content_type_substring_checks": {
       "acceptedRisk": false,
@@ -111,14 +108,14 @@
   },
   "metrics": {
     "content_type_substring_checks": 0,
-    "direct_env_reads": 181,
-    "direct_env_reads_outside_env_boundary": 153,
-    "env_config_unclassified_typed_getters": 176,
-    "exception_message_classifiers": 108,
+    "direct_env_reads": 150,
+    "direct_env_reads_outside_env_boundary": 124,
+    "env_config_unclassified_typed_getters": 113,
+    "exception_message_classifiers": 82,
     "local_workspace_path_literals": 0,
-    "stub_markers": 5,
-    "sys_getcwd_calls": 34,
-    "wildcard_silent_defaults": 2016
+    "stub_markers": 3,
+    "sys_getcwd_calls": 5,
+    "wildcard_silent_defaults": 1632
   },
   "owner": "MASC CI meta gate owner",
   "rebaselineCadence": "No scheduled rebaseline. Rebaseline only in the PR that intentionally changes accepted debt, after the reviewer accepts the severity and exemption rationale."

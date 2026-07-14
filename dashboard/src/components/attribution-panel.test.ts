@@ -13,7 +13,7 @@ function makeEvent(
   return {
     attribution: {
       origin: overrides.origin ?? 'det',
-      gate: overrides.gate ?? 'cdal_verdict',
+      gate: overrides.gate ?? 'accountability',
       evidence: {},
       outcome: overrides.outcome ?? { kind: 'passed' },
     },
@@ -24,7 +24,7 @@ function makeEvent(
 describe('filterAttributionEvents', () => {
   const events: readonly AttributionEvent[] = [
     makeEvent({
-      gate: 'cdal_verdict',
+      gate: 'accountability',
       origin: 'det',
       outcome: { kind: 'policy_failed', reason: 'invalid signature' },
     }),
@@ -55,9 +55,9 @@ describe('filterAttributionEvents', () => {
   })
 
   it('matches by gate substring (case-insensitive)', () => {
-    const result = filterAttributionEvents(events, 'verdict')
+    const result = filterAttributionEvents(events, 'account')
     expect(result).toHaveLength(1)
-    expect(result[0]!.attribution.gate).toBe('cdal_verdict')
+    expect(result[0]!.attribution.gate).toBe('accountability')
   })
 
   it('matches by origin', () => {
@@ -68,7 +68,7 @@ describe('filterAttributionEvents', () => {
   it('matches policy_failed reason', () => {
     const result = filterAttributionEvents(events, 'signature')
     expect(result).toHaveLength(1)
-    expect(result[0]!.attribution.gate).toBe('cdal_verdict')
+    expect(result[0]!.attribution.gate).toBe('accountability')
   })
 
   it('matches partial_pass rationale', () => {
@@ -84,7 +84,7 @@ describe('filterAttributionEvents', () => {
   })
 
   it('trims query before matching', () => {
-    const result = filterAttributionEvents(events, '  cdal  ')
+    const result = filterAttributionEvents(events, '  account  ')
     expect(result).toHaveLength(1)
   })
 
@@ -94,7 +94,7 @@ describe('filterAttributionEvents', () => {
 
   it('does not mutate the input array', () => {
     const copy = events.slice()
-    filterAttributionEvents(events, 'cdal')
+    filterAttributionEvents(events, 'account')
     expect(events).toEqual(copy)
   })
 
@@ -113,29 +113,29 @@ describe('filterAttributionEvents', () => {
 })
 
 describe('gatesToRender', () => {
-  const known = ['cdal_verdict', 'verification', 'keeper_fsm'] as const
+  const known = ['accountability', 'verification', 'keeper_fsm'] as const
 
   it('keeps the known gates first, in declared order', () => {
-    expect(gatesToRender(known, [])).toEqual(['cdal_verdict', 'verification', 'keeper_fsm'])
+    expect(gatesToRender(known, [])).toEqual(['accountability', 'verification', 'keeper_fsm'])
   })
 
   it('appends a data gate that is not in the known set (no silent drop)', () => {
     // The bug class: a backend-emitted gate absent from the known allow-list
     // would never get a card. The union surfaces it instead.
     expect(gatesToRender(known, ['exec_policy'])).toEqual([
-      'cdal_verdict', 'verification', 'keeper_fsm', 'exec_policy',
+      'accountability', 'verification', 'keeper_fsm', 'exec_policy',
     ])
   })
 
   it('does not duplicate a data gate already in the known set', () => {
     expect(gatesToRender(known, ['verification', 'keeper_fsm'])).toEqual([
-      'cdal_verdict', 'verification', 'keeper_fsm',
+      'accountability', 'verification', 'keeper_fsm',
     ])
   })
 
   it('sorts the appended extras for stable ordering', () => {
     expect(gatesToRender(known, ['zeta_gate', 'alpha_gate'])).toEqual([
-      'cdal_verdict', 'verification', 'keeper_fsm', 'alpha_gate', 'zeta_gate',
+      'accountability', 'verification', 'keeper_fsm', 'alpha_gate', 'zeta_gate',
     ])
   })
 

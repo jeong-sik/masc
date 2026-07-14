@@ -244,7 +244,6 @@ function runtimeResolutionPayload() {
     keeper_runtime: null,
     fleet_safety: null,
     fd_accountant: null,
-    cdal: null,
   }
 }
 

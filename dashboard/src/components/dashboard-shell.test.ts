@@ -860,49 +860,6 @@ describe('dashboardHealthChips', () => {
     })
   })
 
-  it('surfaces contract proof and task-scope blockers as a routed health chip', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 2, configured_keepers: 2 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: null,
-        cdal: {
-          writer_status: 'proof_store_incomplete',
-          operator_action_required: true,
-          proof_store_path_drift: false,
-          proof_store: {
-            status: 'stale_incomplete_runs',
-            completeness: {
-              incomplete_run_dirs: 6,
-              stale_incomplete_run_dirs: 3,
-              terminal_incomplete_run_dirs: 1,
-            },
-          },
-          task_scope: {
-            status: 'partial_task_scope',
-            current_writer_missing_task_scope_rows: 5,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
-
-    const cdal = chips.find(c => c.key === 'cdal-runtime-health')
-    expect(cdal).toMatchObject({
-      label: 'Contract proof incomplete 6',
-      tone: 'bad',
-      route: {
-        tab: 'monitoring',
-        params: { section: 'fleet-health' },
-      },
-    })
-    expect(cdal?.detail).toContain('stale=3')
-    expect(cdal?.detail).toContain('current_missing_task_scope=5')
-  })
 })
 
 describe('SideRail v2 chrome', () => {

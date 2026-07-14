@@ -61,9 +61,6 @@
   (re_export masc.masc_board)
   (re_export masc.board_handlers)
   (re_export masc.board_tool_adapter)
-  ;; CDAL runtime proof/session modules are local to this sub-library; tests
-  ;; need it re-exported so [Masc_cdal_runtime.*] resolves.
-  (re_export masc.cdal_runtime)
   ;; RFC-0056 Phase 1A — Trajectory leaf module sub-library.
   ;; Tests previously wrote `Masc.Trajectory.X` (wrapped pattern);
   ;; after this re-export they use bare `Trajectory.X` per the

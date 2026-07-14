@@ -26,7 +26,7 @@ let origin_str = function A.Det -> "det" | A.NonDet -> "nondet"
 (* --- Round-trip --- *)
 
 let test_roundtrip_passed () =
-  let t = A.passed ~origin:Det ~gate:"cdal_verdict" ~evidence:evidence_sample in
+  let t = A.passed ~origin:Det ~gate:"verification" ~evidence:evidence_sample in
   let json = A.to_yojson t in
   match A.of_yojson json with
   | Ok t' ->

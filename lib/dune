@@ -119,7 +119,6 @@
   ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
   ;; literals in lib/runtime and lib/keeper through this leaf.
   masc.types_boundary
-  masc.cdal_runtime
   ;; RFC-0056 Phase 1A — Trajectory leaf module promoted out of flat
   ;; masc namespace. Unblocks Wave A keeper/server godfile extractions
   ;; (PR-1+) by removing the parent ↔ sub-lib cycle on `Trajectory.X`.

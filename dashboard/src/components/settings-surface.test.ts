@@ -430,7 +430,6 @@ describe('SettingsSurface', () => {
       fleet_safety: null,
       fd_accountant: null,
       disk_observation: null,
-      cdal: null,
     }
     shellConfigResolution.value = {
       status: 'ready',

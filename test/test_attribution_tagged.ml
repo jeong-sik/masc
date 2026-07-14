@@ -25,7 +25,7 @@ let origin_str = function A.Det -> "det" | A.NonDet -> "nondet"
 (* --- Det constructors --- *)
 
 let test_det_passed () =
-  let t = AT.det_passed ~gate:"cdal_verdict" ~evidence:`Null in
+  let t = AT.det_passed ~gate:"verification" ~evidence:`Null in
   let a = AT.to_attribution t in
   Alcotest.(check string) "origin" "det" (origin_str a.origin);
   Alcotest.(check string) "outcome" "passed" (outcome_kind a.outcome)

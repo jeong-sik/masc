@@ -43,9 +43,6 @@ let worker_raw_trace_path ~base_path ~worker_name =
 let oas_tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
   Error { Agent_sdk.Types.message; recoverable; error_class = None }
 
-let oas_trace_session_root ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "oas-runtime"
-
 let ensure_worker_container_dirs ~base_path ~worker_name =
   let dir = worker_container_dir ~base_path ~worker_name in
   Fs_compat.mkdir_p dir;
@@ -378,7 +375,7 @@ let make_worker_meta ~base_path ~workspace_path ~worker_name
 
 let append_worker_completion_log ~base_path ~worker_name
     ~prompt ~tool_names ~status ~output ?error ?raw_trace_run
-    ?evidence_session_id ?proof_run_id ?proof_result_status () =
+    ?evidence_session_id () =
   append_worker_turn_log ~base_path ~worker_name
     (`Assoc
       [
@@ -394,12 +391,6 @@ let append_worker_completion_log ~base_path ~worker_name
         ( "evidence_session_id",
           Option.fold ~none:`Null ~some:(fun value -> `String value)
             evidence_session_id );
-        ( "proof_run_id",
-          Option.fold ~none:`Null ~some:(fun value -> `String value)
-            proof_run_id );
-        ( "proof_result_status",
-          Option.fold ~none:`Null ~some:(fun value -> `String value)
-            proof_result_status );
         ( "error",
           Option.fold ~none:`Null ~some:(fun value -> `String value) error );
       ])
@@ -438,45 +429,3 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
   in
   (config, options)
 
-let materialize_direct_evidence ~base_path ~worker_name
-    ~(worker_run_id : string option) ~(meta : worker_container_meta) ~prompt
-    ~workspace_path ~agent ~raw_trace =
-  match evidence_session_id_of_worker_run worker_run_id with
-  | None -> ()
-  | Some session_id ->
-      let aliases =
-        Json_util.dedupe_keep_order
-          ([ worker_name ]
-          @
-          match meta.role with
-          | Some role
-            when String.trim role <> ""
-                 && not (String.equal role worker_name) ->
-              [ role ]
-          | _ -> [])
-      in
-      let options =
-        {
-          Masc_cdal_runtime.Direct_evidence.session_root =
-            Some (oas_trace_session_root ~base_path);
-          session_id;
-          goal = prompt;
-          title = Some (Printf.sprintf "MASC worker %s" worker_name);
-          tag = Some "masc-team-worker";
-          worker_id =
-            Some (stable_worker_session_id worker_name);
-          runtime_actor = Some worker_name;
-          role = meta.role;
-          aliases;
-          requested_provider = Some "local";
-          requested_model = Some meta.effective_model;
-          requested_policy = None;
-          workdir = Some workspace_path;
-        }
-      in
-      match Masc_cdal_runtime.Direct_evidence.persist ~agent ~raw_trace ~options () with
-      | Ok _ -> ()
-      | Error err ->
-          Log.LocalWorker.error
-            "direct evidence persist failed for %s/%s: %s"
-            worker_name session_id (Agent_sdk.Error.to_string err)

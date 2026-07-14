@@ -109,7 +109,6 @@ export type AttributionOrigin = 'det' | 'nondet'
 // a client update, but enumerating canonical values gives us autocomplete and
 // catches typos.
 export type AttributionGate =
-  | 'cdal_verdict'
   | 'verification'
   | 'exec_policy'
   | 'accountability'

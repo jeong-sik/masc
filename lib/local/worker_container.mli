@@ -25,13 +25,13 @@
     - Provider: {!oas_provider_of_label},
       {!resolve_oas_provider_of_label}.
     - Audit + run helpers: {!append_worker_completion_log},
-      {!build_resume_config}, {!materialize_direct_evidence}.
+      {!build_resume_config}.
 
     Internal helpers stay private at this boundary
     ([worker_container_root], [safe_worker_token],
     [worker_meta_path], [worker_checkpoint_path],
     [worker_turn_log_path], [oas_tool_error],
-    [oas_trace_session_root], [stable_worker_session_id],
+    [stable_worker_session_id],
     [oas_worker_evidence_session_id],
     [worker_meta_allowed_fields],
     [worker_meta_removed_fields],
@@ -130,8 +130,8 @@ val resolved_mcp_session_id :
 val evidence_session_id_of_worker_run :
   string option -> string option
 (** Trims and returns [Some] when non-empty, [None]
-    otherwise.  Pairs with {!materialize_direct_evidence}
-    to skip evidence persistence on missing run id. *)
+    otherwise.  Feeds the [evidence_session_id] column of
+    {!append_worker_completion_log}. *)
 
 (** {1 Tool catalogue} *)
 
@@ -182,8 +182,6 @@ val append_worker_completion_log :
   ?error:string ->
   ?raw_trace_run:Agent_sdk.Raw_trace.run_ref ->
   ?evidence_session_id:string ->
-  ?proof_run_id:string ->
-  ?proof_result_status:string ->
   unit ->
   (unit, string) result
 (** Appends one line to [turns.jsonl] summarising a
@@ -213,22 +211,3 @@ val build_resume_config :
     [enable_thinking] / [tool_choice = Auto]. Provider/model sampling and
     output defaults remain OAS-owned. [guardrails] defaults to the unrestricted
     worker surface; the concrete [tools] list is the exposure SSOT. *)
-
-(** {1 Direct-evidence persistence} *)
-
-val materialize_direct_evidence :
-  base_path:string ->
-  worker_name:string ->
-  worker_run_id:string option ->
-  meta:worker_container_meta ->
-  prompt:string ->
-  workspace_path:string ->
-  agent:Agent_sdk.Agent.t ->
-  raw_trace:Agent_sdk.Raw_trace.t ->
-  unit
-(** Writes a direct-evidence bundle under
-    [<base_path>/.masc/oas-runtime/...] when
-    [worker_run_id] is present (no-op otherwise).
-    Aliases are deduped through
-    {!unique_preserve_order}; failures log via
-    [Log.LocalWorker.error] but never re-raise. *)

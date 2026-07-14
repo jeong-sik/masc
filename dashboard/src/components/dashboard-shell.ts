@@ -4,7 +4,7 @@ import { lazy, Suspense } from 'preact/compat'
 import type { ComponentType } from 'preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import type { GroundedVerdict, RouteState, TabId } from '../types'
-import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
+import type { DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import {
   fetchDashboardRuntimeProbe,
   type DashboardRuntimeProbePayload,
@@ -393,50 +393,6 @@ function reactionLedgerHealthChip(
   }
 }
 
-function contractHealthChip(cdal: DashboardCdalHealth | null | undefined): DashboardHealthChip | null {
-  if (!cdal) return null
-  const writerStatus = cdal.writer_status ?? 'unknown'
-  const proofStatus = cdal.proof_store?.status ?? 'unknown'
-  const taskStatus = cdal.task_scope?.status ?? 'unknown'
-  const incomplete = cdal.proof_store?.completeness?.incomplete_run_dirs ?? 0
-  const stale = cdal.proof_store?.completeness?.stale_incomplete_run_dirs ?? 0
-  const terminal = cdal.proof_store?.completeness?.terminal_incomplete_run_dirs ?? 0
-  const currentMissing = cdal.task_scope?.current_writer_missing_task_scope_rows ?? 0
-  const requiresAction = cdal.operator_action_required === true
-  if (!requiresAction && writerStatus === 'active' && incomplete === 0 && currentMissing === 0) {
-    return null
-  }
-  const tone: DashboardHealthChipTone =
-    requiresAction || stale > 0 || currentMissing > 0 ? 'bad' : terminal > 0 || incomplete > 0 ? 'warn' : 'ok'
-  const label = stale > 0 || terminal > 0 || incomplete > 0
-    ? `Contract proof incomplete ${incomplete}`
-    : currentMissing > 0
-      ? `Contract task scope ${currentMissing}`
-      : `Contract verification ${writerStatus}`
-  return {
-    key: 'cdal-runtime-health',
-    label,
-    detail: [
-      `writer_status=${writerStatus}`,
-      `proof_store=${proofStatus}`,
-      `task_scope=${taskStatus}`,
-      `incomplete=${incomplete}`,
-      `stale=${stale}`,
-      `terminal=${terminal}`,
-      `current_missing_task_scope=${currentMissing}`,
-    ].join(', '),
-    tone,
-    route: {
-      tab: 'monitoring',
-      params: { section: 'fleet-health' },
-    },
-  }
-}
-
-// Drill-down routes for each chip key. Centralized so the builder stays
-// readable and tests can audit the routing table separately. Returning
-// undefined keeps the chip as a static span (transport-offline,
-// execution-error: no view helps; hydrating/runtime-ok: nothing to drill).
 function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
   switch (key) {
     case 'source-mismatch':
@@ -621,11 +577,6 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     if (probeErrorChip) {
       chips.push(probeErrorChip)
     }
-  }
-
-  const cdalChip = contractHealthChip(runtime?.cdal)
-  if (cdalChip) {
-    chips.push(cdalChip)
   }
 
   if (configured > 0 && input.keepers.length === 0 && liveKeepers === 0 && pausedKeepers === 0) {

@@ -28,7 +28,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 567 | Git commit hash override for build identity. |
 | `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 276 |  |
 | `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 498 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
-| `MASC_DATA_DIR` | string_literal | n/a | n/a | 511 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for contract verdicts ... |
+| `MASC_DATA_DIR` | string_literal | n/a | n/a | 511 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for runtime data ... |
 | `MASC_GIT_FETCH_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 539 | [git fetch origin] is network-bound and can stall behind a slow Docker bridge or a large remote. Default 120s gives e... |
 | `MASC_HOST` | string_literal | n/a | n/a | 247 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
 | `MASC_HOST_FD_PRESSURE_POLLER_DISABLED` | typed:bool | Policies | operator | 356 | Operator policy toggle for disabling host fd pressure polling. @category Policies @ops_class operator |

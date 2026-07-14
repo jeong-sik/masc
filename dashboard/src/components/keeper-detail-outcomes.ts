@@ -93,15 +93,6 @@ export function OutcomesLedger({ keeper, outcomes }: {
               `)}
             </div>
           ` : null}
-          ${validation.cdal_gate ? html`
-            <div class="mt-2 flex flex-wrap gap-3 text-2xs text-[var(--color-fg-primary)]">
-              <span class="tabular-nums">Contract pass <span class="font-semibold text-[var(--color-status-ok)]">${validation.cdal_gate.pass}</span></span>
-              <span class="tabular-nums">reject <span class="font-semibold text-[var(--color-status-err)]">${validation.cdal_gate.reject}</span></span>
-              ${validation.cdal_gate.pending_verification > 0 ? html`
-                <span class="tabular-nums">검증 대기 <span class="font-semibold text-[var(--color-status-warn)]">${validation.cdal_gate.pending_verification}</span></span>
-              ` : null}
-            </div>
-          ` : null}
         ` : html`
           <div class="text-2xs text-[var(--color-fg-disabled)] leading-snug">
             이 키퍼에 대해 기록된 OAS verdict가 아직 없습니다.

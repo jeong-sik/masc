@@ -97,10 +97,7 @@ let dashboard_retention_json =
                `String
                  (Activity_graph.tool_execution_event_kind_to_string kind))
              Activity_graph.all_tool_execution_event_kinds
-           @ [ `String "keeper.contract_verdict"
-             ; `String "keeper.friction"
-             ; `String "keeper.turn_completed"
-             ]) );
+           @ [ `String "keeper.turn_completed" ]) );
     ]
 
 let event_to_json (e : timeline_event) : Yojson.Safe.t =
@@ -357,28 +354,6 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
                  ("typed_outcome", typed_outcome);
                ];
          })
-  |> take_last limit
-
-let keeper_cdal_events (config : Workspace.config) ~agent_name ~limit :
-    timeline_event list =
-  let scan_limit =
-    let expanded = if limit <= 0 then 0 else limit * 10 in
-    min 1000 (max limit expanded)
-  in
-  let all_events =
-    Activity_graph.list_events config
-      ~kinds:["keeper.contract_verdict"; "keeper.friction"]
-      ~after_seq:0 ~limit:scan_limit ()
-  in
-  all_events
-  |> List.filter (activity_event_matches_agent ~agent_name)
-  |> List.map (fun (e : Activity_graph.event) ->
-       {
-         ts = Float.of_int e.ts_ms /. 1000.0;
-         ts_iso = e.ts_iso;
-         event_type = e.kind;
-         detail = e.payload;
-       })
   |> take_last limit
 
 (* Collect turn-completed events from Activity Graph *)

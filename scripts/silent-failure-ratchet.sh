@@ -49,13 +49,10 @@ for tool in rg python3 awk; do
   }
 done
 
-# Scope: lib/ OCaml sources, excluding the cdal sub-library
-# (RFC-0056 isolation — boundary policed elsewhere) and any test
-# directories nested under lib/.
+# Scope: lib/ OCaml sources, excluding any test directories nested under lib/.
 RG_SCOPE=(
   --type ocaml
   --glob 'lib/**/*.ml'
-  --glob '!lib/cdal/**'
   --glob '!lib/**/test/**'
 )
 

@@ -29,25 +29,21 @@ let test_api_rate_limited_threads_hint () =
        (Llm_provider.Retry.RateLimited
           { retry_after = Some 30.0; message = "slow down" }))
 
-let test_api_hard_quota_message_wins () =
-  (* The message must be one [Retry.hard_quota_indicators] actually lists —
-     "monthly quota reached" is not an indicator, so the original fixture
-     asserted a classification the OAS predicate never made (surfaced on
-     main once #23495's cancelled PR run finally executed this exe). *)
+let test_api_quota_message_does_not_override_rate_limit () =
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.RateLimited
          { retry_after = None; message = "You have exceeded your current quota." })
   in
-  match route_of_oas_error err with
-  | KFR.Retry_after_observed { retry_class = KFR.Hard_quota; _ } -> ()
-  | (KFR.Retry_after_observed _ | KFR.Rotate_now _ | KFR.Escalate_judgment _) as other ->
-    (* Guards against OAS predicate drift: [Retry.is_hard_quota] owns the
-       message classification; the route must stay a hard-quota observation. *)
-    Alcotest.failf
-      "hard-quota message must remain typed, got %s:%s"
-      (KFR.route_kind_label other)
-      (KFR.route_class_label other)
+  check_route
+    "rate-limit prose cannot invent hard quota"
+    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None })
+    err;
+  check_route
+    "PaymentRequired is the typed API hard-quota signal"
+    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None })
+    (Agent_sdk.Error.Api
+       (Llm_provider.Retry.PaymentRequired { message = "billing required" }))
 
 let test_api_overloaded_is_backpressure () =
   check_route
@@ -56,27 +52,17 @@ let test_api_overloaded_is_backpressure () =
        { retry_class = KFR.Capacity_backpressure; retry_after = None })
     (Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded { message = "overloaded" }))
 
-let test_api_server_error_status_split () =
+let test_api_server_error_uses_typed_variant () =
   check_route
-    "524 is gateway backpressure"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = None })
+    "ServerError does not reinterpret status codes"
+    (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
     (Agent_sdk.Error.Api
        (Llm_provider.Retry.ServerError { status = 524; message = "timeout" }));
   check_route
-    "503 is transient server error"
+    "typed ServerError remains a server error for an unusual status"
     (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
     (Agent_sdk.Error.Api
-       (Llm_provider.Retry.ServerError { status = 503; message = "unavailable" }));
-  match
-    route_of_oas_error
-      (Agent_sdk.Error.Api
-         (Llm_provider.Retry.ServerError { status = 418; message = "teapot" }))
-  with
-  | KFR.Escalate_judgment { judgment = KFR.Provider_integration; _ } -> ()
-  | other ->
-    Alcotest.failf "sub-500 server error should judge, got %s"
-      (KFR.route_kind_label other)
+       (Llm_provider.Retry.ServerError { status = 418; message = "teapot" }))
 
 let test_api_auth_rotates_invalid_request_judges () =
   check_route
@@ -447,9 +433,15 @@ let () =
     "keeper_runtime_failure_route"
     [ ( "api"
       , [ Alcotest.test_case "rate limited hint" `Quick test_api_rate_limited_threads_hint
-        ; Alcotest.test_case "hard quota message" `Quick test_api_hard_quota_message_wins
+        ; Alcotest.test_case
+            "quota prose stays rate limited"
+            `Quick
+            test_api_quota_message_does_not_override_rate_limit
         ; Alcotest.test_case "overloaded backpressure" `Quick test_api_overloaded_is_backpressure
-        ; Alcotest.test_case "server error split" `Quick test_api_server_error_status_split
+        ; Alcotest.test_case
+            "server error typed variant"
+            `Quick
+            test_api_server_error_uses_typed_variant
         ; Alcotest.test_case "auth rotates, invalid judges" `Quick test_api_auth_rotates_invalid_request_judges
         ] )
     ; ( "provider"

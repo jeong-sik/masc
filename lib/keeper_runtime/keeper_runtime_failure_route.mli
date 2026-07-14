@@ -21,21 +21,23 @@
     [Keeper_error_classify.recoverable_runtime_failure_reason] opinion is
     an explicit typed-boundary mismatch, not scheduling authority.
 
-    The one string-derived input is [Llm_provider.Retry.is_hard_quota],
-    OAS's own boundary predicate over its [api_error] payloads — consuming
-    it is the allowed MASC→OAS direction; replacing its internals with a
-    typed variant is OAS-side work. *)
+    Hard quota is recognized only from the typed [PaymentRequired] and
+    [HardQuota] constructors. Rate-limit messages and status prose are never
+    reclassified. *)
 
 (** Typed class of the observed retryable provider/runtime failure. *)
 type retry_class =
   | Rate_limited  (** soft 429 throttle; rotation keeps the credential-pool filter *)
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
   | Capacity_backpressure
-      (** provider overload / Cloudflare 524 / capacity-exhausted pools;
-          the 2026-07-06 storm class *)
-  | Server_error  (** transient 5xx / provider unavailable *)
+      (** typed provider overload / capacity-exhausted pools *)
+  | Server_error  (** typed server failure / provider unavailable *)
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
+
+val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
+(** True only for the typed [PaymentRequired] and provider [HardQuota]
+    constructors. Free-form messages and numeric status codes are ignored. *)
 
 (** Why a different runtime is tried in the same turn. *)
 type rotate_class =

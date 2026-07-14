@@ -67,9 +67,6 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Api (NetworkError _) -> Transient_network
   | Agent_sdk.Error.Api (Timeout _) -> Transient_network
   | Agent_sdk.Error.Api (Overloaded _) -> Transient_capacity
-  | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> Transient_network
-  | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> Transient_network
-  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> Transient_network
   | Agent_sdk.Error.Api (RateLimited _) -> Transient_rate_limit
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError
@@ -81,8 +78,6 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
       Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> Transient_network
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Transient_network
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
-      Transient_network
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
       if transient then Transient_network else Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) -> Transient_rate_limit
@@ -127,14 +122,6 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
   | Agent_sdk.Error.Api (Overloaded _) -> true
-  | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
-  (* Cloudflare 52x timeout family — origin server unreachable or
-     slow to respond. Both are transient: a different provider may succeed
-     where one origin timed out, so the runtime should advance. *)
-  | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> true
-  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> true
-  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
-      true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
       transient
   (* Non-transient API errors. *)
@@ -224,12 +211,6 @@ let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
 let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
   Keeper_provider_runtime_boundary.is_provider_timeout_error err
 
-(* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
-   orchestration level this means the current provider lane is saturated or
-   unhealthy enough that rotating/cooling it as backpressure is more useful
-   than lumping it into a generic server_error bucket. *)
-let is_gateway_backpressure_status status = status = 524
-
 let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
@@ -280,7 +261,7 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
 
 let is_auto_recoverable_runtime_fail_open_error
     (err : Agent_sdk.Error.sdk_error) : bool =
-  Keeper_turn_driver.sdk_error_is_hard_quota err
+  Keeper_runtime_failure_route.sdk_error_is_hard_quota err
   || is_resumable_cli_session_error err
   || is_auto_recoverable_runtime_exhausted_error err
 
@@ -399,7 +380,7 @@ let degraded_retry_after_recoverable_error
      || String.equal normalized_effective (Keeper_config.default_runtime_id ())
      || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
-  else if Keeper_turn_driver.sdk_error_is_hard_quota err then
+  else if Keeper_runtime_failure_route.sdk_error_is_hard_quota err then
     phase_recovery_retry Hard_quota
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
@@ -431,7 +412,7 @@ let degraded_retry_after_recoverable_error
         None
 
 let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
-  if Keeper_turn_driver.sdk_error_is_hard_quota err then
+  if Keeper_runtime_failure_route.sdk_error_is_hard_quota err then
     Some Hard_quota
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
@@ -467,7 +448,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Receipt_persistence_failed _) ->
         None
     | None ->
-        (* Status-code-aware runtime rotation: raw provider API errors that are
+        (* Typed runtime rotation: raw provider API errors that are
            not wrapped in a MASC internal error (e.g. single-provider runtimes
            where OAS surfaces the error directly) should still trigger rotation
            when a different runtime may succeed.
@@ -477,16 +458,14 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            candidate boundary below, where runtime/provider credentials are
            available.
 
-           5xx server errors: the provider is unhealthy or overloaded; a
+           [ServerError]: the provider is unhealthy or overloaded; a
            different runtime may be healthy.
 
            401/403 auth errors: the credential for this runtime is invalid; a
            different runtime with different credentials may succeed.
 
-           Hard-quota 429s are already handled above by sdk_error_is_hard_quota.
-           HTTP 402 PaymentRequired is also handled there via OAS
-           Retry.is_hard_quota.
-           Soft (non-hard-quota) rate limits intentionally keep [Rate_limit]
+           [PaymentRequired] and provider [HardQuota] are handled above by
+           [sdk_error_is_hard_quota]. Rate limits intentionally keep [Rate_limit]
            so pool-aware candidate filtering can preserve independent-provider
            failover. *)
         (match err with
@@ -494,11 +473,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Rate_limit
          | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _) ->
              Some Capacity_backpressure
-         | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
-           when is_gateway_backpressure_status status ->
-             Some Capacity_backpressure
-         | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
-           when status >= 500 ->
+         | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _) ->
              Some Server_error
          | Agent_sdk.Error.Api
              ( Llm_provider.Retry.AuthError _
@@ -511,11 +486,8 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Capacity_backpressure
          | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
-         | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
-           when is_gateway_backpressure_status code ->
-             Some Capacity_backpressure
-         | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; transient; _ })
-           when transient || code >= 500 ->
+         | Agent_sdk.Error.Provider
+             (Llm_provider.Error.ServerError { transient = true; _ }) ->
              Some Server_error
          | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
              Some Server_error
@@ -535,9 +507,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              | Llm_provider.Error.UnknownVariant _
              | Llm_provider.Error.ProviderTerminal _) ->
              None
-         (* Sub-500 server errors and remaining 4xx API errors are not
-            classified as recoverable runtime failures. *)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)

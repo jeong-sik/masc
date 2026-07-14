@@ -122,7 +122,6 @@ end
            declaration takes precedence
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
-    @param priority Optional priority for scheduling
     @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared OAS context for cross-turn state
     @param event_bus Optional MASC event bus *)
@@ -145,7 +144,6 @@ val run_turn
   -> ?temperature:float
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
-  -> ?priority:Llm_provider.Request_priority.t
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason

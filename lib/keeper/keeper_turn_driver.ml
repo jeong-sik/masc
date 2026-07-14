@@ -316,7 +316,6 @@ let run_named
     ~base_path
     ~goal
     ?goal_blocks
-    ?priority
     ?session_id
     ?(system_prompt = "")
     ?(tools = [])
@@ -649,7 +648,6 @@ let run_named
             ; name
             ; goal
             ; goal_blocks
-            ; priority
             ; session_id
             ; system_prompt
             ; tools

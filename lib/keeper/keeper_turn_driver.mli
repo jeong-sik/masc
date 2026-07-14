@@ -77,7 +77,6 @@ val run_named :
   base_path:string ->
   goal:string ->
   ?goal_blocks:Agent_sdk.Types.content_block list ->
-  ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->

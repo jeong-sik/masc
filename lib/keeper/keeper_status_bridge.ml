@@ -65,11 +65,6 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
   let effective_runtime_id = effective_declarative_runtime_id defaults meta in
   []
   |> maybe_string_override
-       "prompt.goal"
-       ~normalize:normalize_goal_text
-       defaults.goal
-       (default_string defaults.goal meta.goal)
-  |> maybe_string_override
        "prompt.instructions"
        defaults.instructions
        (default_string defaults.instructions meta.instructions)

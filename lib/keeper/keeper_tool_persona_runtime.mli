@@ -9,8 +9,6 @@ val read_jsonl_rows :
 val find_jsonl_row_by_action_id :
   Yojson.Safe.t list -> string -> Yojson.Safe.t option
 
-val validate_resolved_keeper_create_json : Yojson.Safe.t -> string list
-
 val render_keeper_toml_from_resolved_args :
   Yojson.Safe.t -> (string, string) result
 

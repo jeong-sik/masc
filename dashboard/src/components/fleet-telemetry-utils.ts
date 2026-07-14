@@ -253,7 +253,7 @@ function keeperRecentTools(keeper: Keeper): string[] {
 }
 
 function keeperGoalLabel(keeper: Keeper): string | null {
-  return firstNonEmptyString(keeper.goal)
+  return keeper.active_goal_ids?.[0] ?? null
 }
 
 function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {
@@ -466,7 +466,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             terminal_reason_severity: keeper.trust?.latest_terminal_reason?.severity ?? null,
             tool_audit_at: keeper.tool_audit_at ?? null,
             goal_label: keeperGoalLabel(keeper),
-            goal_linked: (keeper.active_goal_ids?.length ?? 0) > 0 || keeperGoalLabel(keeper) != null,
+            goal_linked: (keeper.active_goal_ids?.length ?? 0) > 0,
             active_goal_count: keeper.active_goal_ids?.length ?? 0,
             sandbox_profile: keeper.sandbox_profile ?? null,
             sandbox_last_error: keeper.sandbox_last_error ?? null,

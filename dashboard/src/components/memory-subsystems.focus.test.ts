@@ -54,7 +54,6 @@ const baseResponse: MemorySubsystemsResponse = {
         id: 'delegation-rendering-review',
         requester: 'keeper-alpha',
         topic: 'Review non-dashboard rendering',
-        goal: 'connector parity',
         promotion_state: 'candidate',
         dir: '<base-path>/.masc/delegation-requests/delegation-rendering-review',
         json_path: '<base-path>/.masc/delegation-requests/delegation-rendering-review/request.json',

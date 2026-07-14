@@ -32,7 +32,6 @@ let make_keepalive_meta ~name ~agent_name =
         ("name", `String name);
         ("agent_name", `String agent_name);
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "test");
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
       ]
@@ -183,7 +182,6 @@ let make_board_resume_meta name =
       [ ("name", `String name)
       ; ("agent_name", `String ("keeper-" ^ name))
       ; ("trace_id", `String ("trace-" ^ name))
-      ; ("goal", `String "test")
       ; ("sandbox_profile", `String "local")
       ; ("network_mode", `String "inherit")
       ]

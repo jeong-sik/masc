@@ -34,7 +34,6 @@ let test_meta_of_json_survives_deleted_cwd () =
           [
             ("name", `String "sangsu");
             ("trace_id", `String "trace-sangsu-live");
-            ("goal", `String "respond to direct messages");
           ]
       in
       match Masc_test_deps.meta_of_json_fixture json with

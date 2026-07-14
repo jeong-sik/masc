@@ -1,5 +1,5 @@
 (** Keeper_config_text — String/UTF-8 processing, bool parsing, input key
-    validation, and goal-horizon text normalization.
+    validation, and prompt text normalization.
 
     Extracted from [keeper_config.ml] during godfile decomposition.
     These functions have no back-references to keeper_config itself —
@@ -54,15 +54,6 @@ let default_proactive_enabled = true
    because silent truncation in the dashboard made operators think edits were
    not persisting. Operators can lower them via env vars if a deployment needs
    tighter prompt budgets. *)
-let default_goal_max_chars =
-  match Env_config_core.raw_value_opt "MASC_KEEPER_GOAL_MAX_CHARS" with
-  | Some v ->
-    (match int_of_string_opt (String.trim v) with
-     | Some n when n > 0 -> n
-     | _ -> 4096)
-  | None -> 4096
-
-
 let prompt_render_max_bytes =
   match Env_config_core.raw_value_opt "MASC_KEEPER_PROMPT_RENDER_MAX_BYTES" with
   | Some v ->
@@ -75,6 +66,7 @@ let prompt_render_max_bytes =
 
 let removed_keeper_input_key_names =
   [
+    "goal";
     "models";
     "allowed_models";
     "active_model";
@@ -236,8 +228,3 @@ let normalize_prompt_text ~(max_bytes : int) (raw : string) : string =
   else
     let cut = String_util.utf8_prefix ~max_bytes s in
     String.trim cut
-
-let normalize_goal_text ?(max_len = default_goal_max_chars) (raw : string) : string =
-  let s = String.trim raw in
-  if s = "" then ""
-  else String_util.utf8_prefix ~max_bytes:max_len s

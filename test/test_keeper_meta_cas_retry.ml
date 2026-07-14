@@ -44,7 +44,6 @@ let make_meta ~name =
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("goal", `String "test keeper");
           ("autoboot_enabled", `Bool false);
         ])
   with

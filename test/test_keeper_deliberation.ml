@@ -273,7 +273,6 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
       [
         ("name", `String "test-keeper");
         ("trace_id", `String "trace-1");
-        ("goal", `String "test deliberation");
         (* legacy keys — should be ignored by meta_of_json *)
         ("deliberation_count", `Int 5);
         ("deliberation_cost_total_usd", `Float 0.03);
@@ -292,7 +291,6 @@ let test_keeper_meta_deliberation_fields_default () =
       [
         ("name", `String "test-keeper-2");
         ("trace_id", `String "trace-2");
-        ("goal", `String "test defaults");
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -1008,7 +1006,7 @@ let test_prompt_always_includes_multi_step () =
 (* ---------- removed keeper field + idle gate tests ---------- *)
 
 let test_removed_initiative_field_rejected () =
-  let json_str = {|{"name":"test","initiative_enabled":true,"trace_id":"t1","goal":"g","runtime_id":"local","proactive_enabled":true}|} in
+  let json_str = {|{"name":"test","initiative_enabled":true,"trace_id":"t1","runtime_id":"local","proactive_enabled":true}|} in
   let json = Yojson.Safe.from_string json_str in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok _ -> fail "initiative_enabled should be rejected"
@@ -1017,7 +1015,7 @@ let test_removed_initiative_field_rejected () =
         (String.contains e 'i')
 
 let test_removed_persona_profile_path_rejected () =
-  let json_str = {|{"name":"test","persona_profile_path":"config/personas/test/profile.json","trace_id":"t2","goal":"g","runtime_id":"local","proactive_enabled":true}|} in
+  let json_str = {|{"name":"test","persona_profile_path":"config/personas/test/profile.json","trace_id":"t2","runtime_id":"local","proactive_enabled":true}|} in
   let json = Yojson.Safe.from_string json_str in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok _ -> fail "persona_profile_path should be rejected"

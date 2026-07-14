@@ -27,13 +27,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
   let now_ts = Time_compat.now () in
-  let goal =
-    match p.goal_opt with
-    | Some goal -> normalize_goal_text goal
-    | None ->
-        p.profile_defaults.goal |> Option.value ~default:""
-        |> normalize_goal_text
-  in
   let autoboot_enabled =
     Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
     |> Option.value ~default:true
@@ -84,11 +77,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
-  if goal = "" then begin
-    Log.Keeper.warn "create_keeper failed: goal is required (name=%s)" p.name;
-    tool_result_error "goal is required when creating a keeper"
-  end
-  else match active_goal_ids_error with
+  match active_goal_ids_error with
   | Some msg -> tool_result_error msg
   | None ->
     match
@@ -232,7 +221,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         in
         let system_prompt =
           build_keeper_system_prompt
-            ~goal
             ~instructions
             ~persona_extended
             ~keeper_name:p.name
@@ -259,7 +247,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         name = p.name;
         agent_name = Keeper_identity.keeper_agent_name p.name;
         persona = Some persona_extended;
-        goal;
         instructions;
         sandbox_profile;
         sandbox_image = None;
@@ -418,7 +405,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("agent_name", `String meta.agent_name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
           ("generation", `Int meta.runtime.generation);
-          ("goal", `String meta.goal);
           ("instructions", `String meta.instructions);
           ("proactive_enabled", `Bool meta.proactive.enabled);
           ("compaction_profile", `String meta.compaction.profile);

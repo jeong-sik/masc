@@ -98,8 +98,16 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          runtime in runtime.toml [[runtime.assignments]] (keyed by keeper name)."
     | false, false -> Ok ()
   in
+  let legacy_goal_result =
+    if has "goal" then
+      Error
+        "keeper.goal is removed. Link Goal entities through active_goal_ids; \
+         keeper instructions remain under keeper.instructions."
+    else Ok ()
+  in
   let result =
     Result.bind result (fun () -> runtime_assignment_result)
+    |> Result.bind (fun () -> legacy_goal_result)
   in
   Result.map
     (fun () ->
@@ -107,7 +115,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         id = None;
         manifest_path = None;
         persona_name = str "persona_name";
-        goal = str "goal";
         instructions = str "instructions";
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
@@ -140,7 +147,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
 let parsed_field_key_names =
   [ "name"
   ; "persona_name"
-  ; "goal"
   ; "instructions"
   ; "autoboot_enabled"
   ; "mention_targets"
@@ -168,7 +174,6 @@ let parsed_field_key_names =
 let canonical_keeper_toml_key_names =
   [ "name"
   ; "persona_name"
-  ; "goal"
   ; "instructions"
   ; "autoboot_enabled"
   ; "mention_targets"
@@ -283,7 +288,6 @@ let merge_keeper_profile_defaults
     id = prefer overlay.id base.id;
     manifest_path = prefer overlay.manifest_path base.manifest_path;
     persona_name = prefer overlay.persona_name base.persona_name;
-    goal = prefer overlay.goal base.goal;
     instructions = prefer overlay.instructions base.instructions;
     autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
     mention_targets =

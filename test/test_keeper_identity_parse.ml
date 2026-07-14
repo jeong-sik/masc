@@ -14,7 +14,6 @@ let minimal_keeper_json ~trace_id =
     [ ("name", `String "alice")
     ; ("agent_name", `String "keeper-alice-agent")
     ; ("trace_id", `String trace_id)
-    ; ("goal", `String "test")
     ]
 
 let strict_meta_of_fields fields =
@@ -33,7 +32,6 @@ let test_explicit_keeper_name_is_not_nickname_canonicalized () =
       [ ("name", `String "personality-resync-test")
       ; ("agent_name", `String "personality-resync-test")
       ; ("trace_id", `String "personality-resync-test-001")
-      ; ("goal", `String "test")
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -53,7 +51,6 @@ let test_legacy_runtime_id_alias_tolerated () =
         ("name", `String "alice");
         ("agent_name", `String "keeper-alice-agent");
         ("trace_id", `String "alice-001");
-        ("goal", `String "test");
         ("runtime_id", `String "oas-keeper_unified");
       ]
   in
@@ -72,7 +69,6 @@ let test_conflicting_runtime_id_and_legacy_runtime_id_rejected () =
         ("name", `String "cheolsu");
         ("agent_name", `String "keeper-cheolsu-agent");
         ("trace_id", `String "cheolsu-001");
-        ("goal", `String "test");
         ("runtime_id", `String "runtime-a");
         ("runtime_id", `String "runtime-b");
       ]
@@ -98,7 +94,6 @@ let test_missing_trace_id () =
     strict_meta_of_fields
       [ ("name", `String "bob")
       ; ("agent_name", `String "keeper-bob-agent")
-      ; ("goal", `String "test")
       ]
   with
   | Error msg ->
@@ -135,7 +130,6 @@ let test_removed_voice_policy_meta_rejected () =
       [ ("name", `String "alice")
       ; ("agent_name", `String "keeper-alice-agent")
       ; ("trace_id", `String "alice-001")
-      ; ("goal", `String "test")
       ; ("policy_voice_enabled", `Bool true)
       ]
   with
@@ -145,6 +139,21 @@ let test_removed_voice_policy_meta_rejected () =
       "error names removed policy_voice_enabled"
       true
       (Astring.String.is_infix ~affix:"policy_voice_enabled" msg)
+
+let test_legacy_goal_meta_rejected () =
+  match
+    strict_meta_of_fields
+      [ ("name", `String "alice")
+      ; ("agent_name", `String "keeper-alice-agent")
+      ; ("trace_id", `String "alice-001")
+      ; ("goal", `String "removed")
+      ]
+  with
+  | Ok _ -> fail "legacy goal meta must be rejected"
+  | Error msg ->
+    check bool "error names removed goal" true
+      (Astring.String.is_infix ~affix:"removed keeper meta field" msg
+       && Astring.String.is_infix ~affix:"goal" msg)
 
 let () =
   run "keeper_identity_parse"
@@ -161,5 +170,7 @@ let () =
         ; test_case "invalid trace_id (..)" `Quick test_invalid_trace_id
         ; test_case "removed voice policy meta" `Quick
             test_removed_voice_policy_meta_rejected
+        ; test_case "removed legacy goal meta" `Quick
+            test_legacy_goal_meta_rejected
         ] )
     ]

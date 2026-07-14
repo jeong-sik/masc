@@ -255,8 +255,7 @@ val exact_direct_mention_present : targets:string list -> string -> bool
 val keeper_constitution : unit -> string
 
 val build_keeper_system_prompt
-  :  goal:string
-  -> instructions:string
+  :  instructions:string
   -> ?persona_extended:string
   -> ?keeper_name:string
   -> ?home_ground:string

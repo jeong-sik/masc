@@ -16,7 +16,6 @@ type request_summary =
   { id : string
   ; requester : string
   ; topic : string
-  ; goal : string option
   ; promotion_state : string
   ; dir : string
   ; json_path : string
@@ -56,7 +55,6 @@ val write_request_if_changed
 val write_execution_result
   :  base_path:string
   -> requester:string
-  -> ?goal:string
   -> Keeper_deliberation.execution_result
   -> (stored_request list, string) result
 

@@ -67,7 +67,7 @@ let write_keeper_toml ~keepers_dir ~name =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "local"
-goal = "Dashboard keeper fixture"
+instructions = "Dashboard keeper fixture"
 |}
 
 let test_runtime_toml =

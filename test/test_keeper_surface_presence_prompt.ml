@@ -71,7 +71,6 @@ let meta : Masc.Keeper_meta_contract.keeper_meta =
       [
         ("name", `String "presence-keeper");
         ("trace_id", `String "test-trace-presence");
-        ("goal", `String "test goal");
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

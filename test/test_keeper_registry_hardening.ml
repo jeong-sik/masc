@@ -23,7 +23,6 @@ let make_meta name =
           ("name", `String name);
           ("agent_name", `String ("agent-" ^ name));
           ("trace_id", `String ("trace-" ^ name));
-          ("goal", `String "test keeper");
           ("allowed_paths", `List [ `String "*" ]);
           ("autoboot_enabled", `Bool false);
         ])

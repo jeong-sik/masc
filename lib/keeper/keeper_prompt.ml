@@ -122,7 +122,7 @@ let behavior_prompt_block name =
         name;
       Printf.sprintf
         "Behavior prompt config drift: missing config/prompts/behavior/%s.md. \
-         Preserve the keeper's configured goal, persona, and runtime policy; \
+         Preserve the keeper's persona and runtime policy; \
          ask the operator to restore the missing behavior prompt file."
         name
 
@@ -137,10 +137,8 @@ let behavior_prompt_block name =
    injecting a stale fact snapshot. *)
 
 let build_keeper_system_prompt
-    ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
     ?(home_ground = "") ?(active_goals = []) () =
-  let goal = normalize_goal_text goal in
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
      [Keeper_prompt_external.get]. Missing/unreadable files no longer inject
@@ -270,11 +268,7 @@ let build_keeper_system_prompt
       repositories_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
-      "<identity>\n\
-       Goal: ";
-      goal;
-      "\n\
-       ";
+      "<identity>";
       custom;
       active_goals_block;
       "</identity>";

@@ -3,10 +3,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 let identity_fields : (string * (keeper_meta -> string)) list =
-  [
-    ("goal", (fun m -> m.goal));
-    ("instructions", (fun m -> m.instructions));
-  ]
+  [ "instructions", (fun m -> m.instructions) ]
 
 
 let generation_id ~keeper_name ~generation ~trace_id =

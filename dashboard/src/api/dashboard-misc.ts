@@ -52,7 +52,6 @@ export interface MemorySubsystemsDelegationRequest {
   id: string
   requester: string
   topic: string
-  goal: string | null
   promotion_state: string
   dir: string
   json_path: string

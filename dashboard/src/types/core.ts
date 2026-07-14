@@ -1188,7 +1188,6 @@ export interface Keeper {
   next_human_action?: string | null
   config_error?: KeeperProfileConfigError | null
   active_goal_ids?: string[]
-  goal?: string | null
   sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
   sandbox_last_error?: string | null
@@ -1361,7 +1360,6 @@ interface KeeperSupervisorDiagnostics {
 // --- Keeper Config (structured read-only view) ---
 
 interface KeeperConfigPrompt {
-  goal: string
   instructions: string
   system_prompt_blocks: {
     constitution: {

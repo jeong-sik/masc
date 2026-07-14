@@ -74,13 +74,12 @@ export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRu
 // A persona profile.json has two layers the backend loaders read from
 // distinct locations:
 //   - identity (top level): display_name -> "name", role, trait;
-//   - keeper-template defaults (nested "keeper" object): goal, instructions,
+//   - keeper-template defaults (nested "keeper" object): instructions,
 //     mention_targets, proactive_enabled — the defaults a keeper spawned from
 //     this persona inherits.
 // masc_persona_create / masc_persona_update take these fields (see
 // keeper_schema.ml) and write them to the correct layer. We forward exactly
-// those fields; a persona needs at least `goal` + `mention_targets` to be
-// spawnable (masc_keeper_create_from_persona requires them). The old
+// those fields. The old
 // `mode`/`description` form fields did not exist in the schema and were
 // silently dropped upstream; they are gone.
 // ---------------------------------------------------------------------------
@@ -90,7 +89,6 @@ export interface PersonaFields {
   display_name?: string
   role?: string
   trait?: string
-  goal?: string
   instructions?: string
   mention_targets?: string[]
   proactive_enabled?: boolean
@@ -103,7 +101,6 @@ function personaArgs(fields: Omit<PersonaFields, 'persona_name'>): Record<string
   if (fields.display_name !== undefined) args.display_name = fields.display_name
   if (fields.role !== undefined) args.role = fields.role
   if (fields.trait !== undefined) args.trait = fields.trait
-  if (fields.goal !== undefined) args.goal = fields.goal
   if (fields.instructions !== undefined) args.instructions = fields.instructions
   if (fields.mention_targets !== undefined && fields.mention_targets.length > 0) {
     args.mention_targets = fields.mention_targets

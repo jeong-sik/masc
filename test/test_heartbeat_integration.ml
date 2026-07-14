@@ -107,7 +107,6 @@ let make_meta name =
     ("name", `String name);
     ("agent_name", `String ("agent-" ^ name));
     ("trace_id", `String ("trace-integ-" ^ name));
-    ("goal", `String "integration test");
   ] in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta

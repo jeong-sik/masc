@@ -103,7 +103,6 @@ let make_keeper_meta ?agent_name name =
          ("name", `String name);
          ("agent_name", `String agent_name);
          ("trace_id", `String ("trace-test-" ^ name));
-         ("goal", `String "test goal");
        ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

@@ -387,7 +387,6 @@ let invalidate_keeper_execution_surfaces =
 let dashboard_config_string_fields =
   [
     "runtime_id";
-    "goal";
     "instructions";
     "compaction_profile";
     "sandbox_profile";

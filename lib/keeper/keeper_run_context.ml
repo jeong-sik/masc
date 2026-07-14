@@ -61,7 +61,6 @@ let build_base_system_prompt
      prompt any more — the filesystem is the repo truth and the prompt's
      constant <repositories> block instructs self-discovery. *)
   Keeper_prompt.build_keeper_system_prompt
-    ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
     ~instructions:
       (prompt_profile_default profile_defaults.instructions meta.instructions)
     ~persona_extended

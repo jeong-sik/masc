@@ -84,7 +84,6 @@ let run
          Keeper_delegation_request_store.write_execution_result
            ~base_path:config.base_path
            ~requester:meta.name
-           ~goal:meta.goal
            execution
        with
        | Ok [] -> ()

@@ -83,7 +83,6 @@ let make_keeper_meta name =
         [ ("name", `String name)
         ; ("agent_name", `String ("agent-" ^ name))
         ; ("trace_id", `String ("trace-" ^ name))
-        ; ("goal", `String "goal timeline test")
         ])
   with
   | Ok meta -> meta

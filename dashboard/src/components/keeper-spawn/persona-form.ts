@@ -2,7 +2,7 @@
 //
 // A persona has two field layers (see keeper-spawn-state.ts): identity
 // (display_name/role/trait) and keeper-template defaults
-// (goal/instructions/mention_targets/proactive_enabled). The form groups them
+// (instructions/mention_targets/proactive_enabled). The form groups them
 // so the two layers stay visually distinct.
 //
 // masc_persona_list returns only identity fields, so on edit the identity
@@ -30,7 +30,6 @@ interface FormFields {
   display_name: string
   role: string
   trait: string
-  goal: string
   instructions: string
   mention_targets: string
   proactive_enabled: boolean
@@ -41,7 +40,6 @@ const emptyForm = (): FormFields => ({
   display_name: '',
   role: '',
   trait: '',
-  goal: '',
   instructions: '',
   mention_targets: '',
   proactive_enabled: false,
@@ -122,7 +120,6 @@ async function handleSubmit(e: Event): Promise<void> {
     display_name: f.display_name.trim(),
     role: f.role.trim() || undefined,
     trait: f.trait.trim() || undefined,
-    goal: f.goal.trim() || undefined,
     instructions: f.instructions.trim() || undefined,
     mention_targets: mentionTargets.length > 0 ? mentionTargets : undefined,
   }
@@ -255,17 +252,6 @@ export function PersonaForm(): any {
 
         ${sectionLabel('키퍼 기본값')}
         ${isEdit ? html`<p class="text-3xs text-[var(--color-fg-muted)]">비워두면 기존 값이 유지됩니다.</p>` : null}
-        <div>
-          <label class="text-2xs text-[var(--color-fg-muted)] block mb-1" for="persona-goal-input">목표</label>
-          <${TextArea}
-            id="persona-goal-input"
-            value=${f.goal}
-            onInput=${(e: Event) => setField('goal', (e.target as HTMLTextAreaElement).value)}
-            placeholder="이 페르소나로 생성된 키퍼가 추구할 목표"
-            rows=${2}
-          />
-        </div>
-
         <div>
           <label class="text-2xs text-[var(--color-fg-muted)] block mb-1" for="persona-instructions-input">행동 지침</label>
           <${TextArea}

@@ -213,7 +213,6 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
   let opt_int = Option.fold ~none:"" ~some:string_of_int in
   let fields =
     [
-      ("goal", meta.goal);
       ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
       ("sandbox_image", opt_string meta.sandbox_image);
       ("network_mode", network_mode_to_string meta.network_mode);
@@ -811,7 +810,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let json = `Assoc ([
            ("name", `String name);
            ("meta", Keeper_meta_json.meta_to_json m);
-           ("goal", `String m.goal);
            ( "persona",
              match m.persona with
              | Some persona when String.trim persona <> "" -> `String persona

@@ -575,21 +575,19 @@ export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | n
  *  and summary surface so they agree on precedence.
  *
  *  Precedence: a real message output (recent_output/input_preview) first, then
- *  the most recent proactive turn's preview, then the goal / current-task
+ *  the most recent proactive turn's preview, then the current-task
  *  fallbacks. The proactive preview matters because a proactive-only keeper
  *  never broadcasts — `recent_output_preview` is message-bus derived and stays
  *  empty for it — so its work surfaces solely through `last_proactive_preview`.
  *  Reading only the message fields left every proactive keeper rendering the
  *  bare "최근 작업 요약 없음" placeholder while the live signal sat unread on the
- *  same card (last_proactive_preview populated 13/15 in the fleet, all five
- *  message/goal fields 0/15). Returns null when no signal exists. */
+ *  same card. Returns null when no signal exists. */
 export function keeperWorkPreview(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
   return firstNonEmptyString(
     keeper.recent_output_preview,
     keeper.recent_input_preview,
     keeper.last_proactive_preview,
-    keeper.goal,
     keeper.agent?.current_task,
   )
 }

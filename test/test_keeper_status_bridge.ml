@@ -54,8 +54,7 @@ let init_runtime_default_for_tests () =
 
 let defaults_with_prompt_fields =
   { Keeper_types_profile.empty_keeper_profile_defaults with
-    goal = Some "profile goal"
-  ; instructions = Some "profile instructions"
+    instructions = Some "profile instructions"
   ; mention_targets = [ "profile-target" ]
   }
 ;;
@@ -64,7 +63,6 @@ let defaults_with_prompt_fields =
   init_runtime_default_for_tests ();
   let meta =
     { (make_meta ()) with
-      goal = "";
       instructions = "";
       mention_targets = [];
     }
@@ -79,14 +77,13 @@ let test_nonempty_live_meta_still_reports_profile_override () =
   init_runtime_default_for_tests ();
   let meta =
     { (make_meta ()) with
-      goal = "live goal";
       instructions = "live instructions";
       mention_targets = [ "live-target" ];
     }
   in
   Alcotest.(check (list string))
     "non-empty live prompt fields still surface as overrides"
-    [ "prompt.goal"; "prompt.instructions"; "workspace.mention_targets" ]
+    [ "prompt.instructions"; "workspace.mention_targets" ]
     (Keeper_status_bridge.live_override_fields meta defaults_with_prompt_fields)
 ;;
 

@@ -22,7 +22,6 @@ let make_meta ?(sandbox = Keeper_types_profile_sandbox.Docker) name =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "repo readiness test");
         ( "sandbox_profile",
           `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
       ]

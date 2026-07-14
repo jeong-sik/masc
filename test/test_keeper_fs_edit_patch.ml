@@ -48,7 +48,6 @@ let make_meta ?(sandbox = Keeper_types_profile_sandbox.Local) name =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "patch test");
         ("allowed_paths", `List [ `String "*" ]);
         ("always_allow", `Bool true);
         ( "sandbox_profile",

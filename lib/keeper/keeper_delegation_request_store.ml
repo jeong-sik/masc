@@ -12,7 +12,6 @@ type request_summary =
   { id : string
   ; requester : string
   ; topic : string
-  ; goal : string option
   ; promotion_state : string
   ; dir : string
   ; json_path : string
@@ -65,11 +64,6 @@ let request_json_content request =
 ;;
 
 let render_task_seed_md (request : Keeper_delegation_request.t) =
-  let goal =
-    match request.goal with
-    | Some goal -> [ ""; "## Goal"; ""; goal ]
-    | None -> []
-  in
   let tags =
     match request.task_seed.tags with
     | [] -> []
@@ -93,7 +87,6 @@ let render_task_seed_md (request : Keeper_delegation_request.t) =
      ; ""
      ; (if String.trim request.reason = "" then "(no reason supplied)" else request.reason)
      ]
-     @ goal
      @ [ ""
        ; "## Promotion Contract"
        ; ""
@@ -115,7 +108,6 @@ let index_event_json request ~dir ~json_path ~task_seed_md_path =
     ; "id", `String request.Keeper_delegation_request.id
     ; "requester", `String request.requester
     ; "topic", `String request.topic
-    ; "goal", Json_util.string_opt_to_json request.goal
     ; ( "promotion_state"
       , `String
           (Keeper_delegation_request.promotion_state_to_string
@@ -224,9 +216,9 @@ let write_request_if_changed ~base_path request =
   if changed then Ok (Some stored) else Ok None
 ;;
 
-let write_execution_result ~base_path ~requester ?goal execution =
+let write_execution_result ~base_path ~requester execution =
   let requests =
-    Keeper_delegation_request.of_execution_result ~requester ?goal execution
+    Keeper_delegation_request.of_execution_result ~requester execution
   in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
@@ -259,16 +251,10 @@ let request_summary_of_index_event json =
     , Some dir
     , Some json_path
     , Some task_seed_md_path ) ->
-    let goal =
-      match Yojson.Safe.Util.member "goal" json with
-      | `String goal -> Some goal
-      | _ -> None
-    in
     Some
       { id
       ; requester
       ; topic
-      ; goal
       ; promotion_state
       ; dir
       ; json_path
@@ -301,7 +287,6 @@ let request_summary_to_json (summary : request_summary) =
     [ "id", `String summary.id
     ; "requester", `String summary.requester
     ; "topic", `String summary.topic
-    ; "goal", Json_util.string_opt_to_json summary.goal
     ; "promotion_state", `String summary.promotion_state
     ; "dir", `String summary.dir
     ; "json_path", `String summary.json_path

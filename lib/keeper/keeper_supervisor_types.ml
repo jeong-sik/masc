@@ -69,8 +69,7 @@ type persona_drift_log_level =
 let keeper_defaults_have_inline_identity
     (defaults : Keeper_types_profile.keeper_profile_defaults)
   =
-  Option.is_some defaults.goal
-  || Option.is_some defaults.instructions
+  Option.is_some defaults.instructions
   || defaults.mention_targets <> []
 ;;
 

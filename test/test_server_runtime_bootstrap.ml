@@ -459,7 +459,7 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
 let write_config_root_keeper_toml config_root name =
   write_file
     (Filename.concat (Filename.concat config_root "keepers") (name ^ ".toml"))
-    (Printf.sprintf "[keeper]\ngoal = \"goal-%s\"\n" name)
+    (Printf.sprintf "[keeper]\ninstructions = \"instructions-%s\"\n" name)
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -475,7 +475,7 @@ let write_basepath_keeper_toml base_path name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "example"
+instructions = "example"
 proactive_enabled = false
 |}
 let find_free_port_from start =
@@ -1240,7 +1240,6 @@ let make_keeper_meta_json ?(name = "sangsu")
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
-          ("goal", `String ("goal-" ^ name));
           ("runtime_id", `String (fixture_runtime_id ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
@@ -1259,7 +1258,6 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
-          ("goal", `String ("goal-" ^ name));
           ("runtime_id", `String (fixture_runtime_id ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");

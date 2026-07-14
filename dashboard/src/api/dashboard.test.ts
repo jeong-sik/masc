@@ -1771,7 +1771,6 @@ describe('fetchKeeperConfig', () => {
       allowed_paths: '/tmp/workspace',
       effective_allowed_paths: ['/tmp/workspace'],
       prompt: {
-        goal: 'Ship stable keeper ops',
         instructions: 'Prefer direct remediation',
         system_prompt_blocks: {
           constitution: { key: 'keeper.constitution', source: 'file', text: 'constitution text' },
@@ -1921,7 +1920,7 @@ describe('fetchKeeperConfig', () => {
         JSON.stringify({
           name: 'keeper-sangsu',
           prompt: {
-            goal: 'raw goal only',
+            instructions: 'raw instructions only',
           },
           metrics: {},
         }),
@@ -1935,12 +1934,10 @@ describe('fetchKeeperConfig', () => {
 
     const result = await fetchKeeperConfig('keeper-sangsu')
 
-    expect(result.prompt.goal).toBe('raw goal only')
-    expect(result.prompt.instructions).toBe('')
+    expect(result.prompt.instructions).toBe('raw instructions only')
     expect(result.metrics.last_model_used).toBe('')
-    expect(result.field_presence?.present_paths).toContain('prompt.goal')
+    expect(result.field_presence?.present_paths).toContain('prompt.instructions')
     expect(result.field_presence?.present_paths).toContain('metrics')
-    expect(result.field_presence?.present_paths).not.toContain('prompt.instructions')
     expect(result.field_presence?.present_paths).not.toContain('metrics.last_model_used')
   })
 
@@ -1952,10 +1949,9 @@ describe('fetchKeeperConfig', () => {
           field_presence: {
             schema: 'keeper.config.field_presence.v1',
             producer: 'dashboard_http_keeper_snapshot',
-            present_paths: ['name', 'prompt', 'prompt.goal'],
+            present_paths: ['name', 'prompt', 'prompt.instructions'],
           },
           prompt: {
-            goal: 'server proof',
             instructions: 'present but intentionally absent from proof',
           },
         }),
@@ -1972,7 +1968,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.field_presence).toEqual({
       schema: 'keeper.config.field_presence.v1',
       producer: 'dashboard_http_keeper_snapshot',
-      present_paths: ['name', 'prompt', 'prompt.goal'],
+      present_paths: ['name', 'prompt', 'prompt.instructions'],
     })
   })
 

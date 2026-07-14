@@ -372,7 +372,6 @@ type keeper_meta =
   ; name : string
   ; agent_name : string
   ; persona : string option
-  ; goal : string
   ; instructions : string
   ; (* -- Policy -- *)
     sandbox_profile : Keeper_types_profile.sandbox_profile
@@ -511,7 +510,6 @@ let effective_meta_of_profile_defaults
                 apply_profile_default defaults.proactive_enabled
                   Keeper_config.default_proactive_enabled
             };
-          goal = apply_profile_default defaults.goal meta.goal;
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
           autoboot_enabled =

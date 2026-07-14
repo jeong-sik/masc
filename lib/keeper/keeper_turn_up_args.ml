@@ -12,7 +12,6 @@ open Keeper_types_profile
 type parsed_args = {
   name : string;
   compaction_profile_opt : string option;
-  goal_opt : string option;
   runtime_id_opt : string option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
@@ -150,7 +149,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       Ok active_goal_ids_opt,
       Ok mention_targets_opt,
       Ok runtime_id_opt ->
-    let goal_opt = get_string_opt args "goal" in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_res = parse_max_context_override args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
@@ -204,7 +202,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     Ok {
       name;
       compaction_profile_opt;
-      goal_opt;
       runtime_id_opt;
       allowed_paths_opt;
       active_goal_ids_opt;

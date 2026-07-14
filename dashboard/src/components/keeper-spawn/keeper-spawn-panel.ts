@@ -4,7 +4,7 @@ import { PersonaBrowser } from './persona-browser'
 import { showSpawnPanel } from './keeper-spawn-state'
 
 // Simple keeper creation entry point for the fleet. Pick a persona → confirm →
-// the keeper boots with that persona's default goal/instructions. Fine-grained
+// the keeper boots with that persona's default instructions. Fine-grained
 // overrides at creation time are intentionally NOT here — those go through
 // keeper detail (post-create) or masc_keeper_up in the tool executor, keeping
 // this flow to one decision.
@@ -28,7 +28,7 @@ export function KeeperSpawnPanel() {
         <${ActionButton} variant="subtle" size="sm" onClick=${() => { showSpawnPanel.value = false }}>닫기<//>
       </div>
       <p class="text-2xs text-[var(--color-fg-muted)] mb-3">
-        페르소나를 골라 키퍼를 시작합니다. 목표·지시사항은 페르소나 기본값을 쓰고, 세부 조정은 생성 후 keeper 상세에서 합니다.
+        페르소나를 골라 키퍼를 시작합니다. 지시사항은 페르소나 기본값을 쓰며, Goal Store 목표는 생성 후 keeper 상세에서 연결합니다.
       </p>
       <${PersonaBrowser} />
     </div>

@@ -228,7 +228,6 @@ let keepers_json
                            ; "agent_name", `String meta.agent_name
                            ; "status", `String "paused"
                            ; "paused", `Bool true
-                           ; "goal", `String meta.goal
                            ; "turn_count", `Int meta.runtime.usage.total_turns
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
@@ -404,7 +403,6 @@ let keepers_json
                          ; ( "trace_id"
                            , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                            )
-                         ; "goal", `String meta.goal
                          ; "status", `String aligned_status
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")

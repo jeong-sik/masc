@@ -15,8 +15,7 @@
    defined in keeper_meta_json.ml from here would create
    Keeper_meta_json -> Keeper_meta_json_scrub -> Keeper_meta_json. *)
 let config_field_names =
-  [ "goal"
-  ; "runtime_id"
+  [ "runtime_id"
   ; "sandbox_profile"; "sandbox_image"; "network_mode"; "allowed_paths"
   ; "mention_targets"
   ; "proactive_enabled"

@@ -176,7 +176,6 @@ let handle_keeper_list ctx args : tool_result =
               ("agent_name", `String m.agent_name);
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.generation);
-              ("goal", `String m.goal);
               ("keepalive_running", `Bool (runtime_keepalive_running ctx.config m));
               ("run_state", run_state_json);
               ("active_model", `String active_model);

@@ -83,7 +83,6 @@ let meta : Masc.Keeper_meta_contract.keeper_meta =
       [
         ("name", `String "wake-context-keeper");
         ("trace_id", `String "test-trace-wake-context");
-        ("goal", `String "test goal");
       ])
 
 (* Same throwaway runtime default as test_keeper_surface_presence_prompt:
@@ -296,7 +295,6 @@ let test_goal_holder_gets_self_direction_directive () =
         [
           ("name", `String "wake-context-keeper");
           ("trace_id", `String "test-trace-wake-context");
-          ("goal", `String "test goal");
           ("active_goal_ids", `List [ `String "goal-x" ]);
         ])
   in

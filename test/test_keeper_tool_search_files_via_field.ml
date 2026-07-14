@@ -42,7 +42,6 @@ let make_meta ~name =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "via discriminator regression");
         ("allowed_paths", `List [ `String "*" ]);
         ("sandbox_profile", `String "local");
       ]

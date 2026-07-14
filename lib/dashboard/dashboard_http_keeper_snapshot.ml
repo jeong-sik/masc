@@ -83,7 +83,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         | Some value when String.trim live = "" -> value
         | _ -> live
       in
-      let prompt_goal = default_prompt_string defaults.goal m.goal in
       let prompt_instructions =
         default_prompt_string defaults.instructions m.instructions
       in
@@ -130,7 +129,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
-          ~goal:prompt_goal
           ~instructions:prompt_instructions
           ~persona_extended ~keeper_name:m.name
           ~active_goals
@@ -163,7 +161,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       let prompt =
         `Assoc [
-          ("goal", `String prompt_goal);
           ("instructions", `String prompt_instructions);
           ( "system_prompt_blocks",
             `Assoc

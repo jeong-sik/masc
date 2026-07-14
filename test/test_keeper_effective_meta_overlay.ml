@@ -139,7 +139,6 @@ let seed_runtime_meta config name =
         ("name", `String name);
         ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "effective meta overlay regression");
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -149,18 +148,18 @@ let seed_runtime_meta config name =
       | Ok () -> meta
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
-let write_keeper_toml ~keepers_dir ~name ~sandbox_profile ~goal =
+let write_keeper_toml ~keepers_dir ~name ~sandbox_profile ~instructions =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
        {|[keeper]
 sandbox_profile = "%s"
-goal = "%s"
+instructions = "%s"
 |}
        sandbox_profile
-       goal)
+       instructions)
 
-let status_goal_with ?(agent_name = "test-agent") ?name config =
+let status_instructions_with ?(agent_name = "test-agent") ?name config =
   let args =
     match name with
     | Some name -> `Assoc [ ("name", `String name); ("fast", `Bool true) ]
@@ -175,11 +174,11 @@ let status_goal_with ?(agent_name = "test-agent") ?name config =
   if not (Profile.tool_result_success result) then
     Alcotest.failf "status failed: %s" (Profile.tool_result_body result);
   let json = Yojson.Safe.from_string (Profile.tool_result_body result) in
-  match json_string_field "goal" json with
-  | Some goal -> goal
-  | None -> Alcotest.fail "status response missing goal"
+  match json_string_field "instructions" json with
+  | Some instructions -> instructions
+  | None -> Alcotest.fail "status response missing instructions"
 
-let status_goal config name = status_goal_with ~name config
+let status_instructions config name = status_instructions_with ~name config
 
 let status_json_with ?(agent_name = "test-agent") ?name config =
   let args =
@@ -207,21 +206,21 @@ let test_status_resolves_keeper_alias_names () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "aliasprobe" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
-    ~goal:"alias status goal";
+    ~instructions:"alias status instructions";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
     "explicit agent alias reaches canonical keeper"
-    "alias status goal"
-    (status_goal_with ~name:"keeper-aliasprobe-agent" config);
+    "alias status instructions"
+    (status_instructions_with ~name:"keeper-aliasprobe-agent" config);
   Alcotest.(check string)
     "prefixed alias reaches canonical keeper"
-    "alias status goal"
-    (status_goal_with ~name:"keeper-aliasprobe" config);
+    "alias status instructions"
+    (status_instructions_with ~name:"keeper-aliasprobe" config);
   Alcotest.(check string)
     "self fallback agent alias reaches canonical keeper"
-    "alias status goal"
-    (status_goal_with ~agent_name:"keeper-aliasprobe-agent" config)
+    "alias status instructions"
+    (status_instructions_with ~agent_name:"keeper-aliasprobe-agent" config)
 
 let test_keeper_surface_resolves_alias_names () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
@@ -342,7 +341,7 @@ let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
     {|[keeper]
 persona_name = "masc-improver"
 sandbox_profile = "docker"
-goal = "Improve MASC autonomously"
+instructions = "Improve MASC autonomously"
 proactive_enabled = true
 allowed_paths = ["workspace/yousleepwhen/masc"]
 active_goal_ids = ["goal-masc-improver"]
@@ -359,7 +358,7 @@ active_goal_ids = ["goal-masc-improver"]
     {
       persisted with
       persona = Some "analyst";
-      goal = "stale goal";
+      instructions = "stale instructions";
       proactive = { enabled = false };
       allowed_paths = [ "/tmp/stale-local-path" ];
       active_goal_ids = [ "stale-goal" ];
@@ -397,9 +396,9 @@ active_goal_ids = ["goal-masc-improver"]
     (Some "masc-improver")
     returned.persona;
   Alcotest.(check string)
-    "returned goal is TOML canonical"
+    "returned instructions are TOML canonical"
     "Improve MASC autonomously"
-    returned.goal;
+    returned.instructions;
   Alcotest.(check bool)
     "returned proactive enabled is TOML canonical"
     true
@@ -483,7 +482,7 @@ let test_missing_sandbox_profile_fails_loud_for_profile_source () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -501,7 +500,7 @@ let test_keeper_up_rejects_profile_source_without_sandbox_profile () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -571,24 +570,25 @@ let test_status_cache_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "statuscache" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
-    ~goal:"first cache goal";
+    ~instructions:"first cache instructions";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
-    "initial TOML goal reaches status"
-    "first cache goal"
-    (status_goal config name);
+    "initial TOML instructions reach status"
+    "first cache instructions"
+    (status_instructions config name);
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
-    ~goal:"second cache goal after toml edit";
+    ~instructions:"second cache instructions after toml edit";
   Alcotest.(check string)
     "TOML edit invalidates cached status"
-    "second cache goal after toml edit"
-    (status_goal config name)
+    "second cache instructions after toml edit"
+    (status_instructions config name)
 
 let test_status_surfaces_chat_queue_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "chatqueue-status" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local" ~goal:"chat queue status";
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"chat queue status";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Eio_main.run @@ fun _env ->
@@ -644,7 +644,7 @@ let test_keeper_list_row_surfaces_effective_meta_errors () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -669,7 +669,7 @@ let test_keeper_list_error_row_preserves_keepalive_state () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
@@ -692,7 +692,7 @@ let test_sandbox_status_fleet_surfaces_effective_meta_errors () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in

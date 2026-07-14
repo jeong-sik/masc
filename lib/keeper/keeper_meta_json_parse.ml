@@ -14,7 +14,6 @@ type parsed_keeper_identity =
   ; pk_persona : string option
   ; pk_trace_id : Keeper_id.Trace_id.t
   ; pk_trace_history : string list
-  ; pk_goal : string
   ; pk_instructions : string
   }
 
@@ -64,9 +63,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_trace_history =
       Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
     in
-    let pk_goal =
-      Safe_ops.json_string ~default:"" "goal" json |> normalize_goal_text
-    in
     (* Layer 2 PR-B (commit 5): delegate the surviving personality field
        to [Keeper_personality_io].  parse + coerce yields trim-only
        canonicalisation; truncation moved to the prompt-render path
@@ -84,7 +80,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_persona
       ; pk_trace_id
       ; pk_trace_history
-      ; pk_goal
       ; pk_instructions
       }
 ;;
@@ -393,6 +388,7 @@ let parse_keeper_state
 ;;
 
 type removed_keeper_meta_field =
+  | Legacy_goal
   | Initiative_enabled
   | Persona_profile_path
   | Tool_access
@@ -401,6 +397,7 @@ type removed_keeper_meta_field =
   | Last_blocker
 
 let removed_keeper_meta_field_of_key = function
+  | "goal" -> Some Legacy_goal
   | "initiative_enabled" -> Some Initiative_enabled
   | "persona_profile_path" -> Some Persona_profile_path
   | "tool_access" -> Some Tool_access
@@ -411,6 +408,7 @@ let removed_keeper_meta_field_of_key = function
 ;;
 
 let removed_keeper_meta_field_to_wire = function
+  | Legacy_goal -> "goal"
   | Initiative_enabled -> "initiative_enabled"
   | Persona_profile_path -> "persona_profile_path"
   | Tool_access -> "tool_access"
@@ -429,6 +427,7 @@ let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
     | [] -> Ok ()
     | (key, value) :: rest ->
       (match removed_keeper_meta_field_of_key key with
+       | Some (Legacy_goal as field)
        | Some (Initiative_enabled as field)
        | Some (Persona_profile_path as field)
        | Some (Tool_access as field)
@@ -486,7 +485,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                         then Keeper_identity.keeper_agent_name identity.pk_name
                         else identity.pk_agent_name)
                    ; persona = identity.pk_persona
-                   ; goal = identity.pk_goal
                    ; instructions = identity.pk_instructions
                    ; sandbox_profile = policy.pp_sandbox_profile
                    ; sandbox_image = policy.pp_sandbox_image

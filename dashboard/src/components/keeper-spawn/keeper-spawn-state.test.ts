@@ -76,7 +76,6 @@ describe('createPersona', () => {
       display_name: '코드 리뷰어',
       role: 'reviewer',
       trait: '꼼꼼한 검증가',
-      goal: 'PR의 결함을 찾는다',
       instructions: '너는 리뷰어다',
       mention_targets: ['reviewer', '리뷰어'],
       proactive_enabled: true,
@@ -87,7 +86,6 @@ describe('createPersona', () => {
       display_name: '코드 리뷰어',
       role: 'reviewer',
       trait: '꼼꼼한 검증가',
-      goal: 'PR의 결함을 찾는다',
       instructions: '너는 리뷰어다',
       mention_targets: ['reviewer', '리뷰어'],
       proactive_enabled: true,
@@ -111,10 +109,10 @@ describe('createPersona', () => {
 describe('updatePersona', () => {
   it('sends only the provided fields so unspecified ones keep their value', async () => {
     callMcpTool.mockResolvedValue('{"personas":[]}')
-    await updatePersona('oracle', { goal: 'new goal' })
+    await updatePersona('oracle', { instructions: 'new instructions' })
     expect(callMcpTool).toHaveBeenCalledWith('masc_persona_update', {
       persona_name: 'oracle',
-      goal: 'new goal',
+      instructions: 'new instructions',
     })
   })
 })

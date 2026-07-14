@@ -4,7 +4,6 @@ type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   persona_name : string option;
-  goal : string option;
   instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;

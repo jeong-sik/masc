@@ -472,7 +472,7 @@ let test_parse_multiline_array_bracket_in_string () =
 let test_profile_minimal () =
   let input = {|
 [keeper]
-goal = "test goal"
+instructions = "test instructions"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -480,13 +480,27 @@ goal = "test goal"
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok defaults ->
-      check (option string) "goal" (Some "test goal") defaults.goal
+      check (option string) "instructions" (Some "test instructions")
+        defaults.instructions
+
+let test_profile_rejects_legacy_goal () =
+  let input = {|
+[keeper]
+goal = "removed"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected keeper.goal removal error"
+     | Error msg ->
+       check bool "names removed keeper.goal" true
+         (contains_substring msg "keeper.goal is removed"))
 
 let test_profile_full () =
   let input = {|
 [keeper]
 persona_name = "analyst"
-goal = "analyze logs"
 instructions = "You are a log analyzer."
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
@@ -500,7 +514,6 @@ active_goal_ids = ["goal-runtime", "goal-masc"]
     | Error e -> fail e
     | Ok d ->
       check (option string) "persona_name" (Some "analyst") d.persona_name;
-      check (option string) "goal" (Some "analyze logs") d.goal;
       check (option string) "instructions" (Some "You are a log analyzer.")
         d.instructions;
       check int "mention_targets" 2 (List.length d.mention_targets);
@@ -513,7 +526,6 @@ active_goal_ids = ["goal-runtime", "goal-masc"]
 let test_profile_parses_multimodal_policy () =
   let input = {|
 [keeper]
-goal = "vision delegation"
 multimodal_policy = "delegate"
 |} in
   match TL.parse_toml input with
@@ -528,7 +540,6 @@ multimodal_policy = "delegate"
 let test_profile_rejects_invalid_multimodal_policy () =
   let input = {|
 [keeper]
-goal = "vision delegation"
 multimodal_policy = "silent_default"
 |} in
   match TL.parse_toml input with
@@ -545,7 +556,6 @@ multimodal_policy = "silent_default"
 let test_profile_rejects_removed_model_keys () =
   let input = {|
 [keeper]
-goal = "test"
 models = ["llama:test"]
 |} in
   match TL.parse_toml input with
@@ -566,7 +576,6 @@ models = ["llama:test"]
 let test_profile_rejects_removed_initiative_keys () =
   let input = {|
 [keeper]
-goal = "test"
 initiative_enabled = true
 |} in
   match TL.parse_toml input with
@@ -587,7 +596,6 @@ initiative_enabled = true
 let test_profile_rejects_removed_ref_keys () =
   let input = {|
 [keeper]
-goal = "test"
 persona_ref = "base-persona"
 runtime_ref = "tool-runtime"
 |} in
@@ -605,7 +613,6 @@ runtime_ref = "tool-runtime"
 let test_profile_rejects_removed_shards_key () =
   let input = {|
 [keeper]
-goal = "test"
 shards = ["base", "voice"]
 |} in
   match TL.parse_toml input with
@@ -622,7 +629,6 @@ shards = ["base", "voice"]
 let test_profile_rejects_removed_voice_policy_key () =
   let input = {|
 [keeper]
-goal = "test"
 policy_voice_enabled = true
 |} in
   match TL.parse_toml input with
@@ -646,7 +652,7 @@ let test_load_from_file () =
   let content = {|
 [keeper]
 name = "test-keeper"
-goal = "testing file load"
+instructions = "testing file load"
 |} in
   let oc = open_out tmp in
   output_string oc content;
@@ -655,7 +661,8 @@ goal = "testing file load"
    | Error e -> fail (KTP.keeper_toml_load_error_to_string e)
    | Ok (name, defaults) ->
      check string "name from toml" "test-keeper" name;
-     check (option string) "goal" (Some "testing file load") defaults.goal;
+     check (option string) "instructions" (Some "testing file load")
+       defaults.instructions;
      check (option string) "manifest" (Some tmp) defaults.manifest_path);
   Sys.remove tmp
 
@@ -664,7 +671,7 @@ let test_load_name_from_filename () =
   let path = Filename.concat tmp_dir "my-analyzer.toml" in
   let content = {|
 [keeper]
-goal = "analyze stuff"
+instructions = "analyze stuff"
 |} in
   let oc = open_out path in
   output_string oc content;
@@ -680,7 +687,7 @@ let test_load_invalid_name () =
   let content = {|
 [keeper]
 name = "invalid name with spaces"
-goal = "test"
+instructions = "test"
 |} in
   let oc = open_out tmp in
   output_string oc content;
@@ -756,11 +763,11 @@ let test_discover_with_files () =
   in
   write_file "alpha.toml" {|
 [keeper]
-goal = "alpha goal"
+instructions = "alpha instructions"
 |};
   write_file "beta.toml" {|
 [keeper]
-goal = "beta goal"
+instructions = "beta instructions"
 |};
   write_file "not-toml.json" {|{"ignored": true}|};
   let result = KTP.discover_keepers_toml tmp_dir in
@@ -790,7 +797,7 @@ let test_discover_retains_invalid_files () =
   in
   write_file "good.toml" {|
 [keeper]
-goal = "works"
+instructions = "works"
 |};
   write_file "bad.toml" "[broken";
   let result = KTP.discover_keepers_toml tmp_dir in
@@ -963,7 +970,8 @@ let test_missing_base_profile_fails_closed () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
   let keeper_path = Filename.concat keepers_dir "missing-base.toml" in
   let base_path_expected = Filename.concat keepers_dir "base.toml" in
-  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"test\"\n";
+  write_file keeper_path
+    "[keeper]\nbase = \"base.toml\"\ninstructions = \"test\"\n";
   let error =
     expect_profile_load_error
       ~base_path
@@ -1024,7 +1032,7 @@ let test_absent_profile_is_legitimate_empty_defaults () =
   | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
   | Ok defaults ->
     check (option string) "no manifest" None defaults.manifest_path;
-    check (option string) "no goal" None defaults.goal
+    check (option string) "no instructions" None defaults.instructions
 
 let test_persona_without_keeper_toml_remains_valid () =
   with_profile_base @@ fun ~base_path ~config_dir ~keepers_dir:_ ->
@@ -1032,7 +1040,7 @@ let test_persona_without_keeper_toml_remains_valid () =
   mkdir_p persona_dir;
   let profile_path = Filename.concat persona_dir "profile.json" in
   write_file profile_path
-    {|{"keeper":{"goal":"observe","instructions":"reason carefully"}}|};
+    {|{"keeper":{"instructions":"reason carefully"}}|};
   match
     KTP.load_keeper_profile_defaults_result_for_base_path
       ~base_path
@@ -1040,7 +1048,8 @@ let test_persona_without_keeper_toml_remains_valid () =
   with
   | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
   | Ok defaults ->
-    check (option string) "persona goal" (Some "observe") defaults.goal;
+    check (option string) "persona instructions" (Some "reason carefully")
+      defaults.instructions;
     check (option string) "persona manifest" (Some profile_path)
       defaults.manifest_path
 
@@ -1180,7 +1189,6 @@ let test_profile_defaults_materializable_for_name_uses_base_path () =
 let test_profile_rejects_runtime_id_key () =
   let input = {|
 [keeper]
-goal = "test"
 runtime_id = "oas-coding_first"
 |} in
   match TL.parse_toml input with
@@ -1193,7 +1201,6 @@ runtime_id = "oas-coding_first"
 let test_profile_rejects_model_key () =
   let input = {|
 [keeper]
-goal = "test"
 model = "oas-coding_first"
 |} in
   match TL.parse_toml input with
@@ -1213,7 +1220,6 @@ let test_persona_defaults_load_prompt_fields () =
 {
   "name": "Probe",
   "keeper": {
-    "goal": "test persona keeper",
     "instructions": "legacy instructions"
   }
 }
@@ -1223,10 +1229,22 @@ let test_persona_defaults_load_prompt_fields () =
     | Ok defaults -> defaults
     | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
   in
-  check (option string) "goal still loads" (Some "test persona keeper")
-    defaults.goal;
   check (option string) "instructions load" (Some "legacy instructions")
     defaults.instructions
+
+let test_persona_defaults_reject_legacy_goal () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|{"name":"Probe","keeper":{"goal":"removed"}}|};
+  match KTP.load_keeper_profile_defaults_result "probe" with
+  | Ok _ -> fail "removed persona keeper.goal must fail loading"
+  | Error error ->
+    let detail = KTP.keeper_toml_load_error_to_string error in
+    check bool "persona error names goal" true
+      (contains_substring detail "goal")
 
 let test_persona_defaults_reject_removed_shards () =
   with_personas_dir @@ fun personas_dir ->
@@ -1238,7 +1256,6 @@ let test_persona_defaults_reject_removed_shards () =
 {
   "name": "Probe",
   "keeper": {
-    "goal": "test persona keeper",
     "shards": ["base", "voice"],
     "policy_voice_enabled": true
   }
@@ -1264,9 +1281,7 @@ let test_persona_resolver_rejects_operator_todo_profile () =
 {
   "name": "OPERATOR_TODO: probe display",
   "role": "draft placeholder",
-  "keeper": {
-    "goal": "OPERATOR_TODO: fill before spawn"
-  }
+  "keeper": {}
 }
 |};
   (match KTP.load_persona_summary "probe" with
@@ -1278,7 +1293,6 @@ let test_persona_resolver_rejects_operator_todo_profile () =
     | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
   in
   check (option string) "placeholder manifest rejected" None defaults.manifest_path;
-  check (option string) "placeholder goal rejected" None defaults.goal;
   match
     KEP.resolved_keeper_args_from_persona
       (`Assoc [ ("persona_name", `String "probe") ])
@@ -1300,7 +1314,7 @@ let test_persona_resolver_reports_placeholder_defaults_source () =
   "name": "Probe",
   "role": "runtime profile",
   "keeper": {
-    "goal": "normal persona goal"
+    "instructions": "normal persona instructions"
   }
 }
 |};
@@ -1311,7 +1325,7 @@ let test_persona_resolver_reports_placeholder_defaults_source () =
     {|
 [keeper]
 persona_name = "probe"
-goal = "OPERATOR_TODO: replace before spawn"
+instructions = "OPERATOR_TODO: replace before spawn"
 |};
   match
     KEP.resolved_keeper_args_from_persona
@@ -1324,7 +1338,7 @@ goal = "OPERATOR_TODO: replace before spawn"
       check bool "reports manifest path" true
         (contains_substring e keeper_path);
       check bool "reports field" true
-        (contains_substring e "keeper.goal")
+        (contains_substring e "keeper.instructions")
 
 let test_persona_resolver_rejects_placeholder_in_resolved_payload () =
   with_personas_dir @@ fun personas_dir ->
@@ -1338,7 +1352,7 @@ let test_persona_resolver_rejects_placeholder_in_resolved_payload () =
   "name": "Probe",
   "role": "runtime profile",
   "keeper": {
-    "goal": "normal persona goal"
+    "instructions": "normal persona instructions"
   }
 }
 |};
@@ -1374,7 +1388,7 @@ let test_persona_resolver_preserves_autoboot_enabled_arg () =
 {
   "name": "Probe",
   "keeper": {
-    "goal": "test persona keeper"
+    "instructions": "test persona keeper"
   }
 }
 |};
@@ -1403,7 +1417,7 @@ let test_persona_resolver_preserves_allowed_paths () =
 {
   "name": "Probe",
   "keeper": {
-    "goal": "test persona keeper"
+    "instructions": "test persona keeper"
   }
 }
 |};
@@ -1431,7 +1445,6 @@ let test_persona_resolver_renders_durable_keeper_toml () =
       [
         ("name", `String "probe-keeper");
         ("persona_name", `String "probe");
-        ("goal", `String "line1\nline2");
         ("instructions", `String "quote: \"ok\"");
         ("autoboot_enabled", `Bool false);
         ("mention_targets", `List [ `String "probe"; `String "@probe" ]);
@@ -1452,8 +1465,6 @@ let test_persona_resolver_renders_durable_keeper_toml () =
                 (TL.toml_string_opt doc "keeper.name");
               check (option string) "persona_name" (Some "probe")
                 defaults.persona_name;
-              check (option string) "goal" (Some "line1\nline2")
-                defaults.goal;
               check (option string) "instructions"
                 (Some "quote: \"ok\"") defaults.instructions;
               check (option bool) "autoboot" (Some false)
@@ -1470,7 +1481,6 @@ let test_persona_resolver_renders_durable_keeper_toml () =
 let test_detect_unknown_keys_empty_when_all_canonical () =
   let input = {|
 [keeper]
-goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
 active_goal_ids = ["goal-runtime"]
@@ -1484,7 +1494,6 @@ active_goal_ids = ["goal-runtime"]
 let test_detect_unknown_keys_flags_legacy_dead_config () =
   let input = {|
 [keeper]
-goal = "g"
 legacy_scope = "current"
 scope_kind = "local"
 mention_targets = ["a"]
@@ -1499,7 +1508,6 @@ mention_targets = ["a"]
 let test_removed_tool_policy_keys_rejected () =
   let input = {|
 [keeper]
-goal = "g"
 tool_access = ["masc_status"]
 tool_denylist = ["Execute"]
 |} in
@@ -1517,7 +1525,6 @@ tool_denylist = ["Execute"]
 let test_detect_unknown_keys_accepts_loader_base () =
   let input = {|
 [keeper]
-goal = "g"
 base = "base.toml"
 legacy_scope = "removed"
 |} in
@@ -1531,7 +1538,6 @@ legacy_scope = "removed"
 let test_detect_unknown_keys_flags_provider_health_table () =
   let input = {|
 [keeper]
-goal = "g"
 mention_targets = ["a"]
 
 [provider_health]
@@ -1647,7 +1653,6 @@ let test_load_keeper_toml_captures_unknown_keys_on_profile () =
   let oc = open_out tmp in
   output_string oc {|[keeper]
 name = "scout"
-goal = "g"
 legacy_scope = "removed"
 typo_field = 42
 |};
@@ -1680,7 +1685,6 @@ let test_keeper_toml_unknown_keys_in_dir_reports_files () =
     {|
 [keeper]
 name = "alpha"
-goal = "g"
 base = "base.toml"
 legacy_scope = "removed"
 |};
@@ -1688,7 +1692,6 @@ legacy_scope = "removed"
     {|
 [keeper]
 name = "beta"
-goal = "g"
 base = "base.toml"
 |};
   write_file (Filename.concat dir "bad.toml")
@@ -1721,7 +1724,6 @@ let test_health_json_surfaces_keeper_toml_unknown_keys () =
     {|
 [keeper]
 name = "alpha"
-goal = "g"
 base = "base.toml"
 legacy_scope = "removed"
 |};
@@ -1953,6 +1955,8 @@ let () =
       ( "profile_defaults",
         [
           test_case "minimal" `Quick test_profile_minimal;
+          test_case "rejects legacy keeper.goal" `Quick
+            test_profile_rejects_legacy_goal;
           test_case "full" `Quick test_profile_full;
           test_case "parses multimodal_policy" `Quick
             test_profile_parses_multimodal_policy;
@@ -2060,6 +2064,8 @@ let () =
             test_bundled_issue_king_uses_local_sandbox;
           test_case "persona defaults load prompt fields" `Quick
             test_persona_defaults_load_prompt_fields;
+          test_case "persona defaults reject legacy goal" `Quick
+            test_persona_defaults_reject_legacy_goal;
           test_case "persona defaults reject removed shards" `Quick
             test_persona_defaults_reject_removed_shards;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick

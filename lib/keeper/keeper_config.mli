@@ -36,7 +36,6 @@ val alert_message_preview_max_chars : int
 val alert_reply_preview_max_chars : int
 
 val default_proactive_enabled : bool
-val default_goal_max_chars : int
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
     Drives [normalize_prompt_text] when called from prompt rendering.
@@ -111,7 +110,6 @@ val utf8_repair_string : string -> string
 (** Trim and truncate prompt text to [max_bytes] on a UTF-8 character
     boundary. Caller MUST pass [max_bytes] explicitly so the unit is visible. *)
 val normalize_prompt_text : max_bytes:int -> string -> string
-val normalize_goal_text : ?max_len:int -> string -> string
 
 (** {1 Compaction Configuration} *)
 

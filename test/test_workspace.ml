@@ -1504,7 +1504,6 @@ let keeper_meta_for_self_filter agent_name =
       [ ("name", `String "self-filter-keeper")
       ; ("agent_name", `String agent_name)
       ; ("trace_id", `String "trace-self-filter")
-      ; ("goal", `String "self-filter regression")
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -1517,7 +1516,6 @@ let keeper_meta_for_goal_filter agent_name active_goal_ids =
       [ ("name", `String "goal-filter-keeper")
       ; ("agent_name", `String agent_name)
       ; ("trace_id", `String "trace-goal-filter")
-      ; ("goal", `String "goal filter regression")
       ; ( "active_goal_ids"
         , `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) )
       ]

@@ -251,7 +251,6 @@ let keeper_live keeper =
 
 let keeper_has_goal keeper =
   json_list_field "active_goal_ids" keeper <> []
-  || Option.is_some (json_string_field_opt "goal" keeper)
 
 let keeper_actor_names keeper =
   [ json_string_field_opt "name" keeper; json_string_field_opt "agent_name" keeper ]

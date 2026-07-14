@@ -19,7 +19,7 @@ type task = {
 
 type keeper = {
   k_name : string;
-  k_goal : string;
+  k_active_goal_ids : string list;
   k_generation : int;
   k_active_model : string option;
   k_models : string list;
@@ -190,7 +190,7 @@ let decode_task json =
     }
 
 let decode_keeper ~filename json =
-  let* k_goal = require_string_field json "goal" in
+  let* k_active_goal_ids = require_string_list json "active_goal_ids" in
   let* k_generation = require_int_field json "generation" in
   let* k_active_model = optional_string json "active_model" in
   let* k_models =
@@ -240,7 +240,7 @@ let decode_keeper ~filename json =
   Ok
     {
       k_name;
-      k_goal;
+      k_active_goal_ids;
       k_generation;
       k_active_model;
       k_models;

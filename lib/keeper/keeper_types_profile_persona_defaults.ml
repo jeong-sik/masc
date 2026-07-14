@@ -30,7 +30,12 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
           | None -> `Null
         in
         let removed_fields =
-          [ "tool_access"; "tool_denylist"; "shards"; "policy_voice_enabled" ]
+          [ "goal"
+          ; "tool_access"
+          ; "tool_denylist"
+          ; "shards"
+          ; "policy_voice_enabled"
+          ]
           |> List.filter (fun key ->
             Option.is_some (Json_util.assoc_member_opt key keeper_json))
         in
@@ -57,7 +62,6 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               id = Some (Ids.Keeper_id.generate ~name ~path);
               manifest_path = Some path;
               persona_name = Some name;
-              goal = Safe_ops.json_string_opt "goal" keeper_json;
               instructions = Safe_ops.json_string_opt "instructions" keeper_json;
               autoboot_enabled = None;
               mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;

@@ -388,13 +388,13 @@ let apply_multimodal_wirein
 let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
     ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
-    ~(on_compaction_started : unit -> unit)
-    ~(on_handoff_started : unit -> unit)
-    ~(base_dir : string)
+    ~on_compaction_started:_
+    ~on_handoff_started:_
+    ~base_dir:_
     ~(meta : keeper_meta)
-    ~(model : string)
+    ~model:_
     ~(primary_model_max_tokens : int)
-    ~(current_turn_blocker_info : blocker_info option)
+    ~current_turn_blocker_info:_
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
   (* Reviewer #13214: an executor without an audit store would let
      retry/fallback/handoff/abort callbacks mutate live state
@@ -471,91 +471,8 @@ let apply_post_turn_lifecycle_with_resilience_handles
             (fun rt -> { rt with generation = current_generation })
             meta
       in
-      let before_tokens = token_count ctx in
-      let compacted_ctx = ctx in
-      let trigger = None in
       let decision = Keeper_compact_policy.Not_requested in
-      let compaction_decided =
-        Keeper_compact_policy.compaction_decision_applied decision
-      in
-      (* Track whether on_compaction_started succeeded, so
-         dispatch_post_turn_lifecycle_events knows the FSM state.
-         If the callback raised (swallowed by Cancel_safe.observe) or
-         dispatch_event returned Error (silently logged by
-         dispatch_keeper_phase_event), the FSM is still at
-         Compaction_accumulating and the downstream dispatch must
-         emit Compaction_started before Compaction_completed. *)
-      let started_dispatched = ref false in
-      (* Attempt save before updating meta so that a save failure is treated as
-         compaction not applied — keeping ctx/checkpoint/metrics consistent. *)
-      let effective_compaction_applied, compaction_failure_reason, effective_ctx, checkpoint =
-        if not compaction_decided then (false, None, ctx, Some cp)
-        else (
-          (* PR-J: lifecycle callbacks fire dispatch_keeper_phase_event,
-             which can raise on transient registry contention or stale
-             entry mismatches. The naked invocation here used to abort
-             the whole post-turn lifecycle on any callback exception
-             without surfacing the cause; failures now increment the
-             [callback=on_compaction_started] counter, log a warn, and
-             write a telemetry coverage-gap row, but the lifecycle
-             continues so a downstream save error still wins the
-             failure_reason field. See
-             docs/architecture/actor-mailbox-pattern.md for the
-             reasoning behind the keep-going-on-callback-failure
-             policy. *)
-          (* RFC-0106 P0 canary: use Cancel_safe.observe so Cancelled
-             propagates without per-site discipline drift. *)
-          let () =
-            Cancel_safe.observe
-              ~on_exn:(fun exn ->
-                Keeper_callback_failure.record ~base_dir ~meta:base_meta
-                  ~callback:"on_compaction_started" exn)
-              (fun () ->
-                 on_compaction_started ();
-                 started_dispatched := true)
-          in
-          let session =
-            create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
-          in
-          let compacted_ctx =
-            let messages, pair_repair_stats =
-              repair_broken_tool_call_pairs_with_stats
-                (messages_of_context compacted_ctx)
-            in
-            log_tool_pair_repair
-              ~keeper_name:base_meta.agent_name
-              ~site:"post_turn_compaction"
-              pair_repair_stats;
-            {
-              compacted_ctx with
-              checkpoint =
-                {
-                  (checkpoint_of_context compacted_ctx) with
-                  messages;
-                };
-            }
-          in
-          (match save_oas_checkpoint
-               ~multimodal_policy:base_meta.multimodal_policy
-               ~keeper_name:base_meta.name
-               ~session
-               ~agent_name:base_meta.agent_name
-               ~ctx:compacted_ctx ~generation:current_generation
-          with
-          | Ok saved_cp -> (true, None, compacted_ctx, Some saved_cp)
-          | Error e ->
-              Log.Keeper.error
-                "keeper:%s compaction checkpoint save failed: %s"
-                base_meta.name e;
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string CheckpointFailures)
-                ~labels:[("keeper", base_meta.name); ("phase", "compaction_save")]
-                ();
-              (false, Some e, ctx, Some cp))
-        )
-      in
-      let after_tokens = token_count effective_ctx in
-      let saved_tokens = max 0 (before_tokens - after_tokens) in
+      let observed_tokens = token_count ctx in
       let meta_after_compaction =
         map_runtime
           (fun rt ->
@@ -563,18 +480,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
               rt with
               compaction_rt =
                 {
-                  count =
-                    rt.compaction_rt.count
-                    + if effective_compaction_applied then 1 else 0;
-                  last_ts =
-                    if effective_compaction_applied then now_ts
-                    else rt.compaction_rt.last_ts;
-                  last_before_tokens =
-                    if effective_compaction_applied then before_tokens
-                    else rt.compaction_rt.last_before_tokens;
-                  last_after_tokens =
-                    if effective_compaction_applied then after_tokens
-                    else rt.compaction_rt.last_after_tokens;
+                  rt.compaction_rt with
                   last_check_ts = now_ts;
                   last_decision =
                     Keeper_compact_policy.compaction_decision_to_string
@@ -584,30 +490,29 @@ let apply_post_turn_lifecycle_with_resilience_handles
             })
           base_meta
       in
-      let _ = on_handoff_started, current_turn_blocker_info in
       {
         updated_meta = meta_after_compaction;
-        checkpoint;
+        checkpoint = Some cp;
         handoff_json = None;
         handoff_attempted = false;
         handoff_failure_reason = None;
         compaction =
           {
-            attempted = compaction_decided;
-            applied = effective_compaction_applied;
-            started_dispatched = !started_dispatched;
-            failure_reason = compaction_failure_reason;
-            trigger;
+            attempted = false;
+            applied = false;
+            started_dispatched = false;
+            failure_reason = None;
+            trigger = None;
             decision;
-            before_tokens;
-            after_tokens;
-            saved_tokens;
+            before_tokens = observed_tokens;
+            after_tokens = observed_tokens;
+            saved_tokens = 0;
           };
         turn_generation = current_generation;
-        context_ratio = context_ratio effective_ctx;
-        context_tokens = token_count effective_ctx;
-        context_max = max_tokens_of_context effective_ctx;
-        message_count = message_count effective_ctx;
+        context_ratio = context_ratio ctx;
+        context_tokens = token_count ctx;
+        context_max = max_tokens_of_context ctx;
+        message_count = message_count ctx;
       }
   in
   (* Strict ordering: autonomous tick → resilience classification
@@ -677,13 +582,6 @@ let recover_latest_checkpoint_for_overflow_retry
   match selected with
   | None -> None
   | Some (ctx, turn_generation) ->
-      let ctx =
-        if primary_model_max_tokens <= 0 then ctx
-        else
-          sync_oas_context
-            (with_max_tokens ctx
-               (min (max_tokens_of_context ctx) primary_model_max_tokens))
-      in
       let before_tokens = token_count ctx in
       let retry_meta =
         if turn_generation = meta.runtime.generation then meta
@@ -695,50 +593,10 @@ let recover_latest_checkpoint_for_overflow_retry
           ~trigger
           ctx
       in
-      let trigger =
-        match base_decision with
-        | Keeper_compact_policy.Prepared trigger -> Some trigger
-        | _ -> None
-      in
       let after_tokens = token_count compacted_ctx in
-      let compaction_applied =
-        Keeper_compact_policy.compaction_decision_prepared base_decision
-      in
-      let meaningful_reduction = after_tokens < before_tokens in
-      if not (compaction_applied && meaningful_reduction) then None
-      else
-        let compaction =
-          {
-            attempted = true;
-            applied = true;
-            started_dispatched = false;  (* recovery path: no callback fires *)
-            failure_reason = None;
-            trigger;
-            decision = base_decision;
-            before_tokens;
-            after_tokens;
-            saved_tokens = max 0 (before_tokens - after_tokens);
-          }
-        in
-        let compacted_ctx =
-          let messages, pair_repair_stats =
-            repair_broken_tool_call_pairs_with_stats
-              (messages_of_context compacted_ctx)
-          in
-          log_tool_pair_repair
-            ~keeper_name:meta.agent_name
-            ~site:"post_turn_compaction_recovery"
-            pair_repair_stats;
-          {
-            compacted_ctx with
-            checkpoint =
-              {
-                (checkpoint_of_context compacted_ctx) with
-                messages;
-              };
-          }
-        in
-        try
+      match base_decision with
+      | Keeper_compact_policy.Prepared prepared_trigger ->
+        (try
           (match save_oas_checkpoint
               ~multimodal_policy:meta.multimodal_policy
               ~keeper_name:meta.name
@@ -747,7 +605,25 @@ let recover_latest_checkpoint_for_overflow_retry
               ~ctx:compacted_ctx ~generation:turn_generation
           with
           | Ok checkpoint ->
-              Some { checkpoint; compaction; turn_generation }
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string Compactions)
+                ~labels:[ "keeper", retry_meta.name ]
+                ();
+              Some
+                { checkpoint
+                ; compaction =
+                    { attempted = true
+                    ; applied = true
+                    ; started_dispatched = false
+                    ; failure_reason = None
+                    ; trigger = Some prepared_trigger
+                    ; decision = Keeper_compact_policy.Applied prepared_trigger
+                    ; before_tokens
+                    ; after_tokens
+                    ; saved_tokens = before_tokens - after_tokens
+                    }
+                ; turn_generation
+                }
           | Error e ->
               Log.Keeper.error
                 "overflow retry checkpoint save failed: %s" e;
@@ -762,4 +638,5 @@ let recover_latest_checkpoint_for_overflow_retry
             log_keeper_exn
               ~label:"overflow retry checkpoint save exception"
               exn;
-            None
+            None)
+      | _ -> None

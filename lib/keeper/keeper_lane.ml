@@ -198,7 +198,7 @@ let rec request_cancel t =
   | Finalizing | Exited -> Cancel_already_exiting
 ;;
 
-let fork ~sw t ~run ~cleanup =
+let fork ~sw t ~with_run_scope ~run ~cleanup =
   match claim_start t with
   | Error _ as error -> error
   | Ok () ->
@@ -208,12 +208,13 @@ let fork ~sw t ~run ~cleanup =
          Atomic.set started true;
          let outcome =
            try
-             Eio.Switch.run (fun lane_sw ->
-               match attach_scope t lane_sw with
-               | Scope_attached -> run lane_sw
-               | Cancel_before_attach ->
-                 Eio.Switch.fail lane_sw Shutdown_cancel;
-                 Eio.Switch.check lane_sw);
+             with_run_scope (fun () ->
+               Eio.Switch.run (fun lane_sw ->
+                 match attach_scope t lane_sw with
+                 | Scope_attached -> run lane_sw
+                 | Cancel_before_attach ->
+                   Eio.Switch.fail lane_sw Shutdown_cancel;
+                   Eio.Switch.check lane_sw));
              Completed
            with
            | Shutdown_cancel -> Shutdown_requested

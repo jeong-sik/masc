@@ -183,6 +183,8 @@ type server_state = {
   clock : float Eio.Time.clock_ty Eio.Resource.t option;
   mono_clock : Eio.Time.Mono.ty Eio.Resource.t option;
   net : Eio_context.eio_net option;
+  publication_recovery_registry :
+    Fs_compat.publication_recovery_registry option;
 }
 (** Runtime state threaded through every request handler.
     [workspace_config] is stored in an atomic reference so
@@ -202,6 +204,9 @@ val create_state : base_path:string -> server_state
     server runs without proc-mgr / fs / clock / net.
     Used by tools that need a state-shaped value but no
     runtime fibers (test fixtures, replay harnesses). *)
+
+exception Publication_recovery_registry_unavailable of
+  Fs_compat.publication_recovery_registry_error
 
 val create_state_eio :
   sw:Eio.Switch.t ->

@@ -1144,6 +1144,10 @@ let start_keepalive
            Keeper_lane.fork
              ~sw:ctx.sw
              reg.lane
+             ~with_run_scope:
+               (Keeper_publication_recovery_scope.with_lane_scope
+                  ~registry:ctx.publication_recovery_registry
+                  ~entry:reg)
              ~run:(fun lane_sw ->
         let ctx = { ctx with sw = lane_sw } in
         (* The sidecar is part of this Keeper lane. It cannot outlive the

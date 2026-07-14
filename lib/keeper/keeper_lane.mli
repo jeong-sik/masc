@@ -45,12 +45,16 @@ val id : t -> Id.t
 val fork :
   sw:Eio.Switch.t ->
   t ->
+  with_run_scope:((unit -> unit) -> unit) ->
   run:(Eio.Switch.t -> unit) ->
   cleanup:(outcome -> (unit, string) result) ->
   (unit, start_error) result
 (** A fork rejected by an already-cancelling Eio switch returns
     [Error (Fork_failed _)] and resolves [exited]. Cleanup and exit resolution
-    are exact-once even if switch cancellation races the child start. *)
+    are exact-once even if switch cancellation races the child start.
+    [with_run_scope] must own every resource whose lifetime is the full Keeper
+    lane; it wraps the lane switch itself, so it returns only after all lane
+    children have joined. *)
 
 (** Resolve a lane for which the launch gate rejected the fiber before it
     started.  This keeps the join contract total for every registry entry. *)

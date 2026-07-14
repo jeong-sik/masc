@@ -290,6 +290,7 @@ let gate_keeper_ctx ~sw ~clock state =
     clock;
     proc_mgr = state.Mcp_server.proc_mgr;
     net = state.Mcp_server.net;
+    publication_recovery_registry = state.Mcp_server.publication_recovery_registry;
   }
 
 let keeper_exists ~sw ~clock state keeper_name =

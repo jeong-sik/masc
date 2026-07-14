@@ -268,6 +268,8 @@ let execute_tool_eio
                 ~clock
                 ~proc_mgr:state.Mcp_server.proc_mgr
                 ~net:state.Mcp_server.net
+                ~publication_recovery_registry:
+                  state.Mcp_server.publication_recovery_registry
             in
             (* Dispatch a single module by tag — creates only that module's context.
      Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
@@ -430,42 +432,45 @@ let execute_tool_eio
                   (String.concat ", " xs)
                   reason
             in
-            let internal_keeper_meta_of_agent () =
-              match Keeper_registry_lookup.find_by_agent_name agent_name with
-              | Some (entry : Keeper_registry.registry_entry)
-                when String.equal entry.base_path config.base_path -> Ok entry.meta
-              | Some _ | None ->
-                let candidates =
-                  [ Keeper_identity.canonical_keeper_name_from_agent_name agent_name
-                  ; Keeper_identity.canonical_keeper_name agent_name
-                  ]
-                  |> List.filter_map (function
-                    | Some value when String.trim value <> "" -> Some (String.trim value)
-                    | _ -> None)
-                  |> List.sort_uniq String.compare
-                in
-                let rec loop = function
-                  | [] ->
-                    Error
-                      (Printf.sprintf
-                         "Internal keeper runtime request is not bound to a known keeper \
-                          agent: %s"
-                         agent_name)
-                  | candidate :: rest ->
-                    (match Keeper_meta_store.read_meta_resolved config candidate with
-                     | Ok (Some (_resolved_name, meta)) -> Ok meta
-                     | Ok None -> loop rest
-                     | Error msg -> Error msg)
-                in
-                loop candidates
+            let internal_keeper_resources_of_agent () =
+              let candidates =
+                [ Keeper_identity.canonical_keeper_name_from_agent_name agent_name
+                ; Keeper_identity.canonical_keeper_name agent_name
+                ]
+                |> List.filter_map (function
+                  | Some value when not (String.equal (String.trim value) "") ->
+                    Some (String.trim value)
+                  | Some _ | None -> None)
+                |> List.sort_uniq String.compare
+              in
+              let rec loop = function
+                | [] -> Error (`Unknown_agent agent_name)
+                | candidate :: rest ->
+                  (match
+                     Keeper_publication_recovery_scope.resolve_turn_resources
+                       ~registry:state.Mcp_server.publication_recovery_registry
+                       ~base_path:config.base_path
+                       ~keeper_name:candidate
+                   with
+                   | Error
+                       (Keeper_publication_recovery_scope.Registry_entry_not_found _)
+                     -> loop rest
+                   | Error failure -> Error (`Recovery failure)
+                   | Ok resources
+                     when String.equal
+                            resources.entry.meta.agent_name
+                            agent_name -> Ok resources
+                   | Ok _ -> loop rest)
+              in
+              loop candidates
             in
             let dispatch_internal_keeper_runtime_tool () =
               let start_time = Time_compat.now () in
               match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
               | Some blocked, _ -> Some blocked
               | None, coerced_args ->
-                (match internal_keeper_meta_of_agent () with
-                 | Error msg ->
+                (match internal_keeper_resources_of_agent () with
+                 | Error (`Unknown_agent unknown_agent) ->
                    (* RFC-0189: agent_name has no matching registered
                       keeper (or base_path mismatch).  Caller can
                       address by registering the keeper / fixing the
@@ -475,8 +480,35 @@ let execute_tool_eio
                    Some
                      (Tool_result.error
                         ~failure_class:(Some Tool_result.Workflow_rejection)
-                        ~tool_name:name ~start_time msg)
-                 | Ok meta ->
+                        ~tool_name:name
+                        ~start_time
+                        (Printf.sprintf
+                           "Internal keeper runtime request is not bound to a live Keeper agent: %s"
+                           unknown_agent))
+                 | Error (`Recovery failure) ->
+                   let detail =
+                     Keeper_publication_recovery_scope.failure_to_string failure
+                   in
+                   Some
+                     (Tool_result.make_err
+                        ~class_:Tool_result.Runtime_failure
+                        ~tool_name:name
+                        ~start_time
+                        ~data:
+                          (`Assoc
+                             [ ( "error"
+                               , `String
+                                   "keeper_publication_recovery_access_unavailable" )
+                             ; "failure_class", `String "runtime_failure"
+                             ; "detail", `String detail
+                             ])
+                        detail)
+                 | Ok
+                     { Keeper_publication_recovery_scope.entry
+                     ; registry = publication_recovery_registry
+                     ; access = publication_recovery_access
+                     } ->
+                   let meta = entry.meta in
                    let ctx_work =
                      Keeper_context_runtime.create
                        ~eio:true
@@ -503,6 +535,8 @@ let execute_tool_eio
                        Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
                          ~config
                          ~meta
+                         ~publication_recovery_registry
+                         ~publication_recovery_access
                                      ~ctx_work
                                      ?turn_sandbox_factory
                                      ~exec_cache

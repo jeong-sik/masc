@@ -484,7 +484,20 @@ type server_state = {
   clock: float Eio.Time.clock_ty Eio.Resource.t option; (* For timestamps/sleep *)
   mono_clock: Eio.Time.Mono.ty Eio.Resource.t option;
   net: Eio_context.eio_net option; (* For network calls - P3a: replaces global ref *)
+  publication_recovery_registry: Fs_compat.publication_recovery_registry option;
 }
+
+exception Publication_recovery_registry_unavailable of
+  Fs_compat.publication_recovery_registry_error
+
+let () =
+  Printexc.register_printer (function
+    | Publication_recovery_registry_unavailable error ->
+      Some
+        ("publication recovery registry unavailable: "
+         ^ Fs_compat.publication_recovery_registry_error_to_string error)
+    | _ -> None)
+;;
 
 let workspace_config state = Atomic.get state.workspace_config
 let set_workspace_config state config = Atomic.set state.workspace_config config
@@ -506,6 +519,7 @@ let create_state ~base_path =
     clock = None;
     mono_clock = None;
     net = None;
+    publication_recovery_registry = None;
   } in
   Board_tool.set_agent_lookup (fun name ->
     try Workspace.is_agent_session_bound (workspace_config state) ~agent_name:name
@@ -555,6 +569,15 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     Session.push_notification_to_active_agents registry ~event
   );
   Keeper_supervisor.set_global_switch sw;
+  let publication_recovery_registry =
+    let registry_root = Eio.Path.(fs / Workspace.masc_root_dir config) in
+    match
+      Fs_compat.open_publication_recovery_registry ~sw ~registry_root
+    with
+    | Ok registry -> registry
+    | Error error ->
+      raise (Publication_recovery_registry_unavailable error)
+  in
   let state = {
     workspace_config = Atomic.make config;
     session_registry = registry;
@@ -565,6 +588,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     clock = Some clock;
     mono_clock = Some mono_clock;
     net = Some net;
+    publication_recovery_registry = Some publication_recovery_registry;
   } in
   (* Agent-to-agent board feedback lookup follows the active workspace. *)
   Board_tool.set_agent_lookup (fun name ->

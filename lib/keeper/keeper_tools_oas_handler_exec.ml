@@ -7,6 +7,9 @@ let execute_with_observers
       ~(name : string)
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(publication_recovery_registry :
+          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -30,7 +33,9 @@ let execute_with_observers
         Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-            ~ctx_work:ctx_snapshot
+          ~publication_recovery_registry
+          ~publication_recovery_access
+          ~ctx_work:ctx_snapshot
             ?turn_sandbox_factory
             ~exec_cache
           ?search_fn

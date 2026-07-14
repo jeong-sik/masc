@@ -735,15 +735,6 @@ let close_open_entry ~before_stage open_file =
   close_open_resource ~before_stage ~stage:Close_payload open_file
 ;;
 
-let close_open_directory ~before_stage ~stage open_directory =
-  match !open_directory with
-  | None -> ()
-  | Some (directory_resource, _) ->
-    run_stage ~before_stage stage (fun () ->
-      Eio.Resource.close directory_resource);
-    open_directory := None
-;;
-
 let verify_path_identity
       ~before_stage
       ~stage
@@ -787,18 +778,6 @@ let cleanup_open_file ~before_stage open_file =
   cleanup_open_resource ~before_stage ~stage:Cleanup_close open_file
 ;;
 
-let cleanup_open_directory ~before_stage ~stage open_directory =
-  match !open_directory with
-  | None -> []
-  | Some (directory_resource, _) ->
-    let failures =
-      capture_cleanup ~before_stage stage (fun () ->
-        Eio.Resource.close directory_resource)
-    in
-    open_directory := None;
-    failures
-;;
-
 let cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty =
   if not !parent_dirty
   then []
@@ -826,8 +805,8 @@ let run_recovery_transition
       ~recovery_phase
       operation
   =
-  run_stage ~before_stage stage (fun () -> ());
   try
+    run_stage ~before_stage stage (fun () -> ());
     match operation () with
     | Ok value -> value
     | Error error ->
@@ -920,7 +899,6 @@ let cleanup_owned_staging_directory
       ~sw
       ~parent
       ~staging_path
-      ~staging_directory
       ~staging_directory_file
       ~staging_directory_identity
       ~staging_directory_created
@@ -1035,11 +1013,6 @@ let cleanup_owned_staging_directory
       then (
         staging_directory_removed := true;
         parent_dirty := true));
-    add
-      (cleanup_open_directory
-         ~before_stage
-         ~stage:Cleanup_close_staging_directory
-         staging_directory);
     add (cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty);
     !failures)
 ;;
@@ -1132,7 +1105,6 @@ let replace_capability_file_with
             ~sw
             ~parent
             ~staging_path
-            ~staging_directory
             ~staging_directory_file
             ~staging_directory_identity
             ~staging_directory_created
@@ -1408,10 +1380,6 @@ let replace_capability_file_with
            ~before_stage
            ~stage:Close_staging_directory
            staging_directory_file;
-         close_open_directory
-           ~before_stage
-           ~stage:Close_staging_directory
-           staging_directory;
          sync_parent_capability ~before_stage ~stage:Sync_parent ~sw parent;
          parent_dirty := false;
          bound_discharge_started := true;

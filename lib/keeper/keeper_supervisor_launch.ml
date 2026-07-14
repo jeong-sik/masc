@@ -119,6 +119,10 @@ let launch_supervised_fiber_body
         Keeper_lane.fork
           ~sw:ctx.sw
           reg.lane
+          ~with_run_scope:
+            (Keeper_publication_recovery_scope.with_lane_scope
+               ~registry:ctx.publication_recovery_registry
+               ~entry:reg)
           ~run:body
           ~cleanup:(fun _ -> Ok ())
       with

@@ -189,6 +189,9 @@ type capability_recovery_effect =
 
 type capability_recovery_failure
 
+val capability_recovery_phase_to_string : capability_recovery_phase -> string
+val capability_recovery_effect_to_string : capability_recovery_effect -> string
+
 val capability_recovery_failure_phase
   :  capability_recovery_failure
   -> capability_recovery_phase

@@ -18,6 +18,22 @@ open Keeper_types_profile
     [Keeper_registry.packed_turn_phase] etc. unchanged. *)
 include module type of Keeper_registry_types
 
+type publication_recovery_attach_error = Publication_recovery_already_attached
+type publication_recovery_detach_error = Publication_recovery_not_attached
+
+val attach_publication_recovery_access :
+  registry_entry ->
+  Fs_compat.publication_recovery_access ->
+  (unit, publication_recovery_attach_error) result
+
+val publication_recovery_access :
+  registry_entry -> Fs_compat.publication_recovery_access option
+
+val detach_publication_recovery_access :
+  registry_entry -> (unit, publication_recovery_detach_error) result
+(** These transitions mutate only the exact entry-local atomic. They never
+    look up by name and never reopen a recovery store. *)
+
 (** [validate_turn_phase_transition] stays in Keeper_registry because its
     implementation depends on [Keeper_fsm_guard_runtime], not a pure type-level
     dependency. *)

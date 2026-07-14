@@ -394,6 +394,14 @@ type capability_recovery_effect = Atomic_write.capability_recovery_effect =
 
 type capability_recovery_failure = Atomic_write.capability_recovery_failure
 
+let capability_recovery_phase_to_string =
+  Atomic_write.capability_recovery_phase_to_string
+;;
+
+let capability_recovery_effect_to_string =
+  Atomic_write.capability_recovery_effect_to_string
+;;
+
 let capability_recovery_failure_phase =
   Atomic_write.capability_recovery_failure_phase
 ;;

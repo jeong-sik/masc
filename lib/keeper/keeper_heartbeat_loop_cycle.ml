@@ -207,6 +207,7 @@ let run_keeper_cycle_admitted
           (Keeper_unified_turn.run_keeper_cycle
              ~config:ctx.config
              ~meta:meta_after_triage
+             ~publication_recovery_registry:ctx.publication_recovery_registry
              ~observation
              ~generation:meta_after_triage.runtime.generation
              ~wake

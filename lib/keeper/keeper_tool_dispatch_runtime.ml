@@ -150,6 +150,9 @@ let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
 let execute_keeper_tool_call_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(publication_recovery_registry :
+          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -204,6 +207,8 @@ let execute_keeper_tool_call_with_outcome
          Keeper_tool_runtime.
                        { config
                        ; meta
+                       ; publication_recovery_registry
+                       ; publication_recovery_access
                        ; ctx_work
                        ; turn_sandbox_factory
                        ; exec_cache
@@ -277,6 +282,9 @@ let execute_keeper_tool_call_with_outcome
 let execute_keeper_tool_call
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(publication_recovery_registry :
+          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -290,7 +298,9 @@ let execute_keeper_tool_call
     execute_keeper_tool_call_with_outcome
       ~config
       ~meta
-                  ~ctx_work
+      ~publication_recovery_registry
+      ~publication_recovery_access
+      ~ctx_work
                   ?turn_sandbox_factory
                   ~exec_cache
       ?search_fn

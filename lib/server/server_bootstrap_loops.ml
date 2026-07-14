@@ -1450,6 +1450,7 @@ let start_keeper_loops_owned
         ; clock
         ; proc_mgr = Some proc_mgr
         ; net = state.net
+        ; publication_recovery_registry = state.publication_recovery_registry
         }
       in
       Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
@@ -1507,6 +1508,7 @@ let start_keeper_loops_owned
                 ; clock
                 ; proc_mgr = Some proc_mgr
                 ; net = state.net
+                ; publication_recovery_registry = state.publication_recovery_registry
                 }
               in
               let launch_outcome =

@@ -62,7 +62,6 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
       Agent_sdk.Types.message list -> Agent_sdk.Types.message list
   ; acc : hook_accumulator
   ; all_tool_names : string list
-  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref

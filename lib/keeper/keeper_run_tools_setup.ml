@@ -20,8 +20,6 @@ let prepare_agent_setup
       ~(dynamic_context : string)
       ~(history_messages : Agent_sdk.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
-      ~(estimated_input_tokens : int)
-      ~(max_context : int)
       ~(shared_context : Agent_sdk.Context.t)
       ~(context_injector : Agent_sdk.Hooks.context_injector)
       ~(start_turn_count : int)
@@ -131,9 +129,6 @@ let prepare_agent_setup
     - List.length model_visible_descriptors
     - transport_alias_count
     - invalid_schema_count
-  in
-  let tool_context_estimate =
-    Keeper_run_prompt.estimate_tool_schema_context ~estimated_input_tokens ~tools
   in
   let all_tool_names =
     List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) keeper_tools
@@ -252,9 +247,7 @@ let prepare_agent_setup
     ; config
     ; keeper_tools_cleanup
     ; manifest_keeper_turn_id
-    ; max_context
     ; meta
-    ; tool_context_estimate
     ; turn_ctx_cell
     ; receipt_turn_count_ref
     ; receipt_model_used_ref

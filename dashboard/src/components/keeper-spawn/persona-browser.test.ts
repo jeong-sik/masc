@@ -16,13 +16,29 @@ vi.mock('../../lib/dashboard-auth-access', () => ({
 import { filterPersonas } from './persona-browser'
 import type { PersonaSummary } from './keeper-spawn-state'
 
+function persona(
+  persona_name: string,
+  display_name: string,
+  role: string | null,
+  trait: string | null,
+): PersonaSummary {
+  return {
+    persona_name,
+    display_name,
+    role,
+    trait,
+    profile_path: `/personas/${persona_name}/profile.json`,
+    has_keeper_defaults: false,
+  }
+}
+
 const sample: PersonaSummary[] = [
-  { name: 'analyst',  displayName: 'Analyst',  role: 'analysis',  mode: 'observer', description: 'inspects harness metrics' },
-  { name: 'executor', displayName: 'Executor', role: 'action',    mode: 'writer',   description: 'runs code edits' },
-  { name: 'scholar',  displayName: 'Scholar',  role: 'research',  mode: 'observer', description: 'reads papers and memory' },
-  { name: 'verifier', displayName: 'Verifier', role: 'guard',     mode: 'checker',  description: 'validates outputs' },
-  { name: 'uranium666', role: 'lab', description: 'experimental sandbox persona' },
-  { name: 'bare-persona' },
+  persona('analyst', 'Analyst', 'analysis', 'inspects harness metrics'),
+  persona('executor', 'Executor', 'action', 'runs code edits'),
+  persona('scholar', 'Scholar', 'research', 'reads papers and memory'),
+  persona('verifier', 'Verifier', 'guard', 'validates outputs'),
+  persona('uranium666', 'Uranium 666', 'lab', 'experimental sandbox persona'),
+  persona('bare-persona', 'Bare Persona', null, null),
 ]
 
 describe('filterPersonas', () => {
@@ -33,41 +49,36 @@ describe('filterPersonas', () => {
 
   it('matches case-insensitive substring on name', () => {
     const out = filterPersonas(sample, 'URANIUM')
-    expect(out.map(p => p.name)).toEqual(['uranium666'])
+    expect(out.map(p => p.persona_name)).toEqual(['uranium666'])
   })
 
-  it('matches on displayName', () => {
+  it('matches on display_name', () => {
     const out = filterPersonas(sample, 'Scholar')
-    expect(out.map(p => p.name)).toEqual(['scholar'])
+    expect(out.map(p => p.persona_name)).toEqual(['scholar'])
   })
 
   it('matches on role', () => {
     const out = filterPersonas(sample, 'research')
-    expect(out.map(p => p.name)).toEqual(['scholar'])
+    expect(out.map(p => p.persona_name)).toEqual(['scholar'])
   })
 
-  it('matches on mode', () => {
-    const out = filterPersonas(sample, 'observer')
-    expect(out.map(p => p.name)).toEqual(['analyst', 'scholar'])
-  })
-
-  it('matches on description', () => {
+  it('matches on trait', () => {
     const out = filterPersonas(sample, 'papers')
-    expect(out.map(p => p.name)).toEqual(['scholar'])
+    expect(out.map(p => p.persona_name)).toEqual(['scholar'])
   })
 
   it('trims surrounding whitespace before matching', () => {
     const out = filterPersonas(sample, '  action  ')
-    expect(out.map(p => p.name)).toEqual(['executor'])
+    expect(out.map(p => p.persona_name)).toEqual(['executor'])
   })
 
   it('returns empty array when nothing matches', () => {
     expect(filterPersonas(sample, 'no-such-token-xyz')).toEqual([])
   })
 
-  it('tolerates personas missing optional fields', () => {
+  it('matches entries whose nullable fields are absent', () => {
     const out = filterPersonas(sample, 'bare')
-    expect(out.map(p => p.name)).toEqual(['bare-persona'])
+    expect(out.map(p => p.persona_name)).toEqual(['bare-persona'])
   })
 
   it('does not mutate the input array', () => {
@@ -77,7 +88,7 @@ describe('filterPersonas', () => {
   })
 
   it('returns a fresh array (not the input) when filtering narrows rows', () => {
-    const out = filterPersonas(sample, 'observer')
+    const out = filterPersonas(sample, 'analysis')
     expect(out).not.toBe(sample)
     expect(out.length).toBeLessThan(sample.length)
   })

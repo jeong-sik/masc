@@ -35,6 +35,7 @@ export type DashboardSurfaceIcon =
   | 'overview'
   | 'monitoring'
   | 'keepers'
+  | 'registry'
   | 'board'
   | 'schedule'
   | 'fusion'
@@ -120,6 +121,7 @@ export interface DashboardSectionNavItem {
 const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'overview',
   'keepers',
+  'registry',
   'monitoring',
   'workspace',
   'approvals',
@@ -141,6 +143,7 @@ const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([
   'logs',
   'settings',
   'keepers',
+  'registry',
   'board',
   'schedule',
   'approvals',
@@ -186,6 +189,14 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     description: 'Dedicated keeper roster, conversation, and context workspace',
     defaultTab: 'keepers',
     tabs: ['keepers'],
+  },
+  {
+    id: 'registry',
+    label: 'Registry',
+    icon: 'registry',
+    description: 'Persona forms, keeper instances, and runtime bindings',
+    defaultTab: 'registry',
+    tabs: ['registry'],
   },
   {
     id: 'board',
@@ -312,6 +323,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   // key — the Record is exhaustive over the union, so the empty entry is required.
   approvals: [],
   fusion: [],
+  registry: [],
   monitoring: [
     {
       id: 'agents',
@@ -476,10 +488,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
 }
 
 function validSectionIds(tab: NonHomeTabId): SurfaceSectionId[] {
-  // Total: an unknown/unmapped tab has no sections. Guards against a route
-  // whose tab is not a section-bearing surface (e.g. partial routes in tests
-  // or a not-yet-registered surface) instead of crashing on undefined.map.
-  return (DASHBOARD_SECTION_ITEMS[tab] ?? []).map(item => item.id)
+  return DASHBOARD_SECTION_ITEMS[tab].map(item => item.id)
 }
 
 export function defaultParamsForTab(tabId: TabId): Record<string, string> {
@@ -488,7 +497,7 @@ export function defaultParamsForTab(tabId: TabId): Record<string, string> {
 
 export function sectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
   if (isSectionlessSurface(tabId)) return []
-  return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId] ?? []
+  return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId]
 }
 
 export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {

@@ -69,10 +69,10 @@ function initEdit(persona: PersonaSummary): void {
   // keeper-template fields start blank (blank = keep current on update).
   formFields.value = {
     ...emptyForm(),
-    persona_name: persona.name,
-    display_name: persona.displayName ?? '',
+    persona_name: persona.persona_name,
+    display_name: persona.display_name,
     role: persona.role ?? '',
-    trait: persona.description ?? '',
+    trait: persona.trait ?? '',
   }
   nameError.value = null
   displayNameError.value = null
@@ -129,7 +129,7 @@ async function handleSubmit(e: Event): Promise<void> {
 
   let ok: boolean
   if (editing) {
-    ok = await updatePersona(editing.name, shared)
+    ok = await updatePersona(editing.persona_name, shared)
   } else {
     // proactive_enabled has no blank state, so it is only set on create.
     ok = await createPersona({
@@ -173,7 +173,7 @@ export function PersonaForm(): any {
 
   if (!isVisible) return null
 
-  const editKey = editing ? editing.name : '__create__'
+  const editKey = editing ? editing.persona_name : '__create__'
   if (editKey !== lastEditKey) {
     lastEditKey = editKey
     if (editing) {
@@ -185,7 +185,7 @@ export function PersonaForm(): any {
 
   const f = formFields.value
   const title = isEdit
-    ? `페르소나 편집: ${editing!.displayName ?? editing!.name}`
+    ? `페르소나 편집: ${editing!.display_name}`
     : '새 페르소나 생성'
 
   const sectionLabel = (text: string) => html`

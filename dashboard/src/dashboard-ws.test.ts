@@ -241,6 +241,7 @@ describe('dashboardSlicesForRoute', () => {
       { tab: 'workspace', params: { section: 'board' } },
       { tab: 'monitoring', params: { section: 'agents' } },
       { tab: 'keepers', params: { keeper: 'sangsu' } },
+      { tab: 'registry', params: {} },
       { tab: 'monitoring', params: { section: 'cognition' } },
       { tab: 'monitoring', params: { section: 'fleet-health', view: 'comparison' } },
       { tab: 'command', params: {} },
@@ -293,6 +294,14 @@ describe('dashboardSlicesForRoute', () => {
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'agents' } }))
       .toContain('composite')
     expect(dashboardSlicesForRoute({ tab: 'keepers', params: { keeper: 'sangsu' } }))
+      .toEqual([
+        'composite',
+        'execution',
+        'namespace',
+        'shell',
+        'transport',
+      ])
+    expect(dashboardSlicesForRoute({ tab: 'registry', params: {} }))
       .toEqual([
         'composite',
         'execution',

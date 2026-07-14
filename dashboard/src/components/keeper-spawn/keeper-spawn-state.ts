@@ -1,42 +1,18 @@
 import { signal, computed } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
-import { asString, extractArray, isRecord } from '../common/normalize'
 import { showToast } from '../common/toast'
 import { createAsyncResource, getData } from '../../lib/async-state'
 import { refreshExecution, shellAuthSummary } from '../../store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
+import {
+  parsePersonaListResponse,
+  type PersonaSummary,
+} from '../../api/schemas/persona'
 
-export interface PersonaSummary {
-  name: string
-  displayName?: string
-  role?: string
-  mode?: string
-  description?: string
-}
+export type { PersonaSummary } from '../../api/schemas/persona'
 
-export function normalizePersonaSummary(raw: unknown): PersonaSummary | null {
-  if (!isRecord(raw)) return null
-
-  const name = asString(raw.persona_name) ?? asString(raw.name)
-  if (!name) return null
-
-  return {
-    name,
-    displayName: asString(raw.display_name) ?? asString(raw.displayName) ?? asString(raw.name),
-    role: asString(raw.role),
-    mode: asString(raw.mode),
-    description: asString(raw.description) ?? asString(raw.trait),
-  }
-}
-
-export function normalizePersonaSummaries(raw: unknown): PersonaSummary[] {
-  return extractArray(raw, ['personas'])
-    .map(normalizePersonaSummary)
-    .filter((persona): persona is PersonaSummary => persona !== null)
-}
-
-const personasResource = createAsyncResource<PersonaSummary[]>()
+export const personasResource = createAsyncResource<readonly PersonaSummary[]>()
 
 export const personas = computed(() => getData(personasResource.state.value) ?? [])
 export const personasLoading = computed(() => personasResource.state.value.status === 'loading')
@@ -47,10 +23,8 @@ export const personasError = computed<string | null>(() => {
 
 export async function loadPersonas(): Promise<void> {
   await personasResource.load(async () => {
-    const raw = await callMcpTool('masc_persona_list', {})
-    return normalizePersonaSummaries(JSON.parse(raw))
-  }).catch(() => {
-    showToast('페르소나 목록 로드 실패', 'error')
+    const raw = await callMcpTool('masc_persona_list', { detailed: true })
+    return parsePersonaListResponse(JSON.parse(raw)).personas
   })
 }
 

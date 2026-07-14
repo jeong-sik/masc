@@ -35,7 +35,7 @@ Adjacent tool-surface sample from the same 240h window:
 
 | Leak class | Baseline count | Code boundary | Current fix path |
 |---|---:|---|---|
-| `shape_block:pipe_or_redirect` | 2,606 | historical `tool_execute` raw command logs, `scripts/analyze-keeper-execute-failures.sh` | Retired for public `Execute`. Unsafe shell syntax no longer enters `tool_execute` as a raw string; callers must use typed `executable`/`argv` or explicit typed pipeline/stage input. The historical bucket remains only for old runtime samples and adjacent shell surfaces. |
+| `shape_block:pipe_or_redirect` | 2,606 | historical `tool_execute` raw command logs, `scripts/analyze-keeper-execute-failures.sh` | Retired for public `Execute`. Unsafe shell syntax no longer enters `tool_execute` as a raw string; callers must use one typed non-empty `argv` process vector or explicit typed pipeline/stage input. The historical bucket remains only for old runtime samples and adjacent shell surfaces. |
 | Missing path or wrong cwd | 1,602 | `lib/keeper/keeper_sandbox_docker.ml`, typed public `Execute` | Preserve path validation, but make public `Execute` expose `cwd`, make retry hints use the typed `Execute { executable, argv, cwd }` shape, and allow the safe `/dev/null` marker instead of treating `cat /dev/null` as an out-of-whitelist path. |
 | `shape_block:chaining` | 1,275 | historical `tool_execute` raw command logs | Retired for public `Execute`. `cd repos/... && ...` is not normalized into a keeper command; callers must pass typed `cwd` plus `executable`/`argv`. |
 | Non-zero command exits | 846 | `lib/exec_core.ml`, `lib/keeper_tool_call_log.ml` | Treat structured `ok=true` and `semantic_status=no_match` as semantic success even when the transport-level call was marked failed. |
@@ -45,7 +45,7 @@ Adjacent tool-surface sample from the same 240h window:
 | Multi-repo cwd required | 286 | historical Execute samples | Retired as a MASC policy class. Execute never infers repository or product semantics; the invoked CLI reports its own cwd/syntax error and the Keeper may retry with a corrected typed cwd. |
 | Timeout | 271 | `lib/exec_core.ml`, Docker shell runtime | Classify as `semantic_status:timeout` for the quality loop; command scoping remains the caller-side correction. |
 | Repeat/streak gates | 203 | OAS retry cache, keeper tool diversity gates | Measure separately as `repeat_or_streak_gate` so retries are not mistaken for new Execute defects. |
-| Wrong tool channel | 164 | historical Execute samples | Retired for typed Execute. Descriptor routing validates Tool identity, while Execute treats executable/argv as opaque input and leaves program availability to the actual execution result. |
+| Wrong tool channel | 164 | historical Execute samples | Retired for typed Execute. Descriptor routing validates Tool identity, while Execute treats the complete argv process vector as opaque input and leaves program availability to the actual execution result. |
 | Command not allowed by validator | 110 | historical Execute samples | Retired. Structural typed-input validation remains, but MASC has no executable-name allowlist. |
 | Docker image missing | 108 | Docker sandbox runtime | Measure separately from command-shape failures; this is an infrastructure/runtime availability class. |
 | Command usage or regex errors | 59 | command-specific handlers | Keep as caller-command defects rather than path or sandbox defects. |

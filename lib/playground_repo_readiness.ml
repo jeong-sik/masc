@@ -295,7 +295,7 @@ let inspect
       let state, ok, next_action =
         if not status.ok then
           "status_failed", false,
-          "Run Execute executable='git' argv=['status','--short'] in this repo; repair git status before starting work."
+          "Run Execute argv=['git','status','--short'] in this repo; repair git status before starting work."
         else if not has_origin then
           "missing_origin", false,
           "Set or reclone origin before worktree creation; latest cannot be verified without origin."

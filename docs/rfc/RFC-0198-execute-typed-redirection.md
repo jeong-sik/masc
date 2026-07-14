@@ -116,8 +116,7 @@ JSON shape:
 
 ```json
 {
-  "executable": "find",
-  "argv": [".", "-name", "*.ml"],
+  "argv": ["find", ".", "-name", "*.ml"],
   "stderr": {"discard": true}
 }
 ```
@@ -126,8 +125,7 @@ JSON shape:
 
 ```json
 {
-  "executable": "find",
-  "argv": [".", "-name", "*.ml"],
+  "argv": ["find", ".", "-name", "*.ml"],
   "discard_stderr": true
 }
 ```

@@ -1,7 +1,4 @@
-type exec_stage = {
-  executable : string;
-  argv : string list;
-}
+type exec_stage = { argv : string list }
 
 type redirect_target =
   | Inherit
@@ -10,7 +7,6 @@ type redirect_target =
 
 type execute_input =
   | Exec of {
-      executable : string;
       argv : string list;
       cwd : string option;
       env : (string * string) list;
@@ -27,9 +23,9 @@ type execute_input =
     }
 
 type validation_error =
-  | Empty_executable of { argv : string list }
+  | Empty_argv
+  | Empty_program
   | Argv_contains_nul of {
-      executable : string;
       index : int;
       token : string;
     }
@@ -76,18 +72,6 @@ let reject_unknown_fields ~path ~allowed fields =
     result_errorf "%s.%s is not a supported typed Execute field" path key
 ;;
 
-let required_string ~path fields key =
-  match member fields key with
-  | Some (`String value) -> Ok value
-  | Some value ->
-    result_errorf
-      "%s.%s must be string, got %s"
-      path
-      key
-      (json_type_name value)
-  | None -> result_errorf "%s.%s is required" path key
-;;
-
 let optional_string ~path fields key =
   match member fields key with
   | None | Some `Null -> Ok None
@@ -122,9 +106,8 @@ let optional_positive_float ~path fields key =
       (json_type_name value)
 ;;
 
-let optional_string_list ~path fields key =
+let required_string_list ~path fields key =
   match member fields key with
-  | None | Some `Null -> Ok []
   | Some (`List values) ->
     let rec loop index acc = function
       | [] -> Ok (List.rev acc)
@@ -144,6 +127,7 @@ let optional_string_list ~path fields key =
       path
       key
       (json_type_name value)
+  | None -> result_errorf "%s.%s is required" path key
 ;;
 
 let optional_env ~path fields =
@@ -208,10 +192,9 @@ let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let path = Printf.sprintf "%s[%d]" path_prefix index in
   let* fields = assoc_fields ~path value in
-  let* () = reject_unknown_fields ~path ~allowed:[ "executable"; "argv" ] fields in
-  let* executable = required_string ~path fields "executable" in
-  let* argv = optional_string_list ~path fields "argv" in
-  Ok { executable; argv }
+  let* () = reject_unknown_fields ~path ~allowed:[ "argv" ] fields in
+  let* argv = required_string_list ~path fields "argv" in
+  Ok { argv }
 ;;
 
 let parse_pipeline ~path (json : Yojson.Safe.t) =
@@ -237,15 +220,14 @@ let of_json (json : Yojson.Safe.t) =
     then
       Error
         "cmd string is not a typed Shell IR input; provide \
-         executable/argv or pipeline"
+         argv or pipeline"
     else Ok ()
   in
   let* () =
     reject_unknown_fields
       ~path:"$"
       ~allowed:
-        [ "executable"
-        ; "argv"
+        [ "argv"
         ; "pipeline"
         ; "cwd"
         ; "env"
@@ -256,7 +238,7 @@ let of_json (json : Yojson.Safe.t) =
         ]
       fields
   in
-  let executable_present = Option.is_some (member fields "executable") in
+  let argv_present = Option.is_some (member fields "argv") in
   let pipeline_value =
     match member fields "pipeline" with
     | Some value -> Some ("$.pipeline", value)
@@ -265,21 +247,20 @@ let of_json (json : Yojson.Safe.t) =
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* env = optional_env ~path:"$" fields in
   let* timeout_sec = optional_positive_float ~path:"$" fields "timeout_sec" in
-  match executable_present, pipeline_value with
+  match argv_present, pipeline_value with
   | true, Some _ ->
     Error
-      "$.executable and $.pipeline are mutually exclusive typed Execute \
-       fields. Pick exactly one form and drop the other: either {executable, \
-       argv} for a single process OR {pipeline} for a multi-stage Shell IR \
+      "$.argv and $.pipeline are mutually exclusive typed Execute \
+       fields. Pick exactly one form and drop the other: either {argv} for a \
+       single process OR {pipeline} for a multi-stage Shell IR \
        pipeline. To pipe through a process, put it in pipeline; do not \
        combine."
   | true, None ->
-    let* executable = required_string ~path:"$" fields "executable" in
-    let* argv = optional_string_list ~path:"$" fields "argv" in
+    let* argv = required_string_list ~path:"$" fields "argv" in
     let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
     let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
     let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
-    Ok (Exec { executable; argv; cwd; env; timeout_sec; stdin; stdout; stderr })
+    Ok (Exec { argv; cwd; env; timeout_sec; stdin; stdout; stderr })
   | false, Some (path, value) ->
     (* RFC-0198 Phase B 한계: typed redirect triple(stdin/stdout/stderr)은 [Exec]
        variant에만 존재하고 [Pipeline]에는 없다. 그런데 이 세 키는
@@ -300,20 +281,20 @@ let of_json (json : Yojson.Safe.t) =
     then
       Error
         "$.stdin / $.stdout / $.stderr are not supported with $.pipeline; typed \
-         redirects apply only to the single-process {executable, argv} form. \
+         redirects apply only to the single-process {argv} form. \
          Put the redirecting command in its own pipeline stage, or use the \
-         {executable, argv} form with the typed redirect fields."
+         {argv} form with the typed redirect fields."
     else
       let* stages = parse_pipeline ~path value in
       Ok (Pipeline { stages; cwd; env; timeout_sec })
-  | false, None -> Error "$.executable or $.pipeline is required"
+  | false, None -> Error "$.argv or $.pipeline is required"
 ;;
 
-let check_argv ~executable argv =
+let check_argv argv =
   let rec loop i = function
     | [] -> Ok ()
     | token :: _ when String.contains token '\000' ->
-      Error (Argv_contains_nul { executable; index = i; token })
+      Error (Argv_contains_nul { index = i; token })
     | _ :: rest -> loop (i + 1) rest
   in
   loop 0 argv
@@ -342,17 +323,16 @@ let check_env env =
   loop env
 ;;
 
-let check_exec ~executable ~argv ~cwd ~env =
+let check_exec ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
-  let trimmed = String.trim executable in
-  if String.length trimmed = 0 then Error (Empty_executable { argv })
-  else (
-    let* () =
-      if argv = [] then Ok () else check_argv ~executable argv
-    in
+  match argv with
+  | [] -> Error Empty_argv
+  | program :: _ when String.equal program "" -> Error Empty_program
+  | _ ->
+    let* () = check_argv argv in
     let* () = check_cwd cwd in
     let* () = check_env env in
-    Ok ())
+    Ok ()
 ;;
 
 let check_redirect_target ~fd = function
@@ -369,9 +349,9 @@ let check_redirects ~stdin ~stdout ~stderr =
 ;;
 
 let validate = function
-  | Exec { executable; argv; cwd; env; timeout_sec = _; stdin; stdout; stderr } ->
+  | Exec { argv; cwd; env; timeout_sec = _; stdin; stdout; stderr } ->
     let ( let* ) = Result.bind in
-    let* () = check_exec ~executable ~argv ~cwd ~env in
+    let* () = check_exec ~argv ~cwd ~env in
     check_redirects ~stdin ~stdout ~stderr
   | Pipeline { stages = []; _ } -> Error Pipeline_empty
   | Pipeline { stages = [ _ ]; _ } -> Error Pipeline_too_short
@@ -381,20 +361,19 @@ let validate = function
     let* () = check_env env in
     let rec each = function
       | [] -> Ok ()
-      | { executable; argv } :: rest ->
-        let* () = check_exec ~executable ~argv ~cwd:None ~env:[] in
+      | { argv } :: rest ->
+        let* () = check_exec ~argv ~cwd:None ~env:[] in
         each rest
     in
     each stages
 ;;
 
-let shell_bin ~argv executable =
-  let trimmed = String.trim executable in
-  if String.length trimmed = 0 then Error (Empty_executable { argv })
-  else
-    match Masc_exec.Exec_program.of_string trimmed with
-    | Ok bin -> Ok bin
-    | Error (`Unknown _) -> Error (Empty_executable { argv })
+let shell_bin = function
+  | [] -> Error Empty_argv
+  | program :: argv ->
+    (match Masc_exec.Exec_program.of_string program with
+     | Ok bin -> Ok (bin, argv)
+     | Error (`Unknown _) -> Error Empty_program)
 ;;
 
 let shell_simple
@@ -402,10 +381,10 @@ let shell_simple
       ?cwd
       ?(env = [])
       ?(redirects = [])
-      { executable; argv }
+      { argv }
   =
   let ( let* ) = Result.bind in
-  let* bin = shell_bin ~argv executable in
+  let* bin, arguments = shell_bin argv in
   Ok
     (Keeper_tool_execute_shell_ir.simple_bin
        ?cwd_raw:cwd
@@ -414,7 +393,7 @@ let shell_simple
        ~env
        ~redirects
        bin
-       argv)
+       arguments)
 ;;
 
 (* RFC-0198 Phase B: lower the typed [redirect_target] triple into the
@@ -449,16 +428,16 @@ let redirects_of ~cwd ~stdin ~stdout ~stderr =
 let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input =
   let ( let* ) = Result.bind in
   match input with
-  | Exec { executable; argv; cwd; env; timeout_sec = _; stdin; stdout; stderr } ->
-    let stage = { executable; argv } in
+  | Exec { argv; cwd; env; timeout_sec = _; stdin; stdout; stderr } ->
+    let stage = { argv } in
     let redirects = redirects_of ~cwd ~stdin ~stdout ~stderr in
     shell_simple ~sandbox ?cwd ~env ~redirects stage
   | Pipeline { stages; cwd; env; timeout_sec = _ } ->
     let* simples =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
-        | { executable; argv } :: rest ->
-          let stage = { executable; argv } in
+        | { argv } :: rest ->
+          let stage = { argv } in
           let* simple = shell_simple ~sandbox ?cwd ~env stage in
           loop (simple :: acc) rest
       in
@@ -474,24 +453,18 @@ let to_shell_ir ?sandbox input =
 ;;
 
 let pp_validation_error ppf = function
-  | Empty_executable { argv = first :: rest } ->
-    Format.fprintf
-      ppf
-      "executable is empty; argv[0]=%S looks like the command name. \
-       Rewrite as executable=%S argv=%s. Do not include the executable in argv."
-      first
-      first
-      (Yojson.Safe.to_string (`List (List.map (fun arg -> `String arg) rest)))
-  | Empty_executable { argv = [] } ->
+  | Empty_argv ->
     Format.pp_print_string ppf
-      "executable is empty — provide a non-empty executable name, \
-       e.g. executable=\"cat\" argv=[\"file.txt\"]"
-  | Argv_contains_nul { executable; index; token } ->
+      "argv is empty — provide a non-empty process vector, \
+       e.g. argv=[\"cat\",\"file.txt\"]"
+  | Empty_program ->
+    Format.pp_print_string ppf
+      "argv[0] is empty — provide a non-empty program token"
+  | Argv_contains_nul { index; token } ->
     Format.fprintf
       ppf
-      "executable %S argv[%d]=%S contains NUL; typed Execute argv strings \
+      "argv[%d]=%S contains NUL; typed Execute argv strings \
        cannot contain NUL bytes"
-      executable
       index
       token
   | Redirect_path_not_absolute { fd; path } ->

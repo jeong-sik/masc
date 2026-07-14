@@ -15,8 +15,8 @@ code_refs:
 # Execute Runbook
 
 This runbook documents the current operator surface for `Execute` and
-adjacent structured shell routing. Execute is typed-only: callers provide
-`executable`/`argv` or `pipeline`. Raw command strings and the old
+adjacent structured process routing. Execute is typed-only: callers provide
+one non-empty `argv` process vector or `pipeline`. Raw command strings and the old
 background task lifecycle are not part of the callable surface.
 
 ## Related Documents
@@ -57,7 +57,7 @@ background task lifecycle are not part of the callable surface.
 Single process:
 
 ```json
-{ "executable": "rg", "argv": ["pattern", "lib"], "cwd": "repos/masc" }
+{ "argv": ["rg", "pattern", "lib"], "cwd": "repos/masc" }
 ```
 
 Pipeline:
@@ -65,8 +65,8 @@ Pipeline:
 ```json
 {
   "pipeline": [
-    { "executable": "rg", "argv": ["--files", "lib"] },
-    { "executable": "head", "argv": ["-20"] }
+    { "argv": ["rg", "--files", "lib"] },
+    { "argv": ["head", "-20"] }
   ],
   "cwd": "repos/masc"
 }

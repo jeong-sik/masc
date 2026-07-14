@@ -1,31 +1,25 @@
 (** Tool_shard_types_schemas_execute — [typed_execute_tools] tool_execute
     schema.
 
-    The public descriptor exposes only the typed argv / pipeline forms:
-    [executable]/[argv] for a single process and [pipeline] for
-    explicit Shell IR pipelines. Raw [cmd] strings are intentionally absent
-    from the schema. *)
+    The public descriptor exposes one command SSOT: a non-empty [argv] process
+    vector for a single process, or [pipeline] containing non-empty [argv]
+    vectors for explicit Shell IR pipelines. Raw [cmd] strings and the retired
+    duplicate [executable] field are intentionally absent from the schema. *)
 
 let tool_execute_exec_stage_schema =
   `Assoc
     [ "type", `String "object"
     ; ( "properties"
       , `Assoc
-          [ ( "executable"
-            , `Assoc
-                [ "type", `String "string"
-                ; "minLength", `Float 1.
-                ; ( "description"
-                  , `String "Opaque non-empty executable name." )
-                ] )
-          ; ( "argv"
+          [ ( "argv"
             , `Assoc
                 [ "type", `String "array"
                 ; "items", `Assoc [ "type", `String "string" ]
+                ; "minItems", `Int 1
                 ; ( "description"
                   , `String
-                      "Arguments after executable, passed verbatim. Do not repeat \
-                       executable as argv[0]. Shell \
+                      "Non-empty process vector: argv[0] is the executable and \
+                       remaining tokens are arguments. Shell \
                        metacharacters are data; use pipeline for multi-stage \
                        execution. Wildcards (*, ?, [...]) are NOT expanded: argv \
                        reaches the process unchanged with no shell, so 'foo*.ml' \
@@ -33,22 +27,9 @@ let tool_execute_exec_stage_schema =
                        or discover exact paths before invoking the program." )
                 ] )
           ] )
-    ; "required", `List [ `String "executable" ]
+    ; "required", `List [ `String "argv" ]
     ; "additionalProperties", `Bool false
     ]
-;;
-
-let tool_execute_executable_field =
-  ( "executable"
-  , `Assoc
-      [ "type", `String "string"
-      ; "minLength", `Float 1.
-      ; ( "description"
-        , `String
-            "Typed argv form: opaque non-empty executable name. Provide argv separately; \
-             do not combine shell syntax into this field. Mutually exclusive with \
-             pipeline." )
-      ] )
 ;;
 
 let tool_execute_argv_field =
@@ -56,10 +37,11 @@ let tool_execute_argv_field =
   , `Assoc
       [ "type", `String "array"
       ; "items", `Assoc [ "type", `String "string" ]
+      ; "minItems", `Int 1
       ; ( "description"
         , `String
-            "Typed argv form: arguments after executable, passed verbatim. Do not \
-             repeat executable as argv[0]. \
+            "Typed single-process form: a non-empty process vector. argv[0] is \
+             the executable and remaining tokens are arguments, all passed verbatim. \
              A literal '|' token is data, not a pipe. Wildcards (*, ?, [...]) are \
              NOT expanded either: there is no shell, so 'foo*.ml' is a literal \
              filename, not a glob. Use exact paths or list a directory first." )
@@ -74,7 +56,7 @@ let tool_execute_pipeline_field =
       ; ( "description"
         , `String
             "Typed pipeline form: ordered exec stages. Use this instead of putting \
-             '|' in argv. Mutually exclusive with executable." )
+             '|' in argv. Mutually exclusive with top-level argv." )
       ] )
 ;;
 
@@ -187,21 +169,21 @@ let tool_execute_stderr_field =
 ;;
 
 let tool_execute_description =
-  "Execute a typed process invocation inside the Keeper sandbox. Accepted fields: executable, argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. Provide either \
-   executable/argv for one process or an explicit pipeline of typed stages, \
-   never both; this tool no longer \
-   exposes background task lifecycle tools. The legacy cmd/command string fields are not accepted. Shell \
+  "Execute a typed process invocation inside the Keeper sandbox. Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. Provide either \
+   one non-empty argv process vector or an explicit pipeline of typed stages, \
+   never both; this tool does not expose background task lifecycle tools. The \
+   cmd and command string fields are rejected. Shell \
    metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
-   objects for redirection and the pipeline field for pipelines. cwd must resolve \
-   inside the Keeper path jail. MASC does not interpret executable or subcommand \
+   objects for redirection and the pipeline field for pipelines. Use Grep for \
+   structured file-content search. cwd must resolve inside the Keeper path jail. \
+   MASC does not interpret program or subcommand \
    meaning: after typed lowering, path containment, sandbox resolution, and the \
    external-effect Gate, the invoked program owns its syntax and exit result."
 ;;
 
 let tool_execute_schema : Masc_domain.tool_schema =
   let properties =
-    [ tool_execute_executable_field
-    ; tool_execute_argv_field
+    [ tool_execute_argv_field
     ; tool_execute_pipeline_field
     ; tool_execute_env_field
     ; tool_execute_cwd_field
@@ -221,24 +203,24 @@ let tool_execute_schema : Masc_domain.tool_schema =
         ; ( "oneOf"
           , `List
               [ `Assoc
-                  [ "required", `List [ `String "executable" ]
+                  [ "required", `List [ `String "argv" ]
                   ; ( "not"
                     , `Assoc [ "required", `List [ `String "pipeline" ] ] )
                   ; ( "description"
                     , `String
-                        "Single-process form: include 'executable' (and \
-                         optional 'argv').  DO NOT also include 'pipeline' \
+                        "Single-process form: include one non-empty 'argv'. \
+                         DO NOT also include 'pipeline' \
                          in the same call." )
                   ]
               ; `Assoc
                   [ "required", `List [ `String "pipeline" ]
                   ; ( "not"
                     , `Assoc
-                        [ "required", `List [ `String "executable" ] ] )
+                        [ "required", `List [ `String "argv" ] ] )
                   ; ( "description"
                     , `String
                         "Pipeline form: include 'pipeline' array of exec \
-                         stages.  DO NOT also include 'executable' in the \
+                         stages.  DO NOT also include top-level 'argv' in the \
                          same call." )
                   ]
               ] )

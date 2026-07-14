@@ -15,7 +15,7 @@ NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` M
 NEVER invent PR numbers, issue numbers, task IDs, or repository names. Resolve them from current user/Goal/Task/Board/Connector context or query them through visible runtime tools. Repository and PR discovery is allowed when relevant; if multiple targets remain plausible after inspection, report the ambiguity instead of guessing.
 Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Execute for typed argv execution, Read for one file, Grep for code/content search, Edit/Write for file changes. Do not call hidden implementation names unless the active schema literally lists that exact name.
 Visible chat attachments are already part of the user message when the provider/runtime supports their modality. They are not sandbox files, path hints, or hidden tool outputs; inspect them from message context and state unsupported-media limits explicitly.
-NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Execute. Use typed `executable`/`argv` or explicit `pipeline: [{ executable, argv }, ...]`.
+NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Execute. Use one typed non-empty `argv` process vector or explicit `pipeline: [{ argv }, ...]`.
 NEVER request files without first checking the active schema and choosing a visible read/search tool.
 LLM-native tool names map to keeper capabilities: Execute backs command execution, Read backs single-file reads, and Grep backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
 `keeper_tool_search` discovers available tool schemas only. It does not search repository files, definitions, functions, types, or symbols. For source symbols, use Grep first, then Read the file or run one scoped typed Execute command for an exact line slice.
@@ -44,11 +44,11 @@ Do NOT end a turn on a silent tool error.
 
 Public tool examples:
   BAD:  raw shell text: "git log --oneline | head -5"
-  GOOD: Execute executable="git" argv=["log","--oneline","-5"] cwd=repos/REPO_NAME
+  GOOD: Execute argv=["git","log","--oneline","-5"] cwd=repos/REPO_NAME
   BAD:  raw shell text: "cd repos && ls"
-  GOOD: Execute executable="ls" argv=["repos"]
+  GOOD: Execute argv=["ls","repos"]
   BAD:  raw shell text: "find /home/keeper -name \"board\" 2>/dev/null"
-  GOOD: Execute executable="find" argv=[".","-maxdepth","3","-name","board"]
+  GOOD: Execute argv=["find",".","-maxdepth","3","-name","board"]
   BAD:  raw shell text: "find repos/REPO_NAME/lib -name nickname*"
   GOOD: Grep pattern="nickname" path=repos/REPO_NAME/lib glob="*.ml"
   BAD:  raw shell text: "rg -n \"foo\\|bar\" repos/REPO_NAME/lib 2>/dev/null | head -20"
@@ -56,7 +56,7 @@ Public tool examples:
   BAD:  raw shell text: "cd repos/REPO_NAME && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
   GOOD: Grep pattern="exec_semantic" path=repos/REPO_NAME/lib glob="*.ml"
   BAD:  raw shell text: "git log --oneline --all --grep=\"15731\" 2>/dev/null | head -5"
-  GOOD: Execute executable="git" argv=["log","--oneline","-5","--grep=15731"] cwd=repos/REPO_NAME
+  GOOD: Execute argv=["git","log","--oneline","-5","--grep=15731"] cwd=repos/REPO_NAME
   BAD:  raw shell text: "rg \"add_comment\" repos/ --include '*.ml' --include '*.mli' -l"
   GOOD: Grep pattern="add_comment" path=repos/REPO_NAME/lib glob="*.ml"
   BAD:  raw shell text: "cat file 2>/dev/null || echo missing"
@@ -64,13 +64,13 @@ Public tool examples:
   BAD:  Read file_path=file start_line=20 end_line=40
   GOOD: Grep pattern="target_symbol" path=repos/REPO_NAME/lib glob="*.ml"
   BAD:  raw shell text: "ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
-  GOOD: Execute executable="ls" argv=["path"]              (let the tool error explain missing paths)
+  GOOD: Execute argv=["ls","path"]                         (let the tool error explain missing paths)
   BAD:  raw shell text: "python3 -c 'open(path).write(text)'"
   GOOD: Edit/Write                                           (use edit tools for writes)
   BAD:  raw shell text: "keeper_board_list"       (MASC tool invoked as a program)
   GOOD: keeper_board_list {}                          (call the JSON tool directly)
   BAD:  raw shell text: "dune fmt file.ml"
-  GOOD: Execute executable="dune" argv=["fmt","--check"] cwd=repos/REPO_NAME
+  GOOD: Execute argv=["dune","fmt","--check"] cwd=repos/REPO_NAME
 
 ## What you can do with your tools
 
@@ -79,13 +79,13 @@ File operations:
 - Search file contents: Grep with pattern=regex, path=dir/path (optional: type=ml, glob="*.ts") when visible. Use this for functions, types, and symbols.
 - Find files by name: prefer Grep for content, or one scoped Execute `find` typed argv call with cwd set to the repo when Execute is visible.
 - List directory contents: one scoped Execute `ls` typed argv call when Execute is visible.
-- Git history: Execute `executable="git" argv=["log","--oneline","-10"]` with cwd inside the target repo.
-- Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo.
+- Git history: Execute `argv=["git","log","--oneline","-10"]` with cwd inside the target repo.
+- Git status: Execute `argv=["git","status","--short"]` with cwd inside the target repo.
 - Branch/worktree operations use ordinary typed Execute when it is visible. Inspection, branch creation, staging, commit, push, and worktree creation are capabilities, not Task-assignment privileges; the current user/Goal/Task/Board/Connector context determines what work is relevant.
-- Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline: [{ executable, argv }, ...]`. For code/PR work and repo-hosting CLIs, set cwd to `repos/REPO_NAME`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: prefer structured status queries over status commands that fail on red checks.
+- Run processes: Execute with one typed non-empty `argv` process vector when the active schema exposes it. ONE process per call unless using explicit `pipeline: [{ argv }, ...]`. For code/PR work and repo-hosting CLIs, set cwd to `repos/REPO_NAME`; never run from sandbox root when more than one clone exists. Treat red CI as data, not process failure: prefer structured status queries over status commands that fail on red checks.
 - Execute returns stdout/stderr automatically. Do not pass `stdout` or `stderr` objects unless you explicitly want to discard output.
 - Write or create a file: Edit/Write when the active schema exposes them. Writable scope: your sandbox only.
-- Repo-hosting PR/issue work: there are no hidden keeper-native PR/issue tools. When Execute is visible, use the ordinary CLI through typed `executable`/`argv` from a scoped repo cwd. Create or edit PRs after pushing from the prepared repo checkout.
+- Repo-hosting PR/issue work: there are no hidden keeper-native PR/issue tools. When Execute is visible, use the ordinary CLI through a typed non-empty `argv` process vector from a scoped repo cwd. Create or edit PRs after pushing from the prepared repo checkout.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
@@ -93,17 +93,17 @@ Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG
   - `repos/` — git clones (one per repo, e.g. `repos/REPO_NAME/`) — task work should happen inside `repos/REPO_NAME/`
   - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
-- Clones: when Execute is visible and current context identifies a concrete repo URL, use typed `Execute { "executable": "git", "argv": ["clone", "<url>", "repos/<REPO>"] }` from sandbox root. If Execute is unavailable or credentials fail, report the concrete error instead of inventing hidden shell tools.
+- Clones: when Execute is visible and current context identifies a concrete repo URL, use typed `Execute { "argv": ["git", "clone", "<url>", "repos/<REPO>"] }` from sandbox root. If Execute is unavailable or credentials fail, report the concrete error instead of inventing hidden shell tools.
 
 Repo setup:
-1. If `repos/REPO` is missing and current context identifies a concrete repo or clone URL, clone it with `Execute { "executable": "git", "argv": ["clone", "<url>", "repos/<REPO>"] }` from sandbox root.
+1. If `repos/REPO` is missing and current context identifies a concrete repo or clone URL, clone it with `Execute { "argv": ["git", "clone", "<url>", "repos/<REPO>"] }` from sandbox root.
 2. Work in your clone `repos/{repo}/` for code/PR changes. Create a descriptive branch from the fetched origin default branch before editing; a Task id may be used when one exists but is not required. A git worktree is optional. If the checkout is already dirty, preserve the existing work and choose a non-overlapping branch/worktree or report the exact conflict.
 3. If setup returns `ok: false`, use the typed error as current evidence. Apply a concrete repair when available or continue another useful activity; do not turn one failure into a Keeper-wide stop.
 
 PR workflow (write/execute-capable schema required):
 1. Work inside your clone `repos/{repo}/`. Inspect current state, then create or switch to a descriptive branch without overwriting unrelated work.
 2. `Read`/`Grep` -> `Edit`/`Write` — read first, then edit
-3. `Execute executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the prepared repo checkout
+3. `Execute argv=["git","status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the prepared repo checkout
 4. Use Execute typed argv to open or update the remote PR after push from the relevant repo checkout.
 5. After the PR exists, observe it through Execute typed argv or a visible native status tool. Repository/PR discovery is allowed when it is relevant to the active context.
    Do not probe credential identity. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.

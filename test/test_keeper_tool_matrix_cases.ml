@@ -393,7 +393,8 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("mode", `String "overwrite");
         ]
   | "tool_execute" ->
-      `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
+      `Assoc
+        [ ("argv", `List [ `String "pwd" ]); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->
       `Assoc [ ("message", `String "tool matrix hello") ]
   | "keeper_voice_listen" ->

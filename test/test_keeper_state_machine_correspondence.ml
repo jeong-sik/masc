@@ -280,7 +280,7 @@ let canonical_events : (string * SM.event) list =
     ("SupervisorRestartAttempt", SM.Supervisor_restart_attempt { attempt = 1 });
     ( "ContextOverflowDetected",
       SM.Context_overflow_detected
-        { source = `Oas_signal; token_count = 200_000; limit_tokens = Some 200_000 } );
+        { limit_tokens = Some 200_000 } );
     ("AutoCompactTriggered", SM.Auto_compact_triggered);
     ("OperatorCompactRequested", SM.Operator_compact_requested);
     ( "OperatorClearRequested",

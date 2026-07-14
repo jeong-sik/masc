@@ -70,18 +70,14 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Operator_stop { remove_meta = false };
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
         SM.Context_overflow_detected
-          { source = `Prompt_rejected;
-            token_count = 205000;
-            limit_tokens = Some 200000 };
+          { limit_tokens = Some 200000 };
       ]
     | SM.Failing ->
       [ SM.Heartbeat_ok; SM.Turn_succeeded;
         SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
         SM.Stop_requested; SM.Operator_pause;
         SM.Context_overflow_detected
-          { source = `Prompt_rejected;
-            token_count = 205000;
-            limit_tokens = Some 200000 };
+          { limit_tokens = Some 200000 };
       ]
     | SM.Overflowed ->
       [ SM.Auto_compact_triggered;

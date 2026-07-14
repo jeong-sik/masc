@@ -10,7 +10,7 @@ import type { KeeperSupervisorCrashLogEntry } from '../types'
 describe('categorizeCrashReason', () => {
   it('classifies known prefixes', () => {
     expect(categorizeCrashReason('heartbeat_timeout')).toBe('heartbeat')
-    expect(categorizeCrashReason('turn_budget_exceeded')).toBe('turn')
+    expect(categorizeCrashReason('turn_execution_failed')).toBe('turn')
     expect(categorizeCrashReason('fiber_panic')).toBe('fiber')
     expect(categorizeCrashReason('exception_unhandled')).toBe('exception')
   })
@@ -47,7 +47,7 @@ describe('groupCrashCohorts', () => {
     const log: KeeperSupervisorCrashLogEntry[] = [
       { ts: 1, reason: 'heartbeat_timeout' },
       { ts: 2, reason: 'heartbeat_lost' },
-      { ts: 3, reason: 'turn_budget_exceeded' },
+      { ts: 3, reason: 'turn_execution_failed' },
       { ts: 4, reason: 'unknown' },
       { ts: 5 },
     ]
@@ -62,7 +62,7 @@ describe('groupCrashCohorts', () => {
 describe('filterCrashLog', () => {
   const log: KeeperSupervisorCrashLogEntry[] = [
     { ts: 1, reason: 'heartbeat_timeout' },
-    { ts: 2, reason: 'turn_budget_exceeded' },
+    { ts: 2, reason: 'turn_execution_failed' },
     { ts: 3, reason: 'fiber_panic' },
     { ts: 4, reason: 'heartbeat_lost' },
   ]

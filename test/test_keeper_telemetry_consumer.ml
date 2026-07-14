@@ -93,7 +93,7 @@ let test_persists_telemetry_event_to_jsonl () =
   let base_path = temp_base_path "keeper_telemetry_persist" in
   let marker = "persist_probe_3f9c1" in
   let payload =
-    `Assoc [ ("kind", `String "turn_budget"); ("marker", `String marker) ]
+    `Assoc [ ("kind", `String "turn_observation"); ("marker", `String marker) ]
   in
   Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in

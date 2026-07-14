@@ -8,7 +8,7 @@
     - [Keeper_turn_terminal_code] (RFC-0042 PR-1/PR-2.5) is the
       {e producer-side} bridge from [Keeper_registry.failure_reason] /
       [Agent_sdk.Error.sdk_error]. Its [of_wire] returns [None] for the
-      SDK-error codes ([api_error_*], the budget prefixes, [internal_error]) because
+      SDK-error codes ([api_error_*], agent observation wires, [internal_error]) because
       they are all collapsed into its [Sdk_error of string] blob — the
       sub-sum RFC-0042 §5.2 explicitly defers. Matching on [Sdk_error s]
       would force the substring re-parse back into the open, so it cannot
@@ -67,19 +67,6 @@ type t =
   | Internal_error of string
   (** Exact wire ["internal_error"]. Payload is the original
           string, carried only for [to_wire] round-trip fidelity. *)
-  | Turn_budget_exhausted of string
-  (** Wire [String.starts_with ~prefix:"turn_budget_exhausted"], emitted from
-          [Runtime_agent.TurnBudgetExhausted]. Unlike
-          [Auto_recoverable_budget], this is a completed runtime stop reason,
-          so the receipt classifier must inspect completion-contract evidence
-          before deciding whether it is safe to pass. Payload is the original
-          string. *)
-  | Auto_recoverable_budget of string
-  (** Wire matches one of the turn/time-budget cut-off prefixes
-          ([agent_error_max_turns_exceeded] / [agent_error_execution_timeout]
-          / [agent_error_idle_timeout]): the turn was cut off before a
-          verdict and the supervisor auto-resumes from its checkpoint.
-          Payload is the original string. *)
   | Pre_dispatch_success of string
   (** Exact wire ["pre_dispatch_success"]: a turn that
           completed without dispatching to a provider. Payload is the
@@ -102,25 +89,6 @@ val of_wire : string -> t
     inverse: [to_wire (of_wire s) = s] for every [s]. *)
 val to_wire : t -> string
 
-(** {1 Turn/time-budget cut-off prefixes (SSOT)}
-
-    Wire prefixes for OAS agent-execution errors that exhaust a turn/time
-    budget before the turn completes. The encoder
-    [Keeper_agent_error.agent_error_terminal_reason_code] builds the wire
-    strings from these constants, and the classifier matches on them via
-    the [Auto_recoverable_budget] bucket. Owned here so the typed parser
-    and the producer share one source. [Keeper_execution_receipt]
-    re-exports these for backward compatibility. *)
-val terminal_prefix_max_turns_exceeded : string
-
-val terminal_prefix_execution_timeout : string
-val terminal_prefix_idle_timeout : string
-val terminal_prefix_turn_budget_exhausted : string
-(** Wire prefix emitted for [Runtime_agent.TurnBudgetExhausted]. This is not
-    part of [is_auto_recoverable_turn_budget_terminal]: it is a completed
-    runtime stop reason, so receipt classification must inspect completion
-    contract evidence before deciding pass vs attention. *)
-
 (** {1 Transient provider-runtime wire codes (SSOT)}
 
     Retry-recoverable transient wire codes inside the
@@ -132,8 +100,7 @@ val terminal_prefix_turn_budget_exhausted : string
     The encoder [Keeper_agent_error.api_error_terminal_reason_code]
     references these so producer and consumer cannot drift.
 
-    Agent execution-budget expiry is carried by typed Agent SDK constructors
-    and does not enter this API/provider wire family. *)
+    Agent execution observations do not enter this API/provider wire family. *)
 val wire_api_error_timeout : string
 
 val wire_api_error_network : string
@@ -146,9 +113,3 @@ val wire_api_error_network : string
     The disposition classifier routes a [true] result to a runtime-advance
     disposition instead of [Disp_pause_human]. *)
 val is_transient_provider_runtime_failure : t -> bool
-
-(** [true] when canonical [terminal_reason] is a turn/time-budget cut-off:
-    auto-recoverable, the keeper resumes from its checkpoint, so it must
-    NOT be classified as a completion-contract failure. Equivalent to
-    [of_wire s] returning [Auto_recoverable_budget _]. *)
-val is_auto_recoverable_turn_budget_terminal : string -> bool

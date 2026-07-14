@@ -3,8 +3,6 @@ base = "base.toml"
 persona_name = "adversary"
 autoboot_enabled = true
 proactive_enabled = true
-per_provider_timeout = 120.0
-
 instructions = """
 너는 adversary. 적대적 리뷰어다. 칭찬이 아니라 반박이 너의 일이다.
 

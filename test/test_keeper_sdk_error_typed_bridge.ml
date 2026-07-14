@@ -18,6 +18,8 @@ module AE = Masc.Keeper_agent_error
 module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
 module KTD = Masc.Keeper_turn_driver
+module KRB = Masc.Keeper_turn_runtime_budget
+module KSB = Masc.Keeper_status_bridge
 module RC = Runtime_candidate
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
@@ -136,6 +138,91 @@ let test_idle_detected_receipt_is_failure () =
     "IdleDetected is not cancellation"
     "error"
     (Masc.Keeper_execution_receipt.outcome_kind_to_string outcome)
+;;
+
+let test_execution_limit_observations_are_successful_receipts () =
+  let observations =
+    [ ( "max turns"
+      , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 }) )
+    ; ( "execution timeout"
+      , SdkE.Agent
+          (SdkE.AgentExecutionTimeout
+             { elapsed_sec = 60.0
+             ; timeout_sec = 60.0
+             ; turn_count = 2
+             ; max_turns = 10
+             }) )
+    ; ( "idle timeout"
+      , SdkE.Agent
+          (SdkE.AgentExecutionIdleTimeout
+             { idle_sec = 60.0
+             ; idle_timeout_sec = 60.0
+             ; turn_count = 2
+             ; max_turns = 10
+             }) )
+    ]
+  in
+  List.iter
+    (fun (label, error) ->
+       let outcome = AE.receipt_outcome_kind_of_sdk_error error in
+       Alcotest.(check string)
+         (label ^ " remains a successful observation")
+         "ok"
+         (Masc.Keeper_execution_receipt.outcome_kind_to_string outcome))
+    observations
+;;
+
+let test_execution_limit_observations_have_no_keeper_authority () =
+  let observations =
+    [ ( "max turns"
+      , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 }) )
+    ; ( "execution timeout"
+      , SdkE.Agent
+          (SdkE.AgentExecutionTimeout
+             { elapsed_sec = 60.0
+             ; timeout_sec = 60.0
+             ; turn_count = 2
+             ; max_turns = 10
+             }) )
+    ; ( "idle timeout"
+      , SdkE.Agent
+          (SdkE.AgentExecutionIdleTimeout
+             { idle_sec = 60.0
+             ; idle_timeout_sec = 60.0
+             ; turn_count = 2
+             ; max_turns = 10
+             }) )
+    ]
+  in
+  List.iter
+    (fun (label, error) ->
+       Alcotest.(check bool)
+         (label ^ " is typed as an OAS execution observation")
+         true
+         (EC.classify_error error = EC.Oas_execution_observed);
+       Alcotest.(check bool)
+         (label ^ " cannot increment the turn failure streak")
+         true
+         (EC.is_auto_recoverable_turn_error error);
+       Alcotest.(check bool)
+         (label ^ " grants no runtime rotation")
+         true
+         (EC.recoverable_runtime_failure_reason error = None);
+       Alcotest.(check bool)
+         (label ^ " grants no blocker")
+         true
+         (KSB.blocker_class_of_sdk_error error = None);
+       match
+         KRB.decide_degraded_retry
+           ~base_runtime:"observation.base"
+           ~effective_runtime:"observation.effective"
+           ~attempted_runtimes:[]
+           error
+       with
+       | KRB.No_degraded_retry -> ()
+       | KRB.Degraded_retry_allowed _ ->
+         Alcotest.failf "%s unexpectedly authorized degraded retry" label)
+    observations
 ;;
 
 let check_parse_split label err ~provider ~model_ ~server =
@@ -383,7 +470,7 @@ let test_soft_rate_limit_classifies_as_rate_limit () =
 let classification_to_string = function
   | EC.Transient_network -> "transient_network"
   | EC.Transient_internal_runner -> "transient_internal_runner"
-  | EC.Transient_oas_timeout -> "transient_oas_timeout"
+  | EC.Oas_execution_observed -> "oas_execution_observed"
   | EC.Transient_rate_limit -> "transient_rate_limit"
   | EC.Transient_capacity -> "transient_capacity"
   | EC.Non_transient -> "non_transient"
@@ -435,7 +522,7 @@ let test_static_error_classification_preserves_retry_semantics () =
     (SdkE.Api (Retry.Timeout { message = "read timed out"; phase = None }));
   check_classification
     "typed agent execution timeout"
-    EC.Transient_oas_timeout
+    EC.Oas_execution_observed
     (SdkE.Agent
        (SdkE.AgentExecutionTimeout
           { elapsed_sec = 60.0
@@ -827,6 +914,14 @@ let () =
             "IdleDetected receipt remains a failure"
             `Quick
             test_idle_detected_receipt_is_failure
+        ; Alcotest.test_case
+            "execution limits do not impersonate cancellation"
+            `Quick
+            test_execution_limit_observations_are_successful_receipts
+        ; Alcotest.test_case
+            "execution limits have no Keeper authority"
+            `Quick
+            test_execution_limit_observations_have_no_keeper_authority
         ] )
     ; ( "server parse rejection split"
       , [ Alcotest.test_case

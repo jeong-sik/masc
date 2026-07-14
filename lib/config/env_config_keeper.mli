@@ -52,7 +52,6 @@ end
 
 module KeeperRuntime : sig
   val debug : bool
-  val deliberation_daily_budget_usd : unit -> float
   val snapshot_sec : int
 end
 
@@ -165,37 +164,23 @@ end
 module KeeperKeepalive : sig
   val interval_sec : int
   val sleep_chunk_sec : float
-  val turn_timeout_sec : float
-  val oas_timeout_sec_override : float option
 
+  val parse_stream_idle_timeout_sec : string -> (float, string) result
+  (** Parse the operator-supplied seconds value. This schema parser performs
+      no clamping and accepts only finite, strictly positive values. *)
 
-  val oas_call_timeout_sec : float
-  (** Resolved OAS-call timeout: [oas_timeout_sec_override] when set, otherwise
-      [turn_timeout_sec]. RFC-0156: no token- or turn-budget dependence. *)
-  val attempt_watchdog_safety_cap_sec : float
-  (** Deprecated compatibility knob for the removed whole-run attempt watchdog.
-      The keeper runtime must not apply this as a wall-clock timeout around
-      active provider/tool execution. Env:
-      [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC]. *)
-  val stream_idle_timeout_sec : float
-
-  val execution_idle_timeout_sec : float option
-  (** OAS Agent.run inactivity deadline. [Some s] forwards to
-      [Builder.with_execution_idle_timeout] through the keeper runtime
-      resolver only for paths that can prove active tool execution is excluded.
-      The keeper path currently parses this knob but does not forward it.
-
-      Env: [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC]. Default: disabled.
-      Clamp range when enabled: [5, 600] s. Unset, invalid, [0], or a
-      negative value disables it. Kept opt-in because this is an Agent.run-level
-      stall detector, not provider transport policy or tool timeout policy. *)
+  val stream_idle_timeout_sec : unit -> float option
+  (** Explicit streaming-provider idle-gap timeout. [None] means disabled;
+      MASC does not infer a timeout from provider/model kind. A configured
+      value must be finite and strictly positive or configuration loading
+      raises {!Env_config_core.Config_error}. *)
 
   val body_timeout_sec_override : float option
   (** Total HTTP body-consumption deadline for non-streaming OAS completion
       calls. [None] (env unset) leaves the runtime builder wire untouched.
       [Some s] forwards to [Builder.with_body_timeout] for sync completion
-      paths. Streaming paths ignore it and rely on {!stream_idle_timeout_sec}
-      plus attempt liveness observation.
+      paths. Streaming paths ignore it and rely on an explicitly configured
+      {!stream_idle_timeout_sec} plus attempt liveness observation.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
 

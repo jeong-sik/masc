@@ -79,7 +79,6 @@ type ctx =
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
   ; observation : Keeper_world_observation.world_observation
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
-  ; prompt_timeout_estimate_tokens : int
   ; shared_context : Agent_sdk.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
@@ -88,12 +87,10 @@ type ctx =
 let run (ctx : ctx)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
-      ~(timeout_sec : float)
-      ~(remaining_turn_budget_s : unit -> float)
       ~(current_turn_phase_elapsed_ms : float option -> int * int option)
       ~(user_message : string)
       ~(registry_base_path : string)
-      ~(record_streaming_cancelled_observation : ?cancel_reason:string -> config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
+      ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
       ~(runtime_id_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
   : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result * turn_state
@@ -113,7 +110,6 @@ let run (ctx : ctx)
       ; build_turn_prompt
       ; trajectory_acc
       ; profile_defaults
-      ; prompt_timeout_estimate_tokens
       ; cleanup
       ; drain_turn_event_bus
       ; event_bus
@@ -127,12 +123,11 @@ let run (ctx : ctx)
    | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
    | Ok clock ->
    let checkpoint_stage_observed = Atomic.make false in
-   let do_run
+  let do_run
         ~(execution : runtime_execution)
         ~run_meta
         ~run_generation
         ~is_retry
-        ~oas_timeout_s
         ~(turn_state : turn_state)
     =
     let turn_state =
@@ -160,24 +155,11 @@ let run (ctx : ctx)
            Keeper_registry.mark_turn_provider_attempt_started
              ~base_path:config.base_path
              meta.name;
-           Keeper_unified_turn_attempt_watchdog.dispatch
-             ~clock
-             ~keeper_name:meta.name
-             ~attempt_watchdog_s:None
-             ~on_cancelled:(fun reason ->
-               record_streaming_cancelled_observation
-                 ~cancel_reason:reason
-                 ~config
-                 ~run_meta
-                 ~run_generation
-                 ~runtime_id:execution.runtime_id
-                 ~keeper_turn_id
-                 ())
-             ~run:(fun () ->
+           try
                (* Emit before the provider/tool run so operator forensics can see
-                  that the keeper entered Streaming. [dispatch] observes external
-                  cancellation only; it must not impose a MASC wall-clock timeout
-                  around active tool execution. *)
+                  that the keeper entered Streaming. The surrounding [try]
+                  records external cancellation without imposing a wall-clock
+                  timeout around active tool execution. *)
                Keeper_turn_fsm.emit_transition
                  ~keeper_name:meta.name
                  ~turn_id:keeper_turn_id
@@ -214,9 +196,6 @@ let run (ctx : ctx)
                  ~runtime_rotation_attempts:
                    (List.rev turn_state.runtime_rotation_attempts)
                  ~temperature:execution.temperature
-                 ?max_tokens:execution.max_tokens
-                 ~oas_timeout_s
-                 ~oas_timeout_is_explicit:false
                  ~trajectory_acc
                  ~is_retry
                  ?shared_context
@@ -242,7 +221,17 @@ let run (ctx : ctx)
                      ~base_path:config.base_path
                      ~keeper_name:meta.name
                      ~channel)
-                 ()))
+                 ()
+           with
+           | Eio.Cancel.Cancelled _ as exn ->
+             record_streaming_cancelled_observation
+               ~config
+               ~run_meta
+               ~run_generation
+               ~runtime_id:execution.runtime_id
+               ~keeper_turn_id
+               ();
+             raise exn)
     in
     result, turn_state
   in
@@ -313,23 +302,11 @@ let run (ctx : ctx)
           err
     in
     let attempt_result, turn_state =
-      let provider_timeout_budget =
-        resolve_provider_timeout_budget
-          ~is_retry
-          ~estimated_input_tokens:prompt_timeout_estimate_tokens
-          ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-      in
-      let turn_state =
-        { turn_state with
-          last_provider_timeout_budget = Some provider_timeout_budget
-        }
-      in
       do_run
         ~execution
         ~run_meta
         ~run_generation
         ~is_retry
-        ~oas_timeout_s:provider_timeout_budget.effective_timeout_sec
         ~turn_state
     in
     match attempt_result with
@@ -409,7 +386,6 @@ let run (ctx : ctx)
               (fun runtime_id ->
                  Keeper_unified_turn_pre_dispatch.build_runtime_execution
                    ~meta
-                   ~profile_defaults
                    ~runtime_id)
         with
         | Keeper_turn_runtime_budget.Degraded_retry_step_setup_failed
@@ -531,7 +507,7 @@ let run (ctx : ctx)
                         ^ overflow_evidence_detail
                         ^ ": "
                         ^ Agent_sdk.Error.to_string err)
-                     Sdk_token_budget_exceeded)
+                     Sdk_context_window_exceeded)
             }
           in
           Otel_metric_store.inc_counter

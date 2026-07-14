@@ -28,7 +28,7 @@ let config_field_names =
        trigger; kept here so legacy persisted JSON sheds the dead keys. *)
   ; "tool_heavy_msg_threshold"; "tool_heavy_ratio_floor"
   ; "auto_handoff"; "handoff_threshold"; "handoff_cooldown_sec"
-  ; "per_provider_timeout_s"; "always_allow"
+  ; "always_allow"
     (* NOTE: multimodal_policy is a PERSISTED runtime field: meta_to_json emits
        it (keeper_meta_json.ml) and it is a canonical key. It must NOT be in this
        config-only scrub list: any call-site that rewrites persisted JSON with

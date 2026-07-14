@@ -8,41 +8,12 @@
 
 module Code = Keeper_turn_terminal_code
 
-let chop_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  let value_len = String.length value in
-  if value_len >= prefix_len && String.sub value 0 prefix_len = prefix
-  then Some (String.sub value prefix_len (value_len - prefix_len))
-  else None
-;;
-
-let chop_suffix ~suffix value =
-  let suffix_len = String.length suffix in
-  let value_len = String.length value in
-  if value_len >= suffix_len
-     && String.sub value (value_len - suffix_len) suffix_len = suffix
-  then Some (String.sub value 0 (value_len - suffix_len))
-  else None
-;;
-
-type turn_budget_detail =
-  { dimension : [ `Turns | `Wall_clock_seconds | `Idle_turns ]
-  ; source : [ `Oas_sdk | `Keeper_runtime | `User_config ]
-  }
-
-type turn_budget_exhausted =
-  { detail : turn_budget_detail option
-  ; used : int
-  ; limit : int
-  }
-
 type t =
   | Success
   | External_cancel
   | Input_required
   | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted
-  | Turn_budget_exhausted of turn_budget_exhausted
   | Provider_error of Code.t
   | Unknown of { raw_error : string }
 
@@ -58,8 +29,7 @@ let severity = function
   | External_cancel
   | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted -> Warn
-  | Provider_error _
-  | Turn_budget_exhausted _ -> Bad
+  | Provider_error _ -> Bad
   | Unknown _ -> Unknown_bad
 ;;
 
@@ -71,29 +41,6 @@ let summary = function
     "keeper turn hit a stale/no-progress timeout"
   | Runtime_attempts_exhausted ->
     "runtime attempts exhausted; inspect per-attempt root causes"
-  | Turn_budget_exhausted { detail; used; limit } ->
-    let dim_label = function
-      | `Turns -> "turn"
-      | `Wall_clock_seconds -> "wall_clock_seconds"
-      | `Idle_turns -> "idle_turn"
-    in
-    let src_label = function
-      | `Oas_sdk -> "oas_sdk"
-      | `Keeper_runtime -> "keeper_runtime"
-      | `User_config -> "user_config"
-    in
-    (match detail with
-     | Some { dimension = dim; source = src } ->
-       Printf.sprintf
-         "%s budget exhausted (%d/%d, source=%s)"
-         (dim_label dim)
-         used
-         limit
-         (src_label src)
-     | _ ->
-       (* Detail-less form (e.g. the runtime-agent turn budget, which carries
-          only used/limit). *)
-       Printf.sprintf "turn budget exhausted (%d/%d)" used limit)
   | Provider_error code -> Printf.sprintf "keeper turn ended with %s" (Code.to_wire code)
   | Unknown { raw_error = "" } ->
     "keeper turn failed without a classified terminal reason"
@@ -106,7 +53,6 @@ let next_action = function
   | External_cancel -> Some "rerun_if_still_relevant"
   | Turn_wall_clock_timeout -> Some "inspect_turn_timeout"
   | Runtime_attempts_exhausted -> Some "inspect_runtime_attempts"
-  | Turn_budget_exhausted _ -> Some "inspect_turn_budget"
   | Provider_error _ | Unknown _ -> Some "inspect_latest_error"
 ;;
 
@@ -116,30 +62,6 @@ let to_wire = function
   | External_cancel -> "external_cancel"
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
   | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
-  | Turn_budget_exhausted { detail; used; limit } ->
-    let dim_wire = function
-      | `Turns -> "turns"
-      | `Wall_clock_seconds -> "wall_clock_seconds"
-      | `Idle_turns -> "idle_turns"
-    in
-    let src_wire = function
-      | `Oas_sdk -> "oas_sdk"
-      | `Keeper_runtime -> "keeper_runtime"
-      | `User_config -> "user_config"
-    in
-    (match detail with
-     | Some { dimension = dim; source = src } ->
-       Printf.sprintf
-         "turn_budget_exhausted(%s:%s:%d/%d)"
-         (dim_wire dim)
-         (src_wire src)
-         used
-         limit
-     (* Detail-less SSOT form: a producer that knows only used/limit (the
-        receipt path) round-trips through this and {!of_wire}. dimension and
-        source are grouped in [detail], so half-tagged typed values are not
-        representable. *)
-     | None -> Printf.sprintf "turn_budget_exhausted(%d/%d)" used limit)
   | Provider_error code -> Code.to_wire code
   | Unknown { raw_error = "" } -> "unknown_error"
   | Unknown { raw_error } -> raw_error
@@ -172,72 +94,8 @@ let of_termination_code (c : Code.t) : t =
   | Code.Sdk_error _ -> Provider_error c
 ;;
 
-(* Wire→typed parser for the [Turn_budget_exhausted] record.
-
-   Single SSOT grammar (see {!to_wire}):
-   - with detail:    ["turn_budget_exhausted(<dim>:<source>:<used>/<limit>)"]
-   - without detail: ["turn_budget_exhausted(<used>/<limit>)"]
-
-   The detail-less form is what the receipt producer emits when it only
-   has {used; limit} (e.g. [Runtime_agent.TurnBudgetExhausted]); it maps to
-   [{ detail = None; … }]. Unknown dimension/source tags,
-   a mixed/partial tag set, or unparseable integers fall back to [None] —
-   fail-closed, never permissive.
-
-   The typed schema is the SSOT; wire strings that don't conform are
-   carried verbatim for diagnostic surfacing rather than being
-   silently collapsed. *)
-let of_wire_turn_budget_exhausted wire =
-  let parse_dimension = function
-    | "turns" -> Some `Turns
-    | "wall_clock_seconds" -> Some `Wall_clock_seconds
-    | "idle_turns" -> Some `Idle_turns
-    | _ -> None
-  in
-  let parse_source = function
-    | "oas_sdk" -> Some `Oas_sdk
-    | "keeper_runtime" -> Some `Keeper_runtime
-    | "user_config" -> Some `User_config
-    | _ -> None
-  in
-  let parse_counts counts_str =
-    match String.split_on_char '/' counts_str with
-    | [ used_str; limit_str ] ->
-      (match int_of_string_opt used_str, int_of_string_opt limit_str with
-       | Some used, Some limit -> Some (used, limit)
-       | _ -> None)
-    | _ -> None
-  in
-  match chop_prefix ~prefix:"turn_budget_exhausted(" wire with
-  | None -> None
-  | Some body ->
-    (match chop_suffix ~suffix:")" body with
-     | None -> None
-     | Some body ->
-       (match String.split_on_char ':' body with
-        | [ dim_str; src_str; counts_str ] ->
-          (match parse_dimension dim_str, parse_source src_str, parse_counts counts_str with
-           | Some dim, Some src, Some (used, limit) ->
-             Some
-               (Turn_budget_exhausted
-                  { detail = Some { dimension = dim; source = src }; used; limit })
-           | _ -> None)
-        | [ counts_str ] ->
-          (match parse_counts counts_str with
-           | Some (used, limit) ->
-             Some (Turn_budget_exhausted { detail = None; used; limit })
-           | None -> None)
-        | _ -> None))
-;;
-
 let of_wire wire =
-  match chop_prefix ~prefix:"turn_budget_exhausted" wire with
-  | Some _ ->
-    (match of_wire_turn_budget_exhausted wire with
-     | Some disposition -> disposition
-     | None -> Unknown { raw_error = wire })
-  | None ->
-    (match wire with
+  match wire with
      | "success" -> Success
      | "input_required" -> Input_required
      | "external_cancel" -> External_cancel
@@ -247,7 +105,7 @@ let of_wire wire =
      | other ->
        (match Code.of_wire other with
         | Some c -> of_termination_code c
-        | None -> Unknown { raw_error = other }))
+        | None -> Unknown { raw_error = other })
 ;;
 
 let is_success = function
@@ -256,15 +114,8 @@ let is_success = function
   | Input_required
   | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted
-  | Turn_budget_exhausted _
   | Provider_error _
   | Unknown _ -> false
-;;
-
-let is_turn_budget_exhausted_wire wire =
-  match of_wire (String.lowercase_ascii (String.trim wire)) with
-  | Turn_budget_exhausted _ -> true
-  | _ -> false
 ;;
 
 let equal a b =
@@ -274,10 +125,6 @@ let equal a b =
   | External_cancel, External_cancel
   | Turn_wall_clock_timeout, Turn_wall_clock_timeout
   | Runtime_attempts_exhausted, Runtime_attempts_exhausted -> true
-  | Turn_budget_exhausted a, Turn_budget_exhausted b ->
-    a.detail = b.detail
-    && a.used = b.used
-    && a.limit = b.limit
   | Provider_error a, Provider_error b -> String.equal (Code.to_wire a) (Code.to_wire b)
   | Unknown a, Unknown b -> String.equal a.raw_error b.raw_error
   | ( Success
@@ -285,7 +132,6 @@ let equal a b =
     | External_cancel
     | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
-    | Turn_budget_exhausted _
     | Provider_error _
     | Unknown _ ), _ -> false
 ;;

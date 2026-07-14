@@ -91,7 +91,6 @@ type operator_disposition_reason =
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_input_required
-  | Reason_turn_budget_exhausted
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_unmapped_runtime_state
@@ -107,36 +106,9 @@ let operator_disposition_reason_to_string = function
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_input_required -> "input_required"
-  | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
-;;
-
-(* Terminal-reason prefixes for OAS agent-execution errors that exhaust a
-   turn/time budget before the turn completes. The SSOT now lives in
-   [Keeper_terminal_reason] (RFC-0042 PR-4) so the typed classifier owns
-   the constants the [Auto_recoverable_budget] bucket matches; these
-   re-exports keep [Keeper_agent_error] and the public [.mli] byte-stable.
-   A turn cut off by the per-call turn cap ([MaxTurnsExceeded]), the
-   wall-clock ceiling ([AgentExecutionTimeout]), or the progress-aware idle
-   watchdog ([AgentExecutionIdleTimeout]) did NOT violate the tool
-   contract — it never reached a verdict. The checkpoint remains available
-   to a later turn. Scope is deliberately narrow: token/cost
-   budget, guardrail, and tripwire terminals stay out, since those are
-   genuine ceilings an operator should see, not transient turn cut-offs. *)
-let terminal_prefix_max_turns_exceeded =
-  Keeper_terminal_reason.terminal_prefix_max_turns_exceeded
-;;
-
-let terminal_prefix_execution_timeout =
-  Keeper_terminal_reason.terminal_prefix_execution_timeout
-;;
-
-let terminal_prefix_idle_timeout = Keeper_terminal_reason.terminal_prefix_idle_timeout
-
-let is_auto_recoverable_turn_budget_terminal =
-  Keeper_terminal_reason.is_auto_recoverable_turn_budget_terminal
 ;;
 
 let operator_disposition (receipt : t)
@@ -158,7 +130,6 @@ let operator_disposition (receipt : t)
     | External_cancel
     | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
-    | Turn_budget_exhausted _
     | Provider_error _
     | Unknown _ -> false
   in
@@ -219,18 +190,15 @@ let operator_disposition (receipt : t)
     Disp_fail_open_next_runtime, Reason_provider_runtime_error
   | Keeper_terminal_reason.Internal_error _ ->
     Disp_fail_open_next_runtime, Reason_internal_error
-  | Keeper_terminal_reason.Auto_recoverable_budget _ ->
-    Disp_pass, Reason_turn_budget_exhausted
   | Config_or_auth _
   | Provider_runtime_failure _
-  | Turn_budget_exhausted _
   | Pre_dispatch_success _
   | Unknown _ ->
     (* Generic fall-through. [Config_or_auth] and
        [Provider_runtime_failure] are caught by the guarded branches above
        (their constructors force [preflight_config_failure] /
-       [provider_runtime_failure] true), so only [Turn_budget_exhausted],
-       [Pre_dispatch_success], and [Unknown] reach here in practice;
+       [provider_runtime_failure] true), so only [Pre_dispatch_success] and
+       [Unknown] reach here in practice;
        [Config_or_auth] and [Provider_runtime_failure] are listed to keep the
        match exhaustive without a wildcard. *)
     if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
@@ -239,19 +207,6 @@ let operator_disposition (receipt : t)
       receipt.runtime_fallback_applied
       || receipt.runtime_outcome = Runtime_passed_to_next_model
     then Disp_pass_next_model, Reason_runtime_fallback
-    else if
-      match terminal_reason with
-      | Keeper_terminal_reason.Turn_budget_exhausted _ -> true
-      | Runtime_exhausted _
-      | Capacity_backpressure _
-      | Config_or_auth _
-      | Provider_runtime_failure _
-      | Internal_error _
-      | Auto_recoverable_budget _
-      | Pre_dispatch_success _
-      | Unknown _ -> false
-    then
-      Disp_pass, Reason_turn_budget_exhausted
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_not_dispatched
@@ -263,8 +218,6 @@ let operator_disposition (receipt : t)
        | Config_or_auth _
        | Provider_runtime_failure _
        | Internal_error _
-       | Turn_budget_exhausted _
-       | Auto_recoverable_budget _
        | Unknown _ -> false)
     then Disp_pass, Reason_healthy
     (* "healthy" requires an explicit success signal: turn completed without

@@ -962,7 +962,7 @@ let test_of_meta_budgets_against_routed_runtime () =
       res.Keeper_context_runtime.effective_budget)
 ;;
 
-let test_turn_budget_uses_routed_runtime () =
+let test_turn_context_window_uses_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
     let budget =
@@ -970,7 +970,7 @@ let test_turn_budget_uses_routed_runtime () =
         ~meta:(make_meta "budgettest")
     in
     Alcotest.(check int)
-      "turn budget uses routed runtime, not runtime-id-agnostic labels"
+      "turn context window uses routed runtime, not runtime-id-agnostic labels"
       64000
       budget)
 ;;
@@ -1527,37 +1527,6 @@ let test_seed_of_thinking_support_gate_contract () =
     (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
 ;;
 
-let test_resolve_turn_max_tokens_precedence () =
-  let profile_defaults =
-    { Keeper_types_profile.empty_keeper_profile_defaults with
-      oas_env =
-        [ Keeper_types_profile.keeper_unified_max_tokens_oas_env_key, "4096" ]
-    }
-  in
-  Alcotest.(check (option int))
-    "profile supplies turn-start output-token intent"
-    (Some 4096)
-    (Keeper_run_context.resolve_turn_max_tokens
-       ~keeper_name:"max-token-snapshot"
-       ~profile_defaults
-       ());
-  Alcotest.(check (option int))
-    "explicit caller value wins over profile"
-    (Some 2048)
-    (Keeper_run_context.resolve_turn_max_tokens
-       ~keeper_name:"max-token-snapshot"
-       ~profile_defaults
-       ~max_tokens:2048
-       ());
-  Alcotest.(check (option int))
-    "absence remains None"
-    None
-    (Keeper_run_context.resolve_turn_max_tokens
-       ~keeper_name:"max-token-snapshot"
-       ~profile_defaults:Keeper_types_profile.empty_keeper_profile_defaults
-       ())
-;;
-
 let test_max_output_tokens_accessor_projects_catalog () =
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
@@ -1867,9 +1836,9 @@ let () =
             `Quick
             test_of_meta_budgets_against_routed_runtime
         ; Alcotest.test_case
-            "turn budget uses the routed runtime"
+            "turn context window uses the routed runtime"
             `Quick
-            test_turn_budget_uses_routed_runtime
+            test_turn_context_window_uses_routed_runtime
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case
@@ -1919,10 +1888,6 @@ let () =
         ] )
     ; ( "runtime token capacity projection"
       , [ Alcotest.test_case
-            "turn-start max_tokens precedence"
-            `Quick
-            test_resolve_turn_max_tokens_precedence
-        ; Alcotest.test_case
             "max_output_tokens_of_runtime_id projects catalog ceiling"
             `Quick
             test_max_output_tokens_accessor_projects_catalog

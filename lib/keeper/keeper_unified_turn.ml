@@ -169,7 +169,6 @@ let run_keeper_cycle
     ; manifest_seq = 0
     ; current_turn_blocker_info = None
     ; last_execution = None
-    ; last_provider_timeout_budget = None
     ; degraded_retry_info = None
     ; runtime_rotation_attempts = []
     ; failure_reason = None
@@ -261,7 +260,6 @@ let run_keeper_cycle
            | Ok profile_defaults ->
              Keeper_unified_turn_pre_dispatch.build_runtime_execution
                ~meta
-               ~profile_defaults
                ~runtime_id:effective_runtime_runtime_name
              |> Result.map (fun execution -> profile_defaults, execution)
          in
@@ -330,7 +328,6 @@ let run_keeper_cycle
             Keeper_event_publisher.publish_runtime_execution_built
               ~keeper_name:meta.name
               ~runtime_id:initial_execution.runtime_id
-              ~max_tokens:initial_execution.max_tokens
               ~max_context:initial_execution.max_context
               ~effective_budget:initial_execution.max_context_resolution.effective_budget
               ~temperature:initial_execution.temperature
@@ -438,7 +435,7 @@ let run_keeper_cycle
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create
                    ?event_bus
-                 (* RFC-0197 P1-4a: mirror the in-flight tool count into the
+                 (* Mirror the in-flight tool count into the
                     live turn_observation so the supervisor sweep excludes
                     active tool execution from the no-progress window. *)
                    ~on_pending_count_change:(fun count ->
@@ -554,12 +551,7 @@ let run_keeper_cycle
                      | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
-                       let { Keeper_unified_turn_retry_setup.timeout_sec
-                           ; turn_started_at
-                           ; remaining_turn_budget_s
-                           ; elapsed_ms
-                           ; current_turn_phase_elapsed_ms
-                           }
+                       let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms }
                          =
                          Keeper_unified_turn_retry_setup.build
                            ~now:(fun () -> Eio.Time.now clock)
@@ -584,15 +576,12 @@ let run_keeper_cycle
                            ; turn_ctx_cell
                            ; observation
                            ; profile_defaults
-                           ; prompt_timeout_estimate_tokens
                            ; shared_context
                            ; trajectory_acc
                            ; turn_id = keeper_turn_id
                            }
                            ~initial_execution
                            ~turn_state
-                           ~timeout_sec
-                           ~remaining_turn_budget_s
                            ~current_turn_phase_elapsed_ms
                            ~user_message
                            ~registry_base_path
@@ -703,31 +692,19 @@ let run_keeper_cycle
                        (Trajectory.Failed (Agent_sdk.Error.to_string err));
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
-                  (match Keeper_turn_driver.classify_masc_internal_error err with
-                   | Some (Keeper_turn_driver.Provider_timeout _) ->
-                     Otel_metric_store.inc_counter
-                       Keeper_metrics.(to_string OasTimeoutClassifications)
-                       ~labels:[ "classification", "structural_budget" ]
-                       ()
-                   | Some (Keeper_turn_driver.Turn_timeout _) ->
-                     Otel_metric_store.inc_counter
-                       Keeper_metrics.(to_string OasTimeoutClassifications)
-                       ~labels:[ "classification", "turn_wall_clock" ]
-                       ()
-                   | _ ->
-                     (match err with
+                  (match err with
                       | Agent_sdk.Error.Agent
                           (AgentExecutionTimeout _ | AgentExecutionIdleTimeout _) ->
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string OasTimeoutClassifications)
-                          ~labels:[ "classification", "structural_budget" ]
+                          ~labels:[ "classification", "oas_execution_observed" ]
                           ()
                       | Agent_sdk.Error.Api (Timeout _) ->
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string OasTimeoutClassifications)
                           ~labels:[ "classification", "transient_network" ]
                           ()
-                      | _ -> ()));
+                      | _ -> ());
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
                   Otel_metric_store.inc_counter
@@ -948,7 +925,6 @@ dominant source of the observed CAS race exhaustion after
                       ~degraded_retry_applied
                       ~degraded_retry_runtime
                       ~fallback_reason
-                      ~last_provider_timeout_budget:turn_state.last_provider_timeout_budget
                       ~current_turn_blocker_info:turn_state.current_turn_blocker_info
                       ~keeper_turn_id
                       result

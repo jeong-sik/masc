@@ -3,8 +3,8 @@ open Alcotest
 module KAR = Masc.Keeper_agent_run
 module KUS = Masc.Keeper_unified_metrics_support
 
-(* RFC-0232: a budget-exhausted (Continuation_checkpoint) turn substitutes a
-   synthetic continuation notice for the reply text. That text is display-only;
+(* RFC-0232: a control checkpoint may substitute a synthetic continuation
+   notice for the reply text. That text is display-only;
    the work preview must gate visible model text on [is_visible_reply] so the
    canned "Continuation checkpoint saved; ..." sentence never surfaces as
    output. These pin the preview precedence. *)
@@ -57,38 +57,38 @@ let test_empty_no_tool_response_is_no_visible_output () =
     (result ~response_text_present:true)
 ;;
 
-let test_budget_exhaustion_is_contract_neutral () =
+let test_turn_limit_observation_is_contract_neutral () =
   let result ?(response_text_present = false) tools =
     KAR.Contract_helpers.observed_completion_evidence
       ~actual_keeper_tool_names:tools
-      ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 60; limit = 60 })
+      ~stop_reason:(Runtime_agent.TurnLimitObserved { turns_used = 60; limit = 60 })
       ~response_text_present
     |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
   in
   check
     string
-    "tool call does not become a budget-derived failure"
-    "unknown"
+    "tool call remains positive execution evidence"
+    "tool_execution_observed"
     (result [ "tool_execute" ]);
   check
     string
-    "raw text does not become a budget-derived verdict"
-    "unknown"
+    "tool evidence remains authoritative when text is also present"
+    "tool_execution_observed"
     (result ~response_text_present:true [ "tool_execute" ]);
   check
     string
-    "tool identity does not change budget neutrality"
-    "unknown"
+    "tool identity does not change evidence classification"
+    "tool_execution_observed"
     (result [ "keeper_task_claim" ]);
   check
     string
-    "completion-like names do not get special treatment"
-    "unknown"
+    "completion-like names remain ordinary tool evidence"
+    "tool_execution_observed"
     (result [ "keeper_task_done" ]);
   check
     string
-    "empty budget exhaustion remains neutral"
-    "unknown"
+    "empty turn-limit observation records no visible output"
+    "no_visible_output"
     (result [])
 ;;
 
@@ -158,9 +158,9 @@ let () =
             `Quick
             test_empty_no_tool_response_is_no_visible_output
         ; test_case
-            "budget exhaustion is completion-contract neutral"
+            "turn-limit observation is completion-contract neutral"
             `Quick
-            test_budget_exhaustion_is_contract_neutral
+            test_turn_limit_observation_is_contract_neutral
         ; test_case
             "recovery defer is completion-contract neutral"
             `Quick

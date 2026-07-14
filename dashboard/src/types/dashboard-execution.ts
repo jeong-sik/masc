@@ -58,7 +58,7 @@ export interface DashboardRuntimeDiagnostic {
   message: string
 }
 
-export type KeeperRuntimeSource = 'env' | 'toml' | 'default' | 'derived'
+export type KeeperRuntimeSource = 'env' | 'toml' | 'default'
 
 export interface KeeperRuntimeField<T> {
   value: T
@@ -66,10 +66,8 @@ export interface KeeperRuntimeField<T> {
 }
 
 export interface KeeperRuntimeResolved {
-  turn_timeout_sec: KeeperRuntimeField<number>
-  oas_timeout_override_sec: KeeperRuntimeField<number | null>
-  oas_timeout_per_1k: KeeperRuntimeField<number>
-  oas_timeout_per_turn: KeeperRuntimeField<number>
+  stream_idle_timeout_sec: KeeperRuntimeField<number | null>
+  body_timeout_override_sec: KeeperRuntimeField<number | null>
 }
 
 export interface DashboardRuntimeResolution {

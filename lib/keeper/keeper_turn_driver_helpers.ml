@@ -15,10 +15,6 @@
 (* RFC-0206: provider_rejections_for_no_tool_error deleted — multi-candidate
    tool-filter rejection lists have no meaning under single-runtime dispatch. *)
 
-let apply_stream_idle_timeout_default = function
-  | Some _ as v -> v
-  | None -> Some Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
-
 let checkpoint_after_attempt ?agent_ref = function
   | Some agent ->
       (match agent_ref with Some r -> r := Some agent | None -> ());

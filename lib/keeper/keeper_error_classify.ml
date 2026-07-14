@@ -19,7 +19,7 @@ open Keeper_context_runtime
 type error_classification =
   | Transient_network
   | Transient_internal_runner
-  | Transient_oas_timeout
+  | Oas_execution_observed
   | Transient_rate_limit
   | Transient_capacity
   | Non_transient
@@ -52,8 +52,6 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
       | Keeper_turn_driver.Accept_rejected _
-      | Keeper_turn_driver.Provider_timeout _
-      | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _
       | Keeper_turn_driver.Receipt_persistence_failed _ )
@@ -102,8 +100,10 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Provider (Llm_provider.Error.InvalidConfig _) -> Non_transient
   | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
   | Agent_sdk.Error.Agent
-      (AgentExecutionTimeout _ | AgentExecutionIdleTimeout _) ->
-      Transient_oas_timeout
+      ( MaxTurnsExceeded _
+      | AgentExecutionTimeout _
+      | AgentExecutionIdleTimeout _ ) ->
+      Oas_execution_observed
   | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
     | AuthorizationError _
     | NotFound _ | PaymentRequired _ | ContextOverflow _) -> Non_transient
@@ -256,8 +256,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
       false
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
-  | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Provider_timeout _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -272,8 +270,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Accept_rejected _)
-  | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Provider_timeout _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -300,8 +296,6 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
       ( Keeper_turn_driver.Runtime_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Provider_timeout _
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _
@@ -317,8 +311,6 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
 type degraded_retry_reason =
   | Hard_quota
   | Resumable_cli_session
-  | Provider_timeout
-  | Turn_timeout
   | Runtime_candidates_filtered
   | Runtime_exhausted
   | Capacity_backpressure
@@ -331,8 +323,6 @@ type degraded_retry_reason =
 let degraded_retry_reason_to_string = function
   | Hard_quota -> "hard_quota"
   | Resumable_cli_session -> "resumable_cli_session"
-  | Provider_timeout -> "provider_timeout"
-  | Turn_timeout -> "turn_timeout"
   | Runtime_candidates_filtered -> "runtime_candidates_filtered"
   | Runtime_exhausted -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
@@ -415,10 +405,6 @@ let degraded_retry_after_recoverable_error
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         phase_recovery_retry Resumable_cli_session
-    | Some (Keeper_turn_driver.Provider_timeout _) ->
-        phase_recovery_retry Provider_timeout
-    | Some (Keeper_turn_driver.Turn_timeout _) ->
-        phase_recovery_retry Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
         phase_recovery_retry Capacity_backpressure
     | Some
@@ -451,10 +437,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         Some Resumable_cli_session
-    | Some (Keeper_turn_driver.Provider_timeout _) ->
-        Some Provider_timeout
-    | Some (Keeper_turn_driver.Turn_timeout _) ->
-        Some Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
         Some Capacity_backpressure
     | Some
@@ -621,12 +603,10 @@ let default_degraded_rotation_candidates
     dedupe_keep_order (default_candidates @ tool_capable)
   | Some
       ( Capacity_backpressure
-      | Provider_timeout
       | Server_error
       | Auth_error
       | Runtime_exhausted
       | Runtime_candidates_filtered
-      | Turn_timeout
       | Resumable_cli_session ) ->
     (* Phase B-1: include the full runtime catalog so transient infrastructure
        failures (notably capacity_backpressure) can fail over to a healthy
@@ -732,8 +712,6 @@ let degraded_rotation_after_recoverable_error
         | Empty_no_progress
         | Thinking_only_no_progress
         | Resumable_cli_session
-        | Provider_timeout
-        | Turn_timeout
         | Runtime_candidates_filtered
         | Runtime_exhausted
         | Capacity_backpressure
@@ -791,7 +769,8 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Internal _ -> false
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
-  is_transient_network_error err
+  classify_error err = Oas_execution_observed
+  || is_transient_network_error err
   || is_server_rejected_parse_error err
   || is_auto_recoverable_runtime_exhausted_error err
   (* Context overflow is handled explicitly by
@@ -809,8 +788,6 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Accept_rejected _)
-  | Some (Keeper_turn_driver.Provider_timeout _)
-  | Some (Keeper_turn_driver.Turn_timeout _)
   (* RFC-0159 Phase A: opaque internal failures should not trigger the
      keeper-cycle-failed WARN by themselves; the surrounding handler
      already logs the exception detail. *)
@@ -869,8 +846,6 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Accept_rejected _)
-  | Some (Keeper_turn_driver.Provider_timeout _)
-  | Some (Keeper_turn_driver.Turn_timeout _)
   (* RFC-0159 Phase A: opaque internal failures are not runtime exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)

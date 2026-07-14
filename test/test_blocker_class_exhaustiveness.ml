@@ -23,19 +23,13 @@ let all_variants : blocker_class list =
   ; Runtime_exhausted No_providers_available
   ; Runtime_exhausted All_providers_failed
   ; Runtime_exhausted Candidates_filtered_after_cycles
-  ; Runtime_exhausted Max_turns_exceeded
   ; Runtime_exhausted Session_conflict
-  ; Runtime_exhausted (Structural_attempt_timeout { detail = "30" })
   ; Runtime_exhausted Capacity_exhausted
   ; Capacity_backpressure
-  ; Turn_timeout
   ; Fiber_unresolved
   ; Stale_turn_timeout
   ; Stale_fleet_batch
-  ; Oas_agent_execution_timeout
-  ; Sdk_max_turns_exceeded
-  ; Sdk_token_budget_exceeded
-  ; Sdk_cost_budget_exceeded
+  ; Sdk_context_window_exceeded
   ; Sdk_unrecognized_stop_reason
   ; Sdk_idle_detected
   ; Sdk_guardrail_violation
@@ -97,16 +91,6 @@ let test_unknown_string () =
 
 (* ── Variant count pin ─────────────────────────────────────────── *)
 
-(** Pin the variant count so additions are visible in diffs.  When adding a
-    new [blocker_class] variant, bump this number and add the variant to
-    [all_variants]. *)
-let expected_variant_count = 28
-
-let test_variant_count () =
-  let count = List.length all_variants in
-  check int "blocker_class variant count" expected_variant_count count
-;;
-
 (* ── SDK error → blocker_class mapping exhaustiveness ────────────── *)
 
 module SdkE = Agent_sdk.Error
@@ -115,14 +99,14 @@ module KSB = Masc.Keeper_status_bridge_blocker
 module KTD = Masc.Keeper_turn_driver
 module Reg = Masc.Keeper_registry
 
-(** Every [Agent_sdk.Error.Agent _] sub-variant must map to a [Some blocker_class]
-    through the two-layer pipeline in [blocker_class_of_sdk_error]:
+(** Every [Agent_sdk.Error.Agent _] sub-variant must have an explicit blocker
+    decision through the two-layer pipeline in [blocker_class_of_sdk_error]:
     1. [classify_masc_internal_error] — for runtime-layer structured errors
     2. Direct SDK pattern match — for Agent sub-variants
 
     When a new Agent sub-variant is added to the SDK, this test forces the
-    developer to decide: map it to a blocker_class or explicitly document why
-    [None] is correct. *)
+    developer to decide: map it to a blocker_class or list why it is an
+    observation/control checkpoint for which [None] is correct. *)
 
 let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
   [ ( "AgentExecutionTimeout"
@@ -168,7 +152,12 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
   ]
 ;;
 
-let agent_variants_with_no_runtime_blocker = [ "ToolFailureRecoveryDeferred" ]
+let agent_variants_with_no_runtime_blocker =
+  [ "AgentExecutionTimeout"
+  ; "AgentExecutionIdleTimeout"
+  ; "MaxTurnsExceeded"
+  ; "ToolFailureRecoveryDeferred"
+  ]
 
 let test_all_agent_variants_classified_intentionally () =
   List.iter
@@ -205,25 +194,6 @@ let test_agent_variant_count_pin () =
     expected_agent_variant_count count
 ;;
 
-let test_typed_agent_timeout_maps_to_oas_timeout () =
-  let structural =
-    SdkE.Agent
-      (SdkE.AgentExecutionTimeout
-         { elapsed_sec = 554.9
-         ; timeout_sec = 554.9
-         ; turn_count = 4
-         ; max_turns = 10
-         })
-  in
-  match KSB.blocker_class_of_sdk_error structural with
-  | Some klass ->
-    check string
-      "typed agent timeout maps to oas_agent_execution_timeout"
-      "oas_agent_execution_timeout"
-      (blocker_class_to_string klass)
-  | None -> fail "typed agent timeout should map to Some blocker_class"
-;;
-
 let test_api_timeout_prose_does_not_map_to_agent_timeout () =
   let api_timeout =
     SdkE.Api
@@ -239,27 +209,6 @@ let test_api_timeout_prose_does_not_map_to_agent_timeout () =
     None
     (KSB.blocker_class_of_sdk_error api_timeout
      |> Option.map blocker_class_to_string)
-;;
-
-let test_provider_timeout_is_not_runtime_blocker () =
-  let provider_timeout =
-    KTD.sdk_error_of_masc_internal_error
-      (KTD.Provider_timeout
-         { budget_sec = 555.0
-         ; keeper_turn_timeout_sec = 600.0
-         ; estimated_input_tokens = 4302
-         ; source = "first_attempt_adaptive_timeout"
-         ; remaining_turn_budget_sec = Some 45.0
-         ; min_required_sec = 15.0
-         ; phase = "runtime_attempt_watchdog"
-         })
-  in
-  match KSB.blocker_class_of_sdk_error provider_timeout with
-  | None -> ()
-  | Some klass ->
-    failf
-      "provider timeout should remain a provider liveness signal, got blocker_class %S"
-      (blocker_class_to_string klass)
 ;;
 
 
@@ -311,7 +260,7 @@ let test_reason_none_provider_error_falls_through () =
     surface.KSB.blocker_class
 ;;
 
-let test_provider_timeout_catch_all_maps_to_turn_timeout () =
+let test_provider_timeout_catch_all_stays_provider_runtime_error () =
   let surface =
     provider_runtime_surface_exn
       ~reason:None
@@ -321,8 +270,8 @@ let test_provider_timeout_catch_all_maps_to_turn_timeout () =
       ()
   in
   check string
-    "provider timeout catch-all -> turn_timeout"
-    "turn_timeout"
+    "provider timeout catch-all remains provider_runtime_error"
+    "provider_runtime_error"
     surface.KSB.blocker_class
 ;;
 
@@ -376,26 +325,21 @@ let () =
       , [ test_case "round-trip" `Quick test_roundtrip
         ; test_case "string uniqueness" `Quick test_string_uniqueness
         ; test_case "unknown string returns None" `Quick test_unknown_string
-        ; test_case "variant count pin" `Quick test_variant_count
         ] )
     ; ( "sdk_error_mapping"
       , [ test_case "all Agent variants are intentionally classified" `Quick
             test_all_agent_variants_classified_intentionally
         ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin
-        ; test_case "typed agent timeout → oas_agent_execution_timeout" `Quick
-            test_typed_agent_timeout_maps_to_oas_timeout
         ; test_case "API timeout prose does not synthesize agent timeout" `Quick
             test_api_timeout_prose_does_not_map_to_agent_timeout
-        ; test_case "provider timeout is not a runtime blocker" `Quick
-            test_provider_timeout_is_not_runtime_blocker
         ] )
     ; ( "provider_runtime_record"
       , [ test_case "typed reason falls through" `Quick
             test_typed_provider_reason_falls_through
         ; test_case "reason=None provider error falls through" `Quick
             test_reason_none_provider_error_falls_through
-        ; test_case "provider timeout catch-all maps to timeout" `Quick
-            test_provider_timeout_catch_all_maps_to_turn_timeout
+        ; test_case "provider timeout catch-all stays provider runtime" `Quick
+            test_provider_timeout_catch_all_stays_provider_runtime_error
         ; test_case
             "provider timeout detail without code stays provider runtime"
             `Quick

@@ -34,7 +34,6 @@ type capabilities =
   { supports_inline_tools : bool
   ; argv_prompt_preflight : bool
   ; uses_anthropic_caching : bool
-  ; max_turns_per_attempt : int option
   }
 [@@deriving show, eq]
 

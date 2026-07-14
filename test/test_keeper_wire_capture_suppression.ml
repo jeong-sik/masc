@@ -152,17 +152,17 @@ let test_internal_response_observation_preserves_raw_response_text () =
     finalized.response_text
 ;;
 
-let test_budget_exhausted_finalizer_preserves_response_text_by_default () =
+let test_turn_limit_observation_preserves_response_text_by_default () =
   let raw_response_text = "Continuation checkpoint saved; keeper remains scheduled" in
   let finalized =
     Response_text.finalize
       ~completion_contract_result:Receipt.Completion_response_observed
-      ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 })
+      ~stop_reason:(Runtime_agent.TurnLimitObserved { turns_used = 3; limit = 3 })
       ~raw_response_text
       ()
   in
   Alcotest.(check string)
-    "turn-budget checkpoint preserves response text"
+    "turn-limit observation preserves response text"
     raw_response_text
     finalized.response_text
 ;;
@@ -244,9 +244,9 @@ let () =
             `Quick
             test_internal_response_observation_preserves_raw_response_text
         ; Alcotest.test_case
-            "turn-budget checkpoint preserves by default"
+            "turn-limit observation preserves by default"
             `Quick
-            test_budget_exhausted_finalizer_preserves_response_text_by_default
+            test_turn_limit_observation_preserves_response_text_by_default
         ; Alcotest.test_case
             "contract observation preserves by default"
             `Quick

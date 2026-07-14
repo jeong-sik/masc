@@ -134,8 +134,8 @@ let test_overflow_failure_contract_keeps_lifecycle_active () =
 
 let test_preflight_overflow_does_not_bypass_driver_retry () =
   let agent_run_src = read_file "lib/keeper/keeper_agent_run.ml" in
-  check bool "preflight includes context-window overflow" true
-    (contains_substring ~needle:"pre_dispatch_context_window_error" agent_run_src);
+  check bool "preflight observes context-window overflow" true
+    (contains_substring ~needle:"pre_dispatch_over_context_window" agent_run_src);
   check bool "preflight overflow is not a pre-dispatch terminal error" true
     (match
        index_of_substring ~needle:"let pre_dispatch_error =" agent_run_src
@@ -159,11 +159,11 @@ let test_preflight_overflow_does_not_bypass_driver_retry () =
   let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
   check bool "overflow branch stamps current turn blocker" true
     (contains_substring ~needle:"current_turn_blocker_info =" execution_src);
-  check bool "overflow blocker uses typed token-budget class" true
+  check bool "overflow blocker uses typed context-window class" true
     (contains_substring
        ~needle:"Keeper_meta_contract.blocker_info_of_class"
        execution_src
-     && contains_substring ~needle:"Sdk_token_budget_exceeded" execution_src);
+     && contains_substring ~needle:"Sdk_context_window_exceeded" execution_src);
   check bool "overflow branch records failure without pause" true
     (contains_substring ~needle:"record_overflow_failure" execution_src)
 ;;

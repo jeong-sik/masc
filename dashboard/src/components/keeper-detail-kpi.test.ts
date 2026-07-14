@@ -28,7 +28,6 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
     handoff_new_generation: null,
     prompt_fingerprint: null,
     prompt_metrics: null,
-    provider_timeout_plan: null,
     ctx_composition: null,
     input_tokens: 120,
     output_tokens: 80,

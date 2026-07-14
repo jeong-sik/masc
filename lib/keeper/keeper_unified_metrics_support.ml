@@ -5,11 +5,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-let string_contains_substring = String_util.string_contains_substring
-
-let string_contains_substring_ci = String_util.string_contains_substring_ci
-
-
 (* ── Observation / decision helpers ─────────────── *)
 
 let decision_channel_of_observation
@@ -304,34 +299,6 @@ let coverage_reason_of_no_result_outcome = function
   | "error" -> "error_turn"
   | _ -> "no_run_result"
 
-let error_category_of_no_result_outcome ~outcome ~error =
-  match outcome with
-  | "error" | "partial" -> (
-      match error with
-      | Some e when String.length e > 0 ->
-          let e_lower = String.lowercase_ascii e in
-          let starts_with prefix =
-            String.starts_with e_lower ~prefix
-          in
-          let contains needle =
-            string_contains_substring ~needle e_lower
-          in
-          (* starts_with checks first (more specific), then contains *)
-          if starts_with "invalid request" then Some "invalid_request"
-          else if starts_with "network error" then Some "network_error"
-          else if starts_with "internal error" then Some "internal_error"
-          else if starts_with "input to" then Some "input_budget_exceeded"
-          (* contains checks second (broader, order matters) *)
-          else if contains "turn outcome ambiguous" then Some "ambiguous_side_effect"
-          else if contains "connection_failure"
-                  || contains "connection refused" then Some "network_error"
-          else if contains "timeout" || contains "timed out" then Some "timeout"
-          else if contains "context length"
-                  || contains "token budget" then Some "input_budget_exceeded"
-          else Some "other"
-      | Some _ | None -> Some "unknown")
-  | _ -> None
-
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   has_substantive_tool_calls (Keeper_agent_result.tool_names result)
   || Option.is_some (visible_run_validation result)
@@ -348,8 +315,8 @@ let validated_evidence_preview
 
 (* RFC-0232: the scheduled-autonomous "what is this keeper doing" preview, by
    precedence. [is_visible_reply] is the typed reply-surface outcome
-   ([Keeper_turn_outcome.of_result_surface]) — a budget-exhausted turn
-   substitutes a synthetic continuation notice for the reply text, and a
+   ([Keeper_turn_outcome.of_result_surface]) — an OAS turn-limit observation
+   may have no visible reply text, and a
    completed runtime turn may still have no visible reply. Neither case may be
    sniffed as model output, so visible model text only wins when the outcome is
    [Visible_reply]. Then substantive tool calls, then validated evidence, else
@@ -475,13 +442,3 @@ let observed_affordances_of_observation
   if observation.scheduled_automation.due_ready_count > 0 then
     add "schedule_dispatch_monitor";
   List.rev !affordances
-
-let response_requests_confirmation (text : string) : bool =
-  let trimmed = String.trim text in
-  trimmed <> ""
-  && (String.contains trimmed '?'
-      || string_contains_substring_ci ~needle:"would you like" trimmed
-      || string_contains_substring_ci ~needle:"do you want" trimmed
-      || string_contains_substring_ci ~needle:"let me know" trimmed
-      || string_contains_substring_ci ~needle:"어떻게 할까" trimmed
-      || string_contains_substring_ci ~needle:"할까" trimmed)

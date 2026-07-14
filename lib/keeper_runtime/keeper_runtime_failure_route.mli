@@ -36,7 +36,6 @@ type retry_class =
   | Server_error  (** transient 5xx / provider unavailable *)
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
-  | Turn_timeout  (** keeper turn budget expiry *)
 
 (** Why a different runtime is tried in the same turn. *)
 type rotate_class =

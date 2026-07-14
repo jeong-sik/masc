@@ -64,15 +64,6 @@ let task_link_already_recorded ~keeper ~task_id ~trace_id =
   let key = (keeper, task_id, trace_id) in
   Link_task_cache_map.mem key (Atomic.get link_task_cache_state).entries
 
-let per_provider_timeout_for_turn
-    ?oas_timeout_s
-    ?(oas_timeout_is_explicit = true)
-    ~(timeout_s : float)
-    () =
-  match (oas_timeout_s, oas_timeout_is_explicit) with
-  | (Some _ as explicit_timeout), true -> explicit_timeout
-  | _, _ -> Some timeout_s
-
 [@@@warning "-11"]
 
 let sdk_stream_event_is_first_token =

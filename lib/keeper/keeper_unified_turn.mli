@@ -8,22 +8,6 @@
 
     @since Unified Keeper Loop *)
 
-type provider_timeout_budget =
-  { effective_timeout_sec : float
-  ; adaptive_timeout_sec : float
-  ; keeper_turn_timeout_sec : float
-  ; remaining_turn_budget_sec : float
-  ; estimated_input_tokens : int
-  ; source : string
-  }
-
-val resolve_provider_timeout_budget
-  :  is_retry:bool
-  -> estimated_input_tokens:int
-  -> remaining_turn_budget_s:float
-  -> provider_timeout_budget
-(** See [Keeper_turn_runtime_budget] for provider timeout planning semantics. *)
-
 type degraded_retry_decision =
   | No_degraded_retry
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
@@ -163,8 +147,7 @@ val next_fail_open_runtime_for_turn
     Exposed so tests can pin the supervisor [fiber_stop] branch without forcing
     a live provider cancellation. *)
 val record_streaming_cancelled_observation
-  :  ?cancel_reason:string
-  -> config:Workspace.config
+  :  config:Workspace.config
   -> run_meta:Keeper_meta_contract.keeper_meta
   -> run_generation:int
   -> runtime_id:string

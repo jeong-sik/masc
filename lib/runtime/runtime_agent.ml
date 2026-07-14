@@ -62,7 +62,19 @@ let transport_error_kind_of_exception = function
 type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed
-  | TurnBudgetExhausted of { turns_used : int; limit : int }
+  | TurnLimitObserved of { turns_used : int; limit : int }
+  | ExecutionTimeoutObserved of {
+      elapsed_sec : float;
+      timeout_sec : float;
+      turn_count : int;
+      max_turns : int;
+    }
+  | ExecutionIdleTimeoutObserved of {
+      idle_sec : float;
+      idle_timeout_sec : float;
+      turn_count : int;
+      max_turns : int;
+    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
@@ -122,7 +134,6 @@ type config =
   summarizer : (Agent_sdk.Types.message list -> string) option;
       (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
           Emergency-phase compaction. Defaults to OAS's extractive default. *)
-  execution_idle_timeout_s : float option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;
@@ -157,16 +168,16 @@ type worker_lifecycle_classification =
 let worker_lifecycle_classification_of_result = function
   | Ok _ -> { event = "completed"; status = "completed"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
-    { event = "completed"; status = "continuation_checkpoint"; error = None }
+    { event = "completed"; status = "turn_limit_observed"; error = None }
   | Error
       (Agent_sdk.Error.Agent (Agent_sdk.Error.ToolFailureRecoveryDeferred _)) ->
     { event = "completed"; status = "tool_failure_recovery_deferred"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _)) ->
     { event = "completed"; status = "input_required"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
-    { event = "failed"; status = "agent_execution_timeout"; error = None }
+    { event = "completed"; status = "agent_execution_timeout_observed"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
-    { event = "failed"; status = "agent_idle_timeout"; error = None }
+    { event = "completed"; status = "agent_idle_timeout_observed"; error = None }
   | Error e ->
     { event = "failed"; status = "failed"; error = Some (Agent_sdk.Error.to_string e) }
 
@@ -298,6 +309,10 @@ let provider_config_preserving_http_transport
      the agent builder via [Agent_sdk.Builder.with_stream_idle_timeout]. The
      transport itself carries no idle deadline; OAS does not infer one. *)
   let http_transport =
+    (* OAS owns stream-idle liveness on
+       [Llm_transport.completion_request.stream_idle_timeout_s].  The request
+       record update below changes only [config], so that typed deadline is
+       preserved without a second construction-time fallback. *)
     Llm_provider.Complete.make_http_transport
       ?clock
       ?body_timeout_s
@@ -335,7 +350,15 @@ let transport_for_provider ~sw ~net ?clock ?body_timeout_s ~provider_cfg () =
      per-request patching, not at transport construction, so it is no longer
      threaded here. stream_idle_timeout_s is applied at the builder, not here
      (see RFC-OAS-026 note above). *)
-  Ok (Some (provider_config_preserving_http_transport ~sw ~net ?clock ?body_timeout_s ~provider_cfg ()))
+  Ok
+    (Some
+       (provider_config_preserving_http_transport
+          ~sw
+          ~net
+          ?clock
+          ?body_timeout_s
+          ~provider_cfg
+          ()))
 
 let runtime_id_of_config (config : config) =
   let runtime_prefix = "runtime:" in
@@ -981,7 +1004,9 @@ let run_duration_ms_since started_at =
 
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_oas_bridge.Success
-  | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Error { transient = false }
+  | TurnLimitObserved _
+  | ExecutionTimeoutObserved _
+  | ExecutionIdleTimeoutObserved _ -> Dashboard_oas_bridge.Success
   | Yielded_to_chat_waiting _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->
@@ -1271,20 +1296,23 @@ let run_blocks
         }
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded r)) ->
       close_after_success ();
+      Log.Misc.warn
+        "oas_worker %s: observed unexpected MaxTurnsExceeded with the Keeper contract configured unbounded (turns=%d reported_limit=%d)"
+        config.name
+        r.turns
+        r.limit;
       let partial_response =
         partial_response_of_stop
           ~session_id
-          (* Display text only.  Checkpoint classification flows through
-             [stop_reason] → [Keeper_turn_outcome] (RFC-0232 P2); no
-             consumer may sniff this string. *)
-          ~text:
-            "Continuation checkpoint saved; keeper remains scheduled for the \
-             next cycle."
+          (* [MaxTurnsExceeded] carries no response payload. Do not fabricate a
+             user-visible checkpoint sentence; the typed stop reason and receipt
+             retain the observation while MASC treats it as non-gating. *)
+          ~text:""
       in
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
         ~status:(dashboard_status_of_stop_reason
-                   (TurnBudgetExhausted { turns_used = r.turns; limit = r.limit }))
+                   (TurnLimitObserved { turns_used = r.turns; limit = r.limit }))
         partial_response;
       let runtime_observation =
         runtime_observation_for_completed_config
@@ -1299,7 +1327,7 @@ let run_blocks
           trace_ref;
           run_validation;
           runtime_observation = Some runtime_observation;
-          stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
+          stop_reason = TurnLimitObserved { turns_used = r.turns; limit = r.limit };
         }
     | Error
         (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
@@ -1407,48 +1435,86 @@ let run_blocks
         }
     | Error
         (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.AgentExecutionTimeout r as agent_err)) ->
+           (Agent_sdk.Error.AgentExecutionTimeout r)) ->
+      close_after_success ();
       let partial_response =
         partial_response_of_stop
           ~session_id
-          ~text:
-            (Printf.sprintf
-               "[agent execution timeout: elapsed=%.1fs timeout=%.1fs turns=%d]"
-               r.elapsed_sec
-               r.timeout_sec
-               r.turn_count)
+          ~text:""
       in
       record_dashboard_oas_response
         ~config
         ~total_duration_ms:run_total_duration_ms
-        ~status:Dashboard_oas_bridge.Timeout
+        ~status:(dashboard_status_of_stop_reason
+                   (ExecutionTimeoutObserved
+                      { elapsed_sec = r.elapsed_sec
+                      ; timeout_sec = r.timeout_sec
+                      ; turn_count = r.turn_count
+                      ; max_turns = r.max_turns
+                      }))
         partial_response;
-      close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-      Error (Agent_sdk.Error.Agent agent_err)
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms
+          config
+      in
+      Ok
+        { response = partial_response
+        ; checkpoint
+        ; session_id
+        ; turns
+        ; trace_ref
+        ; run_validation
+        ; runtime_observation = Some runtime_observation
+        ; stop_reason =
+            ExecutionTimeoutObserved
+              { elapsed_sec = r.elapsed_sec
+              ; timeout_sec = r.timeout_sec
+              ; turn_count = r.turn_count
+              ; max_turns = r.max_turns
+              }
+        }
     | Error
         (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.AgentExecutionIdleTimeout r as agent_err)) ->
-      (* No-progress (idle) timeout. Keeper runtime config may set
-         [execution_idle_timeout_s] to catch Agent-level stalls while leaving
-         healthy streaming runs alive. Treat it like a timeout for the
-         dashboard, preserving idle-specific fields/text. *)
+           (Agent_sdk.Error.AgentExecutionIdleTimeout r)) ->
+      close_after_success ();
       let partial_response =
         partial_response_of_stop
           ~session_id
-          ~text:
-            (Printf.sprintf
-               "[agent idle timeout: idle=%.1fs timeout=%.1fs turns=%d]"
-               r.idle_sec
-               r.idle_timeout_sec
-               r.turn_count)
+          ~text:""
       in
       record_dashboard_oas_response
         ~config
         ~total_duration_ms:run_total_duration_ms
-        ~status:Dashboard_oas_bridge.Timeout
+        ~status:(dashboard_status_of_stop_reason
+                   (ExecutionIdleTimeoutObserved
+                      { idle_sec = r.idle_sec
+                      ; idle_timeout_sec = r.idle_timeout_sec
+                      ; turn_count = r.turn_count
+                      ; max_turns = r.max_turns
+                      }))
         partial_response;
-      close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-      Error (Agent_sdk.Error.Agent agent_err)
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms
+          config
+      in
+      Ok
+        { response = partial_response
+        ; checkpoint
+        ; session_id
+        ; turns
+        ; trace_ref
+        ; run_validation
+        ; runtime_observation = Some runtime_observation
+        ; stop_reason =
+            ExecutionIdleTimeoutObserved
+              { idle_sec = r.idle_sec
+              ; idle_timeout_sec = r.idle_timeout_sec
+              ; turn_count = r.turn_count
+              ; max_turns = r.max_turns
+              }
+        }
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
       let detail =

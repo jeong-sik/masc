@@ -13,12 +13,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let oas_env = extract_oas_env_from_doc doc in
-  let per_provider_timeout_state, per_provider_timeout =
-    per_provider_timeout_of_toml
-      ~source:"keeper TOML"
-      doc
-      (k "per_provider_timeout")
-  in
   let removed_present =
     removed_keeper_input_key_names
     |> List.map k
@@ -107,15 +101,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let result =
     Result.bind result (fun () -> runtime_assignment_result)
   in
-  let result =
-    Result.bind result (fun () -> validate_unified_max_tokens_toml_value doc)
-  in
-  let result =
-    Result.bind result (fun () ->
-      Result.map
-        (fun _ -> ())
-        (parse_unified_max_tokens_override_of_oas_env oas_env))
-  in
   Result.map
     (fun () ->
       {
@@ -143,8 +128,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           else None;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
-        per_provider_timeout_state;
-        per_provider_timeout;
         always_allow = bool_ "always_allow";
         oas_env;
         unknown_toml_keys = [];
@@ -170,7 +153,6 @@ let parsed_field_key_names =
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
-  ; "per_provider_timeout"
   ; "always_allow"
   ]
 
@@ -199,7 +181,6 @@ let canonical_keeper_toml_key_names =
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
-  ; "per_provider_timeout"
   ; "always_allow"
   ]
 
@@ -298,15 +279,6 @@ let merge_keeper_profile_defaults
   let prefer overlay_value base_value =
     match overlay_value with Some _ -> overlay_value | None -> base_value
   in
-  let per_provider_timeout_state, per_provider_timeout =
-    match overlay.per_provider_timeout_state with
-    | Per_provider_timeout_unset ->
-        base.per_provider_timeout_state, base.per_provider_timeout
-    | Per_provider_timeout_invalid ->
-        Per_provider_timeout_invalid, None
-    | Per_provider_timeout_set ->
-        Per_provider_timeout_set, overlay.per_provider_timeout
-  in
   {
     id = prefer overlay.id base.id;
     manifest_path = prefer overlay.manifest_path base.manifest_path;
@@ -328,8 +300,6 @@ let merge_keeper_profile_defaults
     telemetry_feedback_window_hours =
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
-    per_provider_timeout_state;
-    per_provider_timeout;
     always_allow = prefer overlay.always_allow base.always_allow;
     oas_env =
       (let overlay_keys = List.map fst overlay.oas_env in

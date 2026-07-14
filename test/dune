@@ -105,7 +105,7 @@
   test_pool
   test_institution_ids
   test_keeper_turn_disposition
-  test_keeper_execution_receipt_budget_wire
+  test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
@@ -432,7 +432,7 @@
   test_pool
   test_institution_ids
   test_keeper_turn_disposition
-  test_keeper_execution_receipt_budget_wire
+  test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
@@ -970,7 +970,6 @@
   test_local_runtime_pool
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
-  test_keeper_turn_timeout_default_10456
   test_task_status_label_10421
   test_task_completion_path_10449
   test_task_cache_invariant_13397
@@ -1147,7 +1146,6 @@
   test_local_runtime_pool
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
-  test_keeper_turn_timeout_default_10456
   test_task_status_label_10421
   test_task_completion_path_10449
   test_task_cache_invariant_13397
@@ -1860,8 +1858,6 @@
 
 (include stanzas/test_keeper_cwd_response.inc)
 
-(include stanzas/test_keeper_disposition_budget.inc)
-
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
 (include stanzas/test_keeper_tool_name.inc)
@@ -1961,7 +1957,6 @@
 (include stanzas/test_keeper_task_outcomes.inc)
 
 
-(include stanzas/test_keeper_unified_turn_attempt_watchdog.inc)
 
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 
@@ -2010,7 +2005,7 @@
 
 (include stanzas/test_oas_bridge_timeout_ssot_10094.inc)
 
-(include stanzas/test_oas_timeout_budget_strike.inc)
+(include stanzas/test_keeper_runtime_observation_boundaries.inc)
 
 (include stanzas/test_oas_worker_exec_close_cancel_source.inc)
 

@@ -7,7 +7,6 @@ type retry_class =
   | Server_error
   | Network_transient
   | Provider_timeout
-  | Turn_timeout
 
 type rotate_class =
   | Auth_failed
@@ -87,8 +86,6 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   let judge = judge ~err ~provenance:Masc_internal_error in
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
-  | Keeper_internal_error.Provider_timeout _ -> observe_retry Provider_timeout
-  | Keeper_internal_error.Turn_timeout _ -> observe_retry Turn_timeout
   | Keeper_internal_error.Capacity_backpressure { retry_after; _ } ->
     observe_retry ?retry_after:(retry_after_of_capacity_hint retry_after) Capacity_backpressure
   | Keeper_internal_error.Runtime_exhausted { reason; _ } ->
@@ -99,10 +96,8 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Keeper_internal_error.Connection_refused
      | Keeper_internal_error.Dns_failure ->
        observe_retry Network_transient
-     | Keeper_internal_error.Structural_attempt_timeout _ -> observe_retry Provider_timeout
      | Keeper_internal_error.No_providers_available
      | Keeper_internal_error.All_providers_failed
-     | Keeper_internal_error.Max_turns_exceeded
      | Keeper_internal_error.Session_conflict
      | Keeper_internal_error.Other_detail _ ->
        rotate Runtime_exhausted)
@@ -253,7 +248,6 @@ let retry_class_label = function
   | Server_error -> "server_error"
   | Network_transient -> "network_transient"
   | Provider_timeout -> "provider_timeout"
-  | Turn_timeout -> "turn_timeout"
 
 let rotate_class_label = function
   | Auth_failed -> "auth_failed"

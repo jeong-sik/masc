@@ -1,5 +1,5 @@
 (* Keeper_turn_runtime_budget — runtime execution types, fail-open rotation,
-   provider timeout resolution, context overflow observation, Keeper lifecycle
+   context overflow observation, Keeper lifecycle
    sync, and context budget resolution.
 
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
@@ -17,14 +17,12 @@ type runtime_execution = {
   max_context_resolution : Keeper_context_runtime.max_context_resolution;
   max_context : int;
   temperature : float;
-  max_tokens : int option;
 }
 
 let next_fail_open_runtime_for_turn =
   Keeper_turn_runtime_budget_routing.next_fail_open_runtime_for_turn
 
 let sdk_error_kind = Keeper_turn_runtime_budget_routing.sdk_error_kind
-include Keeper_turn_runtime_budget_provider_timeout
 
 type degraded_retry_decision =
   | No_degraded_retry
@@ -714,7 +712,7 @@ let resolved_max_context_for_turn ~(meta : keeper_meta) : int =
         if Atomic.compare_and_set runtime_budget_logged old new_map
         then
           Log.Keeper.info
-            "%s: mixed runtime context budget primary=%d runtime_max=%d; using primary for initial turn budget"
+            "%s: mixed runtime context window primary=%d runtime_max=%d; using primary for initial context window"
             meta.name resolution.primary_budget resolution.runtime_budget
         else log_once ()
     in
@@ -724,7 +722,7 @@ let resolved_max_context_for_turn ~(meta : keeper_meta) : int =
     | Some requested ->
      Log.Keeper.debug
        "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d"
-       meta.name requested resolution.turn_budget resolution.primary_budget
+       meta.name requested resolution.requested_context_window resolution.primary_budget
        resolution.effective_budget
    | None -> ());
   resolution.effective_budget

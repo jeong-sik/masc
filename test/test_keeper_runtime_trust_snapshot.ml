@@ -210,7 +210,7 @@ let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
          (snapshot |> member "execution" |> member "provider_selected_model" |> to_string))
 ;;
 
-let test_budget_not_dispatched_receipt_remains_observational () =
+let test_observation_not_dispatched_receipt_remains_non_blocking () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -221,7 +221,7 @@ let test_budget_not_dispatched_receipt_remains_observational () =
        with_env "MASC_BASE_PATH" base_dir
        @@ fun () ->
        let config = Masc.Workspace.default_config base_dir in
-       let keeper_name = "runtime-trust-budget-not-dispatched" in
+       let keeper_name = "runtime-trust-observation-not-dispatched" in
        let meta = make_meta keeper_name in
        let receipt_store =
          Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
@@ -232,12 +232,10 @@ let test_budget_not_dispatched_receipt_remains_observational () =
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
-               (* Detail-less wire form: the producer
-                  ([Keeper_execution_receipt_types.stop_reason_to_string] via
-                  [Keeper_turn_disposition.to_wire]) emits no [detail] for
-                  [Runtime_agent.TurnBudgetExhausted {turns_used; limit}].
-                  #22618 fabricated a full-detail form no producer emits. *)
-             ; "terminal_reason_code", `String "turn_budget_exhausted(8/8)"
+               (* Typed execution-limit observations project to receipt
+                  success. They do not create a Keeper blocker or terminal
+                  lifecycle decision. *)
+             ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "not_dispatched"
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
@@ -818,9 +816,9 @@ let () =
             `Quick
             test_model_observability_uses_runtime_trust_selected_model
         ; Alcotest.test_case
-            "budget not-dispatched receipt remains observational"
+            "not-dispatched observation remains non-blocking"
             `Quick
-            test_budget_not_dispatched_receipt_remains_observational
+            test_observation_not_dispatched_receipt_remains_non_blocking
         ; Alcotest.test_case
             "unknown completion-contract result remains visible"
             `Quick

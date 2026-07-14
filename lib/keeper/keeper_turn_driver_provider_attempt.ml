@@ -2,19 +2,11 @@
 
 let provider_attempt_status_of_result = function
   | Ok _ -> "provider_returned"
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
-    "timeout"
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
-    "timeout"
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) -> "timeout"
   | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) -> "timeout"
   | Error _ -> "error"
 
 let provider_attempt_exception_kind_of_result = function
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
-    Some "oas_agent_execution_timeout"
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
-    Some "oas_agent_idle_timeout"
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) ->
     Some "outer_oas_timeout"
   | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->
@@ -62,9 +54,6 @@ let provider_attempt_provenance_fields p =
 type provider_attempt_started_record =
   { started_provenance : provider_attempt_provenance
   ; started_is_last : bool
-  ; started_per_provider_timeout_s : float option
-  ; started_attempt_timeout_source : string
-  ; started_attempt_watchdog_source : string
   }
 
 type provider_attempt_finished_record =
@@ -79,19 +68,7 @@ type provider_attempt_finished_record =
 let provider_attempt_started_decision record =
   `Assoc
     (provider_attempt_provenance_fields record.started_provenance
-     @ [
-         ("is_last", `Bool record.started_is_last);
-         ( "per_provider_timeout_s",
-           match record.started_per_provider_timeout_s with
-           | None -> `Null
-           | Some timeout -> `Float timeout );
-         ( "attempt_timeout_s",
-           match record.started_per_provider_timeout_s with
-           | None -> `Null
-           | Some timeout -> `Float timeout );
-         ("attempt_timeout_source", `String record.started_attempt_timeout_source);
-         ("attempt_watchdog_source", `String record.started_attempt_watchdog_source);
-       ])
+     @ [ ("is_last", `Bool record.started_is_last) ])
 ;;
 
 let provider_attempt_finished_decision record =
@@ -137,15 +114,6 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> false
 
-(* RFC-0206: runtime rotation is gone, but "max turns exceeded" still surfaces
-   as a structured masc_internal_error envelope on a single dispatch. *)
-let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
-  match Keeper_internal_error.classify_masc_internal_error err with
-  | Some
-      (Keeper_internal_error.Runtime_exhausted
-         { reason = Keeper_internal_error.Max_turns_exceeded; _ }) -> true
-  | Some _ | None -> false
-
 let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   : float option option =
   match err with
@@ -173,15 +141,6 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> None
-
-let fallback_class_hard_quota = "hard_quota"
-let fallback_class_max_turns = "max_turns"
-
-let sdk_error_runtime_fallback_class (err : Agent_sdk.Error.sdk_error) :
-    string option =
-  if sdk_error_is_hard_quota err then Some fallback_class_hard_quota
-  else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
-  else None
 
 let sdk_error_is_server_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with

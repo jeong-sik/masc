@@ -1,19 +1,15 @@
-(** RFC-0136 PR-4-a: outer setup record for [keeper_unified_turn] retry loop.
+(** RFC-0136 PR-4-a: elapsed-time observation for runtime rotation.
 
-    Groups the wall-clock / budget / profile bindings that the retry loop and
-    [do_run] closure both observe. *)
+    The values feed receipts and telemetry only; they do not admit, reject,
+    pause, or terminate a Keeper turn. *)
 
 type retry_setup =
-  { timeout_sec : float
-  ; turn_started_at : float
-  ; remaining_turn_budget_s : unit -> float
-  ; elapsed_ms : float -> int
-  ; current_turn_phase_elapsed_ms : float option -> int * int option
+  { current_turn_phase_elapsed_ms : float option -> int * int option
   }
 
 (** [build ~now] computes the wall-clock values observed by a turn attempt.
 
     [now ()] returns the monotonic clock time (in seconds) supplied by the
-    Eio clock at the dispatch site.  The retry loop reads it repeatedly via
-    [remaining_turn_budget_s] and [current_turn_phase_elapsed_ms]. *)
+    Eio clock at the dispatch site. The retry loop reads it only to observe
+    productive and retry-phase elapsed time. *)
 val build : now:(unit -> float) -> retry_setup

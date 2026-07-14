@@ -441,7 +441,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.level).toBe('blocked')
     expect(attention.cause).toContain('terminal: api_error_timeout')
     expect(attention.reason).toContain('terminal=api_error_timeout')
-    expect(attention.nextStep).toBe('runtime timeout budget/lane 확인')
+    expect(attention.nextStep).toBe('runtime lane의 provider timeout receipt 확인')
   })
 
   it('routes provider timeout blockers away from generic approval guidance', () => {
@@ -462,7 +462,7 @@ describe('runtimeAttentionForSnapshot', () => {
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
-    expect(attention.nextStep).toBe('runtime timeout budget/lane 확인')
+    expect(attention.nextStep).toBe('runtime lane의 provider timeout receipt 확인')
   })
 })
 

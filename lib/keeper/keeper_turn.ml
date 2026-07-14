@@ -507,7 +507,7 @@ let run_keeper_msg_turn_admitted
             | Some requested ->
               Log.Keeper.debug
                 "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
-                meta.name requested resolution.turn_budget resolution.primary_budget
+                meta.name requested resolution.requested_context_window resolution.primary_budget
                 resolution.effective_budget
 	            | None -> ());
 	              resolution.effective_budget
@@ -681,7 +681,6 @@ let run_keeper_msg_turn_admitted
 	                  let setup_direct_retry_runtime runtime_id =
 	                    Keeper_unified_turn_pre_dispatch.build_runtime_execution
 	                      ~meta
-	                      ~profile_defaults
 	                      ~runtime_id
 	                  in
 

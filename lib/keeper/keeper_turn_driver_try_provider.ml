@@ -33,10 +33,8 @@ type try_provider_ctx =
   ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
-  ; execution_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float
-  ; max_tokens : int option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -126,30 +124,6 @@ let emit_runtime_manifest
     |> append
   | _ -> ()
 
-let max_execution_time_for_attempt ?per_provider_timeout_s () =
-  (* Never forward per-provider timeouts to OAS [max_execution_time_s].
-     That field is a cumulative wall-clock kill switch for one Agent.run /
-     run_stream call; it cancels healthy active streams even while chunks are
-     arriving. Provider-attempt liveness is progress-based instead:
-     [stream_idle_timeout_s] catches inter-line stalls, the liveness observer
-     catches no-first-token / inter-chunk gaps, and tool/max-turn limits bound
-     finite work. *)
-  (match per_provider_timeout_s with
-   | Some (_ : float) -> ()
-   | None -> ());
-  None
-
-let stream_idle_timeout_for_attempt ~configured =
-  Some
-    (Option.value
-       ~default:Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
-       configured)
-
-let body_timeout_for_attempt ?per_provider_timeout_s () =
-  match Keeper_runtime_resolved.body_timeout_override_sec () with
-  | Some _ as s -> s
-  | None -> max_execution_time_for_attempt ?per_provider_timeout_s ()
-
 let accept_rejected_error ~runtime_id ~(response : Agent_sdk_response.api_response) =
   let rejection =
     Keeper_tool_response.accept_rejection_of_response ~runtime_id response
@@ -188,14 +162,17 @@ let apply_accept
   =
   match run_result.stop_reason with
   | Runtime_agent.InputRequired _
-  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
+  | Runtime_agent.ToolFailureRecoveryDeferred _
+  | Runtime_agent.TurnLimitObserved _
+  | Runtime_agent.ExecutionTimeoutObserved _
+  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
     (* These are typed host-control terminals, not model deliverables. Running
        the normal response accept predicate over their question/blank carrier
        would turn them into [Accept_rejected] and incorrectly rotate providers,
-       discarding the checkpoint that carries the recovery receipt. *)
+       discarding typed control/observation evidence. Execution-limit
+       observations never become a MASC acceptance gate. *)
     Ok run_result
   | Runtime_agent.Completed
-  | Runtime_agent.TurnBudgetExhausted _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     if accept run_result.response then Ok run_result
@@ -212,9 +189,6 @@ let apply_accept
     makes all captured dependencies explicit.
 
     @param ctx Explicit closure context (captures from [run_named]).
-    @param per_provider_timeout_s Legacy per-provider budget used for manifest
-    diagnostics only. It is not applied as a cumulative timeout around
-    [Runtime_agent.run] because that run may include active tool execution.
     @param candidate The opaque runtime candidate to attempt.
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
@@ -227,7 +201,6 @@ let same_run_retry_allowed observed = not (Atomic.get observed)
 
 let run_try_provider
       (ctx : try_provider_ctx)
-      ?per_provider_timeout_s
       ?enable_thinking_override
       candidate
   =
@@ -259,17 +232,7 @@ let run_try_provider
            candidate)
             with
             priority = ctx.priority
-          ; max_tokens = ctx.max_tokens
-          ; stream_idle_timeout_s =
-              stream_idle_timeout_for_attempt ~configured:ctx.stream_idle_timeout_s
-          ; max_execution_time_s =
-              max_execution_time_for_attempt ?per_provider_timeout_s ()
-          ; execution_idle_timeout_s =
-              (* Keeper/provider attempts must not forward Agent.run idle
-                 timeout until active tool execution is excluded from OAS idle
-                 accounting. *)
-              (let _ = ctx.execution_idle_timeout_s in
-               None)
+          ; stream_idle_timeout_s = ctx.stream_idle_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
           ; max_turns = ctx.max_turns
@@ -313,7 +276,8 @@ let run_try_provider
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
-    (* Stream stall detection is handled by OAS's stream_idle_timeout_s.
+    (* Explicit stream stall detection is handled by OAS's
+       [stream_idle_timeout_s]; [None] deliberately leaves it disabled.
        No separate liveness FSM — provider stall is an OAS-level concern.
        No per-lane capacity gate — provider load is managed by operator
        adjusting keeper count. *)
@@ -351,13 +315,6 @@ let run_try_provider
                 ~agent_ref:local_agent_ref
                 ctx.goal
         in
-        (* Do not wrap [Runtime_agent.run] in a MASC wall-clock timeout here.
-           OAS provider stream/body timeouts and tool-local subprocess budgets
-           are the safe liveness boundaries. A cumulative wrapper at this layer
-           cannot distinguish provider silence from active tool execution. *)
-        (match per_provider_timeout_s with
-         | Some (_ : float) -> ()
-         | None -> ());
         run_fn ())
     in
     let result =
@@ -394,7 +351,5 @@ let run_try_provider
 ;;
 
 module For_testing = struct
-  let max_execution_time_for_attempt = max_execution_time_for_attempt
-  let stream_idle_timeout_for_attempt = stream_idle_timeout_for_attempt
   let apply_accept = apply_accept
 end

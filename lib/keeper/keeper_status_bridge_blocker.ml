@@ -22,10 +22,7 @@ let blocker_reason_of_turn_driver_reason
   | Keeper_turn_driver.All_providers_failed -> All_providers_failed
   | Keeper_turn_driver.Candidates_filtered_after_cycles ->
     Candidates_filtered_after_cycles
-  | Keeper_turn_driver.Max_turns_exceeded -> Max_turns_exceeded
   | Keeper_turn_driver.Session_conflict -> Session_conflict
-  | Keeper_turn_driver.Structural_attempt_timeout { detail } ->
-    Structural_attempt_timeout { detail }
   | Keeper_turn_driver.Capacity_exhausted -> Capacity_exhausted
   | Keeper_turn_driver.Other_detail detail -> Other_detail detail
 ;;
@@ -40,8 +37,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
     Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
-  | Some (Keeper_turn_driver.Provider_timeout _) -> None
-  | Some (Keeper_turn_driver.Turn_timeout _) -> Some Turn_timeout
   (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
      repr.  They are not yet mapped to a dedicated [blocker_class]; returning
      [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may
@@ -54,9 +49,8 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
     (match err with
      | Agent_sdk.Error.Internal _ -> None
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
-       Some Oas_agent_execution_timeout
-     | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> Some Sdk_max_turns_exceeded
+     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)
+     | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> None
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
      | Agent_sdk.Error.Agent (IdleDetected _) -> Some Sdk_idle_detected
@@ -118,8 +112,6 @@ let runtime_blocker_surface_of_masc_internal_error = function
   | Keeper_turn_driver.Runtime_exhausted _
   | Keeper_turn_driver.Capacity_backpressure _
   | Keeper_turn_driver.Resumable_cli_session _
-  | Keeper_turn_driver.Turn_timeout _
-  | Keeper_turn_driver.Provider_timeout _
   | Keeper_turn_driver.Internal_unhandled_exception _
   | Keeper_turn_driver.Internal_bridge_exception _
   | Keeper_turn_driver.Internal_contract_rejected _
@@ -148,18 +140,10 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       then
         "Watchdog marked the turn stale; inspect watchdog timing and the underlying root cause separately."
       else summary
-    | Oas_agent_execution_timeout ->
-      if summary = ""
-      then
-        "OAS Agent.run reported an execution timeout; inspect whether progress accounting excluded active tool execution."
-      else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
-    | Turn_timeout
     | Stale_fleet_batch
-    | Sdk_max_turns_exceeded
-    | Sdk_token_budget_exceeded
-    | Sdk_cost_budget_exceeded
+    | Sdk_context_window_exceeded
     | Sdk_unrecognized_stop_reason
     | Sdk_idle_detected
     | Sdk_guardrail_violation
@@ -248,13 +232,13 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
      with
      | Keeper_provider_runtime_boundary.Provider_timeout _ ->
        Some
-         (runtime_blocker_surface_of_typed_class
-            ~summary:
-              (Printf.sprintf
-                 "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
-                 code
-                 detail)
-            Turn_timeout)
+         { blocker_class = "provider_runtime_error"
+         ; summary =
+             Printf.sprintf
+               "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
+               code
+               detail
+         }
      | Keeper_provider_runtime_boundary.Not_provider_runtime_failure ->
        Some
          { blocker_class = "provider_runtime_error"

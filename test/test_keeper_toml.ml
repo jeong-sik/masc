@@ -920,13 +920,12 @@ let test_invalid_child_profile_fails_closed_before_dispatch () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
   let keeper_path = Filename.concat keepers_dir "broken.toml" in
   write_file keeper_path
-    "[keeper]\npersona_name = \"analyst\"\n[keeper.oas_env]\n\
-     MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = \"not-an-int\"\n";
+    "[keeper]\ngoal = [\n";
   let error =
     expect_profile_load_error
       ~base_path
       ~keeper_name:"broken"
-      ~kind:KTP.Profile_error
+      ~kind:KTP.Parse_error
       ~failing_path:keeper_path
   in
   check string "keeper path" keeper_path error.keeper_path;
@@ -993,14 +992,13 @@ let test_profile_invalid_base_profile_fails_closed () =
   let invalid_base_path = Filename.concat keepers_dir "base.toml" in
   write_file
     invalid_base_path
-    "[keeper]\ngoal = \"base\"\n[keeper.oas_env]\n\
-     MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = \"8192\"\n";
+    "[keeper]\ngoal = [\n";
   write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"child\"\n";
   ignore
     (expect_profile_load_error
        ~base_path
        ~keeper_name:"profile-base"
-       ~kind:KTP.Profile_error
+       ~kind:KTP.Parse_error
        ~failing_path:invalid_base_path)
 
 let test_unreadable_base_profile_fails_closed () =
@@ -1557,7 +1555,6 @@ persona_name = "analyst"
 [keeper.oas_env]
 OAS_DEFAULT_MODEL = "provider-a/fast"
 OAS_MAX_TOKENS_DEFAULT = 16384
-MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1565,74 +1562,11 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "oas_env count" 3 (List.length d.oas_env);
+      check int "oas_env count" 2 (List.length d.oas_env);
       check string "default model value"
         "provider-a/fast" (List.assoc "OAS_DEFAULT_MODEL" d.oas_env);
       check string "max tokens default value"
-        "16384" (List.assoc "OAS_MAX_TOKENS_DEFAULT" d.oas_env);
-      check string "unified max tokens value"
-        "8192" (List.assoc "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS" d.oas_env);
-      check (option int) "unified max tokens override"
-        (Some 8192)
-        (KTP.unified_max_tokens_override_of_oas_env d.oas_env)
-
-let test_oas_env_rejects_legacy_unified_max_tokens_alias () =
-  let input = {|
-[keeper]
-persona_name = "analyst"
-[keeper.oas_env]
-MASC_KEEPER_UNIFIED_MAX_TOKENS = 4096
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    match KTP.profile_defaults_of_toml doc with
-    | Error e -> fail e
-    | Ok d ->
-      check int "legacy oas_env count" 0 (List.length d.oas_env);
-      check bool "legacy unified max tokens dropped" false
-        (List.mem_assoc "MASC_KEEPER_UNIFIED_MAX_TOKENS" d.oas_env);
-      check (option int) "legacy unified max tokens override"
-        None
-        (KTP.unified_max_tokens_override_of_oas_env d.oas_env)
-
-let test_oas_env_rejects_invalid_unified_max_tokens () =
-  List.iter
-    (fun raw ->
-      let input =
-        Printf.sprintf
-          "[keeper]\npersona_name = \"analyst\"\n[keeper.oas_env]\nMASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = %s\n"
-          raw
-      in
-      match TL.parse_toml input with
-      | Error e -> fail e
-      | Ok doc ->
-        (match KTP.profile_defaults_of_toml doc with
-         | Ok _ -> failf "expected invalid unified max_tokens rejection for %s" raw
-         | Error detail ->
-           check bool "error names unified max_tokens key" true
-             (contains_substring detail "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS");
-           check bool "error requires a positive integer" true
-             (contains_substring detail "positive integer")))
-    [ "\"not-an-int\""; "\"8192\""; "true"; "1.5"; "0"; "-1" ]
-
-let test_oas_env_max_tokens_validation_preserves_value () =
-  let input = {|
-[keeper]
-persona_name = "analyst"
-[keeper.oas_env]
-MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok defaults ->
-       check (option int)
-         "valid unified max_tokens remains available after validation"
-         (Some 8192)
-         (KTP.unified_max_tokens_override_of_oas_env defaults.oas_env))
+        "16384" (List.assoc "OAS_MAX_TOKENS_DEFAULT" d.oas_env)
 
 let test_oas_env_drops_non_oas_prefix () =
   (* Guards against ambient env injection via keeper TOML: arbitrary keys
@@ -2074,12 +2008,6 @@ let () =
         [
           test_case "parses allowed OAS_* keys" `Quick
             test_oas_env_parses_allowed_keys;
-          test_case "rejects legacy unified max tokens alias" `Quick
-            test_oas_env_rejects_legacy_unified_max_tokens_alias;
-          test_case "rejects invalid unified max tokens" `Quick
-            test_oas_env_rejects_invalid_unified_max_tokens;
-          test_case "max tokens validation preserves value" `Quick
-            test_oas_env_max_tokens_validation_preserves_value;
           test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
             test_oas_env_drops_non_oas_prefix;
           test_case "empty when table absent" `Quick

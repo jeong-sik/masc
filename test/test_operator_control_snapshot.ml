@@ -406,7 +406,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
               Some
                 (Keeper_meta_contract.blocker_info_of_class
                    ~detail:"stale timeout before operator resume"
-                   Keeper_meta_contract.Turn_timeout);
+                   Keeper_meta_contract.Stale_turn_timeout);
           };
       }
   in

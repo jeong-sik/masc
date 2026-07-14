@@ -130,7 +130,6 @@ let timeout_phase_is_streaming_activity = function
 type timeout_source =
   | Oas_api
   | Oas_provider
-  | Masc_internal
 
 type provider_timeout =
   { phase : timeout_phase option
@@ -144,11 +143,6 @@ type t =
 let timeout_phase_of_oas_phase phase =
   Llm_provider.Http_client.timeout_phase_to_label phase
   |> timeout_phase_of_label
-;;
-
-let timeout_phase_of_masc_internal_phase phase =
-  let phase = String.trim phase in
-  if String.equal phase "" then None else timeout_phase_of_label phase
 ;;
 
 let suffix_after_prefix text prefix =
@@ -211,16 +205,11 @@ let provider_timeout ~source ~phase =
 ;;
 
 let classify_masc_internal_error = function
-  | Some (Keeper_internal_error.Provider_timeout { phase; _ }) ->
-    provider_timeout
-      ~source:Masc_internal
-      ~phase:(timeout_phase_of_masc_internal_phase phase)
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
       | Keeper_internal_error.Capacity_backpressure _
       | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
-      | Keeper_internal_error.Turn_timeout _
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _
       | Keeper_internal_error.Internal_contract_rejected _

@@ -68,19 +68,12 @@ let success () = make ~source:"turn_result" "success"
 
 let of_failure ?(tool_call_count = 0) ~raw_error err =
   match Keeper_turn_driver.classify_masc_internal_error err with
-    | Some (Keeper_turn_driver.Provider_timeout _) ->
-      of_disposition
-        ~source:"typed_error"
-        (Keeper_turn_disposition.Provider_error
-           (Keeper_turn_terminal_code.Provider_runtime_error "provider_timeout"))
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       make ~source:"typed_error" "capacity_backpressure"
     | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       of_disposition
         ~source:"typed_error"
         Keeper_turn_disposition.Runtime_attempts_exhausted
-    | Some (Keeper_turn_driver.Turn_timeout _) ->
-      make ~source:"typed_error" "turn_wall_clock_timeout"
     | Some
         ( Keeper_turn_driver.Resumable_cli_session _
         | Keeper_turn_driver.Accept_rejected _

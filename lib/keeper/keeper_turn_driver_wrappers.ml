@@ -88,7 +88,6 @@ let run_model_by_label
     ?net
     ()
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
-  let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_tokens ~temperature
@@ -165,7 +164,6 @@ let run_named_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-    ?max_tokens
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
     ?raw_trace
@@ -192,7 +190,7 @@ let run_named_with_masc_tools
   Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ?priority ~system_prompt ~tools:oas_tools
     ?max_turns
     ~max_idle_turns
-    ~temperature ?max_tokens
+    ~temperature
     ?stream_idle_timeout_s ?hooks
     ~accept
     ?compact_ratio
@@ -221,7 +219,6 @@ let run_model_with_masc_tools
     ?net
     ()
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
-  let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_tokens ~temperature

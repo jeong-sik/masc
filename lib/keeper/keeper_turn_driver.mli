@@ -39,18 +39,6 @@ val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
 
-
-val sdk_error_runtime_fallback_class :
-  Agent_sdk.Error.sdk_error -> string option
-
-(** [apply_stream_idle_timeout_default opt] returns [opt] when the caller
-    supplied a value, otherwise injects
-    [Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec]. Used at
-    every {!run_model_by_label} / {!run_model_with_masc_tools} entry so a
-    single-agent dashboard run cannot block forever on a stalled HTTP
-    stream. *)
-val apply_stream_idle_timeout_default : float option -> float option
-
 (** {1 Turn pipeline records} *)
 
 type provider_attempt_provenance =
@@ -64,9 +52,6 @@ type provider_attempt_provenance =
 type provider_attempt_started_record =
   { started_provenance : provider_attempt_provenance
   ; started_is_last : bool
-  ; started_per_provider_timeout_s : float option
-  ; started_attempt_timeout_source : string
-  ; started_attempt_watchdog_source : string
   }
 
 type provider_attempt_finished_record =
@@ -109,7 +94,6 @@ val run_named :
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->
-  ?max_tokens:int ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->
@@ -147,21 +131,18 @@ val run_named :
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
-  ?per_provider_timeout_s:float ->
   unit ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with OAS, and
-    uses [Runtime_fsm.decide] on failure. The optional [max_tokens] value is a
-    turn-start snapshot shared unchanged by every candidate.
+    uses [Runtime_fsm.decide] on failure.
     The runtime loop runs inside a capacity-managed queue permit. *)
 
 type attempt_inference_policy =
   { attempt_temperature : float
   ; attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
-  ; attempt_max_tokens : int option
   }
 
 module For_testing : sig
@@ -193,15 +174,6 @@ module For_testing : sig
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 
-  val max_execution_time_for_attempt :
-    ?per_provider_timeout_s:float -> unit -> float option
-
-  val sdk_error_of_nonretryable_attempt_error :
-    runtime_id:string ->
-    original_error:Agent_sdk.Error.sdk_error ->
-    Llm_provider.Http_client.http_error ->
-    Agent_sdk.Error.sdk_error
-
   val first_runtime_after_modality_reroute :
     keeper_name:string ->
     assignment_id:string ->
@@ -232,7 +204,6 @@ module For_testing : sig
     runtime_id:string ->
     fallback_temperature:float ->
     fallback_enable_thinking:bool option ->
-    turn_max_tokens:int option ->
     unit ->
     attempt_inference_policy
 
@@ -263,15 +234,4 @@ module For_testing : sig
 
   val accept_no_progress_should_try_next : Agent_sdk.Error.sdk_error -> bool
 
-  val accept_rejected_result_should_try_next :
-    is_last:bool -> Agent_sdk.Error.sdk_error -> bool
-
-  val runtime_exhaustion_reason_of_http_error :
-    Llm_provider.Http_client.http_error option ->
-    Keeper_internal_error.runtime_exhaustion_reason
-
-  val sdk_error_of_exhausted :
-    runtime_id:string ->
-    Llm_provider.Http_client.http_error option ->
-    Agent_sdk.Error.sdk_error
 end

@@ -50,8 +50,6 @@ type try_provider_ctx =
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
-  ; exit_condition : (int -> bool) option
-  ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; (* Eio concurrency *)
@@ -249,8 +247,6 @@ let run_try_provider
                | None -> ctx.enable_thinking)
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
-          ; exit_condition = ctx.exit_condition
-          ; exit_condition_result = ctx.exit_condition_result
           ; initial_messages = ctx.initial_messages
           ; model_input_projection = ctx.model_input_projection
           ; raw_trace = ctx.raw_trace

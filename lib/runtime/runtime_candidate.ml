@@ -148,10 +148,6 @@ let label_matches_runtime_id ~label ~runtime_id =
 let has_resolvable_runtime_label labels =
   List.exists (fun label -> Option.is_some (runtime_id_of_label label)) labels
 
-let labels_require_runtime_mcp_header_sync labels =
-  let _ = labels in
-  false
-
 let unknown_runtime_label = "unknown"
 
 let provider_label_of_runtime_label ?provider_kind label =

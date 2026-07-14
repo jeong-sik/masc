@@ -19,7 +19,6 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
-  ; base_path : string
   ; keeper_name : string
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
@@ -29,27 +28,19 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
-  ; max_turns : int
-  ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
-  ; context_reducer : Agent_sdk.Context_reducer.t option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
   ; (* Session / checkpoint *)
-    allowed_paths : string list
-  ; checkpoint_sidecar : Yojson.Safe.t option
+    checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
-  ; tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option
-  ; compact_ratio : float option
-  ; context_window_tokens : int option
-  ; oas_auto_context_overflow_retry : bool
   ; checkpoint_dir : string option
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
   ; checkpoint_stage_observed : bool Atomic.t
@@ -57,10 +48,6 @@ type try_provider_ctx =
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
-  ; approval : Agent_sdk.Hooks.approval_callback option
-  ; exit_condition : (int -> bool) option
-  ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
-  ; summarizer : (Agent_sdk.Types.message list -> string) option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; (* Eio concurrency *)
     sw : Eio.Switch.t
@@ -69,6 +56,7 @@ type try_provider_ctx =
     on_event : (Agent_sdk.Types.sse_event -> unit) option
   ; on_yield : (unit -> unit) option
   ; on_resume : (unit -> unit) option
+  ; cooperative_yield_decider : Runtime_agent.cooperative_yield_decider option
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; on_runtime_observation :
       (Runtime_observation.runtime_observation -> unit) option
@@ -160,16 +148,8 @@ let apply_accept
       (run_result : Runtime_agent.run_result)
   =
   match run_result.stop_reason with
-  | Runtime_agent.InputRequired _
-  | Runtime_agent.ToolFailureRecoveryDeferred _
-  | Runtime_agent.TurnLimitObserved _
-  | Runtime_agent.ExecutionTimeoutObserved _
-  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
-    (* These are typed host-control terminals, not model deliverables. Running
-       the normal response accept predicate over their question/blank carrier
-       would turn them into [Accept_rejected] and incorrectly rotate providers,
-       discarding typed control/observation evidence. Execution-limit
-       observations never become a MASC acceptance gate. *)
+  | Runtime_agent.InputRequired _ ->
+    (* Typed elicitation is host control, not a model deliverable. *)
     Ok run_result
   | Runtime_agent.Completed
   | Runtime_agent.Yielded_to_chat_waiting _
@@ -233,21 +213,13 @@ let run_try_provider
             stream_idle_timeout_s = ctx.stream_idle_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
-          ; max_turns = ctx.max_turns
-          ; max_idle_turns = ctx.max_idle_turns
-          ; guardrails = Some Agent_sdk.Guardrails.permissive
           ; hooks = ctx.hooks
-          ; context_reducer = ctx.context_reducer
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved
-          ; allowed_paths = ctx.allowed_paths
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = ctx.session_id
           ; cache_system_prompt = ctx.cache_system_prompt
-          ; compact_ratio = ctx.compact_ratio
-          ; context_window_tokens = ctx.context_window_tokens
-          ; oas_auto_context_overflow_retry = ctx.oas_auto_context_overflow_retry
           ; checkpoint_dir = ctx.checkpoint_dir
           ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
@@ -258,15 +230,10 @@ let run_try_provider
                | None -> ctx.enable_thinking)
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
-          ; approval = ctx.approval
-          ; exit_condition = ctx.exit_condition
-          ; exit_condition_result = ctx.exit_condition_result
-          ; summarizer = ctx.summarizer
           ; initial_messages = ctx.initial_messages
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
-          ; tool_failure_judge = ctx.tool_failure_judge
           }
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
@@ -297,6 +264,7 @@ let run_try_provider
                 ?on_event:ctx.on_event
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
+                ?cooperative_yield_decider:ctx.cooperative_yield_decider
                 ~agent_ref:local_agent_ref
                 ~goal_detail:ctx.goal
                 blocks
@@ -309,6 +277,7 @@ let run_try_provider
                 ?on_event:ctx.on_event
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
+                ?cooperative_yield_decider:ctx.cooperative_yield_decider
                 ~agent_ref:local_agent_ref
                 ctx.goal
         in

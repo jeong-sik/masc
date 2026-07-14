@@ -136,12 +136,10 @@ let checkpoint_for_replay_persistence
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match stop_reason with
-  | Runtime_agent.InputRequired _
-  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
-    (* OAS attached the durable recovery receipt to the current ToolResult.
-       Blank-response canonicalization and completion-contract pruning both
-       remove that suffix, so this typed control checkpoint must preserve it
-       verbatim. Prefix validation still fails closed before persistence. *)
+  | Runtime_agent.InputRequired _ ->
+    (* The elicitation request belongs to the current replay suffix.
+       Blank-response canonicalization must not remove it. Prefix validation
+       still fails closed before persistence. *)
     (match
        Keeper_replay_prefix.split
          ~prefix:history_messages
@@ -155,23 +153,20 @@ let checkpoint_for_replay_persistence
          , None )
      | Ok [] ->
        Error
-         "refusing to save recovery-control checkpoint without a current-turn \
+         "refusing to save input-required checkpoint without a current-turn \
           replay suffix"
      | Error _ ->
        Error
-         "refusing to save recovery-control checkpoint: messages do not match \
+         "refusing to save input-required checkpoint: messages do not match \
           pre-turn history prefix")
-  | Runtime_agent.TurnLimitObserved _
-  | Runtime_agent.ExecutionTimeoutObserved _
-  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
-    (* An execution-limit observation has no lifecycle authority, but its OAS
-       checkpoint is still the replay SSOT. Preserve the full typed message
-       suffix (thinking, tool call, and tool result blocks) so the next cycle
-       cannot repeat already committed tools after a blank terminal payload. *)
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+    (* A cooperative tool-boundary yield is control state, not an assistant
+       reply. Preserve the exact OAS suffix so already-completed tool calls are
+       never replayed on resume. A pre-dispatch yield has an empty suffix and
+       is preserved unchanged by the same prefix-checked path. *)
     observation_replay_checkpoint ~history_messages ~session_id checkpoint
-  | ( Runtime_agent.Completed
-    | Runtime_agent.Yielded_to_chat_waiting _
-    | Runtime_agent.Yielded_to_durable_stimulus _ ) ->
+  | Runtime_agent.Completed ->
     canonical_success_replay_checkpoint
       ~history_messages
       ~session_id

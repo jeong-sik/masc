@@ -24,7 +24,6 @@ val runtime_id_of_label_or_raw : string -> string
 val normalize_runtime_name_for_bucket : string -> string
 val default_local_runtime_label : unit -> string
 val local_runtime_label : string -> string
-val labels_require_runtime_mcp_header_sync : string list -> bool
 val unknown_runtime_label : string
 
 val provider_label_of_runtime_label :

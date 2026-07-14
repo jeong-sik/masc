@@ -4,7 +4,6 @@
 type error_classification =
   | Transient_network
   | Transient_internal_runner
-  | Oas_execution_observed
   | Transient_rate_limit
   | Transient_capacity
   | Non_transient
@@ -44,9 +43,9 @@ val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the keeper should preserve liveness and skip consecutive
-    failure counting, even if same-turn retry is still disabled. Typed OAS
-    turn-limit and execution-time observations are included defensively so a
-    boundary regression cannot promote them into Keeper lifecycle authority. *)
+    failure counting, even if same-turn retry is still disabled. Cumulative
+    turn/time/token/cost observations have no error constructor and therefore
+    cannot acquire lifecycle authority here. *)
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for accept-rejected responses tagged by the built-in keeper

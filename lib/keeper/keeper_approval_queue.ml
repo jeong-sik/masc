@@ -1734,7 +1734,7 @@ let remove_delivery_from_store delivery =
       Ok ())
 ;;
 
-let approval_decision_equal left right =
+let approval_decision_equal (left : decision) (right : decision) =
   match left, right with
   | Decision.Approve, Decision.Approve -> true
   | Decision.Reject left, Decision.Reject right -> String.equal left right

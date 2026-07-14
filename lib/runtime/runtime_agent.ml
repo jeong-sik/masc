@@ -62,30 +62,32 @@ let transport_error_kind_of_exception = function
 type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed
-  | TurnLimitObserved of { turns_used : int; limit : int }
-  | ExecutionTimeoutObserved of {
-      elapsed_sec : float;
-      timeout_sec : float;
-      turn_count : int;
-      max_turns : int;
-    }
-  | ExecutionIdleTimeoutObserved of {
-      idle_sec : float;
-      idle_timeout_sec : float;
-      turn_count : int;
-      max_turns : int;
-    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
       turns_used : int;
       request : Agent_sdk.Error.input_required;
     }
-  | ToolFailureRecoveryDeferred of {
-      turns_used : int;
-      reason : string;
-      tool_names : string list;
-    }
+
+type cooperative_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type cooperative_yield_boundary =
+  | Before_provider_dispatch of { turn : int }
+  | After_tool_boundary of
+      { turn : int
+      ; checkpoint_stage : Agent_sdk.Agent.checkpoint_stage
+      }
+
+type cooperative_yield_decider =
+  cooperative_yield_boundary -> cooperative_yield_reason option
+
+let stop_reason_of_cooperative_yield ~turn = function
+  | Chat_waiting -> Yielded_to_chat_waiting { turns_used = turn }
+  | Durable_stimulus_waiting ->
+    Yielded_to_durable_stimulus { turns_used = turn }
+;;
 
 type config =
   Runtime_agent_context.config = {
@@ -95,16 +97,11 @@ type config =
   model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  max_turns : int;
-  max_idle_turns : int;
   stream_idle_timeout_s : float option;
-  max_execution_time_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
-  context_reducer : Agent_sdk.Context_reducer.t option;
-  guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
   checkpoint_dir : string option;
   session_id : string option;
@@ -115,31 +112,16 @@ type config =
   enable_thinking : bool option;
   preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
-  allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
-  tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
-  compact_ratio : float option;
-  context_window_tokens : int option;
-  oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  approval : Agent_sdk.Hooks.approval_callback option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
-  summarizer : (Agent_sdk.Types.message list -> string) option;
-      (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
-          Emergency-phase compaction. Defaults to OAS's extractive default. *)
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;
   min_p : float option;
   on_run_complete : (bool -> unit) option;
-  disclosure_level : Agent_sdk.Tool.disclosure_level option;
-  disclosure_resolver
-      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option;
-  tool_selector : Agent_sdk.Tool_selector.strategy option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
 
@@ -164,17 +146,8 @@ type worker_lifecycle_classification =
 
 let worker_lifecycle_classification_of_result = function
   | Ok _ -> { event = "completed"; status = "completed"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
-    { event = "completed"; status = "turn_limit_observed"; error = None }
-  | Error
-      (Agent_sdk.Error.Agent (Agent_sdk.Error.ToolFailureRecoveryDeferred _)) ->
-    { event = "completed"; status = "tool_failure_recovery_deferred"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _)) ->
     { event = "completed"; status = "input_required"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
-    { event = "completed"; status = "agent_execution_timeout_observed"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
-    { event = "completed"; status = "agent_idle_timeout_observed"; error = None }
   | Error e ->
     { event = "failed"; status = "failed"; error = Some (Agent_sdk.Error.to_string e) }
 
@@ -964,14 +937,7 @@ let build
      with
      | Error _ as e -> e
      | Ok transport ->
-      let builder =
-        Runtime_agent_context.builder_without_approval ~net ~config ?transport ()
-      in
-      let builder =
-        match config.approval with
-        | Some cb -> Agent_sdk.Builder.with_approval cb builder
-        | None -> builder
-      in
+      let builder = Runtime_agent_context.builder ~net ~config ?transport () in
       Agent_sdk.Builder.build_safe builder)
 
 (* ================================================================ *)
@@ -992,17 +958,12 @@ let run_duration_ms_since started_at =
 
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_oas_bridge.Success
-  | TurnLimitObserved _
-  | ExecutionTimeoutObserved _
-  | ExecutionIdleTimeoutObserved _ -> Dashboard_oas_bridge.Success
   | Yielded_to_chat_waiting _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
   | InputRequired _ ->
       Dashboard_oas_bridge.Cancelled { reason = "input_required" }
-  | ToolFailureRecoveryDeferred _ ->
-      Dashboard_oas_bridge.Cancelled { reason = "tool_failure_recovery_deferred" }
 
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =
@@ -1041,17 +1002,14 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
 
     The checkpoint provides: messages, turn_count, usage_stats.
     The MASC config provides: provider, model_id, system_prompt,
-    temperature, tools, hooks, guardrails, etc.
+    temperature, tools, hooks, and host-owned checkpoint persistence.
 
     @boundary-contract
     - MASC owns: per-turn config selection (model, temperature, tools,
       system_prompt), checkpoint field patching to align MASC intent with
       OAS resume semantics.
-    - OAS owns: cumulative token/cost telemetry, turn_count tracking,
-      Agent.resume state restoration, loop guard enforcement (max_turns,
-      idle).
-    - OAS no longer enforces cost or cumulative-token budgets; cost is
-      observe-only telemetry. *)
+    - OAS owns: cumulative token/cost telemetry, turn_count tracking, and
+      Agent.resume state restoration. Usage is observation only. *)
 let resume_from_checkpoint
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -1076,7 +1034,7 @@ let resume_from_checkpoint
         Runtime_agent_context.prepare_resume ~config ~checkpoint
       in
       Log.Misc.info
-        "oas_worker %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
+        "oas_worker %s: resume checkpoint_turn_count=%d"
         config.name checkpoint.turn_count;
       let options = { prepared_resume.options with transport } in
       Ok
@@ -1084,8 +1042,6 @@ let resume_from_checkpoint
            ~tools:config.tools ?context:config.context
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
-           ?tool_failure_judge:config.tool_failure_judge
-           ~auto_context_overflow_retry:config.oas_auto_context_overflow_retry
            ()))
 
 (* ================================================================ *)
@@ -1137,6 +1093,7 @@ let run_blocks
     ?(on_event : (Agent_sdk.Types.sse_event -> unit) option)
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
+    ?(cooperative_yield_decider : cooperative_yield_decider option)
     ?(agent_ref : Agent_sdk.Agent.t option ref option)
     ?goal_detail
     (goal_blocks : Agent_sdk.Types.content_block list)
@@ -1193,40 +1150,131 @@ let run_blocks
     Error e
   | Ok agent ->
   (match agent_ref with Some r -> r := Some agent | None -> ());
+  let cooperative_yield = ref None in
   let run_started_at = Unix.gettimeofday () in
   (try
     let result =
-      (* Pass the process-level Eio clock when available so agent_sdk's
-         [with_optional_timeout] can fire on hang when the caller has
-         also set [config.max_execution_time_s]. Both inputs must be
-         [Some] for the timeout to engage; absent either, behaviour is
-         historical (block until provider closes). *)
+      (* The clock activates only explicitly configured provider stream-idle
+         or non-streaming body liveness. It is never a whole-run deadline. *)
       let clock =
         match Process_eio.get_clock () with
         | Ok c -> Some c
         | Error _ -> Eio_context.get_clock_opt ()
       in
-      Otel_spans.with_span
-        ~name:"llm_call"
-        ~attrs:[
-          "gen_ai.request.model", `String config.model_id;
-          "gen_ai.provider.name", `String (Llm_provider.Provider_config.string_of_provider_kind config.provider_cfg.kind);
-          "masc.runtime_id", `String config.name;
-        ]
-        (fun _trace_id ->
-          match on_event with
-          | Some cb ->
-              Agent_sdk.Agent.run_stream_blocks ~sw ?clock ?on_yield ?on_resume
-                ~on_event:cb agent goal_blocks
-          | None ->
-              Agent_sdk.Agent.run_blocks ~sw ?clock ?on_yield ?on_resume agent
-                goal_blocks)
+      let current_turn = (Agent_sdk.Agent.state agent).turn_count in
+      let pre_dispatch_yield =
+        Option.bind cooperative_yield_decider (fun decide ->
+          Option.map
+            (fun reason -> reason, current_turn)
+            (decide (Before_provider_dispatch { turn = current_turn })))
+      in
+      match pre_dispatch_yield with
+      | Some (reason, turn) ->
+        let checkpoint =
+          build_checkpoint
+            ~session_id
+            ?checkpoint_sidecar:config.checkpoint_sidecar
+            agent
+        in
+        cooperative_yield := Some (reason, turn, checkpoint);
+        Ok (partial_response_of_stop ~session_id ~text:"")
+      | None ->
+        Otel_spans.with_span
+          ~name:"llm_call"
+          ~attrs:
+            [ "gen_ai.request.model", `String config.model_id
+            ; ( "gen_ai.provider.name"
+              , `String
+                  (Llm_provider.Provider_config.string_of_provider_kind
+                     config.provider_cfg.kind) )
+            ; "masc.runtime_id", `String config.name
+            ]
+          (fun _trace_id ->
+             match cooperative_yield_decider with
+             | None ->
+               (match on_event with
+                | Some cb ->
+                  Agent_sdk.Agent.run_stream_blocks
+                    ~sw
+                    ?clock
+                    ?on_yield
+                    ?on_resume
+                    ~on_event:cb
+                    agent
+                    goal_blocks
+                | None ->
+                  Agent_sdk.Agent.run_blocks
+                    ~sw
+                    ?clock
+                    ?on_yield
+                    ?on_resume
+                    agent
+                    goal_blocks)
+             | Some decide ->
+               let selected_reason = ref None in
+               let on_tool_boundary
+                     (boundary : Agent_sdk.Agent.Advanced.tool_boundary)
+                 =
+                 match
+                   decide
+                     (After_tool_boundary
+                        { turn = boundary.turn
+                        ; checkpoint_stage = boundary.checkpoint_stage
+                        })
+                 with
+                 | None -> Agent_sdk.Agent.Advanced.Continue
+                 | Some reason ->
+                   selected_reason := Some reason;
+                   Agent_sdk.Agent.Advanced.Yield
+               in
+               let api_strategy =
+                 match on_event with
+                 | None -> Agent_sdk.Agent.Sync
+                 | Some on_event ->
+                   Agent_sdk.Agent.Stream { on_event; on_telemetry = None }
+               in
+               (match
+                  Agent_sdk.Agent.Advanced.run_blocks
+                    ~sw
+                    ?clock
+                    ?on_yield
+                    ?on_resume
+                    ~api_strategy
+                    ~on_tool_boundary
+                    agent
+                    goal_blocks
+                with
+                | Error _ as error -> error
+                | Ok (Agent_sdk.Agent.Advanced.Completed response) -> Ok response
+                | Ok (Agent_sdk.Agent.Advanced.Yielded yielded) ->
+                  (match !selected_reason with
+                   | Some reason ->
+                     cooperative_yield :=
+                       Some (reason, yielded.turn, yielded.checkpoint);
+                     Ok (partial_response_of_stop ~session_id ~text:"")
+                   | None ->
+                     Error
+                       (Agent_sdk.Error.Internal
+                          "OAS returned a cooperative yield without the typed \
+                           MASC boundary decision"))))
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =
       let ckpt =
-        build_checkpoint ~session_id
-          ?checkpoint_sidecar:config.checkpoint_sidecar agent
+        match !cooperative_yield with
+        | None ->
+          build_checkpoint
+            ~session_id
+            ?checkpoint_sidecar:config.checkpoint_sidecar
+            agent
+        | Some (_, _, yielded_checkpoint) ->
+          { yielded_checkpoint with
+            Agent_sdk.Checkpoint.session_id
+          ; working_context =
+              (match config.checkpoint_sidecar with
+               | Some sidecar -> Some sidecar
+               | None -> yielded_checkpoint.working_context)
+          }
       in
       (match config.checkpoint_dir with
        | Some dir ->
@@ -1237,7 +1285,19 @@ let run_blocks
        | None -> ());
       Some ckpt
     in
-    let lifecycle = worker_lifecycle_classification_of_result result in
+    let lifecycle =
+      match result, !cooperative_yield with
+      | Ok _, Some (reason, _, _) ->
+        { event = "yielded"
+        ; status =
+            (match reason with
+             | Chat_waiting -> "yielded_to_chat_waiting"
+             | Durable_stimulus_waiting ->
+               "yielded_to_durable_stimulus")
+        ; error = None
+        }
+      | _ -> worker_lifecycle_classification_of_result result
+    in
     publish_lifecycle ~name:config.name ~event:lifecycle.event
       ~detail:(Printf.sprintf "session=%s" session_id)
       ?error:lifecycle.error
@@ -1264,9 +1324,16 @@ let run_blocks
     (match result with
     | Ok response ->
       close_after_success ();
+      let stop_reason =
+        match !cooperative_yield with
+        | None -> Completed
+        | Some (reason, turn, _) ->
+          stop_reason_of_cooperative_yield ~turn reason
+      in
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
-        ~status:Dashboard_oas_bridge.Success response;
+        ~status:(dashboard_status_of_stop_reason stop_reason)
+        response;
       let runtime_observation =
         runtime_observation_for_completed_config
           ~total_duration_ms:run_total_duration_ms config
@@ -1280,42 +1347,7 @@ let run_blocks
           trace_ref;
           run_validation;
           runtime_observation = Some runtime_observation;
-          stop_reason = Completed;
-        }
-    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded r)) ->
-      close_after_success ();
-      Log.Misc.warn
-        "oas_worker %s: observed unexpected MaxTurnsExceeded with the Keeper contract configured unbounded (turns=%d reported_limit=%d)"
-        config.name
-        r.turns
-        r.limit;
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          (* [MaxTurnsExceeded] carries no response payload. Do not fabricate a
-             user-visible checkpoint sentence; the typed stop reason and receipt
-             retain the observation while MASC treats it as non-gating. *)
-          ~text:""
-      in
-      record_dashboard_oas_response ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason
-                   (TurnLimitObserved { turns_used = r.turns; limit = r.limit }))
-        partial_response;
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms config
-      in
-      Ok
-        {
-          response = partial_response;
-          checkpoint;
-          session_id;
-          turns;
-          trace_ref;
-          run_validation;
-          runtime_observation = Some runtime_observation;
-          stop_reason = TurnLimitObserved { turns_used = r.turns; limit = r.limit };
+          stop_reason;
         }
     | Error
         (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
@@ -1348,160 +1380,6 @@ let run_blocks
         ; run_validation
         ; runtime_observation = Some runtime_observation
         ; stop_reason
-        }
-    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
-      match config.exit_condition_result with
-      | Some render ->
-        close_after_success ();
-        let stop_reason, response_text_opt = render r.turn in
-        let response_text =
-          match response_text_opt with
-          | Some text when String.trim text <> "" -> text
-          | _ -> Printf.sprintf "[exit condition met at turn %d]" r.turn
-        in
-        let partial_response =
-          partial_response_of_stop
-            ~session_id
-            ~text:response_text
-        in
-        record_dashboard_oas_response ~config
-          ~total_duration_ms:run_total_duration_ms
-          ~status:(dashboard_status_of_stop_reason stop_reason)
-          partial_response;
-        let runtime_observation =
-          runtime_observation_for_completed_config
-            ~total_duration_ms:run_total_duration_ms config
-        in
-        Ok
-          {
-            response = partial_response;
-            checkpoint;
-            session_id;
-            turns;
-            trace_ref;
-            run_validation;
-            runtime_observation = Some runtime_observation;
-            stop_reason;
-          }
-      | None ->
-        close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-        Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.ToolFailureRecoveryDeferred
-              { reason; tool_names })) ->
-      close_after_success ();
-      let stop_reason =
-        ToolFailureRecoveryDeferred { turns_used = turns; reason; tool_names }
-      in
-      let partial_response = partial_response_of_stop ~session_id ~text:"" in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason stop_reason)
-        partial_response;
-      Log.Misc.info
-        "oas_worker %s: typed tool-failure recovery deferred tools=%s \
-         reason_digest=%s"
-        config.name
-        (String.concat "," tool_names)
-        (Auth.sha256_hash reason);
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms
-          config
-      in
-      Ok
-        { response = partial_response
-        ; checkpoint
-        ; session_id
-        ; turns
-        ; trace_ref
-        ; run_validation
-        ; runtime_observation = Some runtime_observation
-        ; stop_reason
-        }
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.AgentExecutionTimeout r)) ->
-      close_after_success ();
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          ~text:""
-      in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason
-                   (ExecutionTimeoutObserved
-                      { elapsed_sec = r.elapsed_sec
-                      ; timeout_sec = r.timeout_sec
-                      ; turn_count = r.turn_count
-                      ; max_turns = r.max_turns
-                      }))
-        partial_response;
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms
-          config
-      in
-      Ok
-        { response = partial_response
-        ; checkpoint
-        ; session_id
-        ; turns
-        ; trace_ref
-        ; run_validation
-        ; runtime_observation = Some runtime_observation
-        ; stop_reason =
-            ExecutionTimeoutObserved
-              { elapsed_sec = r.elapsed_sec
-              ; timeout_sec = r.timeout_sec
-              ; turn_count = r.turn_count
-              ; max_turns = r.max_turns
-              }
-        }
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.AgentExecutionIdleTimeout r)) ->
-      close_after_success ();
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          ~text:""
-      in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason
-                   (ExecutionIdleTimeoutObserved
-                      { idle_sec = r.idle_sec
-                      ; idle_timeout_sec = r.idle_timeout_sec
-                      ; turn_count = r.turn_count
-                      ; max_turns = r.max_turns
-                      }))
-        partial_response;
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms
-          config
-      in
-      Ok
-        { response = partial_response
-        ; checkpoint
-        ; session_id
-        ; turns
-        ; trace_ref
-        ; run_validation
-        ; runtime_observation = Some runtime_observation
-        ; stop_reason =
-            ExecutionIdleTimeoutObserved
-              { idle_sec = r.idle_sec
-              ; idle_timeout_sec = r.idle_timeout_sec
-              ; turn_count = r.turn_count
-              ; max_turns = r.max_turns
-              }
         }
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
@@ -1559,11 +1437,22 @@ let run
     ?on_event
     ?on_yield
     ?on_resume
+    ?cooperative_yield_decider
     ?agent_ref
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
-  run_blocks ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume
-    ?agent_ref ~goal_detail:goal [Agent_sdk.Types.Text goal]
+  run_blocks
+    ~sw
+    ~net
+    ~config
+    ?oas_checkpoint
+    ?on_event
+    ?on_yield
+    ?on_resume
+    ?cooperative_yield_decider
+    ?agent_ref
+    ~goal_detail:goal
+    [ Agent_sdk.Types.Text goal ]
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)
@@ -1577,8 +1466,8 @@ let run_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?on_event
     ?on_yield
-    ?on_resume
-    (goal : string)
+  ?on_resume
+  (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   match masc_tools with
   | [] ->

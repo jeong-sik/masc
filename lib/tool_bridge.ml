@@ -35,9 +35,8 @@ module Float = Stdlib.Float
     ([Tool_output.encode_for_oas (Stored {...})]). Smaller outputs flow
     through unchanged.
 
-    The hydrator reducer (see [keeper_artifact_hydrator], PR 4) lazily
-    re-inflates the most recent stored refs before LLM dispatch; older
-    refs stay as markers in the message history.
+    Stored refs remain explicit markers in message history. MASC never
+    rewrites provider input implicitly at dispatch time.
 
     Disabled when [MASC_BASE_PATH] is unset (no store root resolvable),
     which keeps unit tests free from filesystem side effects unless they

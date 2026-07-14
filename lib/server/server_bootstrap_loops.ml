@@ -1079,9 +1079,8 @@ let start_keeper_loops_owned
   (* Create and install the MASC-owned Event_bus alongside OAS's.
      MASC domain events (masc.broadcast, masc.heartbeat, masc.keeper.*,
      masc.harness.*, ...) publish here per OAS event_bus.mli:103-107
-     boundary. Dashboard SSE consumers see both channels as one stream
-     — the relay translates masc.* →
-     masc:* on the wire for backward compatibility. *)
+     boundary. Dashboard SSE consumers see both channels as one stream and
+     consume the canonical dot-separated event names unchanged. *)
   let masc_event_bus =
     Masc_event_bus_policy.create_bus Masc_event_bus_policy.masc_domain
   in
@@ -1089,17 +1088,6 @@ let start_keeper_loops_owned
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:masc_event_bus;
-  (* Compaction audit: subscribe to ContextCompactStarted/ContextCompacted and
-     persist paired rows to [base_path/data/harness-compact/YYYY-MM/DD.jsonl]
-     with rolling 14-day retention (override via
-     MASC_COMPACTION_AUDIT_RETENTION_DAYS). Independent from the SSE bridge —
-     each subscriber gets its own bounded stream. *)
-  Keeper_compact_audit.spawn_subscriber
-    ~sw
-    ~clock
-    ~base_path:(Env_config.base_path ())
-    ~retention_days:14
-    event_bus;
   (* Telemetry feedback loop: observe OAS per-turn signals without
      deserializing provider/model-bearing payloads. *)
   Keeper_telemetry_consumer.spawn_subscriber

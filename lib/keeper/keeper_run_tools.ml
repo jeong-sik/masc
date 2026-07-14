@@ -1,5 +1,5 @@
 (* keeper_run_tools — Step 7 of run_turn: agent setup, tools, progressive
-   disclosure, hooks assembly, context reducer.
+   disclosure, and hooks assembly.
 
    Extracted from keeper_agent_run.ml. *)
 
@@ -58,7 +58,6 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   ; hooks : Agent_sdk.Hooks.hooks
-  ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate

@@ -33,5 +33,5 @@ let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
 (* CLI subprocess transport (json-stream local transport, ctors, argv
    sanitization, MCP-config JSON, and the non-HTTP registry) was removed
    in the CLI provider purge (2026-05-31). Provider dispatch is now
-   HTTP-only; the [Cli_tool_*] provider kinds remain defined in the pinned
-   agent_sdk but have no registered transport and are unreachable here. *)
+   HTTP-only; the [Cli_tool_*] provider kinds remain defined in agent_sdk but
+   have no registered transport and are unreachable here. *)

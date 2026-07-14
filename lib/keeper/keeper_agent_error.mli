@@ -16,20 +16,15 @@ val user_message_of_sdk_error : Agent_sdk.Error.sdk_error -> string
 (** Layer-aware termination semantics for SDK errors crossing the OAS ->
     keeper boundary.
 
-    DD-015: adjacent runtimes use "turn" and "timeout" at different
-    layers. This contract preserves OAS observations without granting them
-    Keeper pause, retry, or blocker authority. *)
+    Provider liveness failures remain distinct from OAS agent-policy errors.
+    Turn, token, cost, and cumulative runtime observations have no constructor
+    here and therefore cannot acquire Keeper pause or blocker authority. *)
 type sdk_termination_semantics =
   | Provider_wall_clock_timeout
-  | Oas_execution_timeout_observed
-  | Oas_turn_limit_observed
-  | Oas_idle_detected_failure
-  | Oas_exit_condition_reached
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
-  | Oas_tool_failure_recovery_failed
-  | Oas_tool_failure_recovery_deferred
+  | Oas_hook_execution_failed
   | Sdk_error_failure
 
 val sdk_termination_semantics
@@ -61,10 +56,9 @@ val api_error_terminal_reason_code_typed
   :  Agent_sdk.Error.api_error
   -> Keeper_turn_terminal_code.t
 
-(** Receipt outcome for terminal SDK values. OAS turn-limit and execution-time
-    observations remain successful even if they reach this defensive bridge;
-    they are neither cancellation nor lifecycle-failure authority. Behavioral
-    [IdleDetected] remains an error. *)
+(** Receipt outcome for terminal SDK values. Provider liveness and typed input
+    requests are cancellations; policy, hook, and other SDK failures are
+    errors. Usage observations never reach this bridge. *)
 val receipt_outcome_kind_of_sdk_error
   :  Agent_sdk.Error.sdk_error
   -> Keeper_execution_receipt.outcome_kind

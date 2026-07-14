@@ -50,6 +50,7 @@ type t =
   | Tools_list
   | Persona_create
   | Persona_update
+  | Persona_delete
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -100,6 +101,7 @@ let all : t list =
   ; Tools_list
   ; Persona_create
   ; Persona_update
+  ; Persona_delete
   ; Voice_agent
   ; Voice_listen
   ; Voice_session_end
@@ -152,6 +154,7 @@ let to_string = function
   | Tools_list -> "keeper_tools_list"
   | Persona_create -> "masc_persona_create"
   | Persona_update -> "masc_persona_update"
+  | Persona_delete -> "masc_persona_delete"
   | Voice_agent -> "keeper_voice_agent"
   | Voice_listen -> "keeper_voice_listen"
   | Voice_session_end -> "keeper_voice_session_end"
@@ -226,6 +229,7 @@ let public_mcp_non_descriptor_names =
      the surface entries without this allowlist edit while main was red. *)
   ; "masc_persona_create"
   ; "masc_persona_update"
+  ; "masc_persona_delete"
   ]
 ;;
 

@@ -48,6 +48,7 @@ type t =
   | Tools_list
   | Persona_create
   | Persona_update
+  | Persona_delete
   | Voice_agent
   | Voice_listen
   | Voice_session_end

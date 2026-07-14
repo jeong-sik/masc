@@ -4,10 +4,26 @@ import { signal } from '@preact/signals'
 import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
 import { TextInput } from '../common/input'
+import { requestConfirm } from '../common/confirm-dialog'
 import { shellAuthSummary } from '../../store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
-import { personas, personasLoading, personasError, loadPersonas, spawnKeeperFromPersona, spawning, spawnResult, showCreateForm, editingPersona, type PersonaSummary } from './keeper-spawn-state'
+import { personas, personasLoading, personasError, loadPersonas, spawnKeeperFromPersona, spawning, spawnResult, showCreateForm, editingPersona, deletePersona, type PersonaSummary } from './keeper-spawn-state'
 import { PersonaForm } from './persona-form'
+
+function beginEdit(persona: PersonaSummary): void {
+  showCreateForm.value = false
+  editingPersona.value = persona
+}
+
+async function confirmDelete(persona: PersonaSummary): Promise<void> {
+  const confirmed = await requestConfirm({
+    title: '페르소나 삭제',
+    message: `${persona.displayName ?? persona.name} 페르소나를 삭제합니까? 이 작업은 되돌릴 수 없습니다.`,
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  await deletePersona(persona.name)
+}
 
 const confirmTarget = signal<string | null>(null)
 const searchQuery = signal('')
@@ -48,7 +64,15 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
       ${persona.role ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${persona.role}</div>` : null}
       ${persona.mode ? html`<div class="text-3xs text-[var(--color-fg-muted)]">모드: ${persona.mode}</div>` : null}
       ${persona.description ? html`<div class="text-2xs text-[var(--color-fg-primary)] mt-1 line-clamp-2">${persona.description}</div>` : null}
-      <div class="mt-auto pt-2">
+      <div class="mt-auto pt-2 flex flex-col gap-1.5">
+        <div class="flex gap-1.5">
+          <${ActionButton} variant="ghost" size="sm" disabled=${!spawnAccess.allowed}
+            title=${spawnAccess.allowed ? '페르소나 편집' : spawnAccess.reason ?? undefined}
+            onClick=${() => beginEdit(persona)}>수정<//>
+          <${ActionButton} variant="danger" size="sm" disabled=${!spawnAccess.allowed}
+            title=${spawnAccess.allowed ? '페르소나 삭제' : spawnAccess.reason ?? undefined}
+            onClick=${() => { void confirmDelete(persona) }}>삭제<//>
+        </div>
         ${isConfirming ? html`
           <div class="flex flex-col gap-1.5">
             <p class="text-3xs text-[var(--color-status-warn)]">키퍼를 시작합니까?</p>

@@ -273,7 +273,11 @@ let test_fetch_rejects_non_regular_paths () =
         let path = Filename.concat shard_dir sha256 in
         create_path path;
         match B.fetch store ~sha256 with
-        | Error (B.Unexpected_file_kind { kind = Fs_compat.Exact_kind kind; _ }) ->
+        | Error
+            (B.Owned_read_failed
+              { failure = Fs_compat.Path_is_not_regular_file { kind; _ }
+              ; _
+              }) ->
             Alcotest.(check bool) "exact non-regular kind" true (kind = expected_kind)
         | Error error ->
             Alcotest.failf "unexpected fetch error: %s" (B.fetch_error_to_string error)
@@ -292,13 +296,35 @@ let test_fetch_reports_inspection_failure () =
   let result = B.fetch store ~sha256 in
   (try Sys.remove base_path with _ -> ());
   match result with
-  | Error (B.Inspect_failed _) -> ()
+  | Error
+      (B.Owned_read_failed
+        { failure = Fs_compat.Ownership_boundary_rejected _; _ }) -> ()
   | Error error ->
       Alcotest.failf
         "unexpected fetch error: %s"
         (B.fetch_error_to_string error)
   | Ok None -> Alcotest.fail "structural store failure was reported as missing"
   | Ok (Some _) -> Alcotest.fail "structural store failure returned bytes"
+
+let test_fetch_rejects_symbolic_link_parent () =
+  with_temp_dir (fun dir ->
+    let outside = Filename.concat dir "outside" in
+    Unix.mkdir outside 0o755;
+    let linked_parent = Filename.concat dir ".masc" in
+    Unix.symlink outside linked_parent;
+    Fun.protect
+      ~finally:(fun () -> Unix.unlink linked_parent)
+      (fun () ->
+         let store = B.create ~base_path:dir in
+         match B.fetch store ~sha256:(String.make 64 '0') with
+         | Error
+             (B.Owned_read_failed
+               { failure = Fs_compat.Ownership_boundary_rejected _; _ }) -> ()
+         | Error error ->
+           Alcotest.failf
+             "unexpected fetch error: %s"
+             (B.fetch_error_to_string error)
+         | Ok _ -> Alcotest.fail "symbolic-link parent escaped blob ownership"))
 
 let test_fetch_reports_integrity_mismatch () =
   with_temp_dir (fun dir ->
@@ -379,6 +405,8 @@ let () =
             test_fetch_rejects_non_regular_paths;
           Alcotest.test_case "fetch reports inspection failure" `Quick
             test_fetch_reports_inspection_failure;
+          Alcotest.test_case "fetch rejects symbolic-link parent" `Quick
+            test_fetch_rejects_symbolic_link_parent;
           Alcotest.test_case "fetch reports integrity mismatch" `Quick
             test_fetch_reports_integrity_mismatch;
           Alcotest.test_case "sha256 rejects path component" `Quick

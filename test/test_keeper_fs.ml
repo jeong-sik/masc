@@ -426,44 +426,50 @@ let test_owned_regular_file_read_rejects_symbolic_links () =
        let owned_path = Filename.concat owned_parent "record.json" in
        ignore (KF.ensure_dir owned_parent : string);
        Unix.symlink outside_path owned_path;
-       (match KF.load_owned_regular_file ~ownership_root:base owned_path with
-        | Error (KF.Path_is_not_regular_file { kind = Unix.S_LNK; _ }) -> ()
+       (match Fs_compat.load_owned_regular_file ~ownership_root:base owned_path with
+        | Error
+            { failure =
+                Fs_compat.Path_is_not_regular_file
+                  { kind = Unix.S_LNK; _ }
+            ; _
+            } -> ()
         | Error error ->
           failf
             "unexpected final-link error: %s"
-            (KF.owned_regular_file_read_error_to_string error)
+            (Fs_compat.owned_regular_file_read_error_to_string error)
         | Ok _ -> fail "final symbolic link was accepted");
        check string "outside target is never read or changed" "outside"
          (read_file outside_path);
        Unix.unlink owned_path;
        require_ok "seed owned regular file" (KF.save_atomic owned_path "owned");
-       (match KF.load_owned_regular_file ~ownership_root:base owned_path with
+       (match Fs_compat.load_owned_regular_file ~ownership_root:base owned_path with
         | Ok (Some content) -> check string "regular file loads" "owned" content
         | Ok None -> fail "owned regular file was reported absent"
         | Error error ->
           failf
             "owned regular file failed: %s"
-            (KF.owned_regular_file_read_error_to_string error));
+            (Fs_compat.owned_regular_file_read_error_to_string error));
        Unix.unlink owned_path;
-       (match KF.load_owned_regular_file ~ownership_root:base owned_path with
+       (match Fs_compat.load_owned_regular_file ~ownership_root:base owned_path with
         | Ok None -> ()
         | Ok (Some _) -> fail "absent owned file returned content"
         | Error error ->
           failf
             "absent owned file failed: %s"
-            (KF.owned_regular_file_read_error_to_string error));
+            (Fs_compat.owned_regular_file_read_error_to_string error));
        let linked_parent = Filename.concat base "linked-parent" in
        Unix.symlink outside linked_parent;
        (match
-          KF.load_owned_regular_file
+          Fs_compat.load_owned_regular_file
             ~ownership_root:base
             (Filename.concat linked_parent "outside.json")
         with
-        | Error (KF.Ownership_boundary_rejected _) -> ()
+        | Error
+            { failure = Fs_compat.Ownership_boundary_rejected _; _ } -> ()
         | Error error ->
           failf
             "unexpected parent-link error: %s"
-            (KF.owned_regular_file_read_error_to_string error)
+            (Fs_compat.owned_regular_file_read_error_to_string error)
         | Ok _ -> fail "symbolic-link parent escaped ownership root"))
 
 (* ================================================================ *)

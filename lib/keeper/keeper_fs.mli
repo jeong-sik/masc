@@ -28,44 +28,6 @@ val save_atomic : string -> string -> (unit, string) result
     Returns [Error msg] on I/O failure. Cancellation still re-raises. *)
 val save_json_atomic : string -> Yojson.Safe.t -> (unit, string) result
 
-type owned_regular_file_read_operation =
-  | Inspect_parent
-  | Inspect_path
-  | Open_path
-  | Inspect_descriptor
-  | Read_contents
-  | Close_descriptor
-
-type owned_regular_file_read_error =
-  | Ownership_boundary_rejected of
-      { path : string
-      ; rejection : Fs_compat.owned_directory_chain_rejection
-      }
-  | Path_is_not_regular_file of
-      { path : string
-      ; kind : Unix.file_kind
-      }
-  | Filesystem_identity_changed of { path : string }
-  | Owned_file_operation_failed of
-      { path : string
-      ; operation : owned_regular_file_read_operation
-      ; detail : string
-      }
-
-(** Read one process-owned regular file without accepting symbolic links or a
-    changed parent chain. [Ok None] means that the owned directory or file is
-    absent. OCaml 5.4 does not expose [O_NOFOLLOW], so the implementation
-    validates [lstat]/[fstat] identity before reading and revalidates the
-    no-follow parent boundary. Blocking Unix operations run in a systhread. *)
-val load_owned_regular_file
-  :  ownership_root:string
-  -> string
-  -> (string option, owned_regular_file_read_error) result
-
-val owned_regular_file_read_error_to_string
-  :  owned_regular_file_read_error
-  -> string
-
 type durable_write_stage =
   | Directory_prepare
   | Payload_encode

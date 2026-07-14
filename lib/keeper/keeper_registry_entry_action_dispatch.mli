@@ -11,10 +11,7 @@ val execute_observability :
   ts_unix:float ->
   Keeper_state_machine.entry_action -> unit
 
-(** Map a [(phase, action)] pair to the follow-up event the dispatcher
-    should fire (currently only [Overflowed/Start_compaction] →
-    [Auto_compact_triggered], with a [metric_keeper_fsm_edge_transitions]
-    counter bump). [None] for all other pairs. *)
+(** Durable activities never synthesize a follow-up lifecycle event here. *)
 val followup_event_of_action :
   phase:Keeper_state_machine.phase ->
   Keeper_state_machine.entry_action -> Keeper_state_machine.event option

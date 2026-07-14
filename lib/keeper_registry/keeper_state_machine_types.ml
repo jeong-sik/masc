@@ -180,9 +180,6 @@ let event_to_string = function
 (** Runtime contract mirrors [.mli]:
     - [Publish_lifecycle] is executed by the registry as an observability
       side effect.
-    - [Start_compaction] is executed by the registry only for the
-      [Overflowed] auto-compact path, which emits
-      [Auto_compact_triggered] after the transition is committed.
     - The remaining variants describe runtime-owned work and remain
       explicit phase-entry intent until that integration is unified. *)
 type entry_action =

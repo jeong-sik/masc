@@ -129,14 +129,9 @@ let derive_phase (c : conditions) : phase =
   else if c.handoff_active
   then HandingOff
   else if c.compaction_active
-  then
-    Compacting
-    (* 8b. Context overflow awaiting auto-compact.
-     Transient: [entry_actions_for] emits [Start_compaction] on entry,
-     which flips [compaction_active] via [Auto_compact_triggered] and the
-     next [derive_phase] returns [Compacting]. If [compaction_active] is
-     already set (compaction already started), priority 8 wins and the
-     keeper reads as [Compacting], not [Overflowed]. *)
+  then Compacting
+  else if c.context_overflow
+  then Overflowed
   else if
     (not c.heartbeat_healthy)
     || (not c.turn_healthy)
@@ -169,32 +164,8 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Context_measured { context_actions; _ } ->
     { c with context_handoff_needed = context_actions.handoff }
   | Compaction_started -> { c with compaction_active = true }
-  | Compaction_completed { before_tokens; after_tokens } ->
-    (* #9988: "completed" alone does not mean the overflow was resolved.
-       In production 98.4% of [Compaction_completed] events arrive with
-       [before_tokens = after_tokens] because the checkpoint reducers
-       produced no savings (no tool_result sections to strip, pure-text
-       turns, etc).  Clearing [context_overflow] unconditionally created
-       an infinite loop with [Context_overflow_detected]: the next turn
-       re-measures the same context, re-fires overflow, re-attempts a
-       noop compaction, and clears the flag again.  #9935 observed
-       45-71 imminent events/day with zero observable reduction action.
-
-       Treat [saved_tokens <= 0] as a noop: keep [context_overflow] set
-       so the next layer (operator alert, stronger compaction profile,
-       handoff) can take over. Only a real reduction clears the flag
-       and releases the retry-exhausted latch. *)
-    let saved_tokens = before_tokens - after_tokens in
-    if saved_tokens > 0
-    then
-      { c with compaction_active = false; context_overflow = false }
-    else (
-      Log.Keeper.warn
-        "[fsm] compaction_completed with no savings (before=%d after=%d); keeping \
-         context_overflow=true to avoid noop re-trigger loop"
-        before_tokens
-        after_tokens;
-      { c with compaction_active = false })
+  | Compaction_completed _ ->
+    { c with compaction_active = false; context_overflow = false }
   | Compaction_failed _ ->
     (* Leave [context_overflow] set — the overflow has not been resolved.
        The retry-exhausted latch is owned by the caller (keeper_unified_turn
@@ -243,14 +214,9 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     ; credential_archived = true
     }
   | Context_overflow_detected _ ->
-    (* Hard overflow reported by the provider. The phase derivation
-       maps this to [Overflowed] (auto-compact path)
-       (if the retry latch is already set). *)
     { c with context_overflow = true }
   | Auto_compact_triggered ->
-    (* Emitted as part of [Overflowed] entry actions.  Promotes the
-       keeper into [Compacting] on the next derivation without waiting
-       for [Compaction_started] from the post-turn lifecycle. *)
+    (* Legacy explicit input. No entry action produces this event. *)
     { c with compaction_active = true }
   | Operator_compact_requested ->
     { c with compaction_active = true }
@@ -261,11 +227,8 @@ let update_conditions (c : conditions) (ev : event) : conditions =
 ;;
 
 (** Compute entry actions for a phase transition.
-    [Publish_lifecycle] is always consumed by the registry runtime.
-    [Start_compaction] is additionally consumed for the auto-compact
-    [Overflowed] path; the remaining variants stay descriptive here
-    because their side effects are still owned elsewhere
-    (post-turn lifecycle or supervisor).
+    [Publish_lifecycle] is consumed by the registry runtime; the remaining
+    variants describe work whose effects are owned by their runtime boundary.
 
     Structure (Iteration 2, /loop FSM drift hunt — Phase A-2):
     Outer match is on [new_phase] so every phase variant is exhaustively
@@ -319,13 +282,8 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Operator_compact_requested
          | Operator_clear_requested _ -> event_to_string event)
     ]
-  (* [Overflowed] entry actions: request a compaction so the registry can
-     promote the committed [Overflowed] transition into the follow-up
-     [Auto_compact_triggered] event, and publish the transition so
-     operators can see "context overflow" distinctly from generic failure. *)
   | Overflowed ->
-    [ Start_compaction
-    ; lifecycle
+    [ lifecycle
         "overflowed"
         (match event with
          | Context_overflow_detected r ->

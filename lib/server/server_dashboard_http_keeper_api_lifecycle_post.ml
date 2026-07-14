@@ -136,11 +136,15 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       | Ok (Some meta) when Bool.equal meta.paused paused -> true
       | Ok (Some meta) ->
            let updated_meta =
-             {
-               meta with
-               paused;
-               updated_at = Keeper_meta_contract.now_iso ();
-             }
+             (* Resume ([paused = false]) routes through [mark_resumed] so the
+                boot-resume writer clears the typed latch together with the
+                pause bit — it must never persist paused=false + Dead_tombstone
+                (rejected by the meta store). Pause keeps the latch paired. *)
+             let base =
+               if paused then { meta with paused = true }
+               else Keeper_meta_contract.mark_resumed meta
+             in
+             { base with updated_at = Keeper_meta_contract.now_iso () }
            in
            (match
               Keeper_meta_store.write_meta_with_merge

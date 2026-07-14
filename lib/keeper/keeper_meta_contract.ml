@@ -414,6 +414,48 @@ type keeper_meta =
   ; meta_version : int
   }
 
+(* Sanctioned unpause transform: the coupled way to set [paused = false].
+   Clears the typed latch (including the terminal [Dead_tombstone]) and the
+   last blocker together with the pause bit, so [paused = false &&
+   latched_reason <> None] cannot be constructed through the resume path.
+   Terminal dead-tombstone revival additionally runs the crash-recoverable
+   [Keeper_dead_revival_transaction] at its call site; [mark_resumed] only
+   normalizes the meta fields. Callers set [updated_at] themselves. *)
+let mark_resumed (m : keeper_meta) : keeper_meta =
+  { m with
+    paused = false
+  ; latched_reason = None
+  ; runtime = { m.runtime with last_blocker = None }
+  }
+;;
+
+(* Write-boundary invariant: a terminal [Dead_tombstone] latch must co-occur
+   with [paused = true]. The canonical setter ([dead_tombstone_meta]) pairs
+   them, and every sanctioned clear runs through [mark_resumed] / dead
+   revival which nulls the latch. [paused = false] while [Dead_tombstone] is
+   latched is un-recoverable: lifecycle admission denies by the latch alone
+   (paused-independent), yet the split can only be produced by a writer that
+   cleared [paused] without clearing the latch. Returns [Some detail] when the
+   split is present so the store can reject the write fail-closed rather than
+   persist an unrepresentable state. Non-terminal latches with [paused = false]
+   are left alone (admission treats them as [Active], so they are recoverable). *)
+let dead_tombstone_pause_violation (m : keeper_meta) : string option =
+  (* Exhaustive on [latched_reason] for the [paused = false] rows (no [_]
+     catch-all): a future terminal latch variant must force a decision here
+     rather than silently escaping the write-boundary guard. A non-terminal
+     latch with [paused = false] is admission-[Active] (recoverable), so it is
+     not a violation. [paused = true] is always consistent with any latch. *)
+  match m.paused, m.latched_reason with
+  | false, Some Keeper_latched_reason.Dead_tombstone ->
+    Some
+      (Printf.sprintf
+         "keeper %s: paused=false with Dead_tombstone latch (resume must clear \
+          the latch via mark_resumed / dead revival)"
+         m.name)
+  | false, (Some (Keeper_latched_reason.Operator_paused _) | None) -> None
+  | true, _ -> None
+;;
+
 let apply_profile_default opt current =
   match opt with
   | Some value -> value

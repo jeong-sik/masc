@@ -32,6 +32,23 @@ let resolve_active_goal_ids config p old_ids =
           (Printf.sprintf "unknown active_goal_ids: %s"
              (String.concat ", " missing))
 
+type revival_decision = {
+  dead_revival_requested : bool;
+  clear_pause_state : bool;
+}
+
+let revival_decision ~(latched_reason : Keeper_latched_reason.t option)
+    ~(paused : bool) : revival_decision =
+  let dead_revival_requested =
+    match latched_reason with
+    | Some Keeper_latched_reason.Dead_tombstone -> true
+    | Some (Keeper_latched_reason.Operator_paused _) | None -> false
+  in
+  {
+    dead_revival_requested;
+    clear_pause_state = paused || dead_revival_requested;
+  }
+
 let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
@@ -104,16 +121,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
       ~fallback_message:old.compaction.message_gate
       ~fallback_token:old.compaction.token_gate
   in
-  let resume_paused_keeper = old.paused in
-  let dead_revival_requested =
-    resume_paused_keeper
-    &&
-    match old.latched_reason with
-    | Some Keeper_latched_reason.Dead_tombstone -> true
-    | Some (Keeper_latched_reason.Operator_paused _)
-    | None -> false
+  let { dead_revival_requested; clear_pause_state } =
+    revival_decision ~latched_reason:old.latched_reason ~paused:old.paused
   in
-  if resume_paused_keeper then (
+  if clear_pause_state then (
     let blocker_class, blocker_detail =
       match old.runtime.last_blocker with
       | Some info -> blocker_class_to_string info.klass, info.detail
@@ -142,16 +153,16 @@ let update_keeper ?(preserve_prompt_defaults = false)
     network_mode;
     autoboot_enabled;
     active_goal_ids;
-    paused = if resume_paused_keeper then false else old.paused;
+    paused = if clear_pause_state then false else old.paused;
     (* Operator-sanctioned resume clears the terminal latch (Dead_tombstone
        included) so a sanctioned keeper_up revives a latched keeper.  Without
        this [latched_reason] survives a paused-clearing resume and every
        latch-keyed lifecycle admission keeps denying revival forever even after
        [paused] is cleared. *)
     latched_reason =
-      if resume_paused_keeper then None else source_meta.latched_reason;
+      if clear_pause_state then None else source_meta.latched_reason;
     runtime =
-      (if resume_paused_keeper then
+      (if clear_pause_state then
          {
            source_meta.runtime with
            last_blocker = None;

@@ -50,7 +50,6 @@ type try_provider_ctx =
   ; compact_ratio : float option
   ; context_window_tokens : int option
   ; oas_auto_context_overflow_retry : bool
-  ; checkpoint_dir : string option
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
   ; checkpoint_stage_observed : bool Atomic.t
   ; context_injector : Agent_sdk.Hooks.context_injector option
@@ -248,7 +247,6 @@ let run_try_provider
           ; compact_ratio = ctx.compact_ratio
           ; context_window_tokens = ctx.context_window_tokens
           ; oas_auto_context_overflow_retry = ctx.oas_auto_context_overflow_retry
-          ; checkpoint_dir = ctx.checkpoint_dir
           ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
           ; context = ctx.context

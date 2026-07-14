@@ -31,17 +31,6 @@ val publish_lifecycle :
     non-sensitive structured runtime metadata such as provider
     kind, model, and endpoint path. *)
 
-val persist_checkpoint :
-  dir:string ->
-  session_id:string ->
-  Agent_sdk.Checkpoint.t ->
-  (unit, string) result
-(** Serialise [ckpt] via [Agent_sdk.Checkpoint.to_string] and write it
-    atomically (tmp → fsync → rename) to [<dir>/<session_id>.json].
-    Returns [Error msg] on I/O failure instead of raising.
-    The parent [dir] is created via [Fs_compat.mkdir_p] before
-    the write. *)
-
 val build_checkpoint :
   session_id:string ->
   ?checkpoint_sidecar:Yojson.Safe.t ->

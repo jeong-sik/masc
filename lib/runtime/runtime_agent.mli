@@ -14,7 +14,7 @@
     Internal helpers stay private at this boundary
     ([invalid_runtime_config],
     [provider_supports_inline_tools],
-    [persist_checkpoint], [build_checkpoint],
+    [build_checkpoint],
     [partial_response_of_stop]). *)
 
 (** {1 Stop reason} *)
@@ -84,7 +84,6 @@ type config = Runtime_agent_context.config = {
   context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_dir : string option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;

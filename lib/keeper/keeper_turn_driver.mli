@@ -103,7 +103,6 @@ val run_named :
   ?compact_ratio:float ->
   ?context_window_tokens:int ->
   ?oas_auto_context_overflow_retry:bool ->
-  ?checkpoint_dir:string ->
   ?checkpoint_sink:Agent_sdk.Agent.checkpoint_sink ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->

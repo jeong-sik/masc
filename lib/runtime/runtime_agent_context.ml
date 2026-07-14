@@ -101,7 +101,6 @@ type config =
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; guardrails : Agent_sdk.Guardrails.t option
   ; event_bus : Agent_sdk.Event_bus.t option
-  ; checkpoint_dir : string option
   ; session_id : string option
   ; description : string option
   ; initial_messages : Agent_sdk.Types.message list
@@ -162,8 +161,7 @@ type config =
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
     (** Caller-owned turn-boundary checkpoint sink, forwarded to
         [Builder.with_checkpoint_sink]. Allows consumers to persist
-        checkpoints at OAS turn boundaries without the full
-        checkpoint_dir filesystem path. *)
+        checkpoints at OAS turn boundaries. *)
   }
 
 let default_config
@@ -194,7 +192,6 @@ let default_config
   ; context_reducer = None
   ; guardrails = None
   ; event_bus = None
-  ; checkpoint_dir = None
   ; session_id = None
   ; description = None
   ; initial_messages = []

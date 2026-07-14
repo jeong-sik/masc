@@ -342,7 +342,6 @@ let run_named
     ?compact_ratio
     ?context_window_tokens
     ?(oas_auto_context_overflow_retry = true)
-    ?checkpoint_dir
     ?checkpoint_sink
     ?context_injector
     ?context
@@ -670,7 +669,6 @@ let run_named
             ; compact_ratio
             ; context_window_tokens
             ; oas_auto_context_overflow_retry
-            ; checkpoint_dir
             ; checkpoint_sink
             ; checkpoint_stage_observed
             ; context_injector

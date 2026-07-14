@@ -1,10 +1,11 @@
 ---
 description: keeper unified loop system prompt template
 category: keeper
-template_variables: [identity_header, instructions_block, goal_lines]
+template_variables: [identity_header, persona_block, instructions_block, goal_lines]
 ---
 
 {{identity_header}}
+{{persona_block}}
 {{instructions_block}}
 {{goal_lines}}
 ## Where you live

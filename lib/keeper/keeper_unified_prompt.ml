@@ -517,6 +517,39 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     if instructions = "" then ""
     else Printf.sprintf "\nInstructions:\n%s\n" instructions
   in
+  (* D-11 (2026-07-14 prompt-assembly audit): the unified lane shipped
+     without any persona injection — identity was the one-line header —
+     while the chat lane injected the persona via
+     [Keeper_prompt.build_keeper_system_prompt]. A keeper therefore only
+     had a personality when spoken to. Mirror the chat lane exactly: same
+     loader (persona file re-read each turn), same XML-escaped <persona>
+     block, so both lanes present one personality. With no
+     [profile_defaults], resolution degrades to the keeper name — the same
+     total fallback [resolved_persona_name] applies. *)
+  let persona_block =
+    let persona_name =
+      match profile_defaults with
+      | Some defaults ->
+          Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
+            defaults
+      | None -> meta.name
+    in
+    let persona_extended =
+      (* DET-OK: an absent persona file is a valid state — the block is
+         omitted below. Read failures already WARN and count
+         ProfileLoadFailures inside [load_persona_extended]; this is a
+         total default between two known outcomes, not an unknown-input
+         guess. *)
+      match Keeper_types_profile.load_persona_extended persona_name with
+      | Some text -> text
+      | None -> ""
+    in
+    (* Inner bytes are the shared SSOT ([Keeper_persona_block.render]); the
+       surrounding newlines are unified-lane layout. *)
+    match Keeper_persona_block.render ~persona_extended with
+    | None -> ""
+    | Some block -> "\n" ^ block ^ "\n"
+  in
   let goal_lines =
     let has_valid_primary_goal =
       Option.is_some (Keeper_runtime_contract.primary_goal_id_opt meta)
@@ -555,6 +588,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       Prompt_registry.render_prompt_template Keeper_prompt_names.unified_system
         [
           ("identity_header", Printf.sprintf "You are %s, a keeper agent." meta.name);
+          ("persona_block", persona_block);
           ("instructions_block", instructions_block);
           ("goal_lines", goal_lines);
         ]

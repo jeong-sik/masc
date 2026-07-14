@@ -162,9 +162,12 @@ let build_keeper_system_prompt
       |> Re.replace_string re_keeper_name_upper ~by:keeper_name
   in
   let persona_block =
-    let s = String_util.escape_xml (String.trim persona_extended) in
-    if s = "" then ""
-    else Printf.sprintf "<persona>\n%s\n</persona>\n\n" s
+    (* Inner bytes are the shared SSOT ([Keeper_persona_block.render]); the
+       trailing blank line is chat-lane layout, frozen to keep historical
+       prompt bytes stable. *)
+    match Keeper_persona_block.render ~persona_extended with
+    | None -> ""
+    | Some block -> block ^ "\n\n"
   in
   let active_goals_block =
     match active_goals with

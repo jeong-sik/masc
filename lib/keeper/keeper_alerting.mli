@@ -28,10 +28,6 @@ val normalize_path_for_check : string -> string
 val normalize_allowed_path_for_check :
   root:string -> string -> string option
 val is_within_root_norm : root_norm:string -> string -> bool
-val absolute_allowed_paths :
-  config:Workspace.config -> allowed_paths:string list -> string list
-val absolute_allowed_paths_result :
-  config:Workspace.config -> allowed_paths:string list -> (string list, string) result
 val resolve_keeper_target_path :
   config:Workspace.config ->
   allowed_paths:string list ->

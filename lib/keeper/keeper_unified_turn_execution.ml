@@ -152,9 +152,6 @@ let run (ctx : ctx)
           (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
         ~generation:run_generation
         ~max_context:execution.max_context
-        (* OAS defines zero as the unbounded idle-turn sentinel. This span
-           records the production Keeper contract, not a tunable threshold. *)
-        ~max_idle_turns:0
         ~channel:(Keeper_world_observation.channel_to_string channel)
         ~is_retry
         ~current_task_id:

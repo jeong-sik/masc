@@ -24,7 +24,6 @@ let config_for_label
     ~(tools : Agent_sdk.Tool.t list)
     ~(max_tokens : int option)
     ~(temperature : float option)
-    ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?hooks
     ?enable_thinking
@@ -54,7 +53,6 @@ let config_for_label
     { base_config with
       max_tokens;
       temperature;
-      max_idle_turns;
       stream_idle_timeout_s;
       hooks;
       enable_thinking;
@@ -72,7 +70,6 @@ let run_model_by_label
     ~goal
     ?(system_prompt = "")
     ?(tools = [])
-    ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
     ?temperature
     ?max_tokens
@@ -88,7 +85,7 @@ let run_model_by_label
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
-      ~tools ~max_tokens ~temperature ~max_idle_turns ?stream_idle_timeout_s ?hooks
+      ~tools ~max_tokens ~temperature ?stream_idle_timeout_s ?hooks
       ?enable_thinking
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
@@ -167,7 +164,6 @@ let run_named_with_masc_tools
     ?on_resume
     ?transport
     ?(yield_on_tool = false)
-    ?(max_idle_turns = 3)
     ?provider_config_transform
     ?sw
     ?net
@@ -180,7 +176,6 @@ let run_named_with_masc_tools
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ~system_prompt ~tools:oas_tools
-    ~max_idle_turns
     ?temperature
     ?stream_idle_timeout_s ?hooks
     ~accept

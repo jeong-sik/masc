@@ -30,7 +30,6 @@ module Attr_key : sig
   val keeper_trace_id : string
   val keeper_generation : string
   val keeper_max_context : string
-  val keeper_max_idle_turns : string
   val keeper_channel : string
   val keeper_is_retry : string
   val keeper_current_task_id : string
@@ -99,7 +98,6 @@ val keeper_turn_attrs
   -> trace_id:string
   -> generation:int
   -> max_context:int
-  -> max_idle_turns:int
   -> channel:string
   -> is_retry:bool
   -> current_task_id:string option
@@ -114,7 +112,6 @@ val with_keeper_turn_span
   -> trace_id:string
   -> generation:int
   -> max_context:int
-  -> max_idle_turns:int
   -> channel:string
   -> is_retry:bool
   -> current_task_id:string option

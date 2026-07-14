@@ -14,7 +14,6 @@ val run_model_by_label :
   goal:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
-  ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
@@ -53,7 +52,6 @@ val run_named_with_masc_tools :
   ?on_resume:(unit -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
-  ?max_idle_turns:int ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->

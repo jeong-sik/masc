@@ -42,14 +42,7 @@ type config = {
   model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  max_turns : int;
-  max_idle_turns : int;
   stream_idle_timeout_s : float option;
-  max_execution_time_s : float option;
-      (** Wall-clock ceiling for one [Agent.run] / [run_stream] call.
-          When [Some] AND a clock is available, agent_sdk returns
-          [Retry.Timeout] after [s] seconds. Default [None] preserves
-          historical block-on-hang behaviour. *)
   body_timeout_s : float option;
       (** Total HTTP body-consumption ceiling forwarded to OAS
           [Builder.with_body_timeout] for non-streaming completion paths.
@@ -79,7 +72,6 @@ type config = {
   enable_thinking : bool option;
   preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
-  allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
@@ -111,13 +103,6 @@ type config = {
 
 (** {1 Default config builder} *)
 
-val unbounded_max_turns : int
-(** The pinned SDK's documented "no turn-count limit" sentinel ([0],
-    agent_sdk lib/base/types.mli); the value
-    {!Agent_sdk.Types.has_finite_max_turns} tests against. The SDK
-    exports the predicate but no named constant, so masc names it here
-    (masc#24391 layer 2). *)
-
 val default_config :
   name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
@@ -148,11 +133,8 @@ type prepared_resume = {
   agent_config : Agent_sdk.Types.agent_config;
   options : Agent_sdk.Agent.options;
 }
-(** Output of {!prepare_resume}.  [patched_checkpoint] has
-    runtime identity fields adjusted, and [agent_config.max_turns]
-    preserves [0] as unbounded; otherwise it is extended past the checkpoint
-    [turn_count] so resume picks up where the previous run left off without
-    re-counting consumed turns. *)
+(** Output of {!prepare_resume}. [patched_checkpoint] has runtime identity
+    fields adjusted. *)
 
 val set_oas_tracer : Agent_sdk.Tracing.t -> unit
 (** Set the OAS tracer used by {!builder}.  Called once
@@ -161,9 +143,6 @@ val set_oas_tracer : Agent_sdk.Tracing.t -> unit
 
 val prepare_resume :
   config:config -> checkpoint:Agent_sdk.Checkpoint.t -> prepared_resume
-(** [prepare_resume ~config ~checkpoint] computes the patched
-    checkpoint + agent_config + options for an
-    [Agent.resume] call.  Pure — no side effects.  The patched
-    agent config preserves {!unbounded_max_turns}; otherwise it
-    extends [config.max_turns] beyond the consumed [checkpoint.turn_count] for
-    generic finite OAS clients. Keeper callers use the unbounded sentinel. *)
+(** [prepare_resume ~config ~checkpoint] computes the patched checkpoint,
+    agent config, and options for an [Agent.resume] call. Pure — no side
+    effects. *)

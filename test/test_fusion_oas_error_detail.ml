@@ -211,7 +211,7 @@ let test_panel_failure_yojson_round_trips_current_shapes () =
           (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)")))
 ;;
 
-let test_timeout_budget_does_not_set_total_execution_ceiling () =
+let test_timeout_budget_sets_transport_timeouts () =
   let config =
     Fusion_oas.For_testing.apply_timeout_budget
       ~timeout_s:300.0
@@ -224,11 +224,7 @@ let test_timeout_budget_does_not_set_total_execution_ceiling () =
   Alcotest.(check (option (float 0.001)))
     "body timeout"
     (Some 300.0)
-    config.body_timeout_s;
-  Alcotest.(check (option (float 0.001)))
-    "no total execution ceiling"
-    None
-    config.max_execution_time_s
+    config.body_timeout_s
 ;;
 
 let () =
@@ -276,9 +272,9 @@ let () =
             `Quick
             test_panel_failure_yojson_round_trips_current_shapes
         ; Alcotest.test_case
-            "timeout budget does not arm OAS total execution ceiling"
+            "timeout budget sets transport timeouts"
             `Quick
-            test_timeout_budget_does_not_set_total_execution_ceiling
+            test_timeout_budget_sets_transport_timeouts
         ] )
     ]
 ;;

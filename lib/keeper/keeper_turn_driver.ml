@@ -269,7 +269,6 @@ let run_named
     ?(tools = [])
     ?(initial_messages = [])
     ?model_input_projection
-    ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
@@ -281,7 +280,6 @@ let run_named
     ?on_resume
     ?agent_ref
     ?transport
-    ?(allowed_paths = [])
     ?checkpoint_sidecar
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
@@ -561,7 +559,6 @@ let run_named
             ; tools
             ; initial_messages
             ; model_input_projection
-            ; max_idle_turns
             ; stream_idle_timeout_s
             ; body_timeout_s
             ; temperature
@@ -569,7 +566,6 @@ let run_named
             ; hooks
             ; raw_trace
             ; transport_resolved
-            ; allowed_paths
             ; checkpoint_sidecar
             ; cache_system_prompt
             ; yield_on_tool

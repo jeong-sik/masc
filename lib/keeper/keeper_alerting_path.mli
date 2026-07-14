@@ -36,17 +36,6 @@ val is_within_root_norm : root_norm:string -> string -> bool
 val is_within_allowed_norms :
   target_norm:string -> string list -> bool
 
-(** Project per-keeper allowed_paths to absolute, normalized paths. *)
-val absolute_allowed_paths :
-  config:Workspace.config -> allowed_paths:string list -> string list
-
-(** Like [absolute_allowed_paths] but errors when normalization
-    silently drops every entry. *)
-val absolute_allowed_paths_result :
-  config:Workspace.config ->
-  allowed_paths:string list ->
-  (string list, string) result
-
 type confined_path
 (** A path projected to one concrete allowed root. The constructor is hidden so
     callers cannot manufacture an absolute or parent-relative capability path. *)

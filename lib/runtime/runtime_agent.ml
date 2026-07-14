@@ -89,10 +89,7 @@ type config =
   model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  max_turns : int;
-  max_idle_turns : int;
   stream_idle_timeout_s : float option;
-  max_execution_time_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
   temperature : float option;
@@ -108,7 +105,6 @@ type config =
   enable_thinking : bool option;
   preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
-  allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
@@ -957,9 +953,8 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
     - MASC owns: per-turn config selection (model, temperature, tools,
       system_prompt), checkpoint field patching to align MASC intent with
       OAS resume semantics.
-    - OAS owns: cumulative token/cost telemetry, turn_count tracking,
-      Agent.resume state restoration, loop guard enforcement (max_turns,
-      idle).
+    - OAS owns: cumulative token/cost telemetry, turn_count tracking, and
+      Agent.resume state restoration.
     - OAS no longer enforces cost or cumulative-token budgets; cost is
       observe-only telemetry. *)
 let resume_from_checkpoint
@@ -1101,11 +1096,6 @@ let run_blocks
   let run_started_at = Unix.gettimeofday () in
   (try
     let result =
-      (* Pass the process-level Eio clock when available so agent_sdk's
-         [with_optional_timeout] can fire on hang when the caller has
-         also set [config.max_execution_time_s]. Both inputs must be
-         [Some] for the timeout to engage; absent either, behaviour is
-         historical (block until provider closes). *)
       let clock =
         match Process_eio.get_clock () with
         | Ok c -> Some c

@@ -83,31 +83,6 @@ let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list
     allowed_norms
 ;;
 
-let absolute_allowed_paths ~(config : Workspace.config) ~(allowed_paths : string list)
-  : string list
-  =
-  let root = project_root_of_config config in
-  allowed_paths |> List.filter_map (normalize_allowed_path_for_check ~root)
-;;
-
-let absolute_allowed_paths_result ~(config : Workspace.config) ~(allowed_paths : string list)
-  : (string list, string) result
-  =
-  let normalized = absolute_allowed_paths ~config ~allowed_paths in
-  if allowed_paths <> [] && normalized = []
-  then
-    (* Tier A3 / Cycle 6: redact the raw [allowed_paths] list — those
-       strings frequently include host-absolute prefixes that should
-       not flow back to the LLM caller. The count is enough for the
-       caller to know "you provided N entries, none were valid". *)
-    Error
-      (Printf.sprintf
-         "allowed_paths_normalized_empty: %d entries provided, none resolved to a valid \
-          path"
-         (List.length allowed_paths))
-  else Ok normalized
-;;
-
 type confined_path =
   { root : string
   ; root_identity : resource_identity option

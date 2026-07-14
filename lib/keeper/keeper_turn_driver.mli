@@ -76,7 +76,6 @@ val run_named :
   ?initial_messages:Agent_sdk.Types.message list ->
   ?model_input_projection:
     (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) ->
-  max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->
@@ -88,7 +87,6 @@ val run_named :
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
   ?transport:Masc_grpc_transport.t ->
-  ?allowed_paths:string list ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->

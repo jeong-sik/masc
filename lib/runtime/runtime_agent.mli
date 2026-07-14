@@ -64,10 +64,7 @@ type config = Runtime_agent_context.config = {
   model_id : string;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  max_turns : int;
-  max_idle_turns : int;
   stream_idle_timeout_s : float option;
-  max_execution_time_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
   temperature : float option;
@@ -83,7 +80,6 @@ type config = Runtime_agent_context.config = {
   enable_thinking : bool option;
   preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
-  allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;

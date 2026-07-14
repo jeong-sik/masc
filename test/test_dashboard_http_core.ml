@@ -1774,6 +1774,38 @@ let test_lifecycle_event_display_values () =
         (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name))
     cases
 
+let test_composite_blocked_ignores_observational_budget_metadata () =
+  let execution ~terminal_reason_code ~operator_disposition_reason =
+    `Assoc
+      [ "terminal_reason_code", `String terminal_reason_code
+      ; "operator_disposition", `String "pass"
+      ; "operator_disposition_reason", `String operator_disposition_reason
+      ; "error", `Null
+      ]
+  in
+  let blocked = Server_dashboard_http_composite_claims.composite_execution_blocked in
+  check bool
+    "budget observation does not block a successful execution"
+    false
+    (blocked
+       (execution
+          ~terminal_reason_code:"success"
+          ~operator_disposition_reason:"turn_budget_exhausted(3/3)"));
+  check bool
+    "removed budget terminal wire gets no legacy pass exception"
+    true
+    (blocked
+       (execution
+          ~terminal_reason_code:"turn_budget_exhausted(3/3)"
+          ~operator_disposition_reason:"success"));
+  check bool
+    "removed budget terminal wire follows the generic unknown-failure path"
+    true
+    (blocked
+       (execution
+          ~terminal_reason_code:"opaque_terminal_failure"
+          ~operator_disposition_reason:"success"))
+
 let () =
   run "dashboard_http_core"
     [
@@ -1875,6 +1907,8 @@ let () =
             test_keeper_chat_receipt_route_and_json;
           test_case "keeper chat recovery route is exact" `Quick
             test_keeper_chat_recovery_route_is_exact;
+          test_case "composite budget metadata stays observational" `Quick
+            test_composite_blocked_ignores_observational_budget_metadata;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "event_of_string round-trips to_string" `Quick

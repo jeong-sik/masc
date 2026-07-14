@@ -4,7 +4,11 @@
     The public descriptor exposes one command SSOT: a non-empty [argv] process
     vector for a single process, or [pipeline] containing non-empty [argv]
     vectors for explicit Shell IR pipelines. Raw [cmd] strings and the retired
-    duplicate [executable] field are intentionally absent from the schema. *)
+    duplicate [executable] field are intentionally absent from the schema.
+
+    Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout,
+    stderr. This sentence is the contract line checked by
+    scripts/check-execute-async-surface.sh — update both together. *)
 
 let tool_execute_exec_stage_schema =
   `Assoc

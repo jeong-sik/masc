@@ -24,15 +24,25 @@ val get_fs_opt : unit -> Eio.Fs.dir_ty Eio.Path.t option
 (** Check if Eio fs is available. *)
 val has_fs : unit -> bool
 
+type exact_path_kind =
+  | Exact_missing
+  | Exact_kind of Unix.file_kind
+  | Exact_unknown
+
+(** Eio-native exact path classification. Unlike {!path_kind}, this preserves
+    regular files, symbolic links, FIFOs, sockets, and devices as distinct
+    [Unix.file_kind] values. [follow=false] is suitable for owned-file read
+    boundaries that must reject links and special files before I/O. *)
+val exact_path_kind : ?follow:bool -> string -> exact_path_kind
+
 type path_kind =
   | Missing
   | Directory
   | Other
 
-(** Eio-native path classification with the same Unix fallback as the other
-    compatibility operations. [follow=false] classifies a symbolic link as
-    [Other] instead of classifying its target. Non-missing I/O failures remain
-    explicit. *)
+(** Coarse projection of {!exact_path_kind}. [follow=false] classifies a
+    symbolic link as [Other] instead of classifying its target. Non-missing
+    I/O failures remain explicit. *)
 val path_kind : ?follow:bool -> string -> path_kind
 
 type owned_directory_chain_rejection = Owned_directory_chain.rejection =

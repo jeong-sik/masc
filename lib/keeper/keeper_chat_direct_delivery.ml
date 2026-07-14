@@ -85,11 +85,6 @@ type transcript_slot =
   | User_transcript
   | Assistant_transcript
 
-type async_terminal_rejection =
-  | Nonterminal_status of Keeper_msg_async.request_status
-  | Volatile_terminal
-  | Projection_failure of Keeper_msg_async.load_result
-
 type removal_failure =
   { removed : bool
   ; detail : string
@@ -124,7 +119,7 @@ type error =
       ; detail : string
       }
   | Persistence_failed of persistence_failure
-  | Async_terminal_rejected of async_terminal_rejection
+  | Async_terminal_rejected of Keeper_msg_async.canonical_terminal_error
   | Async_terminal_identity_mismatch
   | Removal_requires_transcript_commit of phase_kind
   | Removal_failed of removal_failure
@@ -157,11 +152,8 @@ type lane_inventory =
       }
 
 type async_terminal_proof =
-  { canonical_base_path : string
-  ; request_id : Request_id.t
-  ; keeper_name : string
-  ; submitted_by : string
-  ; checkpoint_created_at : float
+  { canonical_terminal : Keeper_msg_async.durable_terminal_proof
+  ; checkpoint : t
   }
 
 let schema_version = 1
@@ -191,23 +183,6 @@ let operation_to_string = function
   | Mark_running -> "mark_running"
   | Stage_effect -> "stage_effect"
   | Commit_transcript -> "commit_transcript"
-;;
-
-let status_kind = function
-  | Keeper_msg_async.Queued -> "queued"
-  | Keeper_msg_async.Running -> "running"
-  | Keeper_msg_async.Cancelling _ -> "cancelling"
-  | Keeper_msg_async.Lost _ -> "lost"
-  | Keeper_msg_async.Cancelled _ -> "cancelled"
-  | Keeper_msg_async.Persistence_failed _ -> "persistence_failed"
-  | Keeper_msg_async.Done _ -> "done"
-;;
-
-let load_result_kind = function
-  | Keeper_msg_async.Found _ -> "found"
-  | Keeper_msg_async.Absent -> "absent"
-  | Keeper_msg_async.Unreadable _ -> "unreadable"
-  | Keeper_msg_async.Rejected _ -> "rejected"
 ;;
 
 let error_to_string = function
@@ -260,12 +235,9 @@ let error_to_string = function
       failure.target_revision
       publication
       failure.detail
-  | Async_terminal_rejected (Nonterminal_status status) ->
-    "direct delivery async proof rejected nonterminal status: " ^ status_kind status
-  | Async_terminal_rejected Volatile_terminal ->
-    "direct delivery async proof requires durable terminal settlement"
-  | Async_terminal_rejected (Projection_failure result) ->
-    "direct delivery canonical async lookup failed: " ^ load_result_kind result
+  | Async_terminal_rejected error ->
+    "direct delivery canonical async lookup failed: "
+    ^ Keeper_msg_async.canonical_terminal_error_to_string error
   | Async_terminal_identity_mismatch ->
     "direct delivery canonical async identity mismatch"
   | Removal_requires_transcript_commit actual ->
@@ -1556,65 +1528,35 @@ let commit_transcript_with_io io ~base_path ~identity ~now =
 
 let commit_transcript = commit_transcript_with_io production_io
 
-let terminal_status = function
-  | Keeper_msg_async.Done _
-  | Keeper_msg_async.Lost _
-  | Keeper_msg_async.Cancelled _
-  | Keeper_msg_async.Persistence_failed _ -> true
-  | Keeper_msg_async.Queued
-  | Keeper_msg_async.Running
-  | Keeper_msg_async.Cancelling _ -> false
-;;
-
-let prove_async_terminal ~base_path ~(identity : t) settlement =
+let observe_async_terminal ~base_path ~(identity : t) =
   let* base_path = canonical_base_path base_path in
-  let* status =
-    match settlement with
-    | Keeper_msg_async.Status_settlement
-        { status; durability = Keeper_msg_async.Durable; _ }
-      when terminal_status status -> Ok status
-    | Keeper_msg_async.Status_settlement
-        { status; durability = Keeper_msg_async.Durable; _ } ->
-      Error (Async_terminal_rejected (Nonterminal_status status))
-    | Keeper_msg_async.Status_settlement
-        { durability = Keeper_msg_async.Volatile_persistence_failure; _ } ->
-      Error (Async_terminal_rejected Volatile_terminal)
-    | Keeper_msg_async.Settlement_projection_error { poll_result } ->
-      Error (Async_terminal_rejected (Projection_failure poll_result))
-  in
   let request_id_wire = Request_id.to_string identity.request_id in
-  match
-    Keeper_msg_async.poll
+  let* proof =
+    Keeper_msg_async.load_canonical_durable_terminal
       ~base_path
       ~caller:identity.payload.submitted_by
       request_id_wire
-  with
-  | Keeper_msg_async.Found entry
-    when String.equal entry.request_id request_id_wire
-         && String.equal entry.keeper_name identity.payload.keeper_name
-         && String.equal entry.base_path base_path
-         && String.equal entry.submitted_by identity.payload.submitted_by
-         && entry.status = status ->
-    Ok
-      { canonical_base_path = base_path
-      ; request_id = identity.request_id
-      ; keeper_name = identity.payload.keeper_name
-      ; submitted_by = identity.payload.submitted_by
-      ; checkpoint_created_at = identity.created_at
-      }
-  | Keeper_msg_async.Found _ -> Error Async_terminal_identity_mismatch
-  | (Keeper_msg_async.Absent
-    | Keeper_msg_async.Unreadable _
-    | Keeper_msg_async.Rejected _) as poll_result ->
-    Error (Async_terminal_rejected (Projection_failure poll_result))
+    |> Result.map_error (fun error -> Async_terminal_rejected error)
+  in
+  let entry = Keeper_msg_async.durable_terminal_entry proof in
+  if
+    String.equal entry.request_id request_id_wire
+    && String.equal entry.keeper_name identity.payload.keeper_name
+    && String.equal entry.base_path base_path
+    && String.equal entry.submitted_by identity.payload.submitted_by
+  then Ok { canonical_terminal = proof; checkpoint = identity }
+  else Error Async_terminal_identity_mismatch
 ;;
 
 let proof_matches ~base_path (identity : t) proof =
-  String.equal proof.canonical_base_path base_path
-  && Request_id.equal proof.request_id identity.request_id
-  && String.equal proof.keeper_name identity.payload.keeper_name
-  && String.equal proof.submitted_by identity.payload.submitted_by
-  && Float.equal proof.checkpoint_created_at identity.created_at
+  let entry =
+    Keeper_msg_async.durable_terminal_entry proof.canonical_terminal
+  in
+  to_yojson proof.checkpoint = to_yojson identity
+  && String.equal entry.base_path base_path
+  && String.equal entry.request_id (Request_id.to_string identity.request_id)
+  && String.equal entry.keeper_name identity.payload.keeper_name
+  && String.equal entry.submitted_by identity.payload.submitted_by
 ;;
 
 let remove_after_async_terminal_with_io

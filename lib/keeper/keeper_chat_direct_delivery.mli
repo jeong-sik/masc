@@ -3,8 +3,8 @@
     This module is subordinate to {!Keeper_msg_async}: it never owns queue
     receipts, request execution, or terminal request truth.  It only closes the
     two crash windows around the direct request's user and assistant transcript
-    rows.  Once the transcript is committed and the caller presents a durable
-    terminal settlement from [Keeper_msg_async], the checkpoint is removed.
+    rows.  Once the transcript is committed and the caller presents canonical
+    durable terminal proof from [Keeper_msg_async], the checkpoint is removed.
 
     Records live in a versioned direct-only directory.  The retired
     [.chat-deliveries] namespace is deliberately outside this module's read,
@@ -101,11 +101,6 @@ type transcript_slot =
   | User_transcript
   | Assistant_transcript
 
-type async_terminal_rejection =
-  | Nonterminal_status of Keeper_msg_async.request_status
-  | Volatile_terminal
-  | Projection_failure of Keeper_msg_async.load_result
-
 type removal_failure =
   { removed : bool
   ; detail : string
@@ -140,7 +135,7 @@ type error =
       ; detail : string
       }
   | Persistence_failed of persistence_failure
-  | Async_terminal_rejected of async_terminal_rejection
+  | Async_terminal_rejected of Keeper_msg_async.canonical_terminal_error
   | Async_terminal_identity_mismatch
   | Removal_requires_transcript_commit of phase_kind
   | Removal_failed of removal_failure
@@ -185,15 +180,16 @@ val load :
   request_id:Request_id.t ->
   (t, error) result
 
-(** Opaque evidence that the exact direct request reached a durably committed
-    terminal state in [Keeper_msg_async].  Construct this only from the
-    [on_worker_settled] callback's typed settlement. *)
+(** Opaque canonical terminal proof bound to the exact immutable direct
+    checkpoint observed at proof construction. *)
 type async_terminal_proof
 
-val prove_async_terminal :
+(** Obtain [Keeper_msg_async]'s canonical-disk proof and bind it to the exact
+    direct checkpoint.  Process-local volatile terminal overlays cannot satisfy
+    this lookup. *)
+val observe_async_terminal :
   base_path:string ->
   identity:t ->
-  Keeper_msg_async.worker_settlement ->
   (async_terminal_proof, error) result
 
 (** Remove the active checkpoint only when it is still the exact supplied

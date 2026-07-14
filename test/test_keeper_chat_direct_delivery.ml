@@ -2,6 +2,7 @@ open Alcotest
 
 module Direct = Masc.Keeper_chat_direct_delivery
 module Keeper_chat_store = Masc.Keeper_chat_store
+module Keeper_fs = Masc.Keeper_fs
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Surface_ref = Masc.Surface_ref
@@ -90,16 +91,18 @@ type flow =
   ; transcript_committed : Direct.t
   }
 
-let complete_flow ~base_path ~request_id =
+let complete_flow ?(time_offset = 0.0) ~base_path ~request_id =
+  let at value = time_offset +. value in
   let prepared =
-    Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:1.0
+    Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:(at 1.0)
     |> expect_ok
   in
   let user_committed =
-    Direct.commit_user_row ~base_path ~identity:prepared ~now:2.0 |> expect_ok
+    Direct.commit_user_row ~base_path ~identity:prepared ~now:(at 2.0)
+    |> expect_ok
   in
   let running =
-    Direct.mark_running ~base_path ~identity:user_committed ~now:3.0
+    Direct.mark_running ~base_path ~identity:user_committed ~now:(at 3.0)
     |> expect_ok
   in
   let effect_staged =
@@ -107,14 +110,14 @@ let complete_flow ~base_path ~request_id =
       ~base_path
       ~identity:running
       ~staged:(assistant_effect ())
-      ~now:4.0
+      ~now:(at 4.0)
     |> expect_ok
   in
   let transcript_committed =
     Direct.commit_transcript
       ~base_path
       ~identity:effect_staged
-      ~now:5.0
+      ~now:(at 5.0)
     |> expect_ok
   in
   { prepared; user_committed; running; effect_staged; transcript_committed }
@@ -412,14 +415,9 @@ let accepted_request_id = function
     fail (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
 ;;
 
-let durable_settlement ~background_sw ~base_path ~request_id =
+let await_settlement ~ops ~background_sw ~base_path ~request_id =
   let settlement, resolve_settlement = Eio.Promise.create () in
   let delivered = Atomic.make false in
-  let ops =
-    Keeper_msg_async.For_testing.make_request_ops
-      ~generate_request_id:(fun () -> Direct.Request_id.to_string request_id)
-      ()
-  in
   let submitted_request_id =
     Keeper_msg_async.For_testing.submit
       ops
@@ -441,19 +439,36 @@ let durable_settlement ~background_sw ~base_path ~request_id =
   Eio.Promise.await settlement
 ;;
 
+let expect_durable_done = function
+  | Keeper_msg_async.Status_settlement
+      { status = Keeper_msg_async.Done _
+      ; durability = Keeper_msg_async.Durable
+      ; _
+      } -> ()
+  | _ -> fail "expected a durably committed terminal settlement"
+;;
+
 let test_remove_requires_canonical_terminal_proof_and_reports_ambiguity _env =
   with_temp_dir (fun base_path ->
     Eio.Switch.run (fun background_sw ->
       let request_id = request_id "direct-remove-proof" in
       let flow = complete_flow ~base_path ~request_id in
-      let settlement =
-        durable_settlement ~background_sw ~base_path ~request_id
+      let ops =
+        Keeper_msg_async.For_testing.make_request_ops
+          ~generate_request_id:(fun () -> Direct.Request_id.to_string request_id)
+          ()
       in
+      let settlement =
+        await_settlement ~ops ~background_sw ~base_path ~request_id
+      in
+      expect_durable_done settlement;
+      (* Model startup after the worker has durably settled: the proof must be
+         reconstructible from the exact canonical terminal record alone. *)
+      Keeper_msg_async.For_testing.clear ();
       let proof =
-        Direct.prove_async_terminal
+        Direct.observe_async_terminal
           ~base_path
           ~identity:flow.transcript_committed
-          settlement
         |> expect_ok
       in
       let remove_io =
@@ -474,10 +489,132 @@ let test_remove_requires_canonical_terminal_proof_and_reports_ambiguity _env =
        | Error (Direct.Removal_failed { removed = true; _ }) -> ()
        | Error error -> fail (Direct.error_to_string error)
        | Ok () -> fail "post-unlink ambiguity was silently reported as success");
+      (match Direct.load ~base_path ~keeper_name:"sangsu" ~request_id with
+       | Error (Direct.Not_found _) -> ()
+       | Error error -> fail (Direct.error_to_string error)
+       | Ok _ -> fail "active checkpoint survived an observed unlink");
+      let replacement =
+        complete_flow ~time_offset:10.0 ~base_path ~request_id
+      in
+      (match
+         Direct.remove_after_async_terminal
+           ~base_path
+           ~identity:replacement.transcript_committed
+           ~proof
+       with
+       | Error Direct.Async_terminal_identity_mismatch -> ()
+       | Error error -> fail (Direct.error_to_string error)
+       | Ok () -> fail "terminal proof was replayed against a later checkpoint");
       match Direct.load ~base_path ~keeper_name:"sangsu" ~request_id with
-      | Error (Direct.Not_found _) -> ()
-      | Error error -> fail (Direct.error_to_string error)
-      | Ok _ -> fail "active checkpoint survived an observed unlink"))
+      | Ok checkpoint ->
+        check bool
+          "replacement checkpoint survives stale proof"
+          true
+          (Float.equal
+             replacement.transcript_committed.created_at
+             checkpoint.created_at)
+      | Error error -> fail (Direct.error_to_string error)))
+;;
+
+let test_startup_checkpoint_rejects_volatile_poll_terminal _env =
+  with_temp_dir (fun base_path ->
+    Eio.Switch.run (fun background_sw ->
+      let request_id = request_id "direct-volatile-terminal" in
+      let flow = complete_flow ~base_path ~request_id in
+      let publications = Atomic.make 0 in
+      let ops =
+        Keeper_msg_async.For_testing.make_request_ops
+          ~generate_request_id:(fun () -> Direct.Request_id.to_string request_id)
+          ~before_durable_write:(fun stage ->
+            match stage with
+            | Keeper_fs.Parent_directory_fsync_after_rename ->
+              let ordinal = Atomic.fetch_and_add publications 1 + 1 in
+              if ordinal = 3
+              then failwith "synthetic terminal publication ambiguity"
+            | Keeper_fs.Directory_prepare
+            | Keeper_fs.Temp_file_create
+            | Keeper_fs.Payload_write
+            | Keeper_fs.Payload_fsync
+            | Keeper_fs.Temp_file_close
+            | Keeper_fs.Atomic_rename
+            | Keeper_fs.Temp_directory_fsync_after_rename -> ())
+          ()
+      in
+      let settlement =
+        await_settlement ~ops ~background_sw ~base_path ~request_id
+      in
+      (match settlement with
+       | Keeper_msg_async.Status_settlement
+           { status = Keeper_msg_async.Done _
+           ; durability = Keeper_msg_async.Volatile_persistence_failure
+           ; _
+           } -> ()
+       | _ -> fail "expected a visible terminal with ambiguous durability");
+      let request_id_wire = Direct.Request_id.to_string request_id in
+      (match Keeper_msg_async.poll ~base_path ~caller:"owner" request_id_wire with
+       | Keeper_msg_async.Found { status = Keeper_msg_async.Done _; _ } -> ()
+       | _ -> fail "expected volatile poll to expose the typed terminal overlay");
+      (match
+         Direct.observe_async_terminal
+           ~base_path
+           ~identity:flow.transcript_committed
+       with
+       | Error
+           (Direct.Async_terminal_rejected
+              (Keeper_msg_async.Canonical_terminal_publication_ambiguous
+                 (Keeper_msg_async.Done _))) -> ()
+       | Error error -> fail (Direct.error_to_string error)
+       | Ok _ -> fail "volatile poll terminal was promoted to a durable proof");
+      match Direct.load ~base_path ~keeper_name:"sangsu" ~request_id with
+      | Ok checkpoint ->
+        check int64
+          "startup checkpoint remains until canonical durability is proven"
+          flow.transcript_committed.revision
+          checkpoint.revision
+      | Error error -> fail (Direct.error_to_string error)))
+;;
+
+let test_corrupt_canonical_terminal_is_typed_and_preserved _env =
+  with_temp_dir (fun base_path ->
+    Eio.Switch.run (fun background_sw ->
+      let request_id = request_id "direct-corrupt-terminal" in
+      let flow = complete_flow ~base_path ~request_id in
+      let request_id_wire = Direct.Request_id.to_string request_id in
+      let ops =
+        Keeper_msg_async.For_testing.make_request_ops
+          ~generate_request_id:(fun () -> request_id_wire)
+          ()
+      in
+      await_settlement ~ops ~background_sw ~base_path ~request_id
+      |> expect_durable_done;
+      Keeper_msg_async.For_testing.clear ();
+      let terminal_path =
+        match
+          Keeper_msg_async.For_testing.terminal_record_path
+            ~base_path
+            ~request_id:request_id_wire
+        with
+        | Some path -> path
+        | None -> fail "expected a canonical terminal path"
+      in
+      Fs_compat.save_file terminal_path "{corrupt";
+      (match
+         Direct.observe_async_terminal
+           ~base_path
+           ~identity:flow.transcript_committed
+       with
+       | Error
+           (Direct.Async_terminal_rejected
+              (Keeper_msg_async.Canonical_terminal_unreadable _)) -> ()
+       | Error error -> fail (Direct.error_to_string error)
+       | Ok _ -> fail "corrupt canonical terminal produced a durable proof");
+      match Direct.load ~base_path ~keeper_name:"sangsu" ~request_id with
+      | Ok checkpoint ->
+        check int64
+          "corrupt async evidence preserves the direct checkpoint"
+          flow.transcript_committed.revision
+          checkpoint.revision
+      | Error error -> fail (Direct.error_to_string error)))
 ;;
 
 let () =
@@ -513,6 +650,14 @@ let () =
             "removal requires canonical durable terminal proof"
             `Quick
             test_remove_requires_canonical_terminal_proof_and_reports_ambiguity
+        ; eio_test_case
+            "startup checkpoint rejects volatile poll terminal"
+            `Quick
+            test_startup_checkpoint_rejects_volatile_poll_terminal
+        ; eio_test_case
+            "corrupt canonical terminal is typed and preserved"
+            `Quick
+            test_corrupt_canonical_terminal_is_typed_and_preserved
         ] )
     ]
 ;;

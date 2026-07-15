@@ -58,12 +58,6 @@ type preset =
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
-  ; min_answered : int
-      (** 심판을 돌리기 위해 응답해야 하는 패널 최소 수 (런타임 quorum). 기본 1.
-          [answered_of] 수가 이 값 미만이면 orchestrator는 심판을 건너뛰고
-          [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
-          허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
-          명시적으로 설정할 수 있다. *)
   ; judge_wave_budget_s : float
       (** 1차 심판 wave 전체 wall-clock 예산 (초). 0=비활성(legacy). *)
   ; adaptive_timeout_factor : float
@@ -72,11 +66,6 @@ type preset =
       (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
   }
 [@@deriving show, eq]
-
-(** [min_answered] 하한과 기본값. 기본 1 = "응답 패널이 1개도 없을 때만 judge skip". *)
-val min_answered_floor : int
-
-val default_min_answered : int
 
 (** Default staged JOJ group size. A staged judge-of-judges run groups first
     judges into fixed-size cohorts before a final meta reduction; default 3
@@ -206,10 +195,6 @@ module Validated_preset : sig
         (** 그룹/심판 max_output_tokens override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
-    | Min_answered_below_min of int
-        (** [min_answered]가 하한 [min_answered_floor] 미만. *)
-    | Min_answered_above_max of int
-        (** [min_answered]가 패널 모델 총합을 초과. *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
     | Bad_judge_wave_budget of float
@@ -219,7 +204,7 @@ module Validated_preset : sig
         (** [adaptive_timeout_factor]가 1.0 미만. *)
 
   (** 검증 순서: non-empty models → prompt → judge → 정체성 중복 → max_output_tokens →
-      1차 심판 prompt/정체성/max_output_tokens → min_answered → timeout 예산/계수.
+      1차 심판 prompt/정체성/max_output_tokens → timeout 예산/계수.
       통과 시 [Ok vp], 첫 위반에서 [Error invalid].
       config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result

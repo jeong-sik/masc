@@ -232,13 +232,14 @@ let turn_resources_error failure =
        ])
 ;;
 
-let preflight_keeper_msg ctx args : (unit, string) result =
+let preflight_keeper_msg ctx args :
+    (Keeper_invocation_contract.request, string) result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
-  if not (validate_name name) then
-    Error (invalid_name_error name)
-  else if message = "" then Error "message is required"
-  else
+  match Keeper_invocation_contract.request ~keeper_name:name ~prompt:message with
+  | Error error ->
+    Error (Keeper_invocation_contract.request_error_to_string error)
+  | Ok request ->
     let direct_reply = get_bool args "direct_reply" false in
     match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> Error e
@@ -268,7 +269,8 @@ let preflight_keeper_msg ctx args : (unit, string) result =
         match Keeper_types_support.ensure_api_keys_for_labels effective_models with
         | Error e -> Error e
         | Ok () ->
-          Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
+          Keeper_turn_helpers.ensure_local_discovery_ready effective_models
+          |> Result.map (fun () -> request))))
 
 (* -- Direct-message turn FSM wrapper ---------------------------------------- *)
 

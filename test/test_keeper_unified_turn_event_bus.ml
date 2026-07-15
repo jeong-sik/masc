@@ -4,9 +4,13 @@
 
 open Alcotest
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 module EB = Masc.Keeper_unified_turn_event_bus
+module Invocation = Masc.Keeper_invocation_contract
 module Kmsg = Masc.Keeper_msg_async
 module Ops = Masc.Keeper_tool_surface_ops
+module Turn_outcome = Masc.Keeper_turn_outcome
 
 let dummy_event payload =
   { Agent_sdk.Event_bus.meta =
@@ -260,6 +264,12 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
   let captured_bus = Agent_sdk.Event_bus.create () in
   let later_bus = Agent_sdk.Event_bus.create () in
   let observed_bus = ref None in
+  let request =
+    match Invocation.request ~keeper_name:"event-bus-test" ~prompt:"run" with
+    | Ok request -> request
+    | Error error ->
+      Alcotest.fail (Invocation.request_error_to_string error)
+  in
   Keeper_event_bus.set captured_bus;
   Fun.protect
     ~finally:(fun () ->
@@ -271,8 +281,8 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
            ~background_sw:sw
            ~base_path
            ~caller:keeper_msg_caller
-           ~keeper_name:"event-bus-test"
-           ~f:(fun ?event_bus _request_sw ->
+           ~request
+           ~f:(fun ?event_bus _request _request_sw ->
              Keeper_event_bus.set later_bus;
              observed_bus := event_bus;
              Tool_result.ok ~tool_name:"keeper-event-bus-test" ~start_time:0.0 "{}")
@@ -321,6 +331,15 @@ let test_keeper_msg_submission_projection_has_unique_keys () =
     ; acceptance = Kmsg.Reconciliation_required { reason }
     }
   in
+  let request =
+    match
+      Invocation.request
+        ~keeper_name:"projection-keeper"
+        ~prompt:"inspect this request"
+    with
+    | Ok request -> request
+    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
+  in
   let core_fields =
     Kmsg.submit_outcome_to_json outcome
     |> require_unique_assoc "core reconciliation outcome"
@@ -334,12 +353,34 @@ let test_keeper_msg_submission_projection_has_unique_keys () =
        (function `String value -> Some value | _ -> None));
   let tool_fields =
     Ops.For_testing.submit_outcome_with_keeper_json
-      ~keeper_name:"projection-keeper"
+      ~request
       outcome
     |> require_unique_assoc "tool reconciliation outcome"
   in
   check bool "operator instruction is explicit" true
     (List.mem_assoc "operator_instruction" tool_fields);
+  check bool "typed run reference is present" true
+    (List.mem_assoc "run_ref" tool_fields);
+  check
+    (option string)
+    "uncertain publication is not reported as queued"
+    (Some "publication_uncertain")
+    (match List.assoc_opt "result_contract" tool_fields with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  let durable_fields =
+    Ops.For_testing.submit_outcome_with_keeper_json
+      ~request
+      { outcome with acceptance = Kmsg.Durably_accepted }
+    |> require_unique_assoc "durable tool submission outcome"
+  in
+  check
+    (option string)
+    "durable submission is queued"
+    (Some "queued")
+    (match List.assoc_opt "status" durable_fields with
+     | Some (`String value) -> Some value
+     | _ -> None);
   let entry : Kmsg.entry =
     { request_id = "kmsg-entry-projection"
     ; keeper_name = "projection-keeper"
@@ -350,14 +391,52 @@ let test_keeper_msg_submission_projection_has_unique_keys () =
     ; completed_at = None
     }
   in
+  let entry_json =
+    match Invocation.entry_to_json entry with
+    | Ok json -> json
+    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
+  in
   let entry_fields =
-    Kmsg.entry_to_json entry |> require_unique_assoc "request entry projection"
+    entry_json |> require_unique_assoc "request entry projection"
   in
   check int "entry status is projected exactly once" 1
     (List.fold_left
        (fun count (key, _) -> if String.equal key "status" then count + 1 else count)
        0
-       entry_fields)
+       entry_fields);
+  check bool "running contract is typed" true
+    (Invocation.result_contract entry = Invocation.Running);
+  let yielded_entry =
+    { entry with
+      status =
+        Kmsg.Done
+          { ok = true
+          ; body = "checkpoint"
+          ; data =
+              Some
+                (`Assoc
+                   [ ( Turn_outcome.wire_key
+                     , `String
+                         (Turn_outcome.to_label
+                            Turn_outcome.Continuation_checkpoint) )
+                   ])
+          }
+    }
+  in
+  check bool "yield is distinct from completion" true
+    (Invocation.result_contract yielded_entry = Invocation.Yielded);
+  let cancelled_entry =
+    { entry with
+      status = Kmsg.Cancelled { reason = "operator"; cancelled_by = "operator" }
+    }
+  in
+  check bool "cancel is distinct from failure" true
+    (Invocation.result_contract cancelled_entry = Invocation.Cancelled);
+  let failed_entry =
+    { entry with status = Kmsg.Done { ok = false; body = "failed"; data = None } }
+  in
+  check bool "failure is distinct from completion" true
+    (Invocation.result_contract failed_entry = Invocation.Failed)
 ;;
 
 let test_take_drain_cancel_clears_active_without_spin () =

@@ -14,6 +14,7 @@ and worker_start_error =
 
 type restored_inventory =
   { operations : Keeper_shutdown_types.t list
+  ; retired_terminal_records : Keeper_shutdown_store.retired_terminal_record list
   ; blocked_keeper_names : string list
   ; corrupt_records : Keeper_shutdown_store.corrupt_record list
   }
@@ -62,10 +63,11 @@ let restore_admission ~config ~keeper_name ~operation_id =
 ;;
 
 let restore_inventory_admission ~config inventory =
-  let rec loop operations blocked corrupt_records = function
+  let rec loop operations retired_terminal_records blocked corrupt_records = function
     | [] ->
       Ok
         { operations = List.rev operations
+        ; retired_terminal_records = List.rev retired_terminal_records
         ; blocked_keeper_names = List.sort_uniq String.compare blocked
         ; corrupt_records = List.rev corrupt_records
         }
@@ -82,10 +84,33 @@ let restore_inventory_admission ~config inventory =
          | Ok () ->
            loop
              (operation :: operations)
+             retired_terminal_records
              (operation.keeper_name :: blocked)
              corrupt_records
              rest)
-      else loop (operation :: operations) blocked corrupt_records rest
+      else
+        loop
+          (operation :: operations)
+          retired_terminal_records
+          blocked
+          corrupt_records
+          rest
+    | Keeper_shutdown_store.Retired_terminal terminal :: rest ->
+      (match
+         Keeper_turn_admission.rollback_shutdown
+           ~base_path:config.Workspace.base_path
+           ~keeper_name:terminal.keeper_name
+           ~operation_id:terminal.operation_id
+       with
+       | Keeper_turn_admission.Shutdown_rolled_back
+       | Keeper_turn_admission.Shutdown_not_reserved
+       | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+         loop
+           operations
+           (terminal :: retired_terminal_records)
+           blocked
+           corrupt_records
+           rest)
     | Keeper_shutdown_store.Corrupt_record corrupt :: rest ->
       (match
          restore_admission
@@ -97,11 +122,12 @@ let restore_inventory_admission ~config inventory =
        | Ok () ->
          loop
            operations
+           retired_terminal_records
            (corrupt.keeper_name :: blocked)
            (corrupt :: corrupt_records)
            rest)
   in
-  loop [] [] [] inventory
+  loop [] [] [] [] inventory
 ;;
 
 let worker_mu = Eio.Mutex.create ()

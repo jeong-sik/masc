@@ -248,6 +248,49 @@ let shutdown_schema5_fixture (operation : Shutdown_types.t) =
   | _ -> fail "shutdown JSON codec did not return an object"
 ;;
 
+let retired_stale_paused_schema5_fixture (operation : Shutdown_types.t) =
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> replace_assoc_field "schema_version" (`Int 5)
+       |> replace_assoc_field
+            "cleanup_intent"
+            (`Assoc
+              [ ( "reason"
+                , `Assoc
+                    [ "kind", `String "stale_paused_prune"
+                    ; "meta_version", `Int 21383
+                    ; "last_updated", `String "2026-07-11T09:04:05Z"
+                    ; "latched_reason", `Null
+                    ] )
+              ; "remove_session", `Bool false
+              ])
+       |> replace_assoc_field
+            "phase"
+            (`Assoc
+              [ "kind", `String "finalized"
+              ; ( "evidence"
+                , `Assoc
+                    [ ( "cleanup"
+                      , `Assoc
+                          [ "settled_task_ids", `List []
+                          ; "pending_confirms_removed", `Int 0
+                          ] )
+                    ; "meta_removed", `Bool true
+                    ; "session_removed", `Bool false
+                    ; "registry_unregistered", `Bool false
+                    ; "accumulator_dropped", `Bool true
+                    ; ( "completion"
+                      , `Assoc
+                          [ "kind", `String "delivered"
+                          ; "action", `String "paused_meta_pruned"
+                          ] )
+                    ] )
+              ]))
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
 let resolve_done_for_test reg value =
   ignore (R.resolve_done reg ~source:"test_fixture" value);
   match
@@ -1638,6 +1681,8 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
         List.fold_left
           (fun (operations, corrupt_records) -> function
              | Shutdown_store.Operation operation -> operation :: operations, corrupt_records
+             | Shutdown_store.Retired_terminal _ ->
+               fail "corrupt-owner fixture produced a retired terminal"
              | Shutdown_store.Corrupt_record corrupt ->
                operations, corrupt :: corrupt_records)
           ([], [])
@@ -1714,6 +1759,256 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           true
           (recovered.phase = recoverable_operation.phase)
       | Error detail -> fail detail)
+
+let test_retired_stale_paused_terminal_releases_exact_fence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "retired-stale-paused-terminal" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let meta = make_meta "retired-stale-paused-owner" in
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 3
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_ownership = Shutdown_types.Dormant_meta
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "keeper-autoboot"
+        ; cleanup_intent = remove_meta_cleanup
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase =
+            Shutdown_types.Finalized
+              { cleanup = { settled_task_ids = []; pending_confirms_removed = 0 }
+              ; meta_removed = true
+              ; session_removed = false
+              ; registry_unregistered = false
+              ; accumulator_dropped = true
+              ; completion = Shutdown_types.Completion_not_requested
+              }
+        ; created_at = "2026-07-12T09:36:07Z"
+        ; updated_at = "2026-07-12T09:36:07Z"
+        }
+      in
+      let blocked_meta = make_meta "current-blocked-owner" in
+      let blocked_operation_id = Shutdown_types.Operation_id.generate () in
+      let blocked_operation : Shutdown_types.t =
+        { operation with
+          operation_id = blocked_operation_id
+        ; keeper_name = blocked_meta.name
+        ; trace_id = blocked_meta.runtime.trace_id
+        ; cleanup_intent = retain_operator_cleanup
+        ; phase =
+            Shutdown_types.Blocked
+              { stage = Shutdown_types.Unhandled_worker
+              ; detail = "Sys_error(\"Mutex.lock: Resource deadlock avoided\")"
+              }
+        }
+      in
+      let malformed_meta = make_meta "retired-malformed-owner" in
+      let malformed_operation_id = Shutdown_types.Operation_id.generate () in
+      let malformed_operation : Shutdown_types.t =
+        { operation with
+          operation_id = malformed_operation_id
+        ; keeper_name = malformed_meta.name
+        ; trace_id = malformed_meta.runtime.trace_id
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match Shutdown_store.persist_new ~config blocked_operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match Shutdown_store.persist_new ~config malformed_operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let operation_path =
+        match Shutdown_store.path ~config ~keeper_name:meta.name operation_id with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match
+         Fs_compat.save_file_atomic
+           operation_path
+           (retired_stale_paused_schema5_fixture operation |> Yojson.Safe.to_string)
+       with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let malformed_operation_path =
+        match
+          Shutdown_store.path
+            ~config
+            ~keeper_name:malformed_meta.name
+            malformed_operation_id
+        with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let malformed_fixture =
+        match retired_stale_paused_schema5_fixture malformed_operation with
+        | `Assoc fields -> `Assoc (replace_assoc_field "trace_id" (`Int 7) fields)
+        | _ -> fail "retired fixture did not return an object"
+      in
+      (match
+         Fs_compat.save_file_atomic
+           malformed_operation_path
+           (Yojson.Safe.to_string malformed_fixture)
+       with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "retired fixture unexpectedly found an existing fence");
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:blocked_meta.name
+           ~operation_id:blocked_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "current blocked fixture unexpectedly found an existing fence");
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:malformed_meta.name
+           ~operation_id:malformed_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "malformed retired fixture unexpectedly found an existing fence");
+      let inventory =
+        match Shutdown_store.scan_inventory ~config with
+        | Ok inventory -> inventory
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let current_operations, retired_terminals, corrupt_records =
+        List.fold_left
+          (fun (operations, terminals, corrupt) -> function
+             | Shutdown_store.Operation current ->
+               current :: operations, terminals, corrupt
+             | Shutdown_store.Retired_terminal terminal ->
+               operations, terminal :: terminals, corrupt
+             | Shutdown_store.Corrupt_record record ->
+               operations, terminals, record :: corrupt)
+          ([], [], [])
+          inventory
+      in
+      (match retired_terminals with
+       | [ terminal ] ->
+         check string "retired terminal keeps path owner" meta.name terminal.keeper_name;
+         check bool
+           "retired terminal keeps operation identity"
+           true
+           (Shutdown_types.Operation_id.equal operation_id terminal.operation_id)
+       | _ -> fail "retired terminal was not isolated from current operations");
+      (match current_operations with
+       | [ current ] ->
+         check string
+           "current blocked operation remains current"
+           blocked_meta.name
+           current.keeper_name
+       | _ -> fail "current blocked operation changed inventory class");
+      (match corrupt_records with
+       | [ corrupt ] ->
+         check string
+           "malformed retired record keeps its path owner"
+           malformed_meta.name
+           corrupt.keeper_name;
+         check bool
+           "malformed retired record keeps its operation identity"
+           true
+           (Shutdown_types.Operation_id.equal
+              malformed_operation_id
+              corrupt.operation_id)
+       | _ -> fail "malformed retired record did not remain corrupt");
+      let restored =
+        match Shutdown_runtime.restore_inventory_admission ~config inventory with
+        | Ok restored -> restored
+        | Error detail -> fail detail
+      in
+      check
+        (list string)
+        "only the current blocked owner remains blocked"
+        [ blocked_meta.name; malformed_meta.name ]
+        restored.blocked_keeper_names;
+      check int "retired terminal remains observable" 1
+        (List.length restored.retired_terminal_records);
+      check bool
+        "retired terminal releases only its exact fence"
+        true
+        (Option.is_none
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+             ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id);
+      check
+        (option string)
+        "current blocked operation keeps its exact fence"
+        (Some (Shutdown_types.Operation_id.to_string blocked_operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:blocked_meta.name)
+             .snapshot_shutdown_operation_id);
+      check
+        (option string)
+        "malformed retired record keeps its exact fence"
+        (Some (Shutdown_types.Operation_id.to_string malformed_operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:malformed_meta.name)
+             .snapshot_shutdown_operation_id);
+      let newer_operation_id = Shutdown_types.Operation_id.generate () in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id:newer_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "newer shutdown fixture was already reserved");
+      (match Shutdown_runtime.restore_inventory_admission ~config inventory with
+       | Ok _ -> ()
+       | Error detail -> fail detail);
+      check
+        (option string)
+        "retired terminal does not clear a newer owner"
+        (Some (Shutdown_types.Operation_id.to_string newer_operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id))
 
 let test_dashboard_purge_resolution_is_fail_closed () =
   Eio_main.run @@ fun env ->
@@ -3262,6 +3557,8 @@ let () =
         test_operator_update_supersedes_exact_blocked_shutdown;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
+      test_case "retired stale paused terminal releases exact fence" `Quick
+        test_retired_stale_paused_terminal_releases_exact_fence;
       test_case "dashboard purge resolution is fail closed" `Quick
         test_dashboard_purge_resolution_is_fail_closed;
       test_case "shutdown prepare joins idle lane" `Quick

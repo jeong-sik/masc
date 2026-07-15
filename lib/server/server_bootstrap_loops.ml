@@ -499,7 +499,9 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
        ~stage:"shutdown"
        ~started:shutdown_started
        ~examined:
-         (List.length restored.operations + List.length restored.corrupt_records)
+         (List.length restored.operations
+          + List.length restored.retired_terminal_records
+          + List.length restored.corrupt_records)
        ~failures:(List.length restored.corrupt_records)
    | Error _ ->
      observe_preparation_stage
@@ -1104,6 +1106,14 @@ let start_keeper_loops_owned
      process-local sink is still absent. *)
   fork_subsystem "keeper_shutdown_recovery" (fun () ->
     let restored = claimed_persistence.claimed_report.shutdown in
+      List.iter
+        (fun terminal ->
+           Log.Keeper.info
+             "retired terminal shutdown operation recognized without an admission fence: keeper=%s operation=%s path=%s"
+             terminal.Keeper_shutdown_store.keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string terminal.operation_id)
+             terminal.path)
+        restored.retired_terminal_records;
       List.iter
         (fun corrupt ->
            Log.Keeper.error

@@ -18,18 +18,17 @@ open Alcotest
 
 let pinned_tag_dispatch_outcome_labels = [ "handled"; "no_handler" ]
 
-let pinned_total_telemetry_wrap_sites_across_entries = 5
+let pinned_total_telemetry_wrap_sites_across_entries = 4
 (** Cumulative wrap sites after PR-9:
     - PR-7 keeper turn: keeper_tool_registered_runtime.ml:164 + :218     (2 sites)
-    - PR-8 MCP server: mcp_server_eio_execute.ml:1065 + :1083 (2 sites)
+    - PR-8 MCP server: mcp_server_eio_execute.ml tag dispatch             (1 site)
     - PR-9 tag-dispatch fallback: keeper_tool_registered_runtime.ml:180+   (1 site)
-    Total: 5 wrap sites covering all three dispatch entries. *)
+    Total: 4 wrap sites covering all three dispatch entries. *)
 
 let pinned_dispatch_entries_covered = 3
 (** RFC-0084 §1.1 enumerates 3 dispatch entries:
     - Keeper turn (handler-registry dispatch)
-    - MCP server (tag-based dispatch via dispatch_by_tag /
-      dispatch_internal_keeper_runtime_tool)
+    - MCP server (tag-based dispatch via dispatch_by_tag)
     - Tag-dispatch fallback (keeper_tag_dispatch.ml /
       Keeper_tool_shared_runtime.tag_dispatch_fn)
     PR-9 brings all 3 to telemetry parity. *)
@@ -59,8 +58,8 @@ let test_no_handler_label_present () =
 let test_cumulative_wrap_site_count () =
   (check int)
     "cumulative Tool_telemetry.with_span wrap sites across 3 dispatch entries \
-     (PR-7 = 2, PR-8 = 2, PR-9 = 1; total 5)"
-    5
+     (PR-7 = 2, PR-8 = 1, PR-9 = 1; total 4)"
+    4
     pinned_total_telemetry_wrap_sites_across_entries
 ;;
 

@@ -9,8 +9,8 @@ open Alcotest
     Tool_operator, Tool_local_runtime, ...) rather than handler-registry
     dispatch.
 
-    Instead, PR-8 wraps the two MCP caller sites (mcp_server_eio_execute
-    .ml:1065 and :1083) with Tool_telemetry.with_span directly. This
+    Instead, PR-8 wraps the MCP tag-dispatch caller site with
+    Tool_telemetry.with_span directly. This
     test verifies the wrapper invariants hold: the with_span call
     produces a 4-tuple emission shape identical to the keeper-turn path.
 
@@ -47,15 +47,13 @@ let test_no_handler_label_present () =
     (List.mem "no_handler" pinned_mcp_outcome_labels)
 ;;
 
-let pinned_mcp_wrap_sites = 2
+let pinned_mcp_wrap_sites = 1
 
 let test_mcp_wrap_site_count () =
-  (* Exactly two wrap sites: dispatch_internal_keeper_runtime_tool +
-     dispatch_by_tag. Future caller additions must update this pin. *)
+  (* The MCP execute surface has one live dispatch path: dispatch_by_tag. *)
   (check int)
-    "MCP server telemetry wrap sites \
-     (RFC-0084 §2.2 PR-8; mcp_server_eio_execute.ml :1065 + :1083)"
-    2
+    "MCP server telemetry wrap sites (RFC-0084 §2.2 PR-8; tag dispatch)"
+    1
     pinned_mcp_wrap_sites
 ;;
 

@@ -33,6 +33,16 @@ let ensure_fs env =
   Masc_test_deps.init_eio_clock env;
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env)
 
+let publication_recovery_registry env sw config =
+  let registry_root =
+    Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_root_dir config)
+  in
+  match Fs_compat.open_publication_recovery_registry ~sw ~registry_root with
+  | Ok registry -> registry
+  | Error error ->
+    fail
+      (Fs_compat.publication_recovery_registry_error_to_string error)
+
 let operator_ctx env sw config agent_name : _ Operator_control.context =
   {
     config;
@@ -41,6 +51,8 @@ let operator_ctx env sw config agent_name : _ Operator_control.context =
     clock = Eio.Stdenv.clock env;
     proc_mgr = Some (Eio.Stdenv.process_mgr env);
     net = Some (Eio.Stdenv.net env);
+    publication_recovery_registry =
+      Some (publication_recovery_registry env sw config);
     mcp_session_id = None;
   }
 

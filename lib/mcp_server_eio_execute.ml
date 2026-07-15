@@ -19,36 +19,10 @@ let resolve_bind_state ~workspace_initialized ~bind_required ~agent_name ~check_
   && check_join agent_name
 ;;
 
-let cleanup_internal_keeper_runtime_resource ~during_exception ~label cleanup =
-  try cleanup () with
-  | Eio.Cancel.Cancelled _ as e when not during_exception -> raise e
-  | exn ->
-    Log.Mcp.warn
-      "internal keeper runtime %s cleanup failed%s: %s"
-      label
-      (if during_exception then " while preserving primary exception" else "")
-      (Printexc.to_string exn)
-;;
-
-let run_with_cleanup_preserving_primary ~cleanup f =
-  match f () with
-  | result ->
-    cleanup ~during_exception:false ();
-    result
-  | exception exn ->
-    let bt = Printexc.get_raw_backtrace () in
-    cleanup ~during_exception:true ();
-    Printexc.raise_with_backtrace exn bt
-;;
-
-module For_testing = struct
-  let cleanup_internal_keeper_runtime_resource = cleanup_internal_keeper_runtime_resource
-  let run_with_cleanup_preserving_primary = run_with_cleanup_preserving_primary
-end
-
 let execute_tool_eio
       ~sw
       ~clock
+      ~(workspace_scope : Mcp_server.workspace_scope)
       ?(profile = Mcp_server_eio_tool_profile.Full)
       ?mcp_session_id
       ?auth_token
@@ -67,7 +41,7 @@ let execute_tool_eio
   Eio_context.set_clock clock;
   (* Otel_metric_store: count every inbound tool call *)
   Otel_metric_store.record_request ();
-  let config = (Mcp_server.workspace_config state) in
+  let config = workspace_scope.config in
   let registry = state.Mcp_server.session_registry in
   (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls. *)
   let workspace_init_cached = Workspace.is_initialized config in
@@ -106,9 +80,6 @@ let execute_tool_eio
   in
   let agent_name = caller_identity.agent_name in
   let token = caller_identity.token in
-  let internal_keeper_runtime_tool =
-    caller_identity.internal_keeper_runtime_tool
-  in
   let owner_keeper_identity = caller_identity.owner_keeper_identity in
   let mode_gate_error = caller_identity.mode_gate_error in
   (* Cache resolved agent_name for this session (Fix 4), carrying the
@@ -268,6 +239,8 @@ let execute_tool_eio
                 ~clock
                 ~proc_mgr:state.Mcp_server.proc_mgr
                 ~net:state.Mcp_server.net
+                ~publication_recovery_registry:
+                  (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
             in
             (* Dispatch a single module by tag — creates only that module's context.
      Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
@@ -287,6 +260,8 @@ let execute_tool_eio
                      ; clock
                      ; proc_mgr = state.Mcp_server.proc_mgr
                      ; net = state.Mcp_server.net
+                     ; publication_recovery_registry =
+                         (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
                      ; mcp_session_id
                      }
                    in
@@ -328,15 +303,18 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_agent_timeline ->
+                   let caller_is_registered_keeper =
+                     Keeper_registry.all ~base_path:config.base_path ()
+                     |> List.exists
+                          (fun (entry : Keeper_registry.registry_entry) ->
+                            String.equal entry.name agent_name
+                            || String.equal entry.meta.agent_name agent_name)
+                   in
                    Tool_agent_timeline.dispatch
                      ~load_chat:(fun ~agent_name:requested_agent_name ->
                        if
                          Keeper_identity.is_keeper_principal_agent_name agent_name
-                         || Option.is_some
-                              (Keeper_registry_lookup.find_by_name agent_name)
-                         || Option.is_some
-                              (Keeper_registry_lookup.find_by_agent_name
-                                 agent_name)
+                         || caller_is_registered_keeper
                        then
                          Keeper_chat_timeline_source.lines_for_self
                            ~base_dir:config.base_path
@@ -430,148 +408,10 @@ let execute_tool_eio
                   (String.concat ", " xs)
                   reason
             in
-            let internal_keeper_meta_of_agent () =
-              match Keeper_registry_lookup.find_by_agent_name agent_name with
-              | Some (entry : Keeper_registry.registry_entry)
-                when String.equal entry.base_path config.base_path -> Ok entry.meta
-              | Some _ | None ->
-                let candidates =
-                  [ Keeper_identity.canonical_keeper_name_from_agent_name agent_name
-                  ; Keeper_identity.canonical_keeper_name agent_name
-                  ]
-                  |> List.filter_map (function
-                    | Some value when String.trim value <> "" -> Some (String.trim value)
-                    | _ -> None)
-                  |> List.sort_uniq String.compare
-                in
-                let rec loop = function
-                  | [] ->
-                    Error
-                      (Printf.sprintf
-                         "Internal keeper runtime request is not bound to a known keeper \
-                          agent: %s"
-                         agent_name)
-                  | candidate :: rest ->
-                    (match Keeper_meta_store.read_meta_resolved config candidate with
-                     | Ok (Some (_resolved_name, meta)) -> Ok meta
-                     | Ok None -> loop rest
-                     | Error msg -> Error msg)
-                in
-                loop candidates
-            in
-            let dispatch_internal_keeper_runtime_tool () =
-              let start_time = Time_compat.now () in
-              match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
-              | Some blocked, _ -> Some blocked
-              | None, coerced_args ->
-                (match internal_keeper_meta_of_agent () with
-                 | Error msg ->
-                   (* RFC-0189: agent_name has no matching registered
-                      keeper (or base_path mismatch).  Caller can
-                      address by registering the keeper / fixing the
-                      agent invocation context.  Same semantic family
-                      as tool_task_handlers' "Agent '%s' is not a
-                      member of this workspace" — [Workflow_rejection]. *)
-                   Some
-                     (Tool_result.error
-                        ~failure_class:(Some Tool_result.Workflow_rejection)
-                        ~tool_name:name ~start_time msg)
-                 | Ok meta ->
-                   let ctx_work =
-                     Keeper_context_runtime.create
-                       ~eio:true
-                       ~system_prompt:""
-                       ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
-                   in
-                               let turn_sandbox_factory =
-                                 Some (Keeper_sandbox_factory.create ~config ~meta ())
-                               in
-                               let cleanup_one ~during_exception label = function
-                                 | None -> ()
-                     | Some factory ->
-                       cleanup_internal_keeper_runtime_resource
-                         ~during_exception
-                         ~label
-                         (fun () -> Keeper_sandbox_factory.cleanup factory)
-                               in
-                               let cleanup ~during_exception () =
-                                 cleanup_one ~during_exception "sandbox" turn_sandbox_factory
-                               in
-                   let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
-                   let result =
-                     run_with_cleanup_preserving_primary ~cleanup (fun () ->
-                       Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
-                         ~config
-                         ~meta
-                                     ~ctx_work
-                                     ?turn_sandbox_factory
-                                     ~exec_cache
-                         (* RFC-0182 Phase 5 PR-A.2: thread Eio
-                            resources from execute_tool_eio scope. *)
-                         ~sw
-                         ~clock
-                         ?mcp_session_id
-                         ~name
-                         ~input:coerced_args
-                         ())
-                   in
-                   Some
-                     (match result.Keeper_tool_dispatch_runtime.outcome with
-                      | `Success ->
-                        Tool_result.make_ok
-                          ~tool_name:name
-                          ~start_time
-                          ~data:
-                            (Option.value
-                               ~default:(`String result.raw_output)
-                               result.data)
-                          ()
-                      | `Failure failure_class ->
-                        Tool_result.make_err
-                          ~tool_name:name
-                          ~class_:failure_class
-                          ~start_time
-                          ~data:
-                            (Option.value
-                               ~default:(`String result.raw_output)
-                               result.data)
-                          result.raw_output))
-            in
             (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
      Tool_token validates the name exists in the tag registry (Parse, Don't
      Validate). If mint fails, the tool is truly unknown. *)
-            (* RFC-0084 §1.1 + §2.2 (PR-8) — MCP server tag/internal-keeper
-               dispatch paths wrap their existing run_pre_hooks + handler
-               chains with Tool_telemetry.with_span so every MCP-originated
-               tool call emits the telemetry 4-tuple (Span / Metric /
-               trace_id; audit slot via [with_non_public_tool_audit] below).
-               This brings MCP-originated calls to behavioural parity with
-               the keeper turn migration in PR-7. *)
-            let dispatch_internal_with_telemetry () =
-              let result, _outcome =
-                Tool_telemetry.with_span ~force_new_trace_id:true ~surface:"mcp" ~tool_name:name (fun _trace_id_thunk ->
-                  let r = dispatch_internal_keeper_runtime_tool () in
-                  (* Route through the shared dispatch finalizer so MCP
-                     internal-keeper-runtime calls run the same result
-                     transformer and dispatch observers as keeper turn calls. *)
-                  let r = Tool_dispatch_emit.finalize_from_handler r in
-                  let outcome =
-                    match r with
-                    | Some _ -> "handled"
-                    | None -> "no_handler"
-                  in
-                  r, outcome)
-              in
-              result
-            in
-            match
-              if internal_keeper_runtime_tool
-              then dispatch_internal_with_telemetry ()
-              else None
-            with
-            | Some result -> with_non_public_tool_audit ~agent_name result
-            | None ->
-              (match Tool_dispatch.mint_token ~name with
+            match Tool_dispatch.mint_token ~name with
                | Error reason ->
                  with_non_public_tool_audit
                    ~agent_name
@@ -588,8 +428,8 @@ let execute_tool_eio
                    let result, _outcome =
                      Tool_telemetry.with_span ~force_new_trace_id:true ~surface:"mcp" ~tool_name:name (fun _trace_id_thunk ->
                        let r = dispatch_by_tag tag in
-                       (* Keep external MCP tools/call on the same
-                          post-dispatch contract as internal keeper calls. *)
+                       (* Keep MCP tools/call on the shared post-dispatch
+                          transformer and observer contract. *)
                        let r = Tool_dispatch_emit.finalize_from_handler r in
                        let outcome =
                          match r with
@@ -613,7 +453,7 @@ let execute_tool_eio
                       ~agent_name
                       (runtime_error_result
                          ~tool_name:name
-                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))
+                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name))))
 ;;
 
 (* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency

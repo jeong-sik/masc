@@ -44,21 +44,22 @@ val valid_fs_write_mode_strings : string list
 val handle_read_file :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
-  keeper_name:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   string
 
 val handle_read_file_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
-  keeper_name:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
 val handle_file_write :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
-  keeper_name:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery_access:Fs_compat.publication_recovery_access ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
@@ -69,7 +70,8 @@ val handle_file_write :
 val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
-  keeper_name:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery_access:Fs_compat.publication_recovery_access ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->

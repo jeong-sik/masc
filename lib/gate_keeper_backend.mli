@@ -52,6 +52,7 @@ val dispatch :
   clock:_ Eio.Time.clock ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
+  publication_recovery_registry:Fs_compat.publication_recovery_registry option ->
   config:Workspace.config ->
   channel:string ->
   channel_user_id:string ->
@@ -91,6 +92,7 @@ val dispatch_with_text_snapshot :
   clock:_ Eio.Time.clock ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
+  publication_recovery_registry:Fs_compat.publication_recovery_registry option ->
   config:Workspace.config ->
   channel:string ->
   channel_user_id:string ->

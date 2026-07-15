@@ -351,6 +351,7 @@ let test_stream_surface_preserves_typed_shutdown_rejection () =
     ; clock
     ; proc_mgr = None
     ; net = None
+    ; publication_recovery_registry = None
     }
   in
   let observed = ref None in

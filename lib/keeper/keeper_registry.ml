@@ -9,6 +9,47 @@ open Keeper_types_profile
 
 include Keeper_registry_setup
 
+type publication_recovery_attach_error = Publication_recovery_already_attached
+type publication_recovery_detach_error = Publication_recovery_not_attached
+
+let rec attach_publication_recovery_access
+          (entry : registry_entry)
+          access
+  =
+  let current = Atomic.get entry.publication_recovery_lane_state in
+  match current with
+  | Publication_recovery_attached _ ->
+    Error Publication_recovery_already_attached
+  | Publication_recovery_detached ->
+    if
+      Atomic.compare_and_set
+        entry.publication_recovery_lane_state
+        current
+        (Publication_recovery_attached access)
+    then Ok ()
+    else attach_publication_recovery_access entry access
+;;
+
+let publication_recovery_access (entry : registry_entry) =
+  match Atomic.get entry.publication_recovery_lane_state with
+  | Publication_recovery_detached -> None
+  | Publication_recovery_attached access -> Some access
+;;
+
+let rec detach_publication_recovery_access (entry : registry_entry) =
+  let current = Atomic.get entry.publication_recovery_lane_state in
+  match current with
+  | Publication_recovery_detached -> Error Publication_recovery_not_attached
+  | Publication_recovery_attached _ ->
+    if
+      Atomic.compare_and_set
+        entry.publication_recovery_lane_state
+        current
+        Publication_recovery_detached
+    then Ok ()
+    else detach_publication_recovery_access entry
+;;
+
 
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]

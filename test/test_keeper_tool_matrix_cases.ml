@@ -124,7 +124,9 @@ let init_keeper_bridge =
       Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch;
       KET.inject_masc_schemas Masc.Config.raw_all_tool_schemas)
 
-let make_meta ?(name = "keeper-tool-matrix") () =
+let keeper_matrix_owner = "keeper-tool-matrix"
+
+let make_meta ?(name = keeper_matrix_owner) () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -152,7 +154,18 @@ let all_keeper_tool_names =
   all_keeper_tool_schemas_raw ()
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
-let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
+let make_fixture
+      sw
+      ~proc_mgr
+      ~fs
+      ~net
+      ~mono_clock
+      clock
+      ~base_path
+      ~publication_recovery_registry
+      ~publication_recovery_access
+      init_mode
+  =
   init_keeper_bridge ();
   let generic =
     Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
@@ -171,7 +184,15 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   Masc.Keeper_registry.clear ();
   ignore (Masc.Keeper_registry.register ~base_path meta.name meta);
   ignore (Masc.Keeper_registry.register ~base_path "tool-matrix" meta);
-  let tools = KTO.make_tools ~config ~meta ~ctx_snapshot () in
+  let tools =
+    KTO.make_tools
+      ~config
+      ~meta
+      ~publication_recovery_registry
+      ~publication_recovery_access
+      ~ctx_snapshot
+      ()
+  in
   (match init_mode with
    | Init_joined ->
        (* Bind under both the raw meta name (used by masc_* tools called
@@ -634,24 +655,44 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
         Unix.putenv "HOME" base_path;
         try
           let case = case_for_name schema.Masc_domain.name in
+          Masc_test_deps.with_publication_recovery_lane
+            ~sw
+            ~fs
+            ~registry_root:base_path
+            ~owner:keeper_matrix_owner
+          @@ fun ~publication_recovery_registry ~publication_recovery_access ->
           let fixture =
-            make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
+            make_fixture
+              sw
+              ~proc_mgr
+              ~fs
+              ~net
+              ~mono_clock
+              clock
+              ~base_path
+              ~publication_recovery_registry
+              ~publication_recovery_access
               case.init_mode
           in
           case.prepare fixture;
           let args = case.arguments fixture schema in
           match find_tool fixture schema.Masc_domain.name with
           | None ->
-              Error
-                (Printf.sprintf "missing keeper Tool.t for %s" schema.Masc_domain.name)
+            Error
+              (Printf.sprintf
+                 "missing keeper Tool.t for %s"
+                 schema.Masc_domain.name)
           | Some tool ->
-              let outcome = Tool.execute tool args in
-              if String.equal schema.Masc_domain.name "masc_heartbeat_start" then
-                Heartbeat.list ()
-                |> List.iter (fun (hb : Heartbeat.t) ->
-                       ignore (Heartbeat.stop hb.id));
-              evaluate_expectation ~name:schema.Masc_domain.name case.expectation
-                outcome
+            let outcome = Tool.execute tool args in
+            if String.equal schema.Masc_domain.name "masc_heartbeat_start"
+            then
+              Heartbeat.list ()
+              |> List.iter (fun (hb : Heartbeat.t) ->
+                   ignore (Heartbeat.stop hb.id));
+            evaluate_expectation
+              ~name:schema.Masc_domain.name
+              case.expectation
+              outcome
         with exn ->
           Error
             (Printf.sprintf "%s raised during keeper case: %s"

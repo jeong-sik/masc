@@ -150,6 +150,9 @@ let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
 let execute_keeper_tool_call_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(publication_recovery_registry :
+          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -170,31 +173,6 @@ let execute_keeper_tool_call_with_outcome
   : executed_tool_result
   =
   let args = input in
-  let meta =
-    match Keeper_registry.get_with_health ~base_path:config.base_path meta.name with
-    | Some (entry, Keeper_registry.Healthy) -> entry.meta
-    | Some (_, health) ->
-      let reason_label =
-        match health with
-        | Keeper_registry.Healthy -> "healthy"
-        | Keeper_registry.Meta_validation_failed _ -> "meta_validation_failed"
-        | Keeper_registry.Lifecycle_transaction_reserved _ ->
-          "lifecycle_transaction_reserved"
-        | Keeper_registry.Required_field_missing _ -> "required_field_missing"
-        | Keeper_registry.Base_path_mismatch _ -> "base_path_mismatch"
-        | Keeper_registry.Name_mismatch _ -> "name_mismatch"
-      in
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string RegistryInvalidEntry)
-        ~labels:
-          [ "operation", "tool_dispatch_fallback"
-          ; "name", meta.name
-          ; "reason", reason_label
-          ]
-        ();
-      meta
-    | None -> meta
-  in
   let effective_search_fn =
          match search_fn with
          | Some f -> f
@@ -204,6 +182,8 @@ let execute_keeper_tool_call_with_outcome
          Keeper_tool_runtime.
                        { config
                        ; meta
+                       ; publication_recovery_registry
+                       ; publication_recovery_access
                        ; ctx_work
                        ; turn_sandbox_factory
                        ; exec_cache
@@ -277,6 +257,9 @@ let execute_keeper_tool_call_with_outcome
 let execute_keeper_tool_call
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(publication_recovery_registry :
+          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -290,7 +273,9 @@ let execute_keeper_tool_call
     execute_keeper_tool_call_with_outcome
       ~config
       ~meta
-                  ~ctx_work
+      ~publication_recovery_registry
+      ~publication_recovery_access
+      ~ctx_work
                   ?turn_sandbox_factory
                   ~exec_cache
       ?search_fn

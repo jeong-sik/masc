@@ -218,6 +218,8 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            Some (publication_recovery_registry env sw config);
         }
       in
       let keeper_name = "ctx-truth" in
@@ -373,6 +375,8 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
       clock = Eio.Stdenv.clock env;
       proc_mgr = Some (Eio.Stdenv.process_mgr env);
       net = None;
+      publication_recovery_registry =
+        Some (publication_recovery_registry env sw config);
     }
   in
   let read_meta label =
@@ -769,6 +773,8 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = None
+        ; publication_recovery_registry =
+            Some (publication_recovery_registry env sw config)
         }
       in
       (match Keeper_dead_revival_transaction.revive ctx ~original ~candidate with
@@ -969,6 +975,8 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            Some (publication_recovery_registry env sw config);
         }
       in
       let ok, _ =
@@ -1075,6 +1083,8 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            Some (publication_recovery_registry env sw config);
         }
       in
       let ok, _ =
@@ -1347,6 +1357,8 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            Some (publication_recovery_registry env sw config);
         }
       in
       let keeper_name = "lightweight-audit" in
@@ -1458,6 +1470,8 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            Some (publication_recovery_registry env sw config);
         }
       in
       let keeper_name = "lightweight-recent-tools" in

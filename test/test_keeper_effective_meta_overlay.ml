@@ -703,6 +703,18 @@ instructions = "missing sandbox profile"
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
+      let registry_root =
+        Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
+      in
+      let publication_recovery_registry =
+        match
+          Fs_compat.open_publication_recovery_registry ~sw ~registry_root
+        with
+        | Ok registry -> registry
+        | Error error ->
+          Alcotest.fail
+            (Fs_compat.publication_recovery_registry_error_to_string error)
+      in
       let ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -711,6 +723,8 @@ instructions = "missing sandbox profile"
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
+          publication_recovery_registry =
+            Some publication_recovery_registry;
         }
       in
       match

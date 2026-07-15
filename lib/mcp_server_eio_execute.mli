@@ -38,26 +38,12 @@ val resolve_bind_state :
   bool
 (** Test hook for the bind-required guard's read decision. *)
 
-(** {1 Test hooks} *)
-
-module For_testing : sig
-  val cleanup_internal_keeper_runtime_resource :
-    during_exception:bool -> label:string -> (unit -> unit) -> unit
-  (** Runs one internal keeper runtime cleanup action.  Non-cancellation
-      cleanup failures are logged and suppressed; cancellation is propagated
-      only when cleanup is not running behind a primary exception. *)
-
-  val run_with_cleanup_preserving_primary :
-    cleanup:(during_exception:bool -> unit -> unit) -> (unit -> 'a) -> 'a
-  (** Runs [f] and then [cleanup].  If [f] raises, cleanup runs on the
-      exception path and the original exception/backtrace is re-raised. *)
-end
-
 (** {1 [tools/call] inner dispatcher} *)
 
 val execute_tool_eio :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  workspace_scope:Mcp_server.workspace_scope ->
   ?profile:Mcp_server_eio_types.tool_profile ->
   ?mcp_session_id:string ->
   ?auth_token:string ->
@@ -73,6 +59,10 @@ val execute_tool_eio :
     failure classification.  The wrapper layer
     {!Mcp_server_eio_call_tool.handle_call_tool_eio}
     composes the final JSON-RPC envelope around it.
+
+    [workspace_scope] is the immutable workspace generation captured by the
+    caller at admission.  The dispatcher never re-reads the mutable server
+    state's current workspace while executing the call.
 
     Side effects on the request scope:
     - Refreshes [Eio_context.set_switch] / [set_clock] so

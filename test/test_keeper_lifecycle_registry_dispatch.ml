@@ -13,6 +13,7 @@ module KST = Keeper_state_machine
 module KFS = Masc.Keeper_fs
 module KTS = Masc.Keeper_types_support
 module P = Masc.Otel_metric_store
+module Publication_scope = Masc.Keeper_publication_recovery_scope
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -30,6 +31,18 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let publication_recovery_registry env sw config =
+  let registry_root =
+    Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_root_dir config)
+  in
+  match
+    Fs_compat.open_publication_recovery_registry ~sw ~registry_root
+  with
+  | Ok registry -> registry
+  | Error error ->
+    fail
+      (Fs_compat.publication_recovery_registry_error_to_string error)
 
 let write_lines path lines =
   let dir = KFS.ensure_dir (Filename.dirname path) in
@@ -549,6 +562,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry = None;
         }
       in
       let labels =
@@ -573,6 +587,150 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       check bool "keepalive registry rejection metric increments" true
         (after > before))
 
+let test_publication_recovery_scope_binds_exact_lane_resources () =
+  let base_dir = temp_dir "keeper_publication_recovery_scope" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore
+        (Masc.Workspace.init config ~agent_name:(Some "test-operator"));
+      let keeper_name = "publication-scope-exact-lane" in
+      let meta = make_keeper_meta ~name:keeper_name () in
+      let entry = KR.register ~base_path:config.base_path keeper_name meta in
+      Eio.Switch.run @@ fun sw ->
+      let registry = publication_recovery_registry env sw config in
+      check bool "lane access begins detached" true
+        (Option.is_none (KR.publication_recovery_access entry));
+      Publication_scope.with_lane_scope
+        ~registry:(Some registry)
+        ~entry
+        (fun () ->
+          let attached_access =
+            match KR.publication_recovery_access entry with
+            | Some access -> access
+            | None -> fail "lane scope did not attach recovery access"
+          in
+          match
+            Publication_scope.resolve_turn_resources
+              ~registry:(Some registry)
+              ~base_path:config.base_path
+              ~keeper_name
+          with
+          | Error failure ->
+            fail (Publication_scope.failure_to_string failure)
+          | Ok resources ->
+            check bool "turn resolves exact registry entry" true
+              (resources.entry == entry);
+            check bool "turn resolves process registry" true
+              (resources.registry == registry);
+            check bool "turn resolves attached lane access" true
+              (resources.access == attached_access));
+      check bool "lane access detaches before scope returns" true
+        (Option.is_none (KR.publication_recovery_access entry));
+      match
+        Publication_scope.resolve_turn_resources
+          ~registry:(Some registry)
+          ~base_path:config.base_path
+          ~keeper_name
+      with
+      | Error Publication_scope.Access_not_attached -> ()
+      | Error failure ->
+        failf
+          "detached entry returned wrong failure: %s"
+          (Publication_scope.failure_to_string failure)
+      | Ok _ -> fail "detached entry unexpectedly resolved turn resources")
+
+let test_publication_recovery_scope_preserves_typed_lookup_failures () =
+  let base_dir = temp_dir "keeper_publication_recovery_failures" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore
+        (Masc.Workspace.init config ~agent_name:(Some "test-operator"));
+      let keeper_name = "publication-scope-failures" in
+      let expect_failure label expected = function
+        | Error failure when expected failure -> ()
+        | Error failure ->
+          failf
+            "%s returned wrong failure: %s"
+            label
+            (Publication_scope.failure_to_string failure)
+        | Ok _ -> failf "%s unexpectedly resolved turn resources" label
+      in
+      expect_failure
+        "missing process registry"
+        (function
+          | Publication_scope.Registry_not_provided -> true
+          | _ -> false)
+        (Publication_scope.resolve_turn_resources
+           ~registry:None
+           ~base_path:config.base_path
+           ~keeper_name);
+      Eio.Switch.run @@ fun sw ->
+      let registry = publication_recovery_registry env sw config in
+      expect_failure
+        "missing keeper entry"
+        (function
+          | Publication_scope.Registry_entry_not_found
+              { base_path; keeper_name = missing_name } ->
+            String.equal base_path config.base_path
+            && String.equal missing_name keeper_name
+          | _ -> false)
+        (Publication_scope.resolve_turn_resources
+           ~registry:(Some registry)
+           ~base_path:config.base_path
+           ~keeper_name);
+      let entry =
+        KR.register
+          ~base_path:config.base_path
+          keeper_name
+          (make_keeper_meta ~name:keeper_name ())
+      in
+      expect_failure
+        "detached keeper entry"
+        (function
+          | Publication_scope.Access_not_attached -> true
+          | _ -> false)
+        (Publication_scope.resolve_turn_resources
+           ~registry:(Some registry)
+           ~base_path:config.base_path
+           ~keeper_name);
+      let corrupted =
+        { entry with
+          meta =
+            { entry.meta with
+              runtime = { entry.meta.runtime with generation = -1 }
+            }
+        }
+      in
+      KR.For_testing.unsafe_put_entry
+        ~base_path:config.base_path
+        keeper_name
+        corrupted;
+      expect_failure
+        "unhealthy keeper entry"
+        (function
+          | Publication_scope.Registry_entry_unhealthy
+              (KR.Required_field_missing { field }) ->
+            String.equal field "generation"
+          | _ -> false)
+        (Publication_scope.resolve_turn_resources
+           ~registry:(Some registry)
+           ~base_path:config.base_path
+           ~keeper_name))
+
 let () =
   run "keeper_lifecycle_registry_dispatch"
     [
@@ -594,6 +752,10 @@ let () =
             test_dispatch_keeper_phase_event_rejection_increments_metric;
           test_case "keepalive event rejection increments metric" `Quick
             test_keepalive_dispatch_event_rejection_increments_metric;
+          test_case "publication recovery scope binds exact lane resources" `Quick
+            test_publication_recovery_scope_binds_exact_lane_resources;
+          test_case "publication recovery scope preserves typed lookup failures" `Quick
+            test_publication_recovery_scope_preserves_typed_lookup_failures;
           test_case "registry rejects mismatched meta update" `Quick
             test_registry_rejects_meta_name_mismatch_update;
           test_case "registry canonicalizes mismatched meta on register" `Quick

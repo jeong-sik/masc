@@ -364,6 +364,8 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
     ~finally:(fun () ->
       if Sys.file_exists marker then Cases.cleanup_dir marker)
     (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
       let config = Masc.Workspace.default_config marker in
       let meta = Cases.make_meta ~name:"keeper-fusion-schema" () in
       let ctx_snapshot =
@@ -372,8 +374,16 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
           ~system_prompt:"keeper fusion schema regression"
           ~max_tokens:4000
       in
+      Masc_test_deps.with_publication_recovery_lane
+        ~sw
+        ~fs:(Eio.Stdenv.fs env)
+        ~registry_root:marker
+        ~owner:meta.name
+      @@ fun ~publication_recovery_registry ~publication_recovery_access ->
       let tools =
-        Masc.Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot ()
+        Masc.Keeper_tools_oas_bundle.make_tools
+          ~config ~meta ~publication_recovery_registry
+          ~publication_recovery_access ~ctx_snapshot ()
       in
       let names =
         List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools

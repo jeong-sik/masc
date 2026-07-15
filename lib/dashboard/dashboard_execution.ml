@@ -626,6 +626,9 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     ; clock
     ; proc_mgr
     ; net = None
+    (* Execution renders call only the read-only operator snapshot projection;
+       this context cannot dispatch a Keeper lane action. *)
+    ; publication_recovery_registry = None
     ; mcp_session_id = None
     }
   in

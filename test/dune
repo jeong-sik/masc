@@ -2167,7 +2167,7 @@
 
 ; RFC-0084 PR-8 — MCP server telemetry wrap parity. Constants-only
 ; (no lib dependency): pins the outcome label vocabulary and wrap site
-; count for mcp_server_eio_execute.ml:1065 + :1083 wraps. Real wrap
+; count for the mcp_server_eio_execute.ml tag-dispatch wrap. Real wrap
 ; behaviour is unit-tested in test_guarded_dispatch_telemetry (PR-3).
 
 (test
@@ -2178,7 +2178,7 @@
 ; RFC-0084 PR-9 — Tag-dispatch fallback telemetry wrap. Final entry for
 ; 4-tuple propagation: brings keeper-turn + MCP + tag-dispatch to 3/3 =
 ; 100% per RFC-0084 §2.1 North Star. Constants-only: pins outcome vocab
-; parity with PR-7 + PR-8, cumulative wrap site count (5), and the
+; parity with PR-7 + PR-8, cumulative wrap site count (4), and the
 ; entries-covered = 3 invariant.
 
 (test
@@ -2563,5 +2563,7 @@
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)
-
+(include stanzas/test_fs_compat_capability_write.inc)
+(include stanzas/test_fs_compat_publication_reconciliation.inc)
+(include stanzas/test_eio_resource_scope.inc)
 (include stanzas/test_text_token_estimate.inc)

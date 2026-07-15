@@ -593,44 +593,37 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
      same code. *)
   let dashboard_auth_error_code = Masc_domain.dashboard_auth_error_code in
   let auth_cfg = Auth.load_auth_config config.base_path in
-  let token = auth_token_from_request request in
-  let token_credential_result =
-    match token with
-    | None -> None
-    | Some raw_token ->
-      Some (Auth.find_credential_by_token config.base_path ~token:raw_token)
+  let actor_resolution =
+    dashboard_actor_resolution_for_request ~base_path:config.base_path request
   in
+  let token = auth_token_from_request request in
   let requested_agent = request_actor_hint request in
-  let token_present = Option.is_some token in
+  let token_present =
+    match actor_resolution with
+    | Authenticated_actor _ | Rejected_credential _ -> true
+    | Anonymous_actor_hint _ -> false
+  in
   let token_valid =
-    match token_credential_result with
-    | Some (Ok _) -> true
-    | _ -> false
+    match actor_resolution with
+    | Authenticated_actor _ -> true
+    | Anonymous_actor_hint _ | Rejected_credential _ -> false
   in
   let token_agent =
-    match token_credential_result with
-    | Some (Ok cred) -> Some cred.Masc_domain.agent_name
-    | _ -> None
+    match actor_resolution with
+    | Authenticated_actor agent_name -> Some agent_name
+    | Anonymous_actor_hint _ | Rejected_credential _ -> None
   in
   let resolved_agent_name_result =
-    match token_credential_result with
-    (* Keep stale bearer tokens visible as auth failures in shell summaries instead of
-       recovering a request actor hint as the effective actor. *)
-    | Some (Error err) -> Error err
-    | _ ->
-    (match dashboard_actor_for_request ~base_path:config.base_path request with
-    | Some agent_name -> Ok agent_name
-    | None ->
-      if auth_cfg.enabled && auth_cfg.require_token && token_present
-      then
-        Error
-          (Masc_domain.Auth
-             (Masc_domain.Auth_error.Unauthorized
-                { reason = Missing_token
-                ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound \
-                             credential)"
-                }))
-      else Ok "dashboard")
+    match actor_resolution with
+    | Authenticated_actor agent_name -> Ok agent_name
+    | Anonymous_actor_hint (Some agent_name) -> Ok agent_name
+    | Anonymous_actor_hint None -> Ok "dashboard"
+    | Rejected_credential (Auth_error_kind.Outcome_error { err; _ }) -> Error err
+    | Rejected_credential Auth_error_kind.Outcome_none ->
+      Error
+        (Masc_domain.Auth
+           (Masc_domain.Auth_error.InvalidToken
+              "Bearer token did not resolve to an agent."))
   in
   let effective_agent =
     match resolved_agent_name_result with
@@ -688,13 +681,9 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
     | Error _ -> None
   in
   let auth_error =
-    match token_credential_result with
-    | Some (Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) as err)) ->
-      Some err
-    | Some (Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) as err)) ->
-      Some err
-    | Some (Error err) -> Some err
-    | _ ->
+    match resolved_agent_name_result with
+    | Error err -> Some err
+    | Ok _ ->
       (match keeper_authorization_result with
        | Error err -> Some err
        | Ok () -> None)

@@ -31,7 +31,7 @@ val all : t list
 (** {1 Dashboard actor fallback typed surface}
 
     The dashboard actor resolution path in [lib/server/server_auth.ml]
-    falls back to the request-actor hint when the bearer token cannot be
+    rejects the request-actor hint when the bearer token cannot be
     mapped to a credential. Two structurally distinct failure modes share
     a single counter ([metric_silent_dashboard_actor_fallback]):
 
@@ -46,10 +46,9 @@ val all : t list
     sites with hardcoded format strings, so callers had no typed handle
     on *why* the fallback fired — a counter is not a fix
     (see CLAUDE.md §Workaround Rejection Bar §1 Counter-as-Fix). The
-    fallback path itself is preserved as a production safety net
-    (dashboard cannot go dark on token churn); this surface adds the
-    typed kind that downstream reducers need without removing the
-    safety net.
+    public reads remain available on token churn, but rejected credentials
+    project to the unparameterized namespace instead of adopting the request
+    hint. This surface provides the typed rejection reason.
 
     Reference: ~/Downloads/MASC Reverse Engineering Design Map.html
     §Gap "Auth identity is spread across several layers" + §개선 #2
@@ -68,7 +67,7 @@ type dashboard_actor_fallback_outcome =
       (** Token resolution raised a classified domain error. [err_kind]
           is the closed-enum classification of [err]; [actor_hint] is
           the request actor hint (header / query param) that the
-          callsite is about to fall back to, captured for the log line. *)
+          callsite rejected, captured for the log line. *)
 
 (** Full record of a single dashboard actor fallback event. *)
 type dashboard_actor_fallback =
@@ -78,11 +77,10 @@ type dashboard_actor_fallback =
             [server_auth.ml:281-291] for the security rationale. *)
   }
 
-(** Render the byte-equivalent warn-log message for a fallback event.
-    Used by the consolidated helper at the callsite; the format strings
-    match the prior inline [Log.Auth.warn] templates so otel_metric_store log
-    queries and alerting rules keyed on the [silent:dashboard_actor_fallback]
-    prefix continue to fire unchanged. *)
+(** Render the warn-log message for a rejected credential event. The
+    historical [silent:dashboard_actor_fallback] event key remains stable for
+    existing log queries, while the message explicitly states that the actor
+    hint was ignored. *)
 val dashboard_actor_fallback_log_message : dashboard_actor_fallback -> string
 
 (** Otel_metric_store counter labels for a fallback event. Always includes the

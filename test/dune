@@ -1267,6 +1267,13 @@
  (modules test_server_auth_warn_log_bound)
  (libraries alcotest masc masc_server eio_main))
 
+; Dashboard actor attribution: rejected credentials cannot become anonymous hints.
+
+(test
+ (name test_server_auth_dashboard_actor_resolution)
+ (modules test_server_auth_dashboard_actor_resolution)
+ (libraries alcotest masc masc.masc_types masc_server eio_main httpun unix))
+
 ; RFC-0301 item 6: the turn-local generated-media accumulator turns stream media
 ; into reload chat blocks (image / voice / attach) via the content-addressed store.
 

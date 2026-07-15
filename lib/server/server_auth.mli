@@ -122,15 +122,11 @@ val record_dashboard_actor_fallback :
 
     Consolidates the two prior inline warn sites (Ok None / Error err
     arms in [dashboard_actor_for_request]) onto a single helper. The
-    rendered log message is byte-equivalent to the prior format strings
-    — otel_metric_store log alerts keyed on the literal
-    [silent:dashboard_actor_fallback] prefix continue to fire.
+    historical [silent:dashboard_actor_fallback] event key remains stable
+    for existing otel_metric_store log alerts.
 
-    WORKAROUND-CARRYOVER: the fallback path itself remains (the
-    dashboard cannot go dark on token churn), but downstream reducers
-    now have a typed handle on *why* the fallback fired. Reference:
-    Reverse Engineering Design Map §개선 #2 (request identity state
-    machine). *)
+    The metric name is retained as an observability compatibility key,
+    but the actor resolver now rejects the hint instead of using it. *)
 
 val stale_token_warn_log_max_entries : int
 (** Ceiling on distinct token-hash prefixes retained for warn-log dedup.
@@ -140,9 +136,29 @@ val stale_token_warn_log_entry_count : unit -> int
 (** Current number of tracked token-hash prefixes. Exposed for testing that
     [record_dashboard_actor_fallback] keeps the dedup table bounded. *)
 
+type dashboard_actor_resolution =
+  | Authenticated_actor of string
+      (** Actor canonically owned by the request bearer token. *)
+  | Anonymous_actor_hint of string option
+      (** Caller-supplied hint on a request that carries no credential.
+          Public dashboard reads deliberately preserve this namespace. *)
+  | Rejected_credential of Auth_error_kind.dashboard_actor_fallback_outcome
+      (** The request carried a credential header, but it was malformed or
+          did not resolve. The accompanying request hint is diagnostic only
+          and must not become the effective actor. Endpoint authorization
+          remains a separate gate. *)
+
+val dashboard_actor_resolution_for_request :
+  base_path:string -> Httpun.Request.t -> dashboard_actor_resolution
+(** Resolve authenticated ownership, anonymous attribution, or explicit
+    credential rejection without collapsing the three states into [option]. *)
+
 val dashboard_actor_for_request :
   base_path:string -> Httpun.Request.t -> string option
-(** Resolve the dashboard actor name from the request. *)
+(** Project a dashboard actor from [dashboard_actor_resolution_for_request].
+    Invalid/expired/rejected credentials return [None]; only requests without
+    credentials may use a request actor hint. This is actor attribution, not
+    endpoint authorization. *)
 
 val is_verified_internal_keeper_request :
   base_path:string -> Httpun.Request.t -> bool

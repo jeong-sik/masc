@@ -944,6 +944,36 @@ let test_dashboard_shell_auth_json_rejects_stale_token_actor_hint () =
   check bool "keeper message blocked" false
     (auth |> member "can_keeper_msg" |> to_bool)
 
+let test_dashboard_shell_auth_json_rejects_malformed_credential () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = false }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  let json =
+    Server_dashboard_http_core.dashboard_shell_http_json
+      ~request:
+        (request_with_headers "/api/v1/dashboard/shell"
+           [ ("authorization", "Basic malformed")
+           ; ("x-masc-agent", "forged-dashboard")
+           ])
+      config
+  in
+  let open Yojson.Safe.Util in
+  let auth = json |> member "auth" in
+  check bool "credential presence retained" true
+    (auth |> member "token_present" |> to_bool);
+  check bool "malformed credential invalid" false
+    (auth |> member "token_valid" |> to_bool);
+  check bool "effective actor unavailable" true
+    (match auth |> member "effective_agent" with `Null -> true | _ -> false);
+  check bool "effective role unavailable" true
+    (match auth |> member "effective_role" with `Null -> true | _ -> false);
+  check string "malformed credential code surfaced" "missing_token"
+    (auth |> member "auth_error_code" |> to_string);
+  check bool "keeper message blocked" false
+    (auth |> member "can_keeper_msg" |> to_bool)
+
 let test_dashboard_shell_snapshot_selector_injects_auth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Dashboard_snapshot.reset_for_test ();
@@ -1861,6 +1891,8 @@ let () =
             test_dashboard_shell_auth_json_reports_missing_token;
           test_case "shell auth rejects stale token actor hint" `Quick
             test_dashboard_shell_auth_json_rejects_stale_token_actor_hint;
+          test_case "shell auth rejects malformed credential" `Quick
+            test_dashboard_shell_auth_json_rejects_malformed_credential;
           test_case "shell snapshot selector injects auth" `Quick
             test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick

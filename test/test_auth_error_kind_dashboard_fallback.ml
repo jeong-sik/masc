@@ -1,4 +1,4 @@
-(** Byte-equivalence + label tests for the dashboard_actor_fallback typed
+(** Rendering + label tests for the dashboard_actor_fallback typed
     surface on [Auth_error_kind].
 
     The two prior inline warn sites at [lib/server/server_auth.ml] used
@@ -6,10 +6,10 @@
     [\<newline><whitespace>] escape into a single line. Operators key
     otel_metric_store log alerts on the literal [silent:dashboard_actor_fallback]
     prefix and on the [Remediation:] substring in the [token_mismatch]
-    arm, so the consolidated helper MUST emit the byte-identical message.
+    arm, so the consolidated helper MUST preserve those stable fragments.
 
-    These tests lock the rendered string for both outcome arms against an
-    explicit hex-literal expected value, and check that the otel_metric_store
+    These tests lock the rendered rejection string for both outcome arms
+    against an explicit hex-literal expected value, and check that the otel_metric_store
     label list matches the prior call. Reference:
     [auth_error_kind.mli §Dashboard actor fallback typed surface]. *)
 
@@ -20,9 +20,9 @@ module Sda = Masc.Silent_dashboard_actor_outcome
 let with_eio_runtime f =
   Eio_main.run @@ fun _env -> f ()
 
-(* ----- Outcome_none: byte-equivalent log message --------------------- *)
+(* ----- Outcome_none: rejected-hint log message ----------------------- *)
 
-let test_outcome_none_log_message_byte_equivalent () =
+let test_outcome_none_log_message () =
   let fb : Aek.dashboard_actor_fallback =
     { outcome = Aek.Outcome_none; token_hash_prefix = "deadbeef" }
   in
@@ -30,9 +30,9 @@ let test_outcome_none_log_message_byte_equivalent () =
   let expected =
     "[silent:dashboard_actor_fallback] outcome=none \
      token_hash_prefix=deadbeef \xe2\x80\x94 bearer token resolved to no \
-     agent, falling back to request actor hint"
+     agent; request actor hint ignored"
   in
-  Alcotest.(check string) "byte-equivalent rendering" expected actual
+  Alcotest.(check string) "rejection rendering" expected actual
 
 let test_outcome_none_log_message_starts_with_alert_prefix () =
   (* Lock the [silent:dashboard_actor_fallback] prefix — otel_metric_store log
@@ -65,7 +65,7 @@ let test_outcome_none_log_message_no_leading_whitespace_after_dash () =
     true
     (Astring.String.is_infix ~affix:needle msg)
 
-(* ----- Outcome_error: byte-equivalent log message -------------------- *)
+(* ----- Outcome_error: rejected-hint log message ---------------------- *)
 
 let invalid_token_err =
   Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "stale-token-x")
@@ -118,7 +118,7 @@ let test_outcome_error_token_mismatch_renders_remediation () =
        ~affix:"localStorage masc_dashboard_token"
        msg)
 
-let test_outcome_error_token_mismatch_byte_equivalent () =
+let test_outcome_error_token_mismatch_log_message () =
   let fb : Aek.dashboard_actor_fallback =
     { outcome =
         Aek.Outcome_error
@@ -135,14 +135,14 @@ let test_outcome_error_token_mismatch_byte_equivalent () =
     Printf.sprintf
       "[silent:dashboard_actor_fallback] outcome=error \
        token_hash_prefix=feed1234 err_kind=token_mismatch \
-       actor_hint=dashboard-admin err=%s \xe2\x80\x94 falling back to \
-       request actor hint. Remediation: clear the browser's stored \
+       actor_hint=dashboard-admin err=%s \xe2\x80\x94 request actor hint \
+       ignored. Remediation: clear the browser's stored \
        dashboard token (localStorage masc_dashboard_token) or delete \
        .masc/auth/dashboard.token so a fresh token is minted on the \
        next dashboard load."
       err_str
   in
-  Alcotest.(check string) "byte-equivalent rendering" expected actual
+  Alcotest.(check string) "rejection rendering" expected actual
 
 let test_outcome_error_non_token_mismatch_no_remediation () =
   (* The remediation tail is exclusive to [Token_mismatch]. Other
@@ -170,7 +170,7 @@ let test_outcome_error_non_token_mismatch_no_remediation () =
     "ends at hint period"
     true
     (Astring.String.is_suffix
-       ~affix:"falling back to request actor hint."
+       ~affix:"request actor hint ignored."
        msg)
 
 (* ----- Otel_metric_store label correspondence ------------------------------- *)
@@ -305,16 +305,16 @@ let test_outcome_error_increments_counter_with_err_kind () =
     after
 
 let suite =
-  [ test_case "Outcome_none: byte-equivalent log message" `Quick
-      test_outcome_none_log_message_byte_equivalent
+  [ test_case "Outcome_none: rejected-hint log message" `Quick
+      test_outcome_none_log_message
   ; test_case "Outcome_none: alert prefix locked" `Quick
       test_outcome_none_log_message_starts_with_alert_prefix
   ; test_case "Outcome_none: no whitespace before em-dash" `Quick
       test_outcome_none_log_message_no_leading_whitespace_after_dash
   ; test_case "Outcome_error+Token_mismatch: remediation tail present" `Quick
       test_outcome_error_token_mismatch_renders_remediation
-  ; test_case "Outcome_error+Token_mismatch: byte-equivalent" `Quick
-      test_outcome_error_token_mismatch_byte_equivalent
+  ; test_case "Outcome_error+Token_mismatch: rejected-hint log message" `Quick
+      test_outcome_error_token_mismatch_log_message
   ; test_case "Outcome_error+other err_kind: no remediation tail" `Quick
       test_outcome_error_non_token_mismatch_no_remediation
   ; test_case "Outcome_none: otel_metric_store labels" `Quick

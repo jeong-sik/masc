@@ -361,8 +361,10 @@ let test_failed_cycle_route_mapping () =
        ~settled_at:2.0
        retry_failure
    with
-   | Masc.Keeper_registry_event_queue.Ack -> ()
-   | _ -> Alcotest.fail "observed retry route did not acknowledge the lease");
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Retry_after_observed ->
+     ()
+   | _ -> Alcotest.fail "observed retry route did not retain the leased work");
   let judgment_failure =
     turn_failure
       (Keeper_runtime_failure_route.Escalate_judgment
@@ -525,6 +527,119 @@ let read_schema path =
      | Some (`String schema) -> schema
      | _ -> Alcotest.fail "migrated state lacks schema")
   | Ok _ -> Alcotest.fail "migrated state is not an object"
+;;
+
+let test_retryable_failure_restores_exact_stimulus_at_fifo_tail () =
+  with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
+    let keeper_name = "retry_tail_keeper" in
+    let source =
+      stimulus
+        ~payload:
+          (Queue.Connector_attention
+             { event_id = "connector-event-17"
+             ; channel = Keeper_continuation_channel.unrouted "retry tail fixture"
+             })
+        "connector-source"
+        1.25
+    in
+    let unrelated = stimulus "unrelated-board-work" 2.5 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      List.fold_left Queue.enqueue pending [ source; unrelated ])
+    |> require_ok "seed retry tail queue";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:3.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim retryable source"
+      |> require_some "retryable source lease"
+    in
+    let receipt =
+      match
+        Persistence.settle_result
+          ~base_path
+          ~keeper_name
+          ~settled_at:4.0
+          ~lease
+          ~settlement:(State.Requeue State.Retry_after_observed)
+          ()
+        |> require_ok "settle retryable source"
+      with
+      | Persistence.Settled receipt -> receipt
+      | Persistence.Already_settled _ ->
+        Alcotest.fail "first retryable settlement was already settled"
+    in
+    let restored =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "restore retryable state"
+    in
+    (match Queue.to_list (State.pending restored) with
+     | [ next; retained ] ->
+       Alcotest.(check string)
+         "unrelated same-lane work remains first"
+         unrelated.post_id
+         next.post_id;
+       Alcotest.(check bool)
+         "restart restores the exact retained stimulus"
+         true
+         (Yojson.Safe.equal
+            (Queue.stimulus_to_yojson source)
+            (Queue.stimulus_to_yojson retained))
+     | _ -> Alcotest.fail "retryable settlement did not restore two pending stimuli");
+    let outbox_entry =
+      match State.transition_outbox restored with
+      | [ entry ] -> entry
+      | _ -> Alcotest.fail "retryable settlement must retain one transition receipt"
+    in
+    (match outbox_entry.receipt.settlement with
+     | State.Requeue State.Retry_after_observed -> ()
+     | _ -> Alcotest.fail "retryable transition lost its typed requeue reason");
+    (match outbox_entry.stimuli with
+     | [ retained ] ->
+       Alcotest.(check bool)
+         "transition outbox retains the exact leased stimulus"
+         true
+         (Yojson.Safe.equal
+            (Queue.stimulus_to_yojson source)
+            (Queue.stimulus_to_yojson retained))
+     | _ -> Alcotest.fail "retryable transition changed the leased stimulus set");
+    Persistence.mark_transition_projected_result
+      ~base_path
+      ~keeper_name
+      ~transition_id:receipt.transition_id
+    |> require_ok "project retryable transition";
+    let next_lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:5.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim unrelated work after retry"
+      |> require_some "unrelated work lease"
+    in
+    (match Persistence.lease_stimuli next_lease with
+     | [ next ] ->
+       Alcotest.(check string)
+         "unrelated work leases before the retained retry"
+         unrelated.post_id
+         next.post_id
+     | _ -> Alcotest.fail "retry fairness fixture expected one leased stimulus");
+    let after_next_claim =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload retained retry after unrelated claim"
+    in
+    match Queue.to_list (State.pending after_next_claim) with
+    | [ retained ] ->
+      Alcotest.(check bool)
+        "retained retry survives the next same-lane claim"
+        true
+        (Yojson.Safe.equal
+           (Queue.stimulus_to_yojson source)
+           (Queue.stimulus_to_yojson retained))
+    | _ -> Alcotest.fail "retained retry was not left pending after peer work claimed")
 ;;
 
 let test_legacy_pair_migrates_once () =
@@ -767,7 +882,11 @@ let () =
             test_unconsumed_approval_requeues_behind_other_work
         ] )
     ; ( "persistence"
-      , [ Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once
+      , [ Alcotest.test_case
+            "retryable failure durable FIFO tail"
+            `Quick
+            test_retryable_failure_restores_exact_stimulus_at_fifo_tail
+        ; Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once
         ; Alcotest.test_case
             "transition outbox projection"
             `Quick

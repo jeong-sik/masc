@@ -257,7 +257,8 @@ let settlement_of_failure ~settled_at failure =
   | Keeper_unified_turn.Follow_failure_route ->
     (match failure.Keeper_unified_turn.route with
      | Keeper_runtime_failure_route.Retry_after_observed _ ->
-       Keeper_registry_event_queue.Ack
+       Keeper_registry_event_queue.Requeue
+         Keeper_registry_event_queue.Retry_after_observed
      | Keeper_runtime_failure_route.Rotate_now _ ->
        Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
      | Keeper_runtime_failure_route.Escalate_judgment

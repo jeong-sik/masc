@@ -13,6 +13,7 @@ type requeue_reason = State.requeue_reason =
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Retry_after_observed
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 

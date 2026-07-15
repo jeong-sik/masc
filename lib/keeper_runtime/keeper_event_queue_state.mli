@@ -17,6 +17,7 @@ type requeue_reason =
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Retry_after_observed
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -106,7 +107,11 @@ val settle :
   (t * settle_result, string) result
 (** Atomically project one lease disposition into pure state.  Repeating the
     same semantic settlement returns [Already_settled]; a different settlement
-    for an already-settled lease is an explicit conflict. *)
+    for an already-settled lease is an explicit conflict.
+
+    [Retry_after_observed] retains the exact leased stimuli at the pending FIFO
+    tail so unrelated work in the same lane can proceed before another
+    provider attempt. *)
 
 val recover_leases : settled_at:float -> t -> (t, string) result
 (** Requeue every active lease with [Registration_recovery], preserving claim

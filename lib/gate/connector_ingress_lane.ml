@@ -114,7 +114,12 @@ let create ~sw ~on_failure () =
     ; on_failure
     }
   in
-  Eio.Fiber.fork ~sw (fun () -> run_dispatcher t);
+  (* run_dispatcher loops forever awaiting the condition; fork it as a daemon so
+     it is cancelled when the switch scope ends instead of keeping the switch
+     alive. A plain Eio.Fiber.fork left Eio.Switch.run waiting on this fiber
+     forever, so callers that scope the ingress in a short-lived switch (e.g.
+     tests) hung after their work completed. *)
+  Eio.Fiber.fork_daemon ~sw (fun () -> run_dispatcher t);
   t
 ;;
 

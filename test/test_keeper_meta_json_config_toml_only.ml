@@ -3,7 +3,7 @@
     keeper.json is the runtime-state store; keeper.toml is the config SSOT.
     The write side ([keeper_meta_json.ml]) stopped emitting config keys
     (always_allow, mention_targets, allowed_paths, proactive_enabled,
-    autoboot_enabled, telemetry_feedback_*), and the read side
+    autoboot_enabled, telemetry_feedback_enabled/window), and the read side
     ([keeper_meta_json_parse.ml]) must not resurrect them: a legacy JSON that
     still carries these keys must be ignored so [ensure_keeper_meta]'s TOML
     overlay stays authoritative. Removing the reads without this guard would let

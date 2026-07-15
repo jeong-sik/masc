@@ -625,7 +625,7 @@ val completed_turn_outcome_of_observation :
 type lifecycle_event_origin =
   | Generic_dispatch
   | Post_turn_lifecycle
-  | Operator_compact
+  | Requested_compaction
 
 (** Pure converter for diagnostic / log labels. *)
 val lifecycle_event_origin_to_string : lifecycle_event_origin -> string

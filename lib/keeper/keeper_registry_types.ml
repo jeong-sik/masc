@@ -249,12 +249,12 @@ let completed_turn_outcome_of_observation (obs : turn_observation)
 type lifecycle_event_origin =
   | Generic_dispatch
   | Post_turn_lifecycle
-  | Operator_compact
+  | Requested_compaction
 
 let lifecycle_event_origin_to_string = function
   | Generic_dispatch -> "generic_dispatch"
   | Post_turn_lifecycle -> "post_turn_lifecycle"
-  | Operator_compact -> "operator_compact"
+  | Requested_compaction -> "requested_compaction"
 ;;
 
 let is_paired_lifecycle_event = function
@@ -282,9 +282,9 @@ let origin_allows_paired_lifecycle_event origin event =
     match origin with
     | Post_turn_lifecycle -> true
     | Generic_dispatch -> false
-    | Operator_compact ->
-      (* Operator_compact authorizes only compaction half-events;
-         handoff half-events flow through other origins. *)
+    | Requested_compaction ->
+      (* Owner-lane manual/configured requests authorize only compaction
+         half-events; handoff half-events flow through other origins. *)
       (match event with
        | Keeper_state_machine.Compaction_started
        | Keeper_state_machine.Compaction_completed

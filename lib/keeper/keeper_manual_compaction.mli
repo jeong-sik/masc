@@ -1,6 +1,7 @@
 type success =
   { recovery : Keeper_context_runtime.overflow_retry_recovery }
 type failure =
+  | Unsupported_trigger of Compaction_trigger.t
   | Lifecycle of string * bool * Keeper_context_runtime.lifecycle_dispatch_error
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
@@ -14,5 +15,6 @@ type failure =
 val run
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> trigger:Compaction_trigger.t
   -> (success, failure) result
 val failure_to_string : failure -> string

@@ -36,30 +36,54 @@ let event_priority = function
   | Operator_clear_requested _ -> 10
   | Context_overflow_detected _ -> 10
 
+let configured_compaction_trigger
+      ~ratio_gate
+      ~message_gate
+      ~token_gate
+      ~cooldown_sec
+      ~context_ratio
+      ~message_count
+      ~token_count
+      ~since_last_compaction_sec
+  =
+  let cooldown_ok =
+    since_last_compaction_sec >= float_of_int cooldown_sec
+  in
+  if not cooldown_ok
+  then None
+  else if context_ratio >= ratio_gate
+  then
+    Some
+      (Compaction_trigger.Ratio_threshold
+         { ratio = context_ratio; threshold = ratio_gate })
+  else if message_gate > 0 && message_count >= message_gate
+  then
+    Some
+      (Compaction_trigger.Message_count
+         { count = message_count; threshold = message_gate })
+  else if token_gate > 0 && token_count >= token_gate
+  then
+    Some
+      (Compaction_trigger.Token_count
+         { count = token_count; threshold = token_gate })
+  else None
+;;
+
 let context_actions (s : measurement_snapshot) : context_actions =
   let t = s.thresholds in
-  (* Compaction: any of 3 explicit context-capacity gates.
-     NOTE(boundary): compact_tok uses raw token_count — ideally MASC would
-     use only ratio-based checks (compact_ratio). The token_gate remains
-     because it is a user-configurable compaction parameter persisted in
-     keeper meta, exposed via dashboard config panel, and referenced in 30+
-     sites. Removing it requires a cross-cutting migration. Until then,
-     token_gate=0 (the default for most profiles) disables this gate. *)
-  let compact_ratio = s.context.context_ratio >= t.compaction_ratio_gate in
-  let compact_msg =
-    t.compaction_message_gate > 0
-    && s.context.message_count >= t.compaction_message_gate
-  in
-  let compact_tok =
-    t.compaction_token_gate > 0
-    && s.context.token_count >= t.compaction_token_gate
-  in
-  let cooldown_ok =
-    s.timing.since_last_compaction_sec >= float_of_int t.compaction_cooldown_sec
-  in
   (* Handoff: context ratio above threshold *)
   let handoff_threshold = t.handoff_threshold *. t.model_handoff_multiplier in
-  { compact = (compact_ratio || compact_msg || compact_tok) && cooldown_ok
+  { compact =
+      Option.is_some
+        (configured_compaction_trigger
+           ~ratio_gate:t.compaction_ratio_gate
+           ~message_gate:t.compaction_message_gate
+           ~token_gate:t.compaction_token_gate
+           ~cooldown_sec:t.compaction_cooldown_sec
+           ~context_ratio:s.context.context_ratio
+           ~message_count:s.context.message_count
+           ~token_count:s.context.token_count
+           ~since_last_compaction_sec:s.timing.since_last_compaction_sec)
   ; handoff =
       t.auto_handoff_enabled
       && s.context.context_ratio >= handoff_threshold

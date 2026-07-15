@@ -15,6 +15,7 @@ type stimulus_kind =
   | Failure_judgment
       (* RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
   | Manual_compaction
+  | Configured_compaction
   | Goal_assigned
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
 
@@ -44,6 +45,7 @@ let stimulus_kind_to_string = function
   | Hitl_resolved -> "hitl_resolved"
   | Failure_judgment -> "failure_judgment"
   | Manual_compaction -> "manual_compaction"
+  | Configured_compaction -> "configured_compaction"
   | Goal_assigned -> "goal_assigned"
 ;;
 
@@ -61,6 +63,7 @@ let stimulus_kind_of_string = function
   | "hitl_resolved" -> Some Hitl_resolved
   | "failure_judgment" -> Some Failure_judgment
   | "manual_compaction" -> Some Manual_compaction
+  | "configured_compaction" -> Some Configured_compaction
   | "goal_assigned" -> Some Goal_assigned
   | _ -> None
 ;;
@@ -117,6 +120,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Failure_judgment _ -> Failure_judgment
   | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
+  | Keeper_event_queue.Configured_compaction_requested _ -> Configured_compaction
   | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
 ;;
 
@@ -222,6 +226,10 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
   | Keeper_event_queue.Manual_compaction_requested -> "manual_compaction_requested"
+  | Keeper_event_queue.Configured_compaction_requested trigger ->
+    Printf.sprintf
+      "configured_compaction_requested trigger=%s"
+      (Compaction_trigger.to_human trigger)
   | Keeper_event_queue.Goal_assigned ga ->
     Printf.sprintf
       "goal_assigned goal_id=%s assigned_by=%s"
@@ -245,6 +253,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Failure_judgment _
     | Keeper_event_queue.Manual_compaction_requested
+    | Keeper_event_queue.Configured_compaction_requested _
     | Keeper_event_queue.Goal_assigned _ -> None
   in
   `Assoc
@@ -576,6 +585,7 @@ let event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id iter =
        | None -> ())
     | Some _
     | None -> ());
+  in
   iteration,
   { keeper_name
   ; stimulus_id
@@ -997,7 +1007,8 @@ let summarize_rows ~keeper_name ~limit rows =
        | Some
            ( Board_signal | Bootstrap | Fusion_completed
            | Bg_completed | Schedule_due | Connector_attention | Hitl_resolved
-           | Failure_judgment | Manual_compaction | Goal_assigned )
+           | Failure_judgment | Manual_compaction | Configured_compaction
+           | Goal_assigned )
          -> ())
   in
   let note_payload_parse_error row =

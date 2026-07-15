@@ -100,6 +100,7 @@ type event_queue_trigger =
   | Hitl_resolved_stimulus
   | Failure_judgment_stimulus
   | Manual_compaction_stimulus
+  | Configured_compaction_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -110,6 +111,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Hitl_resolved_pending
   | Failure_judgment_pending
   | Manual_compaction_pending
+  | Configured_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -714,7 +716,8 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Manual_compaction_requested ->
+  | Keeper_event_queue.Manual_compaction_requested
+  | Keeper_event_queue.Configured_compaction_requested _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
        inject — the keeper resumes on its own state once the approval is gone
@@ -1099,6 +1102,9 @@ let keeper_cycle_decision
   let manual_compaction_control =
     List.mem Manual_compaction_stimulus event_queue_triggers
   in
+  let configured_compaction_control =
+    List.mem Configured_compaction_stimulus event_queue_triggers
+  in
   let failure_judgment_control =
     List.mem Failure_judgment_stimulus event_queue_triggers
   in
@@ -1133,6 +1139,13 @@ let keeper_cycle_decision
     { should_run = true
     ; channel = Reactive
     ; verdict = Run { reasons = Manual_compaction_pending, [] }
+    ; since_last_scheduled_autonomous = None
+    }
+  else if configured_compaction_control
+  then
+    { should_run = true
+    ; channel = Reactive
+    ; verdict = Run { reasons = Configured_compaction_pending, [] }
     ; since_last_scheduled_autonomous = None
     }
   else if failure_judgment_control

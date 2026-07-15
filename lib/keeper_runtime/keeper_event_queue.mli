@@ -93,6 +93,8 @@ type stimulus_payload =
   | Manual_compaction_requested
       (** Operator-requested MASC compaction. The tool only enqueues this
           stimulus; the owning Keeper consumes it under its turn slot. *)
+  | Configured_compaction_requested of Compaction_trigger.t
+      (** Typed configured threshold; performed by the owner Keeper lane. *)
   | Goal_assigned of goal_assignment
       (** A goal was newly added to this keeper's [active_goal_ids]. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
@@ -213,6 +215,7 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 val failure_judgment_post_id : failure_judgment -> post_id
 
 val manual_compaction_post_id : post_id
+val configured_compaction_post_id : post_id
 
 val goal_assignment_post_id : goal_assignment -> post_id
 

@@ -51,11 +51,11 @@ type cycle_outcome =
       { meta : keeper_meta
       ; outcome : failure_judgment_terminal
       }
-  | Manual_compaction_failed of
+  | Requested_compaction_failed of
       { meta : keeper_meta
       ; failure : Keeper_manual_compaction.failure
       }
-  | Manual_compaction_applied of cycle_outcome
+  | Requested_compaction_applied of cycle_outcome
 
 and failure_judgment_terminal =
   | Judgment_boundary_failed of { detail : string }
@@ -71,26 +71,26 @@ let rec meta = function
   | Failed { meta; _ }
   | Busy { meta; _ }
   | Judgment_settled { meta; _ }
-  | Manual_compaction_failed { meta; _ } ->
+  | Requested_compaction_failed { meta; _ } ->
     meta
-  | Manual_compaction_applied outcome -> meta outcome
+  | Requested_compaction_applied outcome -> meta outcome
 ;;
 
 let rec turn_failure = function
   | Failed { failure; _ } -> Some failure
-  | Manual_compaction_applied outcome -> turn_failure outcome
+  | Requested_compaction_applied outcome -> turn_failure outcome
   | Completed _ | Cancelled _ | Skipped _ | Busy _
-  | Judgment_settled _ | Manual_compaction_failed _ -> None
+  | Judgment_settled _ | Requested_compaction_failed _ -> None
 ;;
 
-let manual_compaction_followup_failure = function
-  | Manual_compaction_applied outcome -> turn_failure outcome
+let requested_compaction_followup_failure = function
+  | Requested_compaction_applied outcome -> turn_failure outcome
   | Completed _ | Cancelled _ | Skipped _ | Failed _ | Busy _
-  | Judgment_settled _ | Manual_compaction_failed _ -> None
+  | Judgment_settled _ | Requested_compaction_failed _ -> None
 ;;
 
-let with_manual_compaction applied outcome =
-  if applied then Manual_compaction_applied outcome else outcome
+let with_requested_compaction applied outcome =
+  if applied then Requested_compaction_applied outcome else outcome
 ;;
 
 let record_failure_judgment_outcome
@@ -210,19 +210,24 @@ let run_keeper_cycle_admitted
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
       ?failure_judgment
-      ?(manual_compaction_requested = false)
+      ?compaction_request
       ()
   =
   let admitted_execution =
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       let prepared =
-        if manual_compaction_requested
-        then
-          (match Keeper_manual_compaction.run ~config:ctx.config ~meta:meta_after_triage with
+        match compaction_request with
+        | Some trigger ->
+          (match
+             Keeper_manual_compaction.run
+               ~config:ctx.config
+               ~meta:meta_after_triage
+               ~trigger
+           with
            | Error failure -> `Compaction_failed failure
            | Ok _ -> `Run (obs, true))
-        else
-          match failure_judgment with
+        | None ->
+          (match failure_judgment with
           | None -> `Run (obs, false)
           | Some request ->
             (match
@@ -233,7 +238,7 @@ let run_keeper_cycle_admitted
                  obs
              with
              | `Run observation -> `Run (observation, false)
-             | `Settle outcome -> `Settle outcome)
+             | `Settle outcome -> `Settle outcome))
       in
       match prepared with
       | `Compaction_failed failure -> `Compaction_failed failure
@@ -264,7 +269,7 @@ let run_keeper_cycle_admitted
       ~keeper_name:meta_after_triage.name
       "manual compaction failed in owner lane: %s"
       (Keeper_manual_compaction.failure_to_string failure);
-    Manual_compaction_failed { meta = meta_after_triage; failure }
+    Requested_compaction_failed { meta = meta_after_triage; failure }
   | `Judgment outcome -> Judgment_settled { meta = meta_after_triage; outcome }
   | `Turn (Error failure, manual_compaction_applied) ->
     let err = failure.Keeper_unified_turn.error in
@@ -320,13 +325,13 @@ let run_keeper_cycle_admitted
           ();
         meta_after_triage
     in
-    with_manual_compaction manual_compaction_applied (Failed { meta; failure })
+    with_requested_compaction manual_compaction_applied (Failed { meta; failure })
   | `Turn (Ok (Keeper_unified_turn.Turn_completed updated), applied) ->
-    with_manual_compaction applied (Completed updated)
+    with_requested_compaction applied (Completed updated)
   | `Turn (Ok (Keeper_unified_turn.Turn_cancelled meta), applied) ->
-    with_manual_compaction applied (Cancelled meta)
+    with_requested_compaction applied (Cancelled meta)
   | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta), applied) ->
-    with_manual_compaction applied (Skipped meta)
+    with_requested_compaction applied (Skipped meta)
 ;;
 
 let run_keeper_cycle
@@ -341,7 +346,7 @@ let run_keeper_cycle
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
       ?failure_judgment
-      ?manual_compaction_requested
+      ?compaction_request
       ()
   =
   match
@@ -357,7 +362,7 @@ let run_keeper_cycle
          ~shared_context
          ~wake
          ?failure_judgment
-         ?manual_compaction_requested
+         ?compaction_request
          ?event_bus
          ?hitl_resolution
          ?continuation_delivery_channel)

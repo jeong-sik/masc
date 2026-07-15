@@ -5,10 +5,7 @@
 // edits the [fusion] settings through
 // the pure fusion-settings helpers, and writes back via saveRuntimeTomlConfig
 // (POST /api/v1/runtime/config/raw → Runtime.save_config_text validates +
-// atomically persists + reloads). The backend is the validation SSOT: an
-// out-of-range min_answered is rejected on save and surfaced as an error here.
-// The panel also blocks malformed local form state before POST so invalid UI
-// input is not sent as a fabricated numeric value.
+// atomically persists + reloads). The backend is the validation SSOT.
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchRuntimeTomlConfig, saveRuntimeTomlConfig } from '../api/dashboard'
@@ -16,7 +13,6 @@ import { errorToString } from '../lib/format-string'
 import {
   applyFusionPresetComposition,
   applyFusionSettings,
-  readFusionPresetMinAnswered,
   readFusionSettingsResult,
   type FusionSettings,
   type FusionSettingsParseIssue,
@@ -29,7 +25,6 @@ type EditorState = 'loading' | 'idle' | 'saving' | 'saved' | 'error'
 type FusionSettingsDraft = {
   readonly enabled: boolean
   readonly defaultPreset: string
-  readonly minAnswered: string
   readonly panel: readonly string[]
   readonly judge: string
 }
@@ -40,28 +35,17 @@ function draftFromSettings(sourceText: string, s: FusionSettings): FusionSetting
   return {
     enabled: s.enabled,
     defaultPreset: s.defaultPreset,
-    minAnswered: String(s.minAnswered),
     panel: flatPreset?.panel ?? [],
     judge: flatPreset?.judge ?? '',
   }
 }
 
-function parseDraftPositiveInt(label: string, raw: string): number | string {
-  const trimmed = raw.trim()
-  if (!/^\d+$/.test(trimmed)) return `${label}은 1 이상의 정수여야 합니다.`
-  const parsed = Number.parseInt(trimmed, 10)
-  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : `${label}은 1 이상의 정수여야 합니다.`
-}
-
 function settingsFromDraft(draft: FusionSettingsDraft): FusionSettings | string {
   const defaultPreset = draft.defaultPreset
   if (defaultPreset !== '' && defaultPreset.trim() === '') return 'default_preset은 공백만 입력할 수 없습니다.'
-  const minAnswered = parseDraftPositiveInt('min_answered', draft.minAnswered)
-  if (typeof minAnswered === 'string') return minAnswered
   return {
     enabled: draft.enabled,
     defaultPreset,
-    minAnswered,
   }
 }
 
@@ -233,18 +217,10 @@ export function FusionSettingsPanel() {
   const patchDefaultPreset = (defaultPreset: string) => {
     const next: {
       defaultPreset: string
-      minAnswered?: string
       panel?: readonly string[]
       judge?: string
     } = { defaultPreset }
     if (source !== null) {
-      const minAnswered = readFusionPresetMinAnswered(source, defaultPreset)
-      if (typeof minAnswered === 'number') {
-        next.minAnswered = String(minAnswered)
-      } else {
-        setError(parseIssueMessage([minAnswered]))
-        setState('error')
-      }
       const nextPresetView = readFusionPresetView(source, defaultPreset)
       if (nextPresetView !== null && !nextPresetView.grouped) {
         next.panel = nextPresetView.panel
@@ -344,11 +320,6 @@ export function FusionSettingsPanel() {
       <label class="set-line">
         <span>기본 프리셋 (default_preset)</span>
         <input type="text" value=${draft.defaultPreset} onInput=${(e: Event) => patchDefaultPreset(str(e))} />
-      </label>
-      <label class="set-line">
-        <span>최소 응답 패널 (${draft.defaultPreset || '프리셋'} min_answered)</span>
-        <input type="number" step="1" data-testid="fusion-min-answered" value=${draft.minAnswered}
-          onInput=${(e: Event) => patch({ minAnswered: str(e) })} />
       </label>
       <div class="set-line">
         <button type="button" data-testid="fusion-settings-save" onClick=${onSave} disabled=${state === 'saving'}>

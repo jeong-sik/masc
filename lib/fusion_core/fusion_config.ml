@@ -14,8 +14,6 @@ type config_error =
   | Missing_default_preset of string
   | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
-  | Invalid_min_answered of string * int
-      (** (preset 이름, min_answered): policy 허용 범위 밖 *)
   | Invalid_meta_timeout of string * float
       (** (preset 이름, meta_timeout_s): 양수 유한수가 아님. *)
   | Invalid_judge_wave_budget of string * float
@@ -70,15 +68,10 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
       Otoml.find_opt tbl Otoml.get_float [ "max_timeout_s" ]
   }
 
-let parse_min_answered _name tbl =
-  match Otoml.find_opt tbl Otoml.get_integer [ "min_answered" ] with
-  | None -> Ok Fusion_policy.default_min_answered
-  | Some v -> Ok v
-
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
    (단일 심판 = simple/refine/conditional 심판이자 JOJ meta). [[...judges]] sub-table이
    있으면 JOJ 1차 심판 목록으로 파싱(없으면 []). 검증 순서: non-empty models → 패널 프롬프트 →
-   심판모델 → 패널 정체성 중복 → 1차 심판 prompt/정체성 → min_answered. *)
+   심판모델 → 패널 정체성 중복 → 1차 심판 prompt/정체성. *)
 let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   : (Fusion_policy.Validated_preset.t, config_error) result =
   let judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ] in
@@ -114,33 +107,29 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   let fallback_judge_model =
     Otoml.find_opt tbl Otoml.get_string [ "fallback_judge_model" ]
   in
-  (* 런타임 quorum. 미설정 시 [default_min_answered] = 기존 동작(>= 1 응답이면 심판 실행).
-     허용 범위는 1 이상 패널 모델 총합 이하; 검증 SSOT는 Validated_preset.of_preset. *)
-  Result.bind (parse_min_answered name tbl) (fun min_answered ->
-    let p : Fusion_policy.preset =
-      { name
-      ; panels
-      ; judge
-      ; judge_system_prompt
-      ; judge_timeout_s
-      ; judge_max_output_tokens
-      ; judges
-      ; meta_timeout_s
-      ; min_answered
-      ; judge_wave_budget_s
-      ; adaptive_timeout_factor
-      ; fallback_judge_model
-      }
-    in
-    (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
+  let p : Fusion_policy.preset =
+    { name
+    ; panels
+    ; judge
+    ; judge_system_prompt
+    ; judge_timeout_s
+    ; judge_max_output_tokens
+    ; judges
+    ; meta_timeout_s
+    ; judge_wave_budget_s
+    ; adaptive_timeout_factor
+    ; fallback_judge_model
+    }
+  in
+  (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
      이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
      [open] 안 함 — invalid와 config_error가 Missing_prompt 등 동명 변형을 가져 LHS만
      full-qualify해 shadow를 피한다. *)
-    match Fusion_policy.Validated_preset.of_preset p with
-    | Ok vp -> Ok vp
-    | Error invalid ->
-      Error
-        (match invalid with
+  match Fusion_policy.Validated_preset.of_preset p with
+  | Ok vp -> Ok vp
+  | Error invalid ->
+    Error
+      (match invalid with
          | Fusion_policy.Validated_preset.Empty_panel_models -> Empty_panel_models name
          | Fusion_policy.Validated_preset.Missing_prompt -> Missing_prompt name
          | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
@@ -152,15 +141,12 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Judge_panel_prompt_missing name
          | Fusion_policy.Validated_preset.Duplicate_judge id ->
            Duplicate_judge (name, id)
-         | Fusion_policy.Validated_preset.Min_answered_below_min v
-         | Fusion_policy.Validated_preset.Min_answered_above_max v ->
-           Invalid_min_answered (name, v)
          | Fusion_policy.Validated_preset.Bad_meta_timeout v ->
            Invalid_meta_timeout (name, v)
          | Fusion_policy.Validated_preset.Bad_judge_wave_budget v ->
            Invalid_judge_wave_budget (name, v)
-         | Fusion_policy.Validated_preset.Bad_adaptive_factor v ->
-           Invalid_adaptive_timeout_factor (name, v)))
+       | Fusion_policy.Validated_preset.Bad_adaptive_factor v ->
+         Invalid_adaptive_timeout_factor (name, v))
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.

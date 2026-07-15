@@ -46,8 +46,6 @@ type preset =
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
-  ; min_answered : int
-      (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
   ; judge_wave_budget_s : float
       (** 1차 심판 wave 전체 wall-clock 예산 (초). 0=비활성(legacy). *)
   ; adaptive_timeout_factor : float
@@ -57,8 +55,6 @@ type preset =
   }
 [@@deriving show, eq]
 
-let min_answered_floor = 1
-let default_min_answered = min_answered_floor
 let min_staged_judge_group_size = 2
 let default_staged_judge_group_size = 3
 
@@ -284,10 +280,6 @@ module Validated_preset = struct
         (** 그룹/심판 출력 토큰 예산 override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
-    | Min_answered_below_min of int
-        (** [min_answered]가 하한 [min_answered_floor] 미만. *)
-    | Min_answered_above_max of int
-        (** [min_answered]가 패널 모델 총합을 초과. *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
     | Bad_judge_wave_budget of float
@@ -298,7 +290,7 @@ module Validated_preset = struct
 
   (* 검증 순서는 config 로드 시점과 동일: non-empty models → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
-     1차 심판 prompt → 1차 심판 정체성 중복 → 심판 max_output_tokens 범위 → min_answered.
+     1차 심판 prompt → 1차 심판 정체성 중복 → 심판 max_output_tokens 범위.
      judges=[]면 1차 심판 관련 셋은 통과(simple/refine/conditional preset은 기존과 동일
      결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =
@@ -331,12 +323,7 @@ module Validated_preset = struct
                 with
                 | Some (Some n) -> Error (Bad_max_output_tokens n)
                 | Some None | None ->
-                  let total = List.length (preset_models p) in
-                  if p.min_answered < min_answered_floor
-                  then Error (Min_answered_below_min p.min_answered)
-                  else if p.min_answered > total
-                  then Error (Min_answered_above_max p.min_answered)
-                  else if
+                  if
                     not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
                   then Error (Bad_meta_timeout p.meta_timeout_s)
                   else if p.adaptive_timeout_factor < 1.0

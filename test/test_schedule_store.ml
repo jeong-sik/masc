@@ -119,6 +119,57 @@ let test_duplicate_insert_rejected_without_bump () =
   check int "version unchanged" before.version after.version
 ;;
 
+let with_recurrence_version version = function
+  | `Assoc fields ->
+    let recurrence =
+      match List.assoc_opt "recurrence" fields with
+      | Some (`Assoc recurrence_fields) ->
+        `Assoc
+          ((match version with
+            | None -> List.remove_assoc "schema_version" recurrence_fields
+            | Some version ->
+              ("schema_version", `Int version)
+              :: List.remove_assoc "schema_version" recurrence_fields))
+      | _ -> fail "schedule recurrence IR missing"
+    in
+    `Assoc (("recurrence", recurrence) :: List.remove_assoc "recurrence" fields)
+  | _ -> fail "schedule row must be an object"
+;;
+
+let test_state_isolates_recurrence_version_rejections () =
+  let valid = make_request ~schedule_id:"valid-v1" () |> schedule_request_to_yojson in
+  let missing = with_recurrence_version None valid in
+  let unsupported = with_recurrence_version (Some 2) valid in
+  let json =
+    `Assoc
+      [ "version", `Int 1
+      ; "updated_at", `Float 1.0
+      ; "schedules", `List [ valid; missing; unsupported ]
+      ; "executions", `List []
+      ]
+  in
+  let state =
+    match state_of_yojson json with
+    | Ok state -> state
+    | Error error -> fail error
+  in
+  check int "valid row remains active" 1 (List.length state.schedules);
+  check int "invalid rows isolated" 2 (List.length state.rejected_schedules);
+  (match state.rejected_schedules with
+   | [ { ordinal = 1; error = Recurrence_ir_decode_error Missing_schema_version; _ }
+     ; { ordinal = 2
+       ; error = Recurrence_ir_decode_error (Unsupported_schema_version 2)
+       ; _
+       }
+     ] -> ()
+   | _ -> fail "typed recurrence version evidence missing");
+  match state_to_yojson state |> state_of_yojson with
+  | Error error -> fail error
+  | Ok roundtrip ->
+    check int "roundtrip active rows" 1 (List.length roundtrip.schedules);
+    check int "roundtrip rejected rows" 2 (List.length roundtrip.rejected_schedules)
+;;
+
 let test_store_rejects_non_scheduled_initial_status () =
   with_workspace
   @@ fun config ->
@@ -548,7 +599,17 @@ let test_recurrence_evaluation_failure_never_completes_schedule () =
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
-  let invalid = { valid with recurrence = Interval { interval_sec = 0 } } in
+  let invalid_recurrence =
+    Schedule_domain.recurrence_ir_of_yojson
+      (`Assoc
+        [ "schema_version", `Int 1
+        ; "rule", recurrence_to_yojson (Interval { interval_sec = 0 })
+        ])
+    |> function
+    | Ok recurrence -> recurrence
+    | Error error -> fail (recurrence_ir_decode_error_to_string error)
+  in
+  let invalid = { valid with recurrence = invalid_recurrence } in
   ignore (insert_ok config invalid);
   (match refresh_due config ~now:201.0 with
    | Ok _ -> ()
@@ -693,6 +754,8 @@ let () =
             test_insert_persists_and_bumps_version;
           test_case "duplicate insert rejected without bump" `Quick
             test_duplicate_insert_rejected_without_bump;
+          test_case "recurrence version rejections are row isolated" `Quick
+            test_state_isolates_recurrence_version_rejections;
           test_case "corrupt primary recovers from last-good" `Quick
             test_recovers_from_last_good;
         ] );

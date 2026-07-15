@@ -47,6 +47,17 @@ let unix_timestamp date_time =
   | None -> fail "invalid timestamp fixture"
 ;;
 
+let persisted_ir recurrence =
+  recurrence_ir_of_yojson
+    (`Assoc
+      [ "schema_version", `Int 1
+      ; "rule", recurrence_to_yojson recurrence
+      ])
+  |> function
+  | Ok recurrence -> recurrence
+  | Error error -> fail (recurrence_ir_decode_error_to_string error)
+;;
+
 let test_request_starts_scheduled () =
   let req = request () in
   check_status "status" Scheduled req.status
@@ -100,7 +111,7 @@ let test_interval_recurrence_next_due () =
       ~recurrence:(Interval { interval_sec = 60 })
       ()
   in
-  check bool "is recurring" true (is_recurring req.recurrence);
+  check bool "is recurring" true (is_recurring (recurrence_ir_rule req.recurrence));
   let due_at = expect_due_at (next_due_after ~now:201.0 req) in
   check (float 0.001) "next due" 260.0 due_at
 ;;
@@ -149,7 +160,7 @@ let test_cron_recurrence_next_due_weekdays () =
       ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
       ()
   in
-  check bool "is recurring" true (is_recurring req.recurrence);
+  check bool "is recurring" true (is_recurring (recurrence_ir_rule req.recurrence));
   let due_at = expect_due_at (next_due_after ~now:32400.0 req) in
   check (float 0.001) "next weekday 09:00" 118800.0 due_at
 ;;
@@ -185,13 +196,8 @@ let test_cron_impossible_date_is_explicit () =
        error
    | Ok _ -> fail "impossible recurrence passed validation");
   let valid = request () in
-  let persisted = { valid with recurrence = impossible } in
-  let decoded =
-    match recurrence_to_yojson impossible |> recurrence_of_yojson with
-    | Ok recurrence -> { persisted with recurrence }
-    | Error error -> fail error
-  in
-  match next_due_after ~now:1.0 decoded with
+  let persisted = { valid with recurrence = persisted_ir impossible } in
+  match next_due_after ~now:1.0 persisted with
   | Error (Invalid_persisted_recurrence error) ->
     check string "persisted rejection"
       "recurrence.cron has no possible calendar date"
@@ -235,7 +241,7 @@ let test_schedule_roundtrip () =
     check string "schedule_id" req.schedule_id decoded.schedule_id;
     check_status "status" req.status decoded.status;
     check string "recurrence" "interval"
-      (recurrence_kind_to_string decoded.recurrence);
+      (recurrence_kind_to_string (recurrence_ir_rule decoded.recurrence));
     check string "payload digest" (payload_digest req.payload)
       (payload_digest decoded.payload)
 ;;
@@ -250,8 +256,8 @@ let test_cron_schedule_roundtrip () =
   | Error msg -> fail msg
   | Ok decoded ->
     check string "recurrence" "cron"
-      (recurrence_kind_to_string decoded.recurrence);
-    (match decoded.recurrence with
+      (recurrence_kind_to_string (recurrence_ir_rule decoded.recurrence));
+    (match recurrence_ir_rule decoded.recurrence with
      | Cron { expression; timezone } ->
        check string "expression" "0 9 * * 1-5" expression;
        check string "timezone" "Asia/Seoul" timezone
@@ -269,18 +275,17 @@ let test_recurrence_summary () =
     (recurrence_summary (Cron { expression = "0 9 * * 1-5"; timezone = "UTC" }))
 ;;
 
-let test_missing_recurrence_defaults_one_shot () =
+let test_missing_recurrence_version_is_explicit () =
   let req = request () in
   let json =
     match schedule_request_to_yojson req with
     | `Assoc fields -> `Assoc (List.remove_assoc "recurrence" fields)
     | other -> other
   in
-  match schedule_request_of_yojson json with
-  | Error msg -> fail msg
-  | Ok decoded ->
-    check string "recurrence" "one_shot"
-      (recurrence_kind_to_string decoded.recurrence)
+  match schedule_request_of_yojson_detailed json with
+  | Error (Recurrence_ir_decode_error Missing_schema_version) -> ()
+  | Error error -> fail (schedule_request_decode_error_to_string error)
+  | Ok _ -> fail "missing recurrence version was inferred"
 ;;
 
 let test_execution_record_roundtrip () =
@@ -350,8 +355,8 @@ let () =
           test_case "schedule roundtrip" `Quick test_schedule_roundtrip;
           test_case "cron schedule roundtrip" `Quick test_cron_schedule_roundtrip;
           test_case "recurrence summary" `Quick test_recurrence_summary;
-          test_case "missing recurrence defaults one-shot" `Quick
-            test_missing_recurrence_defaults_one_shot;
+          test_case "missing recurrence version is explicit" `Quick
+            test_missing_recurrence_version_is_explicit;
           test_case "execution record roundtrip" `Quick
             test_execution_record_roundtrip;
         ] );

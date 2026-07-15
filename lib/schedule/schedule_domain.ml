@@ -48,6 +48,17 @@ type recurrence =
       ; timezone : string
       }
 
+type recurrence_ir = V1 of recurrence
+
+type recurrence_ir_decode_error =
+  | Missing_schema_version
+  | Unsupported_schema_version of int
+  | Invalid_recurrence_ir of string
+
+type schedule_request_decode_error =
+  | Invalid_schedule_request of string
+  | Recurrence_ir_decode_error of recurrence_ir_decode_error
+
 type recurrence_evaluation =
   | Next_due_at of float
   | No_next
@@ -73,7 +84,7 @@ type schedule_request =
   ; payload : payload
   ; status : schedule_status
   ; source : schedule_source
-  ; recurrence : recurrence
+  ; recurrence : recurrence_ir
   }
 
 type execution_status =
@@ -486,6 +497,25 @@ let validate_recurrence = function
   | Cron { expression; timezone } -> validate_cron ~expression ~timezone
 ;;
 
+let recurrence_ir_v1 recurrence =
+  let* recurrence = validate_recurrence recurrence in
+  Ok (V1 recurrence)
+;;
+
+let recurrence_ir_rule (V1 recurrence) = recurrence
+
+let recurrence_ir_decode_error_to_string = function
+  | Missing_schema_version -> "recurrence IR is missing schema_version"
+  | Unsupported_schema_version version ->
+    Printf.sprintf "unsupported recurrence IR schema_version: %d" version
+  | Invalid_recurrence_ir detail -> "invalid recurrence IR: " ^ detail
+;;
+
+let schedule_request_decode_error_to_string = function
+  | Invalid_schedule_request detail -> detail
+  | Recurrence_ir_decode_error error -> recurrence_ir_decode_error_to_string error
+;;
+
 let recurrence_evaluation_error_to_string = function
   | Invalid_persisted_recurrence detail ->
     "invalid persisted recurrence: " ^ detail
@@ -541,6 +571,29 @@ let recurrence_of_yojson = function
        Ok (Cron { expression; timezone })
      | other -> Error ("unknown recurrence kind: " ^ other))
   | _ -> Error "expected recurrence object"
+;;
+
+let recurrence_ir_to_yojson (V1 recurrence) =
+  `Assoc
+    [ "schema_version", `Int 1
+    ; "rule", recurrence_to_yojson recurrence
+    ]
+;;
+
+let recurrence_ir_of_yojson = function
+  | `Assoc fields ->
+    (match List.assoc_opt "schema_version" fields with
+     | None -> Error Missing_schema_version
+     | Some (`Int 1) ->
+       (match List.assoc_opt "rule" fields with
+        | None -> Error (Invalid_recurrence_ir "missing field: rule")
+        | Some rule ->
+          recurrence_of_yojson rule
+          |> Result.map (fun recurrence -> V1 recurrence)
+          |> Result.map_error (fun error -> Invalid_recurrence_ir error))
+     | Some (`Int version) -> Error (Unsupported_schema_version version)
+     | Some _ -> Error (Invalid_recurrence_ir "schema_version must be an integer"))
+  | _ -> Error (Invalid_recurrence_ir "expected recurrence IR object")
 ;;
 
 let actor_to_yojson (actor : actor) =
@@ -707,7 +760,7 @@ let first_due_after ~now = function
 ;;
 
 let next_due_after ~now (request : schedule_request) =
-  match request.recurrence with
+  match recurrence_ir_rule request.recurrence with
   | One_shot -> Ok No_next
   | Interval { interval_sec } ->
     next_periodic_due_after
@@ -795,36 +848,39 @@ let schedule_request_to_yojson (request : schedule_request) =
     ; "payload", payload_to_yojson request.payload
     ; "status", `String (schedule_status_to_string request.status)
     ; "source", `String (schedule_source_to_string request.source)
-    ; "recurrence", recurrence_to_yojson request.recurrence
+    ; "recurrence", recurrence_ir_to_yojson request.recurrence
     ]
 ;;
 
-let schedule_request_of_yojson = function
+let schedule_request_of_yojson_detailed = function
   | `Assoc fields ->
-    let* schedule_id = string_field "schedule_id" fields in
-    let* requested_by_json = assoc_field "requested_by" fields in
-    let* requested_by = actor_of_yojson requested_by_json in
-    let* scheduled_by_json = assoc_field "scheduled_by" fields in
-    let* scheduled_by = actor_of_yojson scheduled_by_json in
-    let* requested_at = float_field "requested_at" fields in
-    let* due_at = float_field "due_at" fields in
+    let invalid result = Result.map_error (fun error -> Invalid_schedule_request error) result in
+    let* schedule_id = invalid (string_field "schedule_id" fields) in
+    let* requested_by_json = invalid (assoc_field "requested_by" fields) in
+    let* requested_by = invalid (actor_of_yojson requested_by_json) in
+    let* scheduled_by_json = invalid (assoc_field "scheduled_by" fields) in
+    let* scheduled_by = invalid (actor_of_yojson scheduled_by_json) in
+    let* requested_at = invalid (float_field "requested_at" fields) in
+    let* due_at = invalid (float_field "due_at" fields) in
     let* expires_at =
       match List.assoc_opt "expires_at" fields with
       | None | Some `Null -> Ok None
       | Some value ->
-        let* value = float_of_yojson value in
+        let* value = invalid (float_of_yojson value) in
         Ok (Some value)
     in
-    let* payload_json = assoc_field "payload" fields in
-    let* payload = payload_of_yojson payload_json in
-    let* status_name = string_field "status" fields in
-    let* status = schedule_status_of_string status_name in
-    let* source_name = string_field "source" fields in
-    let* source = schedule_source_of_string source_name in
+    let* payload_json = invalid (assoc_field "payload" fields) in
+    let* payload = invalid (payload_of_yojson payload_json) in
+    let* status_name = invalid (string_field "status" fields) in
+    let* status = invalid (schedule_status_of_string status_name) in
+    let* source_name = invalid (string_field "source" fields) in
+    let* source = invalid (schedule_source_of_string source_name) in
     let* recurrence =
       match List.assoc_opt "recurrence" fields with
-      | None -> Ok One_shot
-      | Some value -> recurrence_of_yojson value
+      | None -> Error (Recurrence_ir_decode_error Missing_schema_version)
+      | Some value ->
+        recurrence_ir_of_yojson value
+        |> Result.map_error (fun error -> Recurrence_ir_decode_error error)
     in
     Ok
       { schedule_id
@@ -838,7 +894,12 @@ let schedule_request_of_yojson = function
       ; source
       ; recurrence
       }
-  | _ -> Error "expected schedule_request object"
+  | _ -> Error (Invalid_schedule_request "expected schedule_request object")
+;;
+
+let schedule_request_of_yojson json =
+  schedule_request_of_yojson_detailed json
+  |> Result.map_error schedule_request_decode_error_to_string
 ;;
 
 let create_request
@@ -857,7 +918,7 @@ let create_request
   let* _ = nonempty "requested_by.id" requested_by.id in
   let* _ = nonempty "scheduled_by.id" scheduled_by.id in
   let* payload = payload_of_yojson payload in
-  let* recurrence = validate_recurrence recurrence in
+  let* recurrence = recurrence_ir_v1 recurrence in
   Ok
     { schedule_id
     ; requested_by

@@ -313,15 +313,24 @@ let test_recurrence_evaluation_failure_defers_only_its_occurrence () =
         ()
     with
     | Ok request ->
-      { request with
-        recurrence =
-          Daily
-            { hour = 9
-            ; minute = 0
-            ; second = 0
-            ; timezone = "America/New_York"
-            }
-      }
+      let recurrence =
+        Schedule_domain.recurrence_ir_of_yojson
+          (`Assoc
+            [ "schema_version", `Int 1
+            ; ( "rule"
+              , Schedule_domain.recurrence_to_yojson
+                  (Daily
+                     { hour = 9
+                     ; minute = 0
+                     ; second = 0
+                     ; timezone = "America/New_York"
+                     }) )
+            ])
+        |> function
+        | Ok recurrence -> recurrence
+        | Error error -> fail (recurrence_ir_decode_error_to_string error)
+      in
+      { request with recurrence }
     | Error error -> fail error
   in
   (match Schedule_store.insert_request config request with

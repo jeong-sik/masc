@@ -2804,9 +2804,15 @@ let schedule_request_dashboard_json
     ; "next_due_at_iso", unix_iso_option_json next_due_at
     ; "expires_at", (match request.expires_at with None -> `Null | Some ts -> `Float ts)
     ; "expires_at_iso", unix_iso_option_json request.expires_at
-    ; "recurrence", Schedule_domain.recurrence_to_yojson request.recurrence
-    ; "recurrence_kind", `String (Schedule_domain.recurrence_kind_to_string request.recurrence)
-    ; "recurrence_summary", `String (Schedule_domain.recurrence_summary request.recurrence)
+    ; "recurrence", Schedule_domain.recurrence_ir_to_yojson request.recurrence
+    ; ( "recurrence_kind"
+      , `String
+          (Schedule_domain.recurrence_kind_to_string
+             (Schedule_domain.recurrence_ir_rule request.recurrence)) )
+    ; ( "recurrence_summary"
+      , `String
+          (Schedule_domain.recurrence_summary
+             (Schedule_domain.recurrence_ir_rule request.recurrence)) )
     ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
     ; ( "payload_kind"
       , match Schedule_payload_projection.kind request with
@@ -2988,6 +2994,8 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          ; "schedule_store_known", `Bool false
          ; "schedule_store_read_error", `String read_error
          ; "request_count", `Null
+         ; "rejected_request_count", `Null
+         ; "rejected_requests", `List []
          ; "request_limit", `Int schedule_projection_request_limit
          ; "truncated", `Bool false
          ; "counts", `Null
@@ -3032,6 +3040,19 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          ; "schedule_store_known", `Bool true
          ; "schedule_store_read_error", `Null
          ; "request_count", `Int (List.length schedules)
+         ; "rejected_request_count", `Int (List.length state.rejected_schedules)
+         ; ( "rejected_requests"
+           , `List
+               (List.map
+                  (fun (row : Schedule_store.rejected_schedule_row) ->
+                     `Assoc
+                       [ "ordinal", `Int row.ordinal
+                       ; ( "error"
+                         , `String
+                             (Schedule_domain.schedule_request_decode_error_to_string
+                                row.error) )
+                       ])
+                  state.rejected_schedules) )
          ; "request_limit", `Int schedule_projection_request_limit
          ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
          ; "counts", schedule_counts_json schedules

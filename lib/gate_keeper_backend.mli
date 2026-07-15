@@ -30,12 +30,18 @@ type submission_owner =
     the external actor's deterministic gate identity. [Authenticated_caller]
     keeps poll/cancel authority with the already-authenticated HTTP principal. *)
 
-type durable_connector =
-  | Discord_connector
-  | Slack_connector
+type connector_delivery =
+  { source : Keeper_chat_queue.message_source
+  ; surface : Surface_ref.t
+  ; conversation_id : string option
+  ; external_message_id : string option
+  }
+(** Immutable projection of the connector-owned delivery coordinates. The leaf
+    parses its own protocol and supplies this value; the Keeper adapter treats
+    every field as typed opaque input and does not inspect product metadata. *)
 
 val accept_connector :
-  connector:durable_connector ->
+  delivery:connector_delivery ->
   clock:_ Eio.Time.clock ->
   config:Workspace.config ->
   channel:string ->
@@ -48,7 +54,9 @@ val accept_connector :
   content:string ->
   Gate_protocol.dispatch_result
 (** Commit one in-process connector event to the existing per-Keeper durable
-    chat queue before returning. The producer's typed request identity is the
+    chat queue before returning. The connector leaf owns {!connector_delivery};
+    this adapter neither identifies products nor derives routes from
+    product-specific metadata. The producer's typed request identity is the
     queue receipt and transcript delivery key; retries converge without a
     derived hash namespace. *)
 

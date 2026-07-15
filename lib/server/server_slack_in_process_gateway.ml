@@ -138,6 +138,21 @@ let metadata_bool key value = [ (key, string_of_bool value) ]
    recorder to thread the persisted user line. *)
 let slack_conversation_id ~channel_id = Printf.sprintf "slack:channel:%s" channel_id
 
+let slack_delivery ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
+    ~user_name ~ts : Gate_keeper_backend.connector_delivery =
+  { source =
+      Keeper_chat_queue.Slack
+        { channel_id
+        ; user_id
+        ; user_name
+        ; team_id = None
+        ; thread_ts = Some reply_to_thread_ts
+        }
+  ; surface = Surface_ref.Slack { team_id = None; channel_id; thread_ts }
+  ; conversation_id = Some (slack_conversation_id ~channel_id)
+  ; external_message_id = Some ts
+  }
+
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
@@ -149,8 +164,8 @@ type accepted_inbound =
   ; outcome : (Channel_gate.outbound_message, Channel_gate.gate_error) result
   }
 
-let accept_inbound ~resolved_binding ~dispatch ~channel_id ~thread_ts ~user_id
-    ~user_name ~text ~ts ~mentions_bot ~is_app_mention =
+let accept_inbound ~resolved_binding ~dispatch_for_delivery ~channel_id
+    ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention =
   match resolved_binding with
   | None ->
     (* No binding for this channel — drop quietly. The bot may sit in channels
@@ -197,11 +212,18 @@ let accept_inbound ~resolved_binding ~dispatch ~channel_id ~thread_ts ~user_id
       ; metadata
       }
     in
+    let user_name = Option.value user_name ~default:user_id in
+    let delivery =
+      slack_delivery ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
+        ~user_name ~ts
+    in
     Some
       { channel_id
       ; reply_to_thread_ts
       ; keeper_name
-      ; outcome = Channel_gate.handle_inbound ~dispatch msg
+      ; outcome =
+          Channel_gate.handle_inbound
+            ~dispatch:(dispatch_for_delivery delivery) msg
       }
 
 let deliver_inbound ~clock accepted =
@@ -262,7 +284,8 @@ let deliver_inbound ~clock accepted =
              channel_id
              (Format.asprintf "%a" State.pp_send_error e)
 
-let accept_event ~resolved_binding ~dispatch (ev : Gw.slack_event) =
+let accept_event ~resolved_binding ~dispatch_for_delivery
+    (ev : Gw.slack_event) =
   match ev with
   | Gw.Message_create
       { channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot
@@ -278,12 +301,12 @@ let accept_event ~resolved_binding ~dispatch (ev : Gw.slack_event) =
     | None ->
       Slack_observability.record_gateway_event
         ~route:Slack_observability.Triggered Slack_observability.Message_create;
-      accept_inbound ~resolved_binding ~dispatch ~channel_id ~thread_ts
+      accept_inbound ~resolved_binding ~dispatch_for_delivery ~channel_id ~thread_ts
         ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention:false)
   | Gw.App_mention { channel_id; thread_ts; user_id; text; ts } ->
     Slack_observability.record_gateway_event ~route:Slack_observability.Triggered
       Slack_observability.App_mention;
-    accept_inbound ~resolved_binding ~dispatch ~channel_id ~thread_ts
+    accept_inbound ~resolved_binding ~dispatch_for_delivery ~channel_id ~thread_ts
       ~user_id
       ~user_name:None ~text ~ts ~mentions_bot:true ~is_app_mention:true
   | Gw.Reaction_added _ ->
@@ -296,7 +319,8 @@ let accept_event ~resolved_binding ~dispatch (ev : Gw.slack_event) =
       Slack_observability.Ignored;
     None
 
-let submit_event ?deliver ingress ~dispatch ~clock (ev : Gw.slack_event) =
+let submit_event ?deliver ingress ~dispatch_for_delivery ~clock
+    (ev : Gw.slack_event) =
   let submit ~channel_id ~event_id =
     match State.resolve_keeper_for_channel_result ~channel_id with
     | Error reason ->
@@ -305,7 +329,7 @@ let submit_event ?deliver ingress ~dispatch ~clock (ev : Gw.slack_event) =
         "Slack ingress binding unavailable channel=%s event=%s: %s"
         channel_id event_id reason
     | Ok resolved_binding -> (
-      match accept_event ~resolved_binding ~dispatch ev with
+      match accept_event ~resolved_binding ~dispatch_for_delivery ev with
       | None -> ()
       | Some accepted ->
         Connector_ingress_lane.submit
@@ -318,11 +342,11 @@ let submit_event ?deliver ingress ~dispatch ~clock (ev : Gw.slack_event) =
   in
   match ev with
   | Gw.Message_create { bot_id = Some _; _ } ->
-    ignore (accept_event ~resolved_binding:None ~dispatch ev)
+    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ev)
   | Gw.Message_create { channel_id; ts; bot_id = None; _ }
   | Gw.App_mention { channel_id; ts; _ } -> submit ~channel_id ~event_id:ts
   | Gw.Reaction_added _ | Gw.Ignored_event _ ->
-    ignore (accept_event ~resolved_binding:None ~dispatch ev)
+    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ev)
 ;;
 
 module For_testing = struct
@@ -391,9 +415,8 @@ let start ~sw ~env ~state =
                failure.reason)
            ()
        in
-       let dispatch_for_config config =
-         Gate_keeper_backend.accept_connector
-           ~connector:Gate_keeper_backend.Slack_connector ~clock ~config
+       let dispatch_for_config config delivery =
+         Gate_keeper_backend.accept_connector ~delivery ~clock ~config
        in
        let policy_label = Gw.trigger_policy_to_string policy in
        Log.Server.info
@@ -407,7 +430,7 @@ let start ~sw ~env ~state =
                let config = Mcp_server.workspace_config state in
                submit_event
                  ingress
-                 ~dispatch:(dispatch_for_config config)
+                 ~dispatch_for_delivery:(dispatch_for_config config)
                  ~clock
                  ev)
              ()

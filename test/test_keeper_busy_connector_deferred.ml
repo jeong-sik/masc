@@ -421,7 +421,21 @@ let test_exact_source_identity_converges () =
       configure_queue ~base;
       let accept () =
         Gate_keeper_backend.accept_connector
-          ~connector:Gate_keeper_backend.Discord_connector ~clock ~config
+          ~delivery:
+            { source =
+                Keeper_chat_queue.Discord
+                  { channel_id = "channel-exact"; user_id = "user-exact" }
+            ; surface =
+                Surface_ref.Discord
+                  { guild_id = None
+                  ; channel_id = "channel-exact"
+                  ; parent_channel_id = None
+                  ; thread_id = None
+                  }
+            ; conversation_id = Some "discord:dm:channel:channel-exact"
+            ; external_message_id = Some "source-123"
+            }
+          ~clock ~config
           ~channel:"discord" ~channel_user_id:"user-exact"
           ~channel_user_name:"Exact User"
           ~channel_workspace_id:"channel-exact" ~keeper_name

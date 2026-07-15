@@ -231,6 +231,7 @@ let test_bound_message_queues_exact_slack_ts () =
           ()
       in
       let accepted_before_delivery = ref false in
+      let observed_delivery = ref None in
       let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
           ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
           ~content:_ =
@@ -242,15 +243,49 @@ let test_bound_message_queues_exact_slack_ts () =
           ; message_request = None
           }
       in
+      let dispatch_for_delivery delivery =
+        observed_delivery := Some delivery;
+        dispatch
+      in
       G.For_testing.submit_event
         ~deliver:(fun () ->
           if not !accepted_before_delivery then
             failwith "delivery ran before durable accept";
           failwith "observe Slack ingress identity")
-        ingress ~dispatch
+        ingress ~dispatch_for_delivery
         ~clock:(Eio.Stdenv.clock env)
         (slack_message ~ts:"1710000000.123456");
       check bool "accept completed before handoff" true !accepted_before_delivery;
+      (match !observed_delivery with
+       | Some
+           { Gate_keeper_backend.source =
+               Keeper_chat_queue.Slack
+                 { channel_id; user_id; user_name; team_id; thread_ts }
+           ; surface =
+               Surface_ref.Slack
+                 { team_id = surface_team_id
+                 ; channel_id = surface_channel_id
+                 ; thread_ts = surface_thread_ts
+                 }
+           ; conversation_id
+           ; external_message_id
+           } ->
+         check string "Slack delivery channel" "C123" channel_id;
+         check string "Slack delivery actor" "U123" user_id;
+         check string "Slack delivery actor name" "operator" user_name;
+         check (option string) "Slack delivery team" None team_id;
+         check (option string) "Slack reply thread"
+           (Some "1710000000.123456") thread_ts;
+         check string "Slack surface channel" "C123" surface_channel_id;
+         check (option string) "Slack surface team" None surface_team_id;
+         check (option string) "Slack source message is top-level" None
+           surface_thread_ts;
+         check (option string) "Slack conversation identity"
+           (Some "slack:channel:C123") conversation_id;
+         check (option string) "Slack external event identity"
+           (Some "1710000000.123456") external_message_id
+       | Some _ -> fail "Slack leaf emitted another connector projection"
+       | None -> fail "Slack leaf did not emit a delivery projection");
       let failure = Eio.Promise.await observed in
       check string "exact Slack event ts" "1710000000.123456"
         failure.Connector_ingress_lane.event_id.opaque_id;
@@ -289,9 +324,10 @@ let test_binding_store_failure_does_not_enqueue () =
       dispatch_called := true;
       Gate_protocol.Unavailable_result
     in
+    let dispatch_for_delivery _delivery = dispatch in
     G.For_testing.submit_event
       ~deliver:(fun () -> fail "binding failure must not schedule delivery")
-      ingress ~dispatch
+      ingress ~dispatch_for_delivery
       ~clock:(Eio.Stdenv.clock env)
       (slack_message ~ts:"1710000000.654321");
     Eio.Fiber.yield ();

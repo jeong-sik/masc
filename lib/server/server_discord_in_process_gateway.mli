@@ -37,7 +37,8 @@ module For_testing : sig
   val submit_triggered_event :
     ?deliver:(unit -> unit) ->
     Connector_ingress_lane.t ->
-    dispatch:Channel_gate.dispatch_fn ->
+    dispatch_for_delivery:
+      (Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
     base_dir:string ->
     Discord_gateway_client.gateway_event ->
     unit

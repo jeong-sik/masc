@@ -258,6 +258,18 @@ let discord_chat_metadata ~guild_id ~channel_id ~message_id =
     ("external_message_id", message_id);
   ]
 
+let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
+    Gate_keeper_backend.connector_delivery =
+  let parent_channel_id = State.parent_channel_of_thread ~channel_id in
+  let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
+  { source = Keeper_chat_queue.Discord { channel_id; user_id = author_id }
+  ; surface =
+      Surface_ref.Discord
+        { guild_id; channel_id; parent_channel_id; thread_id }
+  ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
+  ; external_message_id = Some message_id
+  }
+
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
   =
@@ -343,7 +355,7 @@ let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
                     },
                     [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
 
-let accept_message_create ~resolved_binding ~dispatch
+let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(channel_id : string) ~(message_id : string)
       ~(guild_id : string option)
       ~base_dir
@@ -415,7 +427,12 @@ let accept_message_create ~resolved_binding ~dispatch
       ; metadata
       }
     in
-    let outcome = Channel_gate.handle_inbound ~dispatch msg in
+    let delivery =
+      discord_delivery ~guild_id ~channel_id ~message_id ~author_id
+    in
+    let outcome =
+      Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
+    in
     Some (fun () ->
      match outcome with
      | Error gate_err ->
@@ -487,7 +504,7 @@ let accept_message_create ~resolved_binding ~dispatch
               channel_id
               (Format.asprintf "%a" State.pp_send_error e)))
 
-let accept_event ~resolved_binding ~dispatch ~base_dir
+let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
   | Gw.Ready { bot_user_id; _ } ->
@@ -510,7 +527,7 @@ let accept_event ~resolved_binding ~dispatch ~base_dir
       } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
-    accept_message_create ~resolved_binding ~dispatch ~channel_id
+    accept_message_create ~resolved_binding ~dispatch_for_delivery ~channel_id
       ~message_id ~author_id
       ~guild_id ~base_dir ~author_name ~content ~mentions_bot ~explicit_mentions_bot
       ~message_reference_channel_id ~message_reference_message_id
@@ -681,7 +698,7 @@ let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
       ~message_id ~author_id ~author_name ~content
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
-let submit_triggered_event ?deliver ingress ~dispatch ~base_dir
+let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
@@ -689,9 +706,13 @@ let submit_triggered_event ?deliver ingress ~dispatch ~base_dir
     (match
        resolve_binding_for_message ~channel_id ~message_reference_channel_id
      with
-     | None -> ignore (accept_event ~resolved_binding:None ~dispatch ~base_dir ev)
+     | None ->
+       ignore
+         (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
      | Some ((resolution, _) as resolved_binding) ->
-       (match accept_event ~resolved_binding ~dispatch ~base_dir ev with
+       (match
+          accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ev
+        with
         | None -> ()
         | Some accepted_delivery ->
           Connector_ingress_lane.submit
@@ -705,7 +726,8 @@ let submit_triggered_event ?deliver ingress ~dispatch ~base_dir
   | Gw.Threads_bulk_tracked _
   | Gw.Thread_removed _
   | Gw.Ignored _ ->
-    ignore (accept_event ~resolved_binding:None ~dispatch ~base_dir ev)
+    ignore
+      (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
 ;;
 
 module For_testing = struct
@@ -754,9 +776,8 @@ let start ~sw ~env ~clock ~state =
             failure.reason)
         ()
     in
-    let dispatch_for_config config =
-      Gate_keeper_backend.accept_connector
-        ~connector:Gate_keeper_backend.Discord_connector ~clock ~config
+    let dispatch_for_config config delivery =
+      Gate_keeper_backend.accept_connector ~delivery ~clock ~config
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
@@ -773,7 +794,7 @@ let start ~sw ~env ~clock ~state =
             let config = Mcp_server.workspace_config state in
             submit_triggered_event
               ingress
-              ~dispatch:(dispatch_for_config config)
+              ~dispatch_for_delivery:(dispatch_for_config config)
               ~base_dir:config.base_path
               ev)
           ~on_ambient:(fun ev ->

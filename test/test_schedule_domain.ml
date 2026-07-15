@@ -164,27 +164,50 @@ let test_cron_recurrence_supports_steps_ranges_and_sunday_alias () =
   check (float 0.001) "Sunday 09:00" 291600.0 due_at
 ;;
 
-let check_search_exhausted ~expression =
-  let req = request ~recurrence:(Cron { expression; timezone = "UTC" }) () in
+let test_cron_leap_century_finds_next_occurrence () =
+  let req =
+    request ~recurrence:(Cron { expression = "0 0 29 2 *"; timezone = "UTC" }) ()
+  in
   let after_leap_day =
     unix_timestamp ((2096, 2, 29), ((0, 0, 0), 0))
   in
-  match next_due_after ~now:after_leap_day req with
-  | Error (Search_exhausted error) ->
-    check string "expression" expression error.expression;
-    check string "timezone" "UTC" error.timezone;
-    check bool "search span observed" true (error.searched_minutes > 0)
-  | Error error -> fail (recurrence_evaluation_error_to_string error)
-  | Ok No_next -> fail "search exhaustion collapsed to No_next"
-  | Ok (Next_due_at _) -> fail "expected recurrence search exhaustion"
+  let expected = unix_timestamp ((2104, 2, 29), ((0, 0, 0), 0)) in
+  let actual = expect_due_at (next_due_after ~now:after_leap_day req) in
+  check (float 0.001) "next Gregorian leap day" expected actual
 ;;
 
-let test_cron_search_exhaustion_is_explicit () =
-  (* 2100 is not a leap year, so the next occurrence after 2096 is 2104 and
-     exceeds the current scanner horizon. February 31 never occurs. Both must
-     stay distinguishable from a legitimate one-shot [No_next]. *)
-  check_search_exhausted ~expression:"0 0 29 2 *";
-  check_search_exhausted ~expression:"0 0 31 2 *"
+let test_cron_impossible_date_is_explicit () =
+  let impossible = Cron { expression = "0 0 31 2 *"; timezone = "UTC" } in
+  (match validate_recurrence impossible with
+   | Error error ->
+     check string "creation rejection"
+       "recurrence.cron has no possible calendar date"
+       error
+   | Ok _ -> fail "impossible recurrence passed validation");
+  let valid = request () in
+  let persisted = { valid with recurrence = impossible } in
+  let decoded =
+    match recurrence_to_yojson impossible |> recurrence_of_yojson with
+    | Ok recurrence -> { persisted with recurrence }
+    | Error error -> fail error
+  in
+  match next_due_after ~now:1.0 decoded with
+  | Error (Invalid_persisted_recurrence error) ->
+    check string "persisted rejection"
+      "recurrence.cron has no possible calendar date"
+      error
+  | Error error -> fail (recurrence_evaluation_error_to_string error)
+  | Ok _ -> fail "impossible persisted recurrence produced a due result"
+;;
+
+let test_cron_vixie_or_keeps_restricted_weekday_satisfiable () =
+  let req =
+    request ~recurrence:(Cron { expression = "0 9 31 2 1"; timezone = "UTC" }) ()
+  in
+  let february_first = unix_timestamp ((2024, 2, 1), ((0, 0, 0), 0)) in
+  let monday = unix_timestamp ((2024, 2, 5), ((9, 0, 0), 0)) in
+  let actual = expect_due_at (next_due_after ~now:february_first req) in
+  check (float 0.001) "restricted DOW satisfies Vixie OR" monday actual
 ;;
 
 let test_cron_recurrence_rejects_invalid_expression () =
@@ -313,8 +336,12 @@ let () =
             test_cron_recurrence_next_due_weekdays;
           test_case "cron recurrence supports steps ranges and Sunday alias" `Quick
             test_cron_recurrence_supports_steps_ranges_and_sunday_alias;
-          test_case "cron search exhaustion is explicit" `Quick
-            test_cron_search_exhaustion_is_explicit;
+          test_case "cron leap century finds next occurrence" `Quick
+            test_cron_leap_century_finds_next_occurrence;
+          test_case "cron impossible date is explicit" `Quick
+            test_cron_impossible_date_is_explicit;
+          test_case "cron Vixie OR keeps restricted weekday satisfiable" `Quick
+            test_cron_vixie_or_keeps_restricted_weekday_satisfiable;
           test_case "cron recurrence rejects invalid expression" `Quick
             test_cron_recurrence_rejects_invalid_expression;
         ] );

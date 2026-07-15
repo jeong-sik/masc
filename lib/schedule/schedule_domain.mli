@@ -62,16 +62,11 @@ type recurrence_evaluation =
   | Next_due_at of float
   | No_next
 
-(** Closed failure channel for recurrence evaluation. In particular,
-    [Search_exhausted] must never be interpreted as [No_next]. *)
+(** Closed failure channel for recurrence evaluation. Evaluation failure must
+    never be interpreted as [No_next]. *)
 type recurrence_evaluation_error =
   | Invalid_persisted_recurrence of string
   | Unsupported_timezone of string
-  | Search_exhausted of
-      { expression : string
-      ; timezone : string
-      ; searched_minutes : int
-      }
   | Engine_failure of string
 
 (** Opaque consumer payload.
@@ -169,6 +164,10 @@ val actor_to_yojson : actor -> Yojson.Safe.t
 val actor_of_yojson : Yojson.Safe.t -> (actor, string) result
 val recurrence_to_yojson : recurrence -> Yojson.Safe.t
 val recurrence_of_yojson : Yojson.Safe.t -> (recurrence, string) result
+(** Durable decoding checks the typed wire shape but preserves semantically
+    invalid recurrence intent. Evaluation reports that row through
+    [Invalid_persisted_recurrence] instead of corrupting the whole ledger. New
+    requests must still pass [validate_recurrence]. *)
 val execution_record_to_yojson : execution_record -> Yojson.Safe.t
 val execution_record_of_yojson :
   Yojson.Safe.t -> (execution_record, string) result

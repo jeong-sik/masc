@@ -7,13 +7,10 @@
     1. Opens a WSS connection to Discord Gateway v10
        ({!Discord_gateway_client.run}).
     2. For each accepted [Message_create] event, looks up the
-       channel→keeper binding
-       ({!Channel_gate_discord_state.keeper_for_channel}), runs the
-       keeper turn through {!Channel_gate.handle_inbound_streaming},
-       projects redacted text snapshots by posting/editing one Discord
-       reply, and falls back to
-       {!Channel_gate_discord_state.send_message} when streaming never
-       starts or fails.
+       channel→keeper binding and durably accepts the exact source event before
+       the WSS callback returns. Network ACK delivery then runs on the
+       Keeper-scoped connector lane; the durable chat-queue consumer owns the
+       eventual Keeper turn and connector reply.
 
     Always-on by design: there is no [MASC_DISCORD_BUILTIN]-style
     toggle. The legacy Python sidecar is gone — there is no
@@ -35,6 +32,16 @@ val parse_trigger_policy : string -> Discord_gateway_client.trigger_policy
     to parse is logged via [Log.Server] and falls back to the default,
     rather than being silently coerced. Exposed for unit testing the
     config boundary. *)
+
+module For_testing : sig
+  val submit_triggered_event :
+    ?deliver:(unit -> unit) ->
+    Connector_ingress_lane.t ->
+    dispatch:Channel_gate.dispatch_fn ->
+    base_dir:string ->
+    Discord_gateway_client.gateway_event ->
+    unit
+end
 
 val start :
   sw:Eio.Switch.t ->

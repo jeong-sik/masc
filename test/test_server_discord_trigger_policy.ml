@@ -12,6 +12,42 @@
 
 open Alcotest
 module G = Server_discord_in_process_gateway
+module State = Channel_gate_discord_state
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> unsetenv key)
+    (fun () ->
+      Unix.putenv key value;
+      f ())
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+;;
+
+let with_temp_dir f =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-discord-preworker-%d-%d" (Unix.getpid ())
+         (Random.bits ()))
+  in
+  Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+;;
 
 let ps p = Discord_gateway_state.trigger_policy_to_string p
 let default_str = ps G.default_trigger_policy
@@ -49,6 +85,78 @@ let test_user_only_empty_id_falls_back () =
   check string "user_only: empty id => default" default_str
     (ps (G.parse_trigger_policy "user_only:"))
 
+let discord_message ~message_id =
+  Discord_gateway_client.Message_create
+    { channel_id = "C123"
+    ; guild_id = Some "G123"
+    ; message_id
+    ; author_id = "U123"
+    ; author_name = Some "operator"
+    ; content = "wake the keeper"
+    ; raw_content = "wake the keeper"
+    ; resolved_mentions = []
+    ; mention_user_ids = []
+    ; mentions_bot = true
+    ; explicit_mentions_bot = true
+    ; author_is_bot = false
+    ; message_reference_channel_id = None
+    ; message_reference_message_id = None
+    ; referenced_message_author_id = None
+    }
+;;
+
+let test_durable_accept_precedes_delivery_handoff () =
+  with_temp_dir @@ fun base_dir ->
+  with_env "MASC_DISCORD_BINDING_STORE_PATH"
+    (Filename.concat base_dir "bindings.json")
+  @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_AUDIT_PATH"
+    (Filename.concat base_dir "audit.jsonl")
+  @@ fun () ->
+  with_env "MASC_DISCORD_NAMES_PATH" (Filename.concat base_dir "names.json")
+  @@ fun () ->
+  (match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+   | Error detail -> fail detail
+   | Ok _ -> ());
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let observed, resolve_observed = Eio.Promise.create () in
+  let ingress =
+    Connector_ingress_lane.create ~sw
+      ~on_failure:(fun failure -> Eio.Promise.resolve resolve_observed failure)
+      ()
+  in
+  let accepted_before_delivery = ref false in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+      ~content:_ =
+    accepted_before_delivery := true;
+    Gate_protocol.Reply
+      { content = "queued"
+      ; structured = None
+      ; stats = None
+      ; message_request = None
+      }
+  in
+  G.For_testing.submit_triggered_event
+    ~deliver:(fun () ->
+      if not !accepted_before_delivery then
+        failwith "delivery ran before durable accept";
+      failwith "observe Discord ingress identity")
+    ingress ~dispatch ~base_dir
+    (discord_message ~message_id:"discord-exact-123");
+  check bool "accept completed before handoff" true !accepted_before_delivery;
+  let failure = Eio.Promise.await observed in
+  check string "exact Discord message id" "discord-exact-123"
+    failure.Connector_ingress_lane.event_id.opaque_id;
+  check string "typed source" "discord_triggered" failure.event_id.source;
+  match failure.lane with
+  | Connector_ingress_lane.Keeper_lane keeper_name ->
+    check string "resolved Keeper lane" "luna" keeper_name
+  | Connector_ingress_lane.Connector_lane connector_id ->
+    failf "expected Keeper lane, got connector:%s" connector_id
+;;
+
 let () =
   run "server_discord_trigger_policy"
     [ ( "parse_trigger_policy"
@@ -60,5 +168,9 @@ let () =
             test_unknown_falls_back_to_default
         ; test_case "user_only empty id => default" `Quick
             test_user_only_empty_id_falls_back
+        ] )
+    ; ( "ingress handoff"
+      , [ test_case "durable accept precedes Discord delivery" `Quick
+            test_durable_accept_precedes_delivery_handoff
         ] )
     ]

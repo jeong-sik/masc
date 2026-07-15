@@ -1115,7 +1115,7 @@ let start_keeper_loops_owned
              terminal.path)
         restored.retired_terminal_records;
       List.iter
-        (fun corrupt ->
+        (fun (corrupt : Keeper_shutdown_store.corrupt_record) ->
            Log.Keeper.error
              "corrupt shutdown operation retained under an exact Keeper admission fence: keeper=%s operation=%s path=%s error=%s"
              corrupt.Keeper_shutdown_store.keeper_name

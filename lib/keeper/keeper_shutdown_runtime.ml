@@ -405,7 +405,7 @@ let recover_at_boot ~config =
      | Ok restored ->
        let corrupt_results =
          List.map
-           (fun corrupt ->
+           (fun (corrupt : Keeper_shutdown_store.corrupt_record) ->
               Error
                 (Printf.sprintf
                    "corrupt shutdown operation fenced: keeper=%s operation=%s path=%s error=%s"

@@ -51,6 +51,19 @@ val run_ref_to_json : run_ref -> Yojson.Safe.t
 val run_id : run_ref -> string
 val run_ref_target_name : run_ref -> string
 val run_ref_matches_entry : run_ref -> Keeper_msg_async.entry -> bool
+val validate_entry : run_ref -> Keeper_msg_async.entry -> (Keeper_msg_async.entry, request_error) result
+
+val poll :
+  base_path:string ->
+  caller:string ->
+  run_ref ->
+  (Keeper_msg_async.load_result, request_error) result
+
+val cancel :
+  base_path:string ->
+  caller:string ->
+  run_ref ->
+  (Keeper_msg_async.cancel_result, request_error) result
 
 val submit
   :  background_sw:Eio.Switch.t

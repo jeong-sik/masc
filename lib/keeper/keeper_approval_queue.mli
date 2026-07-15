@@ -57,6 +57,9 @@ val install_error_to_string : install_error -> string
 (** Install one workspace's persisted Gate queue. The file is parsed as one
     closed snapshot: a malformed entry fails the install and is observed via
     the persistence read-drop metric; no valid-looking subset is installed.
+    Snapshot read and in-memory installation are one serialized transition, so
+    a concurrent mutation for the same workspace cannot be overwritten by the
+    loaded snapshot.
     In-flight summaries retain their durable state. Independent delivery replay
     failures are returned in [delivery_replay_failures] and never prevent later
     journals or Gate recovery from being attempted. *)
@@ -156,6 +159,10 @@ module For_testing : sig
   val reset_audit_store : unit -> unit
   val reset_runtime_state : unit -> unit
   val with_pending_store_lock : (unit -> 'a) -> 'a
+  val install_persistence_with_after_load_hook :
+    base_path:string ->
+    after_load:(unit -> unit) ->
+    (install_report, install_error) result
   val pending_store_path : base_path:string -> string
   val always_allowed_store_path : base_path:string -> string
 end

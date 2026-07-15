@@ -271,6 +271,12 @@ module For_testing : sig
   val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
   val modalities_for_request : keeper_chat_stream_request -> string list
   val keeper_chat_stream_headers : string -> Httpun.Headers.t
+  val keeper_run_terminal_payload :
+    Keeper_invocation_contract.run_ref ->
+    result_contract:Keeper_invocation_contract.result_contract ->
+    ?message:string ->
+    unit ->
+    Yojson.Safe.t
   val defer_dashboard_payload_if_busy :
     base_path:string ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

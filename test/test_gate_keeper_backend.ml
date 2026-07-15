@@ -272,6 +272,37 @@ let test_parse_keeper_run_ref_body_is_exact_and_typed () =
   rejects_removed_shape "malformed json" {|{"run_ref":|}
 ;;
 
+let test_keeper_run_terminal_payload_is_typed () =
+  let reference =
+    match
+      Keeper_invocation_contract.run_ref_of_json
+        (`Assoc
+           [ "run_id", `String "typed-run-1"
+           ; "target", `Assoc [ "kind", `String "keeper"; "name", `String "luna" ]
+           ; "capability", `String "invoke_turn"
+           ])
+    with
+    | Ok reference -> reference
+    | Error error -> fail (Keeper_invocation_contract.request_error_to_string error)
+  in
+  match
+    Server_routes_http_keeper_stream.For_testing.keeper_run_terminal_payload
+      reference
+      ~result_contract:Keeper_invocation_contract.Yielded
+      ()
+  with
+  | `Assoc fields ->
+    check bool "typed run ref emitted" true (List.mem_assoc "run_ref" fields);
+    check (option string) "typed result emitted" (Some "yielded")
+      (Option.bind
+         (List.assoc_opt "result_contract" fields)
+         Yojson.Safe.Util.to_string_option);
+    List.iter
+      (fun field -> check bool ("removed " ^ field) false (List.mem_assoc field fields))
+      [ "request_id"; "keeper_name"; "status"; "ok" ]
+  | _ -> fail "typed terminal payload must be an object"
+;;
+
 let test_parse_keeper_chat_stream_request_rejects_removed_timeout () =
   let body = {|{"name":"luna","message":"hello","timeout_sec":1200.5}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
@@ -2809,6 +2840,8 @@ let () =
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "run operation body is exact and typed" `Quick
             test_parse_keeper_run_ref_body_is_exact_and_typed;
+          test_case "run terminal payload is exact and typed" `Quick
+            test_keeper_run_terminal_payload_is_typed;
           test_case "stream request rejects removed request timeout" `Quick
             test_parse_keeper_chat_stream_request_rejects_removed_timeout;
           test_case "stream request rejects partial connector context" `Quick

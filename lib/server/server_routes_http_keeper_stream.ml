@@ -1204,15 +1204,6 @@ let keeper_request_terminal_status_to_string = function
   | Request_stream status -> keeper_stream_terminal_status_to_string status
 ;;
 
-let keeper_request_terminal_status_ok = function
-  | Request_deferred
-  | Request_queued
-  | Request_stream (Stream_done | Stream_reconciliation_required) ->
-    true
-  | Request_stream (Stream_error | Stream_cancelled | Stream_rejected) ->
-    false
-;;
-
 let keeper_request_terminal_status_is_routine = function
   | Request_deferred
   | Request_queued
@@ -1221,19 +1212,12 @@ let keeper_request_terminal_status_is_routine = function
   | Request_stream (Stream_error | Stream_rejected) -> false
 ;;
 
-let keeper_request_terminal_payload ?request_id ~keeper_name ~status
-    ?(message = "") () =
-  let status_label = keeper_request_terminal_status_to_string status in
+let keeper_run_terminal_payload run_ref ~result_contract ?(message = "") () =
   let fields =
-    [ ("keeper_name", `String keeper_name)
-    ; ("status", `String status_label)
-    ; ("ok", `Bool (keeper_request_terminal_status_ok status))
+    [ "run_ref", Keeper_invocation_contract.run_ref_to_json run_ref
+    ; ( "result_contract"
+      , `String (Keeper_invocation_contract.result_contract_to_string result_contract) )
     ]
-  in
-  let fields =
-    match request_id with
-    | Some request_id -> ("request_id", `String request_id) :: fields
-    | None -> fields
   in
   let fields =
     if String.trim message = "" then fields
@@ -2496,14 +2480,10 @@ let process_single_turn ~user_row_origin ~queued_turn
                   }
             }))
     (if durably_accepted then run_ref else None);
-  let publish_terminal ~status ?(message = "") () =
+  let publish_terminal ~status ?result_contract ?(message = "") () =
     let message = redact_text message in
     let status_label = keeper_request_terminal_status_to_string status in
-    let payload_json =
-      keeper_request_terminal_payload ?request_id ~keeper_name:payload.name
-        ~status ~message ()
-    in
-    if keeper_request_terminal_status_is_routine status
+    (if keeper_request_terminal_status_is_routine status
     then
       (match request_id with
        | Some request_id ->
@@ -2523,9 +2503,21 @@ let process_single_turn ~user_row_origin ~queued_turn
        | None ->
          Log.Keeper.warn
            "keeper_stream: request rejected before acceptance keeper=%s status=%s message=%s"
-           payload.name status_label message);
-      Keeper_chat_events.publish events
-        (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
+           payload.name status_label message));
+      (match result_contract, run_ref with
+       | None, _ -> ()
+       | Some result_contract, Some run_ref ->
+         Keeper_chat_events.publish events
+           (Custom
+              { name = "KEEPER_REQUEST_TERMINAL"
+              ; value =
+                  keeper_run_terminal_payload run_ref ~result_contract ~message ()
+              })
+       | Some _, None ->
+         Log.Keeper.error
+           "keeper_stream: typed terminal omitted because accepted run_ref is unavailable keeper=%s status=%s"
+           payload.name
+           status_label)
   in
   let next_worker_projection () =
     if Atomic.get client_disconnected
@@ -2617,7 +2609,11 @@ let process_single_turn ~user_row_origin ~queued_turn
         ; queued_outcome
         }) ->
         let message = redact_text message in
-        publish_terminal ~status:(Request_stream Stream_cancelled) ~message ();
+        publish_terminal
+          ~status:(Request_stream Stream_cancelled)
+          ~result_contract:Keeper_invocation_contract.Cancelled
+          ~message
+          ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
@@ -2630,6 +2626,7 @@ let process_single_turn ~user_row_origin ~queued_turn
         let message = redact_text message in
         publish_terminal
           ~status:(Request_stream Stream_reconciliation_required)
+          ~result_contract:Keeper_invocation_contract.Publication_uncertain
           ~message
           ();
         Keeper_chat_events.publish events (Text_delta message);
@@ -2643,7 +2640,11 @@ let process_single_turn ~user_row_origin ~queued_turn
         ; queued_outcome
         }) ->
         let err = redact_text err in
-        publish_terminal ~status:(Request_stream status) ~message:err ();
+        publish_terminal
+          ~status:(Request_stream status)
+          ~result_contract:Keeper_invocation_contract.Failed
+          ~message:err
+          ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err });
         queued_outcome
@@ -2686,16 +2687,32 @@ let process_single_turn ~user_row_origin ~queued_turn
           then
             Keeper_chat_events.publish events
               (Custom
-                 { name = "KEEPER_CONTINUATION_CHECKPOINT";
+                   { name = "KEEPER_CONTINUATION_CHECKPOINT";
                    value =
                      `Assoc
                        (("message", `String visible_reply)
-                        :: (match request_id with
-                            | Some request_id ->
-                                [ ("request_id", `String request_id) ]
+                        :: (match run_ref with
+                            | Some run_ref ->
+                                [ ( "run_ref"
+                                  , Keeper_invocation_contract.run_ref_to_json run_ref )
+                                ; ( "result_contract"
+                                  , `String
+                                      (Keeper_invocation_contract.result_contract_to_string
+                                         Keeper_invocation_contract.Yielded) )
+                                ]
                             | None -> []))
                  });
-          publish_terminal ~status:(Request_stream Stream_done) ();
+          let result_contract =
+            match turn_outcome with
+            | Keeper_turn_outcome.Continuation_checkpoint ->
+              Keeper_invocation_contract.Yielded
+            | Keeper_turn_outcome.Visible_reply
+            | Keeper_turn_outcome.No_visible_reply -> Keeper_invocation_contract.Completed
+          in
+          publish_terminal
+            ~status:(Request_stream Stream_done)
+            ~result_contract
+            ();
           Keeper_chat_events.publish events Text_message_end;
           Keeper_chat_events.publish events (Run_finished { run_id });
           queued_outcome
@@ -2703,7 +2720,11 @@ let process_single_turn ~user_row_origin ~queued_turn
         | Eio.Cancel.Cancelled _ as e -> raise e
         | Canonical_reply_payload_rejected error ->
             let message = canonical_reply_payload_error_to_string error in
-            publish_terminal ~status:(Request_stream Stream_error) ~message ();
+            publish_terminal
+              ~status:(Request_stream Stream_error)
+              ~result_contract:Keeper_invocation_contract.Failed
+              ~message
+              ();
             Keeper_chat_events.publish events Text_message_end;
             Keeper_chat_events.publish events (Event_error { message });
             if queued_turn
@@ -2711,7 +2732,11 @@ let process_single_turn ~user_row_origin ~queued_turn
             else None
         | exn ->
             let message = redact_text (Printexc.to_string exn) in
-            publish_terminal ~status:(Request_stream Stream_error) ~message ();
+            publish_terminal
+              ~status:(Request_stream Stream_error)
+              ~result_contract:Keeper_invocation_contract.Failed
+              ~message
+              ();
             Keeper_chat_events.publish events Text_message_end;
             Keeper_chat_events.publish events
               (Event_error { message });
@@ -3154,6 +3179,7 @@ module For_testing = struct
   let translate_oas_stream_event = translate_oas_stream_event
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
   let keeper_chat_stream_headers = keeper_chat_stream_headers
+  let keeper_run_terminal_payload = keeper_run_terminal_payload
   let worker_settlement_terminal_body ~staged_body settlement =
     let staged_completion =
       Option.map

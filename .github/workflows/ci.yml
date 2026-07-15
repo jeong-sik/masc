@@ -772,14 +772,6 @@ jobs:
           chmod +x dashboard/scripts/gen-sse-types.sh
           opam exec -- dashboard/scripts/gen-sse-types.sh --check
 
-      - name: Install eio-trace
-        continue-on-error: true
-        run: |
-          # Diagnostic-only. Avoid opam depexts here: GTK/cairo system
-          # packages can consume the step before the quick suite runs.
-          opam install -y --no-depexts eio-trace \
-            || echo "::warning::eio-trace install skipped"
-
       - name: Run tests (quick suite)
         id: quick_suite
         env:
@@ -807,16 +799,6 @@ jobs:
             _build/log
             _build/default/test/_build/_tests/**/*.output
             /tmp/ci-run-tests.*.log
-          retention-days: 7
-
-      - name: Upload eio-trace on failure
-        if: ${{ failure() && steps.quick_suite.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: eio-trace-quick-suite-${{ github.run_id }}
-          path: |
-            _build/default/**/*.trace
-            /tmp/eio-trace-*
           retention-days: 7
 
       - name: Run operator control suite

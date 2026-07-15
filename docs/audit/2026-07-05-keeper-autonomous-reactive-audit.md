@@ -206,16 +206,16 @@ Current worktree update:
 
 ### 6. Connector Reactive Path
 
-Status: strong for Discord; generic connector fallback is explicit.
+Status: typed connector leaves and generic HTTP Gate have separate explicit paths.
 
 Evidence:
 
-- `lib/gate_keeper_backend.ml:17-41` uses a typed `connector_kind`; Discord busy messages route to `Keeper_chat_queue`, Generic uses async poll.
-- `lib/gate_keeper_backend.ml:424-532` enqueues a busy Discord message into the chat lane and returns a busy ACK without pretending the Keeper answered.
+- `Gate_keeper_backend.accept_connector` consumes a leaf-built immutable delivery projection and durably queues it without identifying a product.
+- `Gate_keeper_backend.dispatch` is the generic HTTP Gate path and uses async poll when the Keeper lane is busy.
 - `lib/keeper/keeper_chat_queue.ml:1-10` documents durable queue replay.
 - `lib/keeper/keeper_chat_queue.ml:275-341` persists enqueue/dequeue and coalesces same-source queued messages.
 - `lib/keeper/keeper_chat_consumer.ml:62-126` drains queued messages only when the Keeper is no longer in flight.
-- `test/test_keeper_busy_connector_deferred.ml:1-14` and `55-118` pin the production-path Discord busy behavior.
+- `test/test_keeper_busy_connector_deferred.ml` pins durable Discord and Slack queue behavior through the projection boundary.
 
 Risk:
 

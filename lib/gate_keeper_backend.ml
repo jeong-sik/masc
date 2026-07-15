@@ -1,40 +1,6 @@
 (** Gate_keeper_backend -- adapter between the Channel Gate and the keeper subsystem.
     See [gate_keeper_backend.mli] for the full contract. *)
 
-(* ── Connector deferred-reply routing (RFC-connector-deferred-reply-via-chat-queue) ─────────────── *)
-
-(* [connector_kind] is the typed identity of the connector a [dispatch] serves.
-   It is a property of the connector, not of each message, so it is baked in at
-   dispatch-construction time (the Discord gateway passes [~connector_kind:Discord]
-   when it builds its dispatch). The per-message channel_id / user_id arrive as the
-   ordinary [channel_workspace_id] / [channel_user_id] dispatch fields.
-
-   This lives in [masc] (not the [masc_gate] [dispatch_fn] type) on purpose:
-   [message_source] is a [masc] type, and putting it on a [masc_gate] signature
-   would be a [masc_gate -> masc] dependency cycle. Threading the typed kind as an
-   injected dispatch argument keeps [masc_gate] connector-neutral (RFC-0226) while
-   letting the busy branch route without string-matching the [channel] lane. *)
-type connector_kind =
-  | Discord
-  | Slack
-      (** RFC-0317: the in-process Slack Socket Mode gateway
-          ([Server_slack_in_process_gateway]) builds its dispatch with
-          [~connector_kind:Slack]. Like [Discord] it has an outbound adapter
-          ([Keeper_chat_slack.adapter_loop], drained by the serial chat
-          consumer), so a message arriving mid-turn projects onto the chat queue
-          for deferred delivery rather than the outbound-less async poll store.
-          Added together with that gateway, not before. *)
-  | Generic
-      (** Every connector that is not a wired in-process inbound gateway with its
-          own outbound adapter. Today this is the HTTP gate-route lane
-          (imessage-bot, cli-connector) which POSTs and awaits synchronously, so
-          a busy message keeps the async [masc_keeper_msg] poll path; see
-          RFC-connector-deferred-reply-via-chat-queue §3.3 option (a). *)
-
-type submission_owner =
-  | Authenticated_caller of string
-  | Channel_actor
-
 type connector_delivery =
   { source : Keeper_chat_queue.message_source
   ; surface : Surface_ref.t
@@ -347,9 +313,6 @@ let metadata_value key metadata =
       if value = "" then None else Some value
   | None -> None
 
-let metadata_value_any keys metadata =
-  List.find_map (fun key -> metadata_value key metadata) keys
-
 let assoc_string_if_present key value =
   match non_empty_opt value with
   | None -> []
@@ -366,97 +329,31 @@ let gate_address ~channel ~channel_workspace_id ?conversation_id
   @ opt_assoc_string_if_present "conversation_id" conversation_id
   @ opt_assoc_string_if_present "external_message_id" external_message_id
 
-let discord_channel_id ~channel_workspace_id ~metadata =
-  match metadata_value_any [ "discord.channel_id"; "discord_channel_id" ] metadata with
-  | Some channel_id -> channel_id
-  | None -> String.trim channel_workspace_id
+let surface_for_channel_context ~channel ~channel_workspace_id ?conversation_id
+    ?external_message_id () =
+  let label =
+    match non_empty_opt channel with
+    | Some lane -> lane
+    | None -> "gate"
+  in
+  Surface_ref.Gate
+    { label
+    ; address =
+        gate_address ~channel ~channel_workspace_id ?conversation_id
+          ?external_message_id ()
+    }
 
-let discord_guild_id metadata =
-  metadata_value_any [ "discord.guild_id"; "discord_guild_id" ] metadata
-
-(* Slack surface derivation (RFC-0317). The in-process gateway sets
-   [channel_workspace_id = channel_id] and mirrors it as [slack.channel_id]
-   metadata; prefer the metadata key, fall back to the workspace id. *)
-let slack_channel_id ~channel_workspace_id ~metadata =
-  match metadata_value_any [ "slack.channel_id"; "slack_channel_id" ] metadata with
-  | Some channel_id -> channel_id
-  | None -> String.trim channel_workspace_id
-
-let slack_team_id metadata =
-  metadata_value_any [ "slack.team_id"; "slack_team_id" ] metadata
-
-let slack_thread_ts metadata =
-  metadata_value_any [ "slack.thread_ts"; "slack_thread_ts" ] metadata
-
-let surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
-    ~metadata ?conversation_id ?external_message_id () =
-  match connector_kind with
-  | Discord ->
-      Surface_ref.Discord
-        {
-          guild_id = discord_guild_id metadata;
-          channel_id = discord_channel_id ~channel_workspace_id ~metadata;
-          parent_channel_id =
-            metadata_value_any
-              [ "discord.parent_channel_id"; "discord_parent_channel_id" ]
-              metadata;
-          thread_id =
-            metadata_value_any [ "discord.thread_id"; "discord_thread_id" ] metadata;
-        }
-  | Slack ->
-      Surface_ref.Slack
-        {
-          team_id = slack_team_id metadata;
-          channel_id = slack_channel_id ~channel_workspace_id ~metadata;
-          thread_ts = slack_thread_ts metadata;
-        }
-  | Generic ->
-      let label =
-        match non_empty_opt channel with
-        | Some lane -> lane
-        | None -> "gate"
-      in
-      Surface_ref.Gate
-        {
-          label;
-          address =
-            gate_address ~channel ~channel_workspace_id ?conversation_id
-              ?external_message_id ();
-        }
-
-let conversation_id_for_channel_context ~connector_kind ~channel
-    ~channel_workspace_id ~metadata =
+let conversation_id_for_channel_context ~channel ~channel_workspace_id ~metadata =
   match metadata_value "conversation_id" metadata with
   | Some value -> Some value
-  | None -> (
-      match connector_kind with
-      | Discord ->
-          let channel_id = discord_channel_id ~channel_workspace_id ~metadata in
-          (match non_empty_opt channel_id with
-           | None -> None
-           | Some channel_id ->
-               let guild_label =
-                 match discord_guild_id metadata with
-                 | Some guild_id -> guild_id
-                 | None -> "dm"
-               in
-               Some (Printf.sprintf "discord:%s:channel:%s" guild_label channel_id))
-      | Slack ->
-          (* Same shape as the in-process gateway's [slack_conversation_id] so
-             the inbound-recorded conversation and the busy-deferred delivery
-             reference one id (Slack threads share the parent channel id). *)
-          let channel_id = slack_channel_id ~channel_workspace_id ~metadata in
-          (match non_empty_opt channel_id with
-           | None -> None
-           | Some channel_id -> Some (Printf.sprintf "slack:channel:%s" channel_id))
-      | Generic ->
-          (match non_empty_opt channel, non_empty_opt channel_workspace_id with
-           | Some lane, Some workspace_id ->
-               Some (Printf.sprintf "gate:%s:workspace:%s" lane workspace_id)
-           | _ -> None))
+  | None ->
+    (match non_empty_opt channel, non_empty_opt channel_workspace_id with
+     | Some lane, Some workspace_id ->
+       Some (Printf.sprintf "gate:%s:workspace:%s" lane workspace_id)
+     | _ -> None)
 
 let external_message_id_for_channel_context ~idempotency_key ~metadata =
-  match metadata_value_any [ "external_message_id"; "discord.message_id" ] metadata with
+  match metadata_value "external_message_id" metadata with
   | Some value -> Some value
   | None -> non_empty_opt idempotency_key
 
@@ -663,7 +560,7 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
    below either pass it ([dispatch_with_text_snapshot]) or omit it so it defaults
    to [None] ([dispatch]). Without the unit the optional leaks into [dispatch]'s
    inferred type and breaks the .mli signature. Do not drop the [()]. *)
-let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owner
+let dispatch_core ?on_text_snapshot ~submitted_by
     ~sw ~clock ~proc_mgr ~net ~publication_recovery_provider ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~idempotency_key ~metadata ~content () =
@@ -678,16 +575,10 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
   let agent_name =
     agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id
   in
-  let submitted_by =
-    match submission_owner with
-    | Authenticated_caller caller -> caller
-    | Channel_actor -> agent_name
-  in
   (* Use filesystem-safe sanitizer: this key is later used as a directory
      component in session_dir. An unsanitized channel_workspace_id with '..' or '/'
-     would escape the intended traces/channels/ subtree. Discord passes
-     numeric IDs so this is defensive for future integrations (webhooks,
-     custom channels) that could pass attacker-controlled values. *)
+     would escape the intended traces/channels/ subtree. External Gate callers
+     may pass attacker-controlled values. *)
   let channel_session_key =
     Printf.sprintf "%s_%s"
       (filesystem_safe_or_unknown channel)
@@ -704,8 +595,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
   let lane = String.trim channel in
   let opt value = match String.trim value with "" -> None | v -> Some v in
   let conversation_id =
-    conversation_id_for_channel_context ~connector_kind ~channel
-      ~channel_workspace_id ~metadata
+    conversation_id_for_channel_context ~channel ~channel_workspace_id ~metadata
   in
   let external_message_id =
     external_message_id_for_channel_context ~idempotency_key ~metadata
@@ -716,13 +606,12 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
     |> ensure_metadata "external_message_id" external_message_id
   in
   let surface =
-    surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
-      ~metadata ?conversation_id ?external_message_id ()
+    surface_for_channel_context ~channel ~channel_workspace_id ?conversation_id
+      ?external_message_id ()
   in
-  (* RFC-0232 §3.3: the connector decoded a structured mention of this
-     channel's bound keeper (e.g. Discord <@snowflake>, invisible to
-     the content token parser), so the recorder persists it as an
-     explicit mention of the lane owner. *)
+  (* RFC-0232 §3.3: the Gate caller decoded a structured mention of this
+     channel's bound keeper, so the recorder persists it as an explicit mention
+     of the lane owner. *)
   let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
   Keeper_chat_store.append_user_message
     ~base_dir:config.Workspace.base_path
@@ -889,89 +778,21 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
   | `Async_ack (_, None) | `Streaming None ->
       Gate_protocol.Unavailable_result
 
-(* [connector_kind] is a required labelled argument (not optional): these
-   wrappers are partially applied to produce a [Channel_gate.dispatch_fn] /
-   [streaming_dispatch_fn], so a leading erasable optional would either fail to
-   erase (warning 16) or linger into the resulting function type and not match
-   the connector-neutral [dispatch_fn] shape. Requiring the connector to name
-   its kind also makes a missing wiring a compile error rather than a silent
-   [Generic] default. *)
-let dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
+let dispatch ~submitted_by ~sw ~clock ~proc_mgr ~net
     ~publication_recovery_provider ~config
     ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content =
-  match connector_kind with
-  | Discord ->
-    let delivery =
-      { source =
-          Keeper_chat_queue.Discord
-            { channel_id = channel_workspace_id; user_id = channel_user_id }
-      ; surface =
-          surface_for_channel_context ~connector_kind ~channel
-            ~channel_workspace_id ~metadata ()
-      ; conversation_id =
-          conversation_id_for_channel_context ~connector_kind ~channel
-            ~channel_workspace_id ~metadata
-      ; external_message_id =
-          external_message_id_for_channel_context ~idempotency_key ~metadata
-      }
-    in
-    accept_connector ~delivery ~clock ~config ~channel
-      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-      ~idempotency_key ~metadata ~content
-  | Slack ->
-    let thread_ts =
-      match slack_thread_ts metadata with
-      | Some thread_ts -> Some thread_ts
-      | None ->
-        metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
-    in
-    let delivery =
-      { source =
-          Keeper_chat_queue.Slack
-            { channel_id = channel_workspace_id
-            ; user_id = channel_user_id
-            ; user_name = channel_user_name
-            ; team_id = slack_team_id metadata
-            ; thread_ts
-            }
-      ; surface =
-          surface_for_channel_context ~connector_kind ~channel
-            ~channel_workspace_id ~metadata ()
-      ; conversation_id =
-          conversation_id_for_channel_context ~connector_kind ~channel
-            ~channel_workspace_id ~metadata
-      ; external_message_id =
-          external_message_id_for_channel_context ~idempotency_key ~metadata
-      }
-    in
-    accept_connector ~delivery ~clock ~config ~channel
-      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-      ~idempotency_key ~metadata ~content
-  | Generic ->
-    dispatch_core ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
-      ~publication_recovery_provider ~config ~channel ~channel_user_id
-      ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
-      ~metadata ~content ()
+  dispatch_core ~submitted_by ~sw ~clock ~proc_mgr ~net
+    ~publication_recovery_provider ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+    ~metadata ~content ()
 
-let dispatch_with_text_snapshot ~connector_kind ~submission_owner
-    ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~publication_recovery_provider
-    ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~idempotency_key ~metadata ~content =
-  match connector_kind with
-  | Discord ->
-    dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
-      ~publication_recovery_provider ~config ~channel ~channel_user_id
-      ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
-      ~metadata ~content
-  | Slack ->
-    dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
-      ~publication_recovery_provider ~config ~channel ~channel_user_id
-      ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
-      ~metadata ~content
-  | Generic ->
-    dispatch_core ~connector_kind ~submission_owner ~on_text_snapshot ~sw
-      ~clock ~proc_mgr ~net ~publication_recovery_provider ~config ~channel
-      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-      ~idempotency_key ~metadata ~content ()
+let dispatch_with_text_snapshot ~submitted_by ~on_text_snapshot ~sw ~clock
+    ~proc_mgr ~net ~publication_recovery_provider ~config ~channel
+    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+    ~idempotency_key ~metadata ~content =
+  dispatch_core ~submitted_by ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
+    ~publication_recovery_provider ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+    ~metadata ~content ()

@@ -139,14 +139,11 @@ let handle_gate_message ~sw ~clock ~submitted_by state request reqd =
     let request_started = Unix.gettimeofday () in
     let workspace_scope = Mcp_server.workspace_scope state in
     let dispatch =
-      (* RFC-connector-deferred-reply-via-chat-queue: the HTTP gate route is the convergence point for sidecar
-         connectors (imessage-bot, cli-connector) that POST and await the reply
-         synchronously. They have no in-process outbound adapter, so [Generic]
-         keeps their existing async [masc_keeper_msg] poll behaviour when the
-         keeper is busy. *)
+      (* The HTTP gate route posts and awaits synchronously. A busy Keeper keeps
+         the async [masc_keeper_msg] poll contract; durable connector leaves use
+         [accept_connector] before entering their Keeper lane. *)
       Gate_keeper_backend.dispatch
-        ~connector_kind:Gate_keeper_backend.Generic
-        ~submission_owner:(Gate_keeper_backend.Authenticated_caller submitted_by)
+        ~submitted_by
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net

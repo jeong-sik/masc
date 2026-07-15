@@ -26,6 +26,12 @@ type store_error =
           present but neither it nor its [.last-good] recovery file parses. The
           mutation is refused so the corrupt bytes are NOT overwritten. *)
 
+type running_recovery_reason =
+  | Retryable_dispatch_failure of string
+  | Interrupted_by_process_restart
+
+val running_recovery_reason_to_string : running_recovery_reason -> string
+
 val store_error_to_string : store_error -> string
 
 type read_error =
@@ -147,6 +153,25 @@ val fail_running :
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
 (** Marks a [Running] request and its matching execution attempt [Failed]. *)
+
+val retry_running :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  reason:running_recovery_reason ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Finishes the current execution attempt as [Failed] while returning only the
+    matching schedule to [Due]. Its due time and payload remain unchanged, so
+    the next runner tick retries the same occurrence identity. *)
+
+val recover_running_on_startup :
+  Workspace_utils.config ->
+  now:float ->
+  (state * int, store_error) result
+(** Atomically returns every persisted [Running] schedule to [Due] and finishes
+    each matching execution attempt as [Failed]. Intended for a one-time runner
+    startup recovery before any new dispatch can be active. The recovery reason
+    is fixed to [Interrupted_by_process_restart]. *)
 
 val fail_due_candidate :
   Workspace_utils.config ->

@@ -227,6 +227,32 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~sw
     ~on_error:(log_server_fiber_crash "schedule_runner")
     (fun () ->
+      (* Recover once before this process can start a dispatch. Running is an
+         in-process lease state, so a persisted row here can only belong to the
+         previous process. Repeating this globally on every tick could steal an
+         active dispatch from this same loop. *)
+      let recovery_started_at = Time_compat.now () in
+      (try
+         match
+           Schedule_store.recover_running_on_startup
+             (Mcp_server.workspace_config state)
+             ~now:recovery_started_at
+         with
+         | Ok (_, 0) -> ()
+         | Ok (_, recovered) ->
+           Log.Server.warn
+             "schedule_runner: recovered %d interrupted running schedule(s)"
+             recovered
+         | Error err ->
+           Log.Server.warn
+             "schedule_runner: startup recovery failed: %s"
+             (Schedule_store.store_error_to_string err)
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Server.warn
+           "schedule_runner: startup recovery crashed: %s"
+           (Printexc.to_string exn));
       let rec loop () =
         let started_at = Time_compat.now () in
         Schedule_runner_status.record_tick_started ~now:started_at;

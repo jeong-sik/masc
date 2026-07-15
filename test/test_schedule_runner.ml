@@ -300,14 +300,17 @@ let test_tick_dispatches_every_recurring_occurrence () =
     !calls
 ;;
 
-let test_tick_marks_dispatch_failure_failed () =
+let test_tick_marks_terminal_dispatch_rejection_failed () =
   with_workspace
   @@ fun config ->
   let calls = ref [] in
   let request = create_ok ~schedule_id:"dispatch-fail-1" config in
   let result =
     tick_ok config ~now:201.0
-      ~consumer:(accepting_consumer ~dispatch_result:(Error "boom") calls)
+      ~consumer:
+        (accepting_consumer
+           ~dispatch_result:(Error (Terminal_dispatch_rejection "boom"))
+           calls)
   in
   check int "one dispatch" 1 (List.length result.dispatches);
   check_dispatch_status "failed" Dispatch_failed (List.hd result.dispatches).status;
@@ -325,6 +328,65 @@ let test_tick_marks_dispatch_failure_failed () =
        (Schedule_domain.execution_status_to_string execution.status);
      check (option string) "failed execution error" (Some "boom")
        execution.error)
+;;
+
+let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
+  with_workspace
+  @@ fun config ->
+  let retry_request = create_ok ~schedule_id:"retry-1" config in
+  let healthy_request = create_ok ~schedule_id:"healthy-1" config in
+  let retry_first_attempt = ref true in
+  let retry_signal_ids = ref [] in
+  let healthy_calls = ref 0 in
+  let consumer : Schedule_runner.consumer =
+    { accepts = (fun _request -> Ok ())
+    ; dispatch =
+        (fun _config ~now:_ signal request ->
+           if String.equal request.schedule_id retry_request.schedule_id then (
+             retry_signal_ids := signal.signal_id :: !retry_signal_ids;
+             if !retry_first_attempt then (
+               retry_first_attempt := false;
+               Error (Retryable_dispatch_failure "queue storage unavailable"))
+             else Ok (`Assoc [ "retried", `Bool true ]))
+           else (
+             incr healthy_calls;
+             Ok (`Assoc [ "healthy", `Bool true ])))
+    }
+  in
+  let first = tick_ok config ~now:201.0 ~consumer in
+  check int "both schedules dispatched" 2 (List.length first.dispatches);
+  check int "healthy schedule dispatched once" 1 !healthy_calls;
+  let occurrence_id =
+    match !retry_signal_ids with
+    | [ signal_id ] -> signal_id
+    | _ -> fail "retry schedule did not dispatch exactly once"
+  in
+  (match Schedule_store.get_schedule config ~schedule_id:retry_request.schedule_id with
+   | Some stored -> check string "retry schedule remains due" "due"
+                      (schedule_status_to_string stored.status)
+   | None -> fail "retry schedule missing");
+  (match Schedule_store.get_schedule config ~schedule_id:healthy_request.schedule_id with
+   | Some stored -> check string "other schedule succeeded" "succeeded"
+                      (schedule_status_to_string stored.status)
+   | None -> fail "healthy schedule missing");
+  let second = tick_ok config ~now:202.0 ~consumer in
+  check int "durable signal is not duplicated" 0 (List.length second.emitted);
+  check int "only retry schedule dispatched" 1 (List.length second.dispatches);
+  check Alcotest.(list string) "same occurrence identity reused"
+    [ occurrence_id; occurrence_id ]
+    (List.rev !retry_signal_ids);
+  check int "healthy schedule not replayed" 1 !healthy_calls;
+  (match Schedule_store.get_schedule config ~schedule_id:retry_request.schedule_id with
+   | Some stored -> check string "retry eventually succeeded" "succeeded"
+                      (schedule_status_to_string stored.status)
+   | None -> fail "retry schedule missing after success");
+  check Alcotest.(list string) "failed attempt remains beside successful retry"
+    [ "succeeded"; "failed" ]
+    (Schedule_store.executions_for_schedule
+       (Schedule_store.read_state config)
+       ~schedule_id:retry_request.schedule_id
+     |> List.map (fun (execution : execution_record) ->
+       execution_status_to_string execution.status))
 ;;
 
 let test_recent_signal_decode_error_is_explicit () =
@@ -483,8 +545,10 @@ let () =
             test_tick_dispatches_recurring_candidate_to_next_due
         ; test_case "dispatches every recurring occurrence" `Quick
             test_tick_dispatches_every_recurring_occurrence
-        ; test_case "marks dispatch failure failed" `Quick
-            test_tick_marks_dispatch_failure_failed
+        ; test_case "marks terminal dispatch rejection failed" `Quick
+            test_tick_marks_terminal_dispatch_rejection_failed
+        ; test_case "retries same occurrence without blocking other schedule" `Quick
+            test_tick_retries_same_occurrence_without_blocking_other_schedule
         ; test_case "recent signal decode error is explicit" `Quick
             test_recent_signal_decode_error_is_explicit
         ] )

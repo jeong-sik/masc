@@ -36,6 +36,7 @@
   (re_export masc.discovery_cache)
   (re_export masc.json_field)
   (re_export masc.keeper_hooks_oas_types)
+  (re_export masc.keeper_invocation_types)
   (re_export masc.local_runtime_pool)
   (re_export masc.lockfree_atomic)
   (re_export masc.worker_execution_backend)

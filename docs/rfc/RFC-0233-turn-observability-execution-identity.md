@@ -325,8 +325,8 @@ first-class per-turn id — only `(worker_run_id : string, turn : int)` on the
 event bus / `last_raw_trace_run` (**verified 2026-06-19**: `run()` does not
 return the run id). MASC joins that pair MASC-side and mints `Turn_ref`. No
 MASC concept (`turn_ref`, channel) crosses into OAS. The channel axis is
-`Surface_ref.t` (`lib/keeper/surface_ref.ml`: `Dashboard | Discord | Slack |
-Github | Webhook | Agent | Gate`). The keeper-v2 prototype's `imessage`
+`Surface_ref.t` (`lib/keeper_invocation_types/surface_ref.ml`: `Dashboard | Discord | Slack |
+Webhook | Agent | Gate`). The keeper-v2 prototype's `imessage`
 source has no first-class variant today — it rides `Gate { label =
 "imessage" }`, or gains an `IMessage` variant as a closed-sum extension
 (total decode preserved) if it becomes a primary channel. **Decision

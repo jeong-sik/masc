@@ -5,7 +5,6 @@ module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_fs = Masc.Keeper_fs
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_types_profile = Masc.Keeper_types_profile
-module Surface_ref = Masc.Surface_ref
 
 let () = Mirage_crypto_rng_unix.use_default ()
 

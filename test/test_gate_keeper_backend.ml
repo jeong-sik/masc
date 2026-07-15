@@ -155,7 +155,7 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
     (fun () ->
       let keeper_name = "discord-reply-keeper" in
       let surface =
-        Masc.Surface_ref.Discord
+        Surface_ref.Discord
           {
             guild_id = Some "guild-1";
             channel_id = "chan-9";

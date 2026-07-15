@@ -161,7 +161,7 @@ let test_assistant_message_persists_with_source () =
       Store.append_assistant_message ~base_dir ~keeper_name:"post-keeper"
         ~content:"keeper-initiated hello"
         ~surface:
-          (Masc.Surface_ref.Discord
+          (Surface_ref.Discord
              {
                guild_id = None;
                channel_id = "chan-1";

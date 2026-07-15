@@ -308,6 +308,23 @@ let owner_of_string value =
 let owner_to_string = Capability_leaf.to_string
 let equal_owner = Capability_leaf.equal
 
+type lane_scope_release_fault =
+  { fault_owner : owner
+  ; fault_exception : exn
+  }
+
+let lane_scope_release_fault_key
+      : lane_scope_release_fault Eio.Fiber.key
+  =
+  Eio.Fiber.create_key ()
+;;
+
+let matching_lane_scope_release_fault owner =
+  match Eio.Fiber.get lane_scope_release_fault_key with
+  | Some fault when equal_owner owner fault.fault_owner -> Some fault
+  | None | Some _ -> None
+;;
+
 let operation_id_to_string operation_id = Uuidm.to_string operation_id
 let equal_operation_id = Uuidm.equal
 let record_name = operation_id_to_string
@@ -1711,22 +1728,29 @@ let with_store ~registry ~owner ~on_release_failure f =
   let subject = Lane_root owner in
   let outcome =
     Resource_scope.run_resource_only @@ fun sw ->
+    Option.iter
+      (fun fault ->
+         Eio.Switch.on_release sw (fun () -> raise fault.fault_exception))
+      (matching_lane_scope_release_fault owner);
     match open_store_in_scope ~sw ~registry ~owner with
     | Error _ as error -> error
     | Ok store -> Ok (f store)
   in
   let release_failure =
-    Option.map
-      (fun ({ exception_; backtrace } as raised : Resource_scope.raised) ->
-         { failure =
-             resource_scope_failure
-               ~operation:Close_directory
-               ~subject
-               raised
-         ; exception_
-         ; backtrace
-         })
-      outcome.scope_failure
+    match outcome.callback with
+    | None -> None
+    | Some _ ->
+      Option.map
+        (fun ({ exception_; backtrace } as raised : Resource_scope.raised) ->
+           { failure =
+               resource_scope_failure
+                 ~operation:Close_directory
+                 ~subject
+                 raised
+           ; exception_
+           ; backtrace
+           })
+        outcome.scope_failure
   in
   Option.iter on_release_failure release_failure;
   match outcome.callback with
@@ -3097,6 +3121,18 @@ let record_forensic_bound ~(store : store) ~(bound : bound) ~outcome =
 ;;
 
 module For_testing = struct
+  type nonrec lane_scope_release_fault = lane_scope_release_fault
+
+  let lane_scope_release_fault ~owner ~exception_ =
+    match owner_of_string owner with
+    | Error _ as error -> error
+    | Ok fault_owner -> Ok { fault_owner; fault_exception = exception_ }
+  ;;
+
+  let with_lane_scope_release_fault fault f =
+    Eio.Fiber.with_binding lane_scope_release_fault_key fault f
+  ;;
+
   let operation_id_of_uuid operation_id = operation_id
 
   let prepare_with_operation_id

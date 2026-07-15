@@ -1,10 +1,10 @@
 (include_subdirs no)
 
 (library
- (name fs_compat)
- (public_name masc.fs_compat)
+ (name fs_compat_internal)
+ (package masc)
+ (wrapped true)
  (modules
-  fs_compat
   mkdir_memo
   fd_cache
   owned_directory_chain
@@ -14,18 +14,35 @@
   capability_recovery_obligation
   capability_recovery_reconciler
   publication_recovery_access
-  publication_recovery_for_testing
   atomic_write
   blocking_write
   fd_write_all
   atomic_orphan_size_class)
- (private_modules
-  eio_resource_scope
-  capability_recovery_obligation
-  capability_recovery_reconciler
-  publication_recovery_access
-  atomic_write)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries eio eio.unix unix yojson optint uuidm digestif))
+ (libraries eio eio.unix unix yojson uuidm digestif))
+
+(library
+ (name fs_compat)
+ (public_name masc.fs_compat)
+ (modules fs_compat)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ (flags
+  (:standard -w +4))
+ (libraries fs_compat_internal eio eio.unix unix yojson uuidm digestif))
+
+(library
+ (name fs_compat_test_support)
+ (modules publication_recovery_for_testing capability_write_for_testing)
+ (flags
+  (:standard -w +4))
+ (libraries
+  fs_compat
+  fs_compat_internal
+  eio
+  eio.unix
+  unix
+  yojson
+  uuidm
+  digestif))

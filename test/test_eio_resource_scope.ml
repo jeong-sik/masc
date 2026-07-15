@@ -1,6 +1,6 @@
 open Alcotest
 
-module Scope = Fs_compat.Publication_recovery_for_testing
+module Scope = Fs_compat_test_support.Publication_recovery_for_testing
 module Cleanup = Scope.For_testing
 
 exception Callback_cancelled

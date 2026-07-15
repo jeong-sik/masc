@@ -714,7 +714,7 @@ instructions = "missing sandbox profile"
       in
       let publication_recovery_registry =
         match
-          Fs_compat.open_publication_recovery_registry
+          Fs_compat.Publication_recovery.open_registry
             ~sw
             ~fs:(Eio.Stdenv.fs env)
             ~registry_root
@@ -722,7 +722,7 @@ instructions = "missing sandbox profile"
         | Ok registry -> registry
         | Error error ->
           Alcotest.fail
-            (Fs_compat.publication_recovery_registry_error_to_string error)
+            (Fs_compat.Publication_recovery.registry_error_to_string error)
       in
       let ctx : _ Keeper_tool_surface.context =
         {

@@ -1,10 +1,46 @@
 (** Explicit fixture and state-machine surface for repository tests.
 
     Production code must use the narrow [Fs_compat.Publication_recovery]
-    facade. A source-boundary ratchet rejects consumers below [lib/] outside
-    the two facade modules. *)
+    facade. This module belongs to a workspace-only Dune library and is not
+    installed with [masc.fs_compat]. *)
+
+open Fs_compat_internal
 
 include module type of Publication_recovery_access
+
+type lane_scope_release_fault
+
+val lane_scope_release_fault
+  :  owner:string
+  -> exception_:exn
+  -> (lane_scope_release_fault,
+      Capability_recovery_obligation.validation_error)
+       result
+
+val with_lane_scope_release_fault
+  :  lane_scope_release_fault
+  -> (unit -> 'a)
+  -> 'a
+
+type replace_dispatch_fault
+
+type replace_dispatch_fault_stage =
+  | Before_publish_replace
+  | Before_parent_sync
+
+val replace_dispatch_fault
+  :  stage:replace_dispatch_fault_stage
+  -> exception_:exn
+  -> replace_dispatch_fault
+
+val with_replace_dispatch_fault
+  :  replace_dispatch_fault
+  -> (unit -> 'a)
+  -> 'a
+
+val remove_staging_payload_before_publish
+  :  unit
+  -> replace_dispatch_fault
 
 type record_area =
   | Active

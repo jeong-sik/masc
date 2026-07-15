@@ -332,8 +332,7 @@ let build_projection ?actor ~config ~sw ~clock
       net = None;
       (* Briefing projections call only snapshot/digest reads; no Keeper lane
          action is reachable through this context. *)
-      publication_recovery_provider =
-        Keeper_publication_recovery_availability.non_runtime_provider;
+      delegated_dispatch = None;
       mcp_session_id = None;
     }
   in

@@ -739,7 +739,7 @@ describe('applyKeeperStreamEvent', () => {
     ])
   })
 
-  it('drops pending thinking deltas when aborting a live stream', () => {
+  it('preserves received thinking deltas when aborting a live stream', () => {
     assistantEntry()
     setActiveStream('sangsu', 'reply-1', new AbortController())
     applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -754,7 +754,10 @@ describe('applyKeeperStreamEvent', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('cancelled')
     expect(entry?.streamState).toBeNull()
-    expect(entry?.traceSteps).toBeUndefined()
+    expect(entry?.text).toBe('요청이 취소되었습니다.')
+    expect(entry?.traceSteps).toEqual([
+      { kind: 'think', text: 'half-written reasoning', ts: expect.any(String) },
+    ])
   })
 
   it('splits thinking trace steps by OAS content block index', () => {

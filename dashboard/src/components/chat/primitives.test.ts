@@ -1765,6 +1765,24 @@ describe('Keeper v2 chat blocks', () => {
     expect(trace?.textContent).toContain('result')
   })
 
+  it('renders an explicit placeholder for a redacted persisted thinking block', () => {
+    renderBlocks([{ t: 'thinking', content: '', redacted: true }])
+
+    const thinking = container.querySelector('[data-chat-block="thinking"]')
+    expect(thinking).not.toBeNull()
+    expect(thinking?.getAttribute('data-chat-thinking-redacted')).toBe('true')
+    expect(thinking?.textContent).toContain('provider 서명')
+  })
+
+  it('renders persisted non-redacted thinking content', () => {
+    renderBlocks([{ t: 'thinking', content: 'checking state', redacted: false }])
+
+    const thinking = container.querySelector('[data-chat-block="thinking"]')
+    expect(thinking).not.toBeNull()
+    expect(thinking?.getAttribute('data-chat-thinking-redacted')).toBe('false')
+    expect(thinking?.textContent).toContain('checking state')
+  })
+
   it('renders a link unfurl card with extracted hostname', () => {
     renderBlocks([
       {
@@ -3554,6 +3572,22 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
     ])
     expect(container.querySelector('[data-chat-block="voice"]')).not.toBeNull()
     expect(container.querySelector('[data-chat-block="code"]')).toBeNull()
+  })
+
+  it('does not replace persisted thinking with a markdown reparse', async () => {
+    renderEntries([
+      entry({
+        id: 'a-thinking',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'secondary prose with ```code``` inline',
+        blocks: [{ t: 'thinking', content: 'checked source state', redacted: false }],
+      }),
+    ])
+
+    await flushUi()
+    expect(container.querySelector('[data-chat-block="thinking"]')?.textContent).toContain('checked source state')
+    expect(container.textContent).toContain('secondary prose')
   })
 })
 

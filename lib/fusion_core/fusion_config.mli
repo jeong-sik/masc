@@ -9,10 +9,10 @@
 (** config 파싱/검증 에러 — 닫힌 합. *)
 type config_error =
   | Empty_presets  (** enabled=true인데 preset 0개 *)
-  | Invalid_panel_size of string * int
-      (** (preset 이름, 모델 총합) — 그룹 모델 총합 1..8 위반 (빈 panel=[] 포함). *)
+  | Empty_panel_models of string
+      (** preset의 패널 그룹 전체에 실행할 모델이 없음 (빈 panel=[] 포함). *)
   | Empty_panels of string
-      (** preset의 [panels]가 빈 배열 (그룹 0개). "모델 0개"(Invalid_panel_size)와 구분. *)
+      (** preset의 [panels]가 빈 배열 (그룹 0개). "모델 0개"와 구분. *)
   | Conflicting_panel_grammar of string
       (** 같은 preset에 [[...panels]]와 flat [panel] 둘 다 존재 (silent 선택 금지). *)
   | Duplicate_panelist of string * string
@@ -55,7 +55,7 @@ val disabled : Fusion_policy.t
 
     - [fusion] 부재 → [Ok disabled].
     - enabled=true인데 preset 부재 → [Error [Empty_presets]].
-    - 패널 모델 총합 1..8 위반 → [Error [Invalid_panel_size _]].
+    - 패널 모델 집합이 비어 있음 → [Error [Empty_panel_models _]].
     - [panels] 빈 배열(그룹 0개) → [Error [Empty_panels _]].
     - [[...panels]]와 flat [panel] 동시 → [Error [Conflicting_panel_grammar _]].
     - 패널 정체성(panelist_id) 중복 → [Error [Duplicate_panelist _]]. 라벨이 다르면

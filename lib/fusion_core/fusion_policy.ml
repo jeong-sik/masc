@@ -57,8 +57,6 @@ type preset =
   }
 [@@deriving show, eq]
 
-let min_panel = 1
-let max_panel = 8
 let min_answered_floor = 1
 let default_min_answered = min_answered_floor
 let min_staged_judge_group_size = 2
@@ -75,13 +73,6 @@ let default_timeout_s = 300.0
 (* 모든 그룹의 모델을 평탄화 — 그룹순 × 그룹내 모델순 보존 (패널 fan-out 순서와 동일). *)
 let preset_models (p : preset) =
   List.concat_map (fun (g : panel_group) -> g.models) p.panels
-
-(* 패널 전체(그룹 합) 모델 수가 1..8 범위인가. 1..8은 OpenRouter Fusion의 총 모델
-   상한이므로 그룹별이 아니라 평탄화 총합에 건다. panels=[]는 명시적 실패
-   (Unknown→Permissive 회피 — 빈 그룹 리스트를 통과시키지 않는다). *)
-let preset_size_ok (p : preset) =
-  let total = List.length (preset_models p) in
-  p.panels <> [] && total >= min_panel && total <= max_panel
 
 (* 패널 정체성 (RFC-0278). label이 비면 model 그대로(legacy byte-identity), 있으면
    "label (model)". 이 문자열이 패널의 유일 식별자다: agent 카드명(Async_agent.all
@@ -285,7 +276,7 @@ module Validated_preset = struct
   (* 검증 실패 사유 — 닫힌 합. config 계층이 이를 자기 [config_error]로 매핑한다
      (의존 방향: config → policy). *)
   type invalid =
-    | Bad_size of int  (** 모델 총합(panels=[] 포함)이 min_panel..max_panel 밖 *)
+    | Empty_panel_models  (** 패널 그룹 전체에 실행할 모델이 없음 *)
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
@@ -305,13 +296,13 @@ module Validated_preset = struct
     | Bad_adaptive_factor of float
         (** [adaptive_timeout_factor]가 1.0 미만. *)
 
-  (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
+  (* 검증 순서는 config 로드 시점과 동일: non-empty models → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
      1차 심판 prompt → 1차 심판 정체성 중복 → 심판 max_output_tokens 범위 → min_answered.
      judges=[]면 1차 심판 관련 셋은 통과(simple/refine/conditional preset은 기존과 동일
      결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =
-    if not (preset_size_ok p) then Error (Bad_size (List.length (preset_models p)))
+    if p.panels = [] || preset_models p = [] then Error Empty_panel_models
     else if not (preset_prompts_present p) then Error Missing_prompt
     else if not (preset_judge_present p) then Error Missing_judge_model
     else
@@ -392,8 +383,8 @@ let find_preset (policy : t) name =
    있나"는 게이트가 score 비교나 문자열 매칭으로 판정하지 않고, 키퍼(이미 LLM)가
    판단해 masc_fusion을 호출하는 것으로 표현한다(RFC-0252 §6). 따라서 [req.trigger]는
    발동 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다.
-   size 재검증은 없다 — [find_preset]이 [Validated_preset.t]를 돌려주므로 size는
-   타입으로 증명됨 (RFC-0280, 기존 dead 재검증 제거). *)
+   모델 집합 재검증은 없다 — [find_preset]이 [Validated_preset.t]를 돌려주므로
+   non-empty는 타입으로 증명됨 (RFC-0280, 기존 dead 재검증 제거). *)
 let decide ~(policy : t)
     (req : Fusion_types.fusion_request) : Fusion_types.gate_decision =
   if not policy.enabled then Fusion_types.Deny Fusion_types.Disabled

@@ -3,7 +3,7 @@
 
 type config_error =
   | Empty_presets
-  | Invalid_panel_size of string * int
+  | Empty_panel_models of string
   | Empty_panels of string
   | Conflicting_panel_grammar of string
   | Duplicate_panelist of string * string
@@ -77,7 +77,7 @@ let parse_min_answered _name tbl =
 
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
    (단일 심판 = simple/refine/conditional 심판이자 JOJ meta). [[...judges]] sub-table이
-   있으면 JOJ 1차 심판 목록으로 파싱(없으면 []). 검증 순서: 크기(총합) → 패널 프롬프트 →
+   있으면 JOJ 1차 심판 목록으로 파싱(없으면 []). 검증 순서: non-empty models → 패널 프롬프트 →
    심판모델 → 패널 정체성 중복 → 1차 심판 prompt/정체성 → min_answered. *)
 let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   : (Fusion_policy.Validated_preset.t, config_error) result =
@@ -141,7 +141,7 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Error invalid ->
       Error
         (match invalid with
-         | Fusion_policy.Validated_preset.Bad_size n -> Invalid_panel_size (name, n)
+         | Fusion_policy.Validated_preset.Empty_panel_models -> Empty_panel_models name
          | Fusion_policy.Validated_preset.Missing_prompt -> Missing_prompt name
          | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
          | Fusion_policy.Validated_preset.Duplicate_panelist id ->
@@ -168,8 +168,8 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
      단일 그룹이면 오늘과 byte-identical).
    둘 다 있으면 Conflicting_panel_grammar, panels=[](그룹 0개)면 Empty_panels로 명시적
    거부 (silent 한쪽 선택 금지). 빈 panel=[](모델 0개)은 legacy 길이-1 그룹으로 desugar
-   되어 size 검증에서 Invalid_panel_size(_, 0)으로 잡힌다 — "그룹 0개"(Empty_panels)와
-   "모델 0개"(Invalid_panel_size)는 다른 조건이므로 다른 variant로 구분한다.
+   되어 검증에서 Empty_panel_models로 잡힌다 — "그룹 0개"(Empty_panels)와
+   "모델 0개"(Empty_panel_models)는 다른 조건이므로 다른 variant로 구분한다.
    panels가 스칼라 등 malformed면 get_array가 Type_error를 내고, find_opt/find_or는
    Key_error만 삼키고 Type_error는 전파하므로(otoml_base.ml:332-337) of_toml의
    Type_error 핸들러가 Toml_type_error로 fail-fast한다. 여기서 find_opt는 panels/panel

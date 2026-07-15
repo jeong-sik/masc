@@ -3574,9 +3574,55 @@ let read_owned_directory_blocking ~ownership_root path =
                "owned Keeper directory identity changed during queue inventory")
         | Error _ as error -> error))
 
-let read_owned_directory ~ownership_root path =
+type keeper_directory_inventory =
+  { keeper_names : string list
+  ; rejected_entries : (string * snapshot_load_error) list
+  }
+
+let classify_keeper_directory_entries_blocking entries_path entries =
+  List.fold_left
+    (fun inventory entry_name ->
+       let entry_path = Filename.concat entries_path entry_name in
+       match Unix.lstat entry_path with
+       | { Unix.st_kind = Unix.S_DIR; _ } ->
+         { inventory with keeper_names = entry_name :: inventory.keeper_names }
+       | { Unix.st_kind = Unix.S_REG; _ } ->
+         (* The Keeper runtime root also owns meta JSON, decision JSONL,
+            memory JSONL, and backup files.  They are not chat queue lanes and
+            must not be interpreted as directory names. *)
+         inventory
+       | { Unix.st_kind = st_kind; _ } ->
+         { inventory with
+           rejected_entries =
+             ( entry_name
+             , load_error Invalid_path ~path:entry_path
+                 (Printf.sprintf
+                    "Keeper chat queue inventory entry has unsupported kind %s"
+                    (unix_file_kind_to_string st_kind)) )
+             :: inventory.rejected_entries
+         }
+       | exception exn ->
+         { inventory with
+           rejected_entries =
+             ( entry_name
+             , load_error Read_failed ~path:entry_path (Printexc.to_string exn) )
+             :: inventory.rejected_entries
+         })
+    { keeper_names = []; rejected_entries = [] }
+    entries
+  |> fun inventory ->
+  { keeper_names = List.rev inventory.keeper_names
+  ; rejected_entries = List.rev inventory.rejected_entries
+  }
+;;
+
+let read_keeper_directory_inventory ~ownership_root path =
   Eio_guard.run_in_systhread (fun () ->
-      read_owned_directory_blocking ~ownership_root path)
+    match read_owned_directory_blocking ~ownership_root path with
+    | Error _ as error -> error
+    | Ok None -> Ok None
+    | Ok (Some entries) ->
+      Ok (Some (classify_keeper_directory_entries_blocking path entries)))
 
 let configure_persistence ~base_path =
   let claimed =
@@ -3626,9 +3672,19 @@ let configure_persistence ~base_path =
                 (create_entry ~load_errors:[ error ] ()))
       in
       let keeper_names =
-        match read_owned_directory ~ownership_root:base_path keepers_dir with
+        match
+          read_keeper_directory_inventory
+            ~ownership_root:base_path
+            keepers_dir
+        with
         | Ok None -> []
-        | Ok (Some names) -> List.sort String.compare names
+        | Ok (Some inventory) ->
+          List.iter
+            (fun (entry_name, error) ->
+               reported_errors :=
+                 (Some entry_name, error) :: !reported_errors)
+            inventory.rejected_entries;
+          List.sort String.compare inventory.keeper_names
         | Error error ->
           let error =
             { error with

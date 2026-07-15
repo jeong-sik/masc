@@ -111,6 +111,34 @@ let reject_and_cleanup id =
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
 
+let test_pending_store_lock_serializes_eio_fibers () =
+  Eio_main.run @@ fun _environment ->
+  let first_entered, signal_first_entered = Eio.Promise.create () in
+  let second_attempted, signal_second_attempted = Eio.Promise.create () in
+  let release_first, signal_release_first = Eio.Promise.create () in
+  let order = ref [] in
+  Eio.Fiber.all
+    [ (fun () ->
+        AQ.For_testing.with_pending_store_lock (fun () ->
+          order := "first_entered" :: !order;
+          Eio.Promise.resolve signal_first_entered ();
+          Eio.Promise.await release_first;
+          order := "first_released" :: !order))
+    ; (fun () ->
+        Eio.Promise.await first_entered;
+        Eio.Promise.resolve signal_second_attempted ();
+        AQ.For_testing.with_pending_store_lock (fun () ->
+          order := "second_entered" :: !order))
+    ; (fun () ->
+        Eio.Promise.await second_attempted;
+        Eio.Promise.resolve signal_release_first ())
+    ];
+  Alcotest.(check (list string))
+    "second fiber enters only after the yielding durable transition releases"
+    [ "first_entered"; "first_released"; "second_entered" ]
+    (List.rev !order)
+;;
+
 let test_dedup_never_merges_distinct_origins () =
   let base_path = temp_dir () in
   let keeper_name = "queue-distinct-origin" in
@@ -1173,6 +1201,10 @@ let () =
     "Keeper_approval_queue"
     [ ( "nonhierarchical queue"
       , [ Alcotest.test_case
+            "durable lock serializes Eio fibers"
+            `Quick
+            test_pending_store_lock_serializes_eio_fibers
+        ; Alcotest.test_case
             "submit is nonblocking and exact"
             `Quick
             test_submit_is_nonblocking_and_exactly_deduplicated

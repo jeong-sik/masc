@@ -664,6 +664,21 @@ let test_legacy_json_is_not_a_queue_authority () =
     (Result.is_ok
        (Keeper_chat_queue.enqueue ~keeper_name:healthy_keeper (message "works")))
 
+let test_runtime_files_are_not_queue_lane_directories () =
+  Printf.printf
+    "Test: Keeper runtime files are not interpreted as queue lane directories\n%!";
+  with_base "keeper-chat-runtime-files" @@ fun base_path ->
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  save_text (Filename.concat keepers_dir "executor.json") "{}";
+  save_text (Filename.concat keepers_dir "executor.memory.jsonl") "";
+  save_text (Filename.concat keepers_dir "executor.decisions.jsonl") "";
+  let report = configure base_path in
+  check "runtime files produce no queue recovery failures"
+    (report.load_errors = []);
+  check "runtime files restore no queue lanes"
+    (report.restored_keeper_count = 0)
+
 let test_foreign_database_and_symlink_are_quarantined () =
   Printf.printf "Test: foreign schema and symlink path never become queue SSOT\n%!";
   let foreign_case base_path =
@@ -734,6 +749,7 @@ let () =
   test_uncertain_lease_compensates_and_other_transitions_reconcile ();
   test_restart_requires_explicit_recovery_without_journal ();
   test_legacy_json_is_not_a_queue_authority ();
+  test_runtime_files_are_not_queue_lane_directories ();
   test_foreign_database_and_symlink_are_quarantined ();
   test_reconcile_absent_lane_and_stage_order ();
   if !failures > 0

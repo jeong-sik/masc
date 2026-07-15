@@ -155,6 +155,7 @@ val list_recent_resolved_json :
 module For_testing : sig
   val reset_audit_store : unit -> unit
   val reset_runtime_state : unit -> unit
+  val with_pending_store_lock : (unit -> 'a) -> 'a
   val pending_store_path : base_path:string -> string
   val always_allowed_store_path : base_path:string -> string
 end

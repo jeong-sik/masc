@@ -15,7 +15,7 @@ let status_result ~tool_name ~class_ ~ok fields =
 
 let record_completion ~keeper ~run_id ?failure ?failure_code ~ok () =
   match
-    Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+    Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~operation_id:run_id
       ?failure ?failure_code ~ok ()
   with
   | Ok () -> ()
@@ -145,13 +145,14 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
         ; ("reason", `String (Fusion_types.deny_reason_label reason))
         ]
     | Fusion_types.Allow allowed ->
+      let operation : Fusion_types.fusion_operation = { request = allowed; topology } in
       (* RFC-0266 §7: 진행중 가시성을 위해 fork 직전 run을 Running으로 등록한다
          (sink/실패 경로가 Completed로 갱신). Durable register가 실패하면 worker를
          시작하지 않는다. 시작했지만 복구할 receipt가 없는 상태를 만들 수 없기
          때문이다. *)
       (match
-         Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
-           ~keeper ~preset ~started_at:now_unix
+         Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~operation
+           ~started_at:now_unix
        with
        | Error error ->
          status_result

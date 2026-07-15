@@ -45,9 +45,7 @@ type run_status =
     }
 
 type run = {
-  run_id : string;
-  keeper : string;
-  preset : string;
+  operation : Fusion_types.fusion_operation;
   started_at : float;  (* unix seconds from the keeper clock at fork start *)
   status : run_status;
 }
@@ -95,9 +93,15 @@ let persistence_error_to_string = function
 ;;
 
 let completion_error_to_string = function
-  | Unknown_run run_id -> Printf.sprintf "unknown fusion run %s" run_id
+  | Unknown_run operation_id ->
+    Printf.sprintf "unknown fusion run %s" operation_id
   | Completion_persistence_failed error -> persistence_error_to_string error
 ;;
+
+let run_operation_id (run : run) = Fusion_types.fusion_operation_id run.operation
+let operation_id = run_operation_id
+let keeper (run : run) = run.operation.request.keeper
+let preset (run : run) = run.operation.request.preset
 
 let append_event t event =
   match t.path with
@@ -113,18 +117,25 @@ let append_event t event =
        Error error)
 ;;
 
-let register_running t ~run_id ~keeper ~preset ~started_at =
+let register_running t ~operation ~started_at =
+  let id = Fusion_types.fusion_operation_id operation in
   match
     append_event
       t
-      (Fusion_run_registry_event.Register { run_id; keeper; preset; started_at })
+      (Fusion_run_registry_event.Register { operation; started_at })
   with
   | Error _ as error -> error
   | Ok () ->
     update t (fun runs ->
-      let run = { run_id; keeper; preset; started_at; status = Running } in
-      (* defensive: a re-registered run_id replaces its prior entry *)
-      let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
+      let run = { operation; started_at; status = Running } in
+      (* defensive: a re-registered operation id replaces its prior entry *)
+      let without_dup =
+        List.filter
+          (fun run ->
+             not
+               (String.equal (run_operation_id run) id))
+          runs
+      in
       prune (run :: without_dup));
     Ok ()
 ;;
@@ -133,17 +144,19 @@ let list_runs (t : t) : run list =
   Atomic.get t.runs |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
 ;;
 
-let get (t : t) ~run_id : run option =
-  List.find_opt (fun r -> String.equal r.run_id run_id) (Atomic.get t.runs)
+let get (t : t) ~operation_id:expected : run option =
+  List.find_opt
+    (fun run -> String.equal (run_operation_id run) expected)
+    (Atomic.get t.runs)
 ;;
 
-let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
-  match get t ~run_id with
-  | None -> Error (Unknown_run run_id)
+let mark_completed (t : t) ~operation_id ?failure ?failure_code ~ok () =
+  match get t ~operation_id with
+  | None -> Error (Unknown_run operation_id)
   | Some _ ->
     let persisted =
       append_event t
-        (Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code })
+        (Fusion_run_registry_event.Complete { operation_id; ok; failure; failure_code })
     in
     let receipt =
       match persisted with
@@ -153,7 +166,7 @@ let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
     update t (fun runs ->
       runs
       |> List.map (fun r ->
-           if String.equal r.run_id run_id
+           if String.equal (run_operation_id r) operation_id
            then { r with status = Completed { ok; failure; failure_code; receipt } }
            else r)
       |> prune);
@@ -178,10 +191,12 @@ let status_label = function
    keeper status tool all serialize a run through here so the field set and the
    status label never drift between surfaces. *)
 let run_to_yojson (r : run) : Yojson.Safe.t =
+  let request = r.operation.Fusion_types.request in
   let base =
-    [ ("run_id", `String r.run_id)
-    ; ("keeper", `String r.keeper)
-    ; ("preset", `String r.preset)
+    [ ("run_id", `String request.run_id)
+    ; ("keeper", `String request.keeper)
+    ; ("preset", `String request.preset)
+    ; ("topology", `String (Fusion_types.fusion_topology_to_string r.operation.topology))
     ; ("started_at", `Float r.started_at)
     ; ("status", `String (status_label r.status))
     ]
@@ -214,14 +229,19 @@ let run_to_yojson (r : run) : Yojson.Safe.t =
 
 (* Replay helpers — used to hydrate the in-memory table from disk at boot. *)
 let apply_event runs = function
-  | Fusion_run_registry_event.Register { run_id; keeper; preset; started_at } ->
-    let run = { run_id; keeper; preset; started_at; status = Running } in
-    let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
+  | Fusion_run_registry_event.Register { operation; started_at } ->
+    let id = Fusion_types.fusion_operation_id operation in
+    let run = { operation; started_at; status = Running } in
+    let without_dup =
+      List.filter
+        (fun run -> not (String.equal (run_operation_id run) id))
+        runs
+    in
     run :: without_dup
-  | Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code } ->
+  | Fusion_run_registry_event.Complete { operation_id = completed_id; ok; failure; failure_code } ->
     List.map
       (fun r ->
-         if String.equal r.run_id run_id
+         if String.equal (run_operation_id r) completed_id
          then { r with status = Completed { ok; failure; failure_code; receipt = Durable } }
          else r)
       runs
@@ -277,9 +297,7 @@ let parse_event_line ~path ~line_no line =
 let events_of_run (run : run) =
   let register =
     Fusion_run_registry_event.Register
-      { run_id = run.run_id
-      ; keeper = run.keeper
-      ; preset = run.preset
+      { operation = run.operation
       ; started_at = run.started_at
       }
   in
@@ -289,7 +307,7 @@ let events_of_run (run : run) =
   | Completed { ok; failure; failure_code; receipt = Durable } ->
     [ register
     ; Fusion_run_registry_event.Complete
-        { run_id = run.run_id; ok; failure; failure_code }
+        { operation_id = run_operation_id run; ok; failure; failure_code }
     ]
 ;;
 

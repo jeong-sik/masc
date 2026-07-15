@@ -6,13 +6,11 @@
 
 type t =
   | Register of
-      { run_id : string
-      ; keeper : string
-      ; preset : string
+      { operation : Fusion_types.fusion_operation
       ; started_at : float
       }
   | Complete of
-      { run_id : string
+      { operation_id : string
       ; ok : bool
       ; failure : string option
       ; failure_code : string option
@@ -22,7 +20,8 @@ val to_yojson : t -> Yojson.Safe.t
 (** Canonical JSON object for one event. *)
 
 val of_yojson : Yojson.Safe.t -> (t, string) result
-(** Parse an event from a JSON object; [Error] on unknown event kind. *)
+(** Parse an event from a JSON object; [Error] on unknown event kind or an
+    incomplete canonical operation. *)
 
 val to_jsonl : t -> string
 (** Single JSONL line (JSON object + trailing newline). *)

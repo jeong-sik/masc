@@ -46,12 +46,15 @@ type run_status =
     }
 
 type run = {
-  run_id : string;
-  keeper : string;
-  preset : string;
+  operation : Fusion_types.fusion_operation;
   started_at : float;  (** unix seconds from the keeper clock at fork start *)
   status : run_status;
 }
+
+val operation_id : run -> string
+val keeper : run -> string
+val preset : run -> string
+(** Lossless projections from the canonical immutable [operation]. *)
 
 type t
 
@@ -70,22 +73,22 @@ val replay : string -> t
     the newest {!max_completed_retained}. *)
 
 val register_running :
-  t -> run_id:string -> keeper:string -> preset:string -> started_at:float
+  t -> operation:Fusion_types.fusion_operation -> started_at:float
   -> (unit, persistence_error) result
-(** Record a run as [Running]. A repeated [run_id] replaces its prior entry.
+(** Record a run as [Running]. A repeated operation identity replaces its prior entry.
     When the registry was created with a path, the durable [Register] event is
     committed before publishing in-memory state. An append failure returns
     [Error] and the run is not registered. *)
 
 val mark_completed
   :  t
-  -> run_id:string
+  -> operation_id:string
   -> ?failure:string
   -> ?failure_code:string
   -> ok:bool
   -> unit
   -> (unit, completion_error) result
-(** Transition a run to [Completed]. Unknown [run_id] is an explicit [Error]. [ok] is the
+(** Transition a run to [Completed]. Unknown operation identity is an explicit [Error]. [ok] is the
     judge/sink outcome (false for denied/sink_failed/aborted). [failure]/
     [failure_code]는 [ok=false]일 때의 사유·분류 태그 — 상태 표면(tool/HTTP/SSE)이
     사유 없이 "failed"만 보이는 opaque 실패가 되지 않게 함께 기록한다. A failed
@@ -98,8 +101,8 @@ val list_runs : t -> run list
     pruned; only older durably completed rows are retained by the history
     bound. *)
 
-val get : t -> run_id:string -> run option
-(** The run with [run_id], if still tracked. *)
+val get : t -> operation_id:string -> run option
+(** The run with [operation_id], if still tracked. *)
 
 val status_label : run_status -> string
 (** Stable wire label: [Running -> "running"], [Recovery_required ->
@@ -109,7 +112,7 @@ val status_label : run_status -> string
     [fusion_run_status] SSE event so it never drifts. *)
 
 val run_to_yojson : run -> Yojson.Safe.t
-(** Canonical per-run JSON: [{run_id, keeper, preset, started_at, status}] +
+(** Canonical per-run JSON: [{run_id, keeper, preset, topology, started_at, status}] +
     실패 시 additive [error]/[failure_code] 필드. The single serializer for
     every fusion-run surface (tool / HTTP list / SSE delta). *)
 

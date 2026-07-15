@@ -18,14 +18,33 @@ module Registry = Fusion_run_registry
 module R = struct
   include Registry
 
+  let operation ~run_id ~keeper ~preset : Fusion_types.fusion_operation =
+    { request =
+        { run_id
+        ; keeper
+        ; prompt = "status test"
+        ; preset
+        ; web_tools = false
+        ; depth = Fusion_types.Fusion_depth.Top
+        ; trigger = Fusion_types.Harness_eval
+        }
+    ; topology = Fusion_types.Simple
+    }
+  ;;
+
   let register_running t ~run_id ~keeper ~preset ~started_at =
-    match Registry.register_running t ~run_id ~keeper ~preset ~started_at with
+    match
+      Registry.register_running t ~operation:(operation ~run_id ~keeper ~preset) ~started_at
+    with
     | Ok () -> ()
     | Error error -> fail (Registry.persistence_error_to_string error)
   ;;
 
   let mark_completed t ~run_id ?failure ?failure_code ~ok () =
-    match Registry.mark_completed t ~run_id ?failure ?failure_code ~ok () with
+    match
+      Registry.mark_completed t ~operation_id:run_id ?failure ?failure_code
+        ~ok ()
+    with
     | Ok () -> ()
     | Error error -> fail (Registry.completion_error_to_string error)
   ;;

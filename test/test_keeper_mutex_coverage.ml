@@ -4,6 +4,12 @@ open Masc
 let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:0.0 body
 let caller = "keeper-msg-test-caller"
 
+let keeper_request ?(prompt = "test invocation") keeper_name =
+  match Keeper_invocation_types.keeper_turn ~keeper_name ~prompt with
+  | Ok request -> request
+  | Error reason -> Alcotest.fail reason
+;;
+
 let accepted_request_id = function
   | Ok
       ({ acceptance = Keeper_msg_async.Durably_accepted; request_id }
@@ -179,7 +185,7 @@ let test_keeper_msg_async_roundtrip () =
       ~background_sw:sw
       ~base_path
       ~caller
-      ~keeper_name:"alpha.with.dot"
+      ~request:(keeper_request ~prompt:"durable dotted request" "alpha.with.dot")
       ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
         tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
@@ -193,7 +199,11 @@ let test_keeper_msg_async_roundtrip () =
     (Fs_compat.realpath base_path)
     entry.base_path;
   Alcotest.(check string) "dotted keeper name accepted" "alpha.with.dot"
-    entry.keeper_name;
+    (Keeper_invocation_types.request_target_name entry.request);
+  Alcotest.(check string)
+    "prompt persisted in typed request"
+    "durable dotted request"
+    (Keeper_invocation_types.request_prompt entry.request);
   Alcotest.(check bool)
     "request completed"
     true
@@ -241,7 +251,7 @@ let test_keeper_msg_async_list_isolates_base_paths () =
       ~background_sw:sw
       ~base_path
       ~caller
-      ~keeper_name
+      ~request:(keeper_request keeper_name)
       ~f:(fun _request_sw ->
         Eio.Promise.await release;
         tr_ok "{}")
@@ -279,7 +289,7 @@ let test_keeper_msg_async_recovers_done_from_disk () =
       ~background_sw:sw
       ~base_path
       ~caller
-      ~keeper_name:"beta"
+      ~request:(keeper_request "beta")
       ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
         Tool_result.make_ok
@@ -340,7 +350,7 @@ let test_keeper_msg_async_survives_submitter_turn_switch () =
         ~background_sw:root_sw
         ~base_path
         ~caller
-        ~keeper_name:"root-lifetime"
+        ~request:(keeper_request "root-lifetime")
         ~f:(fun request_sw ->
           Atomic.set request_switch_is_turn_switch (request_sw == turn_sw);
           Eio.Promise.resolve resolve_worker_started ();
@@ -400,7 +410,7 @@ let test_keeper_msg_async_does_not_accept_failed_initial_persistence () =
            ~background_sw
            ~base_path
            ~caller
-           ~keeper_name:"initial-persist-failure"
+           ~request:(keeper_request "initial-persist-failure")
            ~f:(fun _request_sw ->
              Atomic.set worker_ran true;
              tr_ok "{}")
@@ -483,7 +493,7 @@ let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
               ~background_sw:sw
               ~base_path
               ~caller
-              ~keeper_name:"reservation-first"
+              ~request:(keeper_request "reservation-first")
               ~f:(fun _ -> tr_ok "{}")
               ()));
        Fun.protect
@@ -496,7 +506,7 @@ let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
                 ~background_sw:sw
                 ~base_path
                 ~caller
-                ~keeper_name:"reservation-second"
+                ~request:(keeper_request "reservation-second")
                 ~f:(fun _ -> tr_ok "{}")
                 ()
               |> accepted_request_id
@@ -549,7 +559,7 @@ let test_keeper_msg_async_initial_post_publish_failure_rolls_back () =
            ~background_sw
            ~base_path
            ~caller
-           ~keeper_name:"initial-rollback"
+           ~request:(keeper_request "initial-rollback")
            ~f:(fun _request_sw ->
              Atomic.set worker_ran true;
              tr_ok "{}")
@@ -594,7 +604,7 @@ let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
            ~background_sw
            ~base_path
            ~caller
-           ~keeper_name:"initial-uncertain"
+           ~request:(keeper_request "initial-uncertain")
            ~f:(fun _request_sw ->
              Atomic.set worker_ran true;
              tr_ok "{}")
@@ -622,7 +632,7 @@ let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
              ~background_sw
              ~base_path
              ~caller
-             ~keeper_name:"initial-uncertain"
+             ~request:(keeper_request "initial-uncertain")
              ~f:(fun _request_sw -> tr_ok "{}")
              ()
            |> accepted_request_id
@@ -674,7 +684,7 @@ let test_keeper_msg_async_running_double_write_failure_is_terminal_in_memory () 
            ~background_sw
            ~base_path
            ~caller
-           ~keeper_name:"running-double-write-failure"
+           ~request:(keeper_request "running-double-write-failure")
            ~f:(fun _request_sw ->
              Atomic.set worker_ran true;
              tr_ok "{}")
@@ -732,7 +742,7 @@ let test_keeper_msg_async_running_write_failure_projects_durable_marker_once () 
            ~background_sw
            ~base_path
            ~caller
-           ~keeper_name:"running-write-failure"
+           ~request:(keeper_request "running-write-failure")
            ~f:(fun _request_sw ->
              Atomic.set worker_ran true;
              tr_ok "{}")
@@ -786,7 +796,7 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
       ~background_sw:sw
       ~base_path
       ~caller
-      ~keeper_name:"gamma"
+      ~request:(keeper_request "gamma")
       ~f:(fun _request_sw ->
         Eio.Promise.await promise;
         tr_ok "{}")
@@ -846,7 +856,7 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
       ~background_sw:sw
       ~base_path
       ~caller
-      ~keeper_name:"sweep"
+      ~request:(keeper_request "sweep")
       ~f:(fun _request_sw ->
         Eio.Promise.await promise;
         tr_ok "{}")
@@ -914,7 +924,7 @@ let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
         ~background_sw:sw
         ~base_path
         ~caller
-        ~keeper_name:"cancelled"
+        ~request:(keeper_request "cancelled")
         ~f:(fun _request_sw ->
           Eio.Promise.await never;
           tr_ok "{}")
@@ -949,7 +959,7 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
       ~background_sw:sw
       ~base_path
       ~caller
-      ~keeper_name:"operator-cancelled"
+      ~request:(keeper_request "operator-cancelled")
       ~f:(fun _request_sw ->
         Eio.Promise.await never;
         tr_ok "{}")
@@ -1025,7 +1035,7 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
            ~background_sw:sw
            ~base_path
            ~caller
-           ~keeper_name:"live-cancel-volatile"
+           ~request:(keeper_request "live-cancel-volatile")
            ~f:(fun _request_sw ->
              Eio.Promise.await never;
              tr_ok "{}")
@@ -1087,7 +1097,7 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
            ~background_sw:sw
            ~base_path
            ~caller
-           ~keeper_name:"cancel-signal-retry"
+           ~request:(keeper_request "cancel-signal-retry")
            ~f:(fun _request_sw ->
              Eio.Promise.await never;
              tr_ok "{}")
@@ -1152,7 +1162,7 @@ let test_keeper_msg_async_terminal_record_is_durable_without_age_eviction () =
       ~background_sw:sw
       ~base_path
       ~caller
-      ~keeper_name:"delta"
+      ~request:(keeper_request "delta")
       ~f:(fun _request_sw ->
         Eio.Fiber.yield ();
         tr_ok "{}")
@@ -1251,7 +1261,7 @@ let request_record_json ?(keeper_name = "recovery-test") ?(submitted_at = 1.0)
   `Assoc
     ([ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
      ; "request_id", `String request_id
-     ; "keeper_name", `String keeper_name
+     ; "request", Keeper_invocation_types.request_to_json (keeper_request keeper_name)
      ; "base_path", `String (Fs_compat.realpath base_path)
      ; "submitted_by", `String caller
      ; "status", `String status
@@ -1517,7 +1527,8 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
                     && Atomic.compare_and_set inject_terminal true false ->
                write_request_record
                  ~location:Terminal_record
-                 ~keeper_name:running.Keeper_msg_async.keeper_name
+                 ~keeper_name:
+                   (Keeper_invocation_types.request_target_name running.request)
                  ~submitted_at:running.submitted_at
                  ~base_path
                  ~request_id
@@ -1540,7 +1551,7 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
            ~background_sw:sw
            ~base_path
            ~caller
-           ~keeper_name:"canonical-integrity-settlement"
+           ~request:(keeper_request "canonical-integrity-settlement")
            ~f:(fun _request_sw ->
              Eio.Promise.await release;
              tr_ok {|{"worker":"result"}|})
@@ -1636,7 +1647,7 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
            ~background_sw:sw
            ~base_path
            ~caller
-           ~keeper_name:"integrity-projection-error"
+           ~request:(keeper_request "integrity-projection-error")
            ~f:(fun _request_sw ->
              Eio.Promise.await release;
              tr_ok "{}")
@@ -2293,21 +2304,21 @@ let test_keeper_persistence_claim_is_one_shot_for_process () =
        | Ok _ -> Alcotest.fail "second startup owner mutated claimed persistence")
 ;;
 
-let test_keeper_msg_async_rejects_v2_record_without_compatibility () =
+let test_keeper_msg_async_rejects_v3_record_without_compatibility () =
   with_eio_env
   @@ fun _env ->
-  let base_path = temp_dir "keeper-msg-reject-v2-" in
+  let base_path = temp_dir "keeper-msg-reject-v3-" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-       let request_id = "kmsg_unsupported_v2_0_0" in
+       let request_id = "kmsg_unsupported_v3_0_0" in
        write_disk_record
          ~location:Active_record
          ~base_path
          ~request_id
          (Yojson.Safe.to_string
             (`Assoc
-                [ "schema_version", `Int 2
+                [ "schema_version", `Int 3
                 ; "request_id", `String request_id
                 ; "keeper_name", `String "alpha"
                 ; "base_path", `String (Fs_compat.realpath base_path)
@@ -2320,20 +2331,20 @@ let test_keeper_msg_async_rejects_v2_record_without_compatibility () =
           Alcotest.(check bool) "schema rejection is explicit" true
             (String.length reason > 0)
         | Keeper_msg_async.Found _ ->
-          Alcotest.fail "unsupported v2 record was decoded"
+          Alcotest.fail "unsupported v3 record was decoded"
         | Keeper_msg_async.Absent ->
-          Alcotest.fail "unsupported v2 evidence was hidden"
+          Alcotest.fail "unsupported v3 evidence was hidden"
         | Keeper_msg_async.Rejected _ ->
           Alcotest.fail "unsupported persisted schema was classified as caller input");
        let report =
          Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
        in
-       Alcotest.(check int) "unsupported v2 is reported unreadable" 1
+       Alcotest.(check int) "unsupported v3 is reported unreadable" 1
          report.unreadable;
        let active_path =
          require_record_path ~location:Active_record ~base_path ~request_id
        in
-       Alcotest.(check bool) "unsupported v2 evidence is preserved" true
+       Alcotest.(check bool) "unsupported v3 evidence is preserved" true
          (Sys.file_exists active_path))
 ;;
 
@@ -2397,7 +2408,7 @@ let test_keeper_msg_async_load_record_missing_status_is_unreadable () =
             (`Assoc
                 [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
                 ; "request_id", `String request_id
-                ; "keeper_name", `String "alpha"
+                ; "request", Keeper_invocation_types.request_to_json (keeper_request "alpha")
                 ; "base_path", `String (Fs_compat.realpath base_path)
                 ; "submitted_by", `String caller
                 ; "submitted_at", `Float 1.0
@@ -2428,7 +2439,7 @@ let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
             (`Assoc
                 [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
                 ; "request_id", `String request_id
-                ; "keeper_name", `String "alpha"
+                ; "request", Keeper_invocation_types.request_to_json (keeper_request "alpha")
                 ; "base_path", `String (Fs_compat.realpath base_path)
                 ; "submitted_by", `String caller
                 ; "status", `String "sideways"
@@ -2460,7 +2471,7 @@ let test_keeper_msg_async_rejects_filename_request_id_mismatch () =
             (`Assoc
                 [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
                 ; "request_id", `String "kmsg_different_id_0_0"
-                ; "keeper_name", `String "alpha"
+                ; "request", Keeper_invocation_types.request_to_json (keeper_request "alpha")
                 ; "base_path", `String (Fs_compat.realpath base_path)
                 ; "submitted_by", `String caller
                 ; "status", `String "queued"
@@ -2698,9 +2709,9 @@ let () =
             `Quick
             test_keeper_msg_async_load_record_absent_id
         ; test_case
-            "v2 request record is rejected without compatibility"
+            "v3 request record is rejected without compatibility"
             `Quick
-            test_keeper_msg_async_rejects_v2_record_without_compatibility
+            test_keeper_msg_async_rejects_v3_record_without_compatibility
         ; test_case
             "load_record corrupt JSON is Unreadable"
             `Quick

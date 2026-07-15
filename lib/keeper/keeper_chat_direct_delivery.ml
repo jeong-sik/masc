@@ -1528,6 +1528,13 @@ let commit_transcript_with_io io ~base_path ~identity ~now =
 
 let commit_transcript = commit_transcript_with_io production_io
 
+let request_matches_payload request payload =
+  String.equal
+    (Keeper_invocation_types.request_target_name request)
+    payload.keeper_name
+  && String.equal (Keeper_invocation_types.request_prompt request) payload.user_content
+;;
+
 let observe_async_terminal ~base_path ~(identity : t) =
   let* base_path = canonical_base_path base_path in
   let request_id_wire = Request_id.to_string identity.request_id in
@@ -1541,7 +1548,7 @@ let observe_async_terminal ~base_path ~(identity : t) =
   let entry = Keeper_msg_async.durable_terminal_entry proof in
   if
     String.equal entry.request_id request_id_wire
-    && String.equal entry.keeper_name identity.payload.keeper_name
+    && request_matches_payload entry.request identity.payload
     && String.equal entry.base_path base_path
     && String.equal entry.submitted_by identity.payload.submitted_by
   then Ok { canonical_terminal = proof; checkpoint = identity }
@@ -1555,7 +1562,7 @@ let proof_matches ~base_path (identity : t) proof =
   to_yojson proof.checkpoint = to_yojson identity
   && String.equal entry.base_path base_path
   && String.equal entry.request_id (Request_id.to_string identity.request_id)
-  && String.equal entry.keeper_name identity.payload.keeper_name
+  && request_matches_payload entry.request identity.payload
   && String.equal entry.submitted_by identity.payload.submitted_by
 ;;
 

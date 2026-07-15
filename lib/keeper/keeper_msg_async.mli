@@ -34,7 +34,7 @@ type request_status =
 
 type entry =
   { request_id : string
-  ; keeper_name : string
+  ; request : Keeper_invocation_types.request
   ; base_path : string
   ; submitted_by : string
   ; status : request_status
@@ -91,7 +91,7 @@ val durable_terminal_entry : durable_terminal_proof -> entry
 (** Read-only identity/status carried by a proof.  The proof constructor stays
     private to this module. *)
 
-(** Recovery observations for canonical v3 storage only. [finalized] counts
+(** Recovery observations for canonical v4 storage only. [finalized] counts
     terminal states moved from the active partition after a crash; [cleaned]
     counts duplicate active sources removed after terminal durability was
     established. Staging counters cover only the current dedicated atomic
@@ -139,7 +139,6 @@ and recovery_record_error_kind =
 
 type submit_error =
   | Submit_rejected of access_rejection
-  | Submit_invalid_keeper_name of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -221,11 +220,11 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     as [submit]. *)
 
 (** [submit ?on_accepted ?on_worker_aborted ~background_sw ~f
-    ~keeper_name ~base_path ~caller] forks a background daemon fiber on the
+    ~request ~base_path ~caller] forks a background daemon fiber on the
     explicitly supplied server-lifetime [background_sw].  The per-request
     worker switch passed to [f] is distinct: cancellation fails that switch,
     never the server root. Returns the fresh [request_id] synchronously after
-    the owner-bearing v3 request record is durably accepted. If an atomic
+    the owner-bearing v4 request record is durably accepted. If an atomic
     rename publishes the record but its directory fsync and the compensating
     rollback both fail, [Reconciliation_required] preserves the request id so
     the caller can poll instead of creating an unreachable orphan. The async
@@ -268,7 +267,7 @@ val submit
   -> base_path:string
   -> caller:string
   -> f:(Eio.Switch.t -> Keeper_types_profile.tool_result)
-  -> keeper_name:string
+  -> request:Keeper_invocation_types.request
   -> unit
   -> (submit_outcome, submit_error) result
 
@@ -366,7 +365,7 @@ module For_testing : sig
     -> base_path:string
     -> caller:string
     -> f:(Eio.Switch.t -> Keeper_types_profile.tool_result)
-    -> keeper_name:string
+    -> request:Keeper_invocation_types.request
     -> unit
     -> (submit_outcome, submit_error) result
 

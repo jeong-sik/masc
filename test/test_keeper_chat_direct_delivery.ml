@@ -27,6 +27,12 @@ let expect_ok = function
   | Error error -> fail (Direct.error_to_string error)
 ;;
 
+let keeper_request keeper_name =
+  match Keeper_invocation_types.keeper_turn ~keeper_name ~prompt:"소스코드를 확인해" with
+  | Ok request -> request
+  | Error reason -> fail reason
+;;
+
 let request_id wire =
   Direct.Request_id.of_string wire
   |> function
@@ -429,7 +435,7 @@ let await_settlement ~ops ~background_sw ~base_path ~request_id =
       ~background_sw
       ~base_path
       ~caller:"owner"
-      ~keeper_name:"sangsu"
+      ~request:(keeper_request "sangsu")
       ~f:(fun _request_sw -> Keeper_types_profile.tool_result_ok "completed")
       ()
     |> accepted_request_id

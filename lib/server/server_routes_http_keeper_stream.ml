@@ -1940,11 +1940,18 @@ let process_single_turn ~user_row_origin ~queued_turn
     persisted
   in
   let submit_result =
-    match Keeper_msg_async.server_background_switch () with
-    | Error error ->
+    match
+      ( Keeper_msg_async.server_background_switch ()
+      , Keeper_invocation_contract.request
+          ~keeper_name:payload.name
+          ~prompt:payload.message )
+    with
+    | Error error, _ ->
         Error
           (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-    | Ok background_sw ->
+    | _, Error error ->
+        Error (Keeper_invocation_contract.request_error_to_string error)
+    | Ok background_sw, Ok request ->
       let on_accepted =
         if dashboard_direct_stream
         then Some on_direct_request_accepted
@@ -1957,7 +1964,7 @@ let process_single_turn ~user_row_origin ~queued_turn
         ~on_worker_settled:publish_committed_completion
         ~base_path
         ~caller:submitted_by
-        ~keeper_name:payload.name
+        ~request
         ~f:(fun request_sw ->
         let start_time = Time_compat.now () in
         let finish_projection_failure kind detail =

@@ -7,11 +7,14 @@
     than the canonical checkpoint observed inside the save transaction, without
     turning that watermark hit into keeper lifecycle failure.
 
-    Also covers the checkpoint save-path read-modify-write perf fix: an
-    in-process watermark cache replaces the unconditional canonical-file
-    reload on every save (cache-miss/cache-hit semantics must match the
-    disk-only behavior above bit-for-bit), and the canonical file itself is
-    now written compact rather than pretty-printed. *)
+    Also covers the checkpoint save-path read-modify-write perf fix: a
+    fingerprinted sidecar file (size + mtime of the canonical file) lets a
+    save skip re-parsing the canonical JSON when nothing has touched it
+    since the sidecar was written, while every decision is still re-verified
+    against a fresh disk `stat` (no process-local watermark state -- see
+    #24561 / commit 20536cacbf, which removed exactly that structure for
+    this reason). The canonical file itself is now written compact rather
+    than pretty-printed. *)
 
 open Alcotest
 open Masc
@@ -113,12 +116,13 @@ let test_forward_equal_and_stale () =
     | Error _ -> fail "load after rejection failed")
 
 (* The canonical checkpoint file is still the only durable admission
-   watermark: whether a given decision is served from the in-process
-   watermark cache or backfilled from [load_canonical_strict], the disk file
-   is always the ground truth the cache mirrors. This test exercises a
-   session already warm in this process's cache (the seed save populates it);
-   [test_cache_miss_backfills_from_a_pre_existing_canonical_file] below
-   exercises the genuine cache-miss / cold-start path. *)
+   watermark (RFC-0225 §3.2). This save's stale-check happens to be served
+   by the fingerprint-matched sidecar fast path (nothing touched the
+   canonical file between the seed save and the stale check, so the sidecar
+   [size]/[mtime] fingerprint still matches) -- [test_fingerprint_match_skips_full_parse]
+   below proves that explicitly via the parse-count hook; this test only
+   asserts the observable outcome is unchanged from the pre-sidecar
+   disk-only behavior. *)
 let test_disk_is_the_watermark_ssot () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -141,63 +145,132 @@ let test_disk_is_the_watermark_ssot () =
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:9 ~marker:"v9")
       "forward save from disk SSOT")
 
-(* Cache-miss path: this process has never written this session's canonical
-   file, so it is not in the in-memory watermark cache -- a checkpoint placed
-   on disk by writing bytes directly (standing in for a different process, or
-   this process before a restart) must still be discovered and honored. *)
-let test_cache_miss_backfills_from_a_pre_existing_canonical_file () =
+(* RFC-0225 §3.2 fast path: once a session's sidecar fingerprint matches the
+   canonical file's current (size, mtime), [load_canonical_strict] must not
+   run again. A correct answer alone would not distinguish "read the
+   sidecar" from "re-parsed canonical and happened to get the same result",
+   so this asserts the parse-count hook directly. *)
+let test_fingerprint_match_skips_full_parse () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
-    let sid = "sess-preexisting-on-disk" in
-    let path = Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid in
-    Fs_compat.save_file path
-      (make_checkpoint ~session_id:sid ~turn_count:8 ~marker:"v8-on-disk"
-       |> Agent_sdk.Checkpoint.to_string);
-    match
-      Keeper_checkpoint_store.save_oas_classified ~session_dir
-        (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"v3-stale")
-    with
-    | Ok (Keeper_checkpoint_store.Stale_noop
-            { incoming_turn_count; known_turn_count }) ->
-      check int "cache-miss stale incoming turn_count" 3 incoming_turn_count;
-      check int "cache-miss known turn_count backfilled from disk" 8 known_turn_count
-    | Ok (Keeper_checkpoint_store.Saved _) ->
-      fail "stale save advanced on a cache-miss backfill"
-    | Error e -> fail ("cache-miss stale save returned lifecycle failure: " ^ e))
-
-(* Cache-hit path: once a session's watermark is warm in this process, a
-   later decision for the same canonical path must not re-read the file --
-   proven behaviorally by corrupting the on-disk bytes after the cache is
-   warm and observing that both a stale rejection and a forward write still
-   succeed from the cache, instead of failing on a disk parse error. *)
-let test_cache_hit_survives_disk_corruption () =
-  let session_dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
-    let sid = "sess-cache-warm" in
-    let path = Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid in
+    let sid = "sess-fastpath" in
+    Keeper_checkpoint_store.For_testing.reset_full_parse_count ();
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:5 ~marker:"v5")
-      "seed save (warms the cache)";
-    Fs_compat.save_file path "{not-a-checkpoint-anymore";
+      "seed save (cold: no canonical file yet, so this necessarily falls back once)";
+    check int "cold seed save runs exactly one full-parse fallback" 1
+      (Keeper_checkpoint_store.For_testing.get_full_parse_count ());
+    Keeper_checkpoint_store.For_testing.reset_full_parse_count ();
+    save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:6 ~marker:"v6")
+      "forward save served by the sidecar fast path";
+    check int "fingerprint-matched forward save skips the full parse" 0
+      (Keeper_checkpoint_store.For_testing.get_full_parse_count ());
+    (match
+       Keeper_checkpoint_store.save_oas_classified ~session_dir
+         (make_checkpoint ~session_id:sid ~turn_count:4 ~marker:"v4-stale")
+     with
+     | Ok (Keeper_checkpoint_store.Stale_noop
+             { incoming_turn_count; known_turn_count }) ->
+       check int "fast-path stale incoming turn_count" 4 incoming_turn_count;
+       check int "fast-path known turn_count" 6 known_turn_count
+     | Ok (Keeper_checkpoint_store.Saved _) -> fail "stale save advanced via the fast path"
+     | Error e -> fail ("fast-path stale save returned lifecycle failure: " ^ e));
+    check int "fingerprint-matched stale check also skips the full parse" 0
+      (Keeper_checkpoint_store.For_testing.get_full_parse_count ()))
+
+(* Sidecar absent or corrupt: the fast path must never blindly trust a
+   missing/unparseable sidecar. Both sub-cases fall back to the ORIGINAL
+   full-parse path unconditionally (the exact path this module used before
+   this fix) and heal the sidecar afterward so the next save can use the
+   fast path again. *)
+let test_sidecar_unusable_falls_back_to_full_parse () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let sid = "sess-sidecar-unusable" in
+    let sidecar_path =
+      Keeper_checkpoint_store.watermark_sidecar_path
+        (Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid)
+    in
+    save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:8 ~marker:"v8")
+      "seed save (writes canonical + sidecar)";
+    check bool "seed save writes a sidecar" true (Fs_compat.file_exists sidecar_path);
+    (* Sub-case 1: sidecar deleted outright. *)
+    Sys.remove sidecar_path;
+    Keeper_checkpoint_store.For_testing.reset_full_parse_count ();
     (match
        Keeper_checkpoint_store.save_oas_classified ~session_dir
          (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"v3-stale")
      with
      | Ok (Keeper_checkpoint_store.Stale_noop
              { incoming_turn_count; known_turn_count }) ->
-       check int "warm-cache stale incoming turn_count" 3 incoming_turn_count;
-       check int "warm-cache known turn_count served from cache" 5 known_turn_count
+       check int "sidecar-absent stale incoming turn_count" 3 incoming_turn_count;
+       check int "sidecar-absent known turn_count recovered from canonical" 8 known_turn_count
+     | Ok (Keeper_checkpoint_store.Saved _) -> fail "stale save advanced with an absent sidecar"
+     | Error e -> fail ("sidecar-absent stale save returned lifecycle failure: " ^ e));
+    check bool "sidecar-absent path ran the full-parse fallback" true
+      (Keeper_checkpoint_store.For_testing.get_full_parse_count () > 0);
+    check bool "the fallback healed the sidecar" true (Fs_compat.file_exists sidecar_path);
+    (* Sub-case 2: sidecar present but corrupt (unparseable JSON). *)
+    Fs_compat.save_file sidecar_path "{not-json";
+    Keeper_checkpoint_store.For_testing.reset_full_parse_count ();
+    (match
+       Keeper_checkpoint_store.save_oas_classified ~session_dir
+         (make_checkpoint ~session_id:sid ~turn_count:2 ~marker:"v2-stale")
+     with
+     | Ok (Keeper_checkpoint_store.Stale_noop
+             { incoming_turn_count; known_turn_count }) ->
+       check int "corrupt-sidecar stale incoming turn_count" 2 incoming_turn_count;
+       check int "corrupt-sidecar known turn_count recovered from canonical" 8 known_turn_count
+     | Ok (Keeper_checkpoint_store.Saved _) -> fail "stale save advanced with a corrupt sidecar"
+     | Error e -> fail ("corrupt-sidecar stale save returned lifecycle failure: " ^ e));
+    check bool "corrupt-sidecar path ran the full-parse fallback" true
+      (Keeper_checkpoint_store.For_testing.get_full_parse_count () > 0))
+
+(* Fingerprint mismatch: a canonical write that bypasses [save_oas_classified]
+   (a different writer, or a crash between a writer's own canonical write and
+   its sidecar update) leaves the sidecar stale relative to disk. The next
+   save must detect the (size, mtime) mismatch and recover the REAL watermark
+   from a full parse of canonical, not the stale sidecar's belief -- this is
+   exactly the drift the removed in-memory cache (#24561 / commit 20536cacbf)
+   could not detect, because it had no way to notice a canonical write it did
+   not itself perform. *)
+let test_fingerprint_mismatch_recovers_externally_written_canonical () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let sid = "sess-external-write" in
+    let canonical_path =
+      Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid
+    in
+    save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:5 ~marker:"v5")
+      "seed save (sidecar now records turn_count=5)";
+    (* Simulate a different writer updating canonical directly without
+       updating the sidecar. A much longer marker guarantees the byte size
+       differs, so the fingerprint mismatch is detected regardless of
+       filesystem mtime resolution. *)
+    Fs_compat.save_file canonical_path
+      (make_checkpoint ~session_id:sid ~turn_count:9
+         ~marker:"externally-written-turn-nine-with-a-much-longer-marker-to-force-a-size-change"
+       |> Agent_sdk.Checkpoint.to_string);
+    Keeper_checkpoint_store.For_testing.reset_full_parse_count ();
+    (match
+       Keeper_checkpoint_store.save_oas_classified ~session_dir
+         (make_checkpoint ~session_id:sid ~turn_count:7
+            ~marker:"v7-would-wrongly-look-forward-against-a-stale-sidecar")
+     with
+     | Ok (Keeper_checkpoint_store.Stale_noop
+             { incoming_turn_count; known_turn_count }) ->
+       check int "incoming turn_count" 7 incoming_turn_count;
+       check int "known turn_count is the real canonical value, not the stale sidecar's" 9
+         known_turn_count
      | Ok (Keeper_checkpoint_store.Saved _) ->
-       fail "stale save advanced despite a warm cache"
-     | Error e ->
-       fail
-         ("stale save read the corrupted canonical file instead of the cache: " ^ e));
-    save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:6 ~marker:"v6")
-      "forward save must succeed from the cache despite corrupted disk bytes";
+       fail "turn_count=7 was wrongly accepted as forward against a stale sidecar's turn_count=5"
+     | Error e -> fail ("fingerprint-mismatch save returned lifecycle failure: " ^ e));
+    check bool "fingerprint mismatch ran the full-parse fallback" true
+      (Keeper_checkpoint_store.For_testing.get_full_parse_count () > 0);
     match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:sid with
     | Ok on_disk ->
-      check int "forward save overwrote the corrupted bytes with turn_count 6" 6
+      check int "externally-written turn_count=9 remains on disk, untouched by the stale save" 9
         on_disk.Agent_sdk.Checkpoint.turn_count
-    | Error _ -> fail "load after cache-driven forward save failed")
+    | Error _ -> fail "load after fingerprint-mismatch stale rejection failed")
 
 (* The OAS per-turn pipeline builds checkpoints with an empty session_id (the
    OAS agent carries no session field). The keeper sink stamps a validated,
@@ -390,10 +463,12 @@ let () =
             test_multi_domain_writers_leave_max_turn_on_disk;
           test_case "ready runtime raw Domain saves through Unix context" `Quick
             test_ready_runtime_raw_domain_save;
-          test_case "cache miss backfills the watermark from a pre-existing canonical file"
-            `Quick test_cache_miss_backfills_from_a_pre_existing_canonical_file;
-          test_case "cache hit survives canonical file corruption" `Quick
-            test_cache_hit_survives_disk_corruption;
+          test_case "fingerprint-matched sidecar skips the full parse" `Quick
+            test_fingerprint_match_skips_full_parse;
+          test_case "absent or corrupt sidecar falls back to full parse" `Quick
+            test_sidecar_unusable_falls_back_to_full_parse;
+          test_case "fingerprint mismatch recovers an externally-written canonical" `Quick
+            test_fingerprint_mismatch_recovers_externally_written_canonical;
           test_case "canonical checkpoint is written compact and round-trips" `Quick
             test_canonical_checkpoint_is_written_compact;
         ] );

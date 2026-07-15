@@ -391,66 +391,176 @@ let load_canonical_strict path =
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Io_error (Printexc.to_string exn))
 
-(* masc P0 perf fix (checkpoint save-path read-modify-write): every save
-   transaction for one session runs under [with_session_lock_typed], which
-   serializes writers for that [canonical_path] across Eio fibers, raw
-   Domains, and other OS processes (Eio.Mutex + Stdlib.Mutex + flock -- see
-   File_lock_eio). Inside that single-writer critical section, a
-   process-local watermark is exactly as authoritative as a fresh
-   [load_canonical_strict] of the same path, because every successful write
-   updates the cache before the session lock is released. A cache miss
-   (process cold-start, or a session this process has never written) always
-   falls back to [load_canonical_strict], preserving the original
-   crash-recovery contract: RFC-0225 §3.2's "disk is the only admission
-   watermark" invariant now reads as "disk is the only watermark this
-   process has not already durably confirmed."
+(* masc P0 perf fix (checkpoint save-path read-modify-write): a prior
+   revision of this fix cached the watermark in a process-local Hashtbl.
+   That is exactly the structure #24561 (commit 20536cacbf, "make canonical
+   disk the watermark SSOT") deliberately removed: RFC-0225 §3.2 requires
+   the canonical file to be the *only* admission watermark, with no
+   process-local truth retained, because a process-local cache can drift
+   from disk across execution contexts (raw Domain vs Eio fiber; see the
+   companion #24548 fix distinguishing them) in ways a single process
+   cannot observe. This revision keeps that invariant: there is no
+   in-memory watermark state anywhere in this module.
 
-   The per-session lock does NOT protect the cache table itself: two
-   DIFFERENT sessions' transactions run under two different lock_paths and
-   can hold their save transactions concurrently on different Domains (the
-   payload encode step already runs on the executor pool -- see
-   [Executor_pool_ref.submit_or_inline] in [Keeper_fs]), so every access to
-   [watermark_cache] -- a plain, non-domain-safe Hashtbl -- is additionally
-   guarded by a dedicated [Stdlib.Mutex.t]. A plain OS mutex (not the
-   cooperative-yield [File_lock_eio] machinery) is enough here because the
-   guarded section is always a single O(1) Hashtbl operation: it is only ever
-   held across [load_canonical_strict]'s disk I/O by NOT wrapping that call,
-   so a cache miss for one session cannot stall a concurrent cache hit for
-   another, and the brief cross-domain wait this mutex can impose is
-   negligible next to the disk read it replaces.
+   Instead, a tiny fingerprinted sidecar file sits beside the canonical
+   checkpoint ([watermark_sidecar_path]) and is written inside the *same*
+   [with_session_lock_typed] transaction as the canonical write, so it is
+   never observed half-updated relative to canonical. It stores
+   [session_id], [turn_count], and the canonical file's own [size]/[mtime]
+   fingerprint at write time.
 
-   This does not protect against a writer bypassing [save_oas_classified]
-   entirely (e.g. an operator manually restoring a checkpoint file while the
-   server keeps running) -- rg confirms [oas_checkpoint_path] has exactly one
-   production writer in lib/ (this module); every other reference is a
-   read-only dashboard/history consumer. See the PR body for the full audit. *)
+   On the next save, [known_watermark] `stat`s the canonical file and
+   compares that fresh fingerprint against the sidecar's recorded one:
+   - Match: the sidecar's (session_id, turn_count) is trusted without
+     re-parsing the (0.7-1.37MB pretty-printed) canonical JSON.
+   - Mismatch, sidecar missing, or sidecar unparseable: falls back to the
+     original [load_canonical_strict] full parse unconditionally (the exact
+     path this module used before this fix), then re-derives the
+     fingerprint from the just-read canonical file and rewrites the
+     sidecar to heal it for the next save.
+
+   The canonical file is still the *only* source of truth: every decision
+   is re-verified against a fresh `stat` on every single call, so nothing
+   is ever trusted across process boundaries or execution contexts without
+   re-checking disk. A crash between the canonical write and the sidecar
+   write leaves a stale/absent sidecar, which the next save's fingerprint
+   check (or missing-sidecar check) detects and heals via the full-parse
+   fallback -- no special-cased recovery logic is required. *)
+
+let watermark_sidecar_path canonical_path = canonical_path ^ ".watermark.json"
+
+type sidecar_watermark =
+  { session_id : string
+  ; turn_count : int
+  ; canonical_size : int
+  ; canonical_mtime : float
+  }
+
+let sidecar_watermark_to_json (w : sidecar_watermark) : Yojson.Safe.t =
+  `Assoc
+    [ ("session_id", `String w.session_id)
+    ; ("turn_count", `Int w.turn_count)
+    ; ("canonical_size", `Int w.canonical_size)
+    ; ("canonical_mtime", `Float w.canonical_mtime)
+    ]
+
+let sidecar_watermark_of_json (json : Yojson.Safe.t) : sidecar_watermark option =
+  match
+    ( Json_util.get_string json "session_id"
+    , Json_util.get_int json "turn_count"
+    , Json_util.get_int json "canonical_size"
+    , Json_util.get_float json "canonical_mtime" )
+  with
+  | Some session_id, Some turn_count, Some canonical_size, Some canonical_mtime ->
+    Some { session_id; turn_count; canonical_size; canonical_mtime }
+  | _ -> None
+
+(* [Fs_compat.file_size]/[file_mtime] already dispatch Eio-native vs. Unix
+   fallback correctly for both Eio fibers and raw Domains ([with_fs_or_fallback]
+   catches [Stdlib.Effect.Unhandled] and retries on the blocking path), so no
+   separate execution-context check is needed here. Both return [None]
+   uniformly for "does not exist" and "stat failed for any other reason";
+   either way the caller has nothing trustworthy to fast-path against and
+   defers entirely to [load_canonical_strict], which already classifies
+   ENOENT vs. real I/O errors correctly. *)
+let canonical_fingerprint canonical_path : (int * float) option =
+  match Fs_compat.file_size canonical_path, Fs_compat.file_mtime canonical_path with
+  | Some size, Some mtime -> Some (size, mtime)
+  | _ -> None
+
+let load_sidecar_watermark sidecar_path : sidecar_watermark option =
+  match Fs_compat.load_file_opt sidecar_path with
+  | exception _ -> None
+  | None -> None
+  | Some raw ->
+    (match Yojson.Safe.from_string raw with
+     | json -> sidecar_watermark_of_json json
+     | exception _ -> None)
+
+let save_sidecar_watermark_best_effort sidecar_path (w : sidecar_watermark) : unit =
+  try Fs_compat.save_file sidecar_path (Yojson.Safe.to_string (sidecar_watermark_to_json w)) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn
+      "checkpoint watermark sidecar write failed for %s: %s"
+      sidecar_path (Printexc.to_string exn);
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string CheckpointFailures)
+      ~labels:
+        [ ( "site"
+          , Keeper_checkpoint_store_failure_site.(to_label Oas_watermark_sidecar) )
+        ]
+      ()
+
 type watermark = { session_id : string; turn_count : int }
 
-let watermark_cache : (string, watermark) Hashtbl.t = Hashtbl.create 64
-let watermark_cache_mu = Stdlib.Mutex.create ()
+type watermark_fast_path_miss_reason =
+  | No_canonical_file
+  | Sidecar_unusable
+  | Fingerprint_mismatch
 
-let find_cached_watermark canonical_path =
-  Stdlib.Mutex.protect watermark_cache_mu (fun () ->
-    Hashtbl.find_opt watermark_cache canonical_path)
+let watermark_fast_path_miss_reason_to_string = function
+  | No_canonical_file -> "no_canonical_file"
+  | Sidecar_unusable -> "sidecar_unusable"
+  | Fingerprint_mismatch -> "fingerprint_mismatch"
 
-let record_watermark canonical_path watermark =
-  Stdlib.Mutex.protect watermark_cache_mu (fun () ->
-    Hashtbl.replace watermark_cache canonical_path watermark)
+(* Test-only instrumentation: proves the fast path actually skips
+   [load_canonical_strict] rather than merely returning the right answer by
+   coincidence (RFC-0342-style falsifiable claim, not a production metric). *)
+module For_testing = struct
+  let full_parse_count = Atomic.make 0
+  let reset_full_parse_count () = Atomic.set full_parse_count 0
+  let get_full_parse_count () = Atomic.get full_parse_count
+end
+
+let full_parse_fallback ~canonical_path ~sidecar_path ~reason
+  : (watermark option, checkpoint_load_error) result =
+  Atomic.incr For_testing.full_parse_count;
+  Log.Keeper.info
+    "checkpoint watermark sidecar fast-path miss for %s: %s -- falling back to full parse"
+    canonical_path (watermark_fast_path_miss_reason_to_string reason);
+  Otel_metric_store.inc_counter
+    "masc_keeper_checkpoint_watermark_fastpath_miss_total"
+    ~labels:[("reason", watermark_fast_path_miss_reason_to_string reason)]
+    ();
+  match load_canonical_strict canonical_path with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some existing) ->
+    let watermark =
+      { session_id = existing.session_id; turn_count = existing.turn_count }
+    in
+    (match canonical_fingerprint canonical_path with
+     | Some (size, mtime) ->
+       save_sidecar_watermark_best_effort sidecar_path
+         { session_id = watermark.session_id
+         ; turn_count = watermark.turn_count
+         ; canonical_size = size
+         ; canonical_mtime = mtime
+         }
+     | None ->
+       (* The file we just successfully read is now unstatable (deleted out
+          from under us despite the session lock, or a transient stat
+          failure). Not fatal: the sidecar is left as-is and the next save's
+          fingerprint check will simply miss again and re-heal it. *)
+       ());
+    Ok (Some watermark)
 
 let known_watermark ~canonical_path
   : (watermark option, checkpoint_load_error) result =
-  match find_cached_watermark canonical_path with
-  | Some cached -> Ok (Some cached)
-  | None ->
-    (match load_canonical_strict canonical_path with
-     | Error _ as error -> error
-     | Ok None -> Ok None
-     | Ok (Some existing) ->
-       let watermark =
-         { session_id = existing.session_id; turn_count = existing.turn_count }
-       in
-       record_watermark canonical_path watermark;
-       Ok (Some watermark))
+  let sidecar_path = watermark_sidecar_path canonical_path in
+  match canonical_fingerprint canonical_path with
+  | None -> full_parse_fallback ~canonical_path ~sidecar_path ~reason:No_canonical_file
+  | Some (size, mtime) ->
+    (match load_sidecar_watermark sidecar_path with
+     | Some sidecar
+       when Int.equal sidecar.canonical_size size
+         && Float.equal sidecar.canonical_mtime mtime ->
+       Ok (Some { session_id = sidecar.session_id; turn_count = sidecar.turn_count })
+     | Some _ ->
+       full_parse_fallback ~canonical_path ~sidecar_path ~reason:Fingerprint_mismatch
+     | None ->
+       full_parse_fallback ~canonical_path ~sidecar_path ~reason:Sidecar_unusable)
 
 let save_oas_classified_typed
     ~(session_dir : string)
@@ -496,7 +606,20 @@ let save_oas_classified_typed
          with
          | Error error -> Error (Canonical_write_failed error)
          | Ok () ->
-           record_watermark canonical_path { session_id; turn_count = ckpt.turn_count };
+           (match canonical_fingerprint canonical_path with
+            | Some (size, mtime) ->
+              save_sidecar_watermark_best_effort
+                (watermark_sidecar_path canonical_path)
+                { session_id
+                ; turn_count = ckpt.turn_count
+                ; canonical_size = size
+                ; canonical_mtime = mtime
+                }
+            | None ->
+              (* The file we just durably wrote is now unstatable. Not fatal
+                 to this save -- the next save's fingerprint check will miss
+                 (no sidecar to trust) and fall back to a full parse. *)
+              ());
            archive_oas_history_best_effort ~session_dir ckpt;
            Ok
              (Saved

@@ -70,6 +70,10 @@ module For_testing : sig
       This constructor is isolated from the production bootstrap surface. *)
 end
 
+(** Exact UTF-8 byte size of the visible schema components recorded at boot. *)
+val tool_schema_component_bytes :
+  name:string -> description:string -> input_schema:Yojson.Safe.t -> int
+
 (** Create server state with Eio context.
 
     @param sw Eio.Switch for structured concurrency

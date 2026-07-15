@@ -37,9 +37,7 @@ type post_turn_lifecycle =
   ; handoff_failure_reason : string option
   ; compaction : compaction_event
   ; turn_generation : int
-  ; context_ratio : float
-  ; context_tokens : int
-  ; context_max : int
+  ; checkpoint_bytes : int
   ; message_count : int
   }
 

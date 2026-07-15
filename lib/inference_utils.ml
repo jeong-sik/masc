@@ -1,6 +1,6 @@
 (** Inference_utils — inference utility functions.
 
-    Usage helpers, UTF-8 sanitization, token estimation, and
+    Usage helpers, UTF-8 sanitization, and
     concurrency diagnostics.  Extracted from the former [Runtime]
     module during the Runtime deletion refactor.
 
@@ -26,10 +26,6 @@ let int_of_env_default name ~default ~min_v ~max_v =
 (** Total tokens — delegates to OAS [Agent_sdk.Types.total_tokens] (F12 canonical
     projection consumption: OAS owns api_usage arithmetic, MASC consumes). *)
 let total_tokens = Agent_sdk.Types.total_tokens
-
-(** CJK-aware token estimate delegated to OAS Context_reducer. *)
-let estimate_tokens (s : string) : int =
-  if s = "" then 0 else Text_token_estimate.estimate_char_tokens s
 
 (** Zero usage marker — delegates to OAS [Agent_sdk.Types.zero_api_usage] (F4
     canonical projection consumption: removes re-spelled record literal).

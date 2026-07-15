@@ -64,9 +64,7 @@ type post_turn_lifecycle = {
   handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
-  context_ratio : float;
-  context_tokens : int;
-  context_max : int;
+  checkpoint_bytes : int;
   message_count : int;
 }
 
@@ -442,11 +440,9 @@ let apply_post_turn_lifecycle_with_resilience_handles
             failure_reason = None;
             trigger = None;
             decision = no_checkpoint_decision;
-          };
+        };
         turn_generation = meta.runtime.generation;
-        context_ratio = 0.0;
-        context_tokens = 0;
-        context_max = primary_model_max_tokens;
+        checkpoint_bytes = 0;
         message_count = 0;
       }
   | Some cp ->
@@ -497,11 +493,9 @@ let apply_post_turn_lifecycle_with_resilience_handles
             failure_reason = None;
             trigger = None;
             decision;
-          };
+        };
         turn_generation = current_generation;
-        context_ratio = context_ratio ctx;
-        context_tokens = token_count ctx;
-        context_max = max_tokens_of_context ctx;
+        checkpoint_bytes = serialized_bytes ctx;
         message_count = message_count ctx;
       }
   in

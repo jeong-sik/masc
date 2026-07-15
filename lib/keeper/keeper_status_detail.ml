@@ -412,9 +412,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              | Some c ->
                `Assoc [
                  ("has_checkpoint", `Bool true);
-                 ("context_ratio", `Float (Keeper_context_runtime.context_ratio c));
-                 ("context_tokens", `Int (Keeper_context_runtime.token_count c));
-                 ("context_max", `Int (Keeper_context_runtime.max_tokens_of_context c));
+                 ( "checkpoint_bytes"
+                 , `Int (Keeper_context_runtime.serialized_bytes c) );
                  ("message_count", `Int (Keeper_context_runtime.message_count c));
                ]
          in
@@ -689,7 +688,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                            ("age_s", Json_util.float_opt_to_json age_s);
                            ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
                            ("generation", `Int (Safe_ops.json_int ~default:m.runtime.generation "generation" j));
-                           ("context_ratio", `Float (Safe_ops.json_float ~default:0.0 "context_ratio" j));
                            ("context_before_tokens", `Int before_tokens);
                            ("context_after_tokens", `Int after_tokens);
                            ("context_saved_tokens", `Int saved_tokens);

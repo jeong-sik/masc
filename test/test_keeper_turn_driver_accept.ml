@@ -38,6 +38,7 @@ let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
     top_p = None;
     top_k = None;
     min_p = None;
+    reasoning_effort = None;
     enable_thinking = None;
     preserve_thinking = None;
     response_format = Agent_sdk.Types.Off;

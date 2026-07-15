@@ -134,7 +134,7 @@ let create_keeper env sw state name =
       clock = Eio.Stdenv.clock env;
       proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
       publication_recovery_provider =
-        Mcp_server.publication_recovery_availability_provider state;
+        Lib.Mcp_server.publication_recovery_availability_provider state;
     }
   in
   match
@@ -143,7 +143,6 @@ let create_keeper env sw state name =
         (`Assoc
           [
             ("name", `String name);
-            ("goal", `String "Dashboard keeper fixture");
             ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
           ])

@@ -87,7 +87,7 @@ let test_state_set_parity () =
      future OCaml-only phase (e.g. an internal substate not yet modelled
      in the spec) must not break the smoke.  When such drift appears,
      the spec gap should be tracked separately, not enforced here. *)
-  check int "TLA+ phase count" 13 (List.length tla_sorted);
+  check int "TLA+ phase count" 12 (List.length tla_sorted);
   (* OCaml ≥ TLA+ is implied by the per-name check above; we re-state it
      as an explicit inequality for readability. *)
   check

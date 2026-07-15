@@ -915,9 +915,7 @@ let run_keeper_msg_turn_admitted
                    ~turn_generation:lifecycle.turn_generation
                    ~channel:Keeper_world_observation.Reactive
                    ~snapshot_source:"keeper_turn_msg"
-                   ~context_ratio:lifecycle.context_ratio
-                   ~context_tokens:lifecycle.context_tokens
-                   ~context_max:lifecycle.context_max
+                   ~checkpoint_bytes:lifecycle.checkpoint_bytes
                    ~message_count:lifecycle.message_count
                    ~compaction:lifecycle.compaction
                    ~handoff_json:lifecycle.handoff_json

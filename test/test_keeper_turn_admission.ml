@@ -502,8 +502,8 @@ let test_idle_loop_yields_to_parked_chat () =
        per-turn-boundary exit check. Each iteration yields (a turn boundary)
        and inspects [chat_waiting]; a parked chat ends the loop early, the
        admission slot releases, and the chat admits by direct handoff. This
-       harnesses the admission-level contract; the SDK-level [exit_condition]
-       wiring in [Keeper_agent_run] drives the real loop the same way. *)
+       harnesses the admission-level contract; the production path checks the
+       same queue at OAS's typed post-tool boundary. *)
     Eio.Fiber.fork ~sw (fun () ->
       match
         Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->

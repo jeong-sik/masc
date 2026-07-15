@@ -454,8 +454,10 @@ let test_prior_checkpoint_appends_current_goal_once () =
          ~net:env#net
          ()
      with
-     | Ok _ -> Alcotest.fail "invalid provider endpoint unexpectedly completed"
-     | Error err -> ignore (Agent_sdk.Error.to_string err));
+     | Error _ -> ()
+     | Ok _ ->
+       Alcotest.fail
+         "invalid provider endpoints unexpectedly completed the resumed run");
     let messages =
       match !agent_ref with
       | Some agent -> (Agent_sdk.Agent.state agent).messages
@@ -799,6 +801,7 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_sdk.Agent.After_assistant_collected
     ; Agent_sdk.Agent.After_tool_results_appended
+    ; Agent_sdk.Agent.After_context_injection
     ]
   in
   List.iter

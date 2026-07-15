@@ -87,9 +87,6 @@ type world_observation = {
   active_goals : string list;
   (** Goal IDs currently assigned to this keeper. *)
 
-  context_ratio : float Lazy.t;
-  (** Current context window utilization [0.0, 1.0]. *)
-
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)
 

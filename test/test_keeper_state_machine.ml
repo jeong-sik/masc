@@ -723,9 +723,15 @@ let test_can_transition_paused_to_stopped () =
     (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Stopped)
 ;;
 
-let test_can_execute_turn_running_and_failing_only () =
-  check bool "Running executes turns" true (SM.can_execute_turn SM.Running);
-  check bool "Failing executes turns" true (SM.can_execute_turn SM.Failing)
+let test_can_execute_turn_work_capable_phases () =
+  List.iter
+    (fun phase ->
+       check
+         bool
+         ("work-capable phase " ^ SM.phase_to_string phase)
+         true
+         (SM.can_execute_turn phase))
+    [ SM.Running; SM.Failing; SM.Overflowed; SM.Compacting; SM.HandingOff ]
 ;;
 
 let test_can_execute_turn_blocks_other_phases () =
@@ -737,8 +743,6 @@ let test_can_execute_turn_blocks_other_phases () =
          false
          (SM.can_execute_turn phase))
     [ SM.Offline
-    ; SM.Compacting
-    ; SM.HandingOff
     ; SM.Draining
     ; SM.Paused
     ; SM.Stopped
@@ -2284,9 +2288,9 @@ let () =
             test_can_transition_paused_to_latent_buffer_states
         ; test_case "Paused -> Stopped" `Quick test_can_transition_paused_to_stopped
         ; test_case
-            "Running|Failing execute turns"
+            "work-capable phases execute turns"
             `Quick
-            test_can_execute_turn_running_and_failing_only
+            test_can_execute_turn_work_capable_phases
         ; test_case
             "other phases skip turns"
             `Quick

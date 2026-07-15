@@ -599,7 +599,7 @@ let test_execute_structured_result_falls_back_to_baseline () =
 let test_delegation_request_from_propose_spawn_action () =
   let request =
     match
-      R.of_action ~requester:"planner" ~goal:"ship scheduler hardening"
+      R.of_action ~requester:"planner"
         (D.ProposeSpawn
            {
              topic = "Audit Slack connector rendering";
@@ -641,7 +641,7 @@ let test_delegation_request_from_execution_result_uses_selected_action () =
   in
   let result = D.execute_structured_result obs structured in
   let request =
-    match R.of_execution_result ~requester:"rondo" ~goal:"connector parity" result with
+    match R.of_execution_result ~requester:"rondo" result with
     | [ request ] -> request
     | requests ->
         fail
@@ -734,17 +734,6 @@ let test_delegation_request_json_uses_stable_array_shape () =
   in
   check int "multiple request list" 2 (List.length multiple)
 
-let test_delegation_request_id_includes_goal () =
-  let a =
-    R.make ~requester:"planner" ~goal:"goal-a" ~topic:"same topic"
-      ~reason:"same reason" ()
-  in
-  let b =
-    R.make ~requester:"planner" ~goal:"goal-b" ~topic:"same topic"
-      ~reason:"same reason" ()
-  in
-  check bool "goal changes id" true (not (String.equal a.id b.id))
-
 let test_delegation_request_title_truncates_utf8_boundary () =
   let topic = String.make 79 'a' ^ "\xed\x95\x9c" in
   let request =
@@ -760,7 +749,7 @@ let test_delegation_request_store_writes_reviewable_artifacts () =
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
       let request =
-        R.make ~requester:"planner" ~goal:"connector parity"
+        R.make ~requester:"planner"
           ~topic:"Review non-dashboard rendering"
           ~reason:"existing channels lose rich blocks"
           ()
@@ -810,18 +799,14 @@ let test_delegation_request_store_dedups_unchanged_execution () =
       in
       let first =
         match
-          RS.write_execution_result ~base_path:dir ~requester:"planner"
-            ~goal:"connector parity"
-            execution
+          RS.write_execution_result ~base_path:dir ~requester:"planner" execution
         with
         | Ok stored -> stored
         | Error msg -> fail msg
       in
       let second =
         match
-          RS.write_execution_result ~base_path:dir ~requester:"planner"
-            ~goal:"connector parity"
-            execution
+          RS.write_execution_result ~base_path:dir ~requester:"planner" execution
         with
         | Ok stored -> stored
         | Error msg -> fail msg
@@ -1187,8 +1172,6 @@ let () =
             test_delegation_request_multistep_projects_all_spawns;
           test_case "delegation request json uses stable array shape" `Quick
             test_delegation_request_json_uses_stable_array_shape;
-          test_case "delegation request id includes goal" `Quick
-            test_delegation_request_id_includes_goal;
           test_case "delegation request truncates utf8 at boundary" `Quick
             test_delegation_request_title_truncates_utf8_boundary;
           test_case "delegation request store writes reviewable artifacts" `Quick

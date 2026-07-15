@@ -103,19 +103,11 @@ let cleanup_dir dir =
   try rm dir with _ -> ()
 
 let publication_recovery_registry env sw config =
-  let registry_root =
-    Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
-  in
-  match
-    Fs_compat.open_publication_recovery_registry
-      ~sw
-      ~fs:(Eio.Stdenv.fs env)
-      ~registry_root
-  with
-  | Ok registry -> registry
-  | Error error ->
-    fail
-      (Fs_compat.publication_recovery_registry_error_to_string error)
+  Masc_test_deps.with_publication_recovery_registry
+    ~sw
+    ~fs:(Eio.Stdenv.fs env)
+    ~registry_root:(Workspace.masc_root_dir config)
+    Fun.id
 
 let make_meta name =
   let json = `Assoc [
@@ -262,7 +254,6 @@ let base_observation : WO.world_observation =
   ; pending_board_events = []
   ; idle_seconds = 0
   ; active_goals = []
-  ; context_ratio = lazy 0.0
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
   ; failed_task_count = 0
@@ -1630,7 +1621,6 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
        | Error (Shutdown_prepare_join.Prepare_persist_failed _) -> ()
        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
        | Ok _ -> fail "shutdown prepare unexpectedly persisted through a file blocker");
-      configure_keeper_chat_persistence ~base_path:config.base_path;
       match
         Masc.Keeper_turn_admission.run_if_free
           ~base_path:config.base_path
@@ -1767,7 +1757,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
   Masc_event_bus.set completion_bus;
   Fun.protect
     ~finally:(fun () ->
-      Agent_sdk.Event_bus.unsubscribe completion_bus completion_subscription;
+      Masc.Agent_sdk_metrics_bridge.unsubscribe completion_bus completion_subscription;
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Shutdown_finalize.For_testing.reset_completion_handler ();
       Lifecycle_hooks.reset_for_testing ();
@@ -1940,7 +1930,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
        | Shutdown_types.Finalized _ ->
           fail "dead tombstone completion receipt was not delivered");
       check int "Tombstone_reaped delivered once" 1 !hook_deliveries;
-      (match Agent_sdk.Event_bus.drain completion_subscription with
+      (match Masc.Agent_sdk_metrics_bridge.drain completion_subscription with
        | [ event ] ->
          (match event.Agent_sdk.Event_bus.payload with
           | Agent_sdk.Event_bus.Custom
@@ -1991,7 +1981,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       check int
         "delivered receipt prevents duplicate lifecycle event"
         0
-        (List.length (Agent_sdk.Event_bus.drain completion_subscription));
+        (List.length (Masc.Agent_sdk_metrics_bridge.drain completion_subscription));
       check
         bool
         "delivered dead completion releases admission fence"
@@ -2017,7 +2007,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
   Masc_event_bus.set completion_bus;
   Fun.protect
     ~finally:(fun () ->
-      Agent_sdk.Event_bus.unsubscribe completion_bus completion_subscription;
+      Masc.Agent_sdk_metrics_bridge.unsubscribe completion_bus completion_subscription;
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Shutdown_finalize.For_testing.reset_completion_handler ();
       Masc.Keeper_turn_admission.For_testing.reset ();
@@ -2225,7 +2215,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
               (fun (heartbeat : Heartbeat.t) ->
                  String.equal heartbeat.agent_name meta.agent_name)
               (Heartbeat.list ())));
-      (match Agent_sdk.Event_bus.drain completion_subscription with
+      (match Masc.Agent_sdk_metrics_bridge.drain completion_subscription with
        | [ event ] ->
          (match event.Agent_sdk.Event_bus.payload with
           | Agent_sdk.Event_bus.Custom
@@ -2249,7 +2239,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       check int
         "delivered dashboard purge receipt prevents duplicate event"
         0
-        (List.length (Agent_sdk.Event_bus.drain completion_subscription));
+        (List.length (Masc.Agent_sdk_metrics_bridge.drain completion_subscription));
       let admission =
         Masc.Keeper_turn_admission.snapshot_for
           ~base_path:config.base_path

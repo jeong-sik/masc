@@ -46,4 +46,3 @@ val count_running_keeper_fibers : config:Workspace.config -> int
     This intentionally does not read the legacy [.masc/agents/] registry; that
     registry may be empty while keeper fibers are healthy and running. *)
 val compute_idle_seconds : meta:keeper_meta -> int
-val read_context_ratio : config:Workspace.config -> meta:keeper_meta -> float

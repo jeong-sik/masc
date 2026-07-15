@@ -42,8 +42,8 @@ let slot_active slot_name =
   | Some active -> active
   | None -> failwith ("introspection slot missing active bool: " ^ slot_name)
 
-(* The 9 slots the introspection claims are wired, and the 3 it claims are
-   not (compaction is handled by keeper_post_turn, not the SDK hooks). *)
+(* The 9 slots the introspection claims are wired. Retired OAS hook slots are
+   absent rather than retained as inactive compatibility surface. *)
 let expected_active =
   [ "before_turn"
   ; "before_turn_params"
@@ -56,20 +56,15 @@ let expected_active =
   ; "on_tool_error"
   ]
 
-let expected_inactive = [ "pre_compact"; "post_compact"; "on_context_compacted" ]
-
 let test_slot_set () =
   let names = List.map fst (slots_of json) |> List.sort compare in
-  let expected = List.sort compare (expected_active @ expected_inactive) in
-  check (list string) "introspection exposes exactly the 12 known hook slots" expected names
+  let expected = List.sort compare expected_active in
+  check (list string) "introspection exposes exactly the 9 current hook slots" expected names
 
 let test_active_split () =
   List.iter
     (fun n -> check (option bool) (n ^ " is active") (Some true) (slot_bool n "active"))
-    expected_active;
-  List.iter
-    (fun n -> check (option bool) (n ^ " is inactive") (Some false) (slot_bool n "active"))
-    expected_inactive
+    expected_active
 
 let test_sources () =
   (* before_turn_params comes from a sibling module; the remaining active
@@ -79,11 +74,7 @@ let test_sources () =
   check (option string) "before_turn_params source" (Some "keeper_run_tools")
     (slot_string "before_turn_params" "source");
   check (option string) "after_turn source" (Some "keeper_hooks_oas")
-    (slot_string "after_turn" "source");
-  List.iter
-    (fun n ->
-      check (option string) (n ^ " source") (Some "not_registered") (slot_string n "source"))
-    expected_inactive
+    (slot_string "after_turn" "source")
 
 let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
   let json : Yojson.Safe.t =
@@ -119,9 +110,6 @@ let runtime_slots_of (hooks : Agent_sdk.Hooks.hooks) =
     "on_stop", Option.is_some hooks.on_stop;
     "on_error", Option.is_some hooks.on_error;
     "on_tool_error", Option.is_some hooks.on_tool_error;
-    "pre_compact", Option.is_some hooks.pre_compact;
-    "post_compact", Option.is_some hooks.post_compact;
-    "on_context_compacted", Option.is_some hooks.on_context_compacted;
   ]
 
 let test_runtime_active_claims_match_make_hooks () =
@@ -146,15 +134,12 @@ let test_pre_tool_use_is_observation_only () =
           { planned_index = 0
           ; batch_index = 0
           ; batch_size = 1
-          ; concurrency_class = "opaque"
-          ; batch_kind = "opaque"
+          ; execution_mode = Agent_sdk.Tool.Serial
           }
       }
   in
-  match Agent_sdk.Hooks.invoke hooks.pre_tool_use event with
+  match Agent_sdk.Hooks.invoke_validated hooks.pre_tool_use event with
   | Agent_sdk.Hooks.Continue -> ()
-  | Skip -> fail "pre_tool_use timing hook returned Skip"
-  | Override _ -> fail "pre_tool_use timing hook returned Override"
   | AdjustParams _ -> fail "pre_tool_use timing hook adjusted parameters"
   | ElicitInput _ -> fail "pre_tool_use timing hook elicited input"
   | Nudge _ -> fail "pre_tool_use timing hook returned Nudge"
@@ -164,8 +149,8 @@ let test_pre_tool_use_is_observation_only () =
 let () =
   Alcotest.run "Keeper_hooks_oas_introspection"
     [ ( "slot contract"
-      , [ test_case "exactly the 12 known slots" `Quick test_slot_set
-        ; test_case "9 active / 3 inactive" `Quick test_active_split
+      , [ test_case "exactly the 9 current slots" `Quick test_slot_set
+        ; test_case "all current slots active" `Quick test_active_split
         ; test_case "slot sources" `Quick test_sources
         ; test_case "make_hooks active claims match runtime record" `Quick
             test_runtime_active_claims_match_make_hooks

@@ -109,7 +109,6 @@ let test_http_json_surfaces_delegation_requests () =
       let config = Workspace_utils.default_config dir in
       let delegation =
         Delegation_request.make ~requester:"planner"
-          ~goal:"ship connector parity"
           ~topic:"Review non-dashboard rendering"
           ~reason:"existing channels lose rich blocks"
           ()

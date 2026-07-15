@@ -15,7 +15,8 @@ let event_index (event : Agent_sdk.Event_bus.event) =
 
 let subscription_stats purpose bus =
   Agent_sdk.Event_bus.(stats bus).subscriptions
-  |> List.find (fun stats -> stats.purpose = Some purpose)
+  |> List.find (fun (stats : Agent_sdk.Event_bus.subscription_stats) ->
+    stats.purpose = Some purpose)
 ;;
 
 let test_subscribers_own_independent_overflow () =

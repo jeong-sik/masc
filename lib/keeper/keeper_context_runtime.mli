@@ -18,12 +18,9 @@ type session_context = Keeper_types.session_context
 (** {1 Working Context Operations} *)
 
 val text_of_message : Agent_sdk.Types.message -> string
-val msg_tokens : Agent_sdk.Types.message -> int
-val count_tokens : string -> Agent_sdk.Types.message list -> int
 val max_tokens_of_context : working_context -> int
-val token_count : working_context -> int
 val message_count : working_context -> int
-val context_ratio : working_context -> float
+val serialized_bytes : working_context -> int
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val resume_checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
@@ -94,9 +91,7 @@ type post_turn_lifecycle =
   ; handoff_failure_reason : string option
   ; compaction : compaction_event
   ; turn_generation : int
-  ; context_ratio : float
-  ; context_tokens : int
-  ; context_max : int
+  ; checkpoint_bytes : int
   ; message_count : int
   }
 

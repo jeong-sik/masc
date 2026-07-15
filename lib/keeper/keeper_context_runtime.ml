@@ -21,12 +21,9 @@ type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
 let text_of_message = Keeper_context_core.text_of_message
-let msg_tokens = Keeper_context_core.msg_tokens
-let count_tokens = Keeper_context_core.count_tokens
 let max_tokens_of_context = Keeper_context_core.max_tokens_of_context
-let token_count = Keeper_context_core.token_count
 let message_count = Keeper_context_core.message_count
-let context_ratio = Keeper_context_core.context_ratio
+let serialized_bytes = Keeper_context_core.serialized_bytes
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
 let resume_checkpoint_of_context =
   Keeper_context_core.resume_checkpoint_of_context
@@ -104,9 +101,7 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
-  context_ratio : float;
-  context_tokens : int;
-  context_max : int;
+  checkpoint_bytes : int;
   message_count : int;
 }
 

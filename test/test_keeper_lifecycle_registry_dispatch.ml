@@ -169,11 +169,9 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
         failure_reason = None;
         trigger = None;
         decision = KEC.Not_requested;
-      };
+    };
     turn_generation = meta.runtime.generation;
-    context_ratio = 0.0;
-    context_tokens = 0;
-    context_max = 0;
+    checkpoint_bytes = 0;
     message_count = 0;
   }
 

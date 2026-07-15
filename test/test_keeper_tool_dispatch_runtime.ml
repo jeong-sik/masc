@@ -2134,10 +2134,10 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
         check bool "error message preserved" true
           (contains_substring execution.raw_output "Self-approval"))
 
-(* ── OAS descriptor concurrency class ────────────────────────
+(* ── OAS descriptor execution mode ───────────────────────────
 
    WebSearch/WebFetch hit external rate-limited APIs. They must not be
-   classified as [Parallel_read] even though they are read-only. *)
+   assigned an inferred execution mode merely because they are read-only. *)
 
 let make_dummy_oas_tool name =
   Masc.Tool_bridge.oas_tool_of_masc

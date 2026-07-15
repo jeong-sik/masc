@@ -199,9 +199,6 @@ export function heroBody(data: HarnessHealthData): string {
   if (data.overview.handoff_status === 'warning') {
     return '세대 교체 기록에 누락 필드가 있어 keeper 연속성 점검이 필요합니다.'
   }
-  if (data.overview.pre_compact_status === 'warning') {
-    return '압축 직전 컨텍스트 압력이 높아 keeper 연속성이 흔들릴 수 있습니다.'
-  }
   if (data.overview.last_signal_at == null) {
     return 'keeper 장기 실행 중 평가, 압축, 세대 교체가 정상인지 감시합니다.'
   }
@@ -214,8 +211,9 @@ export function railDetail(data: HarnessHealthData, rail: 'evaluator' | 'pre_com
     return `판정 ${data.calibration.total_verdicts}건`
   }
   if (rail === 'pre_compact') {
-    if (data.overview.latest_pre_compact_ratio == null) return '최근 압축 없음'
-    return `컨텍스트 ${Math.round(data.overview.latest_pre_compact_ratio * 100)}%`
+    const bytes = data.overview.latest_pre_compact_checkpoint_bytes
+    if (bytes == null) return '최근 압축 없음'
+    return `체크포인트 ${bytes.toLocaleString()} B`
   }
   if (data.overview.latest_handoff_generation == null) return '최근 교체 없음'
   return `${data.overview.latest_handoff_generation}세대`
@@ -433,10 +431,8 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
               <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestampKo(item.timestamp)}</div>
             </div>
             <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--color-fg-primary)]">
-              <span>컨텍스트 ${Math.round(item.context_ratio * 100)}%</span>
+              <span>체크포인트 ${item.checkpoint_bytes.toLocaleString()} B</span>
               <span>메시지 ${item.message_count}건</span>
-              <span>토큰 ${item.token_count.toLocaleString()}</span>
-              <span>runtime</span>
             </div>
             <div class="mt-2 text-xs text-[var(--color-fg-muted)]">${item.trigger}</div>
             ${item.strategies.length > 0 ? html`

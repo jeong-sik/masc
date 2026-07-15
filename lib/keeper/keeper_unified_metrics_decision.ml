@@ -163,7 +163,6 @@ let append_decision_record
                         observation.pending_messages)) );
               ("active_goals", `Int (List.length observation.active_goals));
               ("idle_seconds", `Int observation.idle_seconds);
-              ("context_ratio", `Float (Lazy.force observation.context_ratio));
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("claimable_task_count", `Int observation.claimable_task_count);
               ( "claim_blocked_task_count",

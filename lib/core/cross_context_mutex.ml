@@ -14,7 +14,7 @@ let rec lock_cooperatively mutex =
   then ()
   else (
     Eio.Fiber.yield ();
-    lock_cooperatively mutex)
+    (lock_cooperatively [@tailcall]) mutex)
 ;;
 
 let with_lock t f =

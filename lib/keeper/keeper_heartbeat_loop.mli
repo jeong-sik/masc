@@ -108,10 +108,24 @@ val record_provider_timeout_observation :
     unified-turn failure path uses — so the caller dispatches
     [Turn_failed]. Such a cycle must not refresh the
     work-as-heartbeat lease. *)
-type keepalive_turn_outcome = {
-  meta : keeper_meta;
-  cycle_crashed : bool;
-}
+type ready_queue_followup =
+  | No_ready_queue_followup
+  | Drain_ready_queue of
+      { excluding : Keeper_event_queue.stimulus list }
+
+type keepalive_turn_outcome =
+  { meta : keeper_meta
+  ; cycle_crashed : bool
+  ; ready_queue_followup : ready_queue_followup
+  }
+
+val ready_queue_followup_of_settlement
+  :  lease:Keeper_registry_event_queue.lease
+  -> Keeper_registry_event_queue.settlement
+  -> ready_queue_followup
+(** Decide whether a committed settlement may immediately drain other ready
+    work. Retryable/recoverable sources are excluded for this one follow-up so
+    they cannot monopolize the lane ahead of unrelated stimuli. *)
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
     increments the registry turn-failure counter (shared with

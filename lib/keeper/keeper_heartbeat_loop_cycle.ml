@@ -51,6 +51,11 @@ type cycle_outcome =
       { meta : keeper_meta
       ; outcome : failure_judgment_terminal
       }
+  | Manual_compaction_failed of
+      { meta : keeper_meta
+      ; failure : Keeper_manual_compaction.failure
+      }
+  | Manual_compaction_applied of cycle_outcome
 
 and failure_judgment_terminal =
   | Judgment_boundary_failed of { detail : string }
@@ -59,14 +64,20 @@ and failure_judgment_terminal =
       ; rationale : string
       }
 
-let meta = function
+let rec meta = function
   | Completed meta
   | Cancelled meta
   | Skipped meta
   | Failed { meta; _ }
   | Busy { meta; _ }
-  | Judgment_settled { meta; _ } ->
+  | Judgment_settled { meta; _ }
+  | Manual_compaction_failed { meta; _ } ->
     meta
+  | Manual_compaction_applied outcome -> meta outcome
+;;
+
+let with_manual_compaction applied outcome =
+  if applied then Manual_compaction_applied outcome else outcome
 ;;
 
 let record_failure_judgment_outcome
@@ -186,44 +197,67 @@ let run_keeper_cycle_admitted
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
       ?failure_judgment
+      ?(manual_compaction_requested = false)
       ()
   =
   let admitted_execution =
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       let prepared =
-        match failure_judgment with
-        | None -> `Run obs
-        | Some request ->
-          prepare_failure_judgment_turn
-            ~base_path:ctx.config.base_path
-            ~keeper_name:meta_after_triage.name
-            ~request
-            obs
+        if manual_compaction_requested
+        then
+          (match Keeper_manual_compaction.run ~config:ctx.config ~meta:meta_after_triage with
+           | Error failure -> `Compaction_failed failure
+           | Ok success ->
+             Keeper_manual_compaction.observe_manifest
+               ~keeper_name:meta_after_triage.name
+               success.manifest;
+             `Run (obs, true))
+        else
+          match failure_judgment with
+          | None -> `Run (obs, false)
+          | Some request ->
+            (match
+               prepare_failure_judgment_turn
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name
+                 ~request
+                 obs
+             with
+             | `Run observation -> `Run (observation, false)
+             | `Settle outcome -> `Settle outcome)
       in
       match prepared with
+      | `Compaction_failed failure -> `Compaction_failed failure
       | `Settle outcome -> `Judgment outcome
-      | `Run observation ->
+      | `Run (observation, manual_compaction_applied) ->
         `Turn
-          (Keeper_unified_turn.run_keeper_cycle
-             ~config:ctx.config
-             ~meta:meta_after_triage
-             ~publication_recovery_provider:ctx.publication_recovery_provider
-             ~observation
-             ~generation:meta_after_triage.runtime.generation
-             ~wake
-             ~channel:turn_decision.channel
-             ?hitl_resolution
-             ?continuation_delivery_channel
-             (* RFC-0315: pass the whole decision, not just its channel — the
-                prompt renders the verdict reasons so the turn knows why it woke. *)
-             ~turn_decision
-             ~shared_context
-             ?event_bus
-             ()))
+          ( Keeper_unified_turn.run_keeper_cycle
+              ~config:ctx.config
+              ~meta:meta_after_triage
+              ~publication_recovery_provider:ctx.publication_recovery_provider
+              ~observation
+              ~generation:meta_after_triage.runtime.generation
+              ~wake
+              ~channel:turn_decision.channel
+              ?hitl_resolution
+              ?continuation_delivery_channel
+              (* RFC-0315: pass the whole decision, not just its channel — the
+                 prompt renders the verdict reasons so the turn knows why it woke. *)
+              ~turn_decision
+              ~shared_context
+              ?event_bus
+              ()
+          , manual_compaction_applied ))
   in
   match admitted_execution with
+  | `Compaction_failed failure ->
+    Log.Keeper.error
+      ~keeper_name:meta_after_triage.name
+      "manual compaction failed in owner lane: %s"
+      (Keeper_manual_compaction.failure_to_string failure);
+    Manual_compaction_failed { meta = meta_after_triage; failure }
   | `Judgment outcome -> Judgment_settled { meta = meta_after_triage; outcome }
-  | `Turn (Error failure) ->
+  | `Turn (Error failure, manual_compaction_applied) ->
     let err = failure.Keeper_unified_turn.error in
     let e_str = Agent_sdk.Error.to_string err in
     Log.Keeper.debug "%s: keeper cycle failed: %s" meta_after_triage.name e_str;
@@ -277,10 +311,13 @@ let run_keeper_cycle_admitted
           ();
         meta_after_triage
     in
-    Failed { meta; failure }
-  | `Turn (Ok (Keeper_unified_turn.Turn_completed updated)) -> Completed updated
-  | `Turn (Ok (Keeper_unified_turn.Turn_cancelled meta)) -> Cancelled meta
-  | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta)) -> Skipped meta
+    with_manual_compaction manual_compaction_applied (Failed { meta; failure })
+  | `Turn (Ok (Keeper_unified_turn.Turn_completed updated), applied) ->
+    with_manual_compaction applied (Completed updated)
+  | `Turn (Ok (Keeper_unified_turn.Turn_cancelled meta), applied) ->
+    with_manual_compaction applied (Cancelled meta)
+  | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta), applied) ->
+    with_manual_compaction applied (Skipped meta)
 ;;
 
 let run_keeper_cycle
@@ -295,6 +332,7 @@ let run_keeper_cycle
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
       ?failure_judgment
+      ?manual_compaction_requested
       ()
   =
   match
@@ -310,6 +348,7 @@ let run_keeper_cycle
          ~shared_context
          ~wake
          ?failure_judgment
+         ?manual_compaction_requested
          ?event_bus
          ?hitl_resolution
          ?continuation_delivery_channel)

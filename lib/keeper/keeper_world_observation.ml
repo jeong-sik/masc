@@ -99,6 +99,7 @@ type event_queue_trigger =
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
   | Failure_judgment_stimulus
+  | Manual_compaction_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -108,6 +109,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
+  | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -711,7 +713,8 @@ let pending_board_event_of_stimulus
          ga)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
-  | Keeper_event_queue.Hitl_resolved _ ->
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Manual_compaction_requested ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
        inject — the keeper resumes on its own state once the approval is gone
@@ -1093,16 +1096,11 @@ let keeper_cycle_decision
   let event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
   in
+  let manual_compaction_control =
+    List.mem Manual_compaction_stimulus event_queue_triggers
+  in
   let failure_judgment_control =
-    List.exists
-      (function
-        | Failure_judgment_stimulus -> true
-        | Bootstrap_stimulus
-        | Scheduled_automation_stimulus
-        | Connector_attention_stimulus
-        | Hitl_resolved_stimulus ->
-          false)
-      event_queue_triggers
+    List.mem Failure_judgment_stimulus event_queue_triggers
   in
   let reactive_triggers =
     [ (if Message_scope.has_kind Message_scope.Mention observation.pending_messages
@@ -1130,6 +1128,13 @@ let keeper_cycle_decision
   in
   if meta.paused
   then blocked Keeper_paused
+  else if manual_compaction_control
+  then
+    { should_run = true
+    ; channel = Reactive
+    ; verdict = Run { reasons = Manual_compaction_pending, [] }
+    ; since_last_scheduled_autonomous = None
+    }
   else if failure_judgment_control
   then
     (* The judge is the recovery control plane for the failure that may have

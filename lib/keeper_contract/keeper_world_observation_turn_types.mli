@@ -18,6 +18,7 @@ type event_queue_trigger =
           conversation. *)
   | Failure_judgment_stimulus
       (** Durable recovery control for a deterministic failed turn. *)
+  | Manual_compaction_stimulus
 
 type turn_reason =
   | Mention_pending
@@ -27,6 +28,7 @@ type turn_reason =
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
+  | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of

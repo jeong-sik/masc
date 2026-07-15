@@ -14,6 +14,7 @@ type stimulus_kind =
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Failure_judgment
       (* RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
+  | Manual_compaction
   | Goal_assigned
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
 
@@ -42,6 +43,7 @@ let stimulus_kind_to_string = function
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
   | Failure_judgment -> "failure_judgment"
+  | Manual_compaction -> "manual_compaction"
   | Goal_assigned -> "goal_assigned"
 ;;
 
@@ -58,6 +60,7 @@ let stimulus_kind_of_string = function
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
   | "failure_judgment" -> Some Failure_judgment
+  | "manual_compaction" -> Some Manual_compaction
   | "goal_assigned" -> Some Goal_assigned
   | _ -> None
 ;;
@@ -113,6 +116,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Failure_judgment _ -> Failure_judgment
+  | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
   | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
 ;;
 
@@ -217,6 +221,7 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       fj.fj_runtime_id
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
+  | Keeper_event_queue.Manual_compaction_requested -> "manual_compaction_requested"
   | Keeper_event_queue.Goal_assigned ga ->
     Printf.sprintf
       "goal_assigned goal_id=%s assigned_by=%s"
@@ -239,6 +244,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Failure_judgment _
+    | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Goal_assigned _ -> None
   in
   `Assoc
@@ -991,7 +997,7 @@ let summarize_rows ~keeper_name ~limit rows =
        | Some
            ( Board_signal | Bootstrap | Fusion_completed
            | Bg_completed | Schedule_due | Connector_attention | Hitl_resolved
-           | Failure_judgment | Goal_assigned )
+           | Failure_judgment | Manual_compaction | Goal_assigned )
          -> ())
   in
   let note_payload_parse_error row =

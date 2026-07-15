@@ -464,20 +464,6 @@ let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option)
     in
     max min_ctx resolution.effective_budget
 
-let manual_compaction_manifest_observation ~keeper_name = function
-  | Ok () -> `Assoc [ "outcome", `String "appended" ]
-  | Error detail ->
-    Log.Keeper.error
-      ~keeper_name
-      "manual compaction manifest append failed after durable checkpoint: %s"
-      detail;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string WriteMetaFailures)
-      ~labels:[ "keeper", keeper_name; "phase", "manual_compaction_manifest" ]
-      ();
-    `Assoc [ "outcome", `String "failed"; "detail", `String detail ]
-;;
-
 let manual_compaction_wakeup_observation ~base_path keeper_name =
   match
     Keeper_registry.wakeup
@@ -488,13 +474,13 @@ let manual_compaction_wakeup_observation ~base_path keeper_name =
   | Keeper_registry.Signaled -> `Assoc [ "outcome", `String "signaled" ]
   | Keeper_registry.Deferred_unregistered ->
     Log.Keeper.info
-      "%s: durable manual compaction committed without a registered wake target"
+      "%s: manual compaction request queued without a registered wake target"
       keeper_name;
     `Assoc [ "outcome", `String "deferred_unregistered" ]
   | Keeper_registry.Deferred_not_running phase ->
     let phase = Keeper_state_machine.phase_to_string phase in
     Log.Keeper.info
-      "%s: durable manual compaction wake deferred in phase=%s"
+      "%s: manual compaction request wake deferred in phase=%s"
       keeper_name
       phase;
     `Assoc
@@ -502,17 +488,14 @@ let manual_compaction_wakeup_observation ~base_path keeper_name =
   | Keeper_registry.Deferred_lifecycle denial ->
     let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
     Log.Keeper.info
-      "%s: durable manual compaction wake deferred by lifecycle reason=%s"
+      "%s: manual compaction request wake deferred by lifecycle reason=%s"
       keeper_name
       reason;
     `Assoc
       [ "outcome", `String "deferred_lifecycle"; "reason", `String reason ]
 ;;
 
-(** Operator-initiated context compaction.
-
-    The transaction lives in [Keeper_manual_compaction]; this adapter only
-    resolves the tool target and projects its typed result. *)
+(** Queue an operator compaction for the target Keeper's owning lane. *)
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_compact_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
@@ -526,7 +509,6 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
         (validation_error_data
            (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
-    let phase_before = Keeper_state_machine.phase_to_string entry.phase in
     if Keeper_state_machine.is_terminal entry.phase then begin
       Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Precondition))] ();
@@ -535,64 +517,41 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
            (Printf.sprintf "keeper %s is explicitly stopped" name))
     end
     else
-      match read_meta_resolved config name with
-      | Ok None ->
-        tool_result_error
-          (Printf.sprintf "keeper %s: meta unavailable for compaction" name)
-      | Error detail ->
-        tool_result_error
-          (Printf.sprintf "keeper %s: compaction meta read failed: %s" name detail)
-      | Ok (Some (_resolved, meta)) ->
-        (match Keeper_manual_compaction.run ~config ~meta with
-         | Error
-             (Keeper_manual_compaction.Lifecycle (stage, checkpoint_applied, error)) ->
-           invalidate_status_cache name;
-           tool_result_error_data
-             (compaction_dispatch_error_data ~stage ~checkpoint_applied error)
-         | Error (Keeper_manual_compaction.Recovery (error, failure_dispatch)) ->
-           (match error with
-            | Keeper_post_turn.Checkpoint_load_failed Keeper_checkpoint_store.Not_found ->
-              Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
-                ~labels:
-                  [ ("keeper", name)
-                  ; ("result", Keeper_operator_compact_result.(to_label No_checkpoint))
-                  ]
-                ()
-            | _ -> ());
-           (match failure_dispatch with
-            | Error dispatch_error ->
-              tool_result_error_data
-                (compaction_recovery_error_data ~dispatch_error error)
-            | Ok () -> tool_result_error_data (compaction_recovery_error_data error))
-         | Ok { recovery; manifest } ->
-           invalidate_status_cache name;
-           let phase_after =
-             Keeper_registry.get ~base_path:config.base_path name
-             |> Option.map (fun entry -> Keeper_state_machine.phase_to_string entry.phase)
-             |> Option.value ~default:"unknown"
-           in
-           Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
-             ~labels:
-               [ ("keeper", name)
-               ; ("result", Keeper_operator_compact_result.(to_label Ok))
-               ]
-             ();
-           tool_result_ok_data
-             (`Assoc
-               [ "name", `String name
-               ; "phase_before", `String phase_before
-               ; "phase_after", `String phase_after
-               ; "applied", `Bool recovery.compaction.applied
-               ; ( "trigger"
-                 , match recovery.compaction.trigger with
-                   | Some trigger -> Compaction_trigger.to_detail_json trigger
-                   | None -> `Null )
-               ; "manifest", manual_compaction_manifest_observation ~keeper_name:name manifest
-               ; ( "wake"
-                 , manual_compaction_wakeup_observation
-                     ~base_path:config.base_path
-                     name )
-               ]))
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = Keeper_event_queue.manual_compaction_post_id
+        ; urgency = Immediate
+        ; arrived_at = Time_compat.now ()
+        ; payload = Manual_compaction_requested
+        }
+      in
+      let queued queue_outcome =
+        tool_result_ok_data
+          (`Assoc
+            [ "name", `String name
+            ; "queued", `Bool true
+            ; "queue_outcome", `String queue_outcome
+            ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+            ; ( "wake"
+              , manual_compaction_wakeup_observation
+                  ~base_path:config.base_path
+                  name )
+            ])
+      in
+      (match
+         Keeper_registry_event_queue.enqueue_stimulus_durable_result
+           ~base_path:config.base_path
+           name
+           stimulus
+       with
+       | Stimulus_storage_error detail ->
+         Log.Keeper.error
+           ~keeper_name:name
+           "manual compaction request enqueue failed: %s"
+           detail;
+         tool_result_error
+           (Printf.sprintf "keeper %s: compaction request enqueue failed: %s" name detail)
+       | Stimulus_enqueued -> queued "enqueued"
+       | Stimulus_already_present -> queued "already_present")
 
 let handle_keeper_compact ctx args : tool_result =
   keeper_compact_body ~config:ctx.config args

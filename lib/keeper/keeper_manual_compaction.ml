@@ -59,10 +59,10 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
     |> Keeper_runtime_manifest.append config
 ;;
 let run ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let dispatch ?(origin = Keeper_registry.Operator_compact) stage event =
+  let dispatch stage event =
     Keeper_context_runtime.dispatch_keeper_phase_event_result
       ~config
-      ~origin
+      ~origin:Keeper_registry.Operator_compact
       ~keeper_name:meta.name
       event
     |> Result.map_error (fun error ->
@@ -75,12 +75,7 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
       ~keeper_name:meta.name
       (Keeper_state_machine.Compaction_failed { reason })
   in
-  match
-    dispatch
-      ~origin:Keeper_registry.Generic_dispatch
-      "operator_request"
-      Keeper_state_machine.Operator_compact_requested
-  with
+  match dispatch "operator_request" Keeper_state_machine.Operator_compact_requested with
   | Error _ as error -> error
   | Ok () ->
     (match dispatch "compaction_started" Keeper_state_machine.Compaction_started with
@@ -112,4 +107,27 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
            | Error error ->
              Error (Lifecycle ("compaction_completed", true, error))
            | Ok () -> Ok { recovery; manifest })))
+;;
+
+let failure_to_string = function
+  | Lifecycle (stage, checkpoint_applied, error) ->
+    Printf.sprintf
+      "stage=%s checkpoint_applied=%b error=%s"
+      stage
+      checkpoint_applied
+      (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
+  | Recovery (error, _) -> Keeper_post_turn.compaction_recovery_error_to_string error
+;;
+
+let observe_manifest ~keeper_name = function
+  | Ok () -> ()
+  | Error detail ->
+    Log.Keeper.error
+      ~keeper_name
+      "manual compaction manifest append failed after durable checkpoint: %s"
+      detail;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WriteMetaFailures)
+      ~labels:[ "keeper", keeper_name; "phase", "manual_compaction_manifest" ]
+      ()
 ;;

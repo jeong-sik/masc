@@ -1,9 +1,16 @@
 open Schedule_domain
 
+type rejected_schedule_row =
+  { ordinal : int
+  ; raw : Yojson.Safe.t
+  ; error : Schedule_domain.schedule_request_decode_error
+  }
+
 type state =
   { version : int
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
+  ; rejected_schedules : rejected_schedule_row list
   ; executions : Schedule_domain.execution_record list
   }
 
@@ -113,7 +120,12 @@ let recovery_path config = schedules_path config ^ ".last-good"
 let ensure_dirs config = Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
 let default_state () =
-  { version = 1; updated_at = now (); schedules = []; executions = [] }
+  { version = 1
+  ; updated_at = now ()
+  ; schedules = []
+  ; rejected_schedules = []
+  ; executions = []
+  }
 ;;
 
 let state_to_yojson (state : state) =
@@ -121,8 +133,9 @@ let state_to_yojson (state : state) =
     [ "version", `Int state.version
     ; "updated_at", `Float state.updated_at
     ; ( "schedules"
-      , `List (List.map Schedule_domain.schedule_request_to_yojson state.schedules)
-      )
+      , `List
+          (List.map Schedule_domain.schedule_request_to_yojson state.schedules
+           @ List.map (fun rejected -> rejected.raw) state.rejected_schedules) )
     ; ( "executions"
       , `List
           (List.map Schedule_domain.execution_record_to_yojson state.executions) )
@@ -168,19 +181,33 @@ let collect_results parse rows =
   loop [] rows
 ;;
 
+let collect_schedule_rows rows =
+  let rec loop ordinal schedules rejected = function
+    | [] -> List.rev schedules, List.rev rejected
+    | raw :: rest ->
+      (match Schedule_domain.schedule_request_of_yojson_detailed raw with
+       | Ok request -> loop (ordinal + 1) (request :: schedules) rejected rest
+       | Error error ->
+         loop
+           (ordinal + 1)
+           schedules
+           ({ ordinal; raw; error } :: rejected)
+           rest)
+  in
+  loop 0 [] [] rows
+;;
+
 let state_of_yojson = function
   | `Assoc fields ->
     let* version = int_field "version" fields in
     let* updated_at = float_field "updated_at" fields in
     let* schedules_json = list_field "schedules" fields in
     let* executions_json = optional_list_field "executions" fields in
-    let* schedules =
-      collect_results Schedule_domain.schedule_request_of_yojson schedules_json
-    in
+    let schedules, rejected_schedules = collect_schedule_rows schedules_json in
     let* executions =
       collect_results Schedule_domain.execution_record_of_yojson executions_json
     in
-    Ok { version; updated_at; schedules; executions }
+    Ok { version; updated_at; schedules; rejected_schedules; executions }
   | json -> Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
 ;;
 
@@ -276,7 +303,12 @@ let write_state config state =
 ;;
 
 let bump_state state ~schedules ~executions =
-  { version = state.version + 1; updated_at = now (); schedules; executions }
+  { version = state.version + 1
+  ; updated_at = now ()
+  ; schedules
+  ; rejected_schedules = state.rejected_schedules
+  ; executions
+  }
 ;;
 
 let find_schedule state schedule_id =
@@ -541,7 +573,7 @@ let complete_running config ~now ~schedule_id ?detail () =
           | Error error -> Error (Recurrence_evaluation_failed error)
           | Ok (Next_due_at due_at) -> Ok { request with status = Scheduled; due_at }
           | Ok No_next ->
-            (match request.recurrence with
+            (match Schedule_domain.recurrence_ir_rule request.recurrence with
              | One_shot -> Ok { request with status = Succeeded }
              | Interval _ | Daily _ | Cron _ ->
                Error

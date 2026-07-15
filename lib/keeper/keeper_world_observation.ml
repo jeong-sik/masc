@@ -199,7 +199,9 @@ let schedule_attention_item action (request : Schedule_domain.schedule_request) 
   ; action = Schedule_projection.attention_action_to_string action
   ; status = Schedule_domain.schedule_status_to_string request.status
   ; payload_kind = schedule_payload_kind request
-  ; recurrence_summary = Schedule_domain.recurrence_summary request.recurrence
+  ; recurrence_summary =
+      Schedule_domain.recurrence_summary
+        (Schedule_domain.recurrence_ir_rule request.recurrence)
   ; due_at = request.due_at
   ; keeper_next_tool = Schedule_projection.keeper_next_tool_for_attention_action action
   ; keeper_next_action = Schedule_projection.keeper_next_action_for_attention_action action

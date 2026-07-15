@@ -195,9 +195,13 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
          ; ( "requested_at_iso"
            , `String (Masc_domain.iso8601_of_unix_seconds request.requested_at) )
          ; ( "recurrence_kind"
-           , `String (Schedule_domain.recurrence_kind_to_string request.recurrence) )
+           , `String
+               (Schedule_domain.recurrence_kind_to_string
+                  (Schedule_domain.recurrence_ir_rule request.recurrence)) )
          ; ( "recurrence_summary"
-           , `String (Schedule_domain.recurrence_summary request.recurrence) )
+           , `String
+               (Schedule_domain.recurrence_summary
+                  (Schedule_domain.recurrence_ir_rule request.recurrence)) )
          ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
          ; ( "payload_kind"
            , match Schedule_payload_projection.kind request with

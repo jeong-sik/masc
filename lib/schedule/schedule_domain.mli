@@ -58,6 +58,17 @@ type recurrence =
       ; timezone : string
       }
 
+type recurrence_ir = private V1 of recurrence
+
+type recurrence_ir_decode_error =
+  | Missing_schema_version
+  | Unsupported_schema_version of int
+  | Invalid_recurrence_ir of string
+
+type schedule_request_decode_error =
+  | Invalid_schedule_request of string
+  | Recurrence_ir_decode_error of recurrence_ir_decode_error
+
 type recurrence_evaluation =
   | Next_due_at of float
   | No_next
@@ -87,7 +98,7 @@ type schedule_request =
   ; payload : payload
   ; status : schedule_status
   ; source : schedule_source
-  ; recurrence : recurrence
+  ; recurrence : recurrence_ir
   }
 
 type execution_status =
@@ -123,6 +134,10 @@ val create_request :
 val is_terminal : schedule_status -> bool
 val is_recurring : recurrence -> bool
 val validate_recurrence : recurrence -> (recurrence, string) result
+val recurrence_ir_v1 : recurrence -> (recurrence_ir, string) result
+val recurrence_ir_rule : recurrence_ir -> recurrence
+val recurrence_ir_decode_error_to_string : recurrence_ir_decode_error -> string
+val schedule_request_decode_error_to_string : schedule_request_decode_error -> string
 val recurrence_evaluation_error_to_string : recurrence_evaluation_error -> string
 val first_due_after :
   now:float -> recurrence -> (recurrence_evaluation, recurrence_evaluation_error) result
@@ -168,8 +183,13 @@ val recurrence_of_yojson : Yojson.Safe.t -> (recurrence, string) result
     invalid recurrence intent. Evaluation reports that row through
     [Invalid_persisted_recurrence] instead of corrupting the whole ledger. New
     requests must still pass [validate_recurrence]. *)
+val recurrence_ir_to_yojson : recurrence_ir -> Yojson.Safe.t
+val recurrence_ir_of_yojson :
+  Yojson.Safe.t -> (recurrence_ir, recurrence_ir_decode_error) result
 val execution_record_to_yojson : execution_record -> Yojson.Safe.t
 val execution_record_of_yojson :
   Yojson.Safe.t -> (execution_record, string) result
 val schedule_request_to_yojson : schedule_request -> Yojson.Safe.t
+val schedule_request_of_yojson_detailed :
+  Yojson.Safe.t -> (schedule_request, schedule_request_decode_error) result
 val schedule_request_of_yojson : Yojson.Safe.t -> (schedule_request, string) result

@@ -39,7 +39,6 @@ type dashboard_purge_artifact =
   | Keeper_policy_log_artifact
   | Keeper_decision_log_artifact
   | Keeper_feedback_log_artifact
-  | Keeper_dataset_export_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_configuration_artifact
   | Agent_artifact_bundle of string list

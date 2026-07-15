@@ -666,7 +666,11 @@ let keeper_dir (config : Workspace.config) =
   ensure_dir d
 
 let keeper_meta_path config name =
-  Filename.concat (keeper_dir config) (name ^ ".json")
+  Filename.concat
+    (keeper_dir config)
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Metadata)
 
 let session_base_dir (config : Workspace.config) =
   let d = Filename.concat (Workspace.masc_root_dir config) "traces" in

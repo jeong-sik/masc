@@ -70,6 +70,10 @@ type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
+type keeper_invocation_acceptance =
+  | Keeper_invocation_accepted
+  | Keeper_invocation_already_accepted
+
 val empty : t
 val revision : t -> int64
 val next_lease_sequence : t -> int64
@@ -77,6 +81,7 @@ val pending : t -> Keeper_event_queue.t
 val leases : t -> lease list
 val last_settlement : t -> transition_receipt option
 val transition_outbox : t -> outbox_entry list
+val keeper_invocation_receipts : t -> string list
 val lease_kind : lease -> lease_kind
 
 val with_pending : Keeper_event_queue.t -> t -> t
@@ -125,6 +130,19 @@ val mark_transition_projected : transition_id:string -> t -> (t, string) result
 (** Atomically retire a durable outbox entry after an external projector has
     materialized its stable [event_id], retaining only the last receipt for an
     immediate idempotent retry. Unknown transition ids fail closed. *)
+
+val accept_keeper_invocation :
+  request_id:string ->
+  Keeper_event_queue.stimulus ->
+  t ->
+  (t * keeper_invocation_acceptance, string) result
+(** Atomically retain the request receipt and enqueue its typed completion.
+    A retained receipt prevents replay from duplicating already-consumed work. *)
+
+val forget_keeper_invocation_receipt :
+  request_id:string -> stimulus:Keeper_event_queue.stimulus -> t -> (t, string) result
+(** Retire only the receipt matching the exact typed completion. A missing
+    receipt is an idempotent no-op; a conflicting completion fails closed. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t

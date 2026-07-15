@@ -45,6 +45,11 @@ type settle_result = Keeper_event_queue_state.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
+type keeper_invocation_acceptance =
+  Keeper_event_queue_state.keeper_invocation_acceptance =
+  | Keeper_invocation_accepted
+  | Keeper_invocation_already_accepted
+
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
 val lease_kind : lease -> lease_kind
 
@@ -155,6 +160,22 @@ val mark_transition_projected_result :
   base_path:string ->
   keeper_name:string ->
   transition_id:string ->
+  (unit, string) result
+
+val accept_keeper_invocation_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  request_id:string ->
+  stimulus:Keeper_event_queue.stimulus ->
+  unit ->
+  (keeper_invocation_acceptance, string) result
+
+val forget_keeper_invocation_receipt_result :
+  base_path:string ->
+  keeper_name:string ->
+  request_id:string ->
+  stimulus:Keeper_event_queue.stimulus ->
   (unit, string) result
 
 val persist :

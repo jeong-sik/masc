@@ -123,6 +123,25 @@ val enqueue_stimulus_durable_result :
     wake hint. Board-attention judgments use the stricter opaque-event-id API
     above. *)
 
+type keeper_invocation_enqueue_result =
+  | Keeper_invocation_enqueued
+  | Keeper_invocation_already_accepted
+  | Keeper_invocation_storage_error of string
+
+val enqueue_keeper_invocation_completion_result :
+  base_path:string ->
+  keeper_name:string ->
+  request_id:string ->
+  Keeper_event_queue.stimulus ->
+  keeper_invocation_enqueue_result
+
+val forget_keeper_invocation_receipt_result :
+  base_path:string ->
+  keeper_name:string ->
+  request_id:string ->
+  stimulus:Keeper_event_queue.stimulus ->
+  (unit, string) result
+
 val enqueue_hitl_resolution_durable_result :
   base_path:string
   -> keeper_name:string

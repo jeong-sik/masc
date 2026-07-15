@@ -16,6 +16,20 @@ let stimulus ?(payload = Queue.Bootstrap) post_id arrived_at : Queue.stimulus =
   { post_id; urgency = Queue.Normal; arrived_at; payload }
 ;;
 
+let keeper_invocation_completion ?(outcome = Queue.Bg_ok "completed") request_id =
+  let completion : Queue.bg_job_completion =
+    { bg_run_id = request_id
+    ; bg_kind = Queue.Keeper_invocation
+    ; bg_outcome = outcome
+    ; bg_board_post_id = ""
+    }
+  in
+  stimulus
+    ~payload:(Queue.Bg_completed completion)
+    (Queue.bg_job_completion_post_id completion)
+    1.0
+;;
+
 let queue stimuli = List.fold_left Queue.enqueue Queue.empty stimuli
 
 let post_ids queue =
@@ -529,6 +543,134 @@ let read_schema path =
   | Ok _ -> Alcotest.fail "migrated state is not an object"
 ;;
 
+let test_keeper_invocation_receipt_survives_consumption_and_replay () =
+  with_temp_dir "keeper-invocation-receipt" (fun base_path ->
+    let keeper_name = "caller_keeper" in
+    let request_id = "delegate-request-7" in
+    let completion = keeper_invocation_completion request_id in
+    (match
+       Persistence.accept_keeper_invocation_result
+         ~base_path
+         ~keeper_name
+         ~request_id
+         ~stimulus:completion
+         ()
+       |> require_ok "accept Keeper completion"
+     with
+     | Persistence.Keeper_invocation_accepted -> ()
+     | Persistence.Keeper_invocation_already_accepted ->
+       Alcotest.fail "first completion was already accepted");
+    let accepted =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload accepted Keeper completion"
+    in
+    Alcotest.(check (list string))
+      "durable receipt records request identity"
+      [ request_id ]
+      (State.keeper_invocation_receipts accepted);
+    Alcotest.(check int)
+      "accepted completion is pending"
+      1
+      (Queue.length (State.pending accepted));
+    Persistence.update_result ~base_path ~keeper_name (fun _pending -> Queue.empty)
+    |> require_ok "simulate completion consumption";
+    let consumed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload consumed Keeper completion"
+    in
+    let consumed_revision = State.revision consumed in
+    Alcotest.(check int) "completion was consumed" 0 (Queue.length (State.pending consumed));
+    Alcotest.(check (list string))
+      "receipt outlives pending consumption"
+      [ request_id ]
+      (State.keeper_invocation_receipts consumed);
+    (match
+       Persistence.accept_keeper_invocation_result
+         ~base_path
+         ~keeper_name
+         ~request_id
+         ~stimulus:completion
+         ()
+       |> require_ok "replay Keeper completion after restart"
+     with
+     | Persistence.Keeper_invocation_already_accepted -> ()
+     | Persistence.Keeper_invocation_accepted ->
+       Alcotest.fail "replay duplicated consumed completion");
+    let replayed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload replayed Keeper completion"
+    in
+    Alcotest.(check int64)
+      "idempotent replay does not write another revision"
+      consumed_revision
+      (State.revision replayed);
+    Alcotest.(check int)
+      "idempotent replay does not redeliver"
+      0
+      (Queue.length (State.pending replayed));
+    let conflicting =
+      keeper_invocation_completion
+        ~outcome:(Queue.Bg_failed "different terminal outcome")
+        request_id
+    in
+    (match
+       Persistence.accept_keeper_invocation_result
+         ~base_path
+         ~keeper_name
+         ~request_id
+         ~stimulus:conflicting
+         ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "conflicting completion reused a durable request id");
+    (match
+       Persistence.forget_keeper_invocation_receipt_result
+         ~base_path
+         ~keeper_name
+         ~request_id
+         ~stimulus:conflicting
+     with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "conflicting completion acknowledged another receipt");
+    Persistence.forget_keeper_invocation_receipt_result
+      ~base_path
+      ~keeper_name
+      ~request_id
+      ~stimulus:completion
+    |> require_ok "forget delivered Keeper completion receipt";
+    let forgotten =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload forgotten Keeper completion receipt"
+    in
+    Alcotest.(check (list string))
+      "delivery acknowledgement retires receipt"
+      []
+      (State.keeper_invocation_receipts forgotten);
+    let forgotten_revision = State.revision forgotten in
+    Persistence.forget_keeper_invocation_receipt_result
+      ~base_path
+      ~keeper_name
+      ~request_id
+      ~stimulus:completion
+    |> require_ok "repeat receipt acknowledgement";
+    let repeated =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload repeated receipt acknowledgement"
+    in
+    Alcotest.(check int64)
+      "repeated acknowledgement is a storage no-op"
+      forgotten_revision
+      (State.revision repeated));
+  (match
+     State.accept_keeper_invocation
+       ~request_id:""
+       (keeper_invocation_completion "")
+       State.empty
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "empty Keeper invocation request id was accepted")
+;;
+
 let test_retryable_failure_restores_exact_stimulus_at_fifo_tail () =
   with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
     let keeper_name = "retry_tail_keeper" in
@@ -883,6 +1025,10 @@ let () =
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case
+            "Keeper invocation crash replay receipt"
+            `Quick
+            test_keeper_invocation_receipt_survives_consumption_and_replay
+        ; Alcotest.test_case
             "retryable failure durable FIFO tail"
             `Quick
             test_retryable_failure_restores_exact_stimulus_at_fifo_tail

@@ -274,6 +274,46 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
   | Error detail -> Stimulus_storage_error detail
 ;;
 
+type keeper_invocation_enqueue_result =
+  | Keeper_invocation_enqueued
+  | Keeper_invocation_already_accepted
+  | Keeper_invocation_storage_error of string
+
+let enqueue_keeper_invocation_completion_result
+      ~base_path
+      ~keeper_name
+      ~request_id
+      stimulus
+  =
+  match
+    Keeper_event_queue_persistence.accept_keeper_invocation_result
+      ~base_path
+      ~keeper_name
+      ~request_id
+      ~stimulus
+      ~after_commit:(publish_pending ~base_path keeper_name)
+      ()
+  with
+  | Ok Keeper_event_queue_persistence.Keeper_invocation_accepted ->
+    Keeper_invocation_enqueued
+  | Ok Keeper_event_queue_persistence.Keeper_invocation_already_accepted ->
+    Keeper_invocation_already_accepted
+  | Error detail -> Keeper_invocation_storage_error detail
+;;
+
+let forget_keeper_invocation_receipt_result
+      ~base_path
+      ~keeper_name
+      ~request_id
+      ~stimulus
+  =
+  Keeper_event_queue_persistence.forget_keeper_invocation_receipt_result
+    ~base_path
+    ~keeper_name
+    ~request_id
+    ~stimulus
+;;
+
 let enqueue_hitl_resolution_durable_result
     ~base_path
     ~keeper_name

@@ -41,6 +41,10 @@ type settle_result = State.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
+type keeper_invocation_acceptance = State.keeper_invocation_acceptance =
+  | Keeper_invocation_accepted
+  | Keeper_invocation_already_accepted
+
 let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
 
@@ -602,6 +606,34 @@ let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
     ~after_commit:(fun _ -> ())
     (fun state ->
        match State.mark_transition_projected ~transition_id state with
+       | Error _ as error -> error
+       | Ok state -> Ok (state, ()))
+;;
+
+let accept_keeper_invocation_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~request_id
+      ~stimulus
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    State.accept_keeper_invocation ~request_id stimulus state)
+;;
+
+let forget_keeper_invocation_receipt_result
+      ~base_path
+      ~keeper_name
+      ~request_id
+      ~stimulus
+  =
+  commit_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       match State.forget_keeper_invocation_receipt ~request_id ~stimulus state with
        | Error _ as error -> error
        | Ok state -> Ok (state, ()))
 ;;

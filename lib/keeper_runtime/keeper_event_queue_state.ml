@@ -58,6 +58,11 @@ type outbox_entry =
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
+type keeper_invocation_receipt =
+  { request_id : string
+  ; stimulus : Keeper_event_queue.stimulus
+  }
+
 type t =
   { revision : int64
   ; next_lease_sequence : int64
@@ -65,11 +70,16 @@ type t =
   ; leases : lease list
   ; last_settlement : transition_receipt option
   ; transition_outbox : outbox_entry list
+  ; keeper_invocation_receipts : keeper_invocation_receipt list
   }
 
 type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+
+type keeper_invocation_acceptance =
+  | Keeper_invocation_accepted
+  | Keeper_invocation_already_accepted
 
 let schema = "keeper.event_queue.state.v2"
 
@@ -80,6 +90,7 @@ let empty =
   ; leases = []
   ; last_settlement = None
   ; transition_outbox = []
+  ; keeper_invocation_receipts = []
   }
 ;;
 
@@ -89,6 +100,9 @@ let pending state = state.pending
 let leases state = state.leases
 let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
+let keeper_invocation_receipts state =
+  List.map (fun receipt -> receipt.request_id) state.keeper_invocation_receipts
+;;
 let lease_kind (lease : lease) = lease.kind
 let active_lease state =
   match state.leases with
@@ -128,6 +142,64 @@ let enqueue_if_missing queue stimulus =
   if queue_contains queue stimulus
   then queue
   else Keeper_event_queue.enqueue queue stimulus
+;;
+
+let validate_keeper_invocation_completion ~request_id stimulus =
+  if String.equal request_id ""
+  then Error "Keeper invocation receipt requires a non-empty request id"
+  else
+    match stimulus.Keeper_event_queue.payload with
+    | Keeper_event_queue.Bg_completed completion
+      when completion.bg_kind = Keeper_event_queue.Keeper_invocation
+           && String.equal completion.bg_run_id request_id -> Ok ()
+    | Keeper_event_queue.Bg_completed _ ->
+      Error "Keeper invocation receipt does not match its typed completion"
+    | _ -> Error "Keeper invocation receipt requires a Bg_completed payload"
+;;
+
+let accept_keeper_invocation ~request_id stimulus state =
+  match validate_keeper_invocation_completion ~request_id stimulus with
+  | Error _ as error -> error
+  | Ok () ->
+    (match
+       List.find_opt
+         (fun receipt -> String.equal receipt.request_id request_id)
+         state.keeper_invocation_receipts
+     with
+     | Some receipt
+       when Keeper_event_queue.stimulus_identity_equal receipt.stimulus stimulus ->
+       Ok (state, Keeper_invocation_already_accepted)
+     | Some _ -> Error (Printf.sprintf "Keeper invocation receipt conflict: %s" request_id)
+     | None ->
+       Ok
+         ( { state with
+             pending = enqueue_if_missing state.pending stimulus
+           ; keeper_invocation_receipts =
+               { request_id; stimulus } :: state.keeper_invocation_receipts
+           }
+         , Keeper_invocation_accepted ))
+;;
+
+let forget_keeper_invocation_receipt ~request_id ~stimulus state =
+  match validate_keeper_invocation_completion ~request_id stimulus with
+  | Error _ as error -> error
+  | Ok () ->
+    (match
+       List.find_opt
+         (fun receipt -> String.equal receipt.request_id request_id)
+         state.keeper_invocation_receipts
+     with
+     | None -> Ok state
+     | Some receipt
+       when Keeper_event_queue.stimulus_identity_equal receipt.stimulus stimulus ->
+       Ok
+         { state with
+           keeper_invocation_receipts =
+             List.filter
+               (fun receipt -> not (String.equal receipt.request_id request_id))
+               state.keeper_invocation_receipts
+         }
+     | Some _ -> Error (Printf.sprintf "Keeper invocation receipt conflict: %s" request_id))
 ;;
 
 let prepend_missing stimuli queue =
@@ -787,6 +859,26 @@ let outbox_entry_of_yojson json =
   Ok { receipt; stimuli }
 ;;
 
+let keeper_invocation_receipt_to_yojson receipt =
+  `Assoc
+    [ "request_id", `String receipt.request_id
+    ; "stimulus", Keeper_event_queue.stimulus_to_yojson receipt.stimulus
+    ]
+;;
+
+let keeper_invocation_receipt_of_yojson json =
+  let context = "Keeper invocation receipt" in
+  let* fields = assoc_fields ~context json in
+  let* request_id = string_field ~context "request_id" fields in
+  let* stimulus_json = required_field ~context "stimulus" fields in
+  let* stimulus = Keeper_event_queue.stimulus_of_yojson stimulus_json in
+  match accept_keeper_invocation ~request_id stimulus empty with
+  | Ok ({ keeper_invocation_receipts = [ receipt ]; _ }, Keeper_invocation_accepted) ->
+    Ok receipt
+  | Ok _ -> Error "Keeper invocation receipt decoder produced an invalid state"
+  | Error _ as error -> error
+;;
+
 let to_yojson state =
   `Assoc
     [ "schema", `String schema
@@ -800,6 +892,11 @@ let to_yojson state =
         | Some receipt -> transition_receipt_to_yojson receipt )
     ; ( "transition_outbox"
       , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
+    ; ( "keeper_invocation_receipts"
+      , `List
+          (List.map
+             keeper_invocation_receipt_to_yojson
+             state.keeper_invocation_receipts) )
     ]
 ;;
 
@@ -826,6 +923,12 @@ let validate_state state =
   then Error "event queue state must contain at most one unprojected transition"
   else if state.leases <> [] && state.transition_outbox <> []
   then Error "event queue state cannot contain both an active lease and an outbox transition"
+  else if
+    Option.is_some
+      (duplicate_by
+         (fun receipt -> receipt.request_id)
+         state.keeper_invocation_receipts)
+  then Error "event queue state has duplicate Keeper invocation receipts"
   else if
     match state.last_settlement, state.transition_outbox with
     | Some receipt, [ entry ] ->
@@ -889,6 +992,19 @@ let of_yojson json =
     let* transition_outbox =
       list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     in
+    let* keeper_invocation_receipts =
+      match List.assoc_opt "keeper_invocation_receipts" fields with
+      | None -> Ok []
+      | Some (`List values) ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | value :: rest ->
+            let* receipt = keeper_invocation_receipt_of_yojson value in
+            loop (receipt :: acc) rest
+        in
+        loop [] values
+      | Some _ -> Error "keeper event queue state receipts must be a list"
+    in
     validate_state
       { revision
       ; next_lease_sequence
@@ -896,5 +1012,6 @@ let of_yojson json =
       ; leases
       ; last_settlement
       ; transition_outbox
+      ; keeper_invocation_receipts
       }
 ;;

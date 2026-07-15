@@ -8,7 +8,6 @@ val runtime_for_memory_os_consolidation : unit -> Runtime.t option
 
 val run_memory_os_consolidation_tick :
   ?complete:Keeper_memory_os_consolidation_runtime.complete_fn ->
-  ?timeout_sec:float ->
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->

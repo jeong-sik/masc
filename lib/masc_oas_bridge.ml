@@ -9,8 +9,10 @@
     [caller] (#10094) is a free-form identifier
     ("anti_rationalization", "operator_judge", ...) for attribution. *)
 let run_safe ~caller fn =
-  let t0 = Unix.gettimeofday () in
-  let elapsed () = Unix.gettimeofday () -. t0 in
+  let t0 = Unix.gettimeofday () (* NDT-OK: cancellation telemetry only. *) in
+  let elapsed () =
+    Unix.gettimeofday () (* NDT-OK: cancellation telemetry only. *) -. t0
+  in
   try fn () with
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* Preserve wall-duration class and the inner cancellation reason.

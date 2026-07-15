@@ -141,7 +141,6 @@ type t =
   | MemoryLaneInFlight
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
-  | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures
   | AlertPersistFailures
   | MetricsSseFailures

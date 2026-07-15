@@ -150,7 +150,6 @@ type t =
   | MemoryLaneInFlight
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
-  | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures
   | AlertPersistFailures
   | MetricsSseFailures
@@ -372,7 +371,6 @@ let to_string = function
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
   | MemoryLaneProviderSlotBusy -> "masc_keeper_memory_lane_provider_slot_busy_total"
   | MemoryBankCompactionFailures -> "masc_keeper_memory_bank_compaction_failures_total"
-  | MemoryOsMaintenanceKeeperTimeout -> "masc_keeper_memory_os_maintenance_keeper_timeout_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
   | AlertPersistFailures -> "masc_keeper_alert_persist_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"

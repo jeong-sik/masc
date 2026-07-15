@@ -2127,6 +2127,29 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
   `
 }
 
+function ChatPersistedThinkingBlock({ content, redacted }: { content: string; redacted: boolean }) {
+  if (!redacted) {
+    return html`
+      <div class="chat-block-trace" data-chat-block="thinking" data-chat-thinking-redacted="false">
+        <${ChatTraceStep} step=${{ kind: 'think', text: content }} />
+      </div>
+    `
+  }
+  return html`
+    <div class="chat-block-trace" data-chat-block="thinking" data-chat-thinking-redacted="true">
+      <div class="chat-block-tstep think">
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <div class="chat-block-tstep-row">
+            <span class="chat-block-tstep-kind">Thinking</span>
+          </div>
+          <div class="chat-block-tstep-text">Thinking 본문은 provider 서명으로만 제공되어 표시할 수 없습니다.</div>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: string }) {
   switch (block.t) {
     case 'p': return html`<${ChatTextBlock} html=${block.html} />`
@@ -2146,6 +2169,7 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
     case 'mermaid': return html`<${ChatMermaidBlock} source=${block.source} caption=${block.caption} />`
     case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
+    case 'thinking': return html`<${ChatPersistedThinkingBlock} content=${block.content} redacted=${block.redacted} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
     case 'fusion': return html`<${ChatFusionCard} boardPostId=${block.board_post_id} runId=${block.run_id} fallbackText=${fallbackText} />`
@@ -2418,9 +2442,10 @@ function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
 
 // Block types that parseMarkdownToBlocks cannot reproduce from message text:
 // synthesized voice clips, attachments, fusion deliberation cards, artifacts,
-// broadcasts, traces, shell transcripts. When an assistant/system message
+// broadcasts, traces, and shell transcripts. When an assistant/system message
 // carries one of these the server blocks are rendered as-is; otherwise the
-// prose is re-parsed richly. (Complement of the markdown-derived block set:
+// prose is re-parsed richly. (Complement of the
+// markdown-derived block set:
 // p/h4/ul/callout/table/code/mermaid/image/svg/link.)
 const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'voice',
@@ -2523,10 +2548,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
     })()
     return () => { active = false }
   }, [shouldParseRichBlocks, entry.text])
-  const effectiveBlocks = isFailureMessage ? [] : (parsedBlocks ?? entry.blocks ?? [])
+  const persistedThinkingBlocks = (entry.blocks ?? [])
+    .filter((block): block is Extract<ChatBlock, { t: 'thinking' }> => block.t === 'thinking')
+  const renderedServerBlocks = parsedBlocks !== null
+    ? [...persistedThinkingBlocks, ...parsedBlocks]
+    : (entry.blocks ?? [])
+  const effectiveBlocks = isFailureMessage ? [] : renderedServerBlocks
   const hasEffectiveBlocks = effectiveBlocks.length > 0
+  const hasNonThinkingBlocks = effectiveBlocks.some(block => block.t !== 'thinking')
   const collapseThreshold = 1200
-  const isCollapsible = !hasEffectiveBlocks && messageLength > collapseThreshold
+  const isCollapsible = !hasNonThinkingBlocks && messageLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -2737,7 +2768,17 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   diagnostic=${entry.error?.trim() ? entry.error : messageText}
                 />`
               : hasEffectiveBlocks
-              ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`
+              ? html`
+                  <${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />
+                  ${hasRealText && !hasNonThinkingBlocks
+                    ? html`
+                        <div
+                          class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+                          dangerouslySetInnerHTML=${renderPlainLinkedHtml(messageText)}
+                        />
+                      `
+                    : null}
+                `
               : traceOwnsIntermediateText
               ? null
               : html`

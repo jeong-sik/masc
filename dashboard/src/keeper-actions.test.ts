@@ -1267,6 +1267,11 @@ describe('sendKeeperThreadMessage stream outcome', () => {
         name: 'KEEPER_QUEUE_REQUEST',
         value: { request_id: 'kmsg_echo_cancelling', status: 'queued' },
       })
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta: 'preserved before cancellation' },
+      })
       return new Promise<{ terminal: boolean }>((_resolve, reject) => {
         opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
       })
@@ -1284,6 +1289,11 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_cancelling')
       expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     })
+    const cancelledAssistant = (keeperThreads.value.echo ?? [])
+      .find(entry => entry.role === 'assistant' && entry.delivery === 'cancelled')
+    expect(cancelledAssistant?.traceSteps).toEqual([
+      { kind: 'think', text: 'preserved before cancellation', ts: expect.any(String), oasBlockIndex: 0 },
+    ])
   })
 
   it('surfaces the actual persistence failure after a cancellation acknowledgement', async () => {

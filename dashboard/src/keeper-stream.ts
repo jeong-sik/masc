@@ -115,16 +115,6 @@ function flushPendingThinkingDeltas(
   persistActiveAssistantDraft(keeperName, assistantEntryId)
 }
 
-function dropPendingThinkingDeltas(keeperName: string, assistantEntryId: string): void {
-  const key = streamEntryKey(keeperName, assistantEntryId)
-  const pending = pendingThinkingDeltas.get(key)
-  if (!pending) return
-  pendingThinkingDeltas.delete(key)
-  if (pending.flushHandle !== null) {
-    cancelStreamFlush(pending.flushHandle)
-  }
-}
-
 function flushAllPendingThinkingDeltas(): void {
   for (const key of Array.from(pendingThinkingDeltas.keys())) {
     const [keeperName, assistantEntryId] = key.split('\u0000')
@@ -346,7 +336,7 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${requestId ? ` request=${requestId}` : ''}`)
   if (controller) controller.abort()
   if (entryId) {
-    dropPendingThinkingDeltas(keeperName, entryId)
+    flushPendingThinkingDeltas(keeperName, entryId)
     finalizeAssistantEntry(keeperName, entryId, {
       text: KEEPER_MESSAGE_CANCELLED_TEXT,
       rawText: KEEPER_MESSAGE_CANCELLED_TEXT,

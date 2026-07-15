@@ -840,6 +840,7 @@ export type ChatTraceToolStep = {
 }
 export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceProgressStep | ChatTraceToolStep
 export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[] }
+export type ChatThinkingBlock = { t: 'thinking'; content: string; redacted: boolean }
 
 export type ChatLinkBlock = { t: 'link'; url: string; title: string; desc?: string; meta?: string; fav?: string; kind?: string }
 
@@ -870,6 +871,7 @@ export type ChatBlock =
   | ChatSvgBlock
   | ChatMermaidBlock
   | ChatTraceBlock
+  | ChatThinkingBlock
   | ChatLinkBlock
   | ChatBroadcastBlock
   | ChatFusionBlock

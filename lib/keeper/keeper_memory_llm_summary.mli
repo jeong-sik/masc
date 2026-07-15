@@ -2,14 +2,7 @@
 
 val summary_max_tokens : int
 
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 val is_direct_completion_provider :
   Llm_provider.Provider_config.t -> bool
@@ -46,7 +39,6 @@ module For_testing : sig
   val summarize_with_provider :
     ?complete:complete_fn ->
     ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-    ?timeout_sec:float ->
     runtime_id:string ->
     sw:Eio.Switch.t ->
     net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
@@ -60,7 +52,6 @@ end
 
 val make :
   ?complete:complete_fn ->
-  ?timeout_sec:float ->
   runtime_id:string ->
   keeper_name:string ->
   unit ->

@@ -181,16 +181,13 @@ let () =
 
   (* ── timeout_safety ────────────────────────────────────────── *)
 
-  (* T1: timeout_s validation *)
-  assert_contains
-    ~label:"T1: timeout_s must be positive finite"
+  assert_not_contains
+    ~label:"bridge has no Eio timeout wrapper"
     src
-    "Float.classify_float timeout_s = FP_nan";
-
-  (* T2: per-caller timeout label exists *)
-  assert_contains
-    ~label:"T2: per-caller timeout Otel_metric_store label"
+    "Eio.Time.with_timeout";
+  assert_not_contains
+    ~label:"bridge has no timeout budget argument"
     src
-    "metric_oas_bridge_timeout";
+    "timeout_s";
 
   print_endline "test_masc_oas_bridge_cancel_boundary: OK"

@@ -3,14 +3,7 @@
     Included by {!Otel_metric_store} so existing callers keep using
     [Otel_metric_store.metric_*] bindings unchanged. *)
 
-(** Labelled [caller, timeout_s] so operators can distinguish short budgets
-    from intentional 120/180s budgets when both fire timeouts in the same
-    session. *)
-val metric_oas_bridge_timeout : string
-
-(** Labelled [caller, bucket] where bucket is a wall-clock class shared with
-    [masc_keeper_oas_cancel_total], allowing backend queries to union the two sources
-    for a fleet-wide bimodal view. *)
+(** Labelled [caller, bucket] to observe structured cancellation latency. *)
 val metric_oas_bridge_cancel : string
 
 val metric_oas_sse_relay_retries : string

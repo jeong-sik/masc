@@ -54,6 +54,9 @@ async function loadSurface(
   const resolveGateApproval = vi
     .fn()
     .mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' })
+  const retryGateAutoJudge = vi
+    .fn()
+    .mockResolvedValue({ ok: true, id: 'appr-1' })
   const setGateMode = vi
     .fn()
     .mockResolvedValue({ ok: true, mode: 'auto_judge', previous_mode: 'manual', actor: 'op', changed_at: '2026-06-19T00:00:00Z' })
@@ -63,6 +66,7 @@ async function loadSurface(
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),
     resolveGateApproval,
+    retryGateAutoJudge,
     deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
     setGateMode,
   })
@@ -77,7 +81,7 @@ async function loadSurface(
     navigate,
   }))
   const mod = await import('./approvals-surface')
-  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGateApproval, setGateMode, navigate }
+  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGateApproval, retryGateAutoJudge, setGateMode, navigate }
 }
 
 describe('ApprovalsSurface', () => {
@@ -204,6 +208,24 @@ describe('ApprovalsSurface', () => {
     expect(states).toContain('pending')
     expect(states).toContain('failed')
     expect(container.textContent).toContain('provider unavailable')
+    expect(container.textContent).toContain('수동 재시도 가능')
+  }, 20000)
+
+  it('retries a failed Auto Judge only after an explicit operator click', async () => {
+    const { ApprovalsSurface, retryGateAutoJudge } = await loadSurface([
+      queueItem({
+        id: 'appr-retry',
+        summary_status: { status: 'failed', reason: 'provider unavailable', retryable: true },
+      }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(retryGateAutoJudge).not.toHaveBeenCalled()
+    container.querySelector<HTMLButtonElement>('.ap-card .ap-act.retry')?.click()
+    await flushUi()
+    expect(retryGateAutoJudge).toHaveBeenCalledWith('appr-retry')
   }, 20000)
 
   it('renders no summary block when the approval has no summary status', async () => {
@@ -483,12 +505,14 @@ describe('ApprovalsSurface', () => {
     vi.doMock('../../api', () => ({
       fetchDashboardGate,
       resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+      retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../api/dashboard-gate', () => ({
       fetchDashboardGate,
       resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+      retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
@@ -521,12 +545,14 @@ describe('ApprovalsSurface', () => {
     vi.doMock('../../api', () => ({
       fetchDashboardGate,
       resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+      retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../api/dashboard-gate', () => ({
       fetchDashboardGate,
       resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+      retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))

@@ -104,15 +104,15 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid max_output_tokens %d" n
 
-let timeout_budget_opt timeout_s =
+let provider_timeout_opt timeout_s =
   if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
 
-let apply_timeout_budget ?timeout_s (base_config : Runtime_agent.config) =
-  match Option.bind timeout_s timeout_budget_opt with
+let apply_provider_timeout ?timeout_s (base_config : Runtime_agent.config) =
+  match Option.bind timeout_s provider_timeout_opt with
   | None -> base_config
   | Some timeout_s ->
-    (* Fusion owns the structural wall-clock budget via the outer
-       Masc_oas_bridge.run_safe call. *)
+    (* OAS selects the single applicable Provider boundary: inter-event idle
+       for streaming, response body for non-streaming. *)
     { base_config with
       Runtime_agent.stream_idle_timeout_s = Some timeout_s
     ; body_timeout_s = Some timeout_s
@@ -196,7 +196,7 @@ let build_agent
            ~system_prompt
            ~tools
        in
-       let base_config = apply_timeout_budget ?timeout_s base_config in
+       let base_config = apply_provider_timeout ?timeout_s base_config in
        let config =
          match max_tokens with
          | None -> Ok base_config
@@ -218,6 +218,6 @@ let build_agent
                  : Fusion_types.panel_failure))))
 
 module For_testing = struct
-  let apply_timeout_budget = apply_timeout_budget
+  let apply_provider_timeout = apply_provider_timeout
   let empty_response_detail = empty_response_detail
 end

@@ -39,6 +39,7 @@ import {
   gateApprovalActing,
   refreshGate,
   respondToKeeperApproval,
+  retryKeeperAutoJudge,
   setKeeperGateMode,
 } from '../gate-store'
 
@@ -245,7 +246,7 @@ function approvalSummaryBlock(status: HitlSummaryStatus | null | undefined) {
       </div>`
     case 'failed':
       return html`<div class="ap-summary ap-summary-failed" data-testid="approval-summary" data-summary-state="failed">
-        <span class="ap-summary-label">컨텍스트 요약 실패${status.retryable ? ' · 재시도 예정' : ''}</span>
+        <span class="ap-summary-label">컨텍스트 요약 실패 · 수동 재시도 가능</span>
         ${status.reason ? html`<span class="ap-summary-reason">${status.reason}</span>` : null}
       </div>`
     case 'available':
@@ -325,6 +326,15 @@ function ApprovalCard({
           </div>
         </div>
         <div class="ap-actions">
+          ${item.summary_status?.status === 'failed'
+            ? html`<button
+                type="button"
+                class="ap-act retry"
+                onClick=${() => void retryKeeperAutoJudge(item.id)}
+                title="자동 반복 없이 Auto Judge를 정확히 한 번 다시 요청합니다"
+                disabled=${anyBusy}
+              >${busy ? '요청 중…' : 'Auto Judge 재시도'}</button>`
+            : null}
           <button
             type="button"
             class="ap-act approve"

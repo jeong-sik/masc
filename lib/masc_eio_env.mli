@@ -12,15 +12,15 @@
     process-wide fallback; an OCaml domain that performs OAS HTTP calls
     must call {!init} with handles, including a clock, owned by that
     domain. See [docs/oas-bridge-clock-timeout-contract.md] for the
-    migration contract. *)
+    Provider timeout contract. *)
 
 type t = {
   sw : Eio.Switch.t;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
 }
-(** Captured Eio handles. [clock] is mandatory because timeout-enforced
-    OAS calls cannot be represented safely without one. *)
+(** Captured Eio handles. [clock] is passed to the OAS Provider transport,
+    which owns the single LLM timeout boundary. *)
 
 val init :
   sw:Eio.Switch.t ->

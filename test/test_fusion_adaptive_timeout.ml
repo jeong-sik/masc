@@ -1,6 +1,4 @@
-(* FUSION adaptive timeout / P0 hardening tests.
-   Covers: config parse/validation, pure adjust_judge_timeout semantics,
-   OTel counter emission, and sink meta JSON for failed judge nodes. *)
+(* Fusion legacy budget parsing and timeout observation tests. *)
 
 open Alcotest
 open Masc
@@ -8,33 +6,6 @@ open Fusion_types
 
 let sample_usage : Fusion_types.usage =
   { Fusion_types.input_tokens = 10; output_tokens = 5 }
-
-let sample_synthesis : Fusion_types.judge_synthesis =
-  { Fusion_types.consensus = []
-  ; contradictions = []
-  ; partial_coverage = []
-  ; unique_insights = []
-  ; blind_spots = []
-  ; resolved_answer = "ok"
-  ; decision = Fusion_types.Answer "ok"
-  }
-
-let sample_judge model : Fusion_policy.judge_spec =
-  { Fusion_policy.jmodel = model
-  ; jlabel = ""
-  ; jsystem_prompt = "judge"
-  ; jweb_tools = false
-  ; jmax_output_tokens = None
-  ; jtimeout_s = 1.0
-  ; jmax_timeout_s = None
-  }
-
-let failed_judge_run model failure :
-    Fusion_orchestrator_judge_wave.judge_run =
-  sample_judge model, model, Error (failure, Fusion_types.zero_usage), 0.0, false
-
-let ok_judge_run model : Fusion_orchestrator_judge_wave.judge_run =
-  sample_judge model, model, Ok (sample_synthesis, sample_usage), 0.0, false
 
 let parse s = Otoml.Parser.from_string s
 
@@ -144,105 +115,18 @@ adaptive_timeout_factor = 0.5
          es)
   | Ok _ -> fail "expected Error Invalid_adaptive_timeout_factor"
 
-let test_adjust_judge_timeout_disabled () =
-  check (option (float 0.001)) "factor=1.0 within budget" (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  check (option (float 0.001)) "factor=1.0 over budget" None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:14.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  check (option (float 0.001)) "wave budget 0 disables cap" (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:0.0 ~elapsed_s:500.0 ~already_timed_out:false)
-
-let test_adjust_judge_timeout_extend () =
-  check (option (float 0.001)) "extend capped by max_s" (Some 15.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 15.0)
-       ~factor:2.0 ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  check (option (float 0.001)) "extend capped by remaining budget" (Some 7.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:12.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  check (option (float 0.001)) "extend below 0.001 -> None" None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:5.0 ~elapsed_s:5.0 ~already_timed_out:true)
-
-let test_runtime_clock_missing_env_returns_typed_failure () =
+let test_runtime_clock_does_not_gate_meta_provider_call () =
   Masc_eio_env.reset_for_test ();
   Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-    let missing_clock_failure =
-      Fusion_types.Internal_error "missing runtime clock"
-    in
-    let clock =
-      Fusion_orchestrator_judge_wave.make_runtime_clock ~missing_clock_failure
-    in
+    let clock = Fusion_orchestrator_judge_wave.make_runtime_clock () in
     match
-      Fusion_orchestrator_judge_wave.meta_budget_check
+      Fusion_orchestrator_judge_wave.meta_provider_timeout
         ~preset:(adaptive_preset ())
         clock
     with
-    | Error (Fusion_types.Internal_error msg, usage) ->
-      check string "typed failure message" "missing runtime clock" msg;
-      check int "input usage" 0 usage.Fusion_types.input_tokens;
-      check int "output usage" 0 usage.Fusion_types.output_tokens
+    | Ok timeout_s -> check (float 0.001) "configured Provider timeout" 90.0 timeout_s
     | Error (failure, _) ->
-      failf
-        "expected Internal_error, got %s"
-        (Fusion_types.judge_failure_text failure)
-    | Ok _ -> fail "expected missing clock failure")
-
-let test_timeout_budget_first_wave_appends_fallback () =
-  let fallback_calls = ref 0 in
-  let fallback = ok_judge_run "fallback-model" in
-  let runs =
-    [ failed_judge_run "judge-a" Fusion_types.Timeout
-    ; failed_judge_run
-        "judge-b"
-        (Fusion_types.Budget_exceeded "wave budget exhausted")
-    ]
-  in
-  let with_fallback =
-    Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
-      ~run_fallback_judge:(fun () ->
-        incr fallback_calls;
-        Some fallback)
-      runs
-  in
-  check int "fallback called once" 1 !fallback_calls;
-  check int "fallback appended" 3 (List.length with_fallback);
-  match List.rev with_fallback with
-  | (_, id, Ok _, _, _) :: _ -> check string "fallback id" "fallback-model" id
-  | _ -> fail "expected appended successful fallback"
-
-let test_timeout_budget_first_wave_skips_fallback_on_provider_error () =
-  let fallback_calls = ref 0 in
-  let runs =
-    [ failed_judge_run "judge-a" Fusion_types.Timeout
-    ; failed_judge_run "judge-b" (Fusion_types.Provider_error "hard failure")
-    ]
-  in
-  let without_fallback =
-    Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
-      ~run_fallback_judge:(fun () ->
-        incr fallback_calls;
-        Some (ok_judge_run "fallback-model"))
-      runs
-  in
-  check int "fallback not called" 0 !fallback_calls;
-  check int "original runs kept" 2 (List.length without_fallback)
-
-let test_record_adaptive_timeout_emits () =
-  let before =
-    Otel_metric_store.metric_value_or_zero
-      Fusion_metrics.metric_fusion_adaptive_timeout_extensions_total
-      ()
-  in
-  Fusion_metrics.record_adaptive_timeout ();
-  let after =
-    Otel_metric_store.metric_value_or_zero
-      Fusion_metrics.metric_fusion_adaptive_timeout_extensions_total
-      ()
-  in
-  check (float 0.0) "adaptive timeout counter incremented" (before +. 1.0) after
+      failf "clock unexpectedly gated meta call: %s" (Fusion_types.judge_failure_text failure))
 
 let test_sink_failed_node_includes_timeout_fields () =
   let node =
@@ -278,23 +162,9 @@ let () =
         ; test_case "invalid_adaptive_factor" `Quick
             test_config_invalid_adaptive_factor
         ] )
-    ; ( "adjust_judge_timeout"
-      , [ test_case "disabled" `Quick test_adjust_judge_timeout_disabled
-        ; test_case "extend" `Quick test_adjust_judge_timeout_extend
-        ] )
     ; ( "clock"
-      , [ test_case "missing runtime env returns typed failure" `Quick
-            test_runtime_clock_missing_env_returns_typed_failure
-        ] )
-    ; ( "fallback"
-      , [ test_case "timeout/budget wave appends fallback" `Quick
-            test_timeout_budget_first_wave_appends_fallback
-        ; test_case "provider failure skips fallback" `Quick
-            test_timeout_budget_first_wave_skips_fallback_on_provider_error
-        ] )
-    ; ( "metrics"
-      , [ test_case "record_adaptive_timeout emits counter" `Quick
-            test_record_adaptive_timeout_emits
+      , [ test_case "missing runtime clock does not gate meta call" `Quick
+            test_runtime_clock_does_not_gate_meta_provider_call
         ] )
     ; ( "sink"
       , [ test_case "failed_node_includes_timeout_fields" `Quick

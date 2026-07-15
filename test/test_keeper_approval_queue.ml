@@ -661,7 +661,7 @@ let test_summary_updates_never_resolve_pending_request () =
              | Error error -> Alcotest.fail (AQ.storage_error_to_string error))))
 ;;
 
-let test_only_retryable_summary_failure_restarts () =
+let test_all_summary_failures_accept_explicit_restart () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-retry" in
   Fun.protect
@@ -694,21 +694,24 @@ let test_only_retryable_summary_failure_restarts () =
             ~reason:"terminal"
             ~retryable:false);
        check_update
-         "retryable CAS restarts"
+         "retryable diagnostic CAS restarts"
          true
-         (AQ.restart_retryable_summary ~id:retryable_id);
+         (AQ.restart_failed_summary ~id:retryable_id);
        check_update
-         "nonretryable state is unchanged"
-         false
-         (AQ.restart_retryable_summary ~id:terminal_id);
+         "nonretryable diagnostic does not block operator restart"
+         true
+         (AQ.restart_failed_summary ~id:terminal_id);
        (match AQ.get_pending_entry ~id:retryable_id with
+       | Some { summary_status = AQ.Summary_pending; _ } -> ()
+       | Some _ | None -> Alcotest.fail "retryable summary did not return to pending");
+       (match AQ.get_pending_entry ~id:terminal_id with
         | Some { summary_status = AQ.Summary_pending; _ } -> ()
-        | Some _ | None -> Alcotest.fail "retryable summary did not return to pending");
+        | Some _ | None -> Alcotest.fail "operator restart was gated by diagnostic state");
        reject_and_cleanup retryable_id;
        reject_and_cleanup terminal_id)
 ;;
 
-let test_retryable_auto_judge_recovery_is_lane_local () =
+let test_lane_activity_does_not_retry_failed_auto_judge () =
   let base_path = temp_dir () in
   let keeper_a = "queue-retry-lane-a" in
   let keeper_b = "queue-retry-lane-b" in
@@ -760,11 +763,11 @@ let test_retryable_auto_judge_recovery_is_lane_local () =
             { summary_status = AQ.Summary_failed { reason; retryable = true }
             ; _
             } ->
-          Alcotest.(check bool)
-            "same lane attempted retry"
-            true
-            (not (String.equal reason "lane-a-original"))
-        | Some _ | None -> Alcotest.fail "same-lane retry state is not observable");
+          Alcotest.(check string)
+            "same lane failure remains untouched"
+            "lane-a-original"
+            reason
+        | Some _ | None -> Alcotest.fail "same-lane failure state is not observable");
        (match AQ.get_pending_entry ~id:id_b with
         | Some
             { summary_status =
@@ -773,7 +776,7 @@ let test_retryable_auto_judge_recovery_is_lane_local () =
             } ->
           ()
         | Some _ | None ->
-          Alcotest.fail "lane A activity retried another Keeper's judge");
+          Alcotest.fail "lane activity changed another Keeper's judge failure");
        reject_and_cleanup id_a;
        reject_and_cleanup id_b;
        List.iter
@@ -1304,13 +1307,13 @@ let () =
             `Quick
             test_summary_updates_never_resolve_pending_request
         ; Alcotest.test_case
-            "only retryable summary failure restarts"
+            "all summary failures accept explicit operator restart"
             `Quick
-            test_only_retryable_summary_failure_restarts
+            test_all_summary_failures_accept_explicit_restart
         ; Alcotest.test_case
-            "retryable Auto Judge recovery is lane-local"
+            "lane activity never retries a failed Auto Judge"
             `Quick
-            test_retryable_auto_judge_recovery_is_lane_local
+            test_lane_activity_does_not_retry_failed_auto_judge
         ; Alcotest.test_case
             "decisive summary finalizes after restart"
             `Quick

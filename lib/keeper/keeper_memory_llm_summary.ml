@@ -22,7 +22,7 @@ let () =
     ~name:Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
     ~help:
       "Total [summarize_with_provider] attempts classified by label \
-       [outcome] (ok_summary | timed_out | http_error | empty_response | \
+       [outcome] (ok_summary | http_error | empty_response | \
        invalid_structured_response). \
        Labels: [outcome], [provider] (neutral runtime lane — concrete \
        model_id is OAS-owned and redacted per RFC-0132 PR-2), [runtime_id]."
@@ -44,17 +44,7 @@ let () =
 let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
-
-let default_complete ~sw ~net ?clock ~config ~messages () =
-  Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 let is_direct_completion_provider
     (provider_cfg : Llm_provider.Provider_config.t) : bool =
@@ -163,26 +153,6 @@ let summary_text_of_response response =
   | Error _ -> None
 ;;
 
-type 'a timeout_result =
-  | Completed of 'a
-  | Timed_out
-  | Clock_unavailable
-
-(* No wall-clock budget kill (fail-open; RFC-0156 withdrew the MASC turn-budget
-   timeout policy). Run [f] to natural completion instead of wrapping it in
-   [Eio.Time.with_timeout_exn]: a slow-but-healthy provider that is still
-   streaming would otherwise turn every budget expiry into kill -> error ->
-   retry churn. A genuine INNER transport timeout raised from within [f]
-   (HTTP client / connect / idle) still surfaces as [Eio.Time.Timeout] ->
-   [Timed_out]. [Eio.Cancel.Cancelled] is not caught here, so it propagates
-   unchanged. The no-clock branch stays as-is (env-not-initialised guard). *)
-let with_timeout ?clock ~timeout_sec:_ f =
-  match clock with
-  | None -> Clock_unavailable
-  | Some _clock ->
-    (try Completed (f ()) with
-     | Eio.Time.Timeout -> Timed_out)
-
 let record_summary_outcome
     ~(runtime_id : string)
     ~(outcome : Keeper_memory_llm_summary_outcome.t) =
@@ -196,9 +166,8 @@ let record_summary_outcome
     ()
 
 let summarize_with_provider
-    ?(complete : complete_fn = default_complete)
+    ?complete
     ?clock
-    ?(timeout_sec = Env_config_runtime_services.Inference.timeout_seconds)
     ~runtime_id
     ~sw
     ~net
@@ -210,21 +179,10 @@ let summarize_with_provider
   let messages = messages_for_summary ~trace_id ~texts in
   let result, outcome =
     match
-      with_timeout ?clock ~timeout_sec (fun () ->
-        complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+      Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
+        ~config:provider_cfg ~messages ()
     with
-    | Timed_out ->
-        Log.Keeper.warn
-          "memory LLM summary timed out trace_id=%s runtime=%s timeout_sec=%.1f"
-          trace_id runtime_id timeout_sec;
-        None, Keeper_memory_llm_summary_outcome.Timed_out
-    | Clock_unavailable ->
-        Log.Keeper.warn
-          "memory LLM summary clock unavailable trace_id=%s runtime=%s \
-           timeout_sec=%.1f — refusing provider call without enforcing timeout"
-          trace_id runtime_id timeout_sec;
-        None, Keeper_memory_llm_summary_outcome.Clock_unavailable
-    | Completed (Ok response) ->
+    | Ok response ->
         (match summary_text_result_of_response response with
          | Ok summary ->
              Some summary, Keeper_memory_llm_summary_outcome.Ok_summary
@@ -239,7 +197,7 @@ let summarize_with_provider
                 runtime=%s detail=%s"
                trace_id runtime_id detail;
              None, Keeper_memory_llm_summary_outcome.Invalid_structured_response)
-    | Completed (Error err) ->
+    | Error err ->
         Log.Keeper.warn
           "memory LLM summary failed trace_id=%s runtime=%s: %s"
           trace_id runtime_id (Provider_http_error.to_message err);
@@ -258,7 +216,6 @@ end
 let summarize_with_providers
     ?complete
     ?clock
-    ?timeout_sec
     ~runtime_id
     ~sw
     ~net
@@ -270,7 +227,7 @@ let summarize_with_providers
     | [] -> None
     | provider_cfg :: rest -> (
         match
-          summarize_with_provider ?complete ?clock ?timeout_sec ~runtime_id
+          summarize_with_provider ?complete ?clock ~runtime_id
             ~sw ~net ~provider_cfg ~trace_id ~texts ()
         with
         | Some summary -> Some summary
@@ -293,7 +250,6 @@ let summarize_with_providers
 
 let make
     ?complete
-    ?timeout_sec
     ~(runtime_id : string)
     ~(keeper_name : string)
     () : Keeper_memory_bank.memory_consolidation_summarizer option =
@@ -328,7 +284,7 @@ let make
              end else
                Some
                  (fun ~trace_id ~texts ->
-                   summarize_with_providers ?complete ?clock ?timeout_sec
+                   summarize_with_providers ?complete ?clock
                      ~runtime_id:provider_runtime_id ~sw ~net ~providers ~trace_id ~texts ()))
     | _ ->
         Log.Keeper.warn ~keeper_name:keeper_name

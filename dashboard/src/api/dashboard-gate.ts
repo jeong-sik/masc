@@ -153,6 +153,12 @@ export function resolveGateApproval(
   })
 }
 
+export function retryGateAutoJudge(
+  id: string,
+): Promise<{ ok: boolean; id: string }> {
+  return post('/api/v1/dashboard/gate/retry', { id })
+}
+
 export function deleteGateApprovalRule(
   id: string,
 ): Promise<{ ok: boolean; id: string }> {

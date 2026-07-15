@@ -9,24 +9,13 @@
     conversation. Every failure path is a typed JSON error — never a silent empty
     success (the failure class the RFC targets).
 
-    Mirrors the provider-sub-call shape of [Keeper_librarian_runtime]; the small
-    [complete_fn] helper is replicated here rather than shared, until a third
-    sub-call consumer justifies extracting a common module. Unlike the librarian,
-    a single vision provider attempt runs to completion (no wall-clock kill,
-    RFC-0156); the per-request deadline only schedules failover to the next
-    runtime.
+    Uses the shared {!Keeper_provider_subcall} boundary, so the tool owns no
+    wall-clock cancellation layer.
     Artifact filesystem I/O is offloaded through {!Eio_guard.run_in_systhread}
     when the Eio runtime is active, so durable fsync/rename work does not block
     the shared Eio domain. *)
 
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 val vision_default_max_tokens : int
 (** Fallback output budget for the one-shot vision sub-call when the selected
@@ -113,7 +102,6 @@ type vision_outcome =
 
 val run_vision
   :  ?complete:complete_fn
-  -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -122,19 +110,15 @@ val run_vision
   -> bytes:string
   -> unit
   -> vision_outcome
-(** The one-shot vision sub-call core (runtime resolution + provider call run to
-    completion + §2.2 classification). A single provider attempt is not
-    wall-clock killed (RFC-0156); the turn clock is required for the cumulative
-    failover deadline — which gates whether the {e next} candidate runtime is
-    started — and for the provider transport clock. Used by {!handle} and by
-    eager ingestion. Non-cancellation exceptions are converted to [Vo_provider];
-    provider success with malformed structured output is
+(** The one-shot vision sub-call core (runtime resolution + Provider-boundary
+    call + §2.2 classification). Used by {!handle} and by eager ingestion.
+    Non-cancellation exceptions are converted to
+    [Vo_provider]; provider success with malformed structured output is
     [Vo_invalid_structured_response], so eager ingestion can keep the turn alive
     with a typed unread placeholder. *)
 
 val handle
   :  ?complete:complete_fn
-  -> ?timeout_sec:float
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -145,7 +129,6 @@ val handle
 
 val handle_with_outcome
   :  ?complete:complete_fn
-  -> ?timeout_sec:float
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -160,7 +143,7 @@ val handle_with_outcome
     string: [{"ok":true,"text":...}] or
     [{"ok":false,"error":code,"failure_class":class[,"detail":...]}] with code
     one of [invalid_args | eio_context_unavailable | artifact_load_failed |
-    invalid_timeout | image_too_large | invalid_media_type | invalid_request |
+    image_too_large | invalid_media_type | invalid_request |
     no_capable_runtime | timeout | provider_error | empty_extraction |
     truncated_extraction]. [complete] defaults to the live provider call (inject
     in tests). Never returns a raw empty success. *)

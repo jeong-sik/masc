@@ -81,7 +81,6 @@ type t =
   | TransitionAuditFailures
   | ExecutionReceiptFailures
   | OperatorBroadcastSuppressed
-  | LlmBridgeFailures
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures

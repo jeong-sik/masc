@@ -155,8 +155,6 @@
   test_sse_qw
   test_sse_stream
   test_health
-  test_masc_oas_bridge_timeout_guard
-  test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
@@ -475,8 +473,6 @@
   test_sse_qw
   test_sse_stream
   test_health
-  test_masc_oas_bridge_timeout_guard
-  test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
@@ -1984,7 +1980,6 @@
 
 (include stanzas/test_oas_bridge_judge_callers_9629.inc)
 
-(include stanzas/test_oas_bridge_timeout_ssot_10094.inc)
 
 (include stanzas/test_keeper_runtime_observation_boundaries.inc)
 

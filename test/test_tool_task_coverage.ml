@@ -488,7 +488,7 @@ let () = test "masc_oas_bridge_fails_closed_without_eio_env" (fun () ->
   | None ->
     let called = ref false in
     match
-      Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
+      Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" (fun () ->
         called := true;
         Ok "ok")
     with

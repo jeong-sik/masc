@@ -355,27 +355,6 @@ let test_missing_clock_is_runtime_failure_without_provider_call () =
     assert (String.equal (assoc_string "error" json) "eio_context_unavailable");
     assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
 
-let test_invalid_timeout_is_runtime_failure_without_provider_call () =
-  with_temp_base (fun _ ->
-    let meta = make_meta "vision-invalid-timeout" in
-    let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
-    let raw =
-      Eio_main.run (fun env ->
-        Eio.Switch.run (fun sw ->
-          Vt.handle
-            ~complete:complete_should_not_run
-            ~timeout_sec:0.0
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            ~net:(Eio.Stdenv.net env)
-            ~meta
-            ~args:(artifact_args handle)
-            ()))
-    in
-    let json = json_of_output raw in
-    assert (String.equal (assoc_string "error" json) "invalid_timeout");
-    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
-
 let test_non_string_media_type_is_policy_rejection () =
   with_temp_base (fun _ ->
     let meta = make_meta "vision-media-type-non-string" in
@@ -793,7 +772,7 @@ let test_retryable_provider_error_tries_next_runtime () =
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
-let test_deadline_exhaustion_preserves_provider_error () =
+let test_candidate_failover_is_not_cut_off_by_local_deadline () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-deadline-provider-error" in
@@ -810,7 +789,6 @@ let test_deadline_exhaustion_preserves_provider_error () =
           Eio.Switch.run (fun sw ->
             Vt.handle
               ~complete
-              ~timeout_sec:0.001
               ~sw
               ~clock:(Eio.Stdenv.clock env)
               ~net:(Eio.Stdenv.net env)
@@ -819,8 +797,8 @@ let test_deadline_exhaustion_preserves_provider_error () =
               ()))
       in
       let json = json_of_output raw in
-      assert (!calls = 1);
-      assert (List.rev !models = [ "vision-a" ]);
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "transient_error")))
 
@@ -1121,7 +1099,6 @@ let () =
   test_missing_eio_context_is_runtime_failure ();
   test_invalid_media_type_is_policy_rejection ();
   test_missing_clock_is_runtime_failure_without_provider_call ();
-  test_invalid_timeout_is_runtime_failure_without_provider_call ();
   test_non_string_media_type_is_policy_rejection ();
   test_unknown_magic_bytes_are_policy_rejection ();
   test_oversize_image_is_runtime_failure_before_provider_call ();
@@ -1136,7 +1113,7 @@ let () =
     test_invalid_structured_vision_response_is_runtime_failure ();
     test_run_vision_invalid_structured_response_is_typed ();
     test_retryable_provider_error_tries_next_runtime ();
-    test_deadline_exhaustion_preserves_provider_error ();
+  test_candidate_failover_is_not_cut_off_by_local_deadline ();
     test_non_retryable_provider_error_stops_without_trying_next_runtime ();
     test_accept_rejected_is_policy_rejection_without_failover ();
     test_eager_eviction_reason_preserves_typed_outcome ());

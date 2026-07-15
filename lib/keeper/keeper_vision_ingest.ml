@@ -33,7 +33,6 @@ let image_store_failed_placeholder ~reason =
   Printf.sprintf "[image — could not store for delegation: %s]" reason
 ;;
 
-let eager_timeout_sec = 30.0
 let max_eager_reads_per_turn = 1
 let max_read_text_chars = 4000
 
@@ -89,7 +88,8 @@ let raw_bytes_of_image_data data =
 
 (* Eager extraction through the shared vision core, only when an Eio context is
    present (prod turn). Absent (tests / pre-bootstrap) -> [None]; the caller then
-   emits an unread placeholder. Bounded by [run_vision]'s [with_timeout]. *)
+   emits an unread placeholder. Provider cancellation, when configured, is
+   owned by the shared Provider boundary. *)
 let eager_read ~media_type ~bytes : (string, string) result option =
   match
     Eio_context.get_net_opt (), Eio_context.get_switch_opt (), Eio_context.get_clock_opt ()
@@ -100,7 +100,6 @@ let eager_read ~media_type ~bytes : (string, string) result option =
          ~sw
          ~clock
          ~net
-         ~timeout_sec:eager_timeout_sec
          ~query:extraction_query
          ~media_type
          ~bytes

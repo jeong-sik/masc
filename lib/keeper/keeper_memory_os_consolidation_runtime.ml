@@ -14,39 +14,9 @@ module Consolidation = Keeper_memory_os_consolidation
 
 (* Same shape as [Keeper_memory_llm_summary.complete_fn]; the LLM call is
    injectable so the loop is driveable with a fake completion in tests. *)
-type complete_fn = Keeper_memory_llm_summary.complete_fn
-
-let default_complete ~sw ~net ?clock ~config ~messages () =
-  Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
-;;
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 let user_message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
-;;
-
-type 'a timeout_result =
-  | Completed of 'a
-  | Timed_out
-  | Clock_unavailable
-
-(* Fail-open per RFC-0156 (MASC turn-budget timeout policy withdrawn) / repo-owner
-   directive (mirrors [Keeper_llm_bridge]
-   @151ac9a27f): a wall-clock budget must NOT force-kill a legitimate LLM/agent
-   execution. The old [Eio.Time.with_timeout_exn] kill only produced
-   kill -> error -> retry churn on slow-but-legitimate provider calls, so [f] now
-   runs to natural completion. A genuine INNER transport timeout still raises
-   [Eio.Time.Timeout] (from the provider's own transport/idle deadlines) and is
-   surfaced as [Timed_out]. [Eio.Cancel.Cancelled] is deliberately not caught here
-   so it propagates (re-raises) to the enclosing switch. [timeout_sec] is no longer
-   consulted for a wall deadline (kept in the signature as advisory only).
-   The [None -> Clock_unavailable] fail-closed guard is retained unchanged: without
-   a clock the provider's inner transport cannot enforce its own idle/connect
-   deadlines, so the call is still refused upstream. *)
-let with_timeout ?clock ~timeout_sec:_ f =
-  match clock with
-  | None -> Clock_unavailable
-  | Some _clock ->
-    (try Completed (f ()) with
-     | Eio.Time.Timeout -> Timed_out)
 ;;
 
 (* The plan can list many groups over a large store, so allow more than the
@@ -153,9 +123,8 @@ let invalid_structured_response_detail detail =
    raising for the expected failure modes (too few facts, transport error,
    unparseable plan) so a caller fiber stays alive. *)
 let consolidate_keeper
-      ?(complete = default_complete)
+      ?complete
       ?clock
-      ?(timeout_sec = Env_config_runtime_services.Inference.timeout_seconds)
       ?(dry_run = false)
       ~sw
       ~net
@@ -180,18 +149,11 @@ let consolidate_keeper
          | Error msg -> Transport_failed ("consolidation provider config rejected: " ^ msg)
          | Ok () ->
         (match
-           with_timeout ?clock ~timeout_sec (fun () ->
-             complete ~sw ~net ?clock ~config ~messages ())
+           Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
+             ~config ~messages ()
          with
-         | Timed_out -> Transport_failed "consolidation provider timed out"
-         | Clock_unavailable ->
-           Transport_failed
-             (Printf.sprintf
-                "consolidation provider clock unavailable; refusing provider call \
-                 without enforcing timeout_sec=%.1f"
-                timeout_sec)
-         | Completed (Error _) -> Transport_failed "consolidation provider transport error"
-         | Completed (Ok response) ->
+         | Error _ -> Transport_failed "consolidation provider transport error"
+         | Ok response ->
            if String.trim (Agent_sdk_response.text_of_response response) = ""
            then Empty_response
            else

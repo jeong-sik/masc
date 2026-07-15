@@ -235,9 +235,10 @@ val attach_summary :
 val mark_summary_failed :
   id:string -> reason:string -> retryable:bool -> (bool, storage_error) result
 
-(** Durably transition only [Summary_failed { retryable = true }] back to the
-    in-flight marker. This exact CAS has no timer or retry-count policy. *)
-val restart_retryable_summary : id:string -> (bool, storage_error) result
+(** Durably transition any [Summary_failed] state back to the in-flight marker.
+    Only explicit operator action calls this CAS, so the diagnostic [retryable]
+    classification never controls work. There is no timer or retry count. *)
+val restart_failed_summary : id:string -> (bool, storage_error) result
 
 val pending_count : unit -> int
 val pending_count_for_keeper : keeper_name:string -> int

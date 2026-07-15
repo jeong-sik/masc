@@ -60,14 +60,6 @@ let metric_telemetry_observe_failures = Otel_metric_store_core.declare_counter "
    most 19 (3 + 8 + 8). *)
 let metric_workspace_telemetry_drop = Otel_metric_store_core.declare_counter "masc_workspace_telemetry_drop_total"
 
-(* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
-   timeouts.  The [caller] string supplied at the run_safe entry
-   point lets the operator see WHICH caller is timing out at
-   WHICH configured budget without grepping warn-level log
-   lines.  Paired with per-caller env-overridable defaults in
-   [Env_config_oas_bridge] so remaining evaluator/advisory callers
-   expose their own budgets instead of hiding behind one generic OAS
-   timeout class. *)
 include Otel_oas_metric_names
 
 

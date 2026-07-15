@@ -946,14 +946,6 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
         24
         (Env_config.KeeperMemoryOs.librarian_max_messages ()));
     check_log_contains lines Env_config.KeeperMemoryOs.librarian_max_messages_env_key;
-    check_log_contains lines "using default");
-  with_captured_console_lines (fun lines ->
-    with_memory_os_env Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key "nan" (fun () ->
-      Alcotest.(check (float 0.001))
-        "invalid timeout falls back"
-        600.0
-        (Env_config.KeeperMemoryOs.librarian_timeout_sec ()));
-    check_log_contains lines Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key;
     check_log_contains lines "using default")
 ;;
 
@@ -1013,8 +1005,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_cadence_turns () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_max_messages_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_messages () : int) )
-  ; ( Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_timeout_sec () : float) )
   ; ( Env_config.KeeperMemoryOs.librarian_max_tokens_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_tokens () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
@@ -1070,89 +1060,32 @@ let test_memory_os_snapshot_registry_parity () =
 ;;
 
 let test_memory_os_config_snapshot_surfaces_effective_envs () =
-  let timeout_env = Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key in
-  let timeout_default =
-    Env_config.KeeperMemoryOs.float_default_to_display
-      Env_config.KeeperMemoryOs.librarian_timeout_sec_default
-  in
   with_memory_os_env Env_config.KeeperMemoryOs.recall_env_key "" (fun () ->
-    with_memory_os_env timeout_env "123.5" (fun () ->
-      let entries = storage_config_entries () in
-      let names = List.map (string_field "config entry" "env") entries in
-      List.iter
-        (fun (expected, _) ->
-           Alcotest.(check bool)
-             (expected ^ " surfaced")
-             true
-             (List.mem expected names))
-        memory_os_knob_readers;
-      let timeout = find_config_env timeout_env entries in
-      Alcotest.(check string)
-        "timeout snapshot source"
-        "env"
-        (string_field "timeout entry" "source" timeout);
-      Alcotest.(check string)
-        "timeout snapshot value"
-        "123.5"
-        (string_field "timeout entry" "value" timeout);
-      Alcotest.(check string)
-        "timeout snapshot default"
-        timeout_default
-        (string_field "timeout entry" "default" timeout);
-      let recall = find_config_env Env_config.KeeperMemoryOs.recall_env_key entries in
-      Alcotest.(check string)
-        "blank recall env falls back to default source"
-        "default"
-        (string_field "recall entry" "source" recall);
-      Alcotest.(check string)
-        "recall snapshot default"
-        "true"
-        (string_field "recall entry" "default" recall);
-      match List.assoc_opt "value" (assoc_fields "recall entry" recall) with
-      | Some `Null -> ()
-      | Some value ->
-        Alcotest.failf
-          "blank recall env should render null value, got %s"
-          (Yojson.Safe.to_string value)
-      | None -> Alcotest.fail "recall entry value missing"));
-  with_memory_os_env timeout_env "nan" (fun () ->
     let entries = storage_config_entries () in
-    let timeout = find_config_env timeout_env entries in
+    let names = List.map (string_field "config entry" "env") entries in
+    List.iter
+      (fun (expected, _) ->
+         Alcotest.(check bool)
+           (expected ^ " surfaced")
+           true
+           (List.mem expected names))
+      memory_os_knob_readers;
+    let recall = find_config_env Env_config.KeeperMemoryOs.recall_env_key entries in
     Alcotest.(check string)
-      "invalid timeout snapshot source"
-      "env"
-      (string_field "timeout entry" "source" timeout);
+      "blank recall env falls back to default source"
+      "default"
+      (string_field "recall entry" "source" recall);
     Alcotest.(check string)
-      "invalid timeout snapshot raw value"
-      "nan"
-      (string_field "timeout entry" "value" timeout);
-    Alcotest.(check string)
-      "invalid timeout snapshot default"
-      timeout_default
-      (string_field "timeout entry" "default" timeout))
-;;
-
-let test_librarian_timeout_override_env () =
-  let env = Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key in
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv env "")
-    (fun () ->
-       Unix.putenv env "";
-       let default = Librarian_runtime.default_timeout_sec () in
-       Alcotest.(check (float 0.001))
-         "empty timeout override falls back"
-         default
-         (Librarian_runtime.default_timeout_sec ());
-       Unix.putenv env "180.5";
-       Alcotest.(check (float 0.001))
-         "positive timeout override parses"
-         180.5
-         (Librarian_runtime.default_timeout_sec ());
-       Unix.putenv env "-1";
-       Alcotest.(check (float 0.001))
-         "invalid timeout override falls back"
-         default
-         (Librarian_runtime.default_timeout_sec ()))
+      "recall snapshot default"
+      "true"
+      (string_field "recall entry" "default" recall);
+    match List.assoc_opt "value" (assoc_fields "recall entry" recall) with
+    | Some `Null -> ()
+    | Some value ->
+      Alcotest.failf
+        "blank recall env should render null value, got %s"
+        (Yojson.Safe.to_string value)
+    | None -> Alcotest.fail "recall entry value missing")
 ;;
 
 let test_librarian_max_tokens_override_env () =
@@ -1441,7 +1374,7 @@ let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
     (parse_result {|{"text":"Remember exact command."}|})
 ;;
 
-let test_memory_llm_summary_requires_clock_before_provider_call () =
+let test_memory_llm_summary_does_not_invent_clock_requirement () =
   with_eio (fun ~sw ~net ~clock:_ ->
     let runtime_id = "summary-clock-required-runtime" in
     let called = ref false in
@@ -1452,7 +1385,6 @@ let test_memory_llm_summary_requires_clock_before_provider_call () =
     let result =
       Memory_summary.For_testing.summarize_with_provider
         ~complete
-        ~timeout_sec:1.0
         ~runtime_id
         ~sw
         ~net
@@ -1461,8 +1393,11 @@ let test_memory_llm_summary_requires_clock_before_provider_call () =
         ~texts:[ "remember this only if timeout can be enforced" ]
         ()
     in
-    Alcotest.(check (option string)) "summary skipped" None result;
-    Alcotest.(check bool) "provider was not called" false !called)
+    Alcotest.(check (option string))
+      "summary returned"
+      (Some "should not run")
+      result;
+    Alcotest.(check bool) "provider was called" true !called)
 ;;
 
 let json_episode_file_count ~keeper_id =
@@ -1516,7 +1451,6 @@ let test_librarian_runtime_appends_episode_bundle () =
            Librarian_runtime.extract_and_append_with_provider
              ~complete
              ~clock
-             ~timeout_sec:1.0
              ~sw
              ~net
              ~keeper_id
@@ -1610,7 +1544,6 @@ let test_librarian_runtime_falls_back_when_schema_unavailable () =
           Librarian_runtime.extract_with_provider_classified
             ~complete
             ~clock
-            ~timeout_sec:1.0
             ~sw
             ~net
             ~runtime_id:unconfigured_runtime_id
@@ -1654,7 +1587,6 @@ let test_librarian_runtime_requires_clock_for_provider_call () =
         (match
            Librarian_runtime.extract_and_append_with_provider_classified
              ~complete
-             ~timeout_sec:1.0
              ~sw
              ~net
              ~keeper_id
@@ -1707,7 +1639,6 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
           Librarian_runtime.extract_and_append_with_provider_classified
             ~complete
             ~clock
-            ~timeout_sec:1.0
             ~sw
             ~net
             ~keeper_id
@@ -1718,10 +1649,7 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
         (match fallback_result with
          | Ok _ -> Alcotest.fail "unstructured provider output must not persist"
          | Error (Librarian_runtime.Provider_unparseable_response reason as err) ->
-           Alcotest.(check int)
-             "initial attempt + parse retries"
-             (1 + Librarian_runtime.librarian_max_parse_retries)
-             !calls;
+           Alcotest.(check int) "single provider attempt" 1 !calls;
            Alcotest.(check bool)
              "typed provider error preserves parser reason"
              true
@@ -1759,71 +1687,6 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
           (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
 ;;
 
-let test_librarian_runtime_rejects_unparseable_output_across_empty_retries () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      with_eio (fun ~sw ~net ~clock ->
-        let keeper_id = "runtime-librarian-fallback-empty-retry-keeper" in
-        let calls = ref 0 in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-          incr calls;
-          if !calls = 1
-          then Ok (fake_response "first invalid librarian payload")
-          else Ok (fake_response "")
-        in
-        let inp : Librarian.input =
-          { Librarian.trace_id = "trace-runtime-fallback-empty-retry"
-          ; generation = 10
-          ; messages =
-              [ text_message "Please remember fallback evidence across retries." ]
-          }
-        in
-        match
-          Librarian_runtime.extract_and_append_with_provider_classified
-            ~complete
-            ~clock
-            ~timeout_sec:1.0
-            ~sw
-            ~net
-            ~keeper_id
-            ~runtime_id:unconfigured_runtime_id
-            ~provider_cfg:(test_provider_cfg ())
-            inp
-        with
-        | Ok _ -> Alcotest.fail "unparseable provider output must not persist"
-        | Error err ->
-          Alcotest.(check int)
-            "initial invalid response + empty retries"
-            (1 + Librarian_runtime.librarian_max_parse_retries)
-            !calls;
-          Alcotest.(check bool)
-            "error keeps first non-empty invalid-json reason"
-            true
-            (contains
-               "librarian provider returned invalid structured JSON"
-               (Librarian_runtime.extraction_error_to_string err));
-          Alcotest.(check bool)
-            "error keeps first non-empty parser detail"
-            true
-            (contains
-               "JSON parse error"
-               (Librarian_runtime.extraction_error_to_string err));
-          Alcotest.(check bool)
-            "error does not use later empty retry reason"
-            false
-            (contains
-               "librarian provider returned empty response"
-               (Librarian_runtime.extraction_error_to_string err));
-          Alcotest.(check int)
-            "event not persisted"
-            0
-            (List.length (Memory_io.read_events_tail ~keeper_id ~n:1));
-          Alcotest.(check int)
-            "fact not persisted"
-            0
-            (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
-;;
-
 let test_librarian_invalid_output_does_not_write_facts () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -1846,7 +1709,6 @@ let test_librarian_invalid_output_does_not_write_facts () =
             Librarian_runtime.extract_and_append_with_provider
               ~complete
               ~clock
-              ~timeout_sec:1.0
               ~sw
               ~net
               ~keeper_id
@@ -1902,7 +1764,6 @@ let test_librarian_runtime_reports_fact_upsert_failure () =
           Librarian_runtime.extract_and_append_with_provider
             ~complete
             ~clock
-            ~timeout_sec:1.0
             ~sw
             ~net
             ~keeper_id
@@ -3459,8 +3320,7 @@ let test_librarian_provider_slot_gate_caps_at_capacity () =
   with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "1" (fun () ->
     with_eio (fun ~sw ~net:_ ~clock ->
       (* Capacity 1: while one entrant holds the slot, a concurrent entrant drops
-         ([None]) after [provider_slot_wait_sec] instead of blocking — the #21230
-         storm-guard the per-keeper lane keeps as an optional fleet-wide gate. *)
+         ([None]) immediately instead of blocking — the #21230 storm guard. *)
       let entered, resolve_entered = Eio.Promise.create () in
       let release, resolve_release = Eio.Promise.create () in
       let first = ref None in
@@ -4659,10 +4519,6 @@ let () =
             `Quick
             test_memory_os_snapshot_registry_parity
         ; Alcotest.test_case
-            "librarian timeout override env"
-            `Quick
-            test_librarian_timeout_override_env
-        ; Alcotest.test_case
             "librarian max tokens override env"
             `Quick
             test_librarian_max_tokens_override_env
@@ -4691,9 +4547,9 @@ let () =
             `Quick
             test_memory_llm_summary_response_parser_accepts_only_summary_json
         ; Alcotest.test_case
-            "memory llm summary requires clock before provider call"
+            "memory llm summary does not invent clock requirement"
             `Quick
-            test_memory_llm_summary_requires_clock_before_provider_call
+            test_memory_llm_summary_does_not_invent_clock_requirement
         ; Alcotest.test_case
             "librarian runtime appends episode bundle"
             `Quick
@@ -4946,10 +4802,6 @@ let () =
             "unparseable output is rejected instead of persisted"
             `Quick
             test_librarian_runtime_rejects_unstructured_fallback
-        ; Alcotest.test_case
-            "non-empty fallback evidence remains an error across empty retries"
-            `Quick
-            test_librarian_runtime_rejects_unparseable_output_across_empty_retries
         ; Alcotest.test_case
             "unstructured fallback does not write facts"
             `Quick

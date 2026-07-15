@@ -20,17 +20,14 @@
       빈 텍스트만 [Failed Empty_response]. JSON envelope를 요구하지 않는다 —
       단일 문자열에 envelope는 정보 이득 0에 provider가 schema를 무시하면 패널이
       전멸하는 실패 클래스만 추가했다 (2026-07-01 사고, 구현부 주석 참조).
-    - [outer_timeout_s]: 전체 fan-out을 감싸는 [Masc_oas_bridge.run_safe] 구조적
-      타임아웃. 웨이브 직렬화를 반영해 [Fusion_policy.panel_outer_timeout_of
-      ~max_fibers]로 산출한 값을 넘겨야 한다. 타임아웃 시 빌드된 모델은
-      [Failed Timeout].
+    - 그룹 [timeout_s]는 OAS Provider transport의 idle/body 경계에만 적용된다.
+      fan-out 전체를 취소하는 별도 wall-clock timeout은 없다.
     - 빌드 실패·실행 실패·빈 응답은 [Failed]로 격리되어 다른 패널을 죽이지 않는다.
     - 반환 순서: 빌드 실패분 먼저, 그 다음 실행 결과(그룹순 × 그룹내 모델순). *)
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> max_fibers:int
-  -> outer_timeout_s:float
   -> groups:Fusion_policy.panel_group list
   -> prompt:string
   -> unit

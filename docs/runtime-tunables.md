@@ -89,7 +89,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES` | typed:int | Runtime | operator | 257 | Base recent-message window for librarian extraction. Default: 24, floored to 1. @category Runtime @ops_class operator |
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS` | typed:int | Runtime | operator | 279 | Output token cap for librarian extraction, applied as min with the provider max_tokens. Default: 4096, floored to 1. ... |
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID` | typed:string | Runtime | operator | 289 | Optional runtime id override for librarian extraction. @category Runtime @ops_class operator |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC` | typed:float | Timeouts | operator | 267 | Provider timeout for librarian extraction. Default: 600 seconds; invalid, non-positive, NaN, or infinite values fall ... |
 | `MASC_KEEPER_MEMORY_OS_RECALL` | typed:bool | Policies | operator | 221 | Memory OS recall prompt injection kill switch. Default: true; invalid values fail closed to false so malformed operat... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | unclassified | unclassified | 73 | Maximum metrics file size in bytes before rotation (default: 10MB) |
 | `MASC_KEEPER_METRICS_MAX_ROTATED` | typed:int | unclassified | unclassified | 76 | Number of rotated files to keep (default: 1, i.e. .1 only) |
@@ -113,12 +112,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_DEAD_TTL_SEC` | typed:float | Timeouts | operator | 21 | Dead tombstone TTL: seconds before Dead entries are cleaned up. @category Timeouts @ops_class operator |
 | `MASC_KEEPER_DOMAIN_POOL_ENABLED` | feature_flag | n/a | n/a | 12 | Historical keeper Domain_pool pilot flag. The supervisor still reads this for observability, but keepalive fibers rem... |
 | `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 17 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
-
-## Env_config_oas_bridge (1 knobs; typed classification 0/0)
-
-| Env var | Kind | Category | Ops class | Line | Doc |
-|---|---|---|---|---|---|
-| `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 66 |  |
 
 ## Env_config_runtime (82 knobs; typed classification 4/66)
 

@@ -183,7 +183,6 @@ val keeper_unified_max_tokens : unit -> int
 
 (** {2 HITL Context-Summary Worker Policy} *)
 
-val hitl_summary_timeout_sec : unit -> float
 val hitl_summary_temperature : unit -> float
 
 val keeper_status_fast_default : unit -> bool

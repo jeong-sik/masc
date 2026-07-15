@@ -308,17 +308,6 @@ let keeper_unified_max_tokens () : int =
 
 (* ── HITL context-summary worker policy ─────────────────────── *)
 
-(** Timeout for the HITL summary LLM call. Kept short because the summary
-    is advisory and must not block operator attention. *)
-let hitl_summary_timeout_sec_rp =
-  _rp_float ~key:"keeper.hitl_summary.timeout_sec"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_HITL_SUMMARY_TIMEOUT_SEC"
-                          ~default:30.0 ~min_v:1.0 ~max_v:300.0)
-    ~min_v:1.0 ~max_v:300.0
-    ~description:"HITL context-summary LLM timeout (seconds)" ()
-let hitl_summary_timeout_sec () : float =
-  Runtime_params.get hitl_summary_timeout_sec_rp
-
 (** Temperature for the HITL summary LLM call. Deterministic by default. *)
 let hitl_summary_temperature_rp =
   _rp_float ~key:"keeper.hitl_summary.temperature"
@@ -333,7 +322,6 @@ let hitl_summary_temperature () : float =
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
-  let (_ : float) = Runtime_params.get hitl_summary_timeout_sec_rp in
   let (_ : float) = Runtime_params.get hitl_summary_temperature_rp in
   ()
 

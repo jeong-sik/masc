@@ -4,14 +4,7 @@
     owns the side-effect boundary: render external prompts, call a provider, and
     append accepted episodes to [Keeper_memory_os_io]. *)
 
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 val enabled : unit -> bool
 (** Opt-in gate controlled by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
@@ -93,11 +86,6 @@ val max_messages : unit -> int
     effective prompt window is this value scaled by [cadence_turns] so skipped
     turns are not evicted before the next due extraction. *)
 
-val default_timeout_sec : unit -> float
-(** Provider timeout for post-turn extraction. Defaults to
-    [librarian_default_timeout_sec] (600 s, aligned with the keeper turn budget)
-    and can be overridden with [MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC]. *)
-
 val runtime_id_for_librarian : runtime_id:string -> string
 (** Runtime id after applying the optional
     [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] override. *)
@@ -120,19 +108,6 @@ val provider_for_librarian
     structured episode output schema. The selected provider config's exact
     temperature is preserved, including omission. *)
 
-val librarian_max_parse_retries : int
-(** Additional provider attempts after an initial unparseable response before
-    [extract_with_provider] gives up (the initial attempt is not counted). *)
-
-val parse_retry_episode_fields : string list
-(** Episode object fields included in the corrective parse-retry shape. *)
-
-val parse_retry_claim_fields : string list
-(** Claim object fields included in the corrective parse-retry shape. *)
-
-val parse_retry_nudge : string
-(** Corrective instruction appended to the message list on each parse-retry. *)
-
 type extraction_error =
   | Prompt_render_failed of string
   | Provider_clock_unavailable
@@ -145,43 +120,10 @@ type extraction_error =
 
 val extraction_error_to_string : extraction_error -> string
 
-type unparseable_response =
-  { reason : string
-  ; raw_evidence : string option
-  }
-
-val unparseable_response : ?raw_evidence:string -> string -> unparseable_response
-(** Typed retry diagnostic. [raw_evidence] is present only when the provider
-    returned non-empty output; [reason] describes that same response so the
-    final typed provider error is not replaced by a later empty retry. *)
-
-type attempt_outcome =
-  | Parsed of Keeper_memory_os_types.episode
-  | Unparseable of unparseable_response
-  | Transport_failed of extraction_error
-
-type parse_retry_error =
-  | Retry_exhausted_unparseable of unparseable_response
-  | Retry_transport_failed of extraction_error
-
 val should_record_cadence_backoff_after_error : extraction_error -> bool
 (** Whether an extraction error represents enough completed work to defer the
     next attempt until the next cadence window. Only completed provider-attempt
     failures should defer cadence; local deterministic failures stay due. *)
-
-val run_with_parse_retries
-  :  max_retries:int
-  -> attempt:(Agent_sdk.Types.message list -> attempt_outcome)
-  -> Agent_sdk.Types.message list
-  -> (Keeper_memory_os_types.episode, parse_retry_error) result
-(** Drive [attempt] over a growing message list. Returns immediately on [Parsed].
-    [Transport_failed] returns [Retry_transport_failed] without retry. On
-    [Unparseable], appends {!parse_retry_nudge} and retries up to [max_retries]
-    times before returning [Retry_exhausted_unparseable]. If any retry produced
-    non-empty fallback evidence, the exhausted diagnostic preserves that
-    evidence with its matching reason instead of pairing it with a later empty
-    retry. Pure given a pure [attempt] — the provider side effect lives in the
-    [attempt] supplied by {!extract_with_provider}. *)
 
 val per_keeper_slot_capacity : unit -> int
 (** Per-keeper librarian provider slot capacity from
@@ -195,8 +137,8 @@ val with_provider_slot
   -> 'a option
 (** Run [f] under the per-keeper librarian provider slot — the #21230/P0-4
     storm guard. At capacity N per keeper, the (N+1)-th concurrent entrant for
-    the same keeper returns [None] after [provider_slot_wait_sec] (drop, not
-    block); capacity 0 disables the gate so [f] always runs ([Some]). The
+    the same keeper returns [None] immediately (drop, not block); capacity 0
+    disables the gate so [f] always runs ([Some]). The
     provider slot registry is guarded through [Eio_guard.with_mutex], avoiding
     blocking stdlib locks on keeper runtime fibers. Exposed for storm-guard
     regression coverage (#21376). *)
@@ -209,7 +151,6 @@ val librarian_provider_clock_unavailable_error : string
 val extract_with_provider
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> runtime_id:string
@@ -221,7 +162,6 @@ val extract_with_provider
 val extract_with_provider_classified
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> runtime_id:string
@@ -242,7 +182,6 @@ val extract_with_provider_classified
 val extract_and_append_with_provider
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
@@ -254,7 +193,6 @@ val extract_and_append_with_provider
 val extract_and_append_with_provider_classified
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
@@ -265,7 +203,6 @@ val extract_and_append_with_provider_classified
 
 val run_best_effort
   :  ?complete:complete_fn
-  -> ?timeout_sec:float
   -> runtime_id:string
   -> keeper_id:string
   -> Keeper_librarian.input

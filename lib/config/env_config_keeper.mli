@@ -66,7 +66,6 @@ module KeeperMemoryOs : sig
   val librarian_env_key : string
   val librarian_cadence_turns_env_key : string
   val librarian_max_messages_env_key : string
-  val librarian_timeout_sec_env_key : string
   val librarian_max_tokens_env_key : string
   val librarian_runtime_id_env_key : string
   val librarian_global_slot_env_key : string
@@ -78,7 +77,6 @@ module KeeperMemoryOs : sig
   val librarian_enabled_default : bool
   val librarian_cadence_turns_default : int
   val librarian_max_messages_default : int
-  val librarian_timeout_sec_default : float
   val librarian_max_tokens_default : int
   val librarian_runtime_id_default : string option
   val librarian_global_slot_default : int
@@ -86,16 +84,10 @@ module KeeperMemoryOs : sig
   val consolidation_enabled_default : bool
   val consolidation_runtime_id_default : string option
 
-  val float_default_to_display : float -> string
-  (** Render a float default for snapshot display, preserving one trailing
-      decimal digit so that values like [600.] display as ["600.0"]. *)
-
   val recall_enabled : unit -> bool
   val librarian_enabled : unit -> bool
   val librarian_cadence_turns : unit -> int
   val librarian_max_messages : unit -> int
-  val librarian_timeout_sec : unit -> float
-
   val librarian_max_tokens : unit -> int
   (** Output token cap for librarian extraction, applied as min with the
       provider max_tokens. Default: 4096, floored to 1. *)

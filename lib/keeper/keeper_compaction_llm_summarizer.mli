@@ -26,26 +26,17 @@ type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan optio
 
 (** The low-level provider completion the summarizer drives. Defaulted to
     {!Llm_provider.Complete.complete}; overridable in tests. *)
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:Eio_context.eio_net ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 (** [make ~runtime_id ~keeper_name ()] resolves [runtime_id] as a Runtime or
     Runtime Lane. A Runtime contributes its exact provider config; a Lane tries
     its configured Runtime candidates in declared order until one returns a
     valid plan. Missing, ineligible, and failed candidates are logged with
     their Runtime id. No default Runtime is substituted. [complete] overrides
-    the call in tests.
+    the Provider boundary in tests.
 
-    The compaction owner imposes no wall-clock deadline. The provider call is
-    cancelled only through the owning Keeper lane or returned provider/runtime
-    failure, so an arbitrary inference timeout cannot strand a live Keeper
-    behind a synthetic compaction failure. *)
+    The compaction owner imposes no wall-clock deadline. Cancellation belongs
+    to the owning Keeper lane or to the Provider transport boundary. *)
 val make
   :  ?complete:complete_fn
   -> runtime_id:string

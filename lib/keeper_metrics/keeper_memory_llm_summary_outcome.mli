@@ -1,8 +1,8 @@
 (** Keeper_memory_llm_summary_outcome — closed sum naming each path
     out of {!Keeper_memory_llm_summary.summarize_with_provider}.
 
-    Until this module existed, the failure modes (timeout, HTTP
-    error, empty/whitespace-only response, invalid structured response)
+    Until this module existed, the failure modes (HTTP error,
+    empty/whitespace-only response, invalid structured response)
     each logged at warn but were not aggregated as a counter, so
     operators could not see "what fraction of summary attempts succeed"
     or "which provider is regressing".  Successful summaries left no
@@ -17,12 +17,6 @@
 type t =
   | Ok_summary
       (** Provider returned a non-empty, non-whitespace summary text. *)
-  | Timed_out
-      (** [Eio.Time.with_timeout_exn] raised before the provider
-          completed.  Counter increment + warn already exists. *)
-  | Clock_unavailable
-      (** MASC had switch/net context but no Eio clock, so the provider call
-          was refused instead of running without the configured timeout. *)
   | Http_error
       (** Provider returned a non-2xx response or transport-level
           failure (deserialised by [Llm_provider.Http_client]). *)

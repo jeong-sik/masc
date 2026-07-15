@@ -381,7 +381,6 @@ let test_consolidate_requires_clock_before_provider_call () =
         let outcome =
           Runtime.consolidate_keeper
             ~complete
-            ~timeout_sec:1.0
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~runtime_id:unconfigured_runtime_id

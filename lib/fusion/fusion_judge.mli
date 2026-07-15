@@ -21,8 +21,9 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
     {!Fusion_judge_parse.of_string}으로 파싱한다.
     [web_tools=true]면 심판 에이전트에 web_search/web_fetch를 주입한다.
     [max_tokens]는 출력 토큰 예산이다. 생략하면 Runtime_agent 기본값을 보존한다.
-    빌드/실행/빈응답/파싱 실패는 [Error (msg, usage)]. 전체는 [Masc_oas_bridge.run_safe]로
-    감싼다. 성공 시 종합 + 소비 토큰 [usage]를 반환하고(panel과 대칭, 비용 회계 RFC §10),
+    빌드/실행/빈응답/파싱 실패는 [Error (msg, usage)]. [Masc_oas_bridge.run_safe]는
+    예외/취소만 관측하며 Provider transport가 timeout을 소유한다. 성공 시 종합 + 소비
+    토큰 [usage]를 반환하고(panel과 대칭, 비용 회계 RFC §10),
     실패 시에도 usage를 동반한다 — 응답을 받은 뒤 실패(빈 응답/파싱 실패)는 소비분을,
     토큰 소비 전 실패(빌드/실행/provider 에러)는 [Fusion_types.zero_usage]를 싣는다. 이로써
     호출자(refine degrade 경로)가 파싱 실패한 심판의 비용을 0으로 버리지 않는다. *)

@@ -12,10 +12,6 @@ let metric_fusion_invocations_total =
 let metric_fusion_judge_executions_total =
   Otel_metric_store_core.declare_counter "masc_fusion_judge_executions_total"
 
-let metric_fusion_adaptive_timeout_extensions_total =
-  Otel_metric_store_core.declare_counter
-    "masc_fusion_adaptive_timeout_extensions_total"
-
 let topology_label = function
   | Simple -> "simple"
   | Refine -> "refine"
@@ -59,9 +55,4 @@ let record_invocation ~topology outcome =
   Otel_metric_store_core.inc_counter
     metric_fusion_invocations_total
     ~labels:[ "topology", topology_label topology; "outcome", outcome_label ]
-    ()
-
-let record_adaptive_timeout () =
-  Otel_metric_store_core.inc_counter
-    metric_fusion_adaptive_timeout_extensions_total
     ()

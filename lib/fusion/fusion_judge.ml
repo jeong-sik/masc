@@ -197,7 +197,7 @@ let run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_mod
       , Fusion_types.zero_usage )
   | Ok agent ->
     (match
-       Masc_oas_bridge.run_safe ~caller:"fusion_judge" ~timeout_s (fun () ->
+       Masc_oas_bridge.run_safe ~caller:"fusion_judge" (fun () ->
          Ok (Agent_sdk.Async_agent.all ~sw [ (agent, prompt) ]))
      with
      | Error e ->

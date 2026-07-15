@@ -49,8 +49,7 @@ let () =
        Labels: [outcome] (ok_summary | parse_error | provider_error | timeout | \
        no_provider_config | no_net | prompt_error | crashed | \
        degraded_plain_json | restart_worker_recovered | \
-       restart_judgment_recovered | restart_retryable_recovered | \
-       lane_activity_retry). \
+       restart_judgment_recovered | operator_retry_started). \
        [degraded_plain_json] is emitted alongside the terminal outcome when \
        the judge endpoint could not serve native structured output and the \
        strict plain-JSON capability path was used. The restart outcomes record which exact persisted work \
@@ -63,10 +62,6 @@ let record_outcome outcome =
     Keeper_metrics.(to_string HitlSummaryOutcomes)
     ~labels:[ "outcome", outcome ]
     ()
-;;
-
-let with_summary_slot f =
-  Eio.Switch.run f
 ;;
 
 (* ── Context collection ─────────────────────────── *)
@@ -338,12 +333,9 @@ let call_summary_llm ~sw ~net ~runtime_id ~provider_config ~context_bundle () =
   | Error detail -> Error (Prompt_unavailable detail)
   | Ok messages ->
     (match
-       Keeper_llm_bridge.run_with_timeout_and_fallback
-         ~timeout_s:(Keeper_config.hitl_summary_timeout_sec ())
-         (fun () ->
-            Llm_provider.Complete.complete ~sw ~net ~config ~messages ()
-            |> Result.map_error (fun http_err ->
-                 Agent_sdk.Error.Internal (Provider_http_error.to_message http_err)))
+       Keeper_provider_subcall.complete ~sw ~net ~config ~messages ()
+       |> Result.map_error (fun http_err ->
+            Agent_sdk.Error.Internal (Provider_http_error.to_message http_err))
      with
      | Ok response -> Ok (response, mode)
      | Error error -> Error (Llm_call_error { mode; error }))
@@ -419,7 +411,6 @@ let spawn
         ~finally:on_finish
         (fun () ->
         try
-          with_summary_slot (fun sw ->
           let context_bundle = build_context_bundle ~entry in
           match Eio_context.get_net_opt () with
           | None ->
@@ -450,7 +441,7 @@ let spawn
                record_outcome "prompt_error";
                on_failure
                  ~reason:("HITL Gate judgment prompt unavailable: " ^ detail)
-                 ~retryable:false
+                 ~retryable:true
              | Error
                  (Llm_call_error
                     { mode; error = (Agent_sdk.Error.Api (Timeout _) as error) }) ->
@@ -464,7 +455,7 @@ let spawn
                List.iter
                  record_outcome
                  (summary_llm_error_outcomes ~mode error);
-               on_failure ~reason:(Agent_sdk.Error.to_string error) ~retryable:true))
+               on_failure ~reason:(Agent_sdk.Error.to_string error) ~retryable:true)
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

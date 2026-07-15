@@ -3,6 +3,7 @@
 module Runtime = Masc.Keeper_tool_memory_runtime
 module Bank = Masc.Keeper_memory_bank
 module Work_request = Masc.Keeper_memory_work_request
+module Work_store = Masc.Keeper_memory_work_store
 
 let make_args ~kind ~title ~content =
   `Assoc
@@ -251,6 +252,75 @@ let test_memory_work_request_strict_round_trip () =
   | Ok _ -> Alcotest.fail "tampered request identity was accepted"
 ;;
 
+let test_memory_work_store_exact_fifo () =
+  with_temp_dir (fun base_path ->
+    let meta = make_meta "durable-memory-fifo" in
+    let make_request turn =
+      Work_request.make
+        ~keeper_name:meta.name
+        ~generation:meta.runtime.generation
+        ~turn
+        ~runtime_id:(Printf.sprintf "runtime.memory.%d" turn)
+        ~meta
+        ~tool_results:[ `Assoc [ "turn", `Int turn ] ]
+        ~librarian_messages:[]
+        ~deliberation_execution:None
+      |> Result.get_ok
+    in
+    let first = make_request 1 in
+    let second = make_request 2 in
+    let enqueue request =
+      match Work_store.enqueue ~base_path request with
+      | Ok outcome -> outcome
+      | Error error -> Alcotest.fail (Work_store.error_to_string error)
+    in
+    Alcotest.(check bool)
+      "first admitted"
+      true
+      (enqueue first = Work_store.Enqueued);
+    Alcotest.(check bool)
+      "second admitted"
+      true
+      (enqueue second = Work_store.Enqueued);
+    Alcotest.(check bool)
+      "duplicate is exact no-op"
+      true
+      (enqueue first = Work_store.Already_present);
+    let pending =
+      Work_store.pending ~base_path ~keeper_name:meta.name
+      |> Result.map_error Work_store.error_to_string
+      |> Result.get_ok
+    in
+    Alcotest.(check (list string))
+      "durable FIFO order"
+      [ Work_request.request_id first; Work_request.request_id second ]
+      (List.map Work_request.request_id pending);
+    let path =
+      Work_store.queue_path ~base_path ~keeper_name:meta.name
+      |> Result.map_error Work_store.error_to_string
+      |> Result.get_ok
+    in
+    let json = Safe_ops.read_json_file_safe path |> Result.get_ok in
+    let duplicate_json =
+      match json with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (name, value) ->
+                match name, value with
+                | "pending", `List (first :: _ as pending) ->
+                  name, `List (pending @ [ first ])
+                | _ -> name, value)
+             fields)
+      | _ -> Alcotest.fail "queue encoding must be an object"
+    in
+    Yojson.Safe.to_file path duplicate_json;
+    match Work_store.pending ~base_path ~keeper_name:meta.name with
+    | Error (Work_store.Decode_failed _) -> ()
+    | Error error -> Alcotest.fail (Work_store.error_to_string error)
+    | Ok _ -> Alcotest.fail "duplicate durable request was accepted")
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -275,6 +345,10 @@ let () =
             "durable work request strict round trip"
             `Quick
             test_memory_work_request_strict_round_trip
+        ; Alcotest.test_case
+            "durable work store exact FIFO"
+            `Quick
+            test_memory_work_store_exact_fifo
         ] )
     ]
 ;;

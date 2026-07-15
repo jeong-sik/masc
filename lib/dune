@@ -280,9 +280,6 @@
   masc.masc_tool_dispatch
   ;; Pure tool surface leaf above the dispatch substrate.
   masc.masc_tool_surface
-  ;; Tool Orchestration Lane — typed ToolJob envelope and durable ToolEvent ledger.
-  ;; Phase 1 (RFC-0256) introduces the envelope; Phase 2 will wire the executor.
-  masc.tool_orchestration
   ;; OTel metric bridge leaf (Otel_metric_store_core snapshot -> OTLP observable).
   masc.otel_metrics
   ;; Thompson Sampling leaf; health/Otel_metric_store edges are callbacks.

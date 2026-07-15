@@ -6,12 +6,12 @@ module R = Fusion_run_registry
 
 let status_running = function
   | R.Running -> true
-  | R.Completed _ -> false
+  | R.Recovery_required _ | R.Completed _ -> false
 ;;
 
 let status_completed_ok = function
   | R.Completed { ok; _ } -> Some ok
-  | R.Running -> None
+  | R.Running | R.Recovery_required _ -> None
 ;;
 
 let yojson_field j k =
@@ -133,6 +133,9 @@ let test_prune_keeps_running_and_recent () =
    keeper tool. "failed" (ok=false) must never collapse into "completed". *)
 let test_status_label () =
   check string "running label" "running" (R.status_label R.Running);
+  check string "recovery label" "recovery_required"
+    (R.status_label
+       (R.Recovery_required { reason = R.Worker_process_restarted }));
   check string "completed label" "completed" (R.status_label (R.Completed { ok = true; failure = None; failure_code = None }));
   check string "failed label" "failed" (R.status_label
        (R.Completed
@@ -140,6 +143,24 @@ let test_status_label () =
           ; failure = Some "judge failed"
           ; failure_code = Some "parse_error"
           }))
+;;
+
+let test_run_to_yojson_recovery_shape () =
+  let path = Filename.temp_file "fusion-recovery" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       Fs_compat.save_file path
+         {|{"event":"register","run_id":"r-recovery","keeper":"kx","preset":"deep","started_at":42.0}
+|};
+       let replayed = R.replay path in
+       match R.get replayed ~run_id:"r-recovery" with
+       | None -> fail "unfinished run must remain in recovery inventory"
+       | Some run ->
+         let j = R.run_to_yojson run in
+         check string "recovery status" "recovery_required" (yojson_str j "status");
+         check string "recovery code" "worker_process_restarted"
+           (yojson_str j "failure_code"))
 ;;
 
 (* Phase 4: run_to_yojson is the one per-run serializer for every fusion-run
@@ -203,6 +224,8 @@ let () =
         ; test_case "run_to_yojson shape + label" `Quick test_run_to_yojson_shape
         ; test_case "run_to_yojson success omits failure fields" `Quick
             test_run_to_yojson_success_has_no_failure_fields
+        ; test_case "run_to_yojson exposes recovery" `Quick
+            test_run_to_yojson_recovery_shape
         ] )
     ]
 ;;

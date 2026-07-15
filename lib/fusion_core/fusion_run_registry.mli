@@ -9,8 +9,11 @@
 
     Never wakes a keeper. *)
 
+type recovery_reason = Worker_process_restarted
+
 type run_status =
   | Running
+  | Recovery_required of { reason : recovery_reason }
   | Completed of {
       ok : bool;
       failure : string option;
@@ -42,9 +45,10 @@ val replay : string -> t
 (** Hydrate a registry from an append-only JSONL file. Missing files yield an
     empty registry. Unreadable files and malformed lines are logged and skipped,
     so persistence problems are visible without blocking in-memory status
-    tracking. Persisted registers without a completed event are dropped during
-    replay because worker fibers do not survive server restart. Replayed
-    completed runs are pruned to the newest {!max_completed_retained}. *)
+    tracking. Persisted registers without a completed event become typed
+    [Recovery_required] rows; dead worker fibers are never presented as live,
+    and unfinished work is never erased. Replayed completed runs are pruned to
+    the newest {!max_completed_retained}. *)
 
 val register_running :
   t -> run_id:string -> keeper:string -> preset:string -> started_at:float -> unit
@@ -66,17 +70,19 @@ val mark_completed
     the registry was created with a path, appends a [Complete] event. *)
 
 val list_runs : t -> run list
-(** All tracked runs, newest [started_at] first ([Running] + recently
-    [Completed]; older completed runs are pruned). *)
+(** All tracked runs, newest [started_at] first ([Running] +
+    [Recovery_required] + recently [Completed]); older completed runs are
+    pruned. *)
 
 val get : t -> run_id:string -> run option
 (** The run with [run_id], if still tracked. *)
 
 val status_label : run_status -> string
-(** Stable wire label: [Running -> "running"], [Completed {ok=true} ->
-    "completed"], [Completed {ok=false} -> "failed"]. The one place the status
-    vocabulary is defined, shared by the Phase 3 tool, the Phase 4 dashboard
-    route, and the [fusion_run_status] SSE event so it never drifts. *)
+(** Stable wire label: [Running -> "running"], [Recovery_required ->
+    "recovery_required"], [Completed {ok=true} -> "completed"], [Completed
+    {ok=false} -> "failed"]. The one place the status vocabulary is defined,
+    shared by the Phase 3 tool, the Phase 4 dashboard route, and the
+    [fusion_run_status] SSE event so it never drifts. *)
 
 val run_to_yojson : run -> Yojson.Safe.t
 (** Canonical per-run JSON: [{run_id, keeper, preset, started_at, status}] +

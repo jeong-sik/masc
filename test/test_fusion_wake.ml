@@ -724,6 +724,8 @@ let test_tool_handle_async_success_projects_running_then_completed () =
        check string "running preset" "unit" preset
      | Some { Fusion_run_registry.status = Completed _; _ } ->
        fail "fusion run should still be Running before the background runner is released"
+     | Some { Fusion_run_registry.status = Recovery_required _; _ } ->
+       fail "newly started fusion run cannot require restart recovery"
      | None -> fail "fusion run should be registered as Running before completion");
     Eio.Promise.resolve resolve_release ();
     (match
@@ -808,7 +810,9 @@ let test_emit_board_failure_is_best_effort () =
         | Fusion_run_registry.Completed { ok = true; _ } -> ()
         | Fusion_run_registry.Completed { ok = false; _ } ->
           fail "fusion run should complete with ok=true"
-        | Fusion_run_registry.Running -> fail "fusion run should not remain running")
+        | Fusion_run_registry.Running -> fail "fusion run should not remain running"
+        | Fusion_run_registry.Recovery_required _ ->
+          fail "same-process completion cannot require restart recovery")
      | None -> fail "fusion run should remain visible");
     let messages = Keeper_chat_store.load ~base_dir ~keeper_name:keeper in
     (* Keeper_chat_store.encode_line auto-derives blocks from message content

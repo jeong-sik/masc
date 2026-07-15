@@ -16,6 +16,8 @@ export function fusionRunStatusTone(status: FusionRunStatusLabel): StatusTone {
   switch (status) {
     case 'running':
       return 'warn'
+    case 'recovery_required':
+      return 'bad'
     case 'completed':
       return 'ok'
     case 'failed':
@@ -27,6 +29,8 @@ export function fusionRunStatusText(status: FusionRunStatusLabel): string {
   switch (status) {
     case 'running':
       return 'running'
+    case 'recovery_required':
+      return 'recovery required'
     case 'completed':
       return 'completed'
     case 'failed':

@@ -22,16 +22,10 @@ describe('parseFusionRunsResponse', () => {
     })
   })
 
-  it('maps an unrecognized status to failed (never a healthy default) and drops rows without a run_id', () => {
-    const parsed = parseFusionRunsResponse({
-      runs: [
-        { run_id: 'r-ok', keeper: 'k', preset: 'p', started_at: 1, status: 'weird' },
-        { keeper: 'k', preset: 'p', started_at: 2, status: 'running' }, // no run_id -> dropped
-      ],
-    })
-    expect(parsed.runs).toHaveLength(1)
-    expect(parsed.runs[0]?.runId).toBe('r-ok')
-    expect(parsed.runs[0]?.status).toBe('failed')
+  it('fails loudly on an unrecognized status', () => {
+    expect(() => parseFusionRunsResponse({
+      runs: [{ run_id: 'r-unknown', keeper: 'k', preset: 'p', started_at: 1, status: 'weird' }],
+    })).toThrow('unknown fusion run status: weird')
   })
 
   it('returns an empty, well-formed response for a non-object payload', () => {
@@ -73,12 +67,14 @@ describe('parseFusionRunsResponse', () => {
 describe('fusion run status helpers', () => {
   it('maps status to the reused chip tone', () => {
     expect(fusionRunStatusTone('running')).toBe('warn')
+    expect(fusionRunStatusTone('recovery_required')).toBe('bad')
     expect(fusionRunStatusTone('completed')).toBe('ok')
     expect(fusionRunStatusTone('failed')).toBe('bad')
   })
 
   it('keeps the wire label as the display text', () => {
     expect(fusionRunStatusText('running')).toBe('running')
+    expect(fusionRunStatusText('recovery_required')).toBe('recovery required')
     expect(fusionRunStatusText('completed')).toBe('completed')
     expect(fusionRunStatusText('failed')).toBe('failed')
   })

@@ -7,15 +7,19 @@
 
    Lock-free Atomic + CAS; optional append-only JSONL backing under
    [<base-path>/.masc/fusion-runs.jsonl] so history survives server restart.
-   Server-lifetime: a fork that dies on server shutdown takes its registry entry
-   with it, so no orphan [Running] survives a restart (RFC-0266 §10 #4).
+   A register without a matching completion is retained as
+   [Recovery_required] on replay. The registry never claims that a dead worker
+   is still running, but it also never erases unfinished work.
 
    This module never wakes a keeper (that is the WAKE half, Phase 1). Recording
    a run is the visibility half and is intentionally side-effect-free beyond
    the in-memory table and the append-only log. *)
 
+type recovery_reason = Worker_process_restarted
+
 type run_status =
   | Running
+  | Recovery_required of { reason : recovery_reason }
   | Completed of {
       ok : bool;
       (* ok=false일 때의 사람-가독 사유 + 안정 분류 태그. 2026-07-01 사고에서
@@ -38,29 +42,29 @@ type t = {
   path : string option;
 }
 
-(* Recent-history retention for [Completed] runs. [Running] runs are never
-   evicted (active state must stay accurate). This is log retention only; it
-   never limits execution or invocation rate. *)
+(* Recent-history retention for [Completed] runs. Active and recovery-required
+   runs are never evicted. This is log retention only; it never limits
+   execution or invocation rate. *)
 let max_completed_retained = 64
 
 let create ?path () : t = { runs = Atomic.make []; path }
 
-let is_running (r : run) =
+let is_unresolved (r : run) =
   match r.status with
-  | Running -> true
+  | Running | Recovery_required _ -> true
   | Completed _ -> false
 ;;
 
-(* Keep every [Running] run plus the [max_completed_retained] most recent
+(* Keep every unresolved run plus the [max_completed_retained] most recent
    [Completed] runs (newest [started_at] first). *)
 let prune (runs : run list) : run list =
-  let running, completed = List.partition is_running runs in
+  let unresolved, completed = List.partition is_unresolved runs in
   let recent_completed =
     completed
     |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
     |> List.filteri (fun i _ -> i < max_completed_retained)
   in
-  running @ recent_completed
+  unresolved @ recent_completed
 ;;
 
 let rec update (t : t) (f : run list -> run list) =
@@ -114,11 +118,12 @@ let get (t : t) ~run_id : run option =
 
 (* Stable status vocabulary shared by every fusion-run surface (Phase 3 keeper
    tool, Phase 4 dashboard route, the [fusion_run_status] SSE event). Hand-
-   written rather than [@@deriving] so the on-wire labels stay
-   "running"/"completed"/"failed" regardless of the variant shape — a consumer
-   never reconstructs run state from the variant, only reads these labels. *)
+   written rather than [@@deriving] so the closed on-wire labels stay stable
+   regardless of the variant shape. A consumer never reconstructs run state
+   from the variant, only reads these labels. *)
 let status_label = function
   | Running -> "running"
+  | Recovery_required _ -> "recovery_required"
   | Completed { ok = true; _ } -> "completed"
   | Completed { ok = false; _ } -> "failed"
 ;;
@@ -140,6 +145,10 @@ let run_to_yojson (r : run) : Yojson.Safe.t =
   let failure_fields =
     match r.status with
     | Running | Completed { ok = true; _ } -> []
+    | Recovery_required { reason = Worker_process_restarted } ->
+      [ ("error", `String "worker process restarted before fusion completion")
+      ; ("failure_code", `String "worker_process_restarted")
+      ]
     | Completed { ok = false; failure; failure_code } ->
       List.filter_map
         (fun (k, v) -> Option.map (fun s -> (k, `String s)) v)
@@ -163,16 +172,34 @@ let apply_event runs = function
       runs
 ;;
 
-let drop_replayed_running runs =
-  let running, completed = List.partition is_running runs in
-  (match running with
-   | [] -> ()
-   | stale ->
+let expose_replayed_running_as_recovery_required runs =
+  let recovered =
+    List.map
+      (fun run ->
+         match run.status with
+         | Running ->
+           { run with
+             status = Recovery_required { reason = Worker_process_restarted }
+           }
+         | Recovery_required _ | Completed _ -> run)
+      runs
+  in
+  let recovery_count =
+    List.fold_left
+      (fun count run ->
+         match run.status with
+         | Recovery_required _ -> count + 1
+         | Running | Completed _ -> count)
+      0
+      recovered
+  in
+  (match recovery_count with
+   | 0 -> ()
+   | _ ->
      Log.Misc.warn
-       "fusion_run_registry: dropped %d replayed running run(s); worker fibers do not \
-        survive server restart"
-       (List.length stale));
-  completed
+       "fusion_run_registry: %d unfinished run(s) require recovery after worker restart"
+       recovery_count);
+  recovered
 ;;
 
 let parse_event_line ~path ~line_no line =
@@ -202,7 +229,7 @@ let events_of_run (run : run) =
       }
   in
   match run.status with
-  | Running -> [ register ]
+  | Running | Recovery_required _ -> [ register ]
   | Completed { ok; failure; failure_code } ->
     [ register
     ; Fusion_run_registry_event.Complete
@@ -286,7 +313,7 @@ let replay path : t =
        first);
   let runs =
     List.fold_left apply_event [] events
-    |> drop_replayed_running
+    |> expose_replayed_running_as_recovery_required
     |> prune
   in
   if should_compact then compact_replay_log path runs;

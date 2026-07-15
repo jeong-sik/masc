@@ -104,7 +104,7 @@ let test_persist_failure_detail () =
 ;;
 
 (* (2) Replay prunes completed runs to the newest [max_completed_retained]
-   without resurrecting register-only rows as live work after restart. *)
+   while preserving register-only rows as explicit recovery work. *)
 let test_replay_prunes_completed () =
   let path = fresh_path "-prune.jsonl" in
   let t = R.create ~path () in
@@ -117,15 +117,18 @@ let test_replay_prunes_completed () =
       ~started_at:(float_of_int i);
     R.mark_completed t ~run_id:("r" ^ string_of_int i) ~ok:true ()
   done;
-  (* Leave one run in [Running] state; replay must drop it because the worker
-     fiber died with the old process. *)
+  (* Leave one run in [Running] state. The old worker is dead, so replay must
+     expose it as recovery-required rather than live or silently dropping it. *)
   R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~started_at:71.0;
   let t2 = R.replay path in
   let runs = R.list_runs t2 in
-  check int "pruned completed only" R.max_completed_retained (List.length runs);
-  check bool "replayed running run dropped" true
-    (Option.is_none (R.get t2 ~run_id:"r-running"));
-  check bool "compacted log omits stale running run" false
+  check int "completed retention plus recovery row"
+    (R.max_completed_retained + 1) (List.length runs);
+  (match R.get t2 ~run_id:"r-running" with
+   | Some { R.status = R.Recovery_required { reason = R.Worker_process_restarted }; _ } -> ()
+   | Some _ -> fail "unfinished run must be recovery-required after replay"
+   | None -> fail "unfinished run must remain observable after replay");
+  check bool "compacted log preserves unfinished run" true
     (contains_substring (Fs_compat.load_file path) "r-running");
   (* Newest completed run (r70) must be present; oldest (r1) pruned. *)
   check bool "newest completed kept" true (Option.is_some (R.get t2 ~run_id:"r70"));
@@ -209,7 +212,7 @@ let () =
       , [ test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
         ; test_case
-            "replay prunes completed and drops stale running runs"
+            "replay prunes completed and preserves recovery work"
             `Quick
             test_replay_prunes_completed
         ; test_case "no-path registry is in-memory only" `Quick test_no_path_is_in_memory_only

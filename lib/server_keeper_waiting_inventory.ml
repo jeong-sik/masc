@@ -8,6 +8,7 @@ type waiting_source =
   | Hitl_pending
   | External_attention
   | Fusion_running
+  | Fusion_recovery_required
   | Background_task
   | Schedule_waiting
   | Turn_admission_waiting
@@ -62,6 +63,7 @@ let source_to_string = function
   | Hitl_pending -> "hitl_pending"
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
+  | Fusion_recovery_required -> "fusion_recovery_required"
   | Background_task -> "background_task"
   | Schedule_waiting -> "schedule_waiting"
   | Turn_admission_waiting -> "turn_admission_waiting"
@@ -80,6 +82,7 @@ let all_waiting_sources =
   ; Hitl_pending
   ; External_attention
   ; Fusion_running
+  ; Fusion_recovery_required
   ; Background_task
   ; Schedule_waiting
   ; Turn_admission_waiting
@@ -569,6 +572,17 @@ let fusion_rows keeper_name runs =
                 ; "status", `String (Fusion_run_registry.status_label run.status)
                 ]
           }
+      | Fusion_run_registry.Recovery_required _ ->
+        Some
+          { keeper_name = Some keeper_name
+          ; source = Fusion_recovery_required
+          ; waiting_on = run.run_id
+          ; wake_producer = Fusion_sink
+          ; since = Some run.started_at
+          ; due_at = None
+          ; next_action = "recover_fusion_run"
+          ; detail = Fusion_run_registry.run_to_yojson run
+          }
       | Completed _ -> None)
 ;;
 
@@ -729,6 +743,7 @@ let row_state rows =
     List.exists
       (fun row ->
          row.source = Fusion_running
+         || row.source = Fusion_recovery_required
          || row.source = Background_task
          || row.source = Turn_admission_shutdown)
       rows

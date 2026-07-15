@@ -6,9 +6,9 @@ import { isRecord, asInt, asNumber, asRecordArray, asString } from '../component
 import { get, type AbortableRequestOptions } from './core'
 
 /** Status of a tracked fusion deliberation, mirroring the backend
-    Fusion_run_registry.status_label vocabulary: a run is `running`, or finished
-    `completed` (judge ok) / `failed` (denied / sink-failed / aborted). */
-export type FusionRunStatusLabel = 'running' | 'completed' | 'failed'
+    Fusion_run_registry.status_label vocabulary: a run is `running`, needs
+    restart recovery, or finished `completed` / `failed`. */
+export type FusionRunStatusLabel = 'running' | 'recovery_required' | 'completed' | 'failed'
 
 /** One row of the fusion run registry from GET /api/v1/dashboard/fusion-runs.
     The registry tracks what the board-post view cannot: an in-progress
@@ -34,12 +34,16 @@ export interface DashboardFusionRunsResponse {
   generatedAt: string | null
 }
 
-// The backend emits a closed three-label enum, so an unrecognized value can only
-// come from a protocol break. Map it to `failed` (conservative: never let a
-// garbled row pose as a healthy `completed` or an active `running`) rather than
-// to a convenient default — see CLAUDE.md "Unknown → Permissive Default".
+// The backend emits a closed enum. A protocol break is surfaced instead of
+// being silently rewritten into a valid state.
 function asFusionRunStatus(value: unknown): FusionRunStatusLabel {
-  return value === 'running' || value === 'completed' || value === 'failed' ? value : 'failed'
+  if (
+    value === 'running'
+    || value === 'recovery_required'
+    || value === 'completed'
+    || value === 'failed'
+  ) return value
+  throw new Error(`unknown fusion run status: ${String(value)}`)
 }
 
 export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsResponse {

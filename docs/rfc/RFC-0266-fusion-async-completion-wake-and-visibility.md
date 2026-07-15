@@ -123,7 +123,7 @@ type run = { run_id : string; keeper : string; preset : string;
 
 - **`masc_fusion_status` 도구** (신규): 인자 없으면 active runs 목록, `run_id` 주면 단건. run_id로 결정론적 polling 가능(현재는 polling surface 자체가 없음). task-1432 흡수.
 - **대시보드 fusion-runs 패널**: registry 스냅샷을 SSE로 반영, running/completed 카드. task-1433 흡수. (대시보드 새 surface 추가 시 nav-event parity 체크리스트 준수 — `dashboard_nav_event.ml:valid_surfaces` 등.)
-- registry는 append-only JSONL로 완료 이력을 복원한다. 현재 restart replay가 `Running`을 drop하므로 durable request/receipt 기반 join/recovery는 잔여 P0다.
+- registry는 append-only JSONL로 완료 이력을 복원한다. restart replay의 미완료 `Running`은 `Recovery_required Worker_process_restarted`로 보존되어 tool/waiting inventory/dashboard에 동일하게 나타난다. 실제 재실행에는 durable request/receipt가 필요하며 잔여 P0다.
 
 ## 8. 재진입 / 루프 안전성
 
@@ -149,7 +149,7 @@ Phase 1만으로 폴링 증상 해소. 2–4는 가시성 요구 충족.
 1. **wake 빈도**: 다중 키퍼가 동시 fusion 시 완료 wake가 몰릴 수 있음 → 각 키퍼당 자기 run에만 wake되므로 fan-in은 키퍼 단위. 문제 시 stimulus 합류(coalesce)는 후속.
 2. **재호출 정책 학습**: 키퍼가 매 결과마다 fusion을 다시 거는 패턴은 turn/tool 관측으로 드러내고 LLM 정책을 교정한다. 숫자 cap으로 전체 실행을 중단하지 않는다.
 3. **intake 주입 형식**: `resolved_answer`를 턴 프롬프트에 '방금 도착한 fusion 결과'로 렌더하는 정확한 형식(Board_signal 렌더와 대칭) — 구현 시 `keeper_heartbeat_stimulus_intake.ml` + observation 주입 지점 확정 필요.
-4. **registry restart recovery**: 현재 replay는 active `Running`을 drop한다. durable request + execution receipt가 없으면 안전한 재실행/조인이 불가능하므로, 임의 replay 대신 typed recovery inventory와 exact adapter를 추가해야 한다.
+4. **registry restart recovery**: typed recovery inventory는 구현됐다. durable request + execution receipt가 없으면 안전한 재실행/조인이 불가능하므로 recovery row를 임의 replay하지 않으며, exact adapter가 잔여다.
 5. **RFC-0233(Turn_ref) 상호작용**: 완료 wake가 새 턴을 시작하면 chat↔board turn-identity 상관에 영향 가능 → 구현 시 교차 확인.
 
 ## 11. CLAUDE.md 준수 self-audit (워크어라운드 시그니처)

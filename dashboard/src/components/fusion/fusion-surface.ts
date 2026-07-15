@@ -38,7 +38,7 @@ import {
   judgeNodeElapsedLabel,
 } from './fusion-judge-format'
 
-type FusionRunStatus = 'complete' | 'failed' | 'running'
+type FusionRunStatus = 'complete' | 'failed' | 'running' | 'recovery'
 type FusionTone = 'ok' | 'warn' | 'bad' | 'volt' | 'muted'
 type FusionDecisionKey = 'Answer' | 'Recommend' | 'Insufficient'
 
@@ -397,7 +397,9 @@ function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
 // Registry status ('completed') aligned to the board run status enum ('complete')
 // so the shared status glyph / row styling apply to registry-only rows unchanged.
 function registryToRunStatus(status: FusionRunStatusLabel): FusionRunStatus {
-  return status === 'completed' ? 'complete' : status
+  if (status === 'completed') return 'complete'
+  if (status === 'recovery_required') return 'recovery'
+  return status
 }
 
 // A sidebar run is either a board-sink run (full panel/judge detail) or a
@@ -475,12 +477,14 @@ function statusLabel(status: FusionRunStatus): string {
       return 'failed'
     case 'running':
       return 'running'
+    case 'recovery':
+      return 'recovery'
   }
 }
 
 function statusDotClass(status: FusionRunStatus): 'done' | 'deny' | 'run' {
   if (status === 'complete') return 'done'
-  if (status === 'failed') return 'deny'
+  if (status === 'failed' || status === 'recovery') return 'deny'
   return 'run'
 }
 
@@ -973,6 +977,8 @@ function FusionRegistryRow({ record, active }: { record: FusionRunRecord; active
         <span class="spacer"></span>
         ${record.status === 'running'
           ? html`<span class="fus-dec-badge run">심의 중</span>`
+          : record.status === 'recovery_required'
+            ? html`<span class="fus-dec-badge bad">복구 필요</span>`
           : record.status === 'failed'
             ? html`<span class="fus-dec-badge bad">실패</span>`
             : html`<span class="fus-dec-badge">레지스트리</span>`}
@@ -1305,6 +1311,8 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
         <div class="fus-judge-wait">
           ${record.status === 'running'
             ? html`<span class="fus-rdot run"></span>심의 진행 중 — 패널·심판 상세는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 이 자리에 나타납니다.`
+            : record.status === 'recovery_required'
+              ? html`재시작 전 실행이 완료되지 않았습니다.${record.failureCode ? html` <span class="mono">${record.failureCode}</span>` : null}${record.error ? html` · ${record.error}` : null}`
             : record.status === 'failed'
               ? html`실패로 종료됨.${record.failureCode ? html` <span class="mono">${record.failureCode}</span>` : null}${record.error ? html` · ${record.error}` : null}`
               : '완료됨 — 보드 sink 기록을 기다리는 중입니다.'}

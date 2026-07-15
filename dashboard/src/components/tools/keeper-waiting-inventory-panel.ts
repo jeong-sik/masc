@@ -42,6 +42,7 @@ export function sourceTone(source: string | null | undefined): StatusChipTone {
     case 'read_error':
     case 'chat_queue_recovery_required':
     case 'chat_queue_persistence_blocked':
+    case 'fusion_recovery_required':
       return 'bad'
     case 'hitl_pending':
     case 'operator_pending_confirm':

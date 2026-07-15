@@ -20,7 +20,6 @@ import {
   markAssistantToolTraceEnded,
   markAssistantToolTraceErrored,
   clearActiveStream,
-  clearActiveStreamRequestId,
   releaseActiveStreamRequestId,
   activeStreamEntryId,
   activeStreamRequestId,
@@ -36,9 +35,14 @@ import { toolEntryIdFromCallId } from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
 import { isKeeperChatReceiptId, parseKeeperQueueRevision } from './lib/keeper-chat-receipt'
+import {
+  isTerminalKeeperRunResult,
+  parseKeeperRunTerminal,
+  parseKeeperRunTracking,
+} from './lib/keeper-run-ref'
+import type { KeeperRunTracking } from './lib/keeper-run-ref'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
-export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingOasToolBlockIndexes = new Map<string, number>()
@@ -671,6 +675,18 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_QUEUE_REQUEST') {
+        try {
+          const tracking = parseKeeperRunTracking(event.value)
+          if (tracking.resultContract !== 'awaiting_execution') {
+            return 'Keeper queue tracking must be awaiting_execution'
+          }
+          if (tracking.runRef.target.name !== keeperName) {
+            return 'Keeper queue tracking target does not match the active Keeper'
+          }
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          return `Keeper queue event has invalid typed run tracking: ${detail}`
+        }
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         setAssistantStreamState(
           keeperName,
@@ -758,23 +774,52 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_REQUEST_TERMINAL') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        const terminal = isRecord(event.value) ? event.value : null
-        const terminalRequestId = asString(terminal?.request_id, '').trim()
+        let terminal: KeeperRunTracking
+        try {
+          terminal = parseKeeperRunTerminal(event.value)
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          return `Keeper run terminal has invalid typed identity: ${detail}`
+        }
+        const terminalRequestId = terminal.runRef.runId
+        if (terminal.runRef.target.name !== keeperName) {
+          return 'Keeper run terminal target does not match the active Keeper'
+        }
         const currentRequestId = activeStreamRequestId(keeperName)
-        const status = asString(terminal?.status, '').trim()
         if (currentRequestId && terminalRequestId !== currentRequestId) {
           return null
         }
-        if (!TERMINAL_REQUEST_STATUSES.has(status)) {
+        if (terminal.resultContract === 'publication_uncertain') {
+          const message = isRecord(event.value)
+            ? asString(event.value.message, '').trim()
+            : ''
+          clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({
+            ...entry,
+            delivery: 'queued',
+            streamState: null,
+            error: null,
+            streamContract: keeperClientObservedSseStreamContract(
+              'queue_event',
+              'backend_terminal_event',
+              {
+                eventName: 'KEEPER_REQUEST_TERMINAL',
+                requestId: terminalRequestId,
+                reason: message || 'Keeper run publication requires reconciliation',
+              },
+            ),
+          }))
           return null
         }
+        if (!isTerminalKeeperRunResult(terminal.resultContract)) {
+          return `Keeper run terminal has nonterminal result_contract: ${terminal.resultContract}`
+        }
         clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-        if (terminalRequestId) releaseActiveStreamRequestId(terminalRequestId)
-        else clearActiveStreamRequestId(keeperName)
-        const ok = terminal?.ok === true
-        if (status === 'cancelled') {
+        releaseActiveStreamRequestId(terminalRequestId)
+        const terminalValue = isRecord(event.value) ? event.value : null
+        if (terminal.resultContract === 'cancelled') {
           const message =
-            asString(terminal?.message, '').trim() || KEEPER_MESSAGE_CANCELLED_TEXT
+            asString(terminalValue?.message, '').trim() || KEEPER_MESSAGE_CANCELLED_TEXT
           updateThreadEntry(keeperName, assistantEntryId, entry => ({
             ...entry,
             text: KEEPER_MESSAGE_CANCELLED_TEXT,
@@ -789,11 +834,9 @@ export function applyKeeperStreamEvent(
           }))
           return null
         }
-        const failed =
-          !ok && ['error', 'lost'].includes(status)
-        if (failed) {
+        if (terminal.resultContract === 'failed') {
           const message =
-            asString(terminal?.message, '').trim() || 'Keeper request failed'
+            asString(terminalValue?.message, '').trim() || 'Keeper request failed'
           updateThreadEntry(keeperName, assistantEntryId, entry => ({
             ...entry,
             text: entry.text || `Keeper request failed: ${message}`,
@@ -809,7 +852,10 @@ export function applyKeeperStreamEvent(
           }))
           return message
         }
-        if (status === 'done' && terminal?.ok !== false) {
+        if (
+          terminal.resultContract === 'completed'
+          || terminal.resultContract === 'yielded'
+        ) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
             const delivery =
               entry.delivery === 'no_reply'

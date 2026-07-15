@@ -126,6 +126,26 @@ function keeperRunRef(runId: string) {
     capability: 'invoke_turn',
   } as const
 }
+
+function keeperRunWire(runId: string) {
+  return {
+    run_id: runId,
+    target: { kind: 'keeper', name: 'echo' },
+    capability: 'invoke_turn',
+  } as const
+}
+
+function keeperQueueValue(runId: string) {
+  return {
+    tracking: {
+      kind: 'keeper_run',
+      run_ref: keeperRunWire(runId),
+      result_contract: 'awaiting_execution',
+    },
+    destination_type: 'keeper',
+    destination_id: 'echo',
+  } as const
+}
 import type { ChatBlock, KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 beforeEach(() => {
@@ -1232,7 +1252,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+        value: keeperQueueValue('kmsg_echo_1'),
       })
       return new Promise<{ terminal: boolean }>((_resolve, reject) => {
         opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
@@ -1282,7 +1302,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_cancelling', status: 'queued' },
+        value: keeperQueueValue('kmsg_echo_cancelling'),
       })
       return new Promise<{ terminal: boolean }>((_resolve, reject) => {
         opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
@@ -1333,7 +1353,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_cancel_persist_failure', status: 'queued' },
+        value: keeperQueueValue('kmsg_echo_cancel_persist_failure'),
       })
       return new Promise<{ terminal: boolean }>((_resolve, reject) => {
         opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
@@ -1376,7 +1396,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_retry', status: 'queued' },
+        value: keeperQueueValue('kmsg_echo_retry'),
       })
       return new Promise<{ terminal: boolean }>((_resolve, reject) => {
         opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
@@ -1412,7 +1432,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_hung_cancel', status: 'queued' },
+        value: keeperQueueValue('kmsg_echo_hung_cancel'),
       })
       return new Promise<{ terminal: boolean }>((_resolve, reject) => {
         opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
@@ -1469,7 +1489,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
         opts.onEvent({
           type: 'CUSTOM',
           name: 'KEEPER_QUEUE_REQUEST',
-          value: { request_id: 'kmsg_echo_late', status: 'queued' },
+          value: keeperQueueValue('kmsg_echo_late'),
         })
       }
       opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
@@ -1499,7 +1519,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_signal', status: 'running' },
+        value: keeperQueueValue('kmsg_echo_signal'),
       })
       throw abortError()
     })
@@ -1530,7 +1550,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+        value: keeperQueueValue('kmsg_echo_1'),
       })
       return new Promise<{ terminal: boolean }>(resolve => {
         resolveStream = resolve
@@ -1573,7 +1593,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_draft', status: 'queued' },
+        value: keeperQueueValue('kmsg_echo_draft'),
       })
       opts.onEvent({ type: 'TEXT_MESSAGE_START' })
       opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: '부분 응답' })
@@ -1926,14 +1946,26 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(user?.id).not.toBe(assistant?.id)
   })
 
-  it('polls a queued request immediately when the stream cuts before terminal', async () => {
+  it.each([
+    { outcome: 'the stream cuts before terminal', terminal: false, terminalEvents: [] },
+    {
+      outcome: 'the server reports publication uncertainty',
+      terminal: true,
+      terminalEvents: [{
+        type: 'CUSTOM',
+        name: 'KEEPER_REQUEST_TERMINAL',
+        value: { run_ref: keeperRunWire('kmsg_echo_1'), result_contract: 'publication_uncertain' },
+      }] satisfies KeeperChatStreamEvent[],
+    },
+  ])('polls a queued request immediately when $outcome', async ({ terminal, terminalEvents }) => {
     streamKeeperMessage.mockImplementation(emitting([
       {
         type: 'CUSTOM',
         name: 'KEEPER_QUEUE_REQUEST',
-        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+        value: keeperQueueValue('kmsg_echo_1'),
       },
-    ], false))
+      ...terminalEvents,
+    ], terminal))
     fetchQueuedKeeperMessageResult.mockResolvedValue({
       requestId: 'kmsg_echo_1',
       keeperName: 'echo',

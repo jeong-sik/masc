@@ -21,8 +21,6 @@ let test_labels () =
     (Fusion_metrics.topology_label Fusion_types.Simple);
   check string "topology judge_of_judges" "judge_of_judges"
     (Fusion_metrics.topology_label Fusion_types.Judge_of_judges);
-  check string "topology staged_judge_of_judges" "staged_judge_of_judges"
-    (Fusion_metrics.topology_label Fusion_types.Staged_judge_of_judges);
   check string "role single" "single"
     (Fusion_metrics.judge_role_label Fusion_types.Single);
   check string "role first" "first"

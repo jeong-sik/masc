@@ -1168,7 +1168,7 @@ let test_topology_unknown_is_none () =
 let test_topology_strings () =
   Alcotest.(check (list string))
     "all topology wire strings"
-    [ "simple"; "refine"; "conditional"; "judge_of_judges"; "staged_judge_of_judges" ]
+    [ "simple"; "refine"; "conditional"; "judge_of_judges" ]
     all_fusion_topology_strings
 
 (* Conditional 에스컬레이트 정책 — 닫힌 합 전수 값-핀. Insufficient만 escalate. *)

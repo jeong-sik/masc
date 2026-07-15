@@ -25,12 +25,9 @@ type outcome =
       [Refine]은 panel→judge→judge'(1차 종합 재검토)→sink, [Conditional]은 1차 판정이
       [Insufficient]일 때만 refine하고 그 외엔 [Simple]처럼 1차 종합 그대로
       ([Fusion_types.decision_warrants_escalation]), [Judge_of_judges]는 preset.judges의
-      N개(>=2) 1차 심판이 같은 패널을 병렬 독립 종합하고 preset.judge(meta)가 reconcile한다
-      (RFC-0283; judges<2면 에러, 1차 전원 실패면 첫 에러, meta 실패면 1차 첫 성공으로 degrade).
-      [Staged_judge_of_judges]는 같은 1차 심판 목록을
-      [policy.staged_judge_group_size]의 정확한 그룹들로 줄이고, 각 stage meta 결과를
-      final meta가 다시 reconcile한다. ragged/too-small judge 목록은 실행 전 에러로
-      fail-closed하며, nested [masc_fusion] 호출은 하지 않는다.
+      typed 목록 전체를 그 순서로 같은 패널에 병렬 실행하고
+      preset.judge(meta)가 reconcile한다 (RFC-0283; 빈 목록은 에러,
+      1차 전원 실패면 첫 에러, meta 실패면 1차 첫 성공으로 degrade).
       단일-심판 위상에서 1차 심판이 실패하면 [Simple]과 동일하게 에러를 전파하고,
       refine(2차)/meta 심판이 실패하면 1차 종합으로 graceful degrade한다(warn 로깅).
       refine/JOJ는 관여한 심판 usage를 모두 합산해 sink로 보낸다.

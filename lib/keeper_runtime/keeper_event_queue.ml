@@ -569,12 +569,8 @@ let payload_to_yojson = function
       ]
 
 let continuation_channel_field fields =
-  match List.assoc_opt "channel" fields with
-  | None ->
-    (* Backward compat: pre-RFC-0320 persisted stimuli carry no channel; a
-       replayed legacy wake is [Unrouted] rather than a parse failure. *)
-    Ok (Keeper_continuation_channel.unrouted "legacy: channel not captured")
-  | Some json -> Keeper_continuation_channel.of_yojson json
+  let* json = required_field ~context:"stimulus.payload" "channel" fields in
+  Keeper_continuation_channel.of_yojson json
 
 let payload_of_yojson json =
   let context = "stimulus.payload" in
@@ -618,11 +614,6 @@ let payload_of_yojson json =
     let* ok = bool_field ~context "ok" fields in
     let* resolved_answer = string_field ~context "resolved_answer" fields in
     let* board_post_id = string_field ~context "board_post_id" fields in
-    (* [Fusion_completed] predates the reply-channel field and was persisted
-       without it, so a legacy snapshot row must replay as [Unrouted] rather
-       than failing the whole snapshot parse (which recovers to an empty queue,
-       dropping every co-resident stimulus). Same lenient contract as the
-       sibling [Connector_attention]/[Hitl_resolved] rows. *)
     let* channel = continuation_channel_field fields in
     Ok (Fusion_completed { run_id; ok; resolved_answer; board_post_id; channel })
   | "bg_completed" ->

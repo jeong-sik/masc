@@ -255,11 +255,9 @@ let () =
          ; channel = Keeper_continuation_channel.unrouted "test fixture"
          })
       "post-1");
-  (* Reply-route parity: the fusion wake serializes its originating channel,
-     and — like the sibling Connector_attention/Hitl_resolved rows — a legacy
-     Fusion_completed row persisted before the channel field existed replays as
-     [Unrouted] rather than failing the snapshot parse (a parse failure recovers
-     to an empty queue, dropping every co-resident stimulus). *)
+  (* Reply-route parity: every continuation-bearing wake serializes its exact
+     originating channel. A missing route is malformed durable state, not an
+     implicit [Unrouted] destination. *)
   (let routed : Keeper_event_queue.fusion_completion =
      { run_id = "fus-routed"
      ; ok = true
@@ -292,8 +290,8 @@ let () =
         | _ -> false)
     | Ok _ -> assert false
     | Error e -> failwith e);
-   let missing_channel_json =
-     match stimulus_to_yojson stim with
+   let without_payload_channel stimulus =
+     match stimulus_to_yojson stimulus with
      | `Assoc fields ->
        `Assoc
          (List.map
@@ -312,20 +310,30 @@ let () =
             fields)
      | other -> other
    in
-   match stimulus_of_yojson missing_channel_json with
-   | Ok { payload = Fusion_completed fc; _ } ->
-     assert (
-       match fc.channel with
-       | Keeper_continuation_channel.Unrouted { reason } ->
-         String.equal reason "legacy: channel not captured"
-       | _ -> false)
-   | Ok _ -> failwith "legacy fusion row must decode as Fusion_completed"
-   | Error e ->
-     failwith
-       (Printf.sprintf
-          "legacy fusion row without a channel key must replay Unrouted, not \
-           fail closed: %s"
-          e));
+   List.iter
+     (fun (label, stimulus) ->
+        match stimulus_of_yojson (without_payload_channel stimulus) with
+        | Error _ -> ()
+        | Ok _ -> failwith (label ^ " without channel must fail explicitly"))
+     [ "fusion completion", stim
+     ; ( "connector attention"
+       , { stim with
+           post_id = "connector-route"
+         ; payload =
+             Connector_attention
+               { event_id = "connector-route"; channel = routed.channel }
+         } )
+     ; ( "HITL resolution"
+       , { stim with
+           post_id = "hitl:approval-route"
+         ; payload =
+             Hitl_resolved
+               { approval_id = "approval-route"
+               ; decision = Hitl_approved
+               ; channel = routed.channel
+               }
+         } )
+     ]);
   assert (
     String.equal
       (fusion_completion_post_id

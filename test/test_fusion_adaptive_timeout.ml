@@ -65,16 +65,6 @@ system_prompt = "lens B"
 timeout_s = 110.0
 |}
 
-let adaptive_preset () =
-  match Fusion_config.of_toml (parse adaptive_toml) with
-  | Ok p ->
-    (match p.Fusion_policy.presets with
-     | [ vp ] -> Fusion_policy.Validated_preset.preset vp
-     | _ -> fail "expected exactly one preset")
-  | Error es ->
-    failf "expected Ok, got errors: %s"
-      (String.concat ", " (List.map Fusion_config.show_config_error es))
-
 let test_config_adaptive_timeout_parse () =
   match Fusion_config.of_toml (parse adaptive_toml) with
   | Ok p ->
@@ -165,30 +155,6 @@ let test_adjust_judge_timeout_extend () =
   check (option (float 0.001)) "extend below 0.001 -> None" None
     (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
        ~factor:2.0 ~wave_budget_s:5.0 ~elapsed_s:5.0 ~already_timed_out:true)
-
-let test_runtime_clock_missing_env_returns_typed_failure () =
-  Masc_eio_env.reset_for_test ();
-  Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-    let missing_clock_failure =
-      Fusion_types.Internal_error "missing runtime clock"
-    in
-    let clock =
-      Fusion_orchestrator_judge_wave.make_runtime_clock ~missing_clock_failure
-    in
-    match
-      Fusion_orchestrator_judge_wave.meta_budget_check
-        ~preset:(adaptive_preset ())
-        clock
-    with
-    | Error (Fusion_types.Internal_error msg, usage) ->
-      check string "typed failure message" "missing runtime clock" msg;
-      check int "input usage" 0 usage.Fusion_types.input_tokens;
-      check int "output usage" 0 usage.Fusion_types.output_tokens
-    | Error (failure, _) ->
-      failf
-        "expected Internal_error, got %s"
-        (Fusion_types.judge_failure_text failure)
-    | Ok _ -> fail "expected missing clock failure")
 
 let test_timeout_budget_first_wave_appends_fallback () =
   let fallback_calls = ref 0 in
@@ -281,10 +247,6 @@ let () =
     ; ( "adjust_judge_timeout"
       , [ test_case "disabled" `Quick test_adjust_judge_timeout_disabled
         ; test_case "extend" `Quick test_adjust_judge_timeout_extend
-        ] )
-    ; ( "clock"
-      , [ test_case "missing runtime env returns typed failure" `Quick
-            test_runtime_clock_missing_env_returns_typed_failure
         ] )
     ; ( "fallback"
       , [ test_case "timeout/budget wave appends fallback" `Quick

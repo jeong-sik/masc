@@ -82,12 +82,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                     }
                 ] )
           in
-          let clock =
-            Fusion_orchestrator_judge_wave.make_runtime_clock
-              ~missing_clock_failure:
-                (Fusion_types.Internal_error
-                   "fusion adaptive timeout requires a wall clock; initialise Masc_eio_env with ~clock")
-          in
+          let clock = Fusion_orchestrator_judge_wave.make_runtime_clock () in
           let elapsed_since_t0 () =
             Fusion_orchestrator_judge_wave.elapsed_since_t0 clock
           in
@@ -117,9 +112,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           in
           let with_timeout_budget_fallback =
             Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
-          in
-          let meta_budget_check () =
-            Fusion_orchestrator_judge_wave.meta_budget_check ~preset clock
           in
           let run_fallback_judge () =
             Fusion_orchestrator_judge_wave.run_fallback_judge
@@ -158,23 +150,10 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                  (Error err, first_nodes)
                | (_, first_s, _) :: _ ->
                  let firsts_usage = firsts_usage firsts_with_fallback in
-                 (match meta_budget_check () with
-                  | Error (failure, _) ->
-                    let elapsed_s = elapsed_since_t0 () in
-                    ( Ok (first_s, firsts_usage)
-                    , first_nodes
-                      @ [ Fusion_types.Judge_failed
-                            { Fusion_types.failed_role = Meta
-                            ; failure
-                            ; usage = Fusion_types.zero_usage
-                            ; elapsed_s
-                            }
-                        ] )
-                  | Ok meta_timeout_s ->
-                    let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
-                     (match
+                 let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
+                 (match
                        Fusion_judge.run_meta ~sw ~net
-                         ~timeout_s:meta_timeout_s
+                         ~timeout_s:preset.Fusion_policy.meta_timeout_s
                          ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge
@@ -205,7 +184,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                                ; usage = meta_u
                                ; elapsed_s
                                }
-                           ] ))))
+                           ] )))
           in
           let run_staged_judge_of_judges () =
             let group_size = policy.Fusion_policy.staged_judge_group_size in
@@ -257,22 +236,9 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 | (_, first_s, _) :: _ ->
                   let firsts_usage = firsts_usage stage_firsts in
                   let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
-                  (match meta_budget_check () with
-                   | Error (failure, _) ->
-                     let elapsed_s = elapsed_since_t0 () in
-                     ( (stage_id, Ok (first_s, firsts_usage))
-                     , first_nodes
-                       @ [ Fusion_types.Judge_failed
-                             { Fusion_types.failed_role = Stage_meta stage_num
-                             ; failure
-                             ; usage = Fusion_types.zero_usage
-                             ; elapsed_s
-                             }
-                         ] )
-                   | Ok meta_timeout_s ->
-                     (match
+                  (match
                         Fusion_judge.run_meta ~sw ~net
-                          ~timeout_s:meta_timeout_s
+                          ~timeout_s:preset.Fusion_policy.meta_timeout_s
                           ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                           ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                           ~judge_model:preset.Fusion_policy.judge
@@ -304,7 +270,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                                 ; usage = stage_u
                                 ; elapsed_s
                                 }
-                            ] )))
+                            ] ))
               in
               let indexed_groups = List.mapi (fun i group -> (i + 1, group)) first_groups in
               let stage_runs =
@@ -327,22 +293,9 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                | (_, first_stage_s, _) :: _ ->
                  let stage_usage = Fusion_types.sum_all_usage stage_results in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_stages in
-                 (match meta_budget_check () with
-                  | Error (failure, _) ->
-                    let elapsed_s = elapsed_since_t0 () in
-                    ( Ok (first_stage_s, stage_usage)
-                    , stage_nodes
-                      @ [ Fusion_types.Judge_failed
-                            { Fusion_types.failed_role = Final_meta
-                            ; failure
-                            ; usage = Fusion_types.zero_usage
-                            ; elapsed_s
-                            }
-                        ] )
-                  | Ok meta_timeout_s ->
-                    (match
+                 (match
                        Fusion_judge.run_meta ~sw ~net
-                         ~timeout_s:meta_timeout_s
+                         ~timeout_s:preset.Fusion_policy.meta_timeout_s
                          ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge
@@ -372,7 +325,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                                ; usage = final_u
                                ; elapsed_s
                                }
-                           ] ))))
+                           ] )))
           in
           let judge_full, judge_nodes =
             match Fusion_types.answered_of panel with

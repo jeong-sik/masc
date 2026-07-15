@@ -381,7 +381,7 @@ let decision_public_allowlist =
     ; "media_dropped_total"; "media_dropped_counts"
     ; "payload_role"; "trigger"; "trigger_detail"; "kind"; "limit_tokens"
     ; "ratio"; "threshold"; "count"
-    ; "source_requeued"; "exact_evidence"
+    ; "owner_lane_resume_requested"; "exact_evidence"
     ; "before_checkpoint_bytes"; "after_checkpoint_bytes"
     ; "before_message_count"; "after_message_count"
     ; "summarized_message_count"; "dropped_message_count"

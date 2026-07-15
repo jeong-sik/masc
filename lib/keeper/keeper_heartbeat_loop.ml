@@ -265,6 +265,9 @@ let settlement_of_failure ~settled_at failure =
   | Keeper_unified_turn.Requeue_after_context_compaction ->
     Keeper_registry_event_queue.Requeue
       Keeper_registry_event_queue.Context_compaction_retry
+  | Keeper_unified_turn.Defer_after_context_compaction_failure ->
+    Keeper_registry_event_queue.Requeue
+      Keeper_registry_event_queue.Context_compaction_retry
   | Keeper_unified_turn.Follow_failure_route ->
     (match failure.Keeper_unified_turn.route with
      | Keeper_runtime_failure_route.Retry_after_observed _ ->
@@ -285,6 +288,55 @@ let settlement_of_failure ~settled_at failure =
                   provenance
                   detail)
          })
+;;
+
+let resume_owner_lane_after_context_compaction ~base_path ~keeper_name = function
+  | Some
+      (Cycle.Failed
+        { failure =
+            { Keeper_unified_turn.source_lease_disposition =
+                Keeper_unified_turn.Requeue_after_context_compaction
+            ; _
+            }
+        ; _
+        }) ->
+    let outcome =
+      Keeper_registry.wakeup
+        ~intent:Keeper_registry.Compaction_signal
+        ~base_path
+        keeper_name
+    in
+    (match outcome with
+     | Keeper_registry.Signaled ->
+       Log.Keeper.info
+         ~keeper_name
+         "provider overflow compaction settled; owner lane resume signaled"
+     | Keeper_registry.Deferred_unregistered ->
+       Log.Keeper.warn
+         ~keeper_name
+         "provider overflow compaction settled but owner lane is unregistered"
+     | Keeper_registry.Deferred_not_running phase ->
+       Log.Keeper.warn
+         ~keeper_name
+         "provider overflow compaction settled but owner lane phase=%s"
+         (Keeper_state_machine.phase_to_string phase)
+     | Keeper_registry.Deferred_lifecycle denial ->
+       Log.Keeper.warn
+         ~keeper_name
+         "provider overflow compaction settled but owner lane lifecycle=%s"
+         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial));
+    Some outcome
+  | Some
+      ( Cycle.Failed _
+      | Cycle.Completed _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _
+      | Cycle.Busy _
+      | Cycle.Judgment_settled _
+      | Cycle.Manual_compaction_failed _
+      | Cycle.Manual_compaction_applied _ )
+  | None ->
+    None
 ;;
 
 let single_approved_resolution lease =
@@ -764,7 +816,13 @@ let run_keepalive_unified_turn
          (match !cycle_outcome_ref with
           | Some (Cycle.Failed { failure; _ }) ->
             (match failure.Keeper_unified_turn.source_lease_disposition with
-             | Keeper_unified_turn.Requeue_after_context_compaction
+             | Keeper_unified_turn.Requeue_after_context_compaction ->
+               resume_owner_lane_after_context_compaction
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name
+                 !cycle_outcome_ref
+               |> ignore
+             | Keeper_unified_turn.Defer_after_context_compaction_failure
              | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
              | Keeper_unified_turn.Follow_failure_route ->
                (match failure.Keeper_unified_turn.route with
@@ -845,6 +903,11 @@ let run_keepalive_unified_turn
              with
              | Error message -> raise (Event_queue_settlement_failed message)
              | Ok () -> ());
+            resume_owner_lane_after_context_compaction
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name
+              !cycle_outcome_ref
+            |> ignore;
             if settlement_is_ack settlement
             then
               mark_connector_attention_ignored_after_turn

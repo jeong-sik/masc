@@ -406,15 +406,30 @@ let test_failed_cycle_route_mapping () =
         Masc.Keeper_unified_turn.Requeue_after_context_compaction
     }
   in
+  (match
+     Masc.Keeper_heartbeat_loop.settlement_of_failure
+       ~settled_at:7.0
+       compacted_failure
+   with
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+     ()
+   | _ -> Alcotest.fail "context-compacted source stimulus was acknowledged");
+  let deferred_failure =
+    { compacted_failure with
+      source_lease_disposition =
+        Masc.Keeper_unified_turn.Defer_after_context_compaction_failure
+    }
+  in
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
-      ~settled_at:7.0
-      compacted_failure
+      ~settled_at:8.0
+      deferred_failure
   with
   | Masc.Keeper_registry_event_queue.Requeue
       Masc.Keeper_registry_event_queue.Context_compaction_retry ->
     ()
-  | _ -> Alcotest.fail "context-compacted source stimulus was acknowledged"
+  | _ -> Alcotest.fail "failed compaction source stimulus was acknowledged"
 ;;
 
 let cycle_meta () =
@@ -428,6 +443,70 @@ let cycle_meta () =
   with
   | Ok meta -> meta
   | Error message -> Alcotest.failf "cycle meta fixture: %s" message
+;;
+
+let test_provider_compaction_resume_is_success_only () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let meta = cycle_meta () in
+  let peer =
+    { meta with
+      name = "queue-outcome-peer"
+    ; agent_name = "agent-queue-outcome-peer"
+    }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.unregister ~base_path meta.name;
+      Masc.Keeper_registry.unregister ~base_path peer.name;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let owner_entry = Masc.Keeper_registry.register ~base_path meta.name meta in
+      let peer_entry = Masc.Keeper_registry.register ~base_path peer.name peer in
+      Atomic.set owner_entry.fiber_wakeup false;
+      Atomic.set peer_entry.fiber_wakeup false;
+      let cycle disposition =
+        let failure =
+          { (turn_failure
+               (Keeper_runtime_failure_route.Retry_after_observed
+                  { retry_class = Keeper_runtime_failure_route.Rate_limited
+                  ; retry_after = None
+                  })) with
+            source_lease_disposition = disposition
+          }
+        in
+        Some (Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure })
+      in
+      (match
+         Masc.Keeper_heartbeat_loop.resume_owner_lane_after_context_compaction
+           ~base_path
+           ~keeper_name:meta.name
+           (cycle Masc.Keeper_unified_turn.Requeue_after_context_compaction)
+       with
+       | Some Masc.Keeper_registry.Signaled -> ()
+       | Some _ -> Alcotest.fail "durable compaction resume was deferred"
+       | None -> Alcotest.fail "durable compaction did not request owner resume");
+      Alcotest.(check bool)
+        "owner lane wake set"
+        true
+        (Atomic.get owner_entry.fiber_wakeup);
+      Alcotest.(check bool)
+        "peer lane remains untouched"
+        false
+        (Atomic.get peer_entry.fiber_wakeup);
+      Atomic.set owner_entry.fiber_wakeup false;
+      (match
+         Masc.Keeper_heartbeat_loop.resume_owner_lane_after_context_compaction
+           ~base_path
+           ~keeper_name:meta.name
+           (cycle
+              Masc.Keeper_unified_turn.Defer_after_context_compaction_failure)
+       with
+       | None -> ()
+       | Some _ -> Alcotest.fail "failed compaction requested an immediate retry");
+      Alcotest.(check bool)
+        "failed compaction leaves owner wake clear"
+        false
+        (Atomic.get owner_entry.fiber_wakeup))
 ;;
 
 let test_applied_compaction_settles_followup_atomically () =
@@ -971,6 +1050,10 @@ let () =
             `Quick
             test_judgment_terminal_evidence_is_durable
         ; Alcotest.test_case "failed cycle route mapping" `Quick test_failed_cycle_route_mapping
+        ; Alcotest.test_case
+            "provider compaction resumes only after success"
+            `Quick
+            test_provider_compaction_resume_is_success_only
         ; Alcotest.test_case
             "applied compaction settles follow-up atomically"
             `Quick

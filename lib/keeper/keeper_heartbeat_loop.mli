@@ -130,6 +130,15 @@ val settlement_of_failure :
     action's new typed route remains authoritative rather than being collapsed
     into a generic judgment failure. *)
 
+val resume_owner_lane_after_context_compaction :
+  base_path:string ->
+  keeper_name:string ->
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  Keeper_registry.wakeup_outcome option
+(** Signal only the owner lane after a provider-overflow compaction and its
+    source settlement are durable. Failed compaction and unrelated outcomes do
+    not wake here, preventing an immediate same-lane retry loop. *)
+
 val settlement_of_cycle_outcome :
   base_path:string ->
   settled_at:float ->

@@ -22,6 +22,7 @@ include Keeper_unified_turn_phase_plan
 type source_lease_disposition =
   | Follow_failure_route
   | Requeue_after_context_compaction
+  | Defer_after_context_compaction_failure
   | Acknowledge_after_in_turn_handling
 
 type turn_failure =
@@ -273,7 +274,7 @@ let append_provider_overflow_manifest
              (`Assoc
                [ "trigger", `String (Compaction_trigger.to_label trigger)
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "source_requeued", `Bool true
+               ; "owner_lane_resume_requested", `Bool true
                ; "error", error
                ; ( "exact_evidence"
                  , Keeper_compact_policy.compaction_evidence_to_json evidence )
@@ -320,12 +321,12 @@ let append_provider_overflow_manifest
              (`Assoc
                [ "trigger", `String (Compaction_trigger.to_label trigger)
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "source_requeued", `Bool true
+               ; "owner_lane_resume_requested", `Bool false
                ; "error", `String reason
                ]))
         Keeper_runtime_manifest.Context_compacted
     in
-    Requeue_after_context_compaction, turn_state
+    Defer_after_context_compaction_failure, turn_state
 ;;
 
 let run_keeper_cycle

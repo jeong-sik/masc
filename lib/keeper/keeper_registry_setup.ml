@@ -165,6 +165,21 @@ let decr_running_count_clamped () =
 
 (** Lock-free CAS loop for registry writes. Atomic.t used instead of Eio.Mutex for non-Eio context compatibility (#7011 pattern). *)
 
+let put_entry_authorized ~base_path name entry =
+  match validate_registry_entry ~base_path name entry with
+  | Error err ->
+    record_invalid_registry_entry ~operation:"put" ~name err;
+    Error err
+  | Ok () ->
+    let key = registry_key ~base_path name in
+    let rec loop () =
+      let current = Atomic.get registry in
+      let updated = StringMap.add key entry current in
+      if Atomic.compare_and_set registry current updated then Ok () else loop ()
+    in
+    loop ()
+;;
+
 let put_entry_internal ?lifecycle_token ~base_path name entry =
   Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
     match
@@ -175,19 +190,7 @@ let put_entry_internal ?lifecycle_token ~base_path name entry =
         ()
     with
     | Error owner -> Error (Lifecycle_transaction_reserved owner)
-    | Ok () ->
-      (match validate_registry_entry ~base_path name entry with
-       | Error err ->
-         record_invalid_registry_entry ~operation:"put" ~name err;
-         Error err
-       | Ok () ->
-         let key = registry_key ~base_path name in
-         let rec loop () =
-           let current = Atomic.get registry in
-           let updated = StringMap.add key entry current in
-           if Atomic.compare_and_set registry current updated then Ok () else loop ()
-         in
-         loop ()))
+    | Ok () -> put_entry_authorized ~base_path name entry)
 ;;
 
 let put_entry ~base_path name entry = put_entry_internal ~base_path name entry
@@ -502,7 +505,7 @@ let register_with_state_result
     ; compaction_stage = Packed Compaction_accumulating
     }
   in
-  let commit () =
+  let commit_authorized () =
     (match StringMap.find_opt key (Atomic.get registry) with
      | Some prior when prior.phase = Running ->
        Otel_metric_store.inc_counter
@@ -512,31 +515,41 @@ let register_with_state_result
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        decr_running_count_clamped ()
      | Some _ | None -> ());
-    put_entry_internal ?lifecycle_token ~base_path name entry
+    put_entry_authorized ~base_path name entry
   in
   let commit_result =
-    if respect_shutdown_fence
-    then
+    Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
       match
-        Keeper_turn_admission.commit_registration_if_open
+        Keeper_lifecycle_reservation.authorize
+          ?token:lifecycle_token
           ~base_path
           ~keeper_name:name
-          commit
+          ()
       with
-      | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
-        Error (Registration_shutdown_reserved operation_id)
-      | Keeper_turn_admission.Registration_committed
-          (Error (Lifecycle_transaction_reserved owner)) ->
-        Error (Registration_lifecycle_reserved owner)
-      | Keeper_turn_admission.Registration_committed (Error validation_error) ->
-        Error (Registration_invalid validation_error)
-      | Keeper_turn_admission.Registration_committed (Ok ()) -> Ok ()
-    else
-      match commit () with
-      | Ok () -> Ok ()
-      | Error (Lifecycle_transaction_reserved owner) ->
-        Error (Registration_lifecycle_reserved owner)
-      | Error validation_error -> Error (Registration_invalid validation_error)
+      | Error owner -> Error (Registration_lifecycle_reserved owner)
+      | Ok () ->
+        if respect_shutdown_fence
+        then
+          match
+            Keeper_turn_admission.commit_registration_if_open
+              ~base_path
+              ~keeper_name:name
+              commit_authorized
+          with
+          | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
+            Error (Registration_shutdown_reserved operation_id)
+          | Keeper_turn_admission.Registration_committed
+              (Error (Lifecycle_transaction_reserved owner)) ->
+            Error (Registration_lifecycle_reserved owner)
+          | Keeper_turn_admission.Registration_committed (Error validation_error) ->
+            Error (Registration_invalid validation_error)
+          | Keeper_turn_admission.Registration_committed (Ok ()) -> Ok ()
+        else
+          match commit_authorized () with
+          | Ok () -> Ok ()
+          | Error (Lifecycle_transaction_reserved owner) ->
+            Error (Registration_lifecycle_reserved owner)
+          | Error validation_error -> Error (Registration_invalid validation_error))
   in
   match commit_result with
   | Error _ as error -> error
@@ -646,11 +659,6 @@ let register_restarting ~base_path name meta
     canonicalize_registry_meta ~operation:"register_restarting" ~base_path name meta
   in
   let key = registry_key ~base_path name in
-  match
-    Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
-  with
-  | Error owner -> Error (Restart_lifecycle_reserved owner)
-  | Ok () ->
   let conditions =
     { Keeper_state_machine.default_conditions with
       restart_requested = true
@@ -716,24 +724,24 @@ let register_restarting ~base_path name meta
     then Ok new_entry
     else loop ()
   in
-  let guarded_loop () =
+  let registration =
     Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      match
-        Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
-      with
+      match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
       | Error owner -> Error (Restart_lifecycle_reserved owner)
-      | Ok () -> loop ())
+      | Ok () ->
+        (match
+           Keeper_turn_admission.commit_registration_if_open
+             ~base_path
+             ~keeper_name:name
+             loop
+         with
+         | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
+           Error (Restart_shutdown_reserved operation_id)
+         | Keeper_turn_admission.Registration_committed result -> result))
   in
-  match
-    Keeper_turn_admission.commit_registration_if_open
-      ~base_path
-      ~keeper_name:name
-      guarded_loop
-  with
-  | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
-    Error (Restart_shutdown_reserved operation_id)
-  | Keeper_turn_admission.Registration_committed (Error _ as error) -> error
-  | Keeper_turn_admission.Registration_committed (Ok registered) ->
+  match registration with
+  | Error _ as error -> error
+  | Ok registered ->
     Log.Keeper.info
       "registry: registering keeper name=%s base_path=%s phase=%s"
       name

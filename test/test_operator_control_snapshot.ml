@@ -596,6 +596,85 @@ let test_lifecycle_reservation_is_per_keeper_and_owner_typed () =
             (not (String.equal (Reservation.owner_id first) (Reservation.owner_id other)));
           ignore (Reservation.release other : Reservation.release_outcome)))
 
+let test_lifecycle_key_lock_waits_cooperatively_between_fibers () =
+  Eio_main.run @@ fun _env ->
+  let module Reservation = Keeper_lifecycle_reservation in
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let first_entered_p, first_entered_r = Eio.Promise.create () in
+      let release_first_p, release_first_r = Eio.Promise.create () in
+      let second_entered_p, second_entered_r = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Reservation.with_key_lock
+          ~base_path:base_dir
+          ~keeper_name:"same-domain-fibers"
+          (fun () ->
+             Eio.Promise.resolve first_entered_r ();
+             Eio.Promise.await release_first_p));
+      Eio.Promise.await first_entered_p;
+      Eio.Fiber.fork ~sw (fun () ->
+        Reservation.with_key_lock
+          ~base_path:base_dir
+          ~keeper_name:"same-domain-fibers"
+          (fun () -> Eio.Promise.resolve second_entered_r ()));
+      Eio.Fiber.yield ();
+      Alcotest.(check bool)
+        "second fiber waits while the first owns the key"
+        true
+        (not (Eio.Promise.is_resolved second_entered_p));
+      Eio.Promise.resolve release_first_r ();
+      Eio.Promise.await second_entered_p)
+
+let test_cross_context_durable_waiter_acquisition_is_cancellable () =
+  Eio_main.run @@ fun _env ->
+  let mutex = Cross_context_mutex.create () in
+  let holder_entered = Atomic.make false in
+  let release_holder = Atomic.make false in
+  let holder =
+    Domain.spawn (fun () ->
+      Cross_context_mutex.with_lock mutex (fun () ->
+        Atomic.set holder_entered true;
+        while not (Atomic.get release_holder) do
+          Domain.cpu_relax ()
+        done))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set release_holder true;
+      Domain.join holder)
+    (fun () ->
+      while not (Atomic.get holder_entered) do
+        Eio.Fiber.yield ()
+      done;
+      let waiter_started = Atomic.make false in
+      let waiter_entered = Atomic.make false in
+      let outcome =
+        Eio.Fiber.first
+          (fun () ->
+             Atomic.set waiter_started true;
+             Cross_context_mutex.with_durable_lock mutex (fun () ->
+               Atomic.set waiter_entered true);
+             `Waiter_entered)
+          (fun () ->
+             while not (Atomic.get waiter_started) do
+               Eio.Fiber.yield ()
+             done;
+             `Cancel_waiter)
+      in
+      (match outcome with
+       | `Cancel_waiter -> ()
+       | `Waiter_entered ->
+         Alcotest.fail "durable waiter entered before the system-thread owner released");
+      Alcotest.(check bool)
+        "cancelled durable waiter never enters the critical section"
+        false
+        (Atomic.get waiter_entered);
+      Atomic.set release_holder true);
+  Cross_context_mutex.with_lock mutex (fun () -> ())
+
 let test_lifecycle_owner_gates_meta_and_registry_mutations () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1703,6 +1782,14 @@ let () =
             "lifecycle reservations are per keeper and owner typed"
             `Quick
             test_lifecycle_reservation_is_per_keeper_and_owner_typed;
+          Alcotest.test_case
+            "lifecycle key lock waits cooperatively between fibers"
+            `Quick
+            test_lifecycle_key_lock_waits_cooperatively_between_fibers;
+          Alcotest.test_case
+            "cross-context durable waiter acquisition is cancellable"
+            `Quick
+            test_cross_context_durable_waiter_acquisition_is_cancellable;
           Alcotest.test_case
             "lifecycle owner gates durable and registry mutations"
             `Quick

@@ -1120,10 +1120,31 @@ let start_keeper_loops_owned
                try
                  match Keeper_shutdown_runtime.recover_operation ~config operation with
                  | Ok recovered ->
-                   Log.Keeper.info
-                     "recovered shutdown operation keeper=%s operation=%s"
-                     recovered.Keeper_shutdown_types.keeper_name
-                     (Keeper_shutdown_types.Operation_id.to_string recovered.operation_id)
+                   (match recovered.Keeper_shutdown_types.phase with
+                    | Keeper_shutdown_types.Blocked failure ->
+                      Log.Keeper.warn
+                        "shutdown recovery retained blocked admission keeper=%s operation=%s stage=%s detail=%s"
+                        recovered.keeper_name
+                        (Keeper_shutdown_types.Operation_id.to_string
+                           recovered.operation_id)
+                        (Keeper_shutdown_types.failure_stage_to_string failure.stage)
+                        failure.detail
+                    | Keeper_shutdown_types.Reconciliation_required _ ->
+                      Log.Keeper.warn
+                        "shutdown recovery retained reconciliation-required admission keeper=%s operation=%s"
+                        recovered.keeper_name
+                        (Keeper_shutdown_types.Operation_id.to_string
+                           recovered.operation_id)
+                    | Keeper_shutdown_types.Prepared
+                    | Keeper_shutdown_types.Joined_idle
+                    | Keeper_shutdown_types.Finalizing_tasks _
+                    | Keeper_shutdown_types.Cleanup_ready _
+                    | Keeper_shutdown_types.Finalized _ ->
+                      Log.Keeper.info
+                        "recovered shutdown operation keeper=%s operation=%s"
+                        recovered.keeper_name
+                        (Keeper_shutdown_types.Operation_id.to_string
+                           recovered.operation_id))
                  | Error detail ->
                    Log.Keeper.error
                      "shutdown recovery failed keeper=%s operation=%s error=%s"

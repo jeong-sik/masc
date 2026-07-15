@@ -359,6 +359,69 @@ let corrupt_both config =
   Workspace_core.write_text config (recovery_path config) "}also not json"
 ;;
 
+let test_startup_recovery_returns_only_running_schedule_to_due () =
+  with_workspace
+  @@ fun config ->
+  let interrupted = make_request ~schedule_id:"interrupted" () in
+  let untouched = make_request ~schedule_id:"untouched" () in
+  ignore (insert_ok config interrupted);
+  ignore (insert_ok config untouched);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:interrupted.schedule_id with
+   | Ok running -> check_status "interrupted is running" Running running.status
+   | Error err -> fail (store_error_to_string err));
+  let reason = Interrupted_by_process_restart in
+  (match recover_running_on_startup config ~now:203.0 with
+   | Ok (_, recovered) -> check int "one interrupted schedule recovered" 1 recovered
+   | Error err -> fail (store_error_to_string err));
+  (match
+     get_schedule config ~schedule_id:interrupted.schedule_id,
+     get_schedule config ~schedule_id:untouched.schedule_id
+   with
+   | Some recovered, Some untouched ->
+     check_status "interrupted returned to due" Due recovered.status;
+     check_status "other due schedule untouched" Due untouched.status
+   | _ -> fail "startup recovery schedules missing");
+  (match last_execution_for_schedule (read_state config)
+           ~schedule_id:interrupted.schedule_id with
+   | Some execution ->
+     check string "interrupted attempt failed" "failed"
+       (execution_status_to_string execution.status);
+     check (option string) "typed restart reason serialized"
+       (Some (running_recovery_reason_to_string reason))
+       execution.error
+   | None -> fail "interrupted execution evidence missing");
+  let before_repeat = read_state config in
+  (match recover_running_on_startup config ~now:204.0 with
+   | Ok (_, recovered) -> check int "recovery is idempotent" 0 recovered
+   | Error err -> fail (store_error_to_string err));
+  check int "idempotent recovery does not rewrite state"
+    before_repeat.version
+    (read_state config).version
+;;
+
+let test_startup_recovery_refuses_corrupt_ledger () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"corrupt-recovery" () in
+  ignore (insert_ok config request);
+  corrupt_both config;
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let recovery_before = Workspace_core.read_text config (recovery_path config) in
+  (match
+     recover_running_on_startup config ~now:203.0
+   with
+   | Error (Corrupt_ledger _) -> ()
+   | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err)
+   | Ok _ -> fail "startup recovery silently replaced corrupt ledger");
+  check string "corrupt primary preserved" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "corrupt recovery preserved" recovery_before
+    (Workspace_core.read_text config (recovery_path config))
+;;
+
 let test_load_fresh_when_file_absent () =
   with_workspace
   @@ fun config ->
@@ -609,6 +672,8 @@ let () =
             test_load_fresh_when_file_absent;
           test_case "both unparseable loads Corrupt" `Quick
             test_load_corrupt_when_both_unparseable;
+          test_case "startup recovery refuses corrupt ledger" `Quick
+            test_startup_recovery_refuses_corrupt_ledger;
           test_case "read_state raises on corrupt ledger" `Quick
             test_read_state_raises_on_corrupt;
           test_case "mutation refused and corrupt ledger preserved" `Quick
@@ -649,6 +714,8 @@ let () =
             test_reschedule_due_cron_advances_to_next_match;
           test_case "start and complete persist execution record" `Quick
             test_start_and_complete_persist_execution_record;
+          test_case "startup recovery returns only running schedule to due" `Quick
+            test_startup_recovery_returns_only_running_schedule_to_due;
           test_case "fail due candidate records failed execution" `Quick
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring occurrences remain dispatchable" `Quick

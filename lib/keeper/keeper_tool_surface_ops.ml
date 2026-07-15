@@ -782,18 +782,18 @@ let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
       Keeper_msg_async.cancel ~base_path:config.base_path ~caller run_id
     in
     let json = Keeper_invocation_contract.delegate_cancellation_to_json reference result in
-    match result with
-    | Keeper_msg_async.Cancellation_requested _ ->
-      tool_result_ok_data json
-    | Keeper_msg_async.Cancel_not_found
-    | Keeper_msg_async.Cancel_unreadable _
-    | Keeper_msg_async.Cancel_rejected _
-    | Keeper_msg_async.Cancel_worker_ownership_unknown _
-    | Keeper_msg_async.Cancel_already_terminal _
-    | Keeper_msg_async.Cancel_persistence_failed _
-    | Keeper_msg_async.Cancel_worker_signal_failed _
-    | Keeper_msg_async.Cancel_state_invariant_failed _ ->
-      tool_result_error_data json
+    (match result with
+     | Keeper_msg_async.Cancellation_requested _ ->
+       tool_result_ok_data json
+     | Keeper_msg_async.Cancel_not_found
+     | Keeper_msg_async.Cancel_unreadable _
+     | Keeper_msg_async.Cancel_rejected _
+     | Keeper_msg_async.Cancel_worker_ownership_unknown _
+     | Keeper_msg_async.Cancel_already_terminal _
+     | Keeper_msg_async.Cancel_persistence_failed _
+     | Keeper_msg_async.Cancel_worker_signal_failed _
+     | Keeper_msg_async.Cancel_state_invariant_failed _ ->
+       tool_result_error_data json)
      | Keeper_msg_async.Absent ->
        tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference Keeper_msg_async.Cancel_not_found)
      | Keeper_msg_async.Unreadable reason ->

@@ -574,7 +574,7 @@ let rec ensure_with
          in
          let completion = completion_of_outcome outcome in
          let cleanup =
-           if Eio_guard.is_ready ()
+           if Eio_guard.is_eio_fiber ()
            then Eio.Cancel.protect (fun () -> release ~completion owned)
            else release ~completion owned
          in

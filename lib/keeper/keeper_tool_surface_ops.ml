@@ -125,10 +125,6 @@ let submit_keeper_msg_with_captured_event_bus
     ~f:(fun request request_sw -> f ?event_bus request request_sw)
     ()
 
-let submit_outcome_with_keeper_json ~request outcome =
-  Keeper_invocation_contract.submission_to_json request outcome
-;;
-
 module For_testing = struct
   let reset_keeper_list_cache () =
     Atomic.set keeper_list_cache (empty_json_cache ~generation:0)
@@ -137,7 +133,6 @@ module For_testing = struct
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
   let submit_keeper_msg_with_captured_event_bus =
     submit_keeper_msg_with_captured_event_bus
-  let submit_outcome_with_keeper_json = submit_outcome_with_keeper_json
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -664,8 +659,9 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
     Ok
       (submit_keeper_invocation
          ~submitted_by
-         ~submission_to_json:Keeper_invocation_contract.submission_to_json
-         ~submission_error_to_json:Keeper_msg_async.submit_error_to_json
+         ~submission_to_json:Keeper_invocation_contract.delegate_submission_to_json
+         ~submission_error_to_json:
+           (Keeper_invocation_contract.delegate_submission_error_to_json request)
          ~run_turn:(fun ?event_bus request worker_ctx ->
            let worker_args = with_invocation_request worker_args request in
            let result =

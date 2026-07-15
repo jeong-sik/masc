@@ -26,6 +26,7 @@
   executable_path
   safe_identifier
   text_similarity
+  text_token_estimate
   string_util
   list_util
   set_util

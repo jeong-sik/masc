@@ -320,9 +320,9 @@ let ensure_dir path =
 let runtime_seed =
   {|
 [runtime]
-default = "sse_storm.smoke"
+default = "deepseek.smoke"
 
-[providers.sse_storm]
+[providers.deepseek]
 display-name = "SSE Storm Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
@@ -335,7 +335,7 @@ max-context = 32768
 tools-support = true
 streaming = true
 
-[sse_storm.smoke]
+[deepseek.smoke]
 is-default = true
 max-concurrent = 1
 |}

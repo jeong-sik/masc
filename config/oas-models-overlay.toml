@@ -6,7 +6,7 @@
 
 # Z.AI coding-plan endpoint under [providers.glm-coding].
 [[models]]
-id_prefix = "glm-5-turbo"
+id_prefix = "GLM-5-Turbo"
 provider_name = "glm-coding"
 base = "glm"
 max_context_tokens = 200000
@@ -22,6 +22,61 @@ input_per_million = 1.2
 output_per_million = 4.0
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "glm-4.7"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+# Native Ollama Cloud schema lane. The OpenAI-compatible ollama_cloud row is
+# intentionally not reused: only /api/chat provides the strict schema contract.
+[[models]]
+id_prefix = "minimax-m3"
+provider_name = "ollama_cloud_native"
+base = "ollama_cloud"
+max_context_tokens = 524288
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+# Ollama Cloud model added after the pinned embedded catalog release.
+[[models]]
+id_prefix = "rnj-1:8b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 32768
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
 
 # Kimi Code coding-plan gateway under [providers.kimi_code].
 [[models]]
@@ -72,8 +127,9 @@ supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
 
-# Local Ollama Gemma 4 E2B edge build. Image input is intentionally absent
-# because only text paths have been probed.
+# Local Ollama Gemma 4 E2B edge build. Image/audio are explicitly false because
+# only text paths have been probed; omission would inherit permissive Ollama
+# base capabilities.
 [[models]]
 id_prefix = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
 provider_name = "ollama"
@@ -85,6 +141,9 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 thinking_control_format = "chat_template_token"
 thinking_control_token = "<|think|>"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_audio_input = false
 supports_response_format_json = true
 supports_native_streaming = true
 supports_seed = true

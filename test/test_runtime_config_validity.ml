@@ -464,7 +464,7 @@ let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
        entry.base_label;
      check (option int) (provider_name ^ " context") (Some 131072)
        entry.max_context_tokens;
-     check (option bool) (provider_name ^ " audio input") None
+     check (option bool) (provider_name ^ " audio input") (Some false)
        entry.supports_audio_input;
      check
        (option string)
@@ -656,9 +656,17 @@ let test_deployment_oas_model_catalog_modality_priorities_resolve () =
                normalized
                entry.id_prefix
          in
-         (match
-            Llm_provider.Capabilities.for_model_id_catalog entry.id_prefix
-          with
+         let capabilities =
+           match entry.provider_name with
+           | None ->
+             Llm_provider.Capabilities.for_model_id_catalog entry.id_prefix
+           | Some provider_label ->
+             Llm_provider.Capabilities.for_provider_model_id
+               ~allow_bare_fallback:false
+               ~provider_label
+               ~model_id:entry.id_prefix
+         in
+         (match capabilities with
           | None ->
             failf
               "modality_priority row %s must resolve through deployment OAS catalog"

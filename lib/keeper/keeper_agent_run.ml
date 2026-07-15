@@ -426,6 +426,8 @@ let run_turn
   in
   append_manifest ~site:"context_injected"
     ~keeper_turn_id:manifest_keeper_turn_id
+    ?checkpoint_path:
+      (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
         (`Assoc

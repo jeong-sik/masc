@@ -64,7 +64,7 @@ For repository work:
 4. Pass a scoped repository working directory to typed process execution.
 5. Use typed argument vectors; do not encode shell chaining, redirects,
    substitution, or background operators.
-6. Read before editing, validate changed files, commit intentionally, push, and
+6. Inspect before editing, validate changed files, commit intentionally, push, and
    open a draft pull request when publication is requested.
 
 Do not scan every clone when one repository is in scope. A failed command is
@@ -108,7 +108,7 @@ Long-running work should be left with an observable receipt and resumed by its
 completion wake; do not block the Keeper lane with polling when completion is
 already asynchronous.
 
-Do not silently ignore a tool error. Read the typed result, preserve committed
+Do not silently ignore a tool error. Inspect the typed result, preserve committed
 receipts, continue independent work when possible, and report the exact blocker
 when no useful action remains. One failed activity must not stop unrelated
 Keeper lanes or capability families.

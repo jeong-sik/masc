@@ -58,7 +58,7 @@ board, connected surface, task, and planning stores without a real product need.
 
 ## Errors, Gate, and continuation
 
-Every failed call returns a typed error. Read its class, detail, and corrective
+Every failed call returns a typed error. Inspect its class, detail, and corrective
 hint. Correct the exact request when possible. Otherwise continue independent
 work or report the blocker. Never convert a failed call into silence.
 

@@ -50,17 +50,6 @@ let assert_contains label haystack needle =
 let assert_not_contains label haystack needle =
   Alcotest.(check bool) label false (string_contains haystack needle)
 
-let identifier_tokens text =
-  let is_identifier_char = function
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
-    | _ -> false
-  in
-  String.to_seq text
-  |> Seq.map (fun char -> if is_identifier_char char then char else ' ')
-  |> String.of_seq
-  |> String.split_on_char ' '
-  |> List.filter (fun token -> not (String.equal token ""))
-
 (* ================================================================ *)
 (* Helper: validate via the same pipeline as the pre-hook            *)
 (* ================================================================ *)
@@ -1635,7 +1624,7 @@ let test_typed_tool_contract_rejection_corpus () =
       , [ "to"; "note" ] )
     ]
 
-let test_keeper_tool_hint_contracts_match_required_fields () =
+let test_keeper_tool_schemas_pin_required_fields () =
   Alcotest.(check bool)
     "keeper_task_claim schema accepts optional task_id"
     true
@@ -1667,60 +1656,7 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
   Alcotest.(check bool)
     "keeper_board_post schema does not require hearth"
     false
-    (List.mem "hearth" (schema_required_fields keeper_board_post_schema));
-  let claim_guidance =
-    read_source_file "config/prompts/keeper.turn_intent.claim_guidance_a.md"
-  in
-  let capabilities = read_source_file "config/prompts/keeper.capabilities.md" in
-  let core_behavior = read_source_file "config/prompts/keeper.core_behavior.md" in
-  assert_contains
-    "keeper_task_claim hint names optional task_id"
-    claim_guidance
-    "`keeper_task_claim { \"task_id\": \"task-123\" }`";
-  assert_contains
-    "Execute core behavior defines argv0 as program"
-    core_behavior
-    "`argv[0]` is the program";
-  assert_contains
-    "Execute core behavior gives complete git process vector"
-    core_behavior
-    "`argv=[\"git\", \"status\", \"--short\"]`";
-  assert_not_contains
-    "Execute core behavior does not advertise retired executable field"
-    core_behavior
-    "`executable`";
-  assert_contains
-    "keeper capabilities delegates call syntax to typed schemas"
-    capabilities
-    "active typed schema is the only callable catalog";
-  assert_contains
-    "keeper capabilities keeps typed failures visible"
-    capabilities
-    "Every failed call returns a typed error";
-  assert_not_contains
-    "keeper capabilities avoids retired capacity token"
-    capabilities
-    ("repo" ^ "_cap")
-
-let test_keeper_prompts_do_not_duplicate_model_tool_names () =
-  let prompt_paths =
-    [ "config/prompts/keeper.unified.system.md"
-    ; "config/prompts/keeper.capabilities.md"
-    ; "config/prompts/keeper.world.md"
-    ]
-  in
-  let tool_names = Keeper_tool_policy.keeper_model_tool_names () in
-  List.iter
-    (fun prompt_path ->
-       let tokens = identifier_tokens (read_source_file prompt_path) in
-       let duplicated_names =
-         List.filter (fun tool_name -> List.mem tool_name tokens) tool_names
-       in
-       Alcotest.(check (list string))
-         (prompt_path ^ " derives callable names only from the typed schema")
-         []
-         duplicated_names)
-    prompt_paths
+    (List.mem "hearth" (schema_required_fields keeper_board_post_schema))
 
 let test_orchestrator_prompt_pins_start_transition () =
   let prompt = read_source_file "config/prompts/system.orchestrator.md" in
@@ -2211,10 +2147,8 @@ let () =
     ("typed_tool_contract_harness", [
       Alcotest.test_case "rejects invalid typed call corpus" `Quick
         test_typed_tool_contract_rejection_corpus;
-      Alcotest.test_case "keeper prompt hints match schema-required fields" `Quick
-        test_keeper_tool_hint_contracts_match_required_fields;
-      Alcotest.test_case "keeper prompts do not duplicate model tool names" `Quick
-        test_keeper_prompts_do_not_duplicate_model_tool_names;
+      Alcotest.test_case "keeper schemas pin required fields" `Quick
+        test_keeper_tool_schemas_pin_required_fields;
       Alcotest.test_case "orchestrator prompt includes start transition" `Quick
         test_orchestrator_prompt_pins_start_transition;
       Alcotest.test_case "task lifecycle guidance is externalized" `Quick

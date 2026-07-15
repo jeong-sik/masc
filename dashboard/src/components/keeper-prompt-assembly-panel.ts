@@ -144,12 +144,6 @@ const STAGES: AssemblyStageSpec[] = [
     promptKeys: [
       'keeper.unified.system',
       'keeper.turn_intent',
-      'keeper.turn_intent.claim_guidance_a',
-      'keeper.turn_intent.claim_guidance_b',
-      'keeper.turn_intent.board_activity_guidance',
-      'keeper.turn_intent.board_post_guidance',
-      'keeper.turn_intent.board_curation_guidance',
-      'keeper.turn_intent.broadcast_guidance',
       'keeper.immediate_task_move',
     ],
     computedRows: [

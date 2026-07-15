@@ -180,6 +180,28 @@ let test_create_list_get_cancel () =
      |> to_string)
 ;;
 
+let test_removed_convenience_input_does_not_synthesize_payload () =
+  with_config
+  @@ fun config ->
+  let result =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-removed-convenience"
+        ; "due_at_unix", `Float 200.0
+        ; "board_content", `String "must not become a scheduled product effect"
+        ; "requested_by_id", `String "operator"
+        ; "scheduled_by_id", `String "scheduler-agent"
+        ])
+  in
+  check bool "removed convenience input rejected" false (Tool_result.is_success result);
+  check bool "neutral payload contract names the missing field" true
+    (String_util.contains_substring
+       (Tool_result.message result)
+       "payload_kind is required");
+  check int "removed convenience input is not persisted" 0
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
 let test_unknown_payload_is_rejected_before_persistence () =
   with_config
   @@ fun config ->
@@ -329,6 +351,8 @@ let () =
     [ ( "wiring"
       , [ test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
+        ; test_case "removed convenience input does not synthesize payload" `Quick
+            test_removed_convenience_input_does_not_synthesize_payload
         ; test_case "unknown payload rejected before persistence" `Quick
             test_unknown_payload_is_rejected_before_persistence
         ; test_case "payload contracts are schema only" `Quick

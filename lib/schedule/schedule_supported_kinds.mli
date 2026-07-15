@@ -6,7 +6,6 @@
     full design rationale. Neither layer reaches across the
     [lib/tool] <-> [lib/server] boundary. *)
 
-val board_post : string
 val keeper_wake : string
 
 val supported : string list

@@ -207,51 +207,21 @@ let runner_status_json_after_dispatches (result : Schedule_runner.tick_result) =
   |> Schedule_runner_status.snapshot_to_yojson ~now:201.5 ~stale_after_sec:10.0
 ;;
 
-let test_board_post_consumer_creates_post_and_succeeds_schedule () =
+let test_board_post_schedule_is_rejected_without_mutation () =
   with_workspace
   @@ fun config ->
   let request = create_board_schedule config in
-  check string "initial status" "scheduled"
-    (Schedule_domain.schedule_status_to_string request.status);
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
-  check string "dispatch status" "succeeded"
+  check string "dispatch status" "unsupported"
     (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing"
    | Some stored ->
-     check string "schedule succeeded" "succeeded"
+     check string "schedule failed" "failed"
        (Schedule_domain.schedule_status_to_string stored.status));
-  (match
-     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
-       ~schedule_id:request.schedule_id
-   with
-   | None -> fail "missing execution record"
-   | Some execution ->
-     check string "execution status" "succeeded"
-       (Schedule_domain.execution_status_to_string execution.status);
-     (match execution.detail with
-      | Some detail ->
-        let open Yojson.Safe.Util in
-        check string "execution detail kind" "masc.board_post.created"
-          (detail |> member "kind" |> to_string)
-      | None -> fail "execution detail missing"));
-  match Board_dispatch.list_posts ~hearth:"ops" ~limit:10 () with
-  | [ post ] ->
-    check string "title" "Scheduled check-in" post.Board.title;
-    check string "content" "Daily schedule fired" post.content;
-    check string "author" "schedule-bot" (Board.Agent_id.to_string post.author);
-    (match post.meta_json with
-     | Some meta ->
-       let open Yojson.Safe.Util in
-       check string "meta source" "scheduled_automation"
-         (meta |> member "source" |> to_string);
-       check string "meta schedule" request.schedule_id
-         (meta |> member "schedule_id" |> to_string);
-       check string "payload meta" "test"
-         (meta |> member "payload_meta" |> member "purpose" |> to_string)
-     | None -> fail "expected schedule meta")
-  | posts -> failf "expected one board post, got %d" (List.length posts)
+  check int "board remains unchanged" 0
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
 let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
@@ -374,6 +344,38 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (queue_evidence |> member "inflight_count" |> to_int);
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
+;;
+
+let test_keeper_wake_durable_enqueue_failure_is_not_success () =
+  with_workspace
+  @@ fun config ->
+  let keeper_owner_path =
+    Filename.concat
+      (Common.keepers_runtime_dir_of_base
+         ~base_path:config.Workspace_utils.base_path)
+      "schedule-keeper"
+  in
+  mkdir_p (Filename.dirname keeper_owner_path);
+  write_empty_file keeper_owner_path;
+  let request = create_keeper_wake_schedule config in
+  let result = tick_ok config ~now:201.0 in
+  (match List.hd result.dispatches with
+   | { status = Schedule_runner.Dispatch_failed; error = Some message; _ } ->
+     check bool "storage failure is explicit" true
+       (String_util.contains_substring
+          message
+          "scheduled keeper wake durable enqueue failed")
+   | _ -> fail "durable enqueue failure must not report dispatch success");
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing"
+   | Some stored ->
+     check string "schedule did not report success" "failed"
+       (Schedule_domain.schedule_status_to_string stored.status));
+  check int "failed commit leaves no queued wake" 0
+    (Keeper_event_queue.length
+       (Keeper_registry_event_queue.snapshot
+          ~base_path:config.Workspace_utils.base_path
+          "schedule-keeper"))
 ;;
 
 let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
@@ -749,11 +751,13 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
 
 let () =
   run "Schedule_consumer_dispatch"
-    [ ( "board_post"
-      , [ test_case "creates board post and succeeds schedule" `Quick
-            test_board_post_consumer_creates_post_and_succeeds_schedule
+    [ ( "keeper_wake"
+      , [ test_case "board post schedule is rejected without mutation" `Quick
+            test_board_post_schedule_is_rejected_without_mutation
         ; test_case "keeper wake enqueues typed stimulus" `Quick
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
+        ; test_case "keeper wake durable enqueue failure is not success" `Quick
+            test_keeper_wake_durable_enqueue_failure_is_not_success
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "dashboard live supported non-terminal evidence matches supported request"

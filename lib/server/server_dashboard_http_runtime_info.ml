@@ -2557,7 +2557,6 @@ let schedule_keeper_queue_evidence_dashboard_json
             [ "projection_status", `String "unrecognized_receipt"
             ; "reason", `String reason
             ]
-        | Ok Server_schedule_consumers.Board_post_created _ -> `Null
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
               { keeper_name
@@ -2635,7 +2634,6 @@ let schedule_keeper_reaction_evidence_dashboard_json
             [ "projection_status", `String "unrecognized_receipt"
             ; "reason", `String reason
             ]
-        | Ok Server_schedule_consumers.Board_post_created _ -> `Null
         | Ok
             (Server_schedule_consumers.Keeper_wake_enqueued
               { keeper_name

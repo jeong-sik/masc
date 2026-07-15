@@ -33,7 +33,7 @@ let wake_enqueue_counts_of_dispatches dispatches =
        | None -> counts
        | Some detail ->
          (match Consumers.dispatch_receipt_of_detail detail with
-          | Error _ | Ok (Consumers.Board_post_created _) -> counts
+          | Error _ -> counts
           | Ok (Consumers.Keeper_wake_enqueued { reaction_ledger_status; _ }) ->
             let counts = bump_wake_enqueued counts in
             (match reaction_ledger_status with

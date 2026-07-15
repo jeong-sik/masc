@@ -32,11 +32,15 @@ let automated id : Schedule_domain.actor =
   { id; kind = Schedule_domain.Automated_actor; display_name = None }
 ;;
 
-let board_payload content =
+let keeper_wake_payload message =
   `Assoc
-    [ "kind", `String Schedule_supported_kinds.board_post
+    [ "kind", `String Schedule_supported_kinds.keeper_wake
     ; "schema_version", `Int 1
-    ; "body", `Assoc [ "content", `String content ]
+    ; ( "body"
+      , `Assoc
+          [ "keeper_name", `String "schedule-keeper"
+          ; "message", `String message
+          ] )
     ]
 ;;
 
@@ -67,10 +71,15 @@ let dispatch_exn config action args =
   | None -> fail ("schedule dispatch returned None: " ^ name)
 ;;
 
-let create_args ?schedule_id ?(content = "scheduled board post") () =
+let create_args ?schedule_id ?(message = "scheduled keeper wake") () =
   `Assoc
     ([ "due_at_unix", `Float 200.0
-     ; "board_content", `String content
+     ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
+     ; ( "payload_body"
+       , `Assoc
+           [ "keeper_name", `String "schedule-keeper"
+           ; "message", `String message
+           ] )
      ; "requested_by_id", `String "operator"
      ; "scheduled_by_id", `String "scheduler-agent"
      ]
@@ -211,7 +220,7 @@ let test_payload_contracts_are_schema_only () =
     Schedule_payload_projection.supported_contracts_to_yojson ()
     |> Yojson.Safe.Util.to_list
   in
-  check int "two supported contracts" 2 (List.length contracts);
+  check int "one supported contract" 1 (List.length contracts);
   List.iter
     (fun contract ->
        let open Yojson.Safe.Util in
@@ -268,7 +277,7 @@ let test_due_signal_and_dashboard_projection () =
   @@ fun config ->
   let request =
     create_service_exn config ~schedule_id:"sched-signal" ~due_at:200.0
-      ~payload:(board_payload "signal me")
+      ~payload:(keeper_wake_payload "signal me")
   in
   let tick =
     match Schedule_runner.tick config ~now:201.0 with

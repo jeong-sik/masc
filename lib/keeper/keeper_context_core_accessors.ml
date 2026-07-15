@@ -70,12 +70,43 @@ let ensure_dir path =
 let estimate_char_tokens (s : string) : int =
   Text_token_estimate.estimate_char_tokens s
 
-(** CJK-aware token estimate delegated to OAS Context_reducer.
-    OAS estimator is already conservative (CJK-aware, ceil-based).
-    Prior 15% buffer (#5053) removed — it caused premature compaction
-    and masked the OAS estimator's actual accuracy. *)
+(** Per-block token estimate, recovered verbatim from the retired
+    [Agent_sdk.Context_reducer.estimate_block_tokens] (oas 902c45d2;
+    OAS 0.212.0 dropped the module). Media weights: base64 payload
+    bytes scaled per modality with the upstream caps. *)
+let block_tokens (block : Agent_sdk.Types.content_block) : int =
+  match block with
+  | Agent_sdk.Types.Text s -> Text_token_estimate.estimate_char_tokens s
+  | Agent_sdk.Types.Thinking { content; _ } ->
+    Text_token_estimate.estimate_char_tokens content
+  | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+    Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+    |> Text_token_estimate.estimate_char_tokens
+  | Agent_sdk.Types.RedactedThinking _ -> 50
+  | Agent_sdk.Types.ToolUse { name; input; _ } ->
+    let input_str = Yojson.Safe.to_string input in
+    Text_token_estimate.estimate_char_tokens (name ^ input_str)
+  | Agent_sdk.Types.ToolResult { content; json; _ } ->
+    let base = Text_token_estimate.estimate_char_tokens content in
+    (match json with
+     | Some j ->
+       base + Text_token_estimate.estimate_char_tokens (Yojson.Safe.to_string j)
+     | None -> base)
+  | Agent_sdk.Types.Image { data; _ } ->
+    min ((String.length data * 3 / 4 / 750) + 1) 1600
+  | Agent_sdk.Types.Document { data; _ } ->
+    min ((String.length data * 3 / 4 / 500) + 1) 3000
+  | Agent_sdk.Types.Audio { data; _ } ->
+    min ((String.length data * 3 / 4 / 320) + 1) 5000
+
+(** CJK-aware message token estimate (formerly OAS Context_reducer).
+    The estimator is conservative (CJK-aware, ceil-based). Prior 15%
+    buffer (#5053) removed — it caused premature compaction and masked
+    the estimator's actual accuracy. *)
 let msg_tokens (m : Agent_sdk.Types.message) : int =
-  Agent_sdk.Context_reducer.estimate_message_tokens m
+  List.fold_left
+    (fun acc block -> acc + block_tokens block)
+    0 m.Agent_sdk.Types.content
 
 let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
   let sys_tokens = Text_token_estimate.estimate_char_tokens system_prompt in
@@ -120,6 +151,7 @@ let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
     min_p = None;
     enable_thinking = None;
     preserve_thinking = None;
+    reasoning_effort = None;
     response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;

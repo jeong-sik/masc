@@ -51,7 +51,7 @@ PERSONA="${PERSONA:-analyst}"
 # Source root holding config/personas/<PERSONA>. Resolved from an explicit path,
 # never home-anchored (SSOT-R6): point it at a populated MASC root.
 PERSONA_SOURCE_ROOT="${MASC_PERSONA_SOURCE_ROOT:-}"
-BORROW_MODEL="${BORROW_MODEL:-deepseek-v4-flash}"  # must be an oas-models.toml id_prefix
+BORROW_MODEL="${BORROW_MODEL:-deepseek-v4-flash}"  # must be an OAS catalog id_prefix
 HOG_LEVELS="${HOG_LEVELS:-0 $((NCPU-1))}"       # host CPU hogs to sweep alongside keeper load
 
 RUN_ID="${RUN_ID:-keeperload-$(date +%Y%m%d_%H%M%S)-$$}"
@@ -224,7 +224,7 @@ fi
 MOCK_PORT="$(harness_pick_free_port)"
 cat > "$BASE_PATH/.masc/config/runtime.toml" <<EOF
 # Mock runtime: borrow a catalog-valid model id ($BORROW_MODEL is an
-# oas-models.toml id_prefix) so init_default_strict's capability gate passes,
+# OAS catalog id_prefix) so init_default_strict's capability gate passes,
 # but route the provider to the local network-free mock.
 [runtime]
 default = "mock.mockmodel"

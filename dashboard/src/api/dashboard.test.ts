@@ -2563,7 +2563,7 @@ describe('fetchRuntimeProviders', () => {
           dropped_lanes: [
             { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
           ],
-          next_action: 'Add the listed provider/model rows to oas-models.toml.',
+          next_action: 'Add deployment rows to oas-models-overlay.toml (or upstream OAS).',
         },
         config_path: '/tmp/masc-test/runtime.toml',
       }), {

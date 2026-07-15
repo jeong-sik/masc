@@ -2,7 +2,7 @@
 # quickstart.sh — one command to install, seed a keeper team, and open the MASC
 # dashboard on macOS or Linux.
 #
-# It seeds the runtime config (runtime.toml / oas-models.toml
+# It seeds the runtime config (runtime.toml / oas-models-overlay.toml
 # / prompts) BEFORE seeding a keeper team, because the server only backfills a
 # config root it did not create — team-first would leave runtime.toml missing.
 # The team keepers inherit [runtime].default (ollama_cloud.deepseek-v4-flash),
@@ -86,12 +86,9 @@ seed_catalogs() {
   # Copy-if-missing so re-runs never clobber operator edits. Order matters:
   # these catalogs must exist before the team is seeded (see file header).
   local f
-  for f in runtime.toml; do
+  for f in runtime.toml oas-models-overlay.toml; do
     if [ ! -e "$cfg/$f" ]; then cp "config/$f" "$cfg/$f"; log "seeded config/$f"; fi
   done
-  if [ ! -e "$cfg/oas-models.toml" ]; then
-    cp "oas-models.toml" "$cfg/oas-models.toml"; log "seeded oas-models.toml"
-  fi
   if [ ! -d "$cfg/prompts" ] && [ -d "config/prompts" ]; then
     cp -R "config/prompts" "$cfg/prompts"; log "seeded config/prompts/"
   fi

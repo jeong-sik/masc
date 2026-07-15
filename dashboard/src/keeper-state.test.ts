@@ -957,6 +957,72 @@ describe('thread history merge & persistence', () => {
     expect(entries[0]?.attachments).toHaveLength(1)
   })
 
+  it('keeps a validated redacted thinking block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'thinking-only',
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'thinking', content: '', redacted: true }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.blocks).toEqual([{ t: 'thinking', content: '', redacted: true }])
+  })
+
+  it('keeps non-redacted thinking content when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'thinking-only',
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'thinking', content: 'checking state', redacted: false }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'thinking', content: 'checking state', redacted: false },
+    ])
+  })
+
+  it('keeps a validated trace block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'trace-only',
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'trace', trace: [{ kind: 'think', text: 'checking state' }] }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'trace', trace: [{ kind: 'think', text: 'checking state' }] },
+    ])
+  })
+
+  it('keeps a validated fusion block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'fusion-only',
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'fusion', board_post_id: 'post-1', run_id: 'fusion-run-1' }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'fusion', board_post_id: 'post-1', run_id: 'fusion-run-1' },
+    ])
+  })
+
   it('still drops rows that have no content and no attachments', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: '', ts: 1_780_000_000 },

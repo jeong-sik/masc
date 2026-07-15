@@ -28,7 +28,7 @@ let publication_recovery_registry env sw config =
     Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
   in
   match
-    Fs_compat.open_publication_recovery_registry
+    Fs_compat.Publication_recovery.open_registry
       ~sw
       ~fs:(Eio.Stdenv.fs env)
       ~registry_root
@@ -36,7 +36,7 @@ let publication_recovery_registry env sw config =
   | Ok registry -> registry
   | Error error ->
     Alcotest.fail
-      (Fs_compat.publication_recovery_registry_error_to_string error)
+      (Fs_compat.Publication_recovery.registry_error_to_string error)
 
 let cleanup_dir dir =
   let rec rm path =
@@ -57,6 +57,10 @@ let result_field json = Yojson.Safe.Util.member "result" json
 
 let operator_ctx ?mcp_session_id env sw config agent_name :
     _ Operator_control.context =
+  let publication_recovery_provider =
+    Masc_test_deps.publication_recovery_provider
+      (publication_recovery_registry env sw config)
+  in
   {
     config;
     agent_name;
@@ -64,9 +68,16 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
     clock = Eio.Stdenv.clock env;
     proc_mgr = Some (Eio.Stdenv.process_mgr env);
     net = Some (Eio.Stdenv.net env);
-    publication_recovery_provider =
-      Masc_test_deps.publication_recovery_provider
-        (publication_recovery_registry env sw config);
+    delegated_dispatch =
+      Some
+        (Masc.Keeper_tool_boundary.delegated_dispatch
+           ~config
+           ~agent_name
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~proc_mgr:(Some (Eio.Stdenv.process_mgr env))
+           ~net:(Some (Eio.Stdenv.net env))
+           ~publication_recovery_provider);
     mcp_session_id;
   }
 

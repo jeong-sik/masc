@@ -188,10 +188,9 @@ val dispatch_post_turn_lifecycle_events
 val recover_latest_checkpoint_for_overflow_retry
   :  base_dir:string
   -> meta:keeper_meta
-  -> model:string
   -> trigger:Compaction_trigger.t
   -> primary_model_max_tokens:int
-  -> overflow_retry_recovery option
+  -> (overflow_retry_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 (** {1 Trace and Board Utilities} *)
 

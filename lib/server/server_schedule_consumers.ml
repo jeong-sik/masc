@@ -3,13 +3,18 @@
    loop logs aggregate dispatch counts for runtime telemetry. *)
 
 let supported_payload_kinds = Schedule_payload_projection.supported_payload_kinds
-let board_post_created_kind = "masc.board_post.created"
 let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
 let keeper_event_queue_label = "keeper_event_queue"
 let reaction_ledger_recorded_label = "recorded"
 let reaction_ledger_record_failed_label = "record_failed"
 
 let ( let* ) = Result.bind
+
+let terminal_dispatch_result result =
+  Result.map_error
+    (fun detail -> Schedule_runner.Terminal_dispatch_rejection detail)
+    result
+;;
 
 let unsupported_payload_labels ~phase = [ "phase", phase ]
 
@@ -109,12 +114,22 @@ let keeper_wake_reaction_ledger_status_json_fields = function
     ]
 ;;
 
+type keeper_wake_occurrence_status =
+  | Keeper_wake_awaiting_ack
+  | Keeper_wake_already_acked
+
+let keeper_wake_occurrence_status_to_string = function
+  | Keeper_wake_awaiting_ack -> "awaiting_ack"
+  | Keeper_wake_already_acked -> "already_acked"
+;;
+
+let keeper_wake_occurrence_status_of_string = function
+  | "awaiting_ack" -> Ok Keeper_wake_awaiting_ack
+  | "already_acked" -> Ok Keeper_wake_already_acked
+  | value -> Error ("unsupported occurrence_status: " ^ value)
+;;
+
 type dispatch_receipt =
-  | Board_post_created of
-      { post_id : string
-      ; author : string
-      ; hearth : string option
-      }
   | Keeper_wake_enqueued of
       { keeper_name : string
       ; schedule_id : string
@@ -124,18 +139,13 @@ type dispatch_receipt =
       ; stimulus : string
       ; stimulus_id : string option
       ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
+      ; occurrence_status : keeper_wake_occurrence_status
       }
 
 let dispatch_receipt_of_detail = function
   | `Assoc fields ->
     let* kind = string_field "kind" fields in
-    if String.equal kind board_post_created_kind
-    then
-      let* post_id = string_field "post_id" fields in
-      let* author = string_field "author" fields in
-      let* hearth = optional_string_field "hearth" fields in
-      Ok (Board_post_created { post_id; author; hearth })
-    else if String.equal kind keeper_wake_enqueued_kind
+    if String.equal kind keeper_wake_enqueued_kind
     then
       let* keeper_name = keeper_name_field "keeper_name" fields in
       let* schedule_id = string_field "schedule_id" fields in
@@ -147,6 +157,10 @@ let dispatch_receipt_of_detail = function
       let* reaction_ledger_status =
         keeper_wake_reaction_ledger_status_of_fields fields
       in
+      let* occurrence_status =
+        let* value = string_field "occurrence_status" fields in
+        keeper_wake_occurrence_status_of_string value
+      in
       Ok
         (Keeper_wake_enqueued
            { keeper_name
@@ -157,19 +171,13 @@ let dispatch_receipt_of_detail = function
            ; stimulus
            ; stimulus_id
            ; reaction_ledger_status
+           ; occurrence_status
            })
     else Error ("unsupported schedule dispatch receipt kind: " ^ kind)
   | _ -> Error "schedule dispatch receipt detail must be an object"
 ;;
 
 let dispatch_receipt_to_yojson = function
-  | Board_post_created { post_id; author; hearth } ->
-    `Assoc
-      [ "kind", `String board_post_created_kind
-      ; "post_id", `String post_id
-      ; "author", `String author
-      ; "hearth", (match hearth with None -> `Null | Some hearth -> `String hearth)
-      ]
   | Keeper_wake_enqueued
       { keeper_name
       ; schedule_id
@@ -179,6 +187,7 @@ let dispatch_receipt_to_yojson = function
       ; stimulus
       ; stimulus_id
       ; reaction_ledger_status
+      ; occurrence_status
       } ->
     `Assoc
       ([ "kind", `String keeper_wake_enqueued_kind
@@ -192,6 +201,8 @@ let dispatch_receipt_to_yojson = function
        ; "schedule_id", `String schedule_id
        ; "urgency", `String urgency
        ; "post_id", `String post_id
+       ; ( "occurrence_status"
+         , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
        ]
        @ keeper_wake_reaction_ledger_status_json_fields reaction_ledger_status)
 ;;
@@ -202,66 +213,6 @@ let accepts request =
   | Error rejection ->
     record_unsupported_payload_dispatch request rejection;
     Error (Schedule_payload_projection.dispatch_rejection_message rejection)
-;;
-
-let schedule_meta_json (request : Schedule_domain.schedule_request) payload user_meta =
-  let base =
-    [ "source", `String "scheduled_automation"
-    ; "schedule_id", `String request.schedule_id
-    ; "payload_kind", `String (Schedule_payload_projection.view_kind payload)
-    ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
-    ; "requested_by", `String request.requested_by.id
-    ; "scheduled_by", `String request.scheduled_by.id
-    ; "due_at", `Float request.due_at
-    ]
-  in
-  match user_meta with
-  | None -> `Assoc base
-  | Some meta -> `Assoc (base @ [ "payload_meta", meta ])
-;;
-
-let dispatch_board_post request payload =
-  let* content = Schedule_payload_projection.body_required_string payload "content" in
-  let* title = Schedule_payload_projection.body_optional_string payload "title" in
-  let* author = Schedule_payload_projection.body_optional_string payload "author" in
-  let* hearth = Schedule_payload_projection.body_optional_string payload "hearth" in
-  let* thread_id = Schedule_payload_projection.body_optional_string payload "thread_id" in
-  let* ttl_hours = Schedule_payload_projection.body_optional_int payload "ttl_hours" in
-  let* user_meta = Schedule_payload_projection.body_optional_assoc payload "meta" in
-  let author =
-    (* DET-OK: absent board-post author maps to the stable scheduled automation
-       actor label for auditability. *)
-    match author with
-    | None -> "schedule-bot"
-    | Some author -> author
-  in
-  let meta_json = schedule_meta_json request payload user_meta in
-  match
-    Board_dispatch.create_post
-      ~author
-      ~content
-      ?title
-      ~post_kind:Board.System_post
-      ~meta_json
-      ~visibility:Board.Internal
-      ?ttl_hours
-      ?hearth
-      ?thread_id
-      ()
-  with
-  | Error err -> Error (Board_types.show_board_error err)
-  | Ok post ->
-    let post_id = Board.Post_id.to_string post.id in
-    Ok
-      (`Assoc
-        [ "kind", `String board_post_created_kind
-        ; "post_id", `String post_id
-        ; "author", `String author
-        ; ( "hearth"
-          , match hearth with
-            | None -> `Null
-            | Some hearth -> `String hearth )
-        ])
 ;;
 
 let body_keeper_name payload =
@@ -297,11 +248,81 @@ let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
          (Printexc.to_string exn))
 ;;
 
-let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request) payload =
-  let* keeper_name = body_keeper_name payload in
-  let* message = Schedule_payload_projection.body_required_string payload "message" in
-  let* title = Schedule_payload_projection.body_optional_string payload "title" in
-  let* urgency = body_keeper_wake_urgency payload in
+type keeper_wake_acceptance =
+  | Wake_required
+  | Already_drained
+
+let retryable_dispatch_failure detail =
+  Error (Schedule_runner.Retryable_dispatch_failure detail)
+;;
+
+let reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
+  try
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+    |> Result.map_error (fun detail ->
+      "failed to read keeper reaction ledger stimulus: " ^ detail)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "failed to read keeper reaction ledger stimulus: %s"
+         (Printexc.to_string exn))
+;;
+
+let accept_keeper_wake_occurrence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+  =
+  match reaction_evidence_result ~base_path ~keeper_name ~stimulus_id with
+  | Error detail -> retryable_dispatch_failure detail
+  | Ok evidence when evidence.event_queue_ack_seen ->
+    (* The transition projector appends this exact-id ACK before retiring its
+       outbox entry. It is therefore the durable terminal occurrence fence,
+       independent of pending/lease/outbox retention. *)
+    Ok Already_drained
+  | Ok evidence ->
+    (match
+       Keeper_registry_event_queue.enqueue_stimulus_durable_result
+         ~base_path
+         keeper_name
+         stimulus
+     with
+     | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+       retryable_dispatch_failure
+         ("scheduled keeper wake durable enqueue failed: " ^ detail)
+     | Keeper_registry_event_queue.Stimulus_enqueued
+     | Keeper_registry_event_queue.Stimulus_already_present ->
+       if evidence.stimulus_seen then Ok Wake_required
+       else
+         (match record_keeper_wake_stimulus ~base_path ~keeper_name stimulus with
+          | Keeper_wake_reaction_ledger_recorded -> Ok Wake_required
+          | Keeper_wake_reaction_ledger_record_failed detail ->
+            retryable_dispatch_failure detail))
+;;
+
+let dispatch_keeper_wake
+      config
+      ~now
+      (signal : Schedule_runner.wake_signal)
+      (request : Schedule_domain.schedule_request)
+      payload
+  =
+  let* keeper_name = terminal_dispatch_result (body_keeper_name payload) in
+  let* message =
+    terminal_dispatch_result
+      (Schedule_payload_projection.body_required_string payload "message")
+  in
+  let* title =
+    terminal_dispatch_result
+      (Schedule_payload_projection.body_optional_string payload "title")
+  in
+  let* urgency = terminal_dispatch_result (body_keeper_wake_urgency payload) in
   let urgency =
     urgency
     (* DET-OK: absent masc.keeper_wake urgency is the schema-v1 default;
@@ -318,56 +339,50 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     }
   in
   let stimulus : Keeper_event_queue.stimulus =
-    { post_id = Keeper_event_queue.schedule_due_post_id wake
+    { post_id = signal.signal_id
     ; urgency
     ; arrived_at = now
     ; payload = Keeper_event_queue.Schedule_due wake
     }
   in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
-  Keeper_registry_event_queue.enqueue
-    ~base_path:config.Workspace_utils.base_path
-    keeper_name
-    stimulus;
-  let wakeup_outcome =
-    Keeper_registry.wakeup
-      ~intent:Keeper_registry.Scheduled_signal
-      ~base_path:config.Workspace_utils.base_path
-      keeper_name
+  let base_path = config.Workspace_utils.base_path in
+  let* acceptance =
+    accept_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id stimulus
   in
-  (match wakeup_outcome with
-   | Keeper_registry.Signaled -> ()
-   | Keeper_registry.Deferred_unregistered ->
-     Log.Keeper.info
-       "schedule stimulus queued for unregistered keeper schedule_id=%s keeper=%s"
-       request.schedule_id
-       keeper_name
-   | Keeper_registry.Deferred_not_running phase ->
-     Log.Keeper.info
-       "schedule stimulus queued without runnable fiber schedule_id=%s keeper=%s phase=%s"
-       request.schedule_id
-       keeper_name
-       (Keeper_state_machine.phase_to_string phase)
-   | Keeper_registry.Deferred_lifecycle denial ->
-     Log.Keeper.info
-       "schedule stimulus queued but lifecycle admission deferred wake schedule_id=%s keeper=%s reason=%s"
-       request.schedule_id
-       keeper_name
-       (Keeper_lifecycle_admission.autonomous_denial_to_wire denial));
-  let reaction_ledger_status =
-    record_keeper_wake_stimulus
-      ~base_path:config.Workspace_utils.base_path
-      ~keeper_name
-      stimulus
+  let occurrence_status =
+    match acceptance with
+    | Wake_required -> Keeper_wake_awaiting_ack
+    | Already_drained -> Keeper_wake_already_acked
   in
-  (match reaction_ledger_status with
-   | Keeper_wake_reaction_ledger_recorded -> ()
-   | Keeper_wake_reaction_ledger_record_failed reason ->
-     Log.Keeper.warn
-       "schedule keeper wake reaction ledger append failed schedule_id=%s keeper=%s: %s"
-       request.schedule_id
-       keeper_name
-       reason);
+  (match acceptance with
+   | Already_drained -> ()
+   | Wake_required ->
+     let wakeup_outcome =
+       Keeper_registry.wakeup
+         ~intent:Keeper_registry.Scheduled_signal
+         ~base_path
+         keeper_name
+     in
+     (match wakeup_outcome with
+      | Keeper_registry.Signaled -> ()
+      | Keeper_registry.Deferred_unregistered ->
+        Log.Keeper.info
+          "schedule stimulus queued for unregistered keeper schedule_id=%s keeper=%s"
+          request.schedule_id
+          keeper_name
+      | Keeper_registry.Deferred_not_running phase ->
+        Log.Keeper.info
+          "schedule stimulus queued without runnable fiber schedule_id=%s keeper=%s phase=%s"
+          request.schedule_id
+          keeper_name
+          (Keeper_state_machine.phase_to_string phase)
+      | Keeper_registry.Deferred_lifecycle denial ->
+        Log.Keeper.info
+          "schedule stimulus queued but lifecycle admission deferred wake schedule_id=%s keeper=%s reason=%s"
+          request.schedule_id
+          keeper_name
+          (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)));
   Ok
     (`Assoc
       ([ "kind", `String keeper_wake_enqueued_kind
@@ -378,19 +393,23 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
        ; "schedule_id", `String request.schedule_id
        ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
        ; "post_id", `String stimulus.post_id
+       ; ( "occurrence_status"
+         , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
        ]
-       @ keeper_wake_reaction_ledger_status_json_fields (Some reaction_ledger_status)))
+       @ keeper_wake_reaction_ledger_status_json_fields
+           (Some Keeper_wake_reaction_ledger_recorded)))
 ;;
 
-let dispatch config ~now request =
+let dispatch config ~now signal request =
   match Schedule_payload_projection.dispatch_view_detailed request with
   | Error rejection ->
-    Error (Schedule_payload_projection.dispatch_rejection_message rejection)
+    Error
+      (Schedule_runner.Terminal_dispatch_rejection
+         (Schedule_payload_projection.dispatch_rejection_message rejection))
   | Ok (kind, payload) ->
     (match kind with
-     | Schedule_payload_projection.Board_post -> dispatch_board_post request payload
      | Schedule_payload_projection.Keeper_wake ->
-       dispatch_keeper_wake config ~now request payload)
+       dispatch_keeper_wake config ~now signal request payload)
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch }

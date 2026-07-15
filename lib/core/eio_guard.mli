@@ -1,8 +1,8 @@
-(** Eio_guard — Dual-mode mutex guard for pre/post Eio runtime.
+(** Eio_guard — Dual-mode guard for Eio and non-Eio callers.
 
-    Before {!enable} is called, all guard functions execute [f] directly
-    (single-threaded, no locking needed). After {!enable}, they acquire
-    the given [Eio.Mutex.t] before running [f].
+    {!enable} records that shared Eio mutexes are live. Runtime operations
+    additionally inspect the current caller because a process-wide ready flag
+    does not give raw Domains or systhreads an Eio effect handler.
 
     Call {!enable} once inside [Eio_main.run]. *)
 
@@ -17,13 +17,26 @@ val disable : unit -> unit
 (** [true] after {!enable} has been called. *)
 val is_ready : unit -> bool
 
-(** Acquire read-write lock if Eio is ready, run [f] directly otherwise. *)
+(** Actual execution context of the current caller. [ready] is process-wide;
+    it does not imply that a raw Domain or systhread has an Eio handler. *)
+type execution_context = Eio_fiber | Non_eio
+
+val execution_context : unit -> execution_context
+val is_eio_fiber : unit -> bool
+
+type mutex_access = Read_write | Read_only
+exception Non_eio_mutex_context of mutex_access
+
+(** Acquire the read-write lock when enabled from an Eio fiber. Runs directly
+    before {!enable}; raises {!Non_eio_mutex_context} for a ready non-Eio
+    caller. *)
 val with_mutex : Eio.Mutex.t -> (unit -> 'a) -> 'a
 
-(** Acquire read-only lock if Eio is ready, run [f] directly otherwise. *)
+(** Read-only counterpart of {!with_mutex}. *)
 val with_mutex_ro : Eio.Mutex.t -> (unit -> 'a) -> 'a
 
-(** Run [f] in a system thread if Eio is ready, directly otherwise. *)
+(** Run [f] in a system thread from an Eio fiber, directly from a non-Eio
+    execution context. *)
 val run_in_systhread : (unit -> 'a) -> 'a
 
 (** Eio-aware replacement for [Fun.protect].
@@ -32,16 +45,14 @@ val run_in_systhread : (unit -> 'a) -> 'a
     so cleanup always runs and cleanup exceptions do not replace the body
     exception.  [Eio.Cancel.Cancelled] always propagates correctly.
 
-    Before {!enable}, falls back to [Fun.protect]. *)
+    Outside an Eio fiber, falls back to [Fun.protect]. *)
 val protect : finally:(unit -> unit) -> (unit -> 'a) -> 'a
 
-(** Cooperatively yield to the Eio scheduler if the runtime is active.
-    No-op before {!enable} or when called from a context where Eio cannot
-    currently yield. *)
+(** Cooperatively yield from an Eio fiber; no-op in a non-Eio context. *)
 val yield_if_ready : unit -> unit
 
-(** Check for cooperative cancellation if the Eio runtime is active.
-    No-op before {!enable} or when called from non-Eio initialization paths. *)
+(** Check cooperative cancellation from an Eio fiber; no-op in a non-Eio
+    context. *)
 val check_if_ready : unit -> unit
 
 (** Named cooperative yield for scheduler-fair keeper/runtime boundaries.

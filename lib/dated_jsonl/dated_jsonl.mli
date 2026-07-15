@@ -77,6 +77,10 @@ val iter_all : t -> (Yojson.Safe.t -> unit) -> unit
     order without loading a whole day-file into memory. Malformed rows are
     skipped, matching {!read_recent} and {!read_range}. *)
 
+val iter_all_result : t -> (Yojson.Safe.t -> unit) -> (unit, string) result
+(** Fail-loud variant of {!iter_all}. Missing stores are empty; directory,
+    file-read, and JSON parse failures are returned with their exact path. *)
+
 val iter_range : t -> since:string -> until:string -> (Yojson.Safe.t -> unit) -> unit
 (** Streaming variant of {!read_range}. Invalid dates iterate zero rows. *)
 

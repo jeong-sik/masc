@@ -168,11 +168,19 @@ type 'a timeout_result =
   | Timed_out
   | Clock_unavailable
 
-let with_timeout ?clock ~timeout_sec f =
+(* No wall-clock budget kill (fail-open; RFC-0156 withdrew the MASC turn-budget
+   timeout policy). Run [f] to natural completion instead of wrapping it in
+   [Eio.Time.with_timeout_exn]: a slow-but-healthy provider that is still
+   streaming would otherwise turn every budget expiry into kill -> error ->
+   retry churn. A genuine INNER transport timeout raised from within [f]
+   (HTTP client / connect / idle) still surfaces as [Eio.Time.Timeout] ->
+   [Timed_out]. [Eio.Cancel.Cancelled] is not caught here, so it propagates
+   unchanged. The no-clock branch stays as-is (env-not-initialised guard). *)
+let with_timeout ?clock ~timeout_sec:_ f =
   match clock with
   | None -> Clock_unavailable
-  | Some clock ->
-    (try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
+  | Some _clock ->
+    (try Completed (f ()) with
      | Eio.Time.Timeout -> Timed_out)
 
 let record_summary_outcome

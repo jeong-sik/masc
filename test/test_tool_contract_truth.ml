@@ -110,8 +110,8 @@ let test_keeper_lifecycle_front_door_is_public () =
           "masc_keeper_up";
           "masc_keeper_down";
         ];
-      check bool "async keeper msg remains hidden by default" false
-        (List.mem "masc_keeper_msg" names))
+      check bool "async keeper delegation remains hidden by default" false
+        (List.mem "masc_keeper_delegate" names))
 
 let test_selected_tools_report_contract_status () =
   Eio_main.run @@ fun env ->

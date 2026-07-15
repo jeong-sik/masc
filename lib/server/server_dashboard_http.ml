@@ -694,48 +694,71 @@ let dashboard_goal_detail_http_json ~(config : Workspace.config) ~goal_id : Yojs
     `Assoc [ "ok", `Bool false; "error", `String message; "goal_id", `String goal_id ]
 ;;
 
-let operator_action_http_json ~state ~sw ~clock request ~args =
-  let workspace_scope = Mcp_server.workspace_scope state in
-  let actor =
-    Server_auth.dashboard_actor_for_request
-      ~base_path:workspace_scope.config.base_path
-      request
-  in
-  let ctx : _ Operator_control.context =
-    { config = workspace_scope.config
-    ; agent_name = Option.value ~default:"dashboard" actor
-    ; sw
-    ; clock
-    ; proc_mgr = state.Mcp_server.proc_mgr
-    ; net = state.Mcp_server.net
-    ; publication_recovery_provider =
-        Mcp_server.publication_recovery_availability_provider state
-    ; mcp_session_id = None
-    }
-  in
-  Operator_control.action_json ?actor_hint:actor ctx args
+let explicit_operator_actor ~authorized_actor request =
+  match
+    Server_auth.auth_token_from_request request,
+    Server_auth.request_actor_hint request
+  with
+  | None, None -> Error "operator request actor is required"
+  | None, Some _
+  | Some _, None
+  | Some _, Some _ -> Ok authorized_actor
 ;;
 
-let operator_confirm_http_json ~state ~sw ~clock request ~args =
+let operator_control_context ~state ~sw ~clock ~config ~agent_name
+    : _ Operator_control.context
+  =
+  { config
+  ; agent_name
+  ; sw
+  ; clock
+  ; proc_mgr = state.Mcp_server.proc_mgr
+  ; net = state.Mcp_server.net
+  ; delegated_dispatch =
+      Some
+        (Keeper_tool_boundary.delegated_dispatch
+           ~config
+           ~agent_name
+           ~sw
+           ~clock
+           ~proc_mgr:state.Mcp_server.proc_mgr
+           ~net:state.Mcp_server.net
+           ~publication_recovery_provider:
+             (Mcp_server.publication_recovery_availability_provider state))
+  ; mcp_session_id = None
+  }
+;;
+
+let operator_action_http_json ~state ~sw ~clock ~authorized_actor request ~args =
   let workspace_scope = Mcp_server.workspace_scope state in
-  let actor =
-    Server_auth.dashboard_actor_for_request
-      ~base_path:workspace_scope.config.base_path
-      request
-  in
-  let ctx : _ Operator_control.context =
-    { config = workspace_scope.config
-    ; agent_name = Option.value ~default:"dashboard" actor
-    ; sw
-    ; clock
-    ; proc_mgr = state.Mcp_server.proc_mgr
-    ; net = state.Mcp_server.net
-    ; publication_recovery_provider =
-        Mcp_server.publication_recovery_availability_provider state
-    ; mcp_session_id = None
-    }
-  in
-  Operator_control.confirm_json ?actor_hint:actor ctx args
+  match explicit_operator_actor ~authorized_actor request with
+  | Error _ as error -> error
+  | Ok actor ->
+    let ctx =
+      operator_control_context
+        ~state
+        ~sw
+        ~clock
+        ~config:workspace_scope.config
+        ~agent_name:actor
+    in
+    Operator_control.action_json ~actor_hint:actor ctx args
+;;
+
+let operator_confirm_http_json ~state ~sw ~clock ~authorized_actor request ~args =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  match explicit_operator_actor ~authorized_actor request with
+  | Error _ as error -> error
+  | Ok actor ->
+    let ctx =
+      operator_control_context
+        ~state
+        ~sw
+        ~clock
+        ~config:workspace_scope.config
+        ~agent_name:actor
+    in
+    Operator_control.confirm_json ~actor_hint:actor ctx args
 ;;
 
 let operator_error_json message =

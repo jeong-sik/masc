@@ -111,6 +111,34 @@ let reject_and_cleanup id =
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
 
+let test_pending_store_lock_serializes_eio_fibers () =
+  Eio_main.run @@ fun _environment ->
+  let first_entered, signal_first_entered = Eio.Promise.create () in
+  let second_attempted, signal_second_attempted = Eio.Promise.create () in
+  let release_first, signal_release_first = Eio.Promise.create () in
+  let order = ref [] in
+  Eio.Fiber.all
+    [ (fun () ->
+        AQ.For_testing.with_pending_store_lock (fun () ->
+          order := "first_entered" :: !order;
+          Eio.Promise.resolve signal_first_entered ();
+          Eio.Promise.await release_first;
+          order := "first_released" :: !order))
+    ; (fun () ->
+        Eio.Promise.await first_entered;
+        Eio.Promise.resolve signal_second_attempted ();
+        AQ.For_testing.with_pending_store_lock (fun () ->
+          order := "second_entered" :: !order))
+    ; (fun () ->
+        Eio.Promise.await second_attempted;
+        Eio.Promise.resolve signal_release_first ())
+    ];
+  Alcotest.(check (list string))
+    "second fiber enters only after the yielding durable transition releases"
+    [ "first_entered"; "first_released"; "second_entered" ]
+    (List.rev !order)
+;;
+
 let test_dedup_never_merges_distinct_origins () =
   let base_path = temp_dir () in
   let keeper_name = "queue-distinct-origin" in
@@ -215,6 +243,81 @@ let install_exn ~base_path =
   match AQ.install_persistence ~base_path with
   | Ok report -> report
   | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+;;
+
+let test_install_serializes_snapshot_read_with_same_base_mutation () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       write_pending_snapshot
+         ~base_path
+         (`Assoc
+            [ "version", `Int 2
+            ; "pending", `List []
+            ; "deliveries", `List []
+            ]);
+       Eio_main.run @@ fun _environment ->
+       let snapshot_loaded, signal_snapshot_loaded = Eio.Promise.create () in
+       let mutation_attempted, signal_mutation_attempted = Eio.Promise.create () in
+       let release_install, signal_release_install = Eio.Promise.create () in
+       let install_done, signal_install_done = Eio.Promise.create () in
+       let mutation_done, signal_mutation_done = Eio.Promise.create () in
+       let mutation_completed_before_release = ref false in
+       Eio.Fiber.all
+         [ (fun () ->
+             let result =
+               AQ.For_testing.install_persistence_with_after_load_hook
+                 ~base_path
+                 ~after_load:(fun () ->
+                   Eio.Promise.resolve signal_snapshot_loaded ();
+                   Eio.Promise.await release_install)
+             in
+             Eio.Promise.resolve signal_install_done result)
+         ; (fun () ->
+             Eio.Promise.await snapshot_loaded;
+             Eio.Promise.resolve signal_mutation_attempted ();
+             let id =
+               submit
+                 ~base_path
+                 ~keeper_name:"queue-install-race"
+                 ~input:(`Assoc [ "target", `String "after-load" ])
+             in
+             Eio.Promise.resolve signal_mutation_done id)
+         ; (fun () ->
+             Eio.Promise.await mutation_attempted;
+             mutation_completed_before_release :=
+               Option.is_some (Eio.Promise.peek mutation_done);
+             Eio.Promise.resolve signal_release_install ())
+         ];
+       Alcotest.(check bool)
+         "same-base mutation waits for snapshot installation"
+         false
+         !mutation_completed_before_release;
+       let report = Eio.Promise.await install_done in
+       let mutation_id = Eio.Promise.await mutation_done in
+       (match report with
+        | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+        | Ok report -> Alcotest.(check int) "empty snapshot installed" 0 report.loaded_pending);
+       Alcotest.(check int) "mutation remains in memory" 1 (AQ.pending_count ());
+       Alcotest.(check bool)
+         "mutation id remains addressable"
+         true
+         (Option.is_some (AQ.get_pending_entry ~id:mutation_id));
+       let open Yojson.Safe.Util in
+       let persisted_ids =
+         read_pending_snapshot ~base_path
+         |> member "pending"
+         |> to_list
+         |> List.map (fun entry -> entry |> member "id" |> to_string)
+       in
+       Alcotest.(check bool)
+         "mutation remains in the durable snapshot"
+         true
+         (List.mem mutation_id persisted_ids))
 ;;
 
 let test_submit_is_nonblocking_and_exactly_deduplicated () =
@@ -1173,6 +1276,14 @@ let () =
     "Keeper_approval_queue"
     [ ( "nonhierarchical queue"
       , [ Alcotest.test_case
+            "durable lock serializes Eio fibers"
+            `Quick
+            test_pending_store_lock_serializes_eio_fibers
+        ; Alcotest.test_case
+            "install serializes snapshot read with mutation"
+            `Quick
+            test_install_serializes_snapshot_read_with_same_base_mutation
+        ; Alcotest.test_case
             "submit is nonblocking and exact"
             `Quick
             test_submit_is_nonblocking_and_exactly_deduplicated

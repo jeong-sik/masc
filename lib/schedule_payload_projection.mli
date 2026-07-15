@@ -4,9 +4,7 @@
     names the payload kinds MASC can understand, validates their objective
     schemas, and returns typed views for production dispatch. *)
 
-type known_kind =
-  | Board_post
-  | Keeper_wake
+type known_kind = Keeper_wake
 
 type support_status =
   | Supported
@@ -84,9 +82,5 @@ val target_summary_result
 
 val target_summary : Schedule_domain.schedule_request -> string option * string option
 
-val view_kind : payload_view -> string
-val view_schema_version : payload_view -> int
 val body_required_string : payload_view -> string -> (string, string) result
 val body_optional_string : payload_view -> string -> (string option, string) result
-val body_optional_int : payload_view -> string -> (int option, string) result
-val body_optional_assoc : payload_view -> string -> (Yojson.Safe.t option, string) result

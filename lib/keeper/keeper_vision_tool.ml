@@ -10,19 +10,33 @@ type complete_fn =
   unit ->
   (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
 
-(* Mirrors Keeper_librarian_runtime.default_complete / with_timeout (neither is
-   exposed). Replicated rather than shared: two tiny consumers do not yet justify
-   a shared keeper_provider_subcall module (repetition over premature
-   abstraction); extract one if a third sub-call appears. *)
+(* Mirrors Keeper_librarian_runtime.default_complete (neither is exposed).
+   Replicated rather than shared: two tiny consumers do not yet justify a shared
+   keeper_provider_subcall module (repetition over premature abstraction);
+   extract one if a third sub-call appears. The provider-attempt wrapper below
+   deliberately diverges from the librarian's: the vision sub-call runs to
+   completion (no wall-clock kill), see [attempt_catching_transport_timeout]. *)
 let default_complete : complete_fn =
  fun ~sw ~net ?clock ~config ~messages () ->
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 
-(* Only [Eio.Time.Timeout] is caught here; [Eio.Cancel.Cancelled] and other
-   exceptions are intentionally propagated so caller cancellation is not
-   swallowed by the tool-level timeout handler. *)
-let with_timeout ~clock ~timeout_sec f =
-  try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
+(* RFC-0156 (withdraw MASC turn-budget timeout policy) / fail-open directive: a
+   single provider attempt runs to completion — no wall-clock budget kills it.
+   A wall-budget kill only turned a slow-but-progressing call into
+   kill -> error -> retry churn, discarding work already in flight. The
+   cumulative per-request deadline is retained, but only as a scheduling gate on
+   whether the *next* candidate runtime is started (see [remaining_timeout_sec]
+   in [run_candidates] / [run_candidates_outcome]); it never interrupts an
+   attempt that is already running.
+
+   [Eio.Time.Timeout] is still caught and mapped to [None] so a genuine
+   inner-transport timeout — the HTTP client's own connect/idle deadline, on the
+   defensive path where it escapes [complete] as an exception rather than an
+   [Error] result — fails the candidate over to the next runtime. [Eio.Cancel.Cancelled]
+   and every other exception propagate so caller/supervisor cancellation is not
+   swallowed by this handler. *)
+let attempt_catching_transport_timeout f =
+  try Some (f ()) with
   | Eio.Time.Timeout -> None
 
 let valid_timeout_sec timeout_sec =
@@ -399,10 +413,14 @@ let run_candidates
            | None -> Some (`Timeout runtime_id)
          in
          loop ~last_error ~attempt_index []
-       | Some timeout_sec ->
+       | Some _remaining ->
+         (* [_remaining] (budget left before the failover deadline) is no longer
+            used to bound the attempt: it runs to completion. The deadline is
+            consumed only by the [None] arm above, which stops starting further
+            candidates once it is exhausted. *)
          let config = provider_for_vision rt.Runtime.provider_config in
          (match
-            with_timeout ~clock ~timeout_sec (fun () ->
+            attempt_catching_transport_timeout (fun () ->
               complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
           with
           | None ->
@@ -485,10 +503,14 @@ let run_candidates_outcome
            | None -> Some (`Timeout runtime_id)
          in
          loop ~last_error ~attempt_index []
-       | Some timeout_sec ->
+       | Some _remaining ->
+         (* [_remaining] (budget left before the failover deadline) is no longer
+            used to bound the attempt: it runs to completion. The deadline is
+            consumed only by the [None] arm above, which stops starting further
+            candidates once it is exhausted. *)
          let config = provider_for_vision rt.Runtime.provider_config in
          (match
-            with_timeout ~clock ~timeout_sec (fun () ->
+            attempt_catching_transport_timeout (fun () ->
               complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
           with
           | None ->

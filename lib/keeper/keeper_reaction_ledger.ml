@@ -122,6 +122,7 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
     "board-attention:" ^ attention.candidate_id
   | Keeper_event_queue.Board_signal _, Board_signal ->
     board_stimulus_id ~post_id:stimulus.post_id
+  | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
   | _, kind ->
     digest_id
       "stimulus"
@@ -527,7 +528,7 @@ let reaction_kind_field row =
   | None -> None
 ;;
 
-let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
+let event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id iter =
   let stimulus_seen = ref false in
   let turn_started_seen = ref false in
   let event_queue_ack_seen = ref false in
@@ -536,8 +537,7 @@ let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
   let event_queue_ack_recorded_at = ref None in
   let latest_recorded_at = ref None in
   let matched_record_count = ref 0 in
-  let store = store_for_base_path ~base_path ~keeper_name in
-  Dated_jsonl.iter_all store (fun row ->
+  let iteration = iter (fun row ->
     match string_field "stimulus_id" row with
     | Some row_stimulus_id when String.equal row_stimulus_id stimulus_id ->
       incr matched_record_count;
@@ -569,7 +569,9 @@ let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
        | Some _
        | None -> ())
     | Some _
-    | None -> ());
+    | None -> ())
+  in
+  iteration,
   { keeper_name
   ; stimulus_id
   ; stimulus_seen = !stimulus_seen
@@ -581,6 +583,22 @@ let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
   ; latest_recorded_at = !latest_recorded_at
   ; matched_record_count = !matched_record_count
   }
+;;
+
+let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
+  let store = store_for_base_path ~base_path ~keeper_name in
+  event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id (fun note ->
+    Dated_jsonl.iter_all store note)
+  |> snd
+;;
+
+let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
+  let store = store_for_base_path ~base_path ~keeper_name in
+  let iteration, evidence =
+    event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id (fun note ->
+      Dated_jsonl.iter_all_result store note)
+  in
+  Result.map (fun () -> evidence) iteration
 ;;
 
 let string_list_field name json =

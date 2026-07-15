@@ -432,6 +432,87 @@ let iter_all t f =
          days)
     months
 
+let sorted_entries_result path =
+  try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
+  | Sys_error message -> Error (Printf.sprintf "failed to list %s: %s" path message)
+;;
+
+let line_error operation path line_number message =
+  Printf.sprintf "%s %s:%d: %s" operation path line_number message
+;;
+
+let iter_json_file_result path f =
+  try
+    let input = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr input)
+      (fun () ->
+         let rec loop line_number =
+           match input_line input with
+           | exception End_of_file -> Ok ()
+           | exception Sys_error message ->
+             Error (line_error "failed to read" path line_number message)
+           | line when String.trim line = "" -> loop (line_number + 1)
+           | line ->
+             (match Yojson.Safe.from_string line with
+              | json ->
+                f json;
+                loop (line_number + 1)
+              | exception Yojson.Json_error message ->
+                Error (line_error "failed to parse" path line_number message))
+         in
+         loop 1)
+  with
+  | Sys_error message -> Error (Printf.sprintf "failed to open %s: %s" path message)
+;;
+
+let iter_all_result t f =
+  let ( let* ) = Result.bind in
+  let* store_present =
+    try
+      match (Unix.stat t.base_dir).st_kind with
+      | Unix.S_DIR -> Ok true
+      | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+      | Unix.S_SOCK ->
+        Error ("dated JSONL base path is not a directory: " ^ t.base_dir)
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | Unix.Unix_error (error, _, _) ->
+      Error
+        (Printf.sprintf
+           "failed to inspect %s: %s"
+           t.base_dir
+           (Unix.error_message error))
+  in
+  if not store_present then Ok ()
+  else
+    let* months = sorted_entries_result t.base_dir in
+    let months =
+      List.filter
+        (fun name ->
+           String.length name = 7
+           && name.[4] = '-'
+           && Option.is_some (int_of_string_opt (String.sub name 0 4)))
+        months
+    in
+    let rec iter_months = function
+      | [] -> Ok ()
+      | month :: rest ->
+        let month_path = Filename.concat t.base_dir month in
+        let* days = sorted_entries_result month_path in
+        let days = List.filter (fun name -> Filename.check_suffix name ".jsonl") days in
+        let rec iter_days = function
+          | [] -> Ok ()
+          | day :: rest ->
+            let* () = iter_json_file_result (Filename.concat month_path day) f in
+            iter_days rest
+        in
+        let* () = iter_days days in
+        iter_months rest
+    in
+    iter_months months
+;;
+
 let iter_range t ~since ~until f =
   match parse_date since, parse_date until with
   | None, _ | _, None -> ()

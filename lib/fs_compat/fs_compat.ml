@@ -13,6 +13,8 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
+open Fs_compat_internal
+
 module Atomic_orphan_size_class = Atomic_orphan_size_class
 
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).
@@ -254,56 +256,20 @@ type atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_targe
 type atomic_replace_recovery_target_error =
   Atomic_write.atomic_replace_recovery_target_error
 
-module Publication_recovery = Publication_recovery_access
+module Publication_recovery = struct
+  include Publication_recovery_access
 
-module Publication_recovery_test_support = Publication_recovery_for_testing
+  type lane_open_error_category =
+    | Invalid_owner_category
+    | Reconciliation_blocked_category
+    | Store_failed_category
 
-module Publication_recovery_for_testing = struct
-  include Publication_recovery_test_support
-
-  let private_registry
-        (registry : Publication_recovery.registry)
-    : Publication_recovery_test_support.registry
-    =
-    registry
-  ;;
-
-  let public_lane_release_failure
-        (failure : Publication_recovery_test_support.lane_release_failure)
-    : Publication_recovery.lane_release_failure
-    =
-    failure
+  let lane_open_error_category = function
+    | Invalid_owner _ -> Invalid_owner_category
+    | Reconciliation_blocked _ -> Reconciliation_blocked_category
+    | Store_failed _ -> Store_failed_category
   ;;
 end
-
-type publication_recovery_access = Publication_recovery.t
-type publication_recovery_registry = Publication_recovery.registry
-type publication_recovery_registry_error = Publication_recovery.registry_error
-type publication_recovery_lane_open_error = Publication_recovery.lane_open_error
-
-type publication_recovery_lane_open_error_kind =
-  | Publication_recovery_invalid_owner
-  | Publication_recovery_reconciliation_blocked
-  | Publication_recovery_store_failed
-
-let open_publication_recovery_registry = Publication_recovery.open_registry
-
-let publication_recovery_registry_error_to_string =
-  Publication_recovery.registry_error_to_string
-;;
-
-let with_publication_recovery_lane = Publication_recovery.with_lane
-
-let publication_recovery_lane_open_error_to_string =
-  Publication_recovery.lane_open_error_to_string
-;;
-
-let publication_recovery_lane_open_error_kind = function
-  | Publication_recovery.Invalid_owner _ -> Publication_recovery_invalid_owner
-  | Publication_recovery.Reconciliation_blocked _ ->
-    Publication_recovery_reconciliation_blocked
-  | Publication_recovery.Store_failed _ -> Publication_recovery_store_failed
-;;
 
 let atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
 
@@ -507,20 +473,6 @@ let sync_directory_capability = Atomic_write.sync_directory_capability
 let capability_directory_sync_error_to_string =
   Atomic_write.capability_directory_sync_error_to_string
 ;;
-
-module Capability_write_for_testing = struct
-  let replace_capability_file =
-    Atomic_write.Capability_write_for_testing.replace_capability_file
-  ;;
-
-  let create_capability_file_exclusive =
-    Atomic_write.Capability_write_for_testing.create_capability_file_exclusive
-  ;;
-
-  let sync_directory_capability =
-    Atomic_write.Capability_write_for_testing.sync_directory_capability
-  ;;
-end
 
 let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
 type atomic_orphan_cleanup_scope = Atomic_write.atomic_orphan_cleanup_scope =

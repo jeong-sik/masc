@@ -17,11 +17,8 @@ export const OAS_EVENT_PREFIX = 'oas:'
 // Backend dashboard timeout is 30s; frontend must wait slightly longer.
 export const DEFAULT_GET_TIMEOUT_MS = 35_000
 export const DEFAULT_POST_TIMEOUT_MS = 30_000
-export const KEEPER_LIFECYCLE_TIMEOUT_MS = 12_000
 export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const NAMESPACE_TRUTH_GET_TIMEOUT_MS = 30_000
-export const KEEPER_MESSAGE_TIMEOUT_MS = 90_000
-export const SOCIAL_SWEEP_TIMEOUT_MS = 45_000
 export const MCP_INITIALIZE_TIMEOUT_MS = 10_000
 export const MCP_INITIALIZED_NOTIFY_TIMEOUT_MS = 5_000
 export const MCP_INIT_COOLDOWN_MS = 2_000
@@ -77,7 +74,6 @@ export const CONTEXT_RATIO_COMPACTING = 0.50 // compacting
 
 // --- Keeper UI/runtime limits ---
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200
-export const KEEPER_STREAM_IDLE_TIMEOUT_MS = 120_000
 export const KEEPER_STREAM_IDLE_POLL_MS = 5_000
 export const STREAMING_THINKING_PREVIEW_CHARS = 6_000
 

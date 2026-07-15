@@ -52,11 +52,6 @@ type atomic_replace_recovery_target =
   ; permissions : Recovery.permissions
   }
 
-type publication_recovery_access = Recovery_access.t
-type publication_recovery_registry = Recovery_access.registry
-type publication_recovery_registry_error = Recovery.transition_error
-type publication_recovery_lane_open_error = Recovery_access.lane_open_error
-type publication_recovery_owner = Recovery_access.owner
 type publication_recovery_reconciliation_report =
   Capability_recovery_reconciler.report
 
@@ -106,9 +101,6 @@ type publication_recovery_reconciliation_row_kind =
   | Publication_recovery_owner_store_release_failed
   | Publication_recovery_owner_store_unavailable
   | Publication_recovery_owner_inventory_unavailable
-
-let open_publication_recovery_registry = Recovery_access.open_registry
-let publication_recovery_registry_error_to_string = Recovery.transition_error_to_string
 
 let publication_recovery_reconciliation_report_owner =
   Capability_recovery_reconciler.report_owner
@@ -210,12 +202,6 @@ let publication_recovery_reconciliation_report_to_yojson =
   Capability_recovery_reconciler.report_to_yojson
 ;;
 
-let with_publication_recovery_lane = Recovery_access.with_lane
-
-let publication_recovery_lane_open_error_to_string =
-  Recovery_access.lane_open_error_to_string
-;;
-
 let atomic_replace_recovery_target_error_to_string = function
   | Recovery_target_validation_failed error ->
     Recovery.validation_error_to_string error
@@ -300,6 +286,37 @@ type capability_write_stage =
   | Cleanup_remove_staging_directory
   | Cleanup_close_staging_directory
   | Cleanup_sync_parent
+
+type replace_dispatch_fault =
+  | Raise_before_stage of
+      { fault_stage : capability_write_stage
+      ; fault_exception : exn
+      }
+  | Remove_staging_payload_before_publish
+
+(* TEL-OK: this fiber key carries a typed test fault plan; no write occurs here. *)
+let replace_dispatch_fault_key
+      : replace_dispatch_fault Eio.Fiber.key
+  =
+  Eio.Fiber.create_key ()
+;;
+
+let no_replace_stage _ = ()
+let no_before_publish _ = ()
+(* TEL-OK: this constant only selects the no-fault callback pair. *)
+let no_replace_dispatch = no_replace_stage, no_before_publish
+
+(* TEL-OK: this lookup only selects callbacks for the typed write operation. *)
+let scoped_replace_dispatch () =
+  match Eio.Fiber.get replace_dispatch_fault_key with
+  | None -> no_replace_dispatch
+  | Some Remove_staging_payload_before_publish ->
+    no_replace_stage, Eio.Path.unlink
+  | Some (Raise_before_stage fault) ->
+    ( (fun stage ->
+        if stage = fault.fault_stage then raise fault.fault_exception)
+    , no_before_publish )
+;;
 
 type capability_write_target_effect =
   | Target_unchanged
@@ -408,7 +425,7 @@ type capability_directory_sync_error =
   }
 
 type publication_recovery_fixture_error =
-  | Fixture_lane_open_failed of publication_recovery_lane_open_error
+  | Fixture_lane_open_failed of Recovery_access.lane_open_error
   | Fixture_validation_failed of Recovery.validation_error
   | Fixture_transition_failed of Recovery.transition_error
   | Fixture_invalid_record_leaf of string
@@ -419,7 +436,7 @@ type publication_recovery_fixture_error =
 
 let publication_recovery_fixture_error_to_string = function
   | Fixture_lane_open_failed error ->
-    publication_recovery_lane_open_error_to_string error
+    Recovery_access.lane_open_error_to_string error
   | Fixture_validation_failed error -> Recovery.validation_error_to_string error
   | Fixture_transition_failed error -> Recovery.transition_error_to_string error
   | Fixture_invalid_record_leaf value ->
@@ -1239,6 +1256,7 @@ let cleanup_owned_staging_directory
 
 let replace_capability_file_with
       ~before_stage
+      ~before_publish
       ~recovery
       ~parent
       ~target:recovery_target
@@ -1588,6 +1606,7 @@ let replace_capability_file_with
                Verify_target_binding
                Resource_identity_changed;
            run_stage ~before_stage Publish_replace (fun () ->
+             before_publish entry;
              try Eio.Path.rename entry target_path with
              | Eio.Cancel.Cancelled _ as cancellation ->
                target_effect := Target_state_unknown;
@@ -1965,6 +1984,7 @@ let create_capability_file_exclusive_with
 
 let replace_capability_file_through_access
       ~before_stage
+      ~before_publish
       ~recovery
       ~parent
       ~target
@@ -1978,6 +1998,7 @@ let replace_capability_file_through_access
         let result =
           replace_capability_file_with
             ~before_stage
+            ~before_publish
             ~recovery
             ~parent
             ~target
@@ -2026,8 +2047,11 @@ let replace_capability_file_through_access
 ;;
 
 let replace_capability_file ~recovery ~parent ~target content =
+  (* TEL-OK: callback selection is not an action; the write returns typed effect evidence. *)
+  let before_stage, before_publish = scoped_replace_dispatch () in
   replace_capability_file_through_access
-    ~before_stage:(fun _ -> ())
+    ~before_stage
+    ~before_publish
     ~recovery
     ~parent
     ~target
@@ -2069,6 +2093,23 @@ let sync_directory_capability directory =
 ;;
 
 module Capability_write_for_testing = struct
+  type nonrec replace_dispatch_fault = replace_dispatch_fault
+
+  (* TEL-OK: this constructor describes a scoped test fault; it performs no write. *)
+  let replace_dispatch_fault ~stage ~exception_ =
+    Raise_before_stage
+      { fault_stage = stage; fault_exception = exception_ }
+  ;;
+
+  let remove_staging_payload_before_publish () =
+    Remove_staging_payload_before_publish
+  ;;
+
+  (* TEL-OK: this installs a fiber-local test plan; the exercised write reports effects. *)
+  let with_replace_dispatch_fault fault f =
+    Eio.Fiber.with_binding replace_dispatch_fault_key fault f
+  ;;
+
   type resource_scope_callback =
     | Return_completed_rows of string list
     | Cancel_callback of exn
@@ -2274,6 +2315,7 @@ module Capability_write_for_testing = struct
     =
     replace_capability_file_through_access
       ~before_stage
+      ~before_publish:no_before_publish
       ~recovery
       ~parent
       ~target

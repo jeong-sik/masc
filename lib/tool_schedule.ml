@@ -120,78 +120,6 @@ let actor_from_args args ~prefix ~default_id ~default_kind =
   else Ok Schedule_domain.{ id; kind; display_name }
 ;;
 
-let has_arg args key = Option.is_some (Json_util.assoc_member_opt key args)
-
-let has_board_convenience_args args =
-  List.exists
-    (has_arg args)
-    [ "board_content"
-    ; "board_title"
-    ; "board_hearth"
-    ; "board_author"
-    ; "board_thread_id"
-    ; "board_ttl_hours"
-    ; "board_meta"
-    ]
-;;
-
-let optional_body_string args ~arg ~field fields =
-  match string_opt args arg with
-  | None -> Ok fields
-  | Some value -> Ok ((field, `String value) :: fields)
-;;
-
-let optional_body_int args ~arg ~field fields =
-  match Json_util.assoc_member_opt arg args with
-  | None -> Ok fields
-  | Some (`Int value) -> Ok ((field, `Int value) :: fields)
-  | Some _ -> Error (arg ^ " must be an integer")
-;;
-
-let optional_nonnegative_body_int args ~arg ~field fields =
-  match Json_util.assoc_member_opt arg args with
-  | None -> Ok fields
-  | Some (`Int value) when value >= 0 -> Ok ((field, `Int value) :: fields)
-  | Some (`Int _) -> Error (arg ^ " must be non-negative")
-  | Some _ -> Error (arg ^ " must be an integer")
-;;
-
-let optional_body_object args ~arg ~field fields =
-  match Json_util.assoc_member_opt arg args with
-  | None -> Ok fields
-  | Some (`Assoc _ as value) -> Ok ((field, value) :: fields)
-  | Some _ -> Error (arg ^ " must be an object")
-;;
-
-let board_post_payload_from_args args =
-  let* content = required_string args "board_content" in
-  let schema_version =
-    (* DET-OK: board_* is a stable convenience projection for the existing
-       board-post v1 consumer. *)
-    optional_int args "payload_schema_version" |> Option.value ~default:1
-  in
-  if schema_version <> 1
-  then Error "board_* convenience fields only support payload_schema_version=1"
-  else
-    let* fields =
-      optional_body_string args ~arg:"board_title" ~field:"title"
-        [ "content", `String content ]
-    in
-    let* fields = optional_body_string args ~arg:"board_author" ~field:"author" fields in
-    let* fields = optional_body_string args ~arg:"board_hearth" ~field:"hearth" fields in
-    let* fields = optional_body_string args ~arg:"board_thread_id" ~field:"thread_id" fields in
-    let* fields =
-      optional_nonnegative_body_int args ~arg:"board_ttl_hours" ~field:"ttl_hours" fields
-    in
-    let* fields = optional_body_object args ~arg:"board_meta" ~field:"meta" fields in
-    Ok
-      (`Assoc
-        [ "kind", `String Schedule_supported_kinds.board_post
-        ; "schema_version", `Int schema_version
-        ; "body", `Assoc (List.rev fields)
-        ])
-;;
-
 let generic_payload_from_args args =
   let* kind = required_string args "payload_kind" in
   let schema_version =
@@ -212,28 +140,9 @@ let generic_payload_from_args args =
 
 let payload_from_args args =
   match Json_util.assoc_member_opt "payload" args with
-  | Some (`Assoc _ as payload) ->
-    if has_board_convenience_args args
-    then Error "use either payload or board_* convenience fields, not both"
-    else Ok payload
+  | Some (`Assoc _ as payload) -> Ok payload
   | Some _ -> Error "payload must be an object envelope"
-  | None ->
-    if has_board_convenience_args args
-    then
-      if has_arg args "payload_body"
-      then Error "use either payload_body or board_* convenience fields, not both"
-      else
-        (match string_opt args "payload_kind" with
-         | None -> board_post_payload_from_args args
-         | Some kind when String.equal kind Schedule_supported_kinds.board_post ->
-           board_post_payload_from_args args
-         | Some kind ->
-           Error
-             ("board_* convenience fields require payload_kind omitted or "
-              ^ Schedule_supported_kinds.board_post
-              ^ ", got "
-              ^ kind))
-    else generic_payload_from_args args
+  | None -> generic_payload_from_args args
 ;;
 
 let schedule_payload_unsupported_labels ~phase = [ "phase", phase ]

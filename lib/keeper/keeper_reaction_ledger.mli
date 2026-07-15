@@ -53,7 +53,8 @@ val board_stimulus_id : post_id:string -> string
 (** Stable id for board-originated stimuli. *)
 
 val stimulus_id_of_event_queue : Keeper_event_queue.stimulus -> string
-(** Stable id derived from the event queue stimulus payload. *)
+(** Stable id derived from the event queue stimulus payload. Scheduled wakes
+    preserve the enclosing schedule occurrence [post_id] exactly. *)
 
 val record_event_queue_stimulus :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
@@ -96,6 +97,14 @@ val event_queue_reaction_evidence :
 (** Stream the durable reaction ledger for exact rows sharing [stimulus_id].
     This intentionally does not use a "recent rows" limit, because dashboards
     use it to prove a specific queue stimulus was observed by the keeper. *)
+
+val event_queue_reaction_evidence_result :
+  base_path:string ->
+  keeper_name:string ->
+  stimulus_id:string ->
+  (event_queue_reaction_evidence, string) result
+(** Fail-loud exact-id scan for delivery invariants. Unlike the dashboard
+    projection above, malformed or unreadable ledger rows return [Error]. *)
 
 val record_board_cursor_ack :
   base_path:string ->

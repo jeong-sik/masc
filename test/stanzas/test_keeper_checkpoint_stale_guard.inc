@@ -1,4 +1,4 @@
-; RFC-0225 §3.2: save_oas refuses checkpoint writes whose turn_count is
+; RFC-0225 §3.2: the checkpoint transaction refuses writes whose turn_count is
 ; older than the last saved one (stale-writer clobber guard, 2026-06-10
 ; voice incident).
 

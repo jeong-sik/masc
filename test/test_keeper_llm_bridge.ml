@@ -98,25 +98,26 @@ let test_env_uninitialized_domain_returns_none () =
           (Domain.join worker))))
 ;;
 
-let test_timeout_log_carries_failure_envelope () =
+let test_slow_call_is_not_wall_budget_killed () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       Masc_eio_env.reset_for_test ();
       Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
         Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
+        (* fail-open directive: a call that overruns [timeout_s] must run to
+           natural completion, not be force-killed by a bridge wall budget.
+           Regression guard for the 30s HITL-summary churn (kill -> retry). *)
         match
           Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:0.001 (fun () ->
             Eio.Time.sleep (Eio.Stdenv.clock env) 0.02;
             Ok "late")
         with
-        | Error (Agent_sdk.Error.Api (Timeout _)) ->
-          assert_latest_failure_envelope
-            ~label:"timeout"
-            ~needle:"OAS execution timed out"
-            ~cause_code:"provider_timeout"
-            ~operator_action:"inspect_provider_stream"
-        | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
-        | Ok value -> Alcotest.failf "unexpected success: %s" value)))
+        | Ok "late" -> ()
+        | Ok other -> Alcotest.failf "unexpected success payload: %s" other
+        | Error err ->
+          Alcotest.failf
+            "slow call was killed instead of completing: %s"
+            (Agent_sdk.Error.to_string err))))
 ;;
 
 let test_parent_timeout_cancel_logs_info () =
@@ -253,9 +254,9 @@ let () =
             `Quick
             test_env_uninitialized_domain_returns_none
         ; Alcotest.test_case
-            "timeout log carries failure envelope"
+            "slow call is not wall-budget killed"
             `Quick
-            test_timeout_log_carries_failure_envelope
+            test_slow_call_is_not_wall_budget_killed
         ; Alcotest.test_case
             "parent timeout cancel logs info"
             `Quick

@@ -205,11 +205,22 @@ type 'a timeout_result =
   | Timed_out
   | Clock_unavailable
 
-let with_timeout ?clock ~timeout_sec f =
+let with_timeout ?clock ~timeout_sec:_ f =
   match clock with
   | None -> Clock_unavailable
-  | Some clock ->
-    (try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
+  | Some _clock ->
+    (* No wall-clock budget kill (fail-open; RFC-0156 withdrew the MASC turn-budget
+       timeout policy). [timeout_sec] is NOT used to force-kill the compaction LLM call: a
+       budget that fired while a slow-but-healthy provider was still streaming
+       turned every compaction turn into kill -> None -> retry churn that never
+       produced a plan, so the completion call now runs to natural completion.
+       A genuine inner transport timeout (the provider call's own connect/idle
+       deadline raising [Eio.Time.Timeout]) is still surfaced as [Timed_out];
+       [Eio.Cancel.Cancelled] from server shutdown / parent-fiber cancel is not
+       caught here and propagates so the caller exits immediately without
+       retrying. The no-clock [Clock_unavailable] fail-closed guard (the [None]
+       arm above) is intentionally left in place. *)
+    (try Completed (f ()) with
      | Eio.Time.Timeout -> Timed_out)
 
 let run_plan
@@ -308,7 +319,10 @@ let candidates_for_assignment ~keeper_name assignment_id =
   | `Lane lane ->
     resolve_lane [] (Runtime_lane.ordered_candidates lane)
 
-let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
+type make_fn = runtime_id:string -> keeper_name:string -> unit -> summarizer option
+let make_override : make_fn option Atomic.t = Atomic.make None
+
+let make_resolved ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
   : summarizer option
   =
   match candidates_for_assignment ~keeper_name runtime_id with
@@ -351,10 +365,19 @@ let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) (
              "compaction LLM candidate skipped runtime=%s assignment=%s: Eio \
               context unavailable"
              candidate.runtime_id runtime_id)
-         candidates;
+       candidates;
        None)
 
+let make ?complete ?timeout_sec ~runtime_id ~keeper_name () =
+  match Atomic.get make_override with
+  | Some override -> override ~runtime_id ~keeper_name ()
+  | None -> make_resolved ?complete ?timeout_sec ~runtime_id ~keeper_name ()
+
 module For_testing = struct
+  let with_make_override override f =
+    let previous = Atomic.exchange make_override (Some override) in
+    Fun.protect ~finally:(fun () -> Atomic.set make_override previous) f
+
   let provider_for_plan = provider_for_plan
 
   let candidate_runtime_ids_for_assignment ~keeper_name ~runtime_id =

@@ -238,6 +238,14 @@ let test_iter_all_chronological_skips_malformed () =
   Dated_jsonl.iter_all store (fun json -> seen := json_i json :: !seen);
   check (list int) "iter_all chronological" [ 1; 2; 3 ] (List.rev !seen)
 
+let test_iter_all_result_rejects_malformed () =
+  let dir = tmpdir "dated_jsonl_iter_all_result" in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; "not-json" ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  match Dated_jsonl.iter_all_result store ignore with
+  | Ok () -> fail "strict iteration silently skipped malformed JSON"
+  | Error _ -> ()
+
 let test_iter_range_chronological () =
   let dir = tmpdir "dated_jsonl_iter_range" in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
@@ -370,6 +378,8 @@ let () =
           test_case "range_recent returns newest n in window" `Quick test_read_range_recent;
           test_case "iter_all chronological" `Quick
             test_iter_all_chronological_skips_malformed;
+          test_case "iter_all result rejects malformed" `Quick
+            test_iter_all_result_rejects_malformed;
           test_case "iter_range chronological" `Quick test_iter_range_chronological;
         ] );
       ( "prune",

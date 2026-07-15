@@ -4,7 +4,7 @@ module Keeper_publication_recovery_availability =
 
 module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
-module Recovery_test = Fs_compat.Publication_recovery_for_testing
+module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 
 let contains_substring text fragment =
   let text_len = String.length text in
@@ -139,18 +139,18 @@ let seed_prepared_recovery ~fs ~base_path ~owner ~operation_id =
   Eio.Switch.run
   @@ fun sw ->
   match
-    Fs_compat.open_publication_recovery_registry
+    Fs_compat.Publication_recovery.open_registry
       ~sw
       ~fs
       ~registry_root:Eio.Path.(fs / Masc.Workspace.masc_root_dir config)
   with
   | Error error ->
     Alcotest.fail
-      (Fs_compat.publication_recovery_registry_error_to_string error)
+      (Fs_compat.Publication_recovery.registry_error_to_string error)
   | Ok registry ->
     (match
        Recovery_test.seed_prepared
-         ~registry:(Recovery_test.private_registry registry)
+         ~registry:(registry)
          ~owner
          ~operation_id
          ~allowed_root_path
@@ -271,25 +271,22 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
         nested_workspace
         initialized_scope.config.workspace_path;
       let registry = require_registry state in
-      let private_registry =
-        Fs_compat.Publication_recovery_for_testing.private_registry registry
-      in
-      Fs_compat.Publication_recovery_for_testing.For_testing.await_discovery_settlement
-        private_registry;
+      Recovery_test.For_testing.await_discovery_settlement
+        registry;
       let before_demand =
-        Fs_compat.Publication_recovery_for_testing.For_testing.snapshot
-          private_registry
+        Recovery_test.For_testing.snapshot
+          registry
       in
       Alcotest.(check int)
         "startup discovery does not prepopulate exact owners"
         0
         (List.length before_demand.owners);
       (match before_demand.discovery with
-       | Fs_compat.Publication_recovery_for_testing.Snapshot_discovery_complete rows ->
+       | Recovery_test.Snapshot_discovery_complete rows ->
          Alcotest.(check int) "both names observed" 2 (List.length rows)
-       | Fs_compat.Publication_recovery_for_testing.Snapshot_discovery_required
-       | Fs_compat.Publication_recovery_for_testing.Snapshot_discovery_running
-       | Fs_compat.Publication_recovery_for_testing.Snapshot_discovery_failed _ ->
+       | Recovery_test.Snapshot_discovery_required
+       | Recovery_test.Snapshot_discovery_running
+       | Recovery_test.Snapshot_discovery_failed _ ->
          Alcotest.fail "discovery settlement did not publish success");
       let settled_health = health state in
       Alcotest.(check bool)
@@ -306,7 +303,7 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
            |> member "owner_identity_rejected"
            |> to_int);
       (match
-         Fs_compat.with_publication_recovery_lane
+         Fs_compat.Publication_recovery.with_lane
            ~registry
            ~owner:first_owner
            (fun _ -> ())
@@ -316,10 +313,10 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
          Alcotest.fail "publication recovery lane release failed"
        | Error error ->
          Alcotest.fail
-           (Fs_compat.publication_recovery_lane_open_error_to_string error));
+           (Fs_compat.Publication_recovery.lane_open_error_to_string error));
       let after_demand =
-        Fs_compat.Publication_recovery_for_testing.For_testing.snapshot
-          private_registry
+        Recovery_test.For_testing.snapshot
+          registry
       in
       Alcotest.(check int)
         "one exact demand creates one owner state"
@@ -428,11 +425,8 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
       let state = create_runtime env sw ~base_path in
       Mcp_server.For_testing.await_publication_recovery_initialization state;
       let registry = require_registry state in
-      let private_registry =
-        Fs_compat.Publication_recovery_for_testing.private_registry registry
-      in
-      Fs_compat.Publication_recovery_for_testing.For_testing.await_discovery_settlement
-        private_registry;
+      Recovery_test.For_testing.await_discovery_settlement
+        registry;
       let owner = "lane-store-health" in
       let exception_ = Failure "deterministic lane store open failure" in
       let backtrace =
@@ -445,9 +439,9 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
           Printexc.get_raw_backtrace ()
       in
       (match
-         Fs_compat.Publication_recovery_for_testing.For_testing
+         Recovery_test.For_testing
          .record_lane_store_open_failure
-           ~registry:private_registry
+           ~registry
            ~owner
            ~exception_
            ~backtrace
@@ -455,7 +449,7 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
        | Ok () -> ()
        | Error error ->
          Alcotest.fail
-           (Fs_compat.Publication_recovery_for_testing.validation_error_to_string
+           (Recovery_test.validation_error_to_string
               error));
       let failed = health state in
       Alcotest.(check string)
@@ -479,15 +473,15 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
            |> to_list
            |> List.map to_string);
       (match
-         Fs_compat.Publication_recovery_for_testing.For_testing
+         Recovery_test.For_testing
          .record_lane_store_open_success
-           ~registry:private_registry
+           ~registry
            ~owner
        with
        | Ok () -> ()
        | Error error ->
          Alcotest.fail
-           (Fs_compat.Publication_recovery_for_testing.validation_error_to_string
+           (Recovery_test.validation_error_to_string
               error));
       let recovered = health state in
       Alcotest.(check string)

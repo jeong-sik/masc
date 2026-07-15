@@ -38,13 +38,18 @@ and dispatch_result =
   ; error : string option
   }
 
+type consumer_dispatch_error =
+  | Retryable_dispatch_failure of string
+  | Terminal_dispatch_rejection of string
+
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
   ; dispatch :
       Workspace_utils.config ->
       now:float ->
+      wake_signal ->
       Schedule_domain.schedule_request ->
-      (Yojson.Safe.t, string) result
+      (Yojson.Safe.t, consumer_dispatch_error) result
   }
 
 type runner_error =
@@ -77,5 +82,5 @@ val tick :
     observable due work. Recurring due work is advanced
     after the generic due signal path succeeds when no consumer is installed; a
     consumer dispatch can instead complete/fail the request. Consumer payload
-    rejection is recorded as a failed execution instead of leaving the request
-    due forever. *)
+    rejection is terminal. A typed retryable dispatch failure finishes only its
+    current execution attempt and leaves the schedule [Due] for the next tick. *)

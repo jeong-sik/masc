@@ -1,11 +1,11 @@
-(** RFC-0225 §3.2: stale OAS checkpoint writes are no-op.
+(** RFC-0225 §3.2: stale OAS checkpoint writes are a disk-SSOT no-op.
 
     Two writers for the same session are last-writer-wins on disk; the
     2026-06-10 voice incident had a stale lane (turn_count=1324) clobber
     the conversation the newer lane had just saved (turn_count=1355).
-    [Keeper_checkpoint_store.save_oas] now skips a save whose [turn_count]
-    is older than the last one saved for the session without turning that
-    watermark hit into keeper lifecycle failure. *)
+    [Keeper_checkpoint_store.save_oas_classified] skips a save whose [turn_count] is older
+    than the canonical checkpoint observed inside the save transaction, without
+    turning that watermark hit into keeper lifecycle failure. *)
 
 open Alcotest
 open Masc
@@ -16,14 +16,14 @@ let () =
   |> Result.get_ok
 
 let temp_dir () =
-  let dir = Filename.temp_file "test_ckpt_stale_guard_" "" in
-  Unix.unlink dir;
-  Unix.mkdir dir 0o755;
-  dir
+  let root = Filename.temp_file "test_ckpt_stale_guard_" "" in
+  Unix.unlink root;
+  Unix.mkdir root 0o755;
+  let session_dir = Filename.concat root "session" in
+  Unix.mkdir session_dir 0o755;
+  session_dir
 
-let ensure_fs env =
-  if not (Fs_compat.has_fs ()) then
-    Fs_compat.set_fs (Eio.Stdenv.fs env)
+let ensure_fs env = Fs_compat.set_fs (Eio.Stdenv.fs env)
 
 let cleanup_dir dir =
   let rec rm path =
@@ -34,7 +34,7 @@ let cleanup_dir dir =
       else
         Unix.unlink path
   in
-  try rm dir with _ -> ()
+  try rm (Filename.dirname dir) with _ -> ()
 
 let make_checkpoint ~session_id ~turn_count ~marker =
   let messages = [
@@ -73,15 +73,14 @@ let make_checkpoint ~session_id ~turn_count ~marker =
   }
 
 let save_ok ~session_dir ckpt label =
-  match Keeper_checkpoint_store.save_oas ~session_dir ckpt with
-  | Ok () -> ()
+  match Keeper_checkpoint_store.save_oas_classified ~session_dir ckpt with
+  | Ok _ -> ()
   | Error e -> fail (label ^ " unexpectedly failed: " ^ e)
 
 let test_forward_equal_and_stale () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun _sw ->
-  Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let sid = "sess-guard" in
@@ -107,19 +106,16 @@ let test_forward_equal_and_stale () =
         on_disk.Agent_sdk.Checkpoint.turn_count
     | Error _ -> fail "load after rejection failed")
 
-(* Cold start: the process-local map is empty but the disk already has a
-   newer checkpoint — the guard must backfill from disk and still refuse. *)
-let test_cold_start_backfills_from_disk () =
+(* Every decision reloads the canonical disk SSOT; there is no process cache to
+   reset or reconstruct after a restart. *)
+let test_disk_is_the_watermark_ssot () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun _sw ->
-  Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let sid = "sess-cold" in
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:8 ~marker:"v8") "seed save";
-    (* Simulate a process restart: in-memory knowledge is gone. *)
-    Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
     (match
        Keeper_checkpoint_store.save_oas_classified ~session_dir
          (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"v3-stale")
@@ -130,35 +126,33 @@ let test_cold_start_backfills_from_disk () =
        check int "cold known turn_count backfilled from disk" 8 known_turn_count
      | Ok (Keeper_checkpoint_store.Saved _) ->
        fail "stale save advanced after cold start"
-     | Error e -> fail ("cold stale save returned lifecycle failure: " ^ e));
+    | Error e -> fail ("cold stale save returned lifecycle failure: " ^ e));
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:9 ~marker:"v9")
-      "forward save after cold start")
-
-let string_contains ~needle haystack =
-  let nlen = String.length needle and hlen = String.length haystack in
-  let rec at i = i + nlen <= hlen && (String.sub haystack i nlen = needle || at (i + 1)) in
-  nlen = 0 || at 0
+      "forward save from disk SSOT")
 
 (* The OAS per-turn pipeline builds checkpoints with an empty session_id (the
    OAS agent carries no session field). The keeper sink stamps a validated,
-   non-empty trace_id before persisting; [save_oas] fails loud on an empty
+   non-empty trace_id before persisting; the store fails loud on an empty
    session_id rather than letting the non-Eio fallback silently write
    "<session_dir>/.json" and drop the checkpoint. *)
 let test_empty_session_id_rejected () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun _sw ->
-  Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     (match
-       Keeper_checkpoint_store.save_oas ~session_dir
+       Keeper_checkpoint_store.save_oas_classified ~session_dir
          (make_checkpoint ~session_id:"" ~turn_count:1 ~marker:"empty")
      with
-     | Ok () -> fail "save_oas accepted an empty session_id"
+     | Ok _ -> fail "checkpoint store accepted an empty session_id"
      | Error msg ->
-       check bool "error names the empty session_id" true
-         (string_contains ~needle:"empty session_id" msg));
+       let expected =
+         match Keeper_id.Trace_id.of_string "" with
+         | Ok _ -> fail "Trace_id parser accepted an empty identifier"
+         | Error reason -> reason
+       in
+       check string "error is the typed trace-id rejection" expected msg);
     (* The silent non-Eio fallback would have written "<session_dir>/.json". *)
     check bool "no orphan .json written for empty session_id" false
       (Sys.file_exists (Filename.concat session_dir ".json"));
@@ -172,16 +166,128 @@ let test_empty_session_id_rejected () =
         on_disk.Agent_sdk.Checkpoint.session_id
     | Error _ -> fail "load after stamped save failed")
 
+let test_invalid_existing_checkpoint_fails_closed () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "sess-corrupt" in
+    let path =
+      Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id
+    in
+    let corrupt = "{not-a-checkpoint" in
+    Fs_compat.save_file path corrupt;
+    (match
+       Keeper_checkpoint_store.save_oas_classified
+         ~session_dir
+         (make_checkpoint ~session_id ~turn_count:9 ~marker:"must-not-write")
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "corrupt existing checkpoint was treated as a cold store");
+    check string "corrupt canonical bytes remain untouched" corrupt
+      (Fs_compat.load_file path);
+    let mismatched =
+      make_checkpoint ~session_id:"another-session" ~turn_count:10
+        ~marker:"wrong-identity"
+      |> Agent_sdk.Checkpoint.to_string
+    in
+    Fs_compat.save_file path mismatched;
+    (match
+       Keeper_checkpoint_store.save_oas_classified
+         ~session_dir
+         (make_checkpoint ~session_id ~turn_count:11 ~marker:"must-not-replace")
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "mismatched checkpoint identity was overwritten");
+    check string "mismatched canonical bytes remain untouched" mismatched
+      (Fs_compat.load_file path))
+
+let test_multi_domain_writers_leave_max_turn_on_disk () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "sess-domains" in
+    save_ok
+      ~session_dir
+      (make_checkpoint ~session_id ~turn_count:0 ~marker:"seed")
+      "seed save";
+    let turns = [ 4; 1; 8; 3; 7; 2; 9; 6; 5 ] in
+    let writer_count = List.length turns in
+    let ready = Atomic.make 0 in
+    let start = Atomic.make false in
+    let writer turn_count =
+      Atomic.incr ready;
+      while not (Atomic.get start) do
+        Domain.cpu_relax ()
+      done;
+      Keeper_checkpoint_store.save_oas_classified
+        ~session_dir
+        (make_checkpoint
+           ~session_id
+           ~turn_count
+           ~marker:(Printf.sprintf "v%d" turn_count))
+    in
+    let domains = List.map (fun turn -> Domain.spawn (fun () -> writer turn)) turns in
+    while Atomic.get ready <> writer_count do
+      Domain.cpu_relax ()
+    done;
+    Atomic.set start true;
+    List.iter
+      (fun domain ->
+        match Domain.join domain with
+        | Ok _ -> ()
+        | Error error -> fail ("concurrent checkpoint save failed: " ^ error))
+      domains;
+    let expected = List.fold_left max min_int turns in
+    match Keeper_checkpoint_store.load_oas ~session_dir ~session_id with
+    | Error _ -> fail "load after concurrent saves failed"
+    | Ok checkpoint ->
+      check int "canonical disk retains the maximum turn" expected
+        checkpoint.Agent_sdk.Checkpoint.turn_count)
+
+let test_ready_runtime_raw_domain_save () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Executor_pool_ref.set (Domain_pool.executor_pool pool);
+  Eio_guard.enable ();
+  Fun.protect ~finally:Eio_guard.disable @@ fun () ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) @@ fun () ->
+  let session_id = "raw-domain-ready" in
+  let session_dir = Filename.concat base_dir "new-session" in
+  let result =
+    Domain.spawn (fun () ->
+      Keeper_checkpoint_store.save_oas_classified ~session_dir
+        (make_checkpoint ~session_id ~turn_count:11 ~marker:"raw-domain"))
+    |> Domain.join
+  in
+  (match result with
+   | Ok (Keeper_checkpoint_store.Saved _) -> ()
+   | Ok (Keeper_checkpoint_store.Stale_noop _) -> fail "new raw-domain save was stale"
+   | Error detail -> fail ("ready-state raw-domain save failed: " ^ detail));
+  check bool "save retains create-first session contract" true
+    (Sys.file_exists session_dir);
+  check bool "stable lock is outside removable session subtree" true
+    (Sys.file_exists (session_dir ^ ".checkpoint.lock"));
+  match Keeper_checkpoint_store.load_oas ~session_dir ~session_id with
+  | Error _ -> fail "raw-domain checkpoint did not round-trip"
+  | Ok checkpoint -> check int "raw-domain turn persisted" 11 checkpoint.turn_count
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
-      ( "save_oas guard",
+      ( "checkpoint transaction",
         [
           test_case "forward and equal saves pass, stale save is no-op" `Quick
             test_forward_equal_and_stale;
-          test_case "cold start backfills last turn_count from disk" `Quick
-            test_cold_start_backfills_from_disk;
+          test_case "canonical disk is the watermark SSOT" `Quick
+            test_disk_is_the_watermark_ssot;
           test_case "empty session_id is refused, not silently dropped" `Quick
             test_empty_session_id_rejected;
+          test_case "invalid canonical checkpoint fails closed" `Quick
+            test_invalid_existing_checkpoint_fails_closed;
+          test_case "multi-domain writers leave max turn on disk" `Quick
+            test_multi_domain_writers_leave_max_turn_on_disk;
+          test_case "ready runtime raw Domain saves through Unix context" `Quick
+            test_ready_runtime_raw_domain_save;
         ] );
     ]

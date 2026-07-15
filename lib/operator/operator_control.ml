@@ -6,23 +6,15 @@ include Operator_control_action
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
 
-let tool_keeper_ctx (ctx : 'a context) : _ Keeper_tool_surface.context =
-  {
-    config = ctx.config;
-    agent_name = ctx.agent_name;
-    sw = ctx.sw;
-    clock = ctx.clock;
-    proc_mgr = ctx.proc_mgr;
-    net = ctx.net;
-    publication_recovery_provider = ctx.publication_recovery_provider;
-  }
-
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
-  match Keeper_tool_surface.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
-  | Some result when Tool_result.is_success result ->
-    Ok (json_of_dispatch_output (Tool_result.message result))
-  | Some result -> Error (Tool_result.message result)
-  | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
+  match ctx.delegated_dispatch with
+  | None -> Error (Printf.sprintf "%s dispatch unavailable in this context" tool_name)
+  | Some dispatch ->
+    (match dispatch ~name:tool_name ~args with
+     | Some result when Tool_result.is_success result ->
+       Ok (json_of_dispatch_output (Tool_result.message result))
+     | Some result -> Error (Tool_result.message result)
+     | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name))
 
 let resolve_keeper_meta_for_name (ctx : 'a context) ~(name : string) =
   match Keeper_meta_store.read_effective_meta_resolved ctx.config name with
@@ -228,51 +220,25 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | None -> Error "payload.message is required"
       in
       let* () =
-        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg"
+        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_delegate"
           request.payload
-      in
-      let direct_reply =
-        Json_util.get_bool request.payload "direct_reply" |> Option.value ~default:false
-      in
-      let timeout_sec =
-        Json_util.get_float request.payload "timeout_sec"
-        |> Option.map (fun f -> int_of_float (Float.ceil f))
-        |> (fun o -> match o with Some n when n > 0 -> Some n | _ -> None)
       in
       let args =
         `Assoc
-          (([
-              ("name", `String name);
-              ("message", `String message);
-            ]
-            @ if direct_reply then [ ("direct_reply", `Bool true) ] else [])
-           @
-           match timeout_sec with
-           | Some value -> [ ("timeout_sec", `Int value) ]
-           | None -> [])
+          [ ( "target"
+            , `Assoc [ "kind", `String "keeper"; "name", `String name ] )
+          ; "capability", `String "invoke_turn"
+          ; "prompt", `String message
+          ]
       in
-      let keeper_ctx : _ Keeper_tool_surface.context =
-        {
-          config = ctx.config;
-          agent_name = ctx.agent_name;
-          sw = ctx.sw;
-          clock = ctx.clock;
-          proc_mgr = ctx.proc_mgr;
-          net = ctx.net;
-          publication_recovery_provider = ctx.publication_recovery_provider;
-        }
-      in
-      let* body =
-        match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
-        | Some result when Tool_result.is_success result -> Ok (Tool_result.message result)
-        | Some result -> Error (Tool_result.message result)
-        | None -> Error "masc_keeper_msg dispatch unavailable"
+      let* result =
+        dispatch_keeper_json ctx ~tool_name:"masc_keeper_delegate" ~args
       in
       Ok
         (`Assoc
           [
-            ("tool_name", `String "masc_keeper_msg");
-            ("result", json_of_dispatch_output body);
+            ("tool_name", `String "masc_keeper_delegate");
+            ("result", result);
           ])
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
 

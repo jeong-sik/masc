@@ -138,63 +138,6 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
     snapshot_ids
   |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
 
-(* Unguarded write body. Public [save_oas] (defined after [load_oas]
-   below) wraps this with the RFC-0225 §3.2 stale-write guard. *)
-let save_oas_unguarded ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
-  : (unit, string) result =
-  if String.length ckpt.session_id = 0 then
-    (* Fail loud at the persistence boundary: a checkpoint with an empty
-       session_id is unpersistable. The primary Eio path already rejects it
-       ([Checkpoint_store.save] validates session_id), but the non-Eio
-       [fallback] below would otherwise silently write "<session_dir>/.json"
-       and drop the checkpoint. Callers must stamp a validated, non-empty
-       session_id (the keeper trace_id) before persisting. *)
-    Error "save_oas: refusing checkpoint with empty session_id"
-  else
-  let fallback () =
-    match Keeper_fs.save_atomic
-      (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
-      (Agent_sdk.Checkpoint.to_string ckpt) with
-    | Ok () ->
-      (try save_oas_history ~session_dir ckpt with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
-             ckpt.session_id (Printexc.to_string exn);
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string CheckpointFailures)
-             ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_archive_fallback))]
-             ());
-      Ok ()
-    | Error msg -> Error msg
-  in
-  try
-    ignore (Keeper_fs.ensure_dir session_dir);
-    match Fs_compat.get_fs_opt () with
-    | Some fs when Eio_guard.is_ready () ->
-        let dir = Eio.Path.(fs / session_dir) in
-        (match Agent_sdk.Checkpoint_store.create dir with
-         | Ok store -> (
-             match Agent_sdk.Checkpoint_store.save store ckpt with
-             | Ok () ->
-                 (try save_oas_history ~session_dir ckpt with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                      Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
-                        ckpt.session_id (Printexc.to_string exn);
-                      Otel_metric_store.inc_counter
-                        Keeper_metrics.(to_string CheckpointFailures)
-                        ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_archive_primary))]
-                        ());
-                 Ok ()
-             | Error err -> Error (Agent_sdk.Error.to_string err))
-         | Error err -> Error (Agent_sdk.Error.to_string err))
-    | Some _ | None ->
-        fallback ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Printf.sprintf "save_oas: %s" (Printexc.to_string exn))
-
 (* Delta Checkpoint Shadow-Apply removed: Agent_sdk.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
 
@@ -274,7 +217,7 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
     else Error Not_found
   in
   match Fs_compat.get_fs_opt () with
-  | Some fs when Eio_guard.is_ready () ->
+  | Some fs when Eio_guard.is_eio_fiber () ->
       let dir = Eio.Path.(fs / session_dir) in
       (match Agent_sdk.Checkpoint_store.create dir with
        | Ok store ->
@@ -294,39 +237,10 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
   | Some _ | None ->
       fallback ()
 
-(* ── RFC-0225 §3.2: stale checkpoint write guard ─────────────────────
-   Two writers for the same session are last-writer-wins on disk; a
-   stale writer (e.g. a lane that resumed from an older snapshot)
-   overwrote the conversation the newer writer had just persisted
-   (2026-06-10 voice incident: oas turn_count 1355 clobbered by 1324).
-   The checkpoint carrier is OAS-owned, so the version is tracked on
-   the MASC side: a process-local map of the highest turn_count saved
-   per checkpoint path, backfilled from disk once per session. *)
-
-let last_saved_oas_turn_count_mu = Stdlib.Mutex.create ()
-let last_saved_oas_turn_count : (string, int) Hashtbl.t = Hashtbl.create 16
-
-let known_oas_turn_count ~session_dir ~session_id =
-  let key = oas_checkpoint_path ~session_dir ~session_id in
-  let cached =
-    (* Stdlib mutex on purpose: the critical section is a pure Hashtbl
-       lookup, never yields. Disk backfill happens outside the lock. *)
-    Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
-      Hashtbl.find_opt last_saved_oas_turn_count key)
-  in
-  match cached with
-  | Some _ as hit -> hit
-  | None ->
-    (match load_oas ~session_dir ~session_id with
-     | Ok existing -> Some existing.turn_count
-     | Error _ -> None)
-
-let record_saved_oas_turn_count ~session_dir ~session_id turn_count =
-  let key = oas_checkpoint_path ~session_dir ~session_id in
-  Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
-    match Hashtbl.find_opt last_saved_oas_turn_count key with
-    | Some known when known >= turn_count -> ()
-    | Some _ | None -> Hashtbl.replace last_saved_oas_turn_count key turn_count)
+(* ── RFC-0225 §3.2: disk-SSOT monotonic checkpoint transaction ──────
+   One stable per-session lock covers canonical disk load, comparison,
+   durable publication, and history capture. The canonical file is the only
+   admission watermark; no process-local checkpoint truth is retained. *)
 
 type save_oas_relation = [ `Cold | `Forward | `Equal ]
 
@@ -340,42 +254,194 @@ let save_relation ~known ~incoming =
   | Some previous when incoming > previous -> `Forward
   | Some _ -> `Equal
 
+type unix_failure =
+  { error : Unix.error
+  ; operation : string
+  ; argument : string
+  }
+
+type directory_failure =
+  | Directory_unix_failure of unix_failure
+  | Directory_other_failure of string
+
+type save_oas_error =
+  | Invalid_session_id of string
+  | Session_directory_unavailable of directory_failure
+  | Existing_checkpoint_unreadable of checkpoint_load_error
+  | Canonical_write_failed of Keeper_fs.durable_write_error
+  | Transaction_lock_failed of File_lock_eio.durable_lock_error
+
+let checkpoint_load_error_to_string = function
+  | Not_found -> "checkpoint not found"
+  | Store_error detail
+  | Parse_error detail
+  | Io_error detail
+  | Sdk_other_error detail -> detail
+
+let save_oas_error_to_string = function
+  | Invalid_session_id reason -> reason
+  | Session_directory_unavailable (Directory_unix_failure failure) ->
+    Printf.sprintf "checkpoint session directory unavailable: %s(%s): %s"
+      failure.operation failure.argument (Unix.error_message failure.error)
+  | Session_directory_unavailable (Directory_other_failure detail) ->
+    "checkpoint session directory unavailable: " ^ detail
+  | Existing_checkpoint_unreadable error ->
+    "existing checkpoint unreadable: " ^ checkpoint_load_error_to_string error
+  | Canonical_write_failed error ->
+    "canonical checkpoint write failed: "
+    ^ Keeper_fs.durable_write_error_to_string error
+  | Transaction_lock_failed error ->
+    "checkpoint transaction lock failed: "
+    ^ File_lock_eio.durable_lock_error_to_string error
+
+let canonical_session_location session_dir =
+  let parent = Filename.dirname session_dir in
+  try
+    Fs_compat.mkdir_p parent;
+    let parent =
+      Eio_guard.run_in_systhread (fun () ->
+        let parent = Unix.realpath parent in
+        if (Unix.stat parent).Unix.st_kind <> Unix.S_DIR
+        then
+          raise
+            (Unix.Unix_error
+               (Unix.ENOTDIR, "checkpoint_session_parent", parent));
+        parent)
+    in
+    Ok (Filename.concat parent (Filename.basename session_dir))
+  with
+  | Unix.Unix_error (error, operation, argument) ->
+    Error
+      (Session_directory_unavailable
+         (Directory_unix_failure { error; operation; argument }))
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Session_directory_unavailable
+         (Directory_other_failure (Printexc.to_string exn)))
+
+let with_session_lock_typed ~session_dir f =
+  match canonical_session_location session_dir with
+  | Error _ as error -> error
+  | Ok session_dir ->
+    let lock_path = session_dir ^ ".checkpoint.lock" in
+    (match File_lock_eio.with_durable_lock ~lock_path (fun () -> f session_dir) with
+     | Ok result -> result
+     | Error error -> Error (Transaction_lock_failed error))
+
+let with_session_lock ~session_dir f =
+  with_session_lock_typed ~session_dir (fun session_dir -> Ok (f session_dir))
+  |> Result.map_error save_oas_error_to_string
+
+let archive_oas_history_best_effort ~session_dir ckpt =
+  try save_oas_history ~session_dir ckpt with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
+      ckpt.session_id (Printexc.to_string exn);
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string CheckpointFailures)
+      ~labels:
+        [ ( "site"
+          , Keeper_checkpoint_store_failure_site.(to_label Oas_archive) )
+        ]
+      ()
+
+let load_canonical_strict path =
+  let unix_error error operation argument =
+    Io_error
+      (Printf.sprintf "%s(%s): %s"
+         operation argument (Unix.error_message error))
+  in
+  let read () =
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | exception Unix.Unix_error (error, operation, argument) ->
+      Error (unix_error error operation argument)
+    | stat when stat.Unix.st_kind <> Unix.S_REG ->
+      Error (Io_error ("canonical checkpoint is not a regular file: " ^ path))
+    | _ ->
+      (try
+         let buffer = Buffer.create 4096 in
+         let bytes = Bytes.create 65536 in
+         let rec read_fd fd =
+           match Unix.read fd bytes 0 (Bytes.length bytes) with
+           | 0 -> Buffer.contents buffer
+           | count ->
+             Buffer.add_subbytes buffer bytes 0 count;
+             read_fd fd
+           | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd fd
+         in
+         let fd = Unix.openfile path [ Unix.O_CLOEXEC; Unix.O_RDONLY ] 0 in
+         let content =
+           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> read_fd fd)
+         in
+         Ok (Some content)
+       with
+       | Unix.Unix_error (error, operation, argument) ->
+         Error (unix_error error operation argument))
+  in
+  match Eio_guard.run_in_systhread read with
+  | Ok None -> Ok None
+  | Error _ as error -> error
+  | Ok (Some content) ->
+    (match Agent_sdk.Checkpoint.of_string content with
+     | Ok checkpoint -> Ok (Some checkpoint)
+     | Error error -> Error (classify_sdk_error error))
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> Error (Io_error (Printexc.to_string exn))
+
+let save_oas_classified_typed
+    ~(session_dir : string)
+    (ckpt : Agent_sdk.Checkpoint.t)
+  : (save_oas_outcome, save_oas_error) result =
+  match Keeper_id.Trace_id.of_string ckpt.session_id with
+  | Error reason -> Error (Invalid_session_id reason)
+  | Ok trace_id ->
+    with_session_lock_typed ~session_dir (fun session_dir ->
+      let session_id = Keeper_id.Trace_id.to_string trace_id in
+      let canonical_path = oas_checkpoint_path ~session_dir ~session_id in
+      match load_canonical_strict canonical_path with
+      | Error error -> Error (Existing_checkpoint_unreadable error)
+      | Ok (Some existing) when not (String.equal existing.session_id session_id) ->
+        Error
+          (Existing_checkpoint_unreadable
+             (Store_error
+                (Printf.sprintf
+                   "canonical checkpoint identity mismatch: expected=%s actual=%s"
+                   session_id existing.session_id)))
+      | Ok (Some existing) when ckpt.turn_count < existing.turn_count ->
+        Log.Keeper.warn
+          "stale OAS checkpoint write skipped for %s: incoming turn_count=%d, last saved=%d"
+          ckpt.session_id ckpt.turn_count existing.turn_count;
+        Otel_metric_store.inc_counter
+          "masc_keeper_checkpoint_stale_noop_total"
+          ~labels:[("site", "store_watermark")]
+          ();
+        Ok
+          (Stale_noop
+             { incoming_turn_count = ckpt.turn_count
+             ; known_turn_count = existing.turn_count
+             })
+      | Ok existing ->
+        let known = Option.map (fun checkpoint -> checkpoint.Agent_sdk.Checkpoint.turn_count) existing in
+        let ownership_root = Filename.dirname session_dir in
+        (match
+           Keeper_fs.save_json_durable_atomic
+             ~ownership_root
+             canonical_path
+             (Agent_sdk.Checkpoint.to_json ckpt)
+         with
+         | Error error -> Error (Canonical_write_failed error)
+         | Ok () ->
+           archive_oas_history_best_effort ~session_dir ckpt;
+           Ok
+             (Saved
+                { relation = save_relation ~known ~incoming:ckpt.turn_count
+                ; turn_count = ckpt.turn_count
+                })))
+
 let save_oas_classified ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (save_oas_outcome, string) result =
-  let known = known_oas_turn_count ~session_dir ~session_id:ckpt.session_id in
-  match known with
-  | Some known when ckpt.turn_count < known ->
-    Log.Keeper.warn
-      "stale OAS checkpoint write skipped for %s: incoming turn_count=%d, last saved=%d"
-      ckpt.session_id ckpt.turn_count known;
-    Otel_metric_store.inc_counter
-      "masc_keeper_checkpoint_stale_noop_total"
-      ~labels:[("site", "store_watermark")]
-      ();
-    Ok (Stale_noop
-          { incoming_turn_count = ckpt.turn_count
-          ; known_turn_count = known
-          })
-  | Some _ | None ->
-    (match save_oas_unguarded ~session_dir ckpt with
-     | Ok () ->
-       record_saved_oas_turn_count
-         ~session_dir ~session_id:ckpt.session_id ckpt.turn_count;
-       Ok
-         (Saved
-            { relation = save_relation ~known ~incoming:ckpt.turn_count
-            ; turn_count = ckpt.turn_count
-            })
-     | Error _ as e -> e)
-
-let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
-  : (unit, string) result =
-  match save_oas_classified ~session_dir ckpt with
-  | Ok (Saved _) | Ok (Stale_noop _) -> Ok ()
-  | Error _ as e -> e
-
-module For_testing = struct
-  let reset_stale_write_guard () =
-    Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
-      Hashtbl.reset last_saved_oas_turn_count)
-end
+  save_oas_classified_typed ~session_dir ckpt
+  |> Result.map_error save_oas_error_to_string

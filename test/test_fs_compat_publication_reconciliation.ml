@@ -1,6 +1,6 @@
 open Alcotest
 
-module Recovery = Fs_compat.Publication_recovery_for_testing
+module Recovery = Fs_compat_test_support.Publication_recovery_for_testing
 
 let with_tmp_dir f =
   let path = Filename.temp_file "masc_publication_reconcile_" ".tmp" in

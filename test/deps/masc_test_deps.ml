@@ -63,7 +63,42 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     | `Assoc fields -> `Assoc (augment fields)
     | other -> other
   in
-  Masc.Keeper_meta_json_parse.meta_of_json json'
+  (* Production [meta_of_json] no longer reads TOML-only config keys from JSON
+     (TOML is the SSOT; the runtime JSON carries only runtime state). Focused
+     fixtures still set config inline for convenience, so this test helper
+     re-applies those keys onto the parsed record. This keeps config injection a
+     test-only concern and does not resurrect the production JSON read path. *)
+  match Masc.Keeper_meta_json_parse.meta_of_json json' with
+  | Error _ as e -> e
+  | Ok meta ->
+    let open Masc.Keeper_meta_contract in
+    let bool_opt key = Safe_ops.json_bool_opt key json' in
+    let apply_bool_opt key current =
+      match bool_opt key with Some _ as v -> v | None -> current
+    in
+    let apply_bool key current =
+      match bool_opt key with Some v -> v | None -> current
+    in
+    let apply_string_list key current =
+      match Safe_ops.json_string_list key json' with [] -> current | xs -> xs
+    in
+    Ok
+      { meta with
+        allowed_paths = apply_string_list "allowed_paths" meta.allowed_paths
+      ; mention_targets = apply_string_list "mention_targets" meta.mention_targets
+      ; proactive =
+          (match bool_opt "proactive_enabled" with
+           | Some enabled -> { enabled }
+           | None -> meta.proactive)
+      ; always_allow = apply_bool_opt "always_allow" meta.always_allow
+      ; autoboot_enabled = apply_bool "autoboot_enabled" meta.autoboot_enabled
+      ; telemetry_feedback_enabled =
+          apply_bool_opt "telemetry_feedback_enabled" meta.telemetry_feedback_enabled
+      ; telemetry_feedback_window_hours =
+          (match Safe_ops.json_int_opt "telemetry_feedback_window_hours" json' with
+           | Some _ as v -> v
+           | None -> meta.telemetry_feedback_window_hours)
+      }
 
 (** Walk up the directory tree from [Sys.getcwd()] until [dune-project] is
     found, then return that directory.
@@ -233,12 +268,12 @@ let cleanup_test_workspace dir =
 let with_publication_recovery_registry ~sw ~fs ~registry_root f =
   let registry_root = Eio.Path.(fs / registry_root) in
   match
-    Fs_compat.open_publication_recovery_registry ~sw ~fs ~registry_root
+    Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
   with
   | Error error ->
     failwith
       ("test publication recovery registry open failed: "
-       ^ Fs_compat.publication_recovery_registry_error_to_string error)
+       ^ Fs_compat.Publication_recovery.registry_error_to_string error)
   | Ok publication_recovery_registry ->
     (match
        Fs_compat.Publication_recovery.discover_owners

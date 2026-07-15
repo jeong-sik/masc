@@ -146,6 +146,7 @@ val operator_action_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  authorized_actor:string ->
   Httpun.Request.t ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
@@ -154,6 +155,7 @@ val operator_confirm_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  authorized_actor:string ->
   Httpun.Request.t ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result

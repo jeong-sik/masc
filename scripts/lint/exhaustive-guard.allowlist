@@ -409,7 +409,6 @@ lib/keeper/keeper_post_turn.ml:799
 lib/keeper/keeper_post_turn.ml:844
 lib/keeper/keeper_registry.ml:2434
 lib/keeper/keeper_registry.ml:2611
-lib/playground_repo_readiness.ml:80
 lib/keeper/keeper_routine_allowlist.ml:27
 lib/keeper/keeper_routine_allowlist.ml:32
 lib/keeper/keeper_run_tools.ml:1146

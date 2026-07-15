@@ -39,7 +39,7 @@ let publication_recovery_registry env sw config =
     Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_root_dir config)
   in
   match
-    Fs_compat.open_publication_recovery_registry
+    Fs_compat.Publication_recovery.open_registry
       ~sw
       ~fs:(Eio.Stdenv.fs env)
       ~registry_root
@@ -47,7 +47,7 @@ let publication_recovery_registry env sw config =
   | Ok registry -> registry
   | Error error ->
     fail
-      (Fs_compat.publication_recovery_registry_error_to_string error)
+      (Fs_compat.Publication_recovery.registry_error_to_string error)
 
 let write_lines path lines =
   let dir = KFS.ensure_dir (Filename.dirname path) in

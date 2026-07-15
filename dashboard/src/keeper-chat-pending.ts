@@ -173,7 +173,9 @@ function normalizeAssistantDraft(raw: unknown): PendingKeeperChatAssistantDraft 
   }
 }
 
-function assistantDraftFromEntry(entry: KeeperConversationEntry): PendingKeeperChatAssistantDraft | null {
+export function pendingKeeperChatAssistantDraftFromEntry(
+  entry: KeeperConversationEntry,
+): PendingKeeperChatAssistantDraft | null {
   if (entry.role !== 'assistant') return null
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
   return {
@@ -272,7 +274,7 @@ export function updatePendingKeeperChatAssistantDraft(
   entry: KeeperConversationEntry,
 ): void {
   const id = requestId.trim()
-  const assistantDraft = assistantDraftFromEntry(entry)
+  const assistantDraft = pendingKeeperChatAssistantDraftFromEntry(entry)
   if (!id || !assistantDraft) return
   const requests = readAll()
   let found = false

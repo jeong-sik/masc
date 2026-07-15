@@ -16,6 +16,8 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Retry_after_observed
+  | Context_compaction_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -250,26 +252,15 @@ type enqueue_stimulus_durable_result =
   | Stimulus_storage_error of string
 
 let enqueue_stimulus_durable_result ~base_path name stimulus =
-  let committed_pending = ref None in
-  let commit_result = ref Stimulus_enqueued in
   match
-    Keeper_event_queue_persistence.update_checked_result
+    Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
       ~base_path
       ~keeper_name:name
-      ~after_commit:(fun () ->
-        match !committed_pending with
-        | None -> ()
-        | Some pending -> publish_pending ~base_path name pending)
-      (fun queue ->
-         let pending = enqueue_if_missing queue stimulus in
-         committed_pending := Some pending;
-         commit_result :=
-           (if queue_contains queue stimulus
-            then Stimulus_already_present
-            else Stimulus_enqueued);
-         Ok pending)
+      ~after_commit:(publish_pending ~base_path name)
+      stimulus
   with
-  | Ok () -> !commit_result
+  | Ok Keeper_event_queue_persistence.Enqueued -> Stimulus_enqueued
+  | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
   | Error detail -> Stimulus_storage_error detail
 ;;
 

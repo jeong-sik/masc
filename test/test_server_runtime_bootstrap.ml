@@ -301,6 +301,72 @@ let test_model_catalog_configuration_prefers_config_root_catalog () =
     Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
     Alcotest.(check int) "set catalog override" 1 !set_calls)
 
+let test_model_catalog_overlay_installs_config_root_overlay () =
+  with_temp_dir "model-catalog-overlay-install" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let overlay = Filename.concat config_root "oas-models-overlay.toml" in
+    mkdir_p config_root;
+    write_file overlay "[[models]]\nid_prefix = \"deployment-delta\"\n";
+    let load_calls = ref [] in
+    let set_overlay_calls = ref 0 in
+    let result =
+      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+        ~config_root
+        ~load_catalog:(fun path ->
+          load_calls := path :: !load_calls;
+          Ok Llm_provider.Model_catalog.empty)
+        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
+        ()
+    in
+    (match result with
+     | None -> Alcotest.fail "expected config-root overlay resolution"
+     | Some path ->
+       Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
+    Alcotest.(check (list string)) "load overlay" [ overlay ] (List.rev !load_calls);
+    Alcotest.(check int) "set overlay" 1 !set_overlay_calls)
+
+let test_model_catalog_overlay_absent_is_noop () =
+  with_temp_dir "model-catalog-overlay-absent" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    mkdir_p config_root;
+    let load_calls = ref [] in
+    let set_overlay_calls = ref 0 in
+    let result =
+      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+        ~config_root
+        ~load_catalog:(fun path ->
+          load_calls := path :: !load_calls;
+          Ok Llm_provider.Model_catalog.empty)
+        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
+        ()
+    in
+    Alcotest.(check bool) "no overlay resolved" true (Option.is_none result);
+    Alcotest.(check (list string)) "no load" [] !load_calls;
+    Alcotest.(check int) "no install" 0 !set_overlay_calls)
+
+let test_model_catalog_overlay_invalid_fails_loud () =
+  with_temp_dir "model-catalog-overlay-invalid" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let overlay = Filename.concat config_root "oas-models-overlay.toml" in
+    mkdir_p config_root;
+    write_file overlay "not toml";
+    let set_overlay_calls = ref 0 in
+    match
+      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+        ~config_root
+        ~load_catalog:(fun (_ : string) -> Error "parse failed")
+        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
+        ()
+    with
+    | (_ : string option) ->
+      Alcotest.fail "expected Config_error for invalid overlay"
+    | exception Env_config_core.Config_error message ->
+      Alcotest.(check bool)
+        "error names overlay path"
+        true
+        (contains_substring message "oas-models-overlay.toml");
+      Alcotest.(check int) "no install" 0 !set_overlay_calls)
+
 let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path () =
   with_temp_dir "model-catalog-bootstrap" (fun dir ->
     let repo = Filename.concat dir "repo" in
@@ -4647,6 +4713,15 @@ let () =
           Alcotest.test_case
             "model catalog configuration prefers config-root catalog"
             `Quick test_model_catalog_configuration_prefers_config_root_catalog;
+          Alcotest.test_case
+            "model catalog overlay installs config-root overlay"
+            `Quick test_model_catalog_overlay_installs_config_root_overlay;
+          Alcotest.test_case
+            "model catalog overlay absent is a no-op"
+            `Quick test_model_catalog_overlay_absent_is_noop;
+          Alcotest.test_case
+            "model catalog overlay invalid fails loud"
+            `Quick test_model_catalog_overlay_invalid_fails_loud;
           Alcotest.test_case
             "model catalog resolution falls back to executable parent"
             `Quick

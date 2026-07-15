@@ -43,6 +43,25 @@ let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
 let dispatch ctx ~name ~args =
   Keeper_tool_surface.dispatch (to_tool_keeper_context ctx) ~name ~args
 
-let dispatch_stream ?on_text_delta ?on_event ctx ~name ~args =
-  Keeper_tool_surface.dispatch_stream ?on_text_delta ?on_event (to_tool_keeper_context ctx) ~name
-    ~args
+(* TEL-OK: this only closes over Keeper-owned context; dispatch remains observed downstream. *)
+let delegated_dispatch
+      ~config
+      ~agent_name
+      ~sw
+      ~clock
+      ~proc_mgr
+      ~net
+      ~publication_recovery_provider
+  =
+  let ctx =
+    create
+      ~config
+      ~agent_name
+      ~sw
+      ~clock
+      ~proc_mgr
+      ~net
+      ~publication_recovery_provider
+  in
+  fun ~name ~args -> dispatch ctx ~name ~args
+;;

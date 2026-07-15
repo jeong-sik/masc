@@ -247,6 +247,7 @@ val pending_board_event_of_bg_job_completion :
 (** Build the actionable observation for a direct scheduled keeper wake. *)
 val pending_board_event_of_scheduled_wake :
   meta:Keeper_meta_contract.keeper_meta ->
+  post_id:Keeper_event_queue.post_id ->
   arrived_at:float ->
   Keeper_event_queue.scheduled_wake ->
   pending_board_event

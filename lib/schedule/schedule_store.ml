@@ -20,6 +20,10 @@ type store_error =
       ; recovery_err : string option
       }
 
+type running_recovery_reason =
+  | Retryable_dispatch_failure of string
+  | Interrupted_by_process_restart
+
 type read_error =
   | Corrupt_read_ledger of
       { primary_err : string
@@ -76,6 +80,13 @@ let store_error_to_string = function
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
+;;
+
+let running_recovery_reason_to_string = function
+  | Retryable_dispatch_failure detail ->
+    "retryable schedule dispatch failure: " ^ detail
+  | Interrupted_by_process_restart ->
+    "schedule execution interrupted by process restart"
 ;;
 
 let read_error_to_string = function
@@ -354,6 +365,15 @@ let update_latest_running_execution executions ~schedule_id update =
   loop [] executions
 ;;
 
+let fail_execution_for_recovery ~now ~reason execution =
+  { execution with
+    status = Execution_failed
+  ; finished_at = Some now
+  ; detail = None
+  ; error = Some (running_recovery_reason_to_string reason)
+  }
+;;
+
 let validate_initial_request (request : Schedule_domain.schedule_request) =
   if Schedule_domain.is_terminal request.status then
     Error (Invalid_initial_status "terminal requests cannot be inserted")
@@ -556,6 +576,59 @@ let fail_running config ~now ~schedule_id ~error =
         let next_state = bump_state state ~schedules ~executions in
         let* () = write_state config next_state in
         Ok updated)
+;;
+
+let retry_running config ~now ~schedule_id ~reason =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      if request.status <> Running then
+        Error Schedule_not_running
+      else
+        let updated = { request with status = Due } in
+        let schedules = replace_schedule state.schedules updated in
+        let* executions =
+          update_latest_running_execution state.executions ~schedule_id
+            (fail_execution_for_recovery ~now ~reason)
+        in
+        let next_state = bump_state state ~schedules ~executions in
+        let* () = write_state config next_state in
+        Ok updated)
+;;
+
+let recover_running_on_startup config ~now =
+  let reason = Interrupted_by_process_restart in
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    let rec recover schedules_rev executions recovered = function
+      | [] -> Ok (List.rev schedules_rev, executions, recovered)
+      | (request : schedule_request) :: rest ->
+        (match request.status with
+         | Running ->
+           let* executions =
+             update_latest_running_execution executions
+               ~schedule_id:request.schedule_id
+               (fail_execution_for_recovery ~now ~reason)
+           in
+           recover
+             ({ request with status = Due } :: schedules_rev)
+             executions
+             (recovered + 1)
+             rest
+         | Scheduled | Due | Succeeded | Failed | Cancelled | Expired ->
+           recover (request :: schedules_rev) executions recovered rest)
+    in
+    let* schedules, executions, recovered =
+      recover [] state.executions 0 state.schedules
+    in
+    if recovered = 0 then
+      Ok (state, 0)
+    else
+      let next_state = bump_state state ~schedules ~executions in
+      let* () = write_state config next_state in
+      Ok (next_state, recovered))
 ;;
 
 let fail_due_candidate config ~now ~schedule_id ~error =

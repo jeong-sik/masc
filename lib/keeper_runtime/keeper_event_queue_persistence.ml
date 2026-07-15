@@ -13,6 +13,8 @@ type requeue_reason = State.requeue_reason =
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Retry_after_observed
+  | Context_compaction_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -520,6 +522,24 @@ let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name
        match f (State.pending state) with
        | Error _ as error -> error
        | Ok pending -> Ok (State.with_pending pending state, ()))
+;;
+
+type enqueue_stimulus_result =
+  | Enqueued
+  | Already_present
+
+let enqueue_stimulus_if_absent_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      stimulus
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    if state_accounts_for_stimulus state stimulus then
+      Ok (state, Already_present)
+    else
+      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
+      Ok (State.with_pending pending state, Enqueued))
 ;;
 
 let update_result ?after_commit ~base_path ~keeper_name f =

@@ -254,10 +254,14 @@ let settlement_of_failure ~settled_at failure =
   match failure.Keeper_unified_turn.source_lease_disposition with
   | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
     Keeper_registry_event_queue.Ack
+  | Keeper_unified_turn.Requeue_after_context_compaction ->
+    Keeper_registry_event_queue.Requeue
+      Keeper_registry_event_queue.Context_compaction_retry
   | Keeper_unified_turn.Follow_failure_route ->
     (match failure.Keeper_unified_turn.route with
      | Keeper_runtime_failure_route.Retry_after_observed _ ->
-       Keeper_registry_event_queue.Ack
+       Keeper_registry_event_queue.Requeue
+         Keeper_registry_event_queue.Retry_after_observed
      | Keeper_runtime_failure_route.Rotate_now _ ->
        Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
      | Keeper_runtime_failure_route.Escalate_judgment
@@ -720,33 +724,37 @@ let run_keepalive_unified_turn
        | None ->
          (match !cycle_outcome_ref with
           | Some (Cycle.Failed { failure; _ }) ->
-            (match failure.Keeper_unified_turn.route with
-             | Keeper_runtime_failure_route.Escalate_judgment
-                 { judgment; provenance; detail } ->
-               let successor =
-                 failure_judgment_successor
-                   ~arrived_at:(Time_compat.now ())
-                   failure
-                   judgment
-                   provenance
-                   detail
-               in
-               (match
-                  Keeper_registry_event_queue.enqueue_durable_result
-                    ~base_path:ctx.config.base_path
-                    meta_after_triage.name
-                    successor
-                with
-                | Ok () -> ()
-                | Error message ->
-                  Log.Keeper.error
-                    "registry: unleased failure judgment enqueue failed keeper=%s: %s"
-                    meta_after_triage.name
-                    message;
-                  record_settlement_failure message)
-             | Keeper_runtime_failure_route.Retry_after_observed _
-             | Keeper_runtime_failure_route.Rotate_now _ ->
-               ())
+            (match failure.Keeper_unified_turn.source_lease_disposition with
+             | Keeper_unified_turn.Requeue_after_context_compaction
+             | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
+             | Keeper_unified_turn.Follow_failure_route ->
+               (match failure.Keeper_unified_turn.route with
+                | Keeper_runtime_failure_route.Escalate_judgment
+                    { judgment; provenance; detail } ->
+                  let successor =
+                    failure_judgment_successor
+                      ~arrived_at:(Time_compat.now ())
+                      failure
+                      judgment
+                      provenance
+                      detail
+                  in
+                  (match
+                     Keeper_registry_event_queue.enqueue_durable_result
+                       ~base_path:ctx.config.base_path
+                       meta_after_triage.name
+                       successor
+                   with
+                   | Ok () -> ()
+                   | Error message ->
+                     Log.Keeper.error
+                       "registry: unleased failure judgment enqueue failed keeper=%s: %s"
+                       meta_after_triage.name
+                       message;
+                     record_settlement_failure message)
+                | Keeper_runtime_failure_route.Retry_after_observed _
+                | Keeper_runtime_failure_route.Rotate_now _ ->
+                  ()))
           | Some (Cycle.Judgment_settled _) ->
             record_settlement_failure
               "failure judgment completed without an owning event queue lease"

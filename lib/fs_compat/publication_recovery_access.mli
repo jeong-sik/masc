@@ -372,16 +372,6 @@ module For_testing : sig
     -> ('a, lane_open_error) result
   (** Internal fixture boundary. Production callers must use [with_lane]. *)
 
-  val lane_release_failure
-    :  owner:string
-    -> exception_:exn
-    -> backtrace:Printexc.raw_backtrace
-    -> (lane_release_failure,
-        Capability_recovery_obligation.validation_error)
-         result
-  (** Construct exact typed lane-release evidence for product-boundary tests.
-      Production lane failures always originate from the resource scope. *)
-
   val record_lane_store_open_failure
     :  registry:registry
     -> owner:string

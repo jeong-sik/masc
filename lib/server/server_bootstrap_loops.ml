@@ -1389,8 +1389,7 @@ let start_keeper_loops_owned
       ; clock
       ; proc_mgr = Some proc_mgr
       ; net = state.net
-      ; publication_recovery_provider =
-          Mcp_server.publication_recovery_availability_provider state
+      ; delegated_dispatch = None
       ; mcp_session_id = None
       }
     in

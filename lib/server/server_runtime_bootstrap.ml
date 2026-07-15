@@ -47,6 +47,7 @@ let model_catalog_env_source_to_string = function
 
 let models_toml_filename = "models.toml"
 let oas_models_toml_filename = "oas-models.toml"
+let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
 
 let nonempty_env env name =
   match env name with
@@ -200,6 +201,44 @@ let configure_oas_model_catalog_env
        raise (Env_config_core.Config_error "model_catalog: OAS embedded model catalog is unavailable"));
     None
 
+(* RFC-0342 D1 / RFC-OAS-036: deployment-local capability deltas live in a
+   config-root overlay merged onto the embedded catalog
+   ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
+   shadows every embedded row and goes stale on each OAS release. A resolved
+   full catalog (env var or config-root file above) still wins outright:
+   [Model_catalog.global] gives the [set_global] replacement precedence over
+   the overlay. *)
+let resolve_oas_model_catalog_overlay_path ?config_root () =
+  match config_root with
+  | None -> None
+  | Some root ->
+    let root = String.trim root in
+    if String.equal root "" then
+      None
+    else
+      existing_file (Filename.concat root oas_models_overlay_toml_filename)
+
+let configure_oas_model_catalog_overlay
+      ?config_root
+      ?(load_catalog = Llm_provider.Model_catalog.load_file)
+      ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
+      ()
+  =
+  match resolve_oas_model_catalog_overlay_path ?config_root () with
+  | None -> None
+  | Some path ->
+    (match load_catalog path with
+     | Ok overlay ->
+       set_overlay overlay;
+       Log.Misc.info
+         "model_catalog: deployment overlay %s installed onto embedded catalog"
+         path;
+       Some path
+     | Error detail ->
+       raise
+         (Env_config_core.Config_error
+            (Printf.sprintf "catalog overlay %s: %s" path detail)))
+
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -346,6 +385,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let (_ : model_catalog_env_resolution option) =
     configure_oas_model_catalog_env ~config_root ()
   in
+  let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing

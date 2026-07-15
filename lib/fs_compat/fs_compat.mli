@@ -3,6 +3,8 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
+open Fs_compat_internal
+
 module Atomic_orphan_size_class = Atomic_orphan_size_class
 
 (** #9921: raised by mutating [Fs_compat] entry points
@@ -229,16 +231,24 @@ module Capability_append_for_testing : sig
     -> capability_append_outcome
 end
 
-type atomic_replace_recovery_target
-type atomic_replace_recovery_target_error
+type atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+type atomic_replace_recovery_target_error = Atomic_write.atomic_replace_recovery_target_error
 
 module Publication_recovery : sig
-  type registry
-  type t
-  type owner
-  type registry_error
-  type lane_open_error
-  type lane_release_failure
+  type registry = Fs_compat_internal.Publication_recovery_access.registry
+  type t = Fs_compat_internal.Publication_recovery_access.t
+  type owner = Fs_compat_internal.Publication_recovery_access.owner
+  type registry_error =
+    Fs_compat_internal.Publication_recovery_access.registry_error
+  type lane_open_error =
+    Fs_compat_internal.Publication_recovery_access.lane_open_error
+  type lane_release_failure =
+    Fs_compat_internal.Publication_recovery_access.lane_release_failure
+
+  type lane_open_error_category =
+    | Invalid_owner_category
+    | Reconciliation_blocked_category
+    | Store_failed_category
 
   type owner_discovery_row =
     | Discovered_owner of owner
@@ -307,64 +317,8 @@ module Publication_recovery : sig
 
   val lane_open_error_to_string : lane_open_error -> string
   val lane_release_failure_to_string : lane_release_failure -> string
+  val lane_open_error_category : lane_open_error -> lane_open_error_category
 end
-
-(** Repository-test access to the private recovery state machine. Production
-    code must use the narrow [Publication_recovery] facade above. *)
-module Publication_recovery_for_testing :
-  sig
-    include module type of Publication_recovery_for_testing
-
-    val private_registry : Publication_recovery.registry -> registry
-    val public_lane_release_failure
-      :  lane_release_failure
-      -> Publication_recovery.lane_release_failure
-  end
-
-type publication_recovery_access = Publication_recovery.t
-type publication_recovery_registry = Publication_recovery.registry
-type publication_recovery_registry_error = Publication_recovery.registry_error
-type publication_recovery_lane_open_error = Publication_recovery.lane_open_error
-
-type publication_recovery_lane_open_error_kind =
-  | Publication_recovery_invalid_owner
-  | Publication_recovery_reconciliation_blocked
-  | Publication_recovery_store_failed
-
-(** Open the process-lifetime publication recovery registry below a
-    caller-owned MASC root capability. The registry remains valid for exactly
-    the lifetime of [sw]. *)
-val open_publication_recovery_registry
-  :  sw:Eio.Switch.t
-  -> fs:Eio.Fs.dir_ty Eio.Path.t
-  -> registry_root:Eio.Fs.dir_ty Eio.Path.t
-  -> (publication_recovery_registry, publication_recovery_registry_error) result
-
-val publication_recovery_registry_error_to_string
-  :  publication_recovery_registry_error
-  -> string
-
-(** Pin one Keeper-owned publication recovery lane for the whole callback.
-    Publications borrow its store through the opaque access value. Closing
-    rejects new borrows and drains every already-started borrow without a
-    timeout or retry budget. *)
-val with_publication_recovery_lane
-  :  registry:publication_recovery_registry
-  -> owner:string
-  -> (publication_recovery_access -> 'a)
-  -> ('a Publication_recovery.lane_outcome,
-      publication_recovery_lane_open_error)
-       result
-
-val publication_recovery_lane_open_error_to_string
-  :  publication_recovery_lane_open_error
-  -> string
-
-(** Constructor-directed public classification. The category never contains
-    owner names, recovery records, paths, operation IDs, or exception text. *)
-val publication_recovery_lane_open_error_kind
-  :  publication_recovery_lane_open_error
-  -> publication_recovery_lane_open_error_kind
 
 (** Build the immutable recovery locator projection used by
     {!replace_capability_file}. *)
@@ -381,11 +335,11 @@ val atomic_replace_recovery_target_error_to_string
   :  atomic_replace_recovery_target_error
   -> string
 
-type capability_write_operation =
+type capability_write_operation = Atomic_write.capability_write_operation =
   | Atomic_replace_operation
   | Create_exclusive_operation
 
-type capability_write_stage =
+type capability_write_stage = Atomic_write.capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
   | Acquire_publication_lease
@@ -423,7 +377,7 @@ type capability_write_stage =
   | Cleanup_close_staging_directory
   | Cleanup_sync_parent
 
-type capability_write_target_effect =
+type capability_write_target_effect = Atomic_write.capability_write_target_effect =
   | Target_unchanged
   | Target_created
   | Target_created_incomplete
@@ -431,17 +385,19 @@ type capability_write_target_effect =
   | Target_state_unknown
 
 type capability_write_operation_failure =
+  Atomic_write.capability_write_operation_failure =
   { exception_ : exn
   ; backtrace : Printexc.raw_backtrace
   }
 
 type capability_write_payload_failure =
+  Atomic_write.capability_write_payload_failure =
   { exception_ : exn
   ; backtrace : Printexc.raw_backtrace
   ; bytes_written : int
   }
 
-type capability_write_cause =
+type capability_write_cause = Atomic_write.capability_write_cause =
   | Invalid_leaf of string
   | Invalid_recovery_target of atomic_replace_recovery_target_error
   | Mutation_contended
@@ -452,12 +408,12 @@ type capability_write_cause =
   | Payload_write_failed of capability_write_payload_failure
   | Operation_failed of capability_write_operation_failure
 
-type capability_write_failure =
+type capability_write_failure = Atomic_write.capability_write_failure =
   { stage : capability_write_stage
   ; cause : capability_write_cause
   }
 
-type capability_recovery_phase =
+type capability_recovery_phase = Atomic_write.capability_recovery_phase =
   | Recovery_validate_owner
   | Recovery_open_registry
   | Recovery_open_store
@@ -468,13 +424,14 @@ type capability_recovery_phase =
   | Recovery_discharge_bound
 
 type capability_recovery_removal_transition =
+  Atomic_write.capability_recovery_removal_transition =
   | Recovery_discharge_active
   | Recovery_discharge_owned
   | Recovery_active_to_owned
   | Recovery_active_to_forensic
   | Recovery_owned_to_forensic
 
-type capability_recovery_effect =
+type capability_recovery_effect = Atomic_write.capability_recovery_effect =
   | Recovery_no_record_change
   | Recovery_layout_may_be_incomplete
   | Recovery_layout_ready
@@ -491,7 +448,7 @@ type capability_recovery_effect =
   | Recovery_source_removal_durability_unknown of
       capability_recovery_removal_transition
 
-type capability_recovery_failure
+type capability_recovery_failure = Atomic_write.capability_recovery_failure
 
 val capability_recovery_phase_to_string : capability_recovery_phase -> string
 val capability_recovery_effect_to_string : capability_recovery_effect -> string
@@ -508,30 +465,34 @@ val capability_recovery_failure_to_string
   :  capability_recovery_failure
   -> string
 
-type capability_recovery_access_failure = Recovery_access_not_available
+type capability_recovery_access_failure =
+  Atomic_write.capability_recovery_access_failure =
+  | Recovery_access_not_available
 
 type capability_write_primary_failure =
+  Atomic_write.capability_write_primary_failure =
   | Write_primary_failure of capability_write_failure
   | Recovery_primary_failure of capability_recovery_failure
   | Recovery_access_primary_failure of capability_recovery_access_failure
 
 type capability_write_cleanup_failure =
+  Atomic_write.capability_write_cleanup_failure =
   | Write_cleanup_failure of capability_write_failure
   | Recovery_cleanup_failure of capability_recovery_failure
 
-type capability_write_error =
+type capability_write_error = Atomic_write.capability_write_error =
   { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
   ; primary_failure : capability_write_primary_failure
   ; cleanup_failures : capability_write_cleanup_failure list
   }
 
-type capability_directory_sync_error =
+type capability_directory_sync_error = Atomic_write.capability_directory_sync_error =
   { failure : capability_write_failure
   ; cleanup_failures : capability_write_failure list
   }
 
-type capability_write_cancellation =
+type capability_write_cancellation = Atomic_write.capability_write_cancellation =
   { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
   ; interrupted_primary_failure : capability_write_primary_failure option
@@ -544,7 +505,7 @@ exception Capability_write_cancelled of exn * capability_write_cancellation
 (** Durable replacement below an already-open target-parent capability.
     Recovery access and the immutable target projection are mandatory. *)
 val replace_capability_file
-  :  recovery:publication_recovery_access
+  :  recovery:Publication_recovery.t
   -> parent:Eio.Fs.dir_ty Eio.Path.t
   -> target:atomic_replace_recovery_target
   -> string
@@ -578,29 +539,6 @@ val sync_directory_capability
 val capability_directory_sync_error_to_string
   :  capability_directory_sync_error
   -> string
-
-module Capability_write_for_testing : sig
-  val replace_capability_file
-    :  before_stage:(capability_write_stage -> unit)
-    -> recovery:publication_recovery_access
-    -> parent:Eio.Fs.dir_ty Eio.Path.t
-    -> target:atomic_replace_recovery_target
-    -> string
-    -> (unit, capability_write_error) result
-
-  val create_capability_file_exclusive
-    :  before_stage:(capability_write_stage -> unit)
-    -> parent:Eio.Fs.dir_ty Eio.Path.t
-    -> leaf:string
-    -> permissions:int
-    -> string
-    -> (unit, capability_write_error) result
-
-  val sync_directory_capability
-    :  before_stage:(capability_write_stage -> unit)
-    -> _ Eio.Path.t
-    -> (unit, capability_directory_sync_error) result
-end
 
 (** [true] iff [name] matches the canonical [.atomic_*.tmp] pattern produced by
     this module. Exposed for tests and recovery sweeps. *)

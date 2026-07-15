@@ -113,7 +113,6 @@
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
   test_server_keeper_background
-  test_keeper_tool_inflight
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
   eval_memory_os_value
@@ -226,7 +225,6 @@
   test_compaction_llm_summarizer
   test_keeper_runtime_failure_route
   test_keeper_allowed_paths
-  test_playground_repo_readiness
   test_playground_paths
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
@@ -434,7 +432,6 @@
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
   test_server_keeper_background
-  test_keeper_tool_inflight
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
   eval_memory_os_value
@@ -547,7 +544,6 @@
   test_compaction_llm_summarizer
   test_keeper_runtime_failure_route
   test_keeper_allowed_paths
-  test_playground_repo_readiness
   test_playground_paths
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
@@ -1020,7 +1016,6 @@
   test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
-  test_tool_job
   test_typed_tool_masc
   test_state_product
   test_tool_result
@@ -1195,7 +1190,6 @@
   test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
-  test_tool_job
   test_typed_tool_masc
   test_state_product
   test_tool_result
@@ -1235,7 +1229,7 @@
   test_board_core_payload
   test_board_attachment_meta
   test_board_moderation)
- (libraries masc_test_deps masc.tool_orchestration bigstringaf)
+ (libraries masc_test_deps bigstringaf)
  (deps ../bin/main_eio.exe))
 
 (test
@@ -2482,6 +2476,10 @@
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
 (include stanzas/test_keeper_meta_canonicalize.inc)
+
+(include stanzas/test_keeper_meta_json_config_toml_only.inc)
+
+(include stanzas/test_keeper_compact_recovery_tool_surface.inc)
 
 (test
  (name test_keeper_visible_path_projection)

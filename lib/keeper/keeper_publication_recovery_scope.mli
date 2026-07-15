@@ -23,6 +23,6 @@ val resolve_turn_resources
   -> (turn_resources, failure) result
 (** Performs only the exact in-memory Keeper registry lookup. The provider is
     not read here. File edit/write dispatch re-reads it at the moment of the
-    effect and executes the write inside [with_publication_recovery_lane]'s
+    effect and executes the write inside [Fs_compat.Publication_recovery.with_lane]'s
     callback. Consequently an idle, read-only, or non-file turn performs no
     publication-recovery filesystem acquisition. *)

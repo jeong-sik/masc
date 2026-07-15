@@ -74,6 +74,48 @@ type overflow_retry_recovery = {
   turn_generation : int;
 } [@@warning "-69"]
 
+type compaction_recovery_error =
+  | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
+  | Compaction_rejected of Keeper_compact_policy.compaction_rejection
+  | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
+  | Checkpoint_superseded of {
+      incoming_turn_count : int;
+      known_turn_count : int;
+    }
+  | Checkpoint_save_failed of string
+
+let compaction_recovery_error_to_tag = function
+  | Checkpoint_load_failed Keeper_checkpoint_store.Not_found ->
+    "checkpoint_not_found"
+  | Checkpoint_load_failed _ -> "checkpoint_load_failed"
+  | Compaction_rejected reason ->
+    Keeper_compact_policy.compaction_rejection_to_string reason
+  | Unexpected_compaction_decision _ -> "unexpected_compaction_decision"
+  | Checkpoint_superseded _ -> "checkpoint_superseded"
+  | Checkpoint_save_failed _ -> "checkpoint_save_failed"
+
+let checkpoint_load_error_detail = function
+  | Keeper_checkpoint_store.Not_found -> "checkpoint not found"
+  | Store_error detail
+  | Parse_error detail
+  | Io_error detail
+  | Sdk_other_error detail -> detail
+
+let compaction_recovery_error_to_string = function
+  | Checkpoint_load_failed error -> checkpoint_load_error_detail error
+  | Compaction_rejected reason ->
+    "compaction rejected: "
+    ^ Keeper_compact_policy.compaction_rejection_to_string reason
+  | Unexpected_compaction_decision decision ->
+    "unexpected compaction decision: "
+    ^ Keeper_compact_policy.compaction_decision_to_string decision
+  | Checkpoint_superseded { incoming_turn_count; known_turn_count } ->
+    Printf.sprintf
+      "checkpoint superseded: incoming_turn_count=%d known_turn_count=%d"
+      incoming_turn_count
+      known_turn_count
+  | Checkpoint_save_failed detail -> detail
+
 let log_tool_pair_repair
     ~keeper_name
     ~site
@@ -524,113 +566,132 @@ let commit_prepared_after_save ~trigger ~save =
     Ok (checkpoint, Keeper_compact_policy.Applied trigger)
 ;;
 
+let checkpoint_of_save_outcome = function
+  | Ok (checkpoint, Keeper_checkpoint_store.Saved _) -> Ok checkpoint
+  | Ok
+      ( _,
+        Keeper_checkpoint_store.Stale_noop
+          { incoming_turn_count; known_turn_count } ) ->
+    Error (Checkpoint_superseded { incoming_turn_count; known_turn_count })
+  | Error detail -> Error (Checkpoint_save_failed detail)
+;;
+
 let recover_latest_checkpoint_for_overflow_retry
     ~(base_dir : string)
     ~(meta : keeper_meta)
-    ~(model : string)
     ~(trigger : Compaction_trigger.t)
-    ~(primary_model_max_tokens : int) : overflow_retry_recovery option =
+    ~(primary_model_max_tokens : int)
+  : (overflow_retry_recovery, compaction_recovery_error) result
+  =
   let session = create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir in
-  let oas_result =
+  match
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-  in
-  (match oas_result with
-   | Error (Parse_error d | Store_error d | Io_error d | Sdk_other_error d) ->
-       Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
-         (Keeper_id.Trace_id.to_string meta.runtime.trace_id) d;
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string OasExecutionErrors)
-         ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Overflow_retry_oas_load))]
-         ()
-   | Error Not_found ->
-       Log.Keeper.debug
-         "keeper:%s overflow-retry OAS checkpoint not found, starting fresh"
-         (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-   | Ok _ -> ());
-  let oas_checkpoint =
-    match oas_result with
-    | Ok v -> Some v
-    | Error Not_found -> None
-    | Error _ ->
-      Log.Keeper.warn "keeper:%s overflow-retry OAS checkpoint load failed; recovery cannot resume it"
-        (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-      None
-  in
-  let selected =
-    match oas_checkpoint with
-    | Some checkpoint ->
-        let turn_generation =
-          checkpoint_generation checkpoint ~fallback:meta.runtime.generation
-        in
-        Some
-          ( context_of_oas_checkpoint
-              checkpoint
-              ~primary_model_max_tokens,
-            turn_generation )
-    | None -> None
-  in
-  match selected with
-  | None -> None
-  | Some (ctx, turn_generation) ->
-      let retry_meta =
-        if turn_generation = meta.runtime.generation then meta
-        else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
-      in
-      let compacted_ctx, base_decision =
-        Keeper_compact_policy.compact_for_request_typed
-          ~meta:retry_meta
-          ~trigger
-          ctx
-      in
-      match base_decision with
-      | Keeper_compact_policy.Prepared prepared_trigger ->
-        (try
-          (match
-             commit_prepared_after_save
-               ~trigger:prepared_trigger
-               ~save:(fun () ->
-                 save_oas_checkpoint
-                   ~multimodal_policy:meta.multimodal_policy
-                   ~keeper_name:meta.name
-                   ~session
-                   ~agent_name:retry_meta.agent_name
-                   ~ctx:compacted_ctx
-                   ~generation:turn_generation)
-           with
-          | Ok (checkpoint, decision) ->
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string Compactions)
-                ~labels:[ "keeper", retry_meta.name ]
-                ();
-              Some
-                { checkpoint
-                ; compaction =
-                    { attempted = true
-                    ; applied = true
-                    ; started_dispatched = false
-                    ; failure_reason = None
-                    ; trigger = Some prepared_trigger
-                    ; decision
-                    }
-                ; turn_generation
-                }
-          | Error e ->
-              Log.Keeper.error
-                "overflow retry checkpoint save failed: %s" e;
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string CheckpointFailures)
-                ~labels:[("keeper", retry_meta.agent_name); ("operation", "overflow_save")]
-                ();
-              None)
+  with
+  | Error Keeper_checkpoint_store.Not_found ->
+    Log.Keeper.debug
+      "keeper:%s overflow-retry OAS checkpoint not found"
+      (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+    Error (Checkpoint_load_failed Keeper_checkpoint_store.Not_found)
+  | Error
+      ((Parse_error detail | Store_error detail | Io_error detail
+       | Sdk_other_error detail) as error) ->
+    Log.Keeper.error
+      "keeper:%s overflow retry OAS load error: %s"
+      (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      detail;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string OasExecutionErrors)
+      ~labels:
+        [ "keeper", meta.name
+        ; ( "phase"
+          , Keeper_oas_execution_error_phase.(to_label Overflow_retry_oas_load) )
+        ]
+      ();
+    Error (Checkpoint_load_failed error)
+  | Ok checkpoint ->
+    let turn_generation =
+      checkpoint_generation checkpoint ~fallback:meta.runtime.generation
+    in
+    let ctx = context_of_oas_checkpoint checkpoint ~primary_model_max_tokens in
+    let retry_meta =
+      if turn_generation = meta.runtime.generation then meta
+      else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
+    in
+    let compacted_ctx, base_decision =
+      Keeper_compact_policy.compact_for_request_typed
+        ~meta:retry_meta
+        ~trigger
+        ctx
+    in
+    (match base_decision with
+     | Keeper_compact_policy.Prepared prepared_trigger ->
+       (try
+          match
+            commit_prepared_after_save
+              ~trigger:prepared_trigger
+              ~save:(fun () ->
+                save_oas_checkpoint_classified
+                  ~multimodal_policy:meta.multimodal_policy
+                  ~keeper_name:meta.name
+                  ~session
+                  ~agent_name:retry_meta.agent_name
+                  ~ctx:compacted_ctx
+                  ~generation:turn_generation
+                |> checkpoint_of_save_outcome)
+          with
+          | Ok (saved_checkpoint, decision) ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string Compactions)
+              ~labels:[ "keeper", retry_meta.name ]
+              ();
+            Ok
+              { checkpoint = saved_checkpoint
+              ; compaction =
+                  { attempted = true
+                  ; applied = true
+                  ; started_dispatched = false
+                  ; failure_reason = None
+                  ; trigger = Some prepared_trigger
+                  ; decision
+                  }
+              ; turn_generation
+              }
+          | Error
+              (Checkpoint_superseded
+                 { incoming_turn_count; known_turn_count } as error) ->
+            Log.Keeper.warn
+              "overflow retry checkpoint superseded: incoming_turn_count=%d known_turn_count=%d"
+              incoming_turn_count
+              known_turn_count;
+            Error error
+          | Error (Checkpoint_save_failed detail as error) ->
+            Log.Keeper.error
+              "overflow retry checkpoint save failed: %s"
+              detail;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string CheckpointFailures)
+              ~labels:
+                [ "keeper", retry_meta.agent_name
+                ; "operation", "overflow_save"
+                ]
+              ();
+            Error error
+          | Error error -> Error error
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
-            log_keeper_exn
-              ~label:"overflow retry checkpoint save exception"
-              exn;
-            None)
-      | _ -> None
+          let detail = Printexc.to_string exn in
+          log_keeper_exn
+            ~label:"overflow retry checkpoint save exception"
+            exn;
+          Error (Checkpoint_save_failed detail))
+     | Keeper_compact_policy.Rejected (_, reason) ->
+       Error (Compaction_rejected reason)
+     | (Keeper_compact_policy.Applied _
+       | Keeper_compact_policy.Not_requested
+       | Keeper_compact_policy.Skipped_no_checkpoint) as decision ->
+       Error (Unexpected_compaction_decision decision))
 
 module For_testing = struct
   let commit_prepared_after_save = commit_prepared_after_save

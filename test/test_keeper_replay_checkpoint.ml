@@ -431,7 +431,6 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
     |> expect_ok
   in
   with_temp_dir (fun session_dir ->
-    Masc.Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
     (match
        Masc.Keeper_checkpoint_store.save_oas_classified
          ~session_dir

@@ -7,8 +7,8 @@
 
 type availability =
   | Initializing
-  | Available of Fs_compat.publication_recovery_registry
-  | Registry_unavailable of Fs_compat.publication_recovery_registry_error
+  | Available of Fs_compat.Publication_recovery.registry
+  | Registry_unavailable of Fs_compat.Publication_recovery.registry_error
   | Initialization_crashed of Eio.Exn.with_bt
   | Non_runtime
 
@@ -16,10 +16,10 @@ type provider = unit -> availability
 
 type unavailable =
   | Runtime_initializing
-  | Runtime_registry_unavailable of Fs_compat.publication_recovery_registry_error
+  | Runtime_registry_unavailable of Fs_compat.Publication_recovery.registry_error
   | Runtime_initialization_crashed of Eio.Exn.with_bt
   | Runtime_non_runtime
-  | Lane_unavailable of Fs_compat.publication_recovery_lane_open_error
+  | Lane_unavailable of Fs_compat.Publication_recovery.lane_open_error
 
 type turn_context =
   { provider : provider
@@ -31,7 +31,7 @@ val non_runtime_provider : provider
 
 val with_access
   :  turn_context
-  -> (Fs_compat.publication_recovery_access -> 'a)
+  -> (Fs_compat.Publication_recovery.t -> 'a)
   -> ('a Fs_compat.Publication_recovery.lane_outcome, unavailable) result
 (** Reads the live provider once and, only when available, borrows the exact
     owner lane for the dynamic extent of [use]. Callback exceptions and

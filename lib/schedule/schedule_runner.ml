@@ -35,13 +35,18 @@ and dispatch_result =
   ; error : string option
   }
 
+type consumer_dispatch_error =
+  | Retryable_dispatch_failure of string
+  | Terminal_dispatch_rejection of string
+
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
   ; dispatch :
       Workspace_utils.config ->
       now:float ->
+      wake_signal ->
       Schedule_domain.schedule_request ->
-      (Yojson.Safe.t, string) result
+      (Yojson.Safe.t, consumer_dispatch_error) result
   }
 
 type runner_error =
@@ -224,16 +229,16 @@ let append_new_signals config candidates =
   | Error msg -> Error (Signal_store_error msg)
 ;;
 
-let candidate_signals ~now state =
+let candidates ~now state =
   Schedule_store.due_execution_candidates state
-  |> List.map (make_signal ~now Due_candidate)
+  |> List.map (fun request -> request, make_signal ~now Due_candidate request)
 ;;
 
 let dispatch_result ?detail ?error schedule_id status =
   { schedule_id; status; detail; error }
 ;;
 
-let finish_failed_dispatch config ~now ~schedule_id error =
+let finish_terminal_dispatch config ~now ~schedule_id error =
   match Schedule_store.fail_running config ~now ~schedule_id ~error with
   | Ok _ -> dispatch_result ~error schedule_id Dispatch_failed
   | Error err ->
@@ -246,12 +251,37 @@ let finish_failed_dispatch config ~now ~schedule_id error =
     dispatch_result ~error schedule_id Dispatch_failed
 ;;
 
-let safe_consumer_dispatch config ~now consumer request =
-  try consumer.dispatch config ~now request with
-  | exn -> Error (Printexc.to_string exn)
+let finish_retryable_dispatch config ~now ~schedule_id detail =
+  let reason = Schedule_store.Retryable_dispatch_failure detail in
+  let error = Schedule_store.running_recovery_reason_to_string reason in
+  match Schedule_store.retry_running config ~now ~schedule_id ~reason with
+  | Ok _ -> dispatch_result ~error schedule_id Dispatch_failed
+  | Error err ->
+    let error =
+      Printf.sprintf
+        "%s; failed to return schedule to due: %s"
+        error
+        (Schedule_store.store_error_to_string err)
+    in
+    dispatch_result ~error schedule_id Dispatch_failed
 ;;
 
-let dispatch_candidate config ~now consumer (request : Schedule_domain.schedule_request) =
+let safe_consumer_dispatch config ~now consumer signal request =
+  Cancel_safe.protect
+    ~on_exn:(fun exn ->
+      Error
+        (Retryable_dispatch_failure
+           ("consumer dispatch raised: " ^ Printexc.to_string exn)))
+    (fun () -> consumer.dispatch config ~now signal request)
+;;
+
+let dispatch_candidate
+      config
+      ~now
+      consumer
+      signal
+      (request : Schedule_domain.schedule_request)
+  =
   let schedule_id = request.Schedule_domain.schedule_id in
   match consumer.accepts request with
   | Error reason ->
@@ -271,8 +301,11 @@ let dispatch_candidate config ~now consumer (request : Schedule_domain.schedule_
        dispatch_result ~error:(Schedule_store.store_error_to_string err) schedule_id
          Dispatch_start_rejected
      | Ok running_request ->
-       (match safe_consumer_dispatch config ~now consumer running_request with
-        | Error error -> finish_failed_dispatch config ~now ~schedule_id error
+       (match safe_consumer_dispatch config ~now consumer signal running_request with
+        | Error (Retryable_dispatch_failure detail) ->
+          finish_retryable_dispatch config ~now ~schedule_id detail
+        | Error (Terminal_dispatch_rejection detail) ->
+          finish_terminal_dispatch config ~now ~schedule_id detail
         | Ok detail ->
           (match Schedule_store.complete_running config ~now ~schedule_id ~detail () with
            | Ok _ -> dispatch_result ~detail schedule_id Dispatch_succeeded
@@ -282,9 +315,11 @@ let dispatch_candidate config ~now consumer (request : Schedule_domain.schedule_
                schedule_id Dispatch_failed)))
 ;;
 
-let dispatch_candidates config ~now consumer state =
-  Schedule_store.due_execution_candidates state
-  |> List.map (dispatch_candidate config ~now consumer)
+let dispatch_candidates config ~now consumer candidates =
+  List.map
+    (fun (request, signal) ->
+       dispatch_candidate config ~now consumer signal request)
+    candidates
 ;;
 
 let read_recent_signals config n =
@@ -303,11 +338,12 @@ let tick ?consumer config ~now =
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Service_error (Schedule_service.Store_error err))
   | Ok (state, due_changed) ->
-    let candidate_signals = candidate_signals ~now state in
+    let candidates = candidates ~now state in
+    let candidate_signals = List.map snd candidates in
     let* emitted = append_new_signals config candidate_signals in
     (match consumer with
      | Some consumer ->
-       let dispatches = dispatch_candidates config ~now consumer state in
+       let dispatches = dispatch_candidates config ~now consumer candidates in
        Ok { due_changed; emitted; rescheduled = 0; dispatches }
      | None ->
        let schedule_ids =

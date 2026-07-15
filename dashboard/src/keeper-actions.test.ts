@@ -1231,10 +1231,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await cancelActiveKeeperThreadMessage('echo')
 
     expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
-    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(
-      'kmsg_echo_1',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    )
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_1')
     const err = await sendPromise
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
@@ -1270,6 +1267,11 @@ describe('sendKeeperThreadMessage stream outcome', () => {
         name: 'KEEPER_QUEUE_REQUEST',
         value: { request_id: 'kmsg_echo_cancelling', status: 'queued' },
       })
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta: 'preserved before cancellation' },
+      })
       return new Promise<{ terminal: boolean }>((_resolve, reject) => {
         opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
       })
@@ -1287,6 +1289,11 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_cancelling')
       expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     })
+    const cancelledAssistant = (keeperThreads.value.echo ?? [])
+      .find(entry => entry.role === 'assistant' && entry.delivery === 'cancelled')
+    expect(cancelledAssistant?.traceSteps).toEqual([
+      { kind: 'think', text: 'preserved before cancellation', ts: expect.any(String), oasBlockIndex: 0 },
+    ])
   })
 
   it('surfaces the actual persistence failure after a cancellation acknowledgement', async () => {
@@ -1408,10 +1415,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
 
-    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(
-      'kmsg_echo_hung_cancel',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    )
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_hung_cancel')
     expect(keeperSending.value.echo).toBe(false)
     expect(activeStreamEntryId('echo')).toBeNull()
     const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
@@ -1468,16 +1472,13 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     controls.emitQueueRequest?.()
     await Promise.resolve()
 
-    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(
-      'kmsg_echo_late',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    )
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_late')
     const err = await sendPromise
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
   })
 
-  it('uses a fresh timeout signal when cancelling after an abort error', async () => {
+  it('does not add a synthetic deadline when cancelling after an abort error', async () => {
     streamKeeperMessage.mockImplementation(async (
       _name: string,
       _message: string,
@@ -1498,12 +1499,12 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
     expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
-    const [requestId, opts] =
-      cancelQueuedKeeperMessage.mock.calls[0] as unknown as [string, { signal?: AbortSignal }]
+    const [requestId, opts] = cancelQueuedKeeperMessage.mock.calls[0] as unknown as [
+      string,
+      { signal?: AbortSignal } | undefined,
+    ]
     expect(requestId).toBe('kmsg_echo_signal')
-    const signal = opts.signal
-    expect(signal).toBeInstanceOf(AbortSignal)
-    expect(signal?.aborted).toBe(false)
+    expect(opts).toBeUndefined()
   })
 
   it('does not duplicate the pending assistant when a live send is still streaming and the panel remounts', async () => {

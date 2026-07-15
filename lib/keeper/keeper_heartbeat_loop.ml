@@ -113,10 +113,16 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
    [Turn_failed] instead of [Turn_succeeded]. Such a cycle must also
    NOT refresh the work-as-heartbeat lease; the count is observation and never
    terminates the Keeper lane. *)
-type keepalive_turn_outcome = {
-  meta : keeper_meta;
-  cycle_crashed : bool;
-}
+type ready_queue_followup =
+  | No_ready_queue_followup
+  | Drain_ready_queue of
+      { excluding : Keeper_event_queue.stimulus list }
+
+type keepalive_turn_outcome =
+  { meta : keeper_meta
+  ; cycle_crashed : bool
+  ; ready_queue_followup : ready_queue_followup
+  }
 
 exception Event_queue_settlement_failed of string
 
@@ -407,6 +413,26 @@ let settlement_is_ack = function
     false
 ;;
 
+let ready_queue_followup_of_settlement ~lease = function
+  | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Escalate _ ->
+    Drain_ready_queue { excluding = [] }
+  | Keeper_registry_event_queue.Requeue
+      ( Keeper_registry_event_queue.Rotate_now
+      | Keeper_registry_event_queue.Retry_after_observed
+      | Keeper_registry_event_queue.Approval_grant_unconsumed
+      | Keeper_registry_event_queue.Approval_grant_state_unavailable ) ->
+    Drain_ready_queue
+      { excluding = Keeper_registry_event_queue.lease_stimuli lease }
+  | Keeper_registry_event_queue.Requeue
+      ( Keeper_registry_event_queue.Cycle_busy
+      | Keeper_registry_event_queue.Turn_not_scheduled
+      | Keeper_registry_event_queue.Cancelled
+      | Keeper_registry_event_queue.Cycle_crashed
+      | Keeper_registry_event_queue.Registration_recovery ) ->
+    No_ready_queue_followup
+;;
+
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
    [Turn_failed] mapping is unit-testable. *)
@@ -427,13 +453,18 @@ let run_keepalive_unified_turn
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
-  then { meta = meta_after_triage; cycle_crashed = false }
+  then
+    { meta = meta_after_triage
+    ; cycle_crashed = false
+    ; ready_queue_followup = No_ready_queue_followup
+    }
   else (
     let consumed_stimuli = ref [] in
     let claimed_lease = ref None in
     let cycle_outcome_ref = ref None in
     let lease_settled = ref false in
     let settlement_failed = ref false in
+    let ready_queue_followup = ref No_ready_queue_followup in
     let record_settlement_failure message =
       settlement_failed := true;
       match !cycle_outcome_ref with
@@ -737,7 +768,8 @@ let run_keepalive_unified_turn
                     meta_after_triage.name
                     successor
                 with
-                | Ok () -> ()
+                | Ok () ->
+                  ready_queue_followup := Drain_ready_queue { excluding = [] }
                 | Error message ->
                   Log.Keeper.error
                     "registry: unleased failure judgment enqueue failed keeper=%s: %s"
@@ -785,6 +817,8 @@ let run_keepalive_unified_turn
               ( Keeper_registry_event_queue.Settled _
               | Keeper_registry_event_queue.Already_settled _ ) ->
             lease_settled := true;
+            ready_queue_followup :=
+              ready_queue_followup_of_settlement ~lease settlement;
             (match
                project_transition_outbox
                  ~base_path:ctx.config.base_path
@@ -798,7 +832,10 @@ let run_keepalive_unified_turn
                 ~base_path:ctx.config.base_path
                 ~keeper_name:meta_after_triage.name
                 (connector_attention_event_ids_of_stimuli !consumed_stimuli)));
-      { meta = meta_after_cycle; cycle_crashed = !settlement_failed }
+      { meta = meta_after_cycle
+      ; cycle_crashed = !settlement_failed
+      ; ready_queue_followup = !ready_queue_followup
+      }
     with
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
@@ -817,7 +854,10 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         exn;
-      { meta = meta_after_triage; cycle_crashed = true })
+      { meta = meta_after_triage
+      ; cycle_crashed = true
+      ; ready_queue_followup = No_ready_queue_followup
+      })
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
@@ -1076,7 +1116,11 @@ let run_heartbeat_loop
         let t_turn_start = t_board_end in
         let turn_outcome =
           if not admitted_turn
-          then { meta = meta_current; cycle_crashed = false }
+          then
+            { meta = meta_current
+            ; cycle_crashed = false
+            ; ready_queue_followup = No_ready_queue_followup
+            }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
                [turn_running] flag toggles around the dispatch and the
@@ -1177,15 +1221,39 @@ let run_heartbeat_loop
           ~t_turn_end
           ~t_recurring_start
           ~t_recurring_end;
+        let ready_queue_followup_count =
+          match turn_outcome.ready_queue_followup with
+          | No_ready_queue_followup -> 0
+          | Drain_ready_queue { excluding }
+            when
+              proactive_warmup_elapsed
+              && not lifecycle_blocked
+              && not turn_outcome.cycle_crashed ->
+            Keeper_registry_event_queue.snapshot
+              ~base_path:ctx.config.base_path
+              meta_current.name
+            |> Keeper_heartbeat_stimulus_intake.ready_stimulus_count ~excluding
+          | Drain_ready_queue _ -> 0
+        in
         (* Carry the inter-cycle sleep result into the next iteration so the
            turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
            keeper's configured cadence ([Timeout]). *)
         last_wake_source :=
-          Keeper_keepalive_signal.interruptible_sleep
-            ~clock:ctx.clock
-            ~stop
-            ~wakeup
-            interval;
+          if ready_queue_followup_count > 0
+          then (
+            let absorbed_wakeup_hint = Atomic.compare_and_set wakeup true false in
+            Log.Keeper.info
+              "%s: keeper lane drain continues without heartbeat sleep ready=%d wake_hint_absorbed=%b"
+              meta_current.name
+              ready_queue_followup_count
+              absorbed_wakeup_hint;
+            Keeper_keepalive_signal.Woken)
+          else
+            Keeper_keepalive_signal.interruptible_sleep
+              ~clock:ctx.clock
+              ~stop
+              ~wakeup
+              interval;
       if Atomic.get stop then () else loop ())
   in
   loop ()

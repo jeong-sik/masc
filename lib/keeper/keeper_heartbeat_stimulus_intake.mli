@@ -52,6 +52,14 @@ val consume_single_heartbeat_stimulus
   -> Keeper_event_queue.stimulus
   -> Keeper_world_observation.pending_board_event list
 
+val ready_stimulus_count
+  :  excluding:Keeper_event_queue.stimulus list
+  -> Keeper_event_queue.t
+  -> int
+(** Count exact typed stimuli that can be leased now, excluding identities
+    retained by the just-finished cycle. This is the queue-drain continuation
+    probe; it neither mutates the queue nor invents a time/count threshold. *)
+
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
     drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges

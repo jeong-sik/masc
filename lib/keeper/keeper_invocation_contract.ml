@@ -222,7 +222,7 @@ let run_ref_of_json json =
 
 let run_id reference = reference.run_id
 
-let run_ref_matches_entry reference entry =
+let run_ref_matches_entry reference (entry : Keeper_msg_async.entry) =
   String.equal reference.run_id entry.Keeper_msg_async.request_id
   && String.equal
        (target_name_of_target reference.target)
@@ -346,7 +346,7 @@ let entry_result = function
     ]
 ;;
 
-let delegate_entry_to_json entry =
+let delegate_entry_to_json (entry : Keeper_msg_async.entry) =
   let contract = result_contract entry in
   let* target_name =
     Keeper_id.Keeper_name.of_string entry.Keeper_msg_async.keeper_name

@@ -30,13 +30,24 @@ let autonomous_yield_request ~base_path ~keeper_name =
     if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
     then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
     else
-      (match Keeper_chat_queue.has_active_receipts ~keeper_name with
+      (match Keeper_chat_queue.lane_status ~keeper_name with
        | Error error ->
          Error
            ("chat queue snapshot failed: "
             ^ Keeper_chat_queue.mutation_error_to_string error)
-       | Ok true -> Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
-       | Ok false ->
+       | Ok
+           { state =
+               Available (Dispatchable _ | Lease_inflight _)
+           ; _
+           } ->
+         Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
+       | Ok
+           { state =
+               (Persistence_reconciliation_required | Unavailable _)
+           ; _
+           } ->
+         Error "chat queue lane is unavailable for dispatch classification"
+       | Ok { state = Available (Idle | Awaiting_recovery _); _ } ->
          let pending =
            Keeper_registry_event_queue.snapshot ~base_path keeper_name
          in

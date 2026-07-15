@@ -225,7 +225,7 @@ let busy_ack_reply_text_queued
         receipt_id in_flight_text
   | Some operation_id, recovery_required_count ->
       Printf.sprintf
-        "%s is stopping under shutdown operation %s; your message is durably queued, but this Keeper lane also has %d receipt(s) awaiting explicit delivery recovery and cannot dispatch automatically (receipt_id=%s).%s"
+        "%s is stopping under shutdown operation %s; your message is durably queued behind the lifecycle fence. This Keeper lane also retains %d unconfirmed receipt(s) as exact recovery evidence; after the next active lane begins, your new receipt may cross that recorded boundary and no older receipt is guessed or replayed (receipt_id=%s).%s"
         keeper_name
         (Keeper_shutdown_types.Operation_id.to_string operation_id)
         recovery_required_count receipt_id in_flight_text
@@ -236,7 +236,7 @@ let busy_ack_reply_text_queued
         keeper_name receipt_id in_flight_text
   | None, recovery_required_count ->
       Printf.sprintf
-        "%s accepted your message durably, but this Keeper lane has %d receipt(s) awaiting explicit delivery recovery and cannot dispatch automatically (receipt_id=%s).%s"
+        "%s accepted your message durably. This Keeper lane retains %d unconfirmed receipt(s) as exact recovery evidence; your new receipt may cross that recorded boundary and no older receipt is guessed or replayed (receipt_id=%s).%s"
         keeper_name recovery_required_count receipt_id in_flight_text
 
 let chat_queue_message_request ~channel ~channel_user_id ~keeper_name

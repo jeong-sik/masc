@@ -548,17 +548,19 @@ let test_restart_requires_explicit_recovery_without_journal () =
      = [ receipt_wire receipt.receipt_id ]);
   (match Keeper_chat_queue.lane_status ~keeper_name with
    | Ok
-       { health =
-           Delivery_recovery_required
-             { receipt_id; lease_id; started_at = _ }
-       ; has_active = true
+       { state =
+           Available
+             (Awaiting_recovery
+                { earliest = { receipt_id; lease_id; started_at = _ }
+                ; unresolved_count = 1
+                })
        ; _
        } ->
-     check "O(1) lane health exposes exact recovery evidence"
+     check "typed lane state exposes exact recovery evidence"
        (Keeper_chat_queue.Receipt_id.equal receipt_id receipt.receipt_id
         && String.equal lease_id lease.lease_id)
    | Ok _ | Error _ ->
-     check "O(1) lane health exposes exact recovery evidence" false);
+     check "typed lane state exposes exact recovery evidence" false);
   (match snapshot.recovery_required with
    | [ { state = Recovery_required evidence; _ } ] ->
      check "restart preserves exact lease evidence"
@@ -652,10 +654,20 @@ let test_recovery_evidence_does_not_occupy_execution_lease () =
      && first_recovery.recovery_required_receipt_count = 1);
   let second = enqueue_exn ~keeper_name (message "second") in
   (match Keeper_chat_queue.lane_status ~keeper_name with
-   | Ok { health = Ready; has_active = true; _ } ->
-     check "pending work remains ready across a recovery boundary" true
+   | Ok
+       { state =
+           Available
+             (Dispatchable
+                (Some
+                   { earliest = { receipt_id; _ }
+                   ; unresolved_count = 1
+                   }))
+       ; _
+       } ->
+     check "pending work exposes the crossed recovery boundary"
+       (Keeper_chat_queue.Receipt_id.equal receipt_id first.receipt_id)
    | Ok _ | Error _ ->
-     check "pending work remains ready across a recovery boundary" false);
+     check "pending work exposes the crossed recovery boundary" false);
   let second_lease = lease_exn ~keeper_name in
   check "later pending receipt crosses the exact recovery boundary"
     (Keeper_chat_queue.Receipt_id.equal

@@ -137,10 +137,6 @@ type dispatch_state = {
   rerun_by_keeper : (string, unit) Hashtbl.t;
 }
 
-type lane_activity =
-  | Dispatchable of bool
-  | Awaiting_delivery_recovery of Keeper_chat_queue.recovery_evidence
-
 let create_dispatch_state ~base_path =
   { base_path = Keeper_registry_types.canonical_base_path_exn base_path
   ; mutex = Eio.Mutex.create ()
@@ -525,23 +521,12 @@ let run ~sw ~clock ~base_path ~handle_turn =
   let ready_lane_activity keeper_name =
     match Keeper_chat_queue.lane_status ~keeper_name with
     | Error _ as error -> error
-    | Ok { health = Keeper_chat_queue.Ready; has_active; _ } ->
-      Ok (Dispatchable has_active)
-    | Ok
-        { health =
-            Keeper_chat_queue.Delivery_recovery_required
-              { receipt_id; lease_id; started_at }
-        ; _
-        } ->
-      Ok
-        (Awaiting_delivery_recovery
-           ({ receipt_id; lease_id; started_at } :
-             Keeper_chat_queue.recovery_evidence))
-    | Ok { health = Keeper_chat_queue.Unavailable error; _ } ->
+    | Ok { state = Keeper_chat_queue.Available activity; _ } -> Ok activity
+    | Ok { state = Keeper_chat_queue.Unavailable error; _ } ->
       unavailable error
     | Ok
         { revision = uncertain_revision
-        ; health = Keeper_chat_queue.Persistence_reconciliation_required
+        ; state = Keeper_chat_queue.Persistence_reconciliation_required
         ; _
         } ->
       (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
@@ -554,23 +539,13 @@ let run ~sw ~clock ~base_path ~handle_turn =
            report.revision;
          (match Keeper_chat_queue.lane_status ~keeper_name with
           | Error _ as error -> error
-          | Ok { health = Keeper_chat_queue.Ready; has_active; _ } ->
-            Ok (Dispatchable has_active)
-          | Ok
-              { health =
-                  Keeper_chat_queue.Delivery_recovery_required
-                    { receipt_id; lease_id; started_at }
-              ; _
-              } ->
-            Ok
-              (Awaiting_delivery_recovery
-                 ({ receipt_id; lease_id; started_at } :
-                   Keeper_chat_queue.recovery_evidence))
-          | Ok { health = Keeper_chat_queue.Unavailable error; _ } ->
+          | Ok { state = Keeper_chat_queue.Available activity; _ } ->
+            Ok activity
+          | Ok { state = Keeper_chat_queue.Unavailable error; _ } ->
             unavailable error
           | Ok
               { revision
-              ; health = Keeper_chat_queue.Persistence_reconciliation_required
+              ; state = Keeper_chat_queue.Persistence_reconciliation_required
               ; _
               } ->
             unavailable
@@ -644,20 +619,32 @@ let run ~sw ~clock ~base_path ~handle_turn =
         release keeper_name
       | Ok _ when retry_pending_finalization dispatch_state ~keeper_name ->
         release keeper_name
-      | Ok (Awaiting_delivery_recovery evidence) ->
+      | Ok (Keeper_chat_queue.Awaiting_recovery boundary) ->
         clear_blocked_lease dispatch_state ~keeper_name;
         Log.Keeper.warn
-          "keeper_chat_consumer: lane awaits explicit delivery recovery keeper=%s receipt_id=%s lease_id=%s started_at=%.06f"
+          "keeper_chat_consumer: lane retains unresolved delivery evidence keeper=%s recovery_count=%d earliest_receipt_id=%s earliest_lease_id=%s started_at=%.06f; execution lease remains available"
           keeper_name
-          (Keeper_chat_queue.Receipt_id.to_string evidence.receipt_id)
-          evidence.lease_id
-          evidence.started_at;
+          boundary.unresolved_count
+          (Keeper_chat_queue.Receipt_id.to_string boundary.earliest.receipt_id)
+          boundary.earliest.lease_id
+          boundary.earliest.started_at;
         release keeper_name
-      | Ok (Dispatchable false) ->
+      | Ok Keeper_chat_queue.Idle
+      | Ok (Keeper_chat_queue.Lease_inflight _) ->
         clear_blocked_lease dispatch_state ~keeper_name;
         release keeper_name
-      | Ok (Dispatchable true) ->
+      | Ok (Keeper_chat_queue.Dispatchable recovery_boundary) ->
         clear_blocked_lease dispatch_state ~keeper_name;
+        Option.iter
+          (fun boundary ->
+             Log.Keeper.info
+               "keeper_chat_consumer: pending receipt crosses unresolved recovery boundary keeper=%s recovery_count=%d earliest_receipt_id=%s earliest_lease_id=%s"
+               keeper_name
+               boundary.Keeper_chat_queue.unresolved_count
+               (Keeper_chat_queue.Receipt_id.to_string
+                  boundary.earliest.receipt_id)
+               boundary.earliest.lease_id)
+          recovery_boundary;
         let admission =
           Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
         in

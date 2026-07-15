@@ -2755,68 +2755,83 @@ let inflight_count ~keeper_name =
         | Some error -> Error (Snapshot_unavailable error)
         | None -> Ok (if Option.is_some entry.inflight then 1 else 0))
 
-let has_active_receipts ~keeper_name =
-  match mutation_context ~keeper_name ~create:false with
-  | Error _ as error -> error
-  | Ok (_, _, None) -> Ok false
-  | Ok (_, _, Some entry) ->
-    with_entry_lock keeper_name entry (fun () ->
-        match first_blocking_error entry with
-        | Some error -> Error (Snapshot_unavailable error)
-        | None ->
-          Ok
-            (entry.pending_count > 0
-             || Option.is_some entry.inflight
-             || not (Sequence_map.is_empty entry.recovery_required)))
+type recovery_boundary =
+  { earliest : recovery_evidence
+  ; unresolved_count : int
+  }
 
-type lane_health =
-  | Ready
-  | Persistence_reconciliation_required
-  | Delivery_recovery_required of
-      { receipt_id : Receipt_id.t
-      ; lease_id : string
-      ; started_at : float
+type dispatch_state =
+  | Idle
+  | Dispatchable of recovery_boundary option
+  | Lease_inflight of
+      { lease_id : string
+      ; crossed_recovery_boundary : recovery_boundary option
       }
+  | Awaiting_recovery of recovery_boundary
+
+type lane_state =
+  | Available of dispatch_state
+  | Persistence_reconciliation_required
   | Unavailable of snapshot_load_error
 
 type lane_status = {
   revision : int64;
-  has_active : bool;
-  health : lane_health;
+  state : lane_state;
 }
+
+let recovery_boundary entry =
+  match Sequence_map.min_binding_opt entry.recovery_required with
+  | None -> Ok None
+  | Some (_, row) ->
+    recovery_evidence_of_row row
+    |> Result.map (fun earliest ->
+      Some
+        { earliest
+        ; unresolved_count = Sequence_map.cardinal entry.recovery_required
+        })
 
 let lane_status ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error _ as error -> error
-  | Ok (_, _, None) ->
-    Ok { revision = 0L; has_active = false; health = Ready }
+  | Ok (_, _, None) -> Ok { revision = 0L; state = Available Idle }
   | Ok (_, _, Some entry) ->
     with_entry_lock keeper_name entry (fun () ->
-        let health =
+        let state =
           match entry.reconciliation_plan, entry.load_errors with
           | Some _, _ -> Persistence_reconciliation_required
           | None, error :: _ -> Unavailable error
           | None, [] ->
-            if entry.pending_count > 0 || Option.is_some entry.inflight
-            then Ready
+            if entry.pending_count <> Sequence_map.cardinal entry.pending
+            then
+              Unavailable
+                (load_error Parse_failed
+                   "pending receipt count disagrees with the FIFO projection")
             else
-              (match Sequence_map.min_binding_opt entry.recovery_required with
-               | None -> Ready
-               | Some (_, row) ->
-                 (match recovery_evidence_of_row row with
-                  | Ok { receipt_id; lease_id; started_at } ->
-                    Delivery_recovery_required { receipt_id; lease_id; started_at }
-                  | Error detail ->
-                    Unavailable (load_error Parse_failed detail)))
+              (match recovery_boundary entry with
+               | Error detail -> Unavailable (load_error Parse_failed detail)
+               | Ok boundary ->
+                 (match entry.inflight with
+                  | Some
+                      { receipt = { state = Stored_inflight { lease_id; _ }; _ }
+                      ; _
+                      } ->
+                    Available
+                      (Lease_inflight
+                         { lease_id
+                         ; crossed_recovery_boundary = boundary
+                         })
+                  | Some _ ->
+                    Unavailable
+                      (load_error Parse_failed
+                         "inflight index contains a non-inflight receipt")
+                  | None when entry.pending_count > 0 ->
+                    Available (Dispatchable boundary)
+                  | None ->
+                    (match boundary with
+                     | None -> Available Idle
+                     | Some boundary -> Available (Awaiting_recovery boundary))))
         in
-        Ok
-          { revision = entry.revision
-          ; has_active =
-              entry.pending_count > 0
-              || Option.is_some entry.inflight
-              || not (Sequence_map.is_empty entry.recovery_required)
-          ; health
-          })
+        Ok { revision = entry.revision; state })
 
 let active_receipt_of_row row =
   match row.receipt.state with

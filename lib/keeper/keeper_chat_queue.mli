@@ -286,26 +286,37 @@ val nack :
 
 val pending_count : keeper_name:string -> (int, mutation_error) result
 val inflight_count : keeper_name:string -> (int, mutation_error) result
-val has_active_receipts : keeper_name:string -> (bool, mutation_error) result
 
-type lane_health =
-  | Ready
-  | Persistence_reconciliation_required
-  | Delivery_recovery_required of
-      { receipt_id : Receipt_id.t
-      ; lease_id : string
-      ; started_at : float
+type recovery_boundary =
+  { earliest : recovery_evidence
+  ; unresolved_count : int
+  }
+
+type dispatch_state =
+  | Idle
+  | Dispatchable of recovery_boundary option
+  | Lease_inflight of
+      { lease_id : string
+      ; crossed_recovery_boundary : recovery_boundary option
       }
+  | Awaiting_recovery of recovery_boundary
+
+type lane_state =
+  | Available of dispatch_state
+  | Persistence_reconciliation_required
   | Unavailable of snapshot_load_error
 
 type lane_status = {
   revision : int64;
-  has_active : bool;
-  health : lane_health;
+  state : lane_state;
 }
 
-(** O(1), memory-only hot-path projection. Consumers should use this instead
-    of materializing [snapshot] before [lease_next]. *)
+(** Memory-only hot-path SSOT. [Dispatchable] and [Lease_inflight] are the
+    only states that require autonomous execution to yield to chat work.
+    [Awaiting_recovery] retains the earliest exact crash boundary and its
+    cardinality without turning evidence into an execution lease. Consumers
+    should use this closed sum instead of materializing [snapshot] or inferring
+    dispatchability from receipt counts. *)
 val lane_status : keeper_name:string -> (lane_status, mutation_error) result
 
 val snapshot : keeper_name:string -> diagnostic_snapshot

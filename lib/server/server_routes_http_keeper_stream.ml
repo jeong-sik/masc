@@ -187,12 +187,16 @@ let dashboard_busy_queue_state ~base_path ~keeper_name =
     else
       match Keeper_chat_queue.lane_status ~keeper_name with
       | Error _ -> true
-      | Ok { has_active; health = Keeper_chat_queue.Ready; _ } -> has_active
+      | Ok { state = Keeper_chat_queue.Available Keeper_chat_queue.Idle; _ } ->
+        false
       | Ok
-          { health =
-              ( Keeper_chat_queue.Persistence_reconciliation_required
-              | Keeper_chat_queue.Delivery_recovery_required _
-              | Keeper_chat_queue.Unavailable _ )
+          { state =
+              Keeper_chat_queue.Available
+                ( Keeper_chat_queue.Dispatchable _
+                | Keeper_chat_queue.Lease_inflight _
+                | Keeper_chat_queue.Awaiting_recovery _ )
+              | Keeper_chat_queue.Persistence_reconciliation_required
+              | Keeper_chat_queue.Unavailable _
           ; _
           } ->
         true
@@ -209,8 +213,10 @@ let dashboard_deferred_ack_text ~keeper_name deferred =
     Printf.sprintf
       "%s accepted your message durably (receipt_id=%s, pending_count=%d, \
        inflight_count=%d, recovery_required_count=%d). This Keeper lane has an \
-       earlier delivery whose external effect is unconfirmed; it will remain \
-       non-dispatchable until an operator resolves that exact receipt."
+       earlier delivery whose external effect is unconfirmed. That exact \
+       receipt remains isolated as recovery evidence and is never guessed or \
+       replayed; this new receipt may proceed across the recorded ordering \
+       boundary."
       keeper_name
       deferred.receipt_id
       deferred.pending_count

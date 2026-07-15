@@ -201,7 +201,9 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
     "Test 1c: run_chat_if_free rechecks durable receipts after a stale outer peek\n%!";
   check
     "outer precheck initially observes no active receipt"
-    (Keeper_chat_queue.has_active_receipts ~keeper_name = Ok false);
+    (match Keeper_chat_queue.lane_status ~keeper_name with
+     | Ok { state = Available Idle; _ } -> true
+     | Ok _ | Error _ -> false);
   let message : Keeper_chat_queue.queued_message =
     { content = "queued first"
     ; user_blocks = []
@@ -615,6 +617,63 @@ let test_autonomous_yields_to_queued_connector_message () =
   | `Ran _ | `Busy _ -> check "run_if_free admits again once the queue is drained" false
 ;;
 
+let test_recovery_evidence_does_not_close_autonomous_lane () =
+  reset ();
+  Printf.printf
+    "Test 10a: recovery evidence does not close autonomous execution\n%!";
+  let first =
+    match Keeper_chat_queue.enqueue ~keeper_name queued_message with
+    | Ok receipt -> receipt
+    | Error error ->
+      failwith (Keeper_chat_queue.mutation_error_to_string error)
+  in
+  (match Keeper_chat_queue.lease_next ~keeper_name with
+    | `Leased _ -> ()
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+      failwith "expected first chat lease");
+  Keeper_chat_queue.For_testing.reset ();
+  let report = Keeper_chat_queue.configure_persistence ~base_path in
+  check "restart preserves one recovery boundary"
+    (report.load_errors = [] && report.recovery_required_receipt_count = 1);
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "open") with
+   | `Ran "open" ->
+     check "recovery-only evidence leaves autonomous execution open" true
+   | `Ran _ | `Busy _ ->
+     check "recovery-only evidence leaves autonomous execution open" false);
+  (match Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy _ ->
+     check "direct chat is routed through the durable recovery boundary" true
+   | `Ran () ->
+     check "direct chat cannot overtake recovery evidence without a receipt" false);
+  let second =
+    match Keeper_chat_queue.enqueue ~keeper_name queued_message with
+    | Ok receipt -> receipt
+    | Error error ->
+      failwith (Keeper_chat_queue.mutation_error_to_string error)
+  in
+  (match Keeper_chat_queue.lane_status ~keeper_name with
+   | Ok
+       { state =
+           Available
+             (Dispatchable
+                (Some { earliest; unresolved_count = 1 }))
+       ; _
+       } ->
+     check "later work names the recovery boundary it will cross"
+       (Keeper_chat_queue.Receipt_id.equal earliest.receipt_id first.receipt_id)
+   | Ok _ | Error _ ->
+     check "later work names the recovery boundary it will cross" false);
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy _ -> check "dispatchable chat work receives autonomous priority" true
+   | `Ran () -> check "autonomous work cannot overtake dispatchable chat" false);
+  match Keeper_chat_queue.lease_next ~keeper_name with
+  | `Leased lease ->
+    check "later receipt crosses the boundary under its own lease"
+      (Keeper_chat_queue.Receipt_id.equal lease.item.receipt_id second.receipt_id)
+  | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+    check "later receipt crosses the boundary under its own lease" false
+;;
+
 let test_shutdown_reservation_fences_and_rolls_back () =
   reset ();
   Printf.printf "Test 11: shutdown reservation fences every turn lane\n%!";
@@ -740,6 +799,7 @@ let () =
   test_autonomous_yields_to_parked_chat ();
   test_idle_loop_yields_to_parked_chat ();
   test_autonomous_yields_to_queued_connector_message ();
+  test_recovery_evidence_does_not_close_autonomous_lane ();
   test_shutdown_reservation_fences_and_rolls_back ();
   test_shutdown_reservation_restores_durable_owner ();
   if !failures > 0

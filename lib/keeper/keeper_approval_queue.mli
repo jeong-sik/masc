@@ -128,7 +128,6 @@ module For_testing : sig
     after_load:(unit -> unit) ->
     (install_report, install_error) result
   val pending_store_path : base_path:string -> string
-  val always_allowed_store_path : base_path:string -> string
 end
 
 (** {1 Nonblocking submission and explicit resolution} *)

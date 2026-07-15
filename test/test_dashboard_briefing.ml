@@ -70,7 +70,7 @@ let write_pending_confirm config _session_id =
             ("target_type", `String "keeper");
             ("target_id", `String "fixture-keeper");
             ("payload", `Assoc [ ("reason", `String "fixture pending confirmation") ]);
-            ("delegated_tool", `String "masc_keeper_msg");
+            ("delegated_tool", `String "masc_keeper_delegate");
             ("created_at", `String (Masc_domain.now_iso ()));
             ("expires_at", `Null);
           ];

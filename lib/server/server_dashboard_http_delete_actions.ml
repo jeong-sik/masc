@@ -379,8 +379,6 @@ let keeper_artifact_path config keeper_name artifact =
     Some (Keeper_types_support.keeper_decision_log_path config keeper_name)
   | Keeper_feedback_log_artifact ->
     Some (Keeper_types_support.keeper_feedback_log_path config keeper_name)
-  | Keeper_dataset_export_artifact ->
-    Some (Keeper_types_support.keeper_dataset_export_path config keeper_name)
   | Keeper_runtime_directory_artifact ->
     Some (Filename.concat (Keeper_fs.keeper_dir config) keeper_name)
   | Keeper_configuration_artifact ->
@@ -424,7 +422,6 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_policy_log_artifact
                | Keeper_decision_log_artifact
                | Keeper_feedback_log_artifact
-               | Keeper_dataset_export_artifact
                | Keeper_configuration_artifact
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug

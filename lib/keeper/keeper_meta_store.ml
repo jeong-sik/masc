@@ -42,25 +42,8 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
          Error e))
 ;;
 
-(** Sidecar stem suffixes (without the trailing .json).
-    A file like [sangsu.dataset.json] has stem [sangsu.dataset]; stripping
-    [.json] and checking [String.ends_with ~suffix] on this stem filters
-    sidecars while allowing keeper names that contain dots (e.g.
-    [dot.name.json]). When adding a new sidecar kind, add its dot-prefixed
-    suffix here. *)
-let keeper_sidecar_stem_suffixes = [ ".dataset" ]
-
 let is_keeper_meta_file f =
-  if not (Filename.check_suffix f ".json")
-  then false
-  else (
-    let stem = Filename.chop_suffix f ".json" in
-    stem <> ""
-    && not
-         (List.exists
-            (fun suf ->
-               String.length stem > String.length suf && String.ends_with ~suffix:suf stem)
-            keeper_sidecar_stem_suffixes))
+  Option.is_some (Keeper_runtime_root_entry.metadata_keeper_name f)
 ;;
 
 let persisted_keeper_names_result config =
@@ -75,8 +58,7 @@ let persisted_keeper_names_result config =
   | Ok files ->
     Ok
       (files
-       |> List.filter is_keeper_meta_file
-       |> List.map Filename.remove_extension
+       |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
        |> List.filter validate_name
        |> List.sort String.compare)
 ;;
@@ -106,7 +88,8 @@ let keeper_names config =
      JSON files are scoped to the server's base_path, so test isolation works.
      Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
      JSON at boot by load_or_materialize_boot_meta, so they appear here too.
-     Sidecar files (.dataset) are filtered by is_keeper_meta_file. *)
+     Every canonical root [.json] is metadata authority; retired dataset
+     exports no longer compete for the same basename. *)
   match keeper_names_result config with
   | Ok names -> names
   | Error msg ->

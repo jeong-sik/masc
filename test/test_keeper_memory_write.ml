@@ -2,6 +2,7 @@
 
 module Runtime = Masc.Keeper_tool_memory_runtime
 module Bank = Masc.Keeper_memory_bank
+module Work_request = Masc.Keeper_memory_work_request
 
 let make_args ~kind ~title ~content =
   `Assoc
@@ -200,6 +201,56 @@ let test_source_round_trip () =
     (Bank.memory_row_source_of_string wire = source)
 ;;
 
+let test_memory_work_request_strict_round_trip () =
+  let meta = make_meta "durable-memory-work" in
+  let librarian_message =
+    let message =
+      Agent_sdk.Types.text_message Agent_sdk.Types.User "remember this"
+    in
+    { message with metadata = [ "source", `String "memory-lane-test" ] }
+  in
+  let request =
+    Work_request.make
+      ~keeper_name:meta.name
+      ~generation:meta.runtime.generation
+      ~turn:8
+      ~runtime_id:"runtime.memory"
+      ~meta
+      ~tool_results:[ `Assoc [ "kind", `String "typed-tool-result" ] ]
+      ~librarian_messages:[ librarian_message ]
+      ~deliberation_execution:None
+    |> Result.get_ok
+  in
+  let encoded = Work_request.to_json request in
+  let decoded = Work_request.of_json encoded |> Result.get_ok in
+  Alcotest.(check string)
+    "content-derived identity round trips"
+    (Work_request.request_id request)
+    (Work_request.request_id decoded);
+  Alcotest.(check string) "keeper identity" meta.name (Work_request.keeper_name decoded);
+  let decoded_messages = Work_request.librarian_messages decoded in
+  Alcotest.(check int) "one message" 1 (List.length decoded_messages);
+  Alcotest.(check int)
+    "message metadata preserved"
+    1
+    (List.length (List.hd decoded_messages).metadata);
+  let tampered =
+    match encoded with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "request_id"
+              then name, `String "tampered"
+              else name, value)
+           fields)
+    | _ -> Alcotest.fail "request encoding must be an object"
+  in
+  match Work_request.of_json tampered with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "tampered request identity was accepted"
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -220,6 +271,10 @@ let () =
             `Quick
             test_tool_write_persists_typed_provenance
         ; Alcotest.test_case "source round trips" `Quick test_source_round_trip
+        ; Alcotest.test_case
+            "durable work request strict round trip"
+            `Quick
+            test_memory_work_request_strict_round_trip
         ] )
     ]
 ;;

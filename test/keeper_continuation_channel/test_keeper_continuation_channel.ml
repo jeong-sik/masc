@@ -2,7 +2,7 @@
 
    Covers the closed-variant contract:
      - codec round-trips for every constructor,
-     - fail-closed parsing (unknown kind / missing field / non-object -> Error),
+     - fail-closed parsing (unknown kind / missing or malformed field / legacy alias -> Error),
      - the routing helpers (is_routable, kind_label, same_route). *)
 
 open Keeper_continuation_channel
@@ -46,6 +46,63 @@ let test_missing_field_is_error () =
   (* discord requires user_id *)
   expect_error "missing discord user_id"
     (`Assoc [ ("kind", `String "discord"); ("channel_id", `String "C") ])
+
+let test_optional_route_coordinates_are_strict () =
+  List.iter
+    (fun (label, json) -> expect_error label json)
+    [ ( "discord guild_id wrong type"
+      , `Assoc
+          [ "kind", `String "discord"
+          ; "channel_id", `String "C"
+          ; "user_id", `String "U"
+          ; "guild_id", `Int 1
+          ] )
+    ; ( "discord parent_channel_id wrong type"
+      , `Assoc
+          [ "kind", `String "discord"
+          ; "channel_id", `String "C"
+          ; "user_id", `String "U"
+          ; "parent_channel_id", `Bool true
+          ] )
+    ; ( "discord thread_id wrong type"
+      , `Assoc
+          [ "kind", `String "discord"
+          ; "channel_id", `String "C"
+          ; "user_id", `String "U"
+          ; "thread_id", `List []
+          ] )
+    ; ( "slack team_id wrong type"
+      , `Assoc
+          [ "kind", `String "slack"
+          ; "channel_id", `String "C"
+          ; "user_id", `String "U"
+          ; "team_id", `Assoc []
+          ] )
+    ; ( "slack thread_ts wrong type"
+      , `Assoc
+          [ "kind", `String "slack"
+          ; "channel_id", `String "C"
+          ; "user_id", `String "U"
+          ; "thread_ts", `Float 1.0
+          ] )
+    ]
+
+let test_slack_legacy_channel_alias_is_rejected () =
+  expect_error
+    "legacy channel alias"
+    (`Assoc
+       [ "kind", `String "slack"
+       ; "channel", `String "C"
+       ; "user_id", `String "U"
+       ]);
+  expect_error
+    "invalid channel_id is not masked by alias"
+    (`Assoc
+       [ "kind", `String "slack"
+       ; "channel_id", `Int 1
+       ; "channel", `String "C"
+       ; "user_id", `String "U"
+       ])
 
 let test_missing_kind_is_error () =
   expect_error "missing kind" (`Assoc [ ("thread_id", `String "t") ])
@@ -146,6 +203,8 @@ let () =
   test_codec_roundtrip ();
   test_unknown_kind_is_error ();
   test_missing_field_is_error ();
+  test_optional_route_coordinates_are_strict ();
+  test_slack_legacy_channel_alias_is_rejected ();
   test_missing_kind_is_error ();
   test_non_object_is_error ();
   test_is_routable ();

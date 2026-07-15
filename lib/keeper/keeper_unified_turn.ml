@@ -21,6 +21,7 @@ include Keeper_unified_turn_phase_plan
 
 type source_lease_disposition =
   | Follow_failure_route
+  | Requeue_after_context_compaction
   | Acknowledge_after_in_turn_handling
 
 type turn_failure =
@@ -120,6 +121,103 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
       ; "This edit grants no authorization. Treat the edited input as operator guidance; any external effect follows the ordinary Gate independently."
       ]
   | None -> user_message
+;;
+
+let recover_provider_context_overflow_in_lane
+      ~(config : Workspace.config)
+      ~base_dir
+      ~(meta : keeper_meta)
+      ~primary_model_max_tokens
+      error
+  =
+  match context_overflow_event_of_error error with
+  | None -> Follow_failure_route
+  | Some
+      ((Keeper_state_machine.Context_overflow_detected { limit_tokens }) as
+       overflow_event) ->
+    let origin = Keeper_registry.Post_turn_lifecycle in
+    let dispatch stage event =
+      match
+        dispatch_keeper_phase_event_result
+          ~config
+          ~origin
+          ~keeper_name:meta.name
+          event
+      with
+      | Ok () -> Ok ()
+      | Error error ->
+        let detail = lifecycle_dispatch_error_to_string error in
+        Log.Keeper.error
+          ~keeper_name:meta.name
+          "provider overflow recovery lifecycle rejected stage=%s: %s"
+          stage
+          detail;
+        Error detail
+    in
+    let release_failed_lifecycle reason =
+      match
+        dispatch
+          "compaction_failed"
+          (Keeper_state_machine.Compaction_failed { reason })
+      with
+      | Ok () -> ()
+      | Error detail ->
+        Log.Keeper.error
+          ~keeper_name:meta.name
+          "provider overflow recovery could not release compaction lifecycle: %s"
+          detail
+    in
+    let fail reason =
+      record_overflow_failure ~config ~meta ~reason;
+      release_failed_lifecycle reason
+    in
+    (match dispatch "context_overflow_detected" overflow_event with
+     | Error _ -> ()
+     | Ok () ->
+       (match dispatch "compaction_started" Keeper_state_machine.Compaction_started with
+        | Error detail -> release_failed_lifecycle detail
+        | Ok () ->
+          (try
+             match
+               recover_latest_checkpoint_for_overflow_retry
+                 ~base_dir
+                 ~meta
+                 ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens })
+                 ~primary_model_max_tokens
+             with
+             | Error error ->
+               fail (Keeper_post_turn.compaction_recovery_error_to_string error)
+             | Ok _ ->
+               (match
+                  dispatch_compaction_completed
+                    ~config
+                    ~origin
+                    ~keeper_name:meta.name
+                with
+                | Ok () ->
+                  Log.Keeper.info
+                    ~keeper_name:meta.name
+                    "provider overflow compaction committed; source stimulus will be requeued"
+                | Error error -> fail (lifecycle_dispatch_error_to_string error))
+           with
+           | Eio.Cancel.Cancelled _ as exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             Eio.Cancel.protect (fun () ->
+               try release_failed_lifecycle "provider overflow compaction cancelled" with
+               | cleanup_exn ->
+                 Log.Keeper.error
+                   ~keeper_name:meta.name
+                   "provider overflow cancellation cleanup failed: %s"
+                   (Printexc.to_string cleanup_exn));
+             Printexc.raise_with_backtrace exn backtrace
+           | exn -> fail (Printexc.to_string exn))));
+    Requeue_after_context_compaction
+  | Some event ->
+    Log.Keeper.error
+      ~keeper_name:meta.name
+      "context overflow classifier returned a non-overflow event: %s"
+      (Keeper_state_machine.event_to_string event);
+    Follow_failure_route
 ;;
 
 let run_keeper_cycle
@@ -860,11 +958,23 @@ dominant source of the observed CAS race exhaustion after
                       ~boundary:Keeper_runtime_failure_route.Oas_execution
                       err
                   in
+                  let source_lease_disposition =
+                    (* The checkpoint helper reports [Ok] only after the
+                       compacted checkpoint is durably saved. The heartbeat
+                       settles the owning lease after this cycle returns, so
+                       no source stimulus is acknowledged ahead of it. *)
+                    recover_provider_context_overflow_in_lane
+                      ~config
+                      ~base_dir
+                      ~meta
+                      ~primary_model_max_tokens:final_execution.max_context
+                      err
+                  in
                   exact_failure_execution :=
                     Some
                       ( final_execution.runtime_id
                       , failure_route
-                      , Follow_failure_route );
+                      , source_lease_disposition );
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string FailureRoute)
                     ~labels:

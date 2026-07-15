@@ -53,6 +53,22 @@ val configure_oas_model_catalog_env :
   unit ->
   model_catalog_env_resolution option
 
+val configure_oas_model_catalog_overlay :
+  ?config_root:string ->
+  ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
+  ?set_overlay:(Llm_provider.Model_catalog.t -> unit) ->
+  unit ->
+  string option
+(** Install the deployment capability overlay (RFC-0342 D1 / RFC-OAS-036).
+    Resolves config-root [oas-models-overlay.toml] only; there is no parent
+    or env fallback. When present, the parsed overlay is installed with
+    [Model_catalog.set_global_overlay], so [Model_catalog.global] serves the
+    embedded catalog merged with the deployment's delta rows. A full catalog
+    resolved by {!configure_oas_model_catalog_env} keeps replacement
+    precedence over the overlay. Returns the installed overlay path. An
+    unreadable or invalid overlay raises [Env_config_core.Config_error]
+    (fail-loud at boot, same as the full-catalog path). *)
+
 (** {1 Runtime Context}
 
     Extracts Eio resources from the standard environment.

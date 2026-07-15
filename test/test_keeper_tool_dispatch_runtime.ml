@@ -2207,15 +2207,15 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
         List.iter (check string "repeated failures stay byte-identical" first) rest
       | [] -> fail "expected dispatch outputs")
 
-let keeper_msg_input_schema () =
+let keeper_delegate_input_schema () =
   match
     List.find_opt
       (fun (schema : Masc_domain.tool_schema) ->
-        String.equal schema.name "masc_keeper_msg")
+        String.equal schema.name "masc_keeper_delegate")
       Masc.Keeper_schema.schemas
   with
   | Some schema -> schema.input_schema
-  | None -> fail "masc_keeper_msg schema missing"
+  | None -> fail "masc_keeper_delegate schema missing"
 
 let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
   let dir = temp_dir "oas-handler-eio-context" in
@@ -2262,7 +2262,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
                  ?sw ?clock ?proc_mgr:_ ?net:_ ?mcp_session_id:_
                  ?authorize_external_effect:_
                  ~name ~args:_ () ->
-              check string "keeper dispatch tool" "masc_keeper_msg" name;
+              check string "keeper dispatch tool" "masc_keeper_delegate" name;
               Atomic.set saw_turn_sw
                 (match sw with Some sw -> sw == turn_sw | None -> false);
               Atomic.set saw_clock (Option.is_some clock);
@@ -2270,11 +2270,11 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
                 (observed_provider == publication_recovery.provider);
               Some
                 (Tool_result.ok ~tool_name:name ~start_time:0.0
-                   "{\"ok\":true,\"request_id\":\"test-request\"}"));
+                   "{\"ok\":true,\"run_ref\":{\"run_id\":\"test-run\"}}"));
           let handler =
             Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
-              ~name:"masc_keeper_msg"
-              ~input_schema:(keeper_msg_input_schema ())
+              ~name:"masc_keeper_delegate"
+              ~input_schema:(keeper_delegate_input_schema ())
               ~config
               ~meta
               ~publication_recovery
@@ -2285,9 +2285,13 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
           let result =
             handler
               (`Assoc
-                [
-                  ("name", `String "keeper-target");
-                  ("message", `String "hello");
+                [ ( "target"
+                  , `Assoc
+                      [ "kind", `String "keeper"
+                      ; "name", `String "keeper-target"
+                      ] )
+                ; "capability", `String "invoke_turn"
+                ; "prompt", `String "hello"
                 ])
           in
           check bool "handler succeeds" true (Tool_result.is_success result);

@@ -26,7 +26,11 @@ let ensure_api_keys_for_labels (_labels : string list) : (unit, string) result =
 
 (** Single-file metrics path kept for fallback reads. *)
 let keeper_metrics_path config name =
-  Filename.concat (keeper_dir_ config) (name ^ ".metrics.jsonl")
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Metrics_log)
 
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
@@ -194,10 +198,18 @@ let prune_keeper_raw_trace_turn_files config name =
   end
 
 let keeper_memory_bank_path config name =
-  Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Memory_log)
 
 let keeper_generation_index_path config name =
-  Filename.concat (keeper_dir_ config) (name ^ ".generation_index.jsonl")
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Generation_index_log)
 
 let keeper_session_dir config trace_id =
   Filename.concat (session_base_dir_ config) trace_id
@@ -223,25 +235,42 @@ let is_internal_history_source (source : string) =
   | _ -> false
 
 let keeper_policy_log_path config name =
-  Filename.concat (keeper_dir_ config) (name ^ ".policy.jsonl")
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Policy_log)
 
 let keeper_decision_log_path config name =
-  Filename.concat (keeper_dir_ config) (name ^ ".decisions.jsonl")
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Decision_log)
 
 let keeper_feedback_log_path config name =
-  Filename.concat (keeper_dir_ config) (name ^ ".feedback.jsonl")
-
-let keeper_dataset_export_path config name =
-  Filename.concat (keeper_dir_ config) (name ^ ".dataset.json")
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Feedback_log)
 
 let keeper_alerts_path config =
-  Filename.concat (keeper_dir_ config) "_alerts.jsonl"
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.global_basename Keeper_runtime_root_entry.Alerts_log)
 
 let keeper_alert_retry_path config =
-  Filename.concat (keeper_dir_ config) "_alerts.retry.jsonl"
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.global_basename
+       Keeper_runtime_root_entry.Alerts_retry_log)
 
 let keeper_alert_deadletter_path config =
-  Filename.concat (keeper_dir_ config) "_alerts.deadletter.jsonl"
+  Filename.concat
+    (keeper_dir_ config)
+    (Keeper_runtime_root_entry.global_basename
+       Keeper_runtime_root_entry.Alerts_deadletter_log)
 
 (** Rotate [path] if it exceeds the configured size threshold.
     Keeps at most [max_rotated] numbered backups (.1, .2, ...). *)

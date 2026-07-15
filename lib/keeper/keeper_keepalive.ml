@@ -67,7 +67,11 @@ let persist_directive_meta_update
       ~(updated_meta : keeper_meta)
   : (unit, string) result
   =
-  let keeper_filename = entry.name ^ ".json" in
+  let keeper_filename =
+    Keeper_runtime_root_entry.keeper_basename
+      ~keeper_name:entry.name
+      Keeper_runtime_root_entry.Metadata
+  in
   let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
   let default_path =
     Filename.concat (Filename.concat masc_root "keepers") keeper_filename

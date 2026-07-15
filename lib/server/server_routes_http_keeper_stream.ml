@@ -563,13 +563,13 @@ let execute_keeper_stream_tool
         }
       in
       match
-        Keeper_tool_surface.dispatch
+        Keeper_tool_surface.dispatch_keeper_msg
+          ~submitted_by:agent_name
           ~continuation_channel
           keeper_ctx
-          ~name:"masc_keeper_msg"
           ~args:arguments
       with
-      | Some result ->
+      | result ->
           let success = Tool_result.is_success result in
           let body = Tool_result.message result in
           let failure_class =
@@ -578,7 +578,6 @@ let execute_keeper_stream_tool
             | None -> Tool_result.Runtime_failure
           in
           success, body, failure_class
-      | None -> false, "masc_keeper_msg dispatch unavailable", Tool_result.Runtime_failure
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Workspace.Not_initialized ->
@@ -813,7 +812,7 @@ let keeper_stream_send_event ?on_closed writer mutex closed event =
   keeper_stream_send_raw ?on_closed writer mutex closed (Ag_ui.event_to_sse event)
 
 (** Execute keeper dispatch with real-time streaming.
-    Calls [dispatch_stream] which forwards MODEL text deltas to [on_text_delta].
+    Calls the private direct-delivery stream which forwards MODEL text deltas to [on_text_delta].
     Projects the typed keeper result into the local HTTP stream response pair.
     No external timeout — keeper internal limits control duration
     (aligned with MCP path, see mcp_server_eio_call_tool.ml:139-143). *)
@@ -848,13 +847,12 @@ let execute_keeper_stream_tool_streaming
         }
       in
       match
-        Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event
+        Keeper_tool_surface.dispatch_keeper_msg_stream ~on_text_delta ?on_event
           ~on_admission_rejected:(fun rejection ->
             admission_rejection := Some rejection)
           ?on_admitted
           keeper_ctx
           ~continuation_channel
-          ~name:"masc_keeper_msg"
           ~args:arguments
       with
       | Some result ->

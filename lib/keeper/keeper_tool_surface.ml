@@ -413,6 +413,11 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
 
 let should_bootstrap_existing_keepalives name args =
   match name with
+  | "masc_keeper_delegate" ->
+      (match Keeper_invocation_contract.request_of_json args with
+       | Ok request ->
+         not (String.equal (String.trim (Keeper_invocation_contract.prompt request)) "")
+       | Error _ -> false)
   | "masc_keeper_msg" ->
       not (String.equal (String.trim (get_string args "message" "")) "")
   | _ -> false
@@ -774,7 +779,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
 
-let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
@@ -785,18 +790,29 @@ let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
   | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
-  | "masc_keeper_msg" ->
+  | "masc_keeper_delegate" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (handle_keeper_msg
-              ?continuation_channel
+           (Keeper_tool_surface_ops.handle_keeper_delegate
               ~submitted_by:ctx.agent_name
               ctx
               args))
-  | "masc_keeper_msg_result" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_result ctx args))
-  | "masc_keeper_msg_cancel" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_cancel ctx args))
-  | "masc_keeper_msg_queue" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_queue ctx args))
+  | "masc_keeper_delegate_status" ->
+      Some
+        (tool_result_with_tool_name ~tool_name:name
+           (Keeper_tool_surface_ops.keeper_delegate_status_body
+              ~config:ctx.config ~caller:ctx.agent_name args))
+  | "masc_keeper_delegate_cancel" ->
+      Some
+        (tool_result_with_tool_name ~tool_name:name
+           (Keeper_tool_surface_ops.keeper_delegate_cancel_body
+              ~config:ctx.config ~caller:ctx.agent_name args))
+  | "masc_keeper_delegate_list" ->
+      Some
+        (tool_result_with_tool_name ~tool_name:name
+           (Keeper_tool_surface_ops.keeper_delegate_list_body
+              ~config:ctx.config ~caller:ctx.agent_name args))
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
   | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
   | "masc_keeper_persona_audit" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_persona_audit ctx args))
@@ -819,63 +835,53 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~args : tool_res
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx args)
 ;;
 
-(** Streaming dispatch: only handles keeper_msg with text delta forwarding.
-    Returns None for all other tool names.
-    Called from server_routes_http_keeper_stream. *)
-let dispatch_stream
+(** Private direct-delivery stream used by connector and dashboard adapters. *)
+let dispatch_keeper_msg_stream
       ?on_text_delta
       ?on_event
       ?continuation_channel
       ?on_admission_rejected
       ?on_admitted
       ctx
-      ~name
       ~args
   : tool_result option
   =
+  let name = "masc_keeper_msg" in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
-  match name with
-  | "masc_keeper_msg" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (handle_keeper_msg_stream
-              ?on_text_delta
-              ?on_event
-              ?continuation_channel
-              ?on_admission_rejected
-              ?on_admitted
-              ctx
-              args))
-  | _ -> None
+  Some
+    (tool_result_with_tool_name
+       ~tool_name:name
+       (handle_keeper_msg_stream
+          ?on_text_delta
+          ?on_event
+          ?continuation_channel
+          ?on_admission_rejected
+          ?on_admitted
+          ctx
+          args))
 
-let dispatch_stream_if_free
+let dispatch_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event
       ?continuation_channel
       ctx
-      ~name
       ~args
   =
+  let name = "masc_keeper_msg" in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
-  match name with
-  | "masc_keeper_msg" ->
-      (match
-         handle_keeper_msg_stream_if_free
-           ?on_text_delta
-           ?on_event
-           ?continuation_channel
-           ctx
-           args
-       with
-       | `Busy rejection -> `Busy rejection
-       | `Ran result ->
-         `Ran
-           (Some
-              (tool_result_with_tool_name ~tool_name:name result)))
-  | _ -> `Ran None
+  match
+    handle_keeper_msg_stream_if_free
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      args
+  with
+  | `Busy rejection -> `Busy rejection
+  | `Ran result ->
+    `Ran (Some (tool_result_with_tool_name ~tool_name:name result))
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -950,27 +956,27 @@ let () =
     match name with
     | "masc_keeper_list" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_list_body ~config args))
-    | "masc_keeper_msg_result" ->
+    | "masc_keeper_delegate_status" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_result_body
+           (Keeper_tool_surface_ops.keeper_delegate_status_body
               ~config
               ~caller:agent_name
               args))
-    | "masc_keeper_msg_cancel" ->
+    | "masc_keeper_delegate_cancel" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_cancel_body
+           (Keeper_tool_surface_ops.keeper_delegate_cancel_body
               ~config
               ~caller:agent_name
               args))
-    | "masc_keeper_msg_queue" ->
+    | "masc_keeper_delegate_list" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_queue_body
+           (Keeper_tool_surface_ops.keeper_delegate_list_body
               ~config
               ~caller:agent_name
               args))
@@ -1046,20 +1052,14 @@ let () =
     (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools.  Require both
        sw and clock from caller; gracefully fail when invoked from a
        path without Eio context. *)
-    | "masc_keeper_msg" ->
+    | "masc_keeper_delegate" ->
       (match sw, clock with
        | Some sw, Some clock ->
-         Some
-           (Keeper_tool_surface_ops.keeper_msg_body
-              ~config
-              ~agent_name
-              ~sw
-              ~clock
-              ~publication_recovery_provider
-              ?proc_mgr
-              ?net
-              args)
-       | _ -> eio_context_missing "masc_keeper_msg")
+         let ctx : _ Keeper_types_profile.context =
+           { config; agent_name; sw; clock; proc_mgr; net; publication_recovery_provider }
+         in
+         Some (Keeper_tool_surface_ops.handle_keeper_delegate ~submitted_by:agent_name ctx args)
+       | _ -> eio_context_missing "masc_keeper_delegate")
     | "masc_keeper_up" ->
       (match sw, clock with
        | Some sw, Some clock ->

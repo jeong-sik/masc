@@ -13,6 +13,7 @@ type error =
       }
   | Supersession_phase_mismatch of Keeper_shutdown_types.t
   | Supersession_intent_mismatch of Keeper_shutdown_types.t
+  | Supersession_safety_mismatch of Keeper_shutdown_types.t
   | Invalid_supersession_actor of string
 
 type persist_blocked_result =
@@ -69,6 +70,11 @@ let error_to_string = function
       operation.keeper_name
       (Operation_id.to_string operation.operation_id)
       (cleanup_reason_label operation.cleanup_intent.reason)
+  | Supersession_safety_mismatch operation ->
+    Printf.sprintf
+      "shutdown operation lacks durable clean-join evidence required for supersession: keeper=%s operation=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
   | Invalid_supersession_actor detail ->
     Printf.sprintf "shutdown supersession actor is invalid: %s" detail
 ;;
@@ -862,6 +868,7 @@ let contextualize_error operation_path = function
     | Revision_conflict _
     | Supersession_phase_mismatch _
     | Supersession_intent_mismatch _
+    | Supersession_safety_mismatch _
     | Invalid_supersession_actor _ ) as error ->
     error
 ;;
@@ -976,8 +983,10 @@ let prepare_operator_metadata_supersession
       ({ phase = Blocked _
        ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
        ; revision
-       ; _ } as _operation) ->
-    Ok { base_path; keeper_name; operation_id; expected_revision = revision; actor }
+       ; _ } as operation) ->
+    if Keeper_shutdown_types.eligible_for_operator_metadata_supersession operation
+    then Ok { base_path; keeper_name; operation_id; expected_revision = revision; actor }
+    else Error (Supersession_safety_mismatch operation)
   | Ok
       ({ phase = Superseded (Operator_metadata_update _)
        ; revision
@@ -1030,7 +1039,11 @@ let supersede_blocked_operator_stop ~config ~token ~now =
              ({ phase = Blocked _
               ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
               ; _ } as existing) ->
-           if not (Int.equal existing.revision token.expected_revision)
+           if not
+                (Keeper_shutdown_types.eligible_for_operator_metadata_supersession
+                   existing)
+           then Error (Supersession_safety_mismatch existing)
+           else if not (Int.equal existing.revision token.expected_revision)
            then
              Error
                (Revision_conflict
@@ -1043,6 +1056,7 @@ let supersede_blocked_operator_stop ~config ~token ~now =
                ; updated_at = now ()
                }
              in
+             let* () = validate_operation superseded in
              Keeper_fs.save_json_atomic operation_path (to_json superseded)
              |> Result.map_error (fun detail -> Io_error detail)
              |> Result.map (fun () -> Superseded_persisted superseded)

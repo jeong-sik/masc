@@ -282,7 +282,7 @@ let existing_operation_intent ~request operation =
   else Error (Existing_operation_intent_mismatch operation)
 ;;
 
-let submit ~config ~entry ~request =
+let submit_unlocked ~config ~entry ~request =
   match Keeper_shutdown_prepare_join.prepare ~config ~entry ~request with
   | Ok operation ->
     start_or_error ~config ~entry:(Some entry) operation
@@ -299,7 +299,14 @@ let submit ~config ~entry ~request =
   | Error error -> Error (Prepare_error error)
 ;;
 
-let submit_dormant ~config ~meta ~request =
+let submit ~config ~entry ~request =
+  Keeper_lifecycle_command_lock.with_lock
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:entry.name
+    (fun () -> submit_unlocked ~config ~entry ~request)
+;;
+
+let submit_dormant_unlocked ~config ~meta ~request =
   match Keeper_shutdown_prepare_join.prepare_dormant ~config ~meta ~request with
   | Ok operation -> start_or_error ~config ~entry:None operation
   | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
@@ -311,6 +318,13 @@ let submit_dormant ~config ~meta ~request =
         | Ok operation -> start_or_error ~config ~entry:None operation)
      | Ok operation -> Error (Existing_operation_lane_mismatch operation))
   | Error error -> Error (Prepare_error error)
+;;
+
+let submit_dormant ~config ~meta ~request =
+  Keeper_lifecycle_command_lock.with_lock
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:meta.name
+    (fun () -> submit_dormant_unlocked ~config ~meta ~request)
 ;;
 
 let recovered_join_state operation =

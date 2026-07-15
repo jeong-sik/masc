@@ -241,10 +241,15 @@ let with_keeper_startup_gate f =
     tool_result_error_data (startup_not_ready_error_data elapsed)
   end else
     f ()
-let execute_keeper_up ctx args : tool_result =
+let execute_keeper_up ?shutdown_supersession_authority ctx args : tool_result =
   match
     let* prepared_args, identity_reseed = prepare_keeper_up_identity ctx args in
-    let result = Turn.handle_keeper_up ctx prepared_args in
+    let result =
+      Turn.handle_keeper_up
+        ?shutdown_supersession_authority
+        ctx
+        prepared_args
+    in
     if not (tool_result_success result) then
       Ok result
     else
@@ -464,8 +469,9 @@ let handle_keeper_create_from_persona ctx args : tool_result =
     with
     | Ok result -> result
     | Error err -> tool_result_error err
-let handle_keeper_up ctx args : tool_result =
-  with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
+let handle_keeper_up ?shutdown_supersession_authority ctx args : tool_result =
+  with_keeper_startup_gate (fun () ->
+    execute_keeper_up ?shutdown_supersession_authority ctx args)
 
 (* RFC-0182 Phase 5 PR-B.2: ctx-free body for [masc_keeper_up].  Same
    pattern as [keeper_msg_body] — construct a fresh keeper context
@@ -480,6 +486,7 @@ let keeper_up_body
           Keeper_publication_recovery_availability.provider)
       ?proc_mgr
       ?net
+      ?shutdown_supersession_authority
       args : tool_result =
   let keeper_ctx : _ Keeper_types_profile.context =
     { config
@@ -491,7 +498,8 @@ let keeper_up_body
     ; publication_recovery_provider
     }
   in
-  with_keeper_startup_gate (fun () -> execute_keeper_up keeper_ctx args)
+  with_keeper_startup_gate (fun () ->
+    execute_keeper_up ?shutdown_supersession_authority keeper_ctx args)
 ;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =

@@ -19,6 +19,16 @@ val schemas : Masc_domain.tool_schema list
 val dispatch :
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
+(** Trusted Keeper-up path for an already authenticated operator route. It
+    preserves the ordinary startup gate, identity preparation, and cache
+    invalidation while carrying the opaque shutdown-supersession capability.
+    Generic MCP dispatch never receives this authority. *)
+val dispatch_operator_keeper_up :
+  authority:Keeper_shutdown_supersession.operator_authority ->
+  _ context ->
+  Yojson.Safe.t ->
+  tool_result
+
 (** Internal async-message entry point for adapters whose authenticated
     submission principal differs from the target turn's [ctx.agent_name].
     [submitted_by] is trusted boundary context, never model input. *)

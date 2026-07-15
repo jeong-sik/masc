@@ -3,11 +3,15 @@ type t =
   | Operator_metadata_update_token of
       Keeper_shutdown_store.operator_metadata_supersession_token
 
+type operator_authority = { actor : string }
+
 type committed =
   | No_shutdown_admission
   | Shutdown_superseded of Keeper_shutdown_types.t
 
 type error =
+  | Operator_authority_required
+  | Invalid_operator_authority of string
   | Preflight_failed of Keeper_shutdown_store.error
   | Multiple_durable_shutdown_operations of
       Keeper_shutdown_types.Operation_id.t list
@@ -16,6 +20,10 @@ type error =
       Keeper_shutdown_types.Operation_id.t
 
 let error_to_string = function
+  | Operator_authority_required ->
+    "keeper update cannot supersede an operator shutdown without authenticated operator authority"
+  | Invalid_operator_authority detail ->
+    "invalid authenticated operator authority: " ^ detail
   | Preflight_failed error ->
     Printf.sprintf
       "keeper update refused before metadata commit: %s"
@@ -36,7 +44,30 @@ let error_to_string = function
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
 ;;
 
-let preflight ~config ~keeper_name ~actor =
+let of_authenticated_dashboard_actor ~actor =
+  Workspace.validate_agent_name actor
+  |> Result.map (fun actor -> { actor })
+  |> Result.map_error (fun detail -> Invalid_operator_authority detail)
+;;
+
+let requires_supersession = function
+  | No_shutdown_admission_token -> false
+  | Operator_metadata_update_token _ -> true
+;;
+
+let prepare_with_authority ~config ~keeper_name ~operation_id = function
+  | None -> Error Operator_authority_required
+  | Some authority ->
+    Keeper_shutdown_store.prepare_operator_metadata_supersession
+      ~config
+      ~keeper_name
+      ~operation_id
+      ~actor:authority.actor
+    |> Result.map (fun token -> Operator_metadata_update_token token)
+    |> Result.map_error (fun error -> Preflight_failed error)
+;;
+
+let preflight ~config ~keeper_name ~authority =
   let snapshot =
     Keeper_turn_admission.snapshot_for
       ~base_path:config.Workspace.base_path
@@ -44,13 +75,7 @@ let preflight ~config ~keeper_name ~actor =
   in
   match snapshot.snapshot_shutdown_operation_id with
   | Some operation_id ->
-    Keeper_shutdown_store.prepare_operator_metadata_supersession
-      ~config
-      ~keeper_name
-      ~operation_id
-      ~actor
-    |> Result.map (fun token -> Operator_metadata_update_token token)
-    |> Result.map_error (fun error -> Preflight_failed error)
+    prepare_with_authority ~config ~keeper_name ~operation_id authority
   | None ->
     (match Keeper_shutdown_store.list_for_keeper ~config ~keeper_name with
      | Error error -> Error (Preflight_failed error)
@@ -63,13 +88,11 @@ let preflight ~config ~keeper_name ~actor =
        (match requiring_fence with
         | [] -> Ok No_shutdown_admission_token
         | [ operation ] ->
-          Keeper_shutdown_store.prepare_operator_metadata_supersession
+          prepare_with_authority
             ~config
             ~keeper_name
             ~operation_id:operation.operation_id
-            ~actor
-          |> Result.map (fun token -> Operator_metadata_update_token token)
-          |> Result.map_error (fun error -> Preflight_failed error)
+            authority
         | operations ->
           Error
             (Multiple_durable_shutdown_operations

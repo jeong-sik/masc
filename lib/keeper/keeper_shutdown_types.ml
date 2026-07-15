@@ -189,6 +189,9 @@ type invariant_error =
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
+  | Superseded_without_clean_join
+  | Superseded_with_session_removal
+  | Superseded_with_owned_tasks of Keeper_id.Task_id.t list
 
 let schema_version = 6
 
@@ -204,6 +207,46 @@ let requires_admission_fence operation =
   | Cleanup_ready _
   | Reconciliation_required _
   | Blocked _ -> true
+;;
+
+let has_clean_join_evidence operation =
+  match operation.turn_disposition, operation.join_evidence with
+  | ( No_inflight_turn
+    , Some
+        { lane_outcome = (Lane_completed | Lane_shutdown_requested | Lane_cancelled_by_parent _)
+        ; terminal = Terminal_stopped
+        ; cleanup_error = None
+        } ) ->
+    true
+  | ( No_inflight_turn
+    , Some { lane_outcome = Lane_failed _; terminal = _; cleanup_error = _ } )
+  | ( No_inflight_turn
+    , Some
+        { lane_outcome = _
+        ; terminal = Terminal_crashed _
+        ; cleanup_error = _
+        } )
+  | No_inflight_turn, Some { cleanup_error = Some _; _ }
+  | No_inflight_turn, None
+  | Inflight_effect_unknown _, _ ->
+    false
+;;
+
+let eligible_for_operator_metadata_supersession operation =
+  match operation.cleanup_intent, operation.owned_task_ids with
+  | { reason = Operator_stop_retain_meta; remove_session = false }, [] ->
+    has_clean_join_evidence operation
+  | ( { reason = Operator_stop_retain_meta; remove_session = (true | false) }
+    , owned_task_ids )
+  | ( { reason =
+          ( Operator_stop_remove_meta
+          | Dead_tombstone_cleanup
+          | Dashboard_keeper_purge _ )
+      ; remove_session = (true | false)
+      }
+    , owned_task_ids ) ->
+    ignore owned_task_ids;
+    false
 ;;
 
 let meta_disposition_to_string = function
@@ -295,6 +338,14 @@ let invariant_error_to_string = function
     Printf.sprintf
       "shutdown supersession requires operator_stop_retain_meta, actual=%s"
       (cleanup_reason_label cleanup_reason)
+  | Superseded_without_clean_join ->
+    "shutdown supersession requires no inflight turn and durable clean lane join evidence"
+  | Superseded_with_session_removal ->
+    "shutdown supersession cannot bypass a requested session removal"
+  | Superseded_with_owned_tasks task_ids ->
+    Printf.sprintf
+      "shutdown supersession cannot bypass cleanup for %d owned task(s)"
+      (List.length task_ids)
 ;;
 
 let validate operation =
@@ -360,7 +411,17 @@ let validate operation =
                 (operation.cleanup_intent.reason, completion)))
     | Superseded (Operator_metadata_update _) ->
       (match operation.cleanup_intent.reason with
-       | Operator_stop_retain_meta -> Ok ()
+       | Operator_stop_retain_meta ->
+         if operation.cleanup_intent.remove_session
+         then Error Superseded_with_session_removal
+         else
+           (match operation.owned_task_ids with
+            | _task_id :: _remaining_task_ids ->
+              Error (Superseded_with_owned_tasks operation.owned_task_ids)
+            | [] ->
+              if not (has_clean_join_evidence operation)
+              then Error Superseded_without_clean_join
+              else Ok ())
        | ( Operator_stop_remove_meta
          | Dead_tombstone_cleanup
          | Dashboard_keeper_purge _ ) as cleanup_reason ->

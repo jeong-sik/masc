@@ -1223,11 +1223,26 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
           ; detail = "operator repair required"
           }
       in
+      let clean_join_evidence : Shutdown_types.join_evidence =
+        { lane_outcome = Shutdown_types.Lane_shutdown_requested
+        ; terminal = Shutdown_types.Terminal_stopped
+        ; cleanup_error = None
+        }
+      in
+      let operator_authority =
+        match
+          Shutdown_supersession.of_authenticated_dashboard_actor ~actor:"tester"
+        with
+        | Ok authority -> authority
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
       let blocked =
-        operation
-          ~name:"superseded-keeper"
-          ~reason:Shutdown_types.Operator_stop_retain_meta
-          ~phase:blocked_phase
+        { (operation
+             ~name:"superseded-keeper"
+             ~reason:Shutdown_types.Operator_stop_retain_meta
+             ~phase:blocked_phase) with
+          join_evidence = Some clean_join_evidence
+        }
       in
       (match Shutdown_store.persist_new ~config blocked with
        | Ok () -> ()
@@ -1272,12 +1287,21 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
        | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
          fail "fixture admission was already reserved");
+      (match
+         Shutdown_supersession.preflight
+           ~config
+           ~keeper_name:blocked.keeper_name
+           ~authority:None
+       with
+       | Error Shutdown_supersession.Operator_authority_required -> ()
+       | Error error -> fail (Shutdown_supersession.error_to_string error)
+       | Ok _ -> fail "public keeper_up authority superseded an operator shutdown");
       let token =
         match
           Shutdown_supersession.preflight
             ~config
             ~keeper_name:blocked.keeper_name
-            ~actor:"tester"
+            ~authority:(Some operator_authority)
         with
         | Ok token -> token
         | Error error -> fail (Shutdown_supersession.error_to_string error)
@@ -1336,6 +1360,41 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
              (Shutdown_types.Superseded_cleanup_reason_mismatch _)) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "Superseded accepted a non-retained cleanup intent");
+      let invalid_session_superseded =
+        { superseded with
+          operation_id = Shutdown_types.Operation_id.generate ()
+        ; cleanup_intent =
+            { reason = Shutdown_types.Operator_stop_retain_meta
+            ; remove_session = true
+            }
+        }
+      in
+      (match Shutdown_store.persist_new ~config invalid_session_superseded with
+       | Error
+           (Shutdown_store.Invalid_operation
+             Shutdown_types.Superseded_with_session_removal) ->
+         ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "Superseded accepted a requested session removal");
+      let owned_task_id =
+        match Keeper_id.Task_id.of_string "task-partial-cleanup" with
+        | Ok task_id -> task_id
+        | Error detail -> fail detail
+      in
+      let invalid_task_superseded =
+        { superseded with
+          operation_id = Shutdown_types.Operation_id.generate ()
+        ; owned_task_ids = [ owned_task_id ]
+        }
+      in
+      (match Shutdown_store.persist_new ~config invalid_task_superseded with
+       | Error
+           (Shutdown_store.Invalid_operation
+             (Shutdown_types.Superseded_with_owned_tasks [ task_id ]))
+         when Keeper_id.Task_id.equal task_id owned_task_id ->
+         ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "Superseded accepted incomplete owned-task cleanup");
       (match
          superseded
          |> shutdown_schema5_fixture
@@ -1359,7 +1418,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
           Shutdown_supersession.preflight
             ~config
             ~keeper_name:blocked.keeper_name
-            ~actor:"tester"
+            ~authority:(Some operator_authority)
         with
         | Ok token -> token
         | Error error -> fail (Shutdown_supersession.error_to_string error)
@@ -1388,10 +1447,12 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Error detail -> fail detail);
 
       let conflict =
-        operation
-          ~name:"supersession-conflict"
-          ~reason:Shutdown_types.Operator_stop_retain_meta
-          ~phase:blocked_phase
+        { (operation
+             ~name:"supersession-conflict"
+             ~reason:Shutdown_types.Operator_stop_retain_meta
+             ~phase:blocked_phase) with
+          join_evidence = Some clean_join_evidence
+        }
       in
       (match Shutdown_store.persist_new ~config conflict with
        | Ok () -> ()
@@ -1407,7 +1468,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
           Shutdown_supersession.preflight
             ~config
             ~keeper_name:conflict.keeper_name
-            ~actor:"tester"
+            ~authority:(Some operator_authority)
         with
         | Ok token -> token
         | Error error -> fail (Shutdown_supersession.error_to_string error)
@@ -1452,6 +1513,165 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            Shutdown_types.Operation_id.to_string
            still_fenced.snapshot_shutdown_operation_id);
 
+      let unsafe_after_preflight =
+        { (operation
+             ~name:"supersession-join-regressed"
+             ~reason:Shutdown_types.Operator_stop_retain_meta
+             ~phase:blocked_phase) with
+          join_evidence = Some clean_join_evidence
+        }
+      in
+      (match Shutdown_store.persist_new ~config unsafe_after_preflight with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      ignore
+        (Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:unsafe_after_preflight.keeper_name
+           ~operation_id:unsafe_after_preflight.operation_id
+          : Masc.Keeper_turn_admission.begin_shutdown_result);
+      let unsafe_after_preflight_token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:unsafe_after_preflight.keeper_name
+            ~authority:(Some operator_authority)
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      let join_regressed =
+        { unsafe_after_preflight with
+          revision = unsafe_after_preflight.revision + 1
+        ; join_evidence = None
+        }
+      in
+      (match
+         Shutdown_store.replace
+           ~config
+           ~expected_revision:unsafe_after_preflight.revision
+           join_regressed
+       with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Shutdown_supersession.commit_after_metadata_update
+           ~config
+           unsafe_after_preflight_token
+       with
+       | Error
+           (Shutdown_supersession.Metadata_committed_supersession_failed
+             (Shutdown_store.Supersession_safety_mismatch _)) ->
+         ()
+       | Error error -> fail (Shutdown_supersession.error_to_string error)
+       | Ok _ -> fail "commit superseded a shutdown whose join evidence regressed");
+      let join_regression_fenced =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:unsafe_after_preflight.keeper_name
+      in
+      check (option string)
+        "commit-time safety failure leaves exact admission fenced"
+        (Some
+           (Shutdown_types.Operation_id.to_string
+              unsafe_after_preflight.operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           join_regression_fenced.snapshot_shutdown_operation_id);
+
+      let unsafe_operations =
+        [ { (operation
+               ~name:"supersession-missing-join"
+               ~reason:Shutdown_types.Operator_stop_retain_meta
+               ~phase:blocked_phase) with
+            turn_disposition = Shutdown_types.No_inflight_turn
+          ; join_evidence = None
+          }
+        ; { (operation
+               ~name:"supersession-inflight-unknown"
+               ~reason:Shutdown_types.Operator_stop_retain_meta
+               ~phase:blocked_phase) with
+            turn_disposition =
+              Shutdown_types.Inflight_effect_unknown
+                { lane = Some Shutdown_types.Autonomous
+                ; admitted_at = Some 1.0
+                ; observed_turn_id = Some 1
+                ; observation_started_at = Some 1.0
+                }
+          ; join_evidence = None
+          }
+        ; { (operation
+               ~name:"supersession-session-removal"
+               ~reason:Shutdown_types.Operator_stop_retain_meta
+               ~phase:
+                 (Shutdown_types.Blocked
+                    { stage = Shutdown_types.Session_remove
+                    ; detail = "session removal did not complete"
+                    })) with
+            cleanup_intent =
+              { reason = Shutdown_types.Operator_stop_retain_meta
+              ; remove_session = true
+              }
+          ; join_evidence = Some clean_join_evidence
+          }
+        ; { (operation
+               ~name:"supersession-owned-task-cleanup"
+               ~reason:Shutdown_types.Operator_stop_retain_meta
+               ~phase:
+                 (Shutdown_types.Blocked
+                    { stage = Shutdown_types.Task_settlement
+                    ; detail = "owned task cleanup did not complete"
+                    })) with
+            owned_task_ids = [ owned_task_id ]
+          ; join_evidence = Some clean_join_evidence
+          }
+        ]
+      in
+      List.iter
+        (fun unsafe ->
+           (match Shutdown_store.persist_new ~config unsafe with
+            | Ok () -> ()
+            | Error error -> fail (Shutdown_store.error_to_string error));
+           ignore
+             (Masc.Keeper_turn_admission.begin_shutdown
+                ~base_path:config.base_path
+                ~keeper_name:unsafe.keeper_name
+                ~operation_id:unsafe.operation_id
+               : Masc.Keeper_turn_admission.begin_shutdown_result);
+           (match
+              Shutdown_supersession.preflight
+                ~config
+                ~keeper_name:unsafe.keeper_name
+                ~authority:(Some operator_authority)
+            with
+            | Error
+                (Shutdown_supersession.Preflight_failed
+                  (Shutdown_store.Supersession_safety_mismatch _)) ->
+              ()
+            | Error error -> fail (Shutdown_supersession.error_to_string error)
+            | Ok _ -> fail "unsafe blocked shutdown produced a supersession token");
+           let fenced =
+             Masc.Keeper_turn_admission.snapshot_for
+               ~base_path:config.base_path
+               ~keeper_name:unsafe.keeper_name
+           in
+           check (option string)
+             "unsafe blocked shutdown remains fenced"
+             (Some (Shutdown_types.Operation_id.to_string unsafe.operation_id))
+             (Option.map
+                Shutdown_types.Operation_id.to_string
+                fenced.snapshot_shutdown_operation_id);
+           match
+             Shutdown_store.load
+               ~config
+               ~keeper_name:unsafe.keeper_name
+               unsafe.operation_id
+           with
+           | Ok { phase = Shutdown_types.Blocked _; _ } -> ()
+           | Ok _ -> fail "unsafe blocked shutdown record changed phase"
+           | Error error -> fail (Shutdown_store.error_to_string error))
+        unsafe_operations;
+
       Masc.Keeper_turn_admission.For_testing.reset ();
       let live_name = "update-blocked-admission" in
       let live_meta = { (make_meta live_name) with paused = true } in
@@ -1465,6 +1685,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
              ~phase:blocked_phase) with
           trace_id = live_meta.runtime.trace_id
         ; generation = live_meta.runtime.generation
+        ; join_evidence = Some clean_join_evidence
         }
       in
       (match Shutdown_store.persist_new ~config live_blocked with
@@ -1517,7 +1738,13 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
-      let result = Turn_up_update.update_keeper ctx parsed live_meta in
+      let result =
+        Turn_up_update.update_keeper
+          ~shutdown_supersession_authority:operator_authority
+          ctx
+          parsed
+          live_meta
+      in
       check bool
         "keeper_up restarts despite the stale blocked admission"
         true
@@ -3216,6 +3443,45 @@ let test_crashed_cycle_records_health_failure () =
     false
     (Health.is_healthy ~agent_name:keeper_name)
 
+let test_lifecycle_command_lock_defers_owner_cancellation () =
+  Eio_main.run @@ fun _env ->
+  let base_dir = temp_dir "lifecycle-command-lock" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       let entered = Atomic.make false in
+       let cancellation_requested = Atomic.make false in
+       let transition_completed = Atomic.make false in
+       let outcome =
+         Eio.Fiber.first
+           (fun () ->
+              Keeper_lifecycle_command_lock.with_lock
+                ~base_path:base_dir
+                ~keeper_name:"durable-owner"
+                (fun () ->
+                   Atomic.set entered true;
+                   while not (Atomic.get cancellation_requested) do
+                     Eio.Fiber.yield ()
+                   done;
+                   Eio.Fiber.yield ();
+                   Atomic.set transition_completed true);
+              `Transition_returned)
+           (fun () ->
+              while not (Atomic.get entered) do
+                Eio.Fiber.yield ()
+              done;
+              Atomic.set cancellation_requested true;
+              `Cancellation_won)
+       in
+       (match outcome with
+        | `Cancellation_won -> ()
+        | `Transition_returned ->
+          fail "lifecycle transition returned before cancellation was requested");
+       check bool
+         "owner completes the durable lifecycle transition before cancellation propagates"
+         true
+         (Atomic.get transition_completed))
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -3261,6 +3527,8 @@ let () =
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "operator update supersedes exact blocked shutdown" `Quick
         test_operator_update_supersedes_exact_blocked_shutdown;
+      test_case "lifecycle command lock defers owner cancellation" `Quick
+        test_lifecycle_command_lock_defers_owner_cancellation;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
       test_case "dashboard purge resolution is fail closed" `Quick

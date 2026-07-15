@@ -327,7 +327,25 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 ])
              reqd
          | None ->
-           (match Keeper_tool_surface.dispatch keeper_ctx ~name:tool_name ~args with
+           let dispatch_result =
+             if String.equal action "boot"
+             then
+               Some
+                 (match
+                    Keeper_shutdown_supersession.of_authenticated_dashboard_actor
+                      ~actor:agent_name
+                  with
+                  | Error error ->
+                    Keeper_types_profile.tool_result_error
+                      (Keeper_shutdown_supersession.error_to_string error)
+                  | Ok shutdown_supersession_authority ->
+                    Keeper_tool_surface.dispatch_operator_keeper_up
+                      ~authority:shutdown_supersession_authority
+                      keeper_ctx
+                      args)
+             else Keeper_tool_surface.dispatch keeper_ctx ~name:tool_name ~args
+           in
+           (match dispatch_result with
             | Some result
               when Tool_result.is_success result
                    && (String.equal action "boot" || String.equal action "clear") ->

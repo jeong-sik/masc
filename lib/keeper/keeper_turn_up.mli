@@ -9,4 +9,6 @@ type tool_result = Keeper_types_profile.tool_result
 (** Handle the [masc_keeper_up] MCP tool call: parse args, look up the
     existing keeper meta, and dispatch to create or update. *)
 val handle_keeper_up :
+  ?shutdown_supersession_authority:
+    Keeper_shutdown_supersession.operator_authority ->
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

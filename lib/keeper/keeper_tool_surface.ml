@@ -835,6 +835,13 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~args : tool_res
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx args)
 ;;
 
+let dispatch_operator_keeper_up ~authority ctx args =
+  Keeper_tool_surface_ops.handle_keeper_up
+    ~shutdown_supersession_authority:authority
+    ctx
+    args
+;;
+
 (** Private direct-delivery stream used by connector and dashboard adapters. *)
 let dispatch_keeper_msg_stream
       ?on_text_delta

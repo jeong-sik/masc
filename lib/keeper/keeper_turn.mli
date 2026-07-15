@@ -10,7 +10,12 @@
 type tool_result = Keeper_types_profile.tool_result
 
 (** Start or reconfigure a keeper agent. *)
-val handle_keeper_up : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
+val handle_keeper_up :
+  ?shutdown_supersession_authority:
+    Keeper_shutdown_supersession.operator_authority ->
+  _ Keeper_types_profile.context ->
+  Yojson.Safe.t ->
+  tool_result
 
 (** Send a message to a running keeper agent.
 

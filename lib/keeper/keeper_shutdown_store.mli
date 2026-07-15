@@ -17,6 +17,7 @@ type error =
       }
   | Supersession_phase_mismatch of Keeper_shutdown_types.t
   | Supersession_intent_mismatch of Keeper_shutdown_types.t
+  | Supersession_safety_mismatch of Keeper_shutdown_types.t
   | Invalid_supersession_actor of string
 
 type persist_blocked_result =

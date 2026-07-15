@@ -732,9 +732,20 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                               [preserve_prompt_defaults] keeps existing prompt
                               fields when the request omits them. *)
                            let result =
-                             Keeper_turn_up_update.update_keeper
-                               ~preserve_prompt_defaults:true keeper_ctx parsed
-                               meta0
+                             match
+                               Keeper_shutdown_supersession.of_authenticated_dashboard_actor
+                                 ~actor:agent_name
+                             with
+                             | Error error ->
+                               Keeper_types_profile.tool_result_error
+                                 (Keeper_shutdown_supersession.error_to_string error)
+                             | Ok shutdown_supersession_authority ->
+                               Keeper_turn_up_update.update_keeper
+                                 ~preserve_prompt_defaults:true
+                                 ~shutdown_supersession_authority
+                                 keeper_ctx
+                                 parsed
+                                 meta0
                            in
                            if not
                                 (Keeper_types_profile.tool_result_success result)
@@ -967,8 +978,22 @@ let ensure_registered_for_resume ~sw ~clock state agent_name name =
   | None ->
       let keeper_ctx = keeper_ctx_of_dashboard_state ~sw ~clock state agent_name in
       let args = `Assoc [ ("name", `String name) ] in
-      (match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_up" ~args with
-       | Some result when Tool_result.is_success result ->
+      let result =
+        match
+          Keeper_shutdown_supersession.of_authenticated_dashboard_actor
+            ~actor:agent_name
+        with
+        | Error error ->
+          Keeper_types_profile.tool_result_error
+            (Keeper_shutdown_supersession.error_to_string error)
+        | Ok shutdown_supersession_authority ->
+          Keeper_tool_surface.dispatch_operator_keeper_up
+            ~authority:shutdown_supersession_authority
+            keeper_ctx
+            args
+      in
+      (match result with
+       | result when Tool_result.is_success result ->
            (match Keeper_registry.get ~base_path:config.base_path name with
             | Some _ -> Ok `Booted_missing_registry
             | None ->
@@ -976,8 +1001,7 @@ let ensure_registered_for_resume ~sw ~clock state agent_name name =
                   (Printf.sprintf
                      "resume boot for %s succeeded but no registry entry was created"
                      name))
-       | Some result -> Error (Tool_result.message result)
-       | None -> Error "masc_keeper_up dispatch returned None")
+       | result -> Error (Tool_result.message result))
 
 let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in

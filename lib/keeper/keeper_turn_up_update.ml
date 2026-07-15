@@ -49,7 +49,7 @@ let revival_decision ~(latched_reason : Keeper_latched_reason.t option)
     clear_pause_state = paused || dead_revival_requested;
   }
 
-let update_keeper ?(preserve_prompt_defaults = false)
+let update_keeper_locked ~preserve_prompt_defaults ~shutdown_supersession_authority
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
@@ -203,7 +203,21 @@ let update_keeper ?(preserve_prompt_defaults = false)
         p.name err;
       tool_result_error err
   | Ok () ->
-         let runtime_assignment_result =
+    (match
+       Keeper_shutdown_supersession.preflight
+         ~config:ctx.config
+         ~keeper_name:updated.name
+         ~authority:shutdown_supersession_authority
+     with
+     | Error error ->
+       tool_result_error (Keeper_shutdown_supersession.error_to_string error)
+     | Ok supersession
+       when dead_revival_requested
+            && Keeper_shutdown_supersession.requires_supersession supersession ->
+       tool_result_error
+         "keeper dead revival cannot supersede a retained shutdown; reconcile the shutdown before revival"
+     | Ok supersession ->
+       let runtime_assignment_result =
            match p.runtime_id_opt with
            | None -> Ok ()
            | Some runtime_id ->
@@ -212,7 +226,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                ~runtime_id
                ()
          in
-         (match runtime_assignment_result with
+       (match runtime_assignment_result with
           | Error err ->
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string TurnUpUpdateFailures)
@@ -268,17 +282,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                lifecycle action, so it owns pause/resume fields while taking
                cumulative counters as [max latest caller]. *)
             (match
-               Keeper_shutdown_supersession.preflight
-                 ~config:ctx.config
-                 ~keeper_name:updated.name
-                 ~actor:ctx.agent_name
-             with
-             | Error error ->
-               tool_result_error
-                 (Keeper_shutdown_supersession.error_to_string error)
-             | Ok supersession ->
-               (match
-                  write_meta_with_merge
+               write_meta_with_merge
                     ~merge:Keeper_meta_merge.monotonic_usage_counters
                     ctx.config
                     updated
@@ -337,3 +341,23 @@ let update_keeper ?(preserve_prompt_defaults = false)
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
                        (start_keepalive_outcome_to_string rejected)))))))
+;;
+
+let update_keeper
+      ?(preserve_prompt_defaults = false)
+      ?shutdown_supersession_authority
+      (ctx : _ context)
+      (p : parsed_args)
+      (old : keeper_meta)
+  : tool_result
+  =
+  Keeper_lifecycle_command_lock.with_lock
+    ~base_path:ctx.config.base_path
+    ~keeper_name:old.name
+    (fun () ->
+       update_keeper_locked
+         ~preserve_prompt_defaults
+         ~shutdown_supersession_authority
+         ctx
+         p
+         old)

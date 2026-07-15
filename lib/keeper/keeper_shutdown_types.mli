@@ -172,9 +172,14 @@ type invariant_error =
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
+  | Superseded_without_clean_join
+  | Superseded_with_session_removal
+  | Superseded_with_owned_tasks of Keeper_id.Task_id.t list
 
 val schema_version : int
 val requires_admission_fence : t -> bool
+val has_clean_join_evidence : t -> bool
+val eligible_for_operator_metadata_supersession : t -> bool
 val cleanup_reason_label : cleanup_reason -> string
 val meta_disposition_to_string : meta_disposition -> string
 val meta_disposition_of_string : string -> (meta_disposition, string) result

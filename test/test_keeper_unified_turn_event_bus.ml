@@ -432,7 +432,7 @@ let test_typed_keeper_invocation_wire_contract () =
     }
   in
   check bool "run ref binds exact durable entry" true
-    (Invocation.run_ref_matches_entry run_ref entry);
+    (Result.is_ok (Invocation.validate_entry run_ref entry));
   let wrong_target_ref =
     match
       Invocation.run_ref_of_json
@@ -445,8 +445,10 @@ let test_typed_keeper_invocation_wire_contract () =
     | Ok reference -> reference
     | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
   in
-  check bool "same run id cannot retarget invocation" false
-    (Invocation.run_ref_matches_entry wrong_target_ref entry);
+  (match Invocation.validate_entry wrong_target_ref entry with
+   | Error Invocation.Run_ref_mismatch -> ()
+   | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
+   | Ok _ -> Alcotest.fail "same run id must not retarget an invocation");
   let entry_fields =
     match Invocation.delegate_entry_to_json entry with
     | Ok json -> require_unique_assoc "typed entry" json

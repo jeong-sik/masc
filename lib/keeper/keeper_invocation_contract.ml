@@ -208,6 +208,34 @@ let run_ref_matches_entry reference (entry : Keeper_msg_async.entry) =
        entry.Keeper_msg_async.keeper_name
 ;;
 
+let validate_entry reference entry =
+  if run_ref_matches_entry reference entry
+  then Ok entry
+  else Error Run_ref_mismatch
+;;
+
+let poll ~base_path ~caller reference =
+  let run_id = run_id reference in
+  match Keeper_msg_async.poll ~base_path ~caller run_id with
+  | Keeper_msg_async.Found entry ->
+    validate_entry reference entry |> Result.map (fun entry -> Keeper_msg_async.Found entry)
+  | (Keeper_msg_async.Absent
+    | Keeper_msg_async.Unreadable _
+    | Keeper_msg_async.Rejected _) as result -> Ok result
+;;
+
+let cancel ~base_path ~caller reference =
+  match poll ~base_path ~caller reference with
+  | Error error -> Error error
+  | Ok (Keeper_msg_async.Found _) ->
+    Ok (Keeper_msg_async.cancel ~base_path ~caller (run_id reference))
+  | Ok Keeper_msg_async.Absent -> Ok Keeper_msg_async.Cancel_not_found
+  | Ok (Keeper_msg_async.Unreadable reason) ->
+    Ok (Keeper_msg_async.Cancel_unreadable reason)
+  | Ok (Keeper_msg_async.Rejected rejection) ->
+    Ok (Keeper_msg_async.Cancel_rejected rejection)
+;;
+
 let result_contract_to_string = Keeper_invocation_types.result_contract_to_string
 let result_contract_of_string = Keeper_invocation_types.result_contract_of_string
 

@@ -309,6 +309,15 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
        Ok
          (Llm_provider.Provider_config.make
             ~kind
+            (* [provider_id] is the runtime.toml [providers.<id>] table name. It is
+               the capability-catalog qualification key: [capability_provider_label]
+               prefers it over the wire [kind], so provider-qualified catalog rows
+               ([provider_name = "<id>"]) resolve per declared provider instead of
+               collapsing every OpenAI-compatible endpoint into the "openai_compat"
+               label (which no catalog row carries — the 2026-07-15 boot-gate
+               wipeout). OAS's own binding layer passes it the same way
+               (provider_runtime_binding.ml [runtime_binding_provider_config]). *)
+            ~provider_id:provider.id
             ~model_id:spec.api_name
             ~base_url
             ~api_key
@@ -330,6 +339,8 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
        Ok
          (Llm_provider.Provider_config.make
             ~kind
+            (* Same capability-qualification key as the Http branch above. *)
+            ~provider_id:provider.id
             ~model_id:spec.api_name
             ~base_url:""
             ~api_key:(api_key_of_credential ?registry_entry provider.credentials)

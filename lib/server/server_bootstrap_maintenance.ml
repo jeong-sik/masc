@@ -34,7 +34,16 @@ let wake_enqueue_counts_of_dispatches dispatches =
        | Some detail ->
          (match Consumers.dispatch_receipt_of_detail detail with
           | Error _ -> counts
-          | Ok (Consumers.Keeper_wake_enqueued { reaction_ledger_status; _ }) ->
+          | Ok
+              (Consumers.Keeper_wake_enqueued
+                { occurrence_status = Consumers.Keeper_wake_already_acked; _ }) ->
+            counts
+          | Ok
+              (Consumers.Keeper_wake_enqueued
+                { occurrence_status = Consumers.Keeper_wake_awaiting_ack
+                ; reaction_ledger_status
+                ; _
+                }) ->
             let counts = bump_wake_enqueued counts in
             (match reaction_ledger_status with
              | Some (Consumers.Keeper_wake_reaction_ledger_record_failed _) ->

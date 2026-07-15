@@ -35,7 +35,6 @@ type t =
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
-  | CompactionNoop
   | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes

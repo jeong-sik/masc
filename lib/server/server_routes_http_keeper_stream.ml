@@ -2387,6 +2387,28 @@ let process_single_turn ~user_row_origin ~queued_turn
              });
         None, false
   in
+  let run_ref =
+    match submit_result with
+    | Error _ -> None
+    | Ok outcome ->
+      (match
+         Keeper_invocation_contract.request
+           ~keeper_name:payload.name
+           ~prompt:payload.message
+       with
+       | Ok request ->
+         Some
+           (match Keeper_invocation_contract.submission_receipt request outcome with
+            | Keeper_invocation_contract.Durable_run run_ref -> run_ref
+            | Keeper_invocation_contract.Reconciliation_required { run_ref; _ } ->
+              run_ref)
+       | Error error ->
+         Log.Keeper.error
+           "keeper_stream: accepted request has invalid typed identity keeper=%s error=%s"
+           payload.name
+           (Keeper_invocation_contract.request_error_to_string error);
+         None)
+  in
   (match client_disconnects, request_id with
    | None, _ | _, None -> ()
    | Some (disconnect_sw, disconnects), Some request_id ->
@@ -2414,24 +2436,29 @@ let process_single_turn ~user_row_origin ~queued_turn
                push_worker_event Stream_client_disconnected
              end));
   Option.iter
-    (fun request_id ->
+    (fun run_ref ->
+       let run_id = Keeper_invocation_contract.run_id run_ref in
        Log.Keeper.info
-         "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
-         payload.name request_id
+         "keeper_stream: queued request keeper=%s run_id=%s surface=%s"
+         payload.name run_id
          (if has_connector_context payload then payload.channel else "dashboard");
        Keeper_chat_events.publish events
          (Custom
             { name = "KEEPER_QUEUE_REQUEST"
             ; value =
                 Gate_protocol.message_request_to_json
-                  { request_id
+                  { tracking =
+                      Gate_protocol.Keeper_run
+                        { run_ref
+                        ; result_contract =
+                            Keeper_invocation_contract.Awaiting_execution
+                        }
                   ; destination_type = "keeper"
                   ; destination_id = payload.name
                   ; channel =
                       (if has_connector_context payload then payload.channel
                        else "dashboard")
                   ; actor_id = Some agent_name
-                  ; status = Gate_protocol.Queued
                   ; modalities = modalities_for_request payload
                   ; transport = Some "sse"
                   ; metadata =
@@ -2440,7 +2467,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                       ]
                   }
             }))
-    (if durably_accepted then request_id else None);
+    (if durably_accepted then run_ref else None);
   let publish_terminal ~status ?(message = "") () =
     let message = redact_text message in
     let status_label = keeper_request_terminal_status_to_string status in

@@ -153,6 +153,37 @@ let test_target_resolution_implicit_unregistered_author () =
          "error message"
          "target_keeper is required because board post author \"operator\" is not a registered keeper")
 
+let typed_submission keeper_name =
+  `Assoc
+    [ ( "run_ref"
+      , `Assoc
+          [ "run_id", `String "run-1"
+          ; "target", `Assoc [ "kind", `String "keeper"; "name", `String keeper_name ]
+          ; "capability", `String "invoke_turn"
+          ] )
+    ; "result_contract", `String "awaiting_execution"
+    ]
+
+let test_typed_submission_projection () =
+  let project target data =
+    Server_routes_http_routes_activity.board_context_inference_submission_json
+      ~post_id:"post-1" ~target_keeper:target
+      ~target_source:Server_routes_http_routes_activity.Explicit_target data
+  in
+  (match project "luna" (typed_submission "luna") with
+   | Ok json ->
+     let open Yojson.Safe.Util in
+     check string "run id" "run-1"
+       (json |> member "run_ref" |> member "run_id" |> to_string);
+     check bool "legacy fields absent" true
+       (json |> member "request_id" = `Null && json |> member "status" = `Null)
+   | Error error -> fail error);
+  match project "luna" (typed_submission "other") with
+  | Error error ->
+    check bool "retargeting rejected" true
+      (String_util.string_contains_substring ~needle:"does not match" error)
+  | Ok _ -> fail "expected exact board target rejection"
+
 let () =
   run "Server board context inference resolution"
     [ ( "parse_request",
@@ -163,4 +194,6 @@ let () =
         ; test_case "implicit registered author" `Quick test_target_resolution_implicit_registered_author
         ; test_case "implicit unregistered author" `Quick test_target_resolution_implicit_unregistered_author
         ] )
+    ; ( "typed_submission",
+        [ test_case "projects exact run_ref" `Quick test_typed_submission_projection ] )
     ]

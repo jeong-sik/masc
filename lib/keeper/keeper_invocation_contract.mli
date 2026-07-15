@@ -32,7 +32,6 @@ type result_contract = Keeper_invocation_types.result_contract =
 type request_error =
   | Invalid_target of string
   | Empty_prompt
-  | Invalid_entry_projection
   | Invalid_wire_value of
       { field : string
       ; expected : string
@@ -69,9 +68,6 @@ val result_contract : Keeper_msg_async.entry -> result_contract
 val result_contract_to_string : result_contract -> string
 val result_contract_of_string : string -> result_contract option
 
-val submission_to_json
-  :  request -> Keeper_msg_async.submit_outcome -> Yojson.Safe.t
-
 val delegate_submission_to_json
   :  request -> Keeper_msg_async.submit_outcome -> Yojson.Safe.t
 
@@ -80,10 +76,6 @@ val delegate_submission_error_to_json
 
 val delegate_cancellation_to_json
   :  run_ref -> Keeper_msg_async.cancel_result -> Yojson.Safe.t
-
-val entry_to_json
-  :  Keeper_msg_async.entry
-  -> (Yojson.Safe.t, request_error) result
 
 val delegate_entry_to_json
   :  Keeper_msg_async.entry

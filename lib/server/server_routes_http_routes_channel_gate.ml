@@ -49,18 +49,23 @@ module Http = Http_server_eio
       {
         "ok": true,
         "destination_id": "luna",
-        "reply": "luna is busy; your message is queued (request_id=luna-abc123).",
+        "reply": "luna is busy; preserve the returned tracking value.",
         "turn_stats": { "model_used": null, "duration_ms": 8, "tokens_used": 0 },
         "message_request": {
-          "request_id": "luna-abc123",
+          "tracking": {
+            "kind": "keeper_run",
+            "run_ref": { "run_id": "luna-abc123",
+              "target": { "kind": "keeper", "name": "luna" },
+              "capability": "invoke_turn" },
+            "result_contract": "awaiting_execution"
+          },
           "destination_type": "keeper",
           "destination_id": "luna",
           "channel": "discord",
           "actor_id": "123456789",
-          "status": "queued",
           "modalities": ["text"],
           "transport": "discord",
-          "metadata": { "status_source": "keeper_msg_async" }
+          "metadata": { "tracking_source": "keeper_invocation" }
         }
       }
     ]}

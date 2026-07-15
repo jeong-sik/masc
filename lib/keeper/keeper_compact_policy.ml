@@ -10,59 +10,76 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_core
 
-type pre_compact_event = {
-  timestamp : float;
-  keeper_name : string;
-  context_ratio : float;
-  message_count : int;
-  token_count : int;
-  strategies : string list;
-  context_window : int;
-  is_local_model : bool;
-  trigger : Compaction_trigger.t;
-}
+type pre_compact_event =
+  { timestamp : float
+  ; keeper_name : string
+  ; checkpoint_bytes : int
+  ; message_count : int
+  ; strategies : string list
+  ; trigger : Compaction_trigger.t
+  }
 
 let record_pre_compact_callback_atomic
-    : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option)
-      Atomic.t
+    : (keeper_name:string
+       -> checkpoint_bytes:int
+       -> message_count:int
+       -> strategies:string list
+       -> trigger:Compaction_trigger.t
+       -> pre_compact_event option)
+        Atomic.t
   =
   Atomic.make
-    (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
+    (fun
+      ~keeper_name:_
+      ~checkpoint_bytes:_
+      ~message_count:_
+      ~strategies:_
+      ~trigger:_
+    -> None)
 ;;
 
 let record_pre_compact_callback
-    ~keeper_name
-    ~context_ratio
-    ~message_count
-    ~token_count
-    ~strategies
-    ~context_window
-    ~is_local_model
-    ~trigger
+      ~keeper_name
+      ~checkpoint_bytes
+      ~message_count
+      ~strategies
+      ~trigger
   =
   Atomic.get record_pre_compact_callback_atomic
     ~keeper_name
-    ~context_ratio
+    ~checkpoint_bytes
     ~message_count
-    ~token_count
     ~strategies
-    ~context_window
-    ~is_local_model
     ~trigger
+;;
 
 let register_record_pre_compact
     (f :
-       keeper_name:string
-       -> context_ratio:float
-       -> message_count:int
-       -> token_count:int
-       -> strategies:string list
-       -> context_window:int
-       -> is_local_model:bool
-       -> trigger:Compaction_trigger.t
-       -> pre_compact_event option)
+      keeper_name:string
+      -> checkpoint_bytes:int
+      -> message_count:int
+      -> strategies:string list
+      -> trigger:Compaction_trigger.t
+      -> pre_compact_event option)
   =
   Atomic.set record_pre_compact_callback_atomic f
+;;
+
+type compaction_rejection =
+  | Retired_deterministic_mode
+  | Runtime_identity_unavailable
+  | Summarizer_unavailable
+  | Plan_unavailable_or_invalid
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
+
+let compaction_rejection_to_string = function
+  | Retired_deterministic_mode -> "retired_deterministic_mode"
+  | Runtime_identity_unavailable -> "runtime_identity_unavailable"
+  | Summarizer_unavailable -> "summarizer_unavailable"
+  | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
+  | Structurally_unchanged -> "structurally_unchanged"
+  | Checkpoint_not_reduced -> "checkpoint_not_reduced"
 ;;
 
 type compaction_decision =
@@ -72,23 +89,12 @@ type compaction_decision =
   | Not_requested
   | Skipped_no_checkpoint
 
-and compaction_rejection =
-  | Retired_deterministic_mode
-  | Runtime_unavailable
-  | Summarizer_unavailable_or_invalid
-  | Structural_noop
-
-let compaction_rejection_to_string = function
-  | Retired_deterministic_mode -> "retired_deterministic_mode"
-  | Runtime_unavailable -> "runtime_unavailable"
-  | Summarizer_unavailable_or_invalid -> "summarizer_unavailable_or_invalid"
-  | Structural_noop -> "structural_noop"
-
 let compaction_decision_to_string = function
   | Applied trigger -> "applied:" ^ Compaction_trigger.to_human trigger
   | Prepared trigger -> "prepared:" ^ Compaction_trigger.to_human trigger
   | Rejected (trigger, reason) ->
-    Printf.sprintf "rejected:%s:%s"
+    Printf.sprintf
+      "rejected:%s:%s"
       (compaction_rejection_to_string reason)
       (Compaction_trigger.to_human trigger)
   | Not_requested -> "not_requested"
@@ -109,8 +115,113 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
 
-let serialize_messages messages =
-  Yojson.Safe.to_string (`List (List.map message_to_json messages))
+let strategy_names (meta : keeper_meta) =
+  match meta.compaction.mode with
+  | Keeper_config.Llm -> [ "ConfiguredLlm" ]
+  | Keeper_config.Deterministic -> [ "NoLocalReducer" ]
+;;
+
+let record_pre_compact
+      ~(meta : keeper_meta)
+      ~checkpoint_bytes
+      ~message_count
+      ~strategies
+      ~trigger
+  =
+  let event =
+    try
+      Atomic.get record_pre_compact_callback_atomic
+        ~keeper_name:meta.name
+        ~checkpoint_bytes
+        ~message_count
+        ~strategies
+        ~trigger
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Harness.warn
+        "[pre_compact] dashboard record failed: %s"
+        (Printexc.to_string exn);
+      None
+  in
+  match event with
+  | None -> ()
+  | Some event ->
+    (try
+       Sse.broadcast
+         (`Assoc
+             [ "type", `String "oas:masc:harness:pre_compact"
+             ; ( "payload"
+               , `Assoc
+                   [ "timestamp", `Float event.timestamp
+                   ; "keeper_name", `String event.keeper_name
+                   ; "checkpoint_bytes", `Int event.checkpoint_bytes
+                   ; "message_count", `Int event.message_count
+                   ; ( "strategies"
+                     , `List (List.map (fun value -> `String value) event.strategies) )
+                   ; "trigger", `String (Compaction_trigger.to_label event.trigger)
+                   ; "trigger_detail", Compaction_trigger.to_detail_json event.trigger
+                   ] )
+             ])
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Harness.warn
+         "[pre_compact] sse broadcast failed: %s"
+         (Printexc.to_string exn))
+;;
+
+let requested_messages (meta : keeper_meta) messages =
+  match meta.compaction.mode with
+  | Keeper_config.Deterministic -> Error Retired_deterministic_mode
+  | Keeper_config.Llm ->
+    let runtime_id =
+      try
+        let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+        if String.trim runtime_id = ""
+        then Error Runtime_identity_unavailable
+        else Ok runtime_id
+      with
+      | Failure _ -> Error Runtime_identity_unavailable
+    in
+    (match runtime_id with
+     | Error _ as error -> error
+     | Ok runtime_id ->
+       (match
+          Keeper_compaction_llm_summarizer.make
+            ~runtime_id
+            ~keeper_name:meta.name
+            ()
+        with
+        | None -> Error Summarizer_unavailable
+        | Some summarize ->
+          (match summarize ~messages with
+           | None -> Error Plan_unavailable_or_invalid
+           | Some plan ->
+             if plan.summarized = [] && plan.dropped = []
+             then Error Structurally_unchanged
+             else
+               Ok (Keeper_compaction_llm_summarizer.apply plan ~messages))))
+;;
+
+let log_rejection ~meta ~trigger ~reason ~checkpoint_bytes ~message_count =
+  let reason_label = compaction_rejection_to_string reason in
+  Log.Harness.emit
+    Log.Warn
+    ~details:
+      (`Assoc
+          [ "keeper_name", `String meta.name
+          ; "trigger", `String (Compaction_trigger.to_label trigger)
+          ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+          ; "reason", `String reason_label
+          ; "checkpoint_bytes", `Int checkpoint_bytes
+          ; "message_count", `Int message_count
+          ])
+    (Printf.sprintf
+       "compaction_rejected keeper=%s trigger=%s reason=%s"
+       meta.name
+       (Compaction_trigger.to_human trigger)
+       reason_label)
 ;;
 
 let compact_for_request_typed
@@ -119,102 +230,86 @@ let compact_for_request_typed
       (ctx : working_context)
   : working_context * compaction_decision
   =
-  let source_messages = messages_of_context ctx in
-  let reject reason detail =
-    Log.Keeper.warn ~keeper_name:meta.name "context compaction rejected: %s" detail;
-    Error reason
-  in
-  let candidate =
-    match meta.compaction.mode with
-    | Keeper_config.Deterministic ->
-      reject Retired_deterministic_mode "deterministic reducer is retired"
-    | Keeper_config.Llm ->
-      let runtime_id =
-        try
-          let id = Keeper_meta_contract.runtime_id_of_meta meta |> String.trim in
-          if id = "" then reject Runtime_unavailable "runtime identity is empty"
-          else Ok id
-        with
-        | Failure detail -> reject Runtime_unavailable detail
-      in
-      (match runtime_id with
-       | Error _ as error -> error
-       | Ok runtime_id ->
-         (match
-            Keeper_compaction_llm_summarizer.make
-              ~runtime_id
-              ~keeper_name:meta.name
-              ()
-          with
-          | None ->
-            reject
-              Summarizer_unavailable_or_invalid
-              "configured summarizer is unavailable"
-          | Some summarize ->
-            (match summarize ~messages:source_messages with
-             | None ->
-               reject
-                 Summarizer_unavailable_or_invalid
-                 "no valid semantic compaction plan"
-             | Some plan ->
-               Ok
-                 (Keeper_compaction_llm_summarizer.apply
-                    plan
-                    ~messages:source_messages))))
-  in
-  match candidate with
-  | Error reason -> ctx, Rejected (trigger, reason)
-  | Ok candidate ->
+  let before_bytes = serialized_bytes ctx in
+  let before_messages = message_count ctx in
+  record_pre_compact
+    ~meta
+    ~checkpoint_bytes:before_bytes
+    ~message_count:before_messages
+    ~strategies:(strategy_names meta)
+    ~trigger;
+  match requested_messages meta (messages_of_context ctx) with
+  | Error reason ->
+    log_rejection
+      ~meta
+      ~trigger
+      ~reason
+      ~checkpoint_bytes:before_bytes
+      ~message_count:before_messages;
+    ctx, Rejected (trigger, reason)
+  | Ok requested ->
     let messages, pair_repair_stats =
-      Keeper_context_core.repair_broken_tool_call_pairs_with_stats candidate
+      Keeper_context_core.repair_broken_tool_call_pairs_with_stats requested
     in
     let compacted_ctx =
       sync_oas_context
         { ctx with checkpoint = { (checkpoint_of_context ctx) with messages } }
     in
-    let before_json = serialize_messages source_messages in
-    let after_json = serialize_messages messages in
-    if String.equal before_json after_json
-    then (
-      Log.Keeper.warn
-        ~keeper_name:meta.name
-        "context compaction rejected: plan produced no structural checkpoint change";
-      ctx, Rejected (trigger, Structural_noop))
+    let after_bytes = serialized_bytes compacted_ctx in
+    let reject reason =
+      log_rejection
+        ~meta
+        ~trigger
+        ~reason
+        ~checkpoint_bytes:before_bytes
+        ~message_count:before_messages;
+      ctx, Rejected (trigger, reason)
+    in
+    if after_bytes = before_bytes
+    then reject Structurally_unchanged
+    else if after_bytes > before_bytes
+    then reject Checkpoint_not_reduced
     else (
-    let tool_use_sample_json =
-      List.map
-        (fun (tool_use_id, tool_name) ->
-           `Assoc
-             [ "tool_use_id", `String tool_use_id
-             ; "tool_name", `String tool_name
-             ])
-        pair_repair_stats.dropped_tool_use_samples
-    in
-    let tool_result_id_json =
-      List.map
-        (fun tool_use_id -> `String tool_use_id)
-        pair_repair_stats.dropped_tool_result_ids
-    in
-    Log.Harness.emit
-      Log.Info
-      ~details:
-        (`Assoc
-            [ "keeper_name", `String meta.name
-            ; "trigger", Compaction_trigger.to_detail_json trigger
-            ; "before_messages", `Int (List.length source_messages)
-            ; "after_messages", `Int (List.length messages)
-            ; "before_checkpoint_bytes", `Int (String.length before_json)
-            ; "after_checkpoint_bytes", `Int (String.length after_json)
-            ; ( "tool_pair_repair"
-              , `Assoc
-                  [ ( "dropped_tool_uses"
-                    , `Int pair_repair_stats.dropped_tool_uses )
-                  ; ( "dropped_tool_results"
-                    , `Int pair_repair_stats.dropped_tool_results )
-                  ; "dropped_tool_use_samples", `List tool_use_sample_json
-                  ; "dropped_tool_result_ids", `List tool_result_id_json
-                  ] )
-            ])
-      (Printf.sprintf "context compaction prepared keeper=%s" meta.name);
-    compacted_ctx, Prepared trigger)
+      let after_messages = message_count compacted_ctx in
+      let tool_use_sample_json =
+        List.map
+          (fun (tool_use_id, tool_name) ->
+             `Assoc
+               [ "tool_use_id", `String tool_use_id
+               ; "tool_name", `String tool_name
+               ])
+          pair_repair_stats.dropped_tool_use_samples
+      in
+      let tool_result_id_json =
+        List.map
+          (fun tool_use_id -> `String tool_use_id)
+          pair_repair_stats.dropped_tool_result_ids
+      in
+      Log.Harness.emit
+        Log.Info
+        ~details:
+          (`Assoc
+              [ "keeper_name", `String meta.name
+              ; "trigger", `String (Compaction_trigger.to_label trigger)
+              ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+              ; "before_checkpoint_bytes", `Int before_bytes
+              ; "after_checkpoint_bytes", `Int after_bytes
+              ; "saved_checkpoint_bytes", `Int (before_bytes - after_bytes)
+              ; "before_messages", `Int before_messages
+              ; "after_messages", `Int after_messages
+              ; ( "tool_pair_repair"
+                , `Assoc
+                    [ ( "dropped_tool_uses"
+                      , `Int pair_repair_stats.dropped_tool_uses )
+                    ; ( "dropped_tool_results"
+                      , `Int pair_repair_stats.dropped_tool_results )
+                    ; "dropped_tool_use_samples", `List tool_use_sample_json
+                    ; "dropped_tool_result_ids", `List tool_result_id_json
+                    ] )
+              ])
+        (Printf.sprintf
+           "context compaction prepared keeper=%s saved_checkpoint_bytes=%d"
+           meta.name
+           (before_bytes - after_bytes));
+      compacted_ctx, Prepared trigger)
 ;;

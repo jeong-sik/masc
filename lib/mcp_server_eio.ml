@@ -34,6 +34,12 @@ let get_clock_opt () = Eio_context.get_clock_opt ()
 (** {1 State Construction} *)
 let get_clock () = Eio_context.get_clock ()
 
+let tool_schema_component_bytes ~name ~description ~input_schema =
+  String.length name
+  + String.length description
+  + String.length (Yojson.Safe.to_string input_schema)
+;;
+
 let create_state ?test_mode ~base_path () =
   let state = Mcp_server.create_state ~base_path in
   (match test_mode with
@@ -89,28 +95,22 @@ let () =
      Uses Config.raw_all_tool_schemas, including domain-adapter schemas not
      present in Tools.all_schemas_extended. *)
   Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
-  (* Report tool schema budget to Otel_metric_store (#7483 Step 1).
-     Token estimate goes through the OAS Context_reducer facade
-     (Keeper_context_core_accessors.estimate_char_tokens), the MASC SSOT for
-     token estimation, instead of a third ad-hoc chars/4 byte heuristic. byte/4
-     weights every UTF-8 byte equally (a 3-byte CJK char counts as ~0.75
-     token), whereas the OAS estimator classifies per character: ~4 ASCII
-     chars/token and ~2/3 token per multi-byte char. ASCII-only schemas land on
-     the same value; CJK-bearing schemas use the empirically-tuned char-based
-     estimate. One estimate per schema preserves the gauge's per-schema budget
-     meaning. *)
+  (* Report exact visible schema-component bytes. Provider tokenization is not
+     inferred before dispatch; authoritative token usage arrives in responses. *)
   (let schemas = Config.visible_tool_schemas () in
    let count = List.length schemas in
-   let approx_tokens =
+   let component_bytes =
      List.fold_left
        (fun acc (s : Masc_domain.tool_schema) ->
           acc
-          + Keeper_context_core_accessors.estimate_char_tokens
-              (s.name ^ s.description ^ Yojson.Safe.to_string s.input_schema))
+          + tool_schema_component_bytes
+              ~name:s.name
+              ~description:s.description
+              ~input_schema:s.input_schema)
        0
        schemas
    in
-   Otel_metric_store.set_tool_schema_stats ~count ~approx_tokens);
+   Otel_metric_store.set_tool_schema_stats ~count ~component_bytes);
   (* Wire tag-based dispatch for keeper masc_* tools.
      See #4579: keeper_tool_dispatch_runtime uses handler registry (Tool_Board only),
      this callback adds tag-registry dispatch for ~190 more tools. *)

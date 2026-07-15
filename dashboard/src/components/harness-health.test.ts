@@ -18,7 +18,7 @@ function sampleResponse() {
       pre_compact_last_event_at: 1711440000,
       handoff_last_event_at: 1711430000,
       fallback_ratio: 0.83,
-      latest_pre_compact_ratio: 0.91,
+      latest_pre_compact_checkpoint_bytes: 131072,
       latest_handoff_generation: 27,
     },
     calibration: {
@@ -55,12 +55,10 @@ function sampleResponse() {
         {
           timestamp: 1711440000,
           keeper_name: 'keeper-a',
-          context_ratio: 0.91,
+          checkpoint_bytes: 131072,
           message_count: 88,
-          token_count: 32000,
           strategies: ['PruneToolOutputs'],
-          model_family: 'verifier',
-          trigger: 'ratio(0.91>=0.85)',
+          trigger: 'manual',
         },
       ],
     },
@@ -172,7 +170,8 @@ describe('HarnessHealth', () => {
     expect(container.textContent).toContain('감시 흐름도')
     expect(container.textContent).toContain('keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다')
     expect(container.textContent).toContain('평가 모델 건강도')
-    expect(container.textContent).toContain('컨텍스트 압축 압력')
+    expect(container.textContent).toContain('압축 전 체크포인트')
+    expect(container.textContent).toContain('131,072 B')
     expect(container.textContent).toContain('keeper 세대 교체')
     expect(container.textContent).toContain('대체 처리율')
     expect(container.textContent).toContain('judge timeout')

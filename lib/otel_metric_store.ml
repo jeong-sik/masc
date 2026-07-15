@@ -56,9 +56,9 @@ let register_otel_source_once () =
 let otel_source_registered_for_test () = Atomic.get otel_source_registered
 let otel_samples_for_test () = otel_samples ()
 
-let set_tool_schema_stats ~count ~approx_tokens =
+let set_tool_schema_stats ~count ~component_bytes =
   set_gauge metric_mcp_tool_schema_count (Float.of_int count);
-  set_gauge metric_mcp_tool_schema_tokens_approx (Float.of_int approx_tokens)
+  set_gauge metric_mcp_tool_schema_component_bytes (Float.of_int component_bytes)
 ;;
 
 let record_request () = inc_counter metric_mcp_requests ()

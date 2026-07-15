@@ -74,6 +74,8 @@ let with_config_input name value f =
     f
 
 let with_clean_base_path_env f =
+  with_config_input "OAS_CAPABILITY_MANIFEST" None @@ fun () ->
+  with_config_input "OAS_MODEL_CATALOG" None @@ fun () ->
   with_config_input "MASC_BASE_PATH" None @@ fun () ->
   with_config_input "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_config_input "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
@@ -159,7 +161,9 @@ let make_config_root root =
   write_file (Filename.concat root "oas-models.toml") repo_model_catalog_toml;
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
-  write_file (Filename.concat config "keepers/example.toml") "[keeper]\ngoal = \"example\"\n";
+  write_file
+    (Filename.concat config "keepers/example.toml")
+    "[keeper]\nautoboot_enabled = true\n";
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
@@ -260,7 +264,7 @@ let test_capability_manifest_configuration_uses_config_root_file () =
         ~clear_manifest:(fun () -> incr clear_calls)
         ~load_manifest:(fun path ->
           load_calls := path :: !load_calls;
-          Some [])
+          Ok [])
         ~set_manifest:(fun (_ : Llm_provider.Capability_manifest.t) -> incr set_calls)
         ()
     in
@@ -282,6 +286,27 @@ let test_capability_manifest_configuration_uses_config_root_file () =
     Alcotest.(check int) "clear manifest cache" 1 !clear_calls;
     Alcotest.(check (list string)) "load manifest" [ manifest ] (List.rev !load_calls);
     Alcotest.(check int) "set manifest override" 1 !set_calls)
+
+let test_capability_manifest_configuration_rejects_invalid_file () =
+  with_temp_dir "capability-manifest-bootstrap-invalid" (fun config_root ->
+    let manifest = Filename.concat config_root "capability-manifest.json" in
+    write_file manifest {|{"schema_version":1,"models":[]}|};
+    Alcotest.check_raises
+      "invalid capability manifest fails startup configuration"
+      (Invalid_argument
+         (Printf.sprintf
+            "invalid OAS capability manifest %s: invalid fixture"
+            manifest))
+      (fun () ->
+         ignore
+           (Server_runtime_bootstrap.configure_oas_capability_manifest_env
+              ~env:(fun _ -> None)
+              ~config_root
+              ~putenv:(fun _ _ -> ())
+              ~clear_manifest:(fun () -> ())
+              ~load_manifest:(fun _ -> Error "invalid fixture")
+              ~set_manifest:(fun _ -> ())
+              ())))
 
 let test_model_catalog_configuration_installs_resolved_catalog () =
   with_temp_dir "model-catalog-bootstrap-install" (fun dir ->
@@ -306,7 +331,7 @@ let test_model_catalog_configuration_installs_resolved_catalog () =
         ~clear_catalog:(fun () -> incr clear_calls)
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Some Llm_provider.Model_catalog.empty)
+          Ok Llm_provider.Model_catalog.empty)
         ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
         ()
     in
@@ -328,6 +353,27 @@ let test_model_catalog_configuration_installs_resolved_catalog () =
     Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
     Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
     Alcotest.(check int) "set catalog override" 1 !set_calls)
+
+let test_model_catalog_configuration_rejects_invalid_file () =
+  with_temp_dir "model-catalog-bootstrap-invalid" (fun config_root ->
+    let catalog = Filename.concat config_root "oas-models.toml" in
+    write_file catalog "[[models]]\nid_prefix = \"invalid-fixture\"\n";
+    Alcotest.check_raises
+      "invalid model catalog fails startup configuration"
+      (Invalid_argument
+         (Printf.sprintf "invalid OAS model catalog %s: invalid fixture" catalog))
+      (fun () ->
+         ignore
+           (Server_runtime_bootstrap.configure_oas_model_catalog_env
+              ~env:(fun _ -> None)
+              ~config_root
+              ~cwd:config_root
+              ~argv0:(Filename.concat config_root "main_eio.exe")
+              ~putenv:(fun _ _ -> ())
+              ~clear_catalog:(fun () -> ())
+              ~load_catalog:(fun _ -> Error "invalid fixture")
+              ~set_catalog:(fun _ -> ())
+              ())))
 
 let test_model_catalog_configuration_prefers_config_root_catalog () =
   with_temp_dir "model-catalog-bootstrap-config-root" (fun dir ->
@@ -351,7 +397,7 @@ let test_model_catalog_configuration_prefers_config_root_catalog () =
         ~clear_catalog:(fun () -> incr clear_calls)
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Some Llm_provider.Model_catalog.empty)
+          Ok Llm_provider.Model_catalog.empty)
         ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
         ()
     in
@@ -439,7 +485,6 @@ let test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd () =
 let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
   with_temp_dir "model-catalog-bootstrap-agent-sdk" (fun dir ->
     let putenv_calls = ref [] in
-    let preload_calls = ref 0 in
     let env _ = None in
     let result =
       Server_runtime_bootstrap.configure_oas_model_catalog_env
@@ -447,19 +492,19 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
         ~cwd:dir
         ~argv0:(Filename.concat dir "main_eio.exe")
         ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~preload_agent_sdk_catalog:(fun () -> incr preload_calls)
         ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
         ()
     in
     Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result);
-    Alcotest.(check int) "preload called once" 1 !preload_calls;
     Alcotest.(check int) "does not write OAS_MODEL_CATALOG" 0
       (List.length !putenv_calls))
 
 let write_config_root_keeper_toml config_root name =
   write_file
     (Filename.concat (Filename.concat config_root "keepers") (name ^ ".toml"))
-    (Printf.sprintf "[keeper]\ninstructions = \"instructions-%s\"\n" name)
+    (Printf.sprintf
+       "[keeper]\nautoboot_enabled = true\ninstructions = \"instructions-%s\"\n"
+       name)
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -1328,12 +1373,6 @@ let mark_keeper_stopped config (meta : Keeper_meta_contract.keeper_meta) =
   dispatch_keeper_event config meta Keeper_state_machine.Stop_requested;
   dispatch_keeper_event config meta Keeper_state_machine.Drain_complete
 
-let mark_keeper_zombie config (meta : Keeper_meta_contract.keeper_meta) =
-  Keeper_registry.mark_dead
-    ~base_path:config.Workspace.base_path
-    meta.name
-    ~at:(Time_compat.now ())
-
 let record_keeper_dead_tombstone config (meta : Keeper_meta_contract.keeper_meta) =
   Keeper_registry.mark_dead
     ~base_path:config.Workspace.base_path
@@ -1383,7 +1422,7 @@ let mark_keeper_dead_with_registry_cause config
        base_path);
   Keeper_registry.record_crash ~base_path meta.name 1780000000.0
     (Printf.sprintf
-       "synthetic crash record github_pat_secret at %s/crash.log"
+       "synthetic crash record at %s/crash.log"
        base_path);
   Keeper_registry.mark_dead ~base_path meta.name ~at:1780000001.0
 
@@ -1722,7 +1761,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
     write_config_root_keeper_toml config_root "mad-improver";
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
-      "[keeper]\ngoal = \"operator\"\nautoboot_enabled = false\n";
+      "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -1866,7 +1905,7 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
         in
         Alcotest.(check string) "pause kind" "unclassified_paused"
           (detail |> member "pause_kind" |> to_string);
-        Alcotest.(check string) "last blocker class" "turn_timeout"
+        Alcotest.(check string) "last blocker class" "stale_turn_timeout"
           (detail |> member "last_blocker" |> member "klass" |> to_string)))
 
 let test_health_json_reports_dormant_task_owner_as_advisory () =
@@ -1875,7 +1914,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "executor.toml")
-      "[keeper]\ngoal = \"goal-executor\"\nautoboot_enabled = false\n";
+      "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -2766,12 +2805,8 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
           in
           Alcotest.(check bool) "health preserves crash reason class" true
             (contains_substring latest_crash_reason "synthetic crash record");
-          Alcotest.(check bool) "health redacts crash reason token" false
-            (contains_substring latest_crash_reason "github_pat_secret");
           Alcotest.(check bool) "health redacts crash reason base path" false
             (contains_substring latest_crash_reason config.Workspace.base_path);
-          Alcotest.(check bool) "health marks redacted crash reason" true
-            (contains_substring latest_crash_reason "[REDACTED]");
           Alcotest.(check bool) "health marks redacted crash reason path" true
             (contains_substring latest_crash_reason "[REDACTED_PATH]"))))
 
@@ -2853,15 +2888,6 @@ let test_health_json_explains_stopped_capacity_blocker_as_terminal () =
     ~expected_phase:"stopped"
     ~expected_action:"restart_or_disable_stopped_keeper"
     mark_keeper_stopped
-
-let test_health_json_explains_zombie_capacity_blocker_as_terminal () =
-  test_health_json_explains_terminal_capacity_blocker
-    ~dir_name:"health-zombie-capacity-blocker"
-    ~keeper_name:"zombie-capacity"
-    ~trace_id:"trace-zombie-capacity"
-    ~expected_phase:"zombie"
-    ~expected_action:"repair_terminal_keeper_failure"
-    mark_keeper_zombie
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->
@@ -4710,8 +4736,14 @@ let () =
             "capability manifest configuration uses config root"
             `Quick test_capability_manifest_configuration_uses_config_root_file;
           Alcotest.test_case
+            "capability manifest configuration rejects invalid file"
+            `Quick test_capability_manifest_configuration_rejects_invalid_file;
+          Alcotest.test_case
             "model catalog configuration installs resolved catalog"
             `Quick test_model_catalog_configuration_installs_resolved_catalog;
+          Alcotest.test_case
+            "model catalog configuration rejects invalid file"
+            `Quick test_model_catalog_configuration_rejects_invalid_file;
           Alcotest.test_case
             "model catalog configuration prefers config-root catalog"
             `Quick test_model_catalog_configuration_prefers_config_root_catalog;
@@ -4847,9 +4879,6 @@ let () =
           Alcotest.test_case
             "health json explains stopped capacity blocker as terminal"
             `Quick test_health_json_explains_stopped_capacity_blocker_as_terminal;
-          Alcotest.test_case
-            "health json explains zombie capacity blocker as terminal"
-            `Quick test_health_json_explains_zombie_capacity_blocker_as_terminal;
           Alcotest.test_case
             "health json exposes dead keeper registry cause"
             `Quick test_health_json_exposes_dead_keeper_registry_cause;

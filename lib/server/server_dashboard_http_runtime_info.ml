@@ -1541,9 +1541,9 @@ let runtime_request_config_json (rt : Runtime.t) =
     ; "clear_thinking", Json_util.bool_opt_to_json cfg.clear_thinking
     ; ( "resolved_reasoning_effort"
       , Json_util.string_opt_to_json
-          (Llm_provider.Provider_config.reasoning_effort_request_value
-             ~enable_thinking:cfg.enable_thinking
-             ~thinking_budget:cfg.thinking_budget) )
+          (Option.map
+             Llm_provider.Provider_config.reasoning_effort_to_string
+             cfg.reasoning_effort) )
     ; "glm_clear_thinking", `Bool (Llm_provider.Provider_config.glm_clear_thinking cfg)
     ; "glm_replay_reasoning", `Bool (Llm_provider.Provider_config.glm_should_replay_reasoning cfg)
     ; "tool_stream", `Bool cfg.tool_stream

@@ -1334,10 +1334,11 @@ let () =
            Masc.Keeper_unified_turn_execution.autonomous_yield_request
              ~base_path
              ~keeper_name
-             ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
          with
-         | None -> ()
-         | Some _ ->
+         | Ok None -> ()
+         | Error error ->
+           Alcotest.failf "empty queue snapshot failed: %s" error
+         | Ok (Some _) ->
            Alcotest.fail "empty work queues must not request an autonomous yield");
         Masc.Keeper_registry_event_queue.enqueue
           ~base_path
@@ -1347,15 +1348,16 @@ let () =
           Masc.Keeper_unified_turn_execution.autonomous_yield_request
             ~base_path
             ~keeper_name
-            ~channel:Masc.Keeper_world_observation.Reactive
         with
-        | Some
-            { Masc.Keeper_agent_run.reason =
-                Masc.Keeper_agent_run.Durable_stimulus_waiting
-            ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
-            } ->
+        | Ok
+            (Some
+               { Masc.Keeper_agent_run.reason =
+                   Masc.Keeper_agent_run.Durable_stimulus_waiting
+               }) ->
           ()
-        | None | Some _ ->
+        | Error error ->
+          Alcotest.failf "durable queue snapshot failed: %s" error
+        | Ok None | Ok (Some _) ->
           Alcotest.fail "pending durable stimulus must request a typed yield"));
 
   (* --- critical delivery: durable enqueue succeeds before registration and

@@ -51,36 +51,6 @@ let ensure_dir path =
   (* ensure_dir returns the created path; fire-and-forget *)
   ignore (Keeper_fs.ensure_dir path)
 
-(** {1 Token Estimation Facade}
-
-    All OAS Context_reducer estimation calls in MASC pass through this
-    module.  Other keeper modules must NOT call
-    [Agent_sdk.Context_reducer.estimate_*] directly for decision-making.
-
-    @boundary-contract
-    - MASC owns: observation (context_ratio for logging, compaction strategy
-      selection, dashboard display). Token estimates are read-only signals.
-    - OAS owns: authoritative token estimation (CJK-aware, ceil-based),
-      context budget enforcement during Agent.run, compaction execution.
-    - Neither may: MASC must not add safety buffers on top of OAS estimates
-      (removed in #5053); OAS estimates must not be used as exact counts
-      for billing or hard limits. *)
-
-(** Estimate token count for a raw string (CJK-aware). *)
-let estimate_char_tokens (s : string) : int =
-  Agent_sdk.Context_reducer.estimate_char_tokens s
-
-(** CJK-aware token estimate delegated to OAS Context_reducer.
-    OAS estimator is already conservative (CJK-aware, ceil-based).
-    Prior 15% buffer (#5053) removed — it caused premature compaction
-    and masked the OAS estimator's actual accuracy. *)
-let msg_tokens (m : Agent_sdk.Types.message) : int =
-  Agent_sdk.Context_reducer.estimate_message_tokens m
-
-let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
-  let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
-  List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
-
 let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
 
 let oas_context_of_context (ctx : working_context) = ctx.checkpoint.context
@@ -118,6 +88,7 @@ let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
     top_p = None;
     top_k = None;
     min_p = None;
+    reasoning_effort = None;
     enable_thinking = None;
     preserve_thinking = None;
     response_format = Agent_sdk.Types.Off;
@@ -128,16 +99,8 @@ let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
     working_context = None;
   }
 
-let token_count (ctx : working_context) =
-  count_tokens (system_prompt_of_context ctx) (messages_of_context ctx)
-
 let message_count (ctx : working_context) =
   List.length (messages_of_context ctx)
-
-let context_ratio (ctx : working_context) : float =
-  let max_tokens = max_tokens_of_context ctx in
-  if max_tokens = 0 then 0.0
-  else float_of_int (token_count ctx) /. float_of_int max_tokens
 
 let create_oas_context ~eio =
   if eio then Agent_sdk.Context.create () else Agent_sdk.Context.create_sync ()
@@ -175,18 +138,8 @@ let append_many ctx msgs =
 let sync_oas_context (ctx : working_context) : working_context =
   let context = oas_context_of_context ctx in
   let message_count = message_count ctx in
-  let token_count = token_count ctx in
-  let context_ratio =
-    let max_tokens = max_tokens_of_context ctx in
-    if max_tokens = 0 then 0.0
-    else float_of_int token_count /. float_of_int max_tokens
-  in
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "message_count" (`Int message_count);
-  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-    "token_count" (`Int token_count);
-  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-    "context_ratio" (`Float context_ratio);
   ctx
 
 let role_to_string = Message_json.role_to_string
@@ -537,10 +490,12 @@ let serialize_context (ctx : working_context) : string =
       `String
         (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
     ("messages", `List (List.map message_to_json (messages_of_context ctx)));
-    ("token_count", `Int (token_count ctx));
     ("max_tokens", `Int (max_tokens_of_context ctx));
   ] in
   Yojson.Safe.to_string json
+
+let serialized_bytes (ctx : working_context) : int =
+  String.length (serialize_context ctx)
 
 let deserialize_context ~eio (s : string) ~max_tokens : working_context =
   let json = Yojson.Safe.from_string s in
@@ -549,7 +504,6 @@ let deserialize_context ~eio (s : string) ~max_tokens : working_context =
     (match Json_util.assoc_member_opt "messages" json with Some (`List l) -> l | _ -> []) |> List.map message_of_json
     |> repair_broken_tool_call_pairs
   in
-  let _legacy_token_count = Json_util.get_int json "token_count" in
   let context = create_oas_context ~eio in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
@@ -563,7 +517,6 @@ let context_to_json (ctx : working_context) : Yojson.Safe.t =
       `String
         (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
     ("messages", `List (List.map message_to_json (messages_of_context ctx)));
-    ("token_count", `Int (token_count ctx));
     ("max_tokens", `Int (max_tokens_of_context ctx));
   ]
 

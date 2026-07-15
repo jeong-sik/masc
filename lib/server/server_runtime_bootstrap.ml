@@ -996,6 +996,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
+  (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
+     routes the current binary already removed (#24332 governance->gate:
+     the served SPA still called DELETE'd /api/v1/dashboard/governance for
+     3+ days because scripts/build-dashboard-if-needed.sh was never re-run
+     after the binary shipped). Cheap synchronous stat comparison; not worth
+     its own fiber. *)
+  Web_dashboard.log_bundle_freshness_warning ();
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in

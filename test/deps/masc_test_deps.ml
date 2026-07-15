@@ -233,12 +233,12 @@ let cleanup_test_workspace dir =
 let with_publication_recovery_registry ~sw ~fs ~registry_root f =
   let registry_root = Eio.Path.(fs / registry_root) in
   match
-    Fs_compat.open_publication_recovery_registry ~sw ~fs ~registry_root
+    Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
   with
   | Error error ->
     failwith
       ("test publication recovery registry open failed: "
-       ^ Fs_compat.publication_recovery_registry_error_to_string error)
+       ^ Fs_compat.Publication_recovery.registry_error_to_string error)
   | Ok publication_recovery_registry ->
     (match
        Fs_compat.Publication_recovery.discover_owners

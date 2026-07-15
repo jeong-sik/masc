@@ -51,8 +51,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
              ; clock
              ; proc_mgr
              ; net = None
-             ; publication_recovery_provider =
-                 Mcp_server.publication_recovery_availability_provider state
+             ; delegated_dispatch = None
              ; mcp_session_id = None
              }
            in

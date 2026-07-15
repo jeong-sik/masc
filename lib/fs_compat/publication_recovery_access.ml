@@ -1606,21 +1606,6 @@ module For_testing = struct
        | Error error -> Error (Store_failed error))
   ;;
 
-  let lane_release_failure ~owner ~exception_ ~backtrace =
-    match Core.owner_of_string owner with
-    | Error _ as error -> error
-    | Ok owner ->
-      Ok
-        { Core.failure =
-            { operation = Core.Close_directory
-            ; subject = Core.Lane_root owner
-            ; cause = Core.Io_failed { exception_; backtrace }
-            }
-        ; exception_
-        ; backtrace
-        }
-  ;;
-
   let record_lane_store_open_failure
         ~registry
         ~owner

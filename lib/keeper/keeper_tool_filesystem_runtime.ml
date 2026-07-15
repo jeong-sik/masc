@@ -489,6 +489,17 @@ and created_directory_sync_outcome =
   | Directory_sync_succeeded
   | Directory_sync_failed of Fs_compat.capability_directory_sync_error
 
+type created_directory_dispatch_fault =
+  { fault_stage : created_directory_stage
+  ; fault_exception : exn
+  }
+
+let created_directory_dispatch_fault_key
+      : created_directory_dispatch_fault Eio.Fiber.key
+  =
+  Eio.Fiber.create_key ()
+;;
+
 type append_target_effect =
   | Append_target_unchanged
   | Append_target_extended_complete
@@ -519,7 +530,7 @@ type content_write_error =
 type content_publication =
   | Recovery_independent of (unit -> (unit, content_write_error) result)
   | Recovery_guarded of
-      (Fs_compat.publication_recovery_access
+      (Fs_compat.Publication_recovery.t
        -> (unit, content_write_error) result)
 
 let append_capability ~on_cancelled file content =
@@ -563,6 +574,16 @@ let create_and_commit_directory_component
       ~parent_dir
       ~component
   =
+  let dispatch_fault = Eio.Fiber.get created_directory_dispatch_fault_key in
+  let run_directory_operation =
+    match dispatch_fault with
+    | None -> created_directory_operation
+    | Some fault ->
+      (fun stage f ->
+         created_directory_operation stage (fun () ->
+           if fault.fault_stage = stage then raise fault.fault_exception;
+           f ()))
+  in
   let unchanged primary_failure =
     ( None
     , { component
@@ -584,13 +605,13 @@ let create_and_commit_directory_component
   in
   let child = Eio.Path.(parent_dir / component) in
   match
-    created_directory_operation Create_directory (fun () ->
+    run_directory_operation Create_directory (fun () ->
       Eio.Path.mkdir ~perm:0o700 child)
   with
   | Error primary_failure -> unchanged primary_failure
   | Ok () ->
     (match
-       created_directory_operation Inspect_created_directory (fun () ->
+       run_directory_operation Inspect_created_directory (fun () ->
          Eio.Path.stat ~follow:false child)
      with
      | Error primary_failure ->
@@ -605,7 +626,7 @@ let create_and_commit_directory_component
          }
      | Ok created ->
        (match
-          created_directory_operation Acquire_directory_capability (fun () ->
+          run_directory_operation Acquire_directory_capability (fun () ->
             Eio.Path.open_dir ~sw child)
         with
         | Error primary_failure ->
@@ -614,7 +635,7 @@ let create_and_commit_directory_component
             primary_failure
         | Ok child_dir ->
           let directory_file =
-            created_directory_operation Acquire_directory_capability (fun () ->
+            run_directory_operation Acquire_directory_capability (fun () ->
               Eio.Path.open_in ~sw Eio.Path.(child_dir / "."))
           in
           let validation =
@@ -622,7 +643,7 @@ let create_and_commit_directory_component
             | Error _ as error -> error
             | Ok directory_file ->
               (match
-                 created_directory_operation
+                 run_directory_operation
                    Validate_directory_capability
                    (fun () ->
                       Eio.Path.stat ~follow:false child, Eio.File.stat directory_file)
@@ -668,7 +689,7 @@ let create_and_commit_directory_component
                    ; cause = Directory_posix_descriptor_unavailable
                    }
                | Some fd ->
-                 created_directory_operation Apply_directory_permissions (fun () ->
+                 run_directory_operation Apply_directory_permissions (fun () ->
                    Eio_unix.run_in_systhread
                      ~label:"keeper-fs-created-directory-fchmod"
                      (fun () ->
@@ -1173,6 +1194,25 @@ let created_parent_effects_json created_parents =
   `List (List.map created_directory_commit_json created_parents)
 ;;
 
+let created_directory_sync_observation_json = function
+  | Directory_sync_not_attempted -> `String "not_attempted"
+  | Directory_sync_succeeded -> `String "succeeded"
+  | Directory_sync_failed _ -> `String "failed"
+;;
+
+let created_parent_effect_observation_json commit =
+  `Assoc
+    [ ( "target_effect"
+      , `String (created_directory_target_effect_to_string commit.target_effect) )
+    ; "child_sync", created_directory_sync_observation_json commit.child_sync
+    ; "parent_sync", created_directory_sync_observation_json commit.parent_sync
+    ]
+;;
+
+let created_parent_effect_observations_json created_parents =
+  `List (List.map created_parent_effect_observation_json created_parents)
+;;
+
 let capability_write_error_payload
       ~target
       ~created_parents
@@ -1476,7 +1516,7 @@ let publication_recovery_cleanup_failed_attempt
       ( "filesystem publication committed, but publication recovery lane cleanup failed"
       , `Bool true )
     | Publication_write_effect_observed ->
-      ( "filesystem publication changed the target before the publication callback and recovery lane cleanup both failed"
+      ( "filesystem publication produced an observable filesystem effect before the publication callback and recovery lane cleanup both failed"
       , `Bool true )
     | Publication_write_not_executed ->
       ( "filesystem publication left the target unchanged, but publication recovery lane cleanup failed"
@@ -1537,13 +1577,59 @@ let finish_recovery_guarded_write
          release_failure)
 ;;
 
-let publication_execution_of_target_effect = function
-  | Fs_compat.Target_unchanged -> Publication_write_not_executed
+type publication_effect_observation =
+  | Publication_effect_absent
+  | Publication_effect_observed
+  | Publication_effect_indeterminate
+
+let join_publication_effect_observation left right =
+  match left, right with
+  | Publication_effect_observed, _ | _, Publication_effect_observed ->
+    Publication_effect_observed
+  | Publication_effect_indeterminate, _ | _, Publication_effect_indeterminate ->
+    Publication_effect_indeterminate
+  | Publication_effect_absent, Publication_effect_absent ->
+    Publication_effect_absent
+;;
+
+let publication_execution_of_effect_observation = function
+  | Publication_effect_absent -> Publication_write_not_executed
+  | Publication_effect_observed -> Publication_write_effect_observed
+  | Publication_effect_indeterminate -> Publication_write_indeterminate
+;;
+
+let publication_effect_observation_of_target_effect = function
+  | Fs_compat.Target_unchanged -> Publication_effect_absent
   | ( Fs_compat.Target_created
     | Fs_compat.Target_created_incomplete
     | Fs_compat.Target_replaced ) ->
-    Publication_write_effect_observed
-  | Fs_compat.Target_state_unknown -> Publication_write_indeterminate
+    Publication_effect_observed
+  | Fs_compat.Target_state_unknown -> Publication_effect_indeterminate
+;;
+
+let publication_effect_observation_of_directory_target_effect = function
+  | Directory_unchanged -> Publication_effect_absent
+  | (Directory_created_validated | Directory_created_requested_mode) ->
+    Publication_effect_observed
+  | Directory_state_unknown -> Publication_effect_indeterminate
+;;
+
+let publication_effect_observation_of_created_parents created_parents =
+  List.fold_left
+    (fun observation commit ->
+       join_publication_effect_observation
+         observation
+         (publication_effect_observation_of_directory_target_effect
+            commit.target_effect))
+    Publication_effect_absent
+    created_parents
+;;
+
+let publication_execution_of_error_effect ~primary ~created_parents =
+  join_publication_effect_observation
+    primary
+    (publication_effect_observation_of_created_parents created_parents)
+  |> publication_execution_of_effect_observation
 ;;
 
 let content_write_observation = function
@@ -1551,8 +1637,12 @@ let content_write_observation = function
     { execution = Publication_write_completed
     ; publication_result = `Assoc [ "outcome", `String "success" ]
     }
-  | Error (Content_write_capability { error; _ }) ->
-    { execution = publication_execution_of_target_effect error.target_effect
+  | Error (Content_write_capability { error; created_parents }) ->
+    { execution =
+        publication_execution_of_error_effect
+          ~primary:
+            (publication_effect_observation_of_target_effect error.target_effect)
+          ~created_parents
     ; publication_result =
         `Assoc
           [ "outcome", `String "failure"
@@ -1561,10 +1651,17 @@ let content_write_observation = function
             , `String
                 (Fs_compat.capability_write_target_effect_to_string
                    error.target_effect) )
+          ; ( "filesystem_created_parent_effects"
+            , created_parent_effect_observations_json created_parents )
           ]
     }
-  | Error (Content_write_directory { failed_commit; _ }) ->
-    { execution = Publication_write_not_executed
+  | Error (Content_write_directory { failed_commit; created_parents }) ->
+    { execution =
+        publication_execution_of_error_effect
+          ~primary:
+            (publication_effect_observation_of_directory_target_effect
+               failed_commit.target_effect)
+          ~created_parents
     ; publication_result =
         `Assoc
           [ "outcome", `String "failure"
@@ -1573,6 +1670,8 @@ let content_write_observation = function
             , `String
                 (created_directory_target_effect_to_string
                    failed_commit.target_effect) )
+          ; ( "filesystem_created_parent_effects"
+            , created_parent_effect_observations_json created_parents )
           ]
     }
   | Error (Content_write_append outcome) ->
@@ -2338,86 +2437,24 @@ let handle_file_write
 ;;
 
 module For_testing = struct
-  let committed_publication_release_failure
-        ~keeper_name
-        ~release_failure
-    =
-    let outcome =
-      Fs_compat.Publication_recovery.Lane_release_failed
-        { value = ()
-        ; release_failure
-        }
+  type created_directory_fault_stage =
+    | Before_create_directory
+    | Before_inspect_created_directory
+    | Before_apply_directory_permissions
+
+  type created_directory_fault = created_directory_dispatch_fault
+
+  let created_directory_fault ~stage ~exception_ =
+    let fault_stage =
+      match stage with
+      | Before_create_directory -> Create_directory
+      | Before_inspect_created_directory -> Inspect_created_directory
+      | Before_apply_directory_permissions -> Apply_directory_permissions
     in
-    match
-      finish_recovery_guarded_write
-        ~keeper_name
-        ~target:"product-contract-fixture"
-        ~observe_result:(fun () ->
-          { execution = Publication_write_completed
-          ; publication_result = `Assoc [ "outcome", `String "success" ]
-          })
-        ~finish:(fun () ->
-          Ok
-            (Write_succeeded
-               (Yojson.Safe.to_string (`Assoc [ "ok", `Bool true ]))))
-        outcome
-    with
-    | Ok attempt -> file_write_attempt_to_execution attempt
-    | Error message -> Keeper_tool_execution.failure (error_json message)
+    { fault_stage; fault_exception = exception_ }
   ;;
 
-  let failed_publication_release_failure
-        ~keeper_name
-        ~target_effect
-        ~release_failure
-    =
-    let error =
-      { Fs_compat.operation = Fs_compat.Atomic_replace_operation
-      ; target_effect
-      ; primary_failure =
-          Fs_compat.Write_primary_failure
-            { stage = Fs_compat.Sync_parent
-            ; cause = Fs_compat.Resource_identity_changed
-            }
-      ; cleanup_failures = []
-      }
-    in
-    let result =
-      Error (Content_write_capability { error; created_parents = [] })
-    in
-    let outcome =
-      Fs_compat.Publication_recovery.Lane_release_failed
-        { value = result; release_failure }
-    in
-    match
-      finish_recovery_guarded_write
-        ~keeper_name
-        ~target:"product-contract-fixture"
-        ~observe_result:content_write_observation
-        ~finish:(fun result ->
-          match result with
-          | Error (Content_write_capability { error; created_parents }) ->
-            Ok
-              (Write_failed
-                 { payload =
-                     capability_write_error_payload
-                       ~target:"product-contract-fixture"
-                       ~created_parents
-                       error
-                 ; class_ = Tool_result.Runtime_failure
-                 })
-          | Ok () ->
-            Ok
-              (Write_succeeded
-                 (Yojson.Safe.to_string (`Assoc [ "ok", `Bool true ])))
-          | Error
-              ( Content_write_message _
-              | Content_write_directory _
-              | Content_write_append _ ) ->
-            Error "unexpected product-contract fixture result")
-        outcome
-    with
-    | Ok attempt -> file_write_attempt_to_execution attempt
-    | Error message -> Keeper_tool_execution.failure (error_json message)
+  let with_created_directory_fault fault f =
+    Eio.Fiber.with_binding created_directory_dispatch_fault_key fault f
   ;;
 end

@@ -1,4 +1,45 @@
+open Fs_compat_internal
+
 include Publication_recovery_access
+
+type lane_scope_release_fault =
+  Capability_recovery_obligation.For_testing.lane_scope_release_fault
+
+let lane_scope_release_fault =
+  Capability_recovery_obligation.For_testing.lane_scope_release_fault
+;;
+
+let with_lane_scope_release_fault =
+  Capability_recovery_obligation.For_testing.with_lane_scope_release_fault
+;;
+
+type replace_dispatch_fault =
+  Atomic_write.Capability_write_for_testing.replace_dispatch_fault
+
+type replace_dispatch_fault_stage =
+  | Before_publish_replace
+  | Before_parent_sync
+
+(* TEL-OK: this workspace-only constructor maps a typed test stage; no write occurs. *)
+let replace_dispatch_fault ~stage ~exception_ =
+  let stage =
+    match stage with
+    | Before_publish_replace -> Atomic_write.Publish_replace
+    | Before_parent_sync -> Atomic_write.Sync_parent
+  in
+  Atomic_write.Capability_write_for_testing.replace_dispatch_fault
+    ~stage
+    ~exception_
+;;
+
+(* TEL-OK: the internal fiber binding is exercised through the real write operation. *)
+let with_replace_dispatch_fault =
+  Atomic_write.Capability_write_for_testing.with_replace_dispatch_fault
+;;
+
+let remove_staging_payload_before_publish =
+  Atomic_write.Capability_write_for_testing.remove_staging_payload_before_publish
+;;
 
 type record_area =
   | Active

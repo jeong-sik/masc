@@ -481,7 +481,7 @@ type owner_identity_projection =
 exception Owner_identity_projection_settled_more_than_once
 
 type publication_recovery_available =
-  { registry : Fs_compat.publication_recovery_registry
+  { registry : Fs_compat.Publication_recovery.registry
   ; owner_identity_projection : owner_identity_projection Atomic.t
   }
 
@@ -489,7 +489,7 @@ type publication_recovery_runtime_state =
   | Publication_recovery_initializing
   | Publication_recovery_available of publication_recovery_available
   | Publication_recovery_unavailable of
-      Fs_compat.publication_recovery_registry_error
+      Fs_compat.Publication_recovery.registry_error
   | Publication_recovery_initialization_crashed of Eio.Exn.with_bt
   | Publication_recovery_non_runtime
 
@@ -505,7 +505,7 @@ type publication_recovery_runtime_snapshot =
       ; owner_identity_projection : owner_identity_projection
       }
   | Publication_recovery_unavailable_snapshot of
-      Fs_compat.publication_recovery_registry_error
+      Fs_compat.Publication_recovery.registry_error
   | Publication_recovery_initialization_crashed_snapshot
   | Publication_recovery_non_runtime_snapshot
 
@@ -1251,7 +1251,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     let initialization =
       try
         `Returned
-          (Fs_compat.open_publication_recovery_registry
+          (Fs_compat.Publication_recovery.open_registry
              ~sw
              ~fs
              ~registry_root)
@@ -1300,7 +1300,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
              [ "registry_root", `String process_masc_root
              ; ( "error"
                , `String
-                   (Fs_compat.publication_recovery_registry_error_to_string
+                   (Fs_compat.Publication_recovery.registry_error_to_string
                       error) )
              ])
         "publication recovery registry is unavailable; publication filesystem tools fail closed"

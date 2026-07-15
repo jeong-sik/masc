@@ -37,11 +37,6 @@ val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
 
 type atomic_replace_recovery_target
 type atomic_replace_recovery_target_error
-type publication_recovery_access = Publication_recovery_access.t
-type publication_recovery_registry = Publication_recovery_access.registry
-type publication_recovery_registry_error = Capability_recovery_obligation.transition_error
-type publication_recovery_lane_open_error = Publication_recovery_access.lane_open_error
-type publication_recovery_owner = Publication_recovery_access.owner
 type publication_recovery_reconciliation_report = Capability_recovery_reconciler.report
 
 type publication_recovery_record_area =
@@ -91,16 +86,6 @@ type publication_recovery_reconciliation_row_kind =
   | Publication_recovery_owner_store_unavailable
   | Publication_recovery_owner_inventory_unavailable
 
-val open_publication_recovery_registry
-  :  sw:Eio.Switch.t
-  -> fs:Eio.Fs.dir_ty Eio.Path.t
-  -> registry_root:Eio.Fs.dir_ty Eio.Path.t
-  -> (publication_recovery_registry, publication_recovery_registry_error) result
-
-val publication_recovery_registry_error_to_string
-  :  publication_recovery_registry_error
-  -> string
-
 val publication_recovery_reconciliation_report_owner
   :  publication_recovery_reconciliation_report
   -> string
@@ -127,14 +112,6 @@ val publication_recovery_reconciliation_report_to_string
 val publication_recovery_reconciliation_report_to_yojson
   :  publication_recovery_reconciliation_report
   -> Yojson.Safe.t
-
-val with_publication_recovery_lane
-  :  registry:publication_recovery_registry
-  -> owner:string
-  -> (publication_recovery_access -> 'a)
-  -> ('a Publication_recovery_access.lane_outcome,
-      publication_recovery_lane_open_error)
-       result
 
 (** Build the immutable recovery locator projection used by
     [replace_capability_file]. The allowed-root identity is caller-certified;
@@ -328,7 +305,7 @@ exception Capability_write_cancelled of exn * capability_write_cancellation
     target-parent sync all complete. No target tree is scanned during failure
     handling. *)
 val replace_capability_file
-  :  recovery:publication_recovery_access
+  :  recovery:Publication_recovery_access.t
   -> parent:Eio.Fs.dir_ty Eio.Path.t
   -> target:atomic_replace_recovery_target
   -> string
@@ -367,6 +344,22 @@ val capability_directory_sync_error_to_string
   -> string
 
 module Capability_write_for_testing : sig
+  type replace_dispatch_fault
+
+  val replace_dispatch_fault
+    :  stage:capability_write_stage
+    -> exception_:exn
+    -> replace_dispatch_fault
+
+  val remove_staging_payload_before_publish
+    :  unit
+    -> replace_dispatch_fault
+
+  val with_replace_dispatch_fault
+    :  replace_dispatch_fault
+    -> (unit -> 'a)
+    -> 'a
+
   type resource_scope_callback =
     | Return_completed_rows of string list
     | Cancel_callback of exn
@@ -451,15 +444,15 @@ module Capability_write_for_testing : sig
     -> cleanup_evidence
 
   val single_publication_recovery_borrow_balance
-    :  registry:publication_recovery_registry
+    :  registry:Publication_recovery_access.registry
     -> owner:string
-    -> (single_borrow_evidence, publication_recovery_lane_open_error) result
+    -> (single_borrow_evidence, Publication_recovery_access.lane_open_error) result
 
   val publication_recovery_stage_name : Uuidm.t -> string
 
   val replace_capability_file
     :  before_stage:(capability_write_stage -> unit)
-    -> recovery:publication_recovery_access
+    -> recovery:Publication_recovery_access.t
     -> parent:Eio.Fs.dir_ty Eio.Path.t
     -> target:atomic_replace_recovery_target
     -> string
@@ -474,7 +467,7 @@ module Capability_write_for_testing : sig
     -> (unit, capability_write_error) result
 
   val seed_prepared_publication_recovery
-    :  registry:publication_recovery_registry
+    :  registry:Publication_recovery_access.registry
     -> owner:string
     -> operation_id:Uuidm.t
     -> allowed_root_path:string
@@ -488,7 +481,7 @@ module Capability_write_for_testing : sig
     -> (unit, publication_recovery_fixture_error) result
 
   val seed_bound_publication_recovery
-    :  registry:publication_recovery_registry
+    :  registry:Publication_recovery_access.registry
     -> owner:string
     -> operation_id:Uuidm.t
     -> allowed_root_path:string
@@ -504,7 +497,7 @@ module Capability_write_for_testing : sig
     -> (unit, publication_recovery_fixture_error) result
 
   val write_raw_publication_recovery_record
-    :  registry:publication_recovery_registry
+    :  registry:Publication_recovery_access.registry
     -> owner:string
     -> area:publication_recovery_record_area
     -> record_name:string

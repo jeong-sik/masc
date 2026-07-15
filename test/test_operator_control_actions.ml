@@ -15,7 +15,7 @@ let claim_and_start config ~agent_name ~task_id =
   | Ok _ -> ()
   | Error err -> Alcotest.fail (Masc_domain.show_masc_error err)
 
-let test_task_inject_executes_immediately () =
+let test_task_inject_executes_after_confirmation () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -49,20 +49,50 @@ let test_task_inject_executes_immediately () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check bool) "confirm required" false
+      Alcotest.(check bool) "confirm required" true
         Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
-      Alcotest.(check bool) "no confirm token" true
-        (Yojson.Safe.Util.member "confirm_token" action_json = `Null);
+      let confirm_token =
+        Yojson.Safe.Util.(action_json |> member "confirm_token" |> to_string)
+      in
       let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
       let pending_confirms =
         snapshot |> Yojson.Safe.Util.member "pending_confirms"
         |> Yojson.Safe.Util.to_list
       in
-      Alcotest.(check int) "pending confirm count" 0 (List.length pending_confirms);
-      Alcotest.(check bool) "result present" true
-        (Yojson.Safe.Util.member "result" action_json <> `Null);
+      Alcotest.(check int) "pending confirm count" 1 (List.length pending_confirms);
+      Alcotest.(check bool) "result absent before confirmation" true
+        (Yojson.Safe.Util.member "result" action_json = `Null);
       let tasks = Workspace.get_tasks_raw config in
-      Alcotest.(check int) "task injected" 1 (List.length tasks))
+      Alcotest.(check int) "task not injected before confirmation" 0
+        (List.length tasks);
+      let confirm_json =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [
+              ("actor", `String "operator");
+              ("confirm_token", `String confirm_token);
+              ("decision", `String "confirm");
+            ])
+      in
+      let confirm_json =
+        match confirm_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "confirmation decision" "confirm"
+        Yojson.Safe.Util.(confirm_json |> member "decision" |> to_string);
+      Alcotest.(check bool) "result present after confirmation" true
+        (Yojson.Safe.Util.member "result" confirm_json <> `Null);
+      let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
+      let pending_confirms =
+        snapshot |> Yojson.Safe.Util.member "pending_confirms"
+        |> Yojson.Safe.Util.to_list
+      in
+      Alcotest.(check int) "pending confirm removed" 0
+        (List.length pending_confirms);
+      let tasks = Workspace.get_tasks_raw config in
+      Alcotest.(check int) "task injected after confirmation" 1
+        (List.length tasks))
 
 let test_digest_defaults_to_workspace_target () =
   Eio_main.run @@ fun env ->
@@ -147,9 +177,9 @@ let () =
     "operator_control_actions"
     [ ( "actions"
       , [ Alcotest.test_case
-            "task inject executes immediately"
+            "task inject executes after confirmation"
             `Quick
-            test_task_inject_executes_immediately
+            test_task_inject_executes_after_confirmation
         ; Alcotest.test_case
             "digest defaults to workspace target"
             `Quick

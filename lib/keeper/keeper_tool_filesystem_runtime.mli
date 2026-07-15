@@ -95,19 +95,20 @@ val handle_file_write_with_outcome :
     opened root capability. *)
 
 module For_testing : sig
-  val committed_publication_release_failure
-    :  keeper_name:string
-    -> release_failure:Fs_compat.Publication_recovery.lane_release_failure
-    -> Keeper_tool_execution.t
-  (** Inject a post-callback lane release failure through the same public tool
-      result projection used after a committed production publication. *)
+  type created_directory_fault_stage =
+    | Before_create_directory
+    | Before_inspect_created_directory
+    | Before_apply_directory_permissions
 
-  val failed_publication_release_failure
-    :  keeper_name:string
-    -> target_effect:Fs_compat.capability_write_target_effect
-    -> release_failure:Fs_compat.Publication_recovery.lane_release_failure
-    -> Keeper_tool_execution.t
-  (** Project a typed atomic-publication failure together with a subsequent
-      lane release failure. This exercises preservation of the target effect
-      already observed by the capability writer. *)
+  type created_directory_fault
+
+  val created_directory_fault
+    :  stage:created_directory_fault_stage
+    -> exception_:exn
+    -> created_directory_fault
+
+  val with_created_directory_fault
+    :  created_directory_fault
+    -> (unit -> 'a)
+    -> 'a
 end

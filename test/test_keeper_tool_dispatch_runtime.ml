@@ -6,7 +6,9 @@ module KTD = Masc.Keeper_tool_descriptor
 module Workspace = Masc.Workspace
 module Publication_availability =
   Masc.Keeper_publication_recovery_availability
-module Recovery_test = Fs_compat.Publication_recovery_for_testing
+module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
+module Capability_write_test =
+  Fs_compat_test_support.Capability_write_for_testing
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -990,7 +992,7 @@ let test_publication_reconciliation_evidence_is_redacted () =
        in
        (match
           Recovery_test.seed_prepared
-            ~registry:(Recovery_test.private_registry registry)
+            ~registry:(registry)
             ~owner:meta.name
             ~operation_id
             ~allowed_root_path:allowed_root_sentinel
@@ -1007,7 +1009,7 @@ let test_publication_reconciliation_evidence_is_redacted () =
           fail (Recovery_test.fixture_error_to_string error));
        (match
           Recovery_test.write_raw_record
-            ~registry:(Recovery_test.private_registry registry)
+            ~registry:(registry)
             ~owner:meta.name
             ~area:Recovery_test.Forensic
             ~record_name:operation_id_text
@@ -1064,7 +1066,7 @@ let test_publication_registry_evidence_is_redacted () =
        let registry_error =
          Eio.Switch.run @@ fun sw ->
          match
-           Fs_compat.open_publication_recovery_registry
+           Fs_compat.Publication_recovery.open_registry
              ~sw
              ~fs
              ~registry_root:Eio.Path.(fs / registry_path_sentinel)
@@ -1201,7 +1203,7 @@ let test_publication_write_cancellation_releases_exact_lane () =
        let registry_root = Eio.Path.(fs / registry_dir) in
        let registry =
          match
-           Fs_compat.open_publication_recovery_registry
+           Fs_compat.Publication_recovery.open_registry
              ~sw
              ~fs
              ~registry_root
@@ -1209,7 +1211,7 @@ let test_publication_write_cancellation_releases_exact_lane () =
          | Ok registry -> registry
          | Error error ->
            fail
-             (Fs_compat.publication_recovery_registry_error_to_string error)
+             (Fs_compat.Publication_recovery.registry_error_to_string error)
        in
        (match Fs_compat.Publication_recovery.discover_owners registry with
         | Ok [] -> ()
@@ -1251,7 +1253,7 @@ let test_publication_write_cancellation_releases_exact_lane () =
             publication_recovery
             (fun publication_recovery_access ->
                Eio.Cancel.sub (fun cancellation_context ->
-                 Fs_compat.Capability_write_for_testing.replace_capability_file
+                 Capability_write_test.replace_capability_file
                    ~before_stage:(function
                      | Fs_compat.Acquire_mutation_lease ->
                        Atomic.set cancellation_hook_observed true;
@@ -1311,103 +1313,433 @@ let test_publication_write_cancellation_releases_exact_lane () =
          (read_file target_path))
 ;;
 
-let test_committed_publication_release_failure_preserves_effect_truth () =
+let test_real_publication_release_failure_preserves_effect_truth () =
   let exception Injected_release_failure of string in
-  let exception_ =
-    Injected_release_failure "private-release-failure-evidence"
-  in
-  let backtrace =
-    try raise exception_ with
-    | observed ->
-      check bool "exact injected release failure" true (observed == exception_);
-      Printexc.get_raw_backtrace ()
-  in
-  let release_failure =
-    match
-      Fs_compat.Publication_recovery_for_testing.For_testing.lane_release_failure
-        ~owner:"committed-publication"
-        ~exception_
-        ~backtrace
-    with
-    | Ok failure ->
-      Fs_compat.Publication_recovery_for_testing
-      .public_lane_release_failure
-        failure
-    | Error error ->
-      fail
-        (Fs_compat.Publication_recovery_for_testing.validation_error_to_string error)
-  in
-  let execution =
-    Masc.Keeper_tool_filesystem_runtime.For_testing
-    .committed_publication_release_failure
-      ~keeper_name:"committed-publication"
-      ~release_failure
-  in
-  (match execution.outcome with
-   | Masc.Keeper_tool_execution.Failed Tool_result.Runtime_failure -> ()
-   | Masc.Keeper_tool_execution.Failed failure_class ->
-     failf
-       "cleanup failure received wrong class: %s"
-       (Tool_result.tool_failure_class_to_string failure_class)
-   | Masc.Keeper_tool_execution.Succeeded ->
-     fail "cleanup failure was reported as success");
-  check string
-    "committed effect and cleanup failure are both explicit"
-    "filesystem publication committed, but publication recovery lane cleanup failed"
-    execution.raw_output;
-  let data =
-    match execution.data with
-    | Some data -> data
-    | None -> fail "cleanup failure omitted typed data"
-  in
-  check string
-    "typed cleanup error"
-    "publication_recovery_cleanup_failed"
-    Yojson.Safe.Util.(member "error" data |> to_string);
-  check string
-    "release phase is explicit"
-    "lane_release_failed"
-    Yojson.Safe.Util.(member "state" data |> to_string);
-  check bool
-    "committed write is never relabelled as unexecuted"
-    true
-    Yojson.Safe.Util.(member "write_executed" data |> to_bool);
-  check bool
-    "Keeper remains active after lane cleanup failure"
-    true
-    Yojson.Safe.Util.(member "keeper_active" data |> to_bool);
-  let failed_execution =
-    Masc.Keeper_tool_filesystem_runtime.For_testing
-    .failed_publication_release_failure
-      ~keeper_name:"committed-publication"
-      ~target_effect:Fs_compat.Target_replaced
-      ~release_failure
-  in
-  (match failed_execution.outcome with
-   | Masc.Keeper_tool_execution.Failed Tool_result.Runtime_failure -> ()
-   | Masc.Keeper_tool_execution.Failed failure_class ->
-     failf
-       "post-rename failure received wrong class: %s"
-       (Tool_result.tool_failure_class_to_string failure_class)
-   | Masc.Keeper_tool_execution.Succeeded ->
-     fail "post-rename failure was reported as success");
-  let failed_data =
-    match failed_execution.data with
-    | Some data -> data
-    | None -> fail "post-rename cleanup failure omitted typed data"
-  in
-  check bool
-    "post-rename callback failure preserves the executed target effect"
-    true
-    Yojson.Safe.Util.(member "write_executed" failed_data |> to_bool);
-  check string
-    "post-rename target effect remains explicit"
-    "target_replaced"
-    Yojson.Safe.Util.(
-      failed_data
-      |> member "publication_result"
-      |> member "filesystem_target_effect"
-      |> to_string)
+  let exception Injected_write_failure of string in
+  with_exec_fixture
+    ~always_allow:true
+    "keeper_tool_dispatch_release_failure_effect_truth"
+    (fun ~config ~meta ~publication_recovery:fixture_recovery ~ctx_work ->
+       let registry =
+         match fixture_recovery.provider () with
+         | Publication_availability.Available registry -> registry
+         | Publication_availability.Initializing
+         | Publication_availability.Registry_unavailable _
+         | Publication_availability.Initialization_crashed _
+         | Publication_availability.Non_runtime ->
+           fail "fixture did not provide its exact recovery registry"
+       in
+       let provider_reads = Atomic.make 0 in
+       let publication_recovery =
+         { Publication_availability.provider =
+             (fun () ->
+                Atomic.incr provider_reads;
+                Publication_availability.Available registry)
+         ; keeper_name = meta.name
+         }
+       in
+       let target = Filename.concat config.base_path "release-effect.txt" in
+       let execute_at target content =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String target
+                ; "content", `String content
+                ])
+           ()
+       in
+       let execute content = execute_at target content in
+       let warmup = execute "warmup" in
+       check string "warmup Write succeeds" "success"
+         (outcome_label warmup.outcome);
+       let release_fault =
+         match
+           Recovery_test.lane_scope_release_fault
+             ~owner:meta.name
+             ~exception_:
+               (Injected_release_failure
+                  "private-release-failure-evidence")
+         with
+         | Ok fault -> fault
+         | Error error ->
+           fail (Recovery_test.validation_error_to_string error)
+       in
+       let committed =
+         Recovery_test.with_lane_scope_release_fault release_fault (fun () ->
+           execute "committed")
+       in
+       (match committed.outcome with
+        | `Failure Tool_result.Runtime_failure -> ()
+        | `Failure failure_class ->
+          failf
+            "cleanup failure received wrong class: %s"
+            (Tool_result.tool_failure_class_to_string failure_class)
+        | `Success -> fail "cleanup failure was reported as success");
+       check string
+         "committed effect and cleanup failure are both explicit"
+         "filesystem publication committed, but publication recovery lane cleanup failed"
+         committed.raw_output;
+       let committed_data =
+         match committed.data with
+         | Some data -> data
+         | None -> fail "cleanup failure omitted typed data"
+       in
+       check
+         (testable Yojson.Safe.pp Yojson.Safe.equal)
+         "committed cleanup failure has the exact typed public projection"
+         (`Assoc
+            [ "error", `String "publication_recovery_cleanup_failed"
+            ; "failure_class", `String "runtime_failure"
+            ; "state", `String "lane_release_failed"
+            ; ( "detail"
+              , `String
+                  "publication recovery lane cleanup failed after the publication callback returned" )
+            ; "write_executed", `Bool true
+            ; "keeper_active", `Bool true
+            ; ( "publication_result"
+              , `Assoc [ "outcome", `String "success" ] )
+            ])
+         committed_data;
+       check string "committed bytes reached the real target" "committed"
+         (read_file target);
+       let recovered = execute "recovered" in
+       check string "same Keeper lane recovers on the next Write" "success"
+         (outcome_label recovered.outcome);
+       check string "recovered Write publishes exact bytes" "recovered"
+         (read_file target);
+       let write_fault =
+         Recovery_test.replace_dispatch_fault
+           ~stage:Recovery_test.Before_parent_sync
+           ~exception_:
+             (Injected_write_failure "private-write-failure-evidence")
+       in
+       let failed_after_replace =
+         Recovery_test.with_lane_scope_release_fault release_fault (fun () ->
+           Recovery_test.with_replace_dispatch_fault write_fault (fun () ->
+             execute "replaced-before-failure"))
+       in
+       (match failed_after_replace.outcome with
+        | `Failure Tool_result.Runtime_failure -> ()
+        | `Failure failure_class ->
+          failf
+            "post-replace cleanup failure received wrong class: %s"
+            (Tool_result.tool_failure_class_to_string failure_class)
+        | `Success -> fail "post-replace cleanup failure was reported as success");
+       check string
+         "post-replace callback and cleanup failures remain explicit"
+         "filesystem publication produced an observable filesystem effect before the publication callback and recovery lane cleanup both failed"
+         failed_after_replace.raw_output;
+       let failed_after_replace_data =
+         match failed_after_replace.data with
+         | Some data -> data
+         | None -> fail "post-replace cleanup failure omitted typed data"
+       in
+       check
+         (testable Yojson.Safe.pp Yojson.Safe.equal)
+         "post-replace cleanup failure preserves exact typed effect truth"
+         (`Assoc
+            [ "error", `String "publication_recovery_cleanup_failed"
+            ; "failure_class", `String "runtime_failure"
+            ; "state", `String "lane_release_failed"
+            ; ( "detail"
+              , `String
+                  "publication recovery lane cleanup failed after the publication callback returned" )
+            ; "write_executed", `Bool true
+            ; "keeper_active", `Bool true
+            ; ( "publication_result"
+              , `Assoc
+                  [ "outcome", `String "failure"
+                  ; "failure_class", `String "runtime_failure"
+                  ; "filesystem_target_effect", `String "target_replaced"
+                  ; "filesystem_created_parent_effects", `List []
+                  ] )
+            ])
+         failed_after_replace_data;
+       check string
+         "post-replace failure retains the bytes observed on disk"
+         "replaced-before-failure"
+         (read_file target);
+       let recovered_after_callback_failure =
+         execute "recovered-after-callback-failure"
+       in
+       check string
+         "same Keeper lane recovers after callback and cleanup failure"
+         "success"
+         (outcome_label recovered_after_callback_failure.outcome);
+       let unknown_fault =
+         Recovery_test.remove_staging_payload_before_publish ()
+       in
+       let unknown_target_effect =
+         Recovery_test.with_lane_scope_release_fault release_fault (fun () ->
+           Recovery_test.with_replace_dispatch_fault unknown_fault (fun () ->
+             execute "must-not-replace-existing-target"))
+       in
+       check string
+         "unknown target effect is not guessed as executed or unchanged"
+         "filesystem publication callback and publication recovery lane cleanup both failed"
+         unknown_target_effect.raw_output;
+       let unknown_target_effect_data =
+         match unknown_target_effect.data with
+         | Some data -> data
+         | None -> fail "unknown-target cleanup failure omitted typed data"
+       in
+       check
+         (testable Yojson.Safe.pp Yojson.Safe.equal)
+         "unknown target effect remains indeterminate in the public projection"
+         (`Assoc
+            [ "error", `String "publication_recovery_cleanup_failed"
+            ; "failure_class", `String "runtime_failure"
+            ; "state", `String "lane_release_failed"
+            ; ( "detail"
+              , `String
+                  "publication recovery lane cleanup failed after the publication callback returned" )
+            ; "write_executed", `Null
+            ; "keeper_active", `Bool true
+            ; ( "publication_result"
+              , `Assoc
+                  [ "outcome", `String "failure"
+                  ; "failure_class", `String "runtime_failure"
+                  ; "filesystem_target_effect", `String "target_state_unknown"
+                  ; "filesystem_created_parent_effects", `List []
+                  ] )
+            ])
+         unknown_target_effect_data;
+       check string
+         "failed real rename preserves the prior target bytes"
+         "recovered-after-callback-failure"
+         (read_file target);
+       let recovered_after_unknown = execute "recovered-after-unknown" in
+       check string
+         "same Keeper lane recovers after indeterminate target observation"
+         "success"
+         (outcome_label recovered_after_unknown.outcome);
+       let created_parent =
+         Filename.concat config.base_path "created-parent-effect"
+       in
+       let nested_target = Filename.concat created_parent "child.txt" in
+       let unchanged_fault =
+         Recovery_test.replace_dispatch_fault
+           ~stage:Recovery_test.Before_publish_replace
+           ~exception_:
+             (Injected_write_failure "private-before-publish-evidence")
+       in
+       let parent_effect =
+         Recovery_test.with_lane_scope_release_fault release_fault (fun () ->
+           Recovery_test.with_replace_dispatch_fault unchanged_fault (fun () ->
+             execute_at nested_target "must-not-reach-target"))
+       in
+       check string
+         "created parent remains an observed effect when target is unchanged"
+         "filesystem publication produced an observable filesystem effect before the publication callback and recovery lane cleanup both failed"
+         parent_effect.raw_output;
+       let parent_effect_data =
+         match parent_effect.data with
+         | Some data -> data
+         | None -> fail "created-parent cleanup failure omitted typed data"
+       in
+       check
+         (testable Yojson.Safe.pp Yojson.Safe.equal)
+         "created-parent effect joins with the unchanged target effect"
+         (`Assoc
+            [ "error", `String "publication_recovery_cleanup_failed"
+            ; "failure_class", `String "runtime_failure"
+            ; "state", `String "lane_release_failed"
+            ; ( "detail"
+              , `String
+                  "publication recovery lane cleanup failed after the publication callback returned" )
+            ; "write_executed", `Bool true
+            ; "keeper_active", `Bool true
+            ; ( "publication_result"
+              , `Assoc
+                  [ "outcome", `String "failure"
+                  ; "failure_class", `String "runtime_failure"
+                  ; "filesystem_target_effect", `String "target_unchanged"
+                  ; ( "filesystem_created_parent_effects"
+                    , `List
+                        [ `Assoc
+                            [ ( "target_effect"
+                              , `String "directory_created_requested_mode" )
+                            ; "child_sync", `String "succeeded"
+                            ; "parent_sync", `String "succeeded"
+                            ]
+                        ] )
+                  ] )
+            ])
+         parent_effect_data;
+       check bool "created parent remains on disk" true
+         (Sys.file_exists created_parent && Sys.is_directory created_parent);
+       check bool "failed pre-publish target remains absent" false
+         (Sys.file_exists nested_target);
+       check int "each real Write reads the provider exactly once" 8
+         (Atomic.get provider_reads))
+;;
+
+let test_real_directory_release_failure_preserves_effect_truth () =
+  let exception Injected_release_failure of string in
+  let exception Injected_directory_failure of string in
+  with_exec_fixture
+    ~always_allow:true
+    "keeper_tool_dispatch_directory_release_effect_truth"
+    (fun ~config ~meta ~publication_recovery:fixture_recovery ~ctx_work ->
+       let registry =
+         match fixture_recovery.provider () with
+         | Publication_availability.Available registry -> registry
+         | Publication_availability.Initializing
+         | Publication_availability.Registry_unavailable _
+         | Publication_availability.Initialization_crashed _
+         | Publication_availability.Non_runtime ->
+           fail "fixture did not provide its exact recovery registry"
+       in
+       let provider_reads = Atomic.make 0 in
+       let publication_recovery =
+         { Publication_availability.provider =
+             (fun () ->
+                Atomic.incr provider_reads;
+                Publication_availability.Available registry)
+         ; keeper_name = meta.name
+         }
+       in
+       let execute target content =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String target
+                ; "content", `String content
+                ])
+           ()
+       in
+       let warmup_target = Filename.concat config.base_path "lane-warmup.txt" in
+       let warmup = execute warmup_target "warmup" in
+       check string "directory matrix warmup succeeds" "success"
+         (outcome_label warmup.outcome);
+       let release_fault =
+         match
+           Recovery_test.lane_scope_release_fault
+             ~owner:meta.name
+             ~exception_:
+               (Injected_release_failure
+                  "private-directory-release-failure-evidence")
+         with
+         | Ok fault -> fault
+         | Error error ->
+           fail (Recovery_test.validation_error_to_string error)
+       in
+       let run_case
+             ~label
+             ~stage
+             ~expected_message
+             ~expected_target_effect
+             ~expected_write_executed
+             ~expected_directory_exists
+         =
+         let parent = Filename.concat config.base_path label in
+         let target = Filename.concat parent "child.txt" in
+         let fault =
+           Masc.Keeper_tool_filesystem_runtime.For_testing
+           .created_directory_fault
+             ~stage
+             ~exception_:(Injected_directory_failure label)
+         in
+         let result =
+           Recovery_test.with_lane_scope_release_fault release_fault (fun () ->
+             Masc.Keeper_tool_filesystem_runtime.For_testing
+             .with_created_directory_fault
+               fault
+               (fun () -> execute target "must-not-reach-target"))
+         in
+         (match result.outcome with
+          | `Failure Tool_result.Runtime_failure -> ()
+          | `Failure failure_class ->
+            failf
+              "%s returned wrong failure class: %s"
+              label
+              (Tool_result.tool_failure_class_to_string failure_class)
+          | `Success -> failf "%s unexpectedly succeeded" label);
+         check string (label ^ " message") expected_message result.raw_output;
+         let data =
+           match result.data with
+           | Some data -> data
+           | None -> failf "%s omitted typed data" label
+         in
+         check
+           (testable Yojson.Safe.pp Yojson.Safe.equal)
+           (label ^ " exact typed projection")
+           (`Assoc
+              [ "error", `String "publication_recovery_cleanup_failed"
+              ; "failure_class", `String "runtime_failure"
+              ; "state", `String "lane_release_failed"
+              ; ( "detail"
+                , `String
+                    "publication recovery lane cleanup failed after the publication callback returned" )
+              ; "write_executed", expected_write_executed
+              ; "keeper_active", `Bool true
+              ; ( "publication_result"
+                , `Assoc
+                    [ "outcome", `String "failure"
+                    ; "failure_class", `String "runtime_failure"
+                    ; ( "filesystem_directory_target_effect"
+                      , `String expected_target_effect )
+                    ; "filesystem_created_parent_effects", `List []
+                    ] )
+              ])
+           data;
+         check bool (label ^ " directory state") expected_directory_exists
+           (Sys.file_exists parent && Sys.is_directory parent);
+         check bool (label ^ " target remains absent") false
+           (Sys.file_exists target)
+       in
+       let recover_lane content =
+         let result = execute warmup_target content in
+         check string "same Keeper lane recovers between directory cases"
+           "success"
+           (outcome_label result.outcome)
+       in
+       run_case
+         ~label:"directory-unchanged"
+         ~stage:
+           Masc.Keeper_tool_filesystem_runtime.For_testing
+           .Before_create_directory
+         ~expected_message:
+           "filesystem publication left the target unchanged, but publication recovery lane cleanup failed"
+         ~expected_target_effect:"directory_unchanged"
+         ~expected_write_executed:(`Bool false)
+         ~expected_directory_exists:false;
+       recover_lane "recovered-after-directory-unchanged";
+       run_case
+         ~label:"directory-state-unknown"
+         ~stage:
+           Masc.Keeper_tool_filesystem_runtime.For_testing
+           .Before_inspect_created_directory
+         ~expected_message:
+           "filesystem publication callback and publication recovery lane cleanup both failed"
+         ~expected_target_effect:"directory_state_unknown"
+         ~expected_write_executed:`Null
+         ~expected_directory_exists:true;
+       recover_lane "recovered-after-directory-unknown";
+       run_case
+         ~label:"directory-created-validated"
+         ~stage:
+           Masc.Keeper_tool_filesystem_runtime.For_testing
+           .Before_apply_directory_permissions
+         ~expected_message:
+           "filesystem publication produced an observable filesystem effect before the publication callback and recovery lane cleanup both failed"
+         ~expected_target_effect:"directory_created_validated"
+         ~expected_write_executed:(`Bool true)
+         ~expected_directory_exists:true;
+       check int "each directory matrix Write reads the provider exactly once" 6
+         (Atomic.get provider_reads))
 ;;
 
 let test_tool_search_without_session_searcher_is_unavailable () =
@@ -2282,7 +2614,9 @@ let () =
       test_case "publication Write cancellation releases exact lane" `Quick
         test_publication_write_cancellation_releases_exact_lane;
       test_case "committed publication preserves cleanup failure truth" `Quick
-        test_committed_publication_release_failure_preserves_effect_truth;
+        test_real_publication_release_failure_preserves_effect_truth;
+      test_case "directory publication preserves cleanup failure truth" `Quick
+        test_real_directory_release_failure_preserves_effect_truth;
       test_case "tool search without session searcher is unavailable" `Quick
         test_tool_search_without_session_searcher_is_unavailable;
       test_case "tool search uses injected session searcher" `Quick

@@ -274,7 +274,7 @@ module For_testing : sig
 
   val publication_recovery_registry
     :  server_state
-    -> Fs_compat.publication_recovery_registry option
+    -> Fs_compat.Publication_recovery.registry option
   (** Test-only exact registry access. Production Keeper callers must carry the
       live provider and may not snapshot the registry. *)
 

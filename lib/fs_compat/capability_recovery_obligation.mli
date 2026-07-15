@@ -535,6 +535,18 @@ type inventory = inventory_row list
 val inventory : store -> (inventory, transition_error) result
 
 module For_testing : sig
+  type lane_scope_release_fault
+
+  val lane_scope_release_fault
+    :  owner:string
+    -> exception_:exn
+    -> (lane_scope_release_fault, validation_error) result
+
+  val with_lane_scope_release_fault
+    :  lane_scope_release_fault
+    -> (unit -> 'a)
+    -> 'a
+
   val operation_id_of_uuid : Uuidm.t -> operation_id
 
   val prepare_with_operation_id

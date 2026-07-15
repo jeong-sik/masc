@@ -5,8 +5,8 @@ type 'a context = {
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
-  publication_recovery_provider :
-    Keeper_publication_recovery_availability.provider;
+  delegated_dispatch :
+    (name:string -> args:Yojson.Safe.t -> Tool_result.result option) option;
   mcp_session_id : string option;
 }
 

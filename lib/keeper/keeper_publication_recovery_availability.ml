@@ -1,7 +1,7 @@
 type availability =
   | Initializing
-  | Available of Fs_compat.publication_recovery_registry
-  | Registry_unavailable of Fs_compat.publication_recovery_registry_error
+  | Available of Fs_compat.Publication_recovery.registry
+  | Registry_unavailable of Fs_compat.Publication_recovery.registry_error
   | Initialization_crashed of Eio.Exn.with_bt
   | Non_runtime
 
@@ -9,10 +9,10 @@ type provider = unit -> availability
 
 type unavailable =
   | Runtime_initializing
-  | Runtime_registry_unavailable of Fs_compat.publication_recovery_registry_error
+  | Runtime_registry_unavailable of Fs_compat.Publication_recovery.registry_error
   | Runtime_initialization_crashed of Eio.Exn.with_bt
   | Runtime_non_runtime
-  | Lane_unavailable of Fs_compat.publication_recovery_lane_open_error
+  | Lane_unavailable of Fs_compat.Publication_recovery.lane_open_error
 
 type turn_context =
   { provider : provider
@@ -32,11 +32,13 @@ let constant availability () = availability
 let non_runtime_provider = constant Non_runtime
 
 let lane_public_category error =
-  match Fs_compat.publication_recovery_lane_open_error_kind error with
-  | Fs_compat.Publication_recovery_invalid_owner -> Public_lane_invalid_owner
-  | Fs_compat.Publication_recovery_reconciliation_blocked ->
+  match Fs_compat.Publication_recovery.lane_open_error_category error with
+  | Fs_compat.Publication_recovery.Invalid_owner_category ->
+    Public_lane_invalid_owner
+  | Fs_compat.Publication_recovery.Reconciliation_blocked_category ->
     Public_lane_reconciliation_blocked
-  | Fs_compat.Publication_recovery_store_failed -> Public_lane_store_failed
+  | Fs_compat.Publication_recovery.Store_failed_category ->
+    Public_lane_store_failed
 ;;
 
 let public_category = function
@@ -85,7 +87,7 @@ let with_access publication_recovery use =
   | Non_runtime -> Error Runtime_non_runtime
   | Available registry ->
     (match
-       Fs_compat.with_publication_recovery_lane
+       Fs_compat.Publication_recovery.with_lane
          ~registry
          ~owner:publication_recovery.keeper_name
          use
@@ -97,7 +99,7 @@ let with_access publication_recovery use =
          ~keeper_name:publication_recovery.keeper_name
          "publication recovery lane acquisition failed category=%s evidence=%s"
          (public_category_to_string category)
-         (Fs_compat.publication_recovery_lane_open_error_to_string error);
+         (Fs_compat.Publication_recovery.lane_open_error_to_string error);
        Error (Lane_unavailable error))
 ;;
 

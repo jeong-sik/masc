@@ -1,5 +1,8 @@
 open Alcotest
 
+module Capability_write_test =
+  Fs_compat_test_support.Capability_write_for_testing
+
 let with_tmp_dir f =
   let path = Filename.temp_file "masc_capability_write_" ".tmp" in
   Sys.remove path;
@@ -42,13 +45,13 @@ let with_publication_recovery_access ~fs f =
   with_tmp_dir @@ fun registry_directory ->
   Eio.Switch.run @@ fun sw ->
   match
-    Fs_compat.open_publication_recovery_registry
+    Fs_compat.Publication_recovery.open_registry
       ~sw
       ~fs
       ~registry_root:Eio.Path.(fs / registry_directory)
   with
   | Error error ->
-    fail (Fs_compat.publication_recovery_registry_error_to_string error)
+    fail (Fs_compat.Publication_recovery.registry_error_to_string error)
   | Ok registry ->
     (match Fs_compat.Publication_recovery.discover_owners registry with
      | Error error ->
@@ -57,7 +60,7 @@ let with_publication_recovery_access ~fs f =
             error)
      | Ok [] ->
        (match
-          Fs_compat.with_publication_recovery_lane
+          Fs_compat.Publication_recovery.with_lane
             ~registry
             ~owner:"capability-write-test"
             f
@@ -67,7 +70,7 @@ let with_publication_recovery_access ~fs f =
           fail "publication recovery lane release failed"
         | Error error ->
           fail
-            (Fs_compat.publication_recovery_lane_open_error_to_string
+            (Fs_compat.Publication_recovery.lane_open_error_to_string
                error))
      | Ok rows ->
        failf
@@ -120,7 +123,7 @@ let replace_capability_file_for_testing
   let target =
     require_recovery_target ~allowed_root_path ~parent ~leaf ~permissions
   in
-  Fs_compat.Capability_write_for_testing.replace_capability_file
+  Capability_write_test.replace_capability_file
     ~before_stage
     ~recovery
     ~parent
@@ -644,7 +647,7 @@ let test_existing_replace_yields_to_cooperative_absent_publication ~fs () =
   let create_result, resolve_create_result = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+      Capability_write_test.create_capability_file_exclusive
         ~before_stage:(function
           | Fs_compat.Inspect_open_resource ->
             Eio.Promise.resolve resolve_create_visible ();
@@ -862,7 +865,7 @@ let test_exclusive_create_visibility_remains_under_parent_lease ~fs () =
   let create_result, resolve_create_result = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+      Capability_write_test.create_capability_file_exclusive
         ~before_stage:(function
           | Fs_compat.Inspect_open_resource ->
             Eio.Promise.resolve resolve_target_visible ();
@@ -1120,7 +1123,7 @@ let test_create_failure_leaves_public_leaf ~fs () =
   let target = Filename.concat directory "target" in
   with_parent_capability ~fs directory @@ fun parent ->
   (match
-     Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+     Capability_write_test.create_capability_file_exclusive
        ~before_stage:(function
          | Fs_compat.Apply_permissions -> raise Exit
          | _ -> ())
@@ -1144,7 +1147,7 @@ let test_create_parent_sync_failure_preserves_complete_effect ~fs () =
   let target = Filename.concat directory "target" in
   with_parent_capability ~fs directory @@ fun parent ->
   (match
-     Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+     Capability_write_test.create_capability_file_exclusive
        ~before_stage:(function
          | Fs_compat.Sync_parent -> raise Exit
          | _ -> ())
@@ -1271,7 +1274,7 @@ let test_create_primary_failure_survives_cleanup_cancellation ~fs () =
     try
       Eio.Cancel.sub (fun context ->
         ignore
-          (Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+          (Capability_write_test.create_capability_file_exclusive
              ~before_stage:(function
                | Fs_compat.Write_payload -> raise Exit
                | Fs_compat.Cleanup_close ->
@@ -1414,7 +1417,7 @@ let test_exclusive_create_cancellation_reports_incomplete_entry ~fs () =
     try
       Eio.Cancel.sub (fun context ->
         ignore
-          (Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+          (Capability_write_test.create_capability_file_exclusive
              ~before_stage:(function
                | Fs_compat.Apply_permissions ->
                  Eio.Cancel.cancel context Exit;
@@ -1506,7 +1509,7 @@ let test_create_commit_cancellation_reports_complete_effect ~fs () =
     try
       Eio.Cancel.sub (fun context ->
         ignore
-          (Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+          (Capability_write_test.create_capability_file_exclusive
              ~before_stage:(function
                | Fs_compat.Sync_parent -> Eio.Cancel.cancel context Exit
                | _ -> ())
@@ -1733,7 +1736,7 @@ let test_directory_sync_failure_is_typed ~fs () =
   with_tmp_dir @@ fun directory ->
   with_parent_capability ~fs directory @@ fun parent ->
   match
-    Fs_compat.Capability_write_for_testing.sync_directory_capability
+    Capability_write_test.sync_directory_capability
       ~before_stage:(function
         | Fs_compat.Sync_parent -> raise Exit
         | _ -> ())

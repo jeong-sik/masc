@@ -411,7 +411,7 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       clock = ctx.clock;
       proc_mgr = ctx.proc_mgr;
       net = ctx.net;
-      publication_recovery_provider = ctx.publication_recovery_provider;
+      delegated_dispatch = ctx.delegated_dispatch;
       mcp_session_id = ctx.mcp_session_id;
     }
   in

@@ -72,7 +72,7 @@ let event_id_to_string event_id =
 
 let with_lock t f = Stdlib.Mutex.protect t.mutex f
 
-let report_failure t failure =
+let notify_failure t failure =
   try t.on_failure failure with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -83,12 +83,19 @@ let report_failure t failure =
       (Printexc.to_string exn)
 ;;
 
+let report_failure t ~lane ~event_id ~reason =
+  let failure = { lane; event_id; reason } in
+  notify_failure t failure;
+  failure
+;;
+
 let run_isolated t ~lane ~event_id run =
   try Ok (run ()) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    let failure = { lane; event_id; reason = Printexc.to_string exn } in
-    report_failure t failure;
+    let failure =
+      report_failure t ~lane ~event_id ~reason:(Printexc.to_string exn)
+    in
     Error failure
 ;;
 

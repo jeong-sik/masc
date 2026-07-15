@@ -333,27 +333,33 @@ let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
         keeper_name event_id error
 
 let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
-  match State.resolve_keeper_for_channel ~channel_id with
-  | Some resolution -> Some (resolution, [])
-  | None -> (
+  match State.resolve_keeper_for_channel_result ~channel_id with
+  | Error error -> Error error
+  | Ok (Some resolution) -> Ok (Some (resolution, []))
+  | Ok None -> (
       match message_reference_channel_id with
-      | None -> None
+      | None -> Ok None
       | Some reference_channel_id ->
           let reference_channel_id = String.trim reference_channel_id in
           if reference_channel_id = "" || String.equal reference_channel_id channel_id
-          then None
+          then Ok None
           else
-            match State.resolve_keeper_for_channel ~channel_id:reference_channel_id with
-            | None -> None
-            | Some resolution ->
-                Some
-                  ( {
-                      State.keeper_name = resolution.State.keeper_name;
-                      incoming_channel_id = channel_id;
-                      bound_channel_id = resolution.bound_channel_id;
-                      via_parent = true;
-                    },
-                    [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
+            match
+              State.resolve_keeper_for_channel_result
+                ~channel_id:reference_channel_id
+            with
+            | Error error -> Error error
+            | Ok None -> Ok None
+            | Ok (Some resolution) ->
+                Ok
+                  (Some
+                     ( { State.keeper_name = resolution.State.keeper_name
+                       ; incoming_channel_id = channel_id
+                       ; bound_channel_id = resolution.bound_channel_id
+                       ; via_parent = true
+                       }
+                     , [ ( "discord.binding_reference_channel_id"
+                         , reference_channel_id ) ] )))
 
 let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(channel_id : string) ~(message_id : string)
@@ -568,12 +574,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
 let handle_ambient ~resolved_keeper_name ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
       ~(author_id : string) ~(author_name : string option) ~(content : string) =
-  let keeper_name =
-    match resolved_keeper_name with
-    | Some keeper_name -> Some keeper_name
-    | None -> State.keeper_for_channel ~channel_id
-  in
-  match keeper_name with
+  match resolved_keeper_name with
   | None ->
     Discord_observability.record_ambient
       Discord_observability.Ambient_dropped_unbound
@@ -689,7 +690,7 @@ let handle_ambient ~resolved_keeper_name ~base_dir
         Discord_observability.Ambient_recorded
     end
 
-let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
+let on_ambient ~resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
       { channel_id; guild_id; message_id; author_id; author_name; content; _ }
@@ -710,6 +711,22 @@ let discord_event_opaque_id : Gw.gateway_event -> string = function
   | Gw.Ignored reason -> reason
 ;;
 
+let resolve_binding_for_event ingress ~event_id resolve =
+  let lane = Connector_ingress_lane.Connector_lane State.channel in
+  match Connector_ingress_lane.run_isolated ingress ~lane ~event_id resolve with
+  | Error _ -> Error ()
+  | Ok (Error error) ->
+    let (_ : Connector_ingress_lane.failure) =
+      Connector_ingress_lane.report_failure
+        ingress
+        ~lane
+        ~event_id
+        ~reason:(Format.asprintf "%a" State.pp_binding_lookup_error error)
+    in
+    Error ()
+  | Ok (Ok resolution) -> Ok resolution
+;;
+
 let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
@@ -723,9 +740,11 @@ let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
       }
     in
     (match
-       resolve_binding_for_message ~channel_id ~message_reference_channel_id
+       resolve_binding_for_event ingress ~event_id (fun () ->
+         resolve_binding_for_message ~channel_id ~message_reference_channel_id)
      with
-     | None ->
+     | Error () -> ()
+     | Ok None ->
        ignore
          (Connector_ingress_lane.run_isolated
             ingress
@@ -737,7 +756,7 @@ let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
                 ~dispatch_for_delivery
                 ~base_dir
                 ev))
-     | Some ((resolution, _) as resolved_binding) ->
+     | Ok (Some ((resolution, _) as resolved_binding)) ->
        (match
           Connector_ingress_lane.run_isolated
             ingress
@@ -794,20 +813,27 @@ end
 let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create { channel_id; message_id; _ } ->
-    (match State.keeper_for_channel ~channel_id with
-     | None ->
+    let event_id =
+      { Connector_ingress_lane.source = State.channel
+      ; route = Connector_ingress_lane.Ambient
+      ; phase = Connector_ingress_lane.Acceptance
+      ; opaque_id = message_id
+      }
+    in
+    (match
+       resolve_binding_for_event ingress ~event_id (fun () ->
+         State.resolve_keeper_for_channel_result ~channel_id)
+     with
+     | Error () -> ()
+     | Ok None ->
        ignore
          (Connector_ingress_lane.run_isolated
             ingress
             ~lane:(Connector_ingress_lane.Connector_lane State.channel)
-            ~event_id:
-              { source = State.channel
-              ; route = Connector_ingress_lane.Ambient
-              ; phase = Connector_ingress_lane.Acceptance
-              ; opaque_id = message_id
-              }
-            (fun () -> on_ambient ~base_dir ev))
-     | Some keeper_name ->
+            ~event_id
+            (fun () -> on_ambient ~resolved_keeper_name:None ~base_dir ev))
+     | Ok (Some resolution) ->
+       let keeper_name = resolution.State.keeper_name in
        Connector_ingress_lane.submit
          ingress
          ~lane:(Connector_ingress_lane.Keeper_lane keeper_name)
@@ -817,7 +843,8 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
            ; phase = Connector_ingress_lane.Delivery
            ; opaque_id = message_id
            }
-         (fun () -> on_ambient ~resolved_keeper_name:keeper_name ~base_dir ev))
+         (fun () ->
+           on_ambient ~resolved_keeper_name:(Some keeper_name) ~base_dir ev))
   | Gw.Ready _
   | Gw.Reaction_add _
   | Gw.Thread_tracked _
@@ -834,7 +861,7 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
            ; phase = Connector_ingress_lane.Acceptance
            ; opaque_id = discord_event_opaque_id ev
            }
-         (fun () -> on_ambient ~base_dir ev))
+         (fun () -> on_ambient ~resolved_keeper_name:None ~base_dir ev))
 ;;
 
 (* ---------------------------------------------------------------- *)

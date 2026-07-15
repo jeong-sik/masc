@@ -48,6 +48,15 @@ val run_isolated :
     [on_failure] and returned as a typed error, so the transport callback can
     continue without weakening durable accept-before-return ordering. *)
 
+val report_failure :
+  t ->
+  lane:lane ->
+  event_id:event_id ->
+  reason:string ->
+  failure
+(** Report an explicit typed-boundary rejection without raising an exception.
+    The returned failure is the exact value delivered to [on_failure]. *)
+
 val submit :
   t ->
   lane:lane ->

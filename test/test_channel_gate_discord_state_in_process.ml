@@ -1,6 +1,6 @@
 (* RFC-0203 Phase 3 — unit tests for the in-process gateway helpers
    added to [Channel_gate_discord_state]:
-   - [keeper_for_channel] (binding lookup)
+   - [resolve_keeper_for_channel_result] (typed binding lookup)
    - [send_error] / [pp_send_error] (typed REST error wrapper)
    - [send_message] error path with [DISCORD_BOT_TOKEN] unset
    - [edit_message] error path with [DISCORD_BOT_TOKEN] unset
@@ -16,22 +16,34 @@ let setenv k v = Unix.putenv k v
 let unsetenv k = Unix.putenv k ""
 
 (* ---------------------------------------------------------------- *)
-(* keeper_for_channel                                               *)
+(* resolve_keeper_for_channel_result                                *)
 (* ---------------------------------------------------------------- *)
 
 let test_lookup_blank_channel_id () =
-  check (option string) "empty => None" None
-    (State.keeper_for_channel ~channel_id:"")
+  match State.resolve_keeper_for_channel_result ~channel_id:"" with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "blank channel resolved a Keeper"
+  | Error error ->
+      fail (Format.asprintf "%a" State.pp_binding_lookup_error error)
 
 let test_lookup_whitespace_channel_id () =
-  check (option string) "whitespace => None" None
-    (State.keeper_for_channel ~channel_id:"   ")
+  match State.resolve_keeper_for_channel_result ~channel_id:"   " with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "whitespace channel resolved a Keeper"
+  | Error error ->
+      fail (Format.asprintf "%a" State.pp_binding_lookup_error error)
 
 let test_lookup_unbound_channel_returns_none () =
   (* No bind() called for this channel id and the binding store may
      be empty or missing; lookup must not raise either way. *)
-  check (option string) "no binding => None" None
-    (State.keeper_for_channel ~channel_id:"channel-id-with-no-binding")
+  match
+    State.resolve_keeper_for_channel_result
+      ~channel_id:"channel-id-with-no-binding"
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "unbound channel resolved a Keeper"
+  | Error error ->
+      fail (Format.asprintf "%a" State.pp_binding_lookup_error error)
 
 (* ---------------------------------------------------------------- *)
 (* send_error / pp_send_error                                       *)
@@ -109,7 +121,7 @@ let test_edit_message_without_token_returns_missing_token () =
 
 let () =
   run "channel_gate_discord_state_in_process"
-    [ ( "keeper_for_channel"
+    [ ( "resolve_keeper_for_channel_result"
       , [ test_case "blank channel id => None" `Quick
             test_lookup_blank_channel_id
         ; test_case "whitespace channel id => None" `Quick

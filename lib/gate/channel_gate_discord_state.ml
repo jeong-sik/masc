@@ -49,6 +49,7 @@ let binding_store =
     ~binding_audit_read_path ~guild_id_field:Store.Include_event_value
 
 let read_bindings () = Store.read_bindings binding_store
+let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
 let save_bindings bindings = Store.save_bindings binding_store bindings
 let append_audit_event event = Store.append_audit_event binding_store event
@@ -56,7 +57,7 @@ let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
 (* ── Thread registry ──────────────────────────────────────────────
    Thread→parent mapping populated from THREAD_CREATE gateway events.
-   Used by [resolve_keeper_for_channel] to resolve bindings for thread
+   Used by [resolve_keeper_for_channel_result] to resolve bindings for thread
    messages whose channel_id is the thread's snowflake, not the parent
    channel's. Module-level mutable state (same pattern as [last_ready]). *)
 
@@ -478,94 +479,49 @@ type keeper_binding_resolution = {
   via_parent : bool;
 }
 
+type binding_lookup_error =
+  | Binding_store_read_failed of string
+
+let pp_binding_lookup_error formatter = function
+  | Binding_store_read_failed detail ->
+      Format.fprintf formatter "Discord binding store read failed: %s" detail
+
 let binding_for_channel bindings ~channel_id =
   List.find_map
     (fun (b : binding) ->
       if String.equal b.channel_id channel_id then Some b else None)
     bindings
 
-let resolve_keeper_for_channel ~channel_id =
+let resolve_keeper_for_channel_result ~channel_id =
   let normalized = String.trim channel_id in
-  if String.equal normalized "" then None
+  if String.equal normalized "" then Ok None
   else
-    let candidates =
-      try read_bindings ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> []
-    in
-    match binding_for_channel candidates ~channel_id:normalized with
-    | Some b ->
-        Some
-          {
-            keeper_name = b.keeper_name;
-            incoming_channel_id = normalized;
-            bound_channel_id = b.channel_id;
-            via_parent = false;
-          }
-    | None -> (
-        (* Thread fallback: if this channel_id is a known Discord thread,
-           try resolving via its parent channel's binding. *)
-        match parent_channel_of_thread ~channel_id:normalized with
-        | Some parent_id when parent_id <> normalized ->
-            (match binding_for_channel candidates ~channel_id:parent_id with
-             | Some b ->
-                 Some
-                   {
-                     keeper_name = b.keeper_name;
-                     incoming_channel_id = normalized;
-                     bound_channel_id = b.channel_id;
-                     via_parent = true;
-                   }
-             | None -> (
-                 (* Final fallback: names file (legacy sidecar data). *)
-                 let names_parent =
-                   try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | _ -> None
-                 in
-                 match names_parent with
-                 | None -> None
-                 | Some names_parent ->
-                     let names_parent = String.trim names_parent in
-                     match binding_for_channel candidates ~channel_id:names_parent with
-                     | None -> None
-                     | Some b ->
-                         Some
-                           {
-                             keeper_name = b.keeper_name;
-                             incoming_channel_id = normalized;
-                             bound_channel_id = b.channel_id;
-                             via_parent = true;
-                           } ))
-        | _ -> (
-            (* No thread match — try names file (legacy sidecar data). *)
-            let parent_channel_id =
-              try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | _ -> None
-            in
-            match parent_channel_id with
-            | None -> None
-            | Some parent_channel_id -> (
-                let parent_channel_id = String.trim parent_channel_id in
-                match binding_for_channel candidates ~channel_id:parent_channel_id with
-                | None -> None
-                | Some b ->
-                    Some
-                      {
-                        keeper_name = b.keeper_name;
-                        incoming_channel_id = normalized;
-                        bound_channel_id = b.channel_id;
-                        via_parent = true;
-                      } )) )
-
-let keeper_for_channel ~channel_id =
-  match resolve_keeper_for_channel ~channel_id with
-  | None -> None
-  | Some resolution -> Some resolution.keeper_name
+    match read_bindings_result () with
+    | Error detail -> Error (Binding_store_read_failed detail)
+    | Ok candidates ->
+      let binding, via_parent =
+        match binding_for_channel candidates ~channel_id:normalized with
+        | Some binding -> Some binding, false
+        | None ->
+          let parent_binding =
+            Option.bind
+              (parent_channel_of_thread ~channel_id:normalized)
+              (fun parent_channel_id ->
+              if String.equal parent_channel_id normalized
+              then None
+              else binding_for_channel candidates ~channel_id:parent_channel_id)
+          in
+          parent_binding, true
+      in
+      Ok
+        (Option.map
+           (fun (binding : binding) ->
+             { keeper_name = binding.keeper_name
+             ; incoming_channel_id = normalized
+             ; bound_channel_id = binding.channel_id
+             ; via_parent
+             })
+           binding)
 
 (* RFC-0223 P2: presence surface. Both recomputed per call — no cached
    presence state. *)

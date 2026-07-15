@@ -377,13 +377,23 @@ let test_resolve_keeper_for_thread_parent_binding () =
     ignore
       (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
          ~actor_name:"dashboard");
-    match Discord_state.resolve_keeper_for_channel ~channel_id:"thread-1" with
-    | None -> fail "expected parent binding to resolve"
-    | Some resolution ->
-        check string "keeper" "luna" resolution.keeper_name;
-        check string "incoming" "thread-1" resolution.incoming_channel_id;
-        check string "bound" "parent-1" resolution.bound_channel_id;
-        check bool "via parent" true resolution.via_parent)
+    Discord_state.register_thread ~thread_id:"thread-1"
+      ~parent_channel_id:"parent-1";
+    Fun.protect
+      ~finally:(fun () -> Discord_state.unregister_thread ~thread_id:"thread-1")
+      (fun () ->
+        match
+          Discord_state.resolve_keeper_for_channel_result ~channel_id:"thread-1"
+        with
+        | Error error ->
+            fail
+              (Format.asprintf "%a" Discord_state.pp_binding_lookup_error error)
+        | Ok None -> fail "expected parent binding to resolve"
+        | Ok (Some resolution) ->
+            check string "keeper" "luna" resolution.keeper_name;
+            check string "incoming" "thread-1" resolution.incoming_channel_id;
+            check string "bound" "parent-1" resolution.bound_channel_id;
+            check bool "via parent" true resolution.via_parent))
 
 let test_resolve_keeper_exact_binding_wins_over_parent () =
   with_temp_dir @@ fun dir ->
@@ -402,9 +412,13 @@ let test_resolve_keeper_exact_binding_wins_over_parent () =
     ignore
       (Discord_state.bind ~channel_id:"thread-1" ~keeper_name:"sangsu"
          ~actor_name:"dashboard");
-    match Discord_state.resolve_keeper_for_channel ~channel_id:"thread-1" with
-    | None -> fail "expected exact binding to resolve"
-    | Some resolution ->
+    match
+      Discord_state.resolve_keeper_for_channel_result ~channel_id:"thread-1"
+    with
+    | Error error ->
+        fail (Format.asprintf "%a" Discord_state.pp_binding_lookup_error error)
+    | Ok None -> fail "expected exact binding to resolve"
+    | Ok (Some resolution) ->
         check string "keeper" "sangsu" resolution.keeper_name;
         check string "incoming" "thread-1" resolution.incoming_channel_id;
         check string "bound" "thread-1" resolution.bound_channel_id;

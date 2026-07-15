@@ -49,6 +49,13 @@ let with_temp_dir f =
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 ;;
 
+let write_text path content =
+  let output = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output content)
+;;
+
 let ps p = Discord_gateway_state.trigger_policy_to_string p
 let default_str = ps G.default_trigger_policy
 
@@ -249,6 +256,64 @@ let test_accept_failure_does_not_kill_discord_ingress () =
        failf "expected Keeper lane, got connector:%s" connector_id)
 ;;
 
+let test_binding_read_failure_is_observed_and_next_event_continues () =
+  with_temp_dir @@ fun base_dir ->
+  let binding_path = Filename.concat base_dir "bindings.json" in
+  with_env "MASC_DISCORD_BINDING_STORE_PATH" binding_path @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_AUDIT_PATH"
+    (Filename.concat base_dir "audit.jsonl")
+  @@ fun () ->
+  with_env "MASC_DISCORD_NAMES_PATH" (Filename.concat base_dir "names.json")
+  @@ fun () ->
+  write_text binding_path "{not-json";
+  (match State.resolve_keeper_for_channel_result ~channel_id:"C123" with
+   | Error (State.Binding_store_read_failed _) -> ()
+   | Ok _ -> fail "malformed binding store was accepted");
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let observed_failure = ref None in
+  let ingress =
+    Connector_ingress_lane.create
+      ~sw
+      ~on_failure:(fun failure -> observed_failure := Some failure)
+      ()
+  in
+  let accepted = ref 0 in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+      ~content:_ =
+    incr accepted;
+    Gate_protocol.Reply
+      { content = "queued"; structured = None; stats = None; message_request = None }
+  in
+  let dispatch_for_delivery _delivery = dispatch in
+  G.For_testing.submit_triggered_event
+    ~deliver:(fun () -> ())
+    ingress ~dispatch_for_delivery ~base_dir
+    (discord_message ~message_id:"discord-binding-read-failed");
+  check int "malformed binding was not accepted as unbound" 0 !accepted;
+  (match !observed_failure with
+   | None -> fail "binding read failure was not observed"
+   | Some failure ->
+     check string "failed source event" "discord-binding-read-failed"
+       failure.Connector_ingress_lane.event_id.opaque_id;
+     check bool "triggered route" true
+       (failure.event_id.route = Connector_ingress_lane.Triggered);
+     check bool "acceptance phase" true
+       (failure.event_id.phase = Connector_ingress_lane.Acceptance);
+     (match failure.lane with
+      | Connector_ingress_lane.Connector_lane connector_id ->
+        check string "unresolved connector lane" State.channel connector_id
+      | Connector_ingress_lane.Keeper_lane keeper_name ->
+        failf "binding failure was misattributed to keeper:%s" keeper_name));
+  Yojson.Safe.to_file binding_path (`Assoc [ "C123", `String "luna" ]);
+  G.For_testing.submit_triggered_event
+    ~deliver:(fun () -> ())
+    ingress ~dispatch_for_delivery ~base_dir
+    (discord_message ~message_id:"discord-binding-read-next");
+  check int "next event was accepted" 1 !accepted
+;;
+
 let () =
   run "server_discord_trigger_policy"
     [ ( "parse_trigger_policy"
@@ -266,5 +331,7 @@ let () =
             test_durable_accept_precedes_delivery_handoff
         ; test_case "accept failure preserves next Discord event" `Quick
             test_accept_failure_does_not_kill_discord_ingress
+        ; test_case "binding read failure preserves next Discord event" `Quick
+            test_binding_read_failure_is_observed_and_next_event_continues
         ] )
     ]

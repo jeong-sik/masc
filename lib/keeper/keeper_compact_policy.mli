@@ -37,11 +37,33 @@ type compaction_evidence =
   ; before_tool_result_count : int
   ; after_tool_result_count : int
   }
+
+type compaction_receipt =
+  { operation_id : string
+  ; source_session_id : string
+  ; source_generation : int
+  ; source_turn_count : int
+  ; trigger : Compaction_trigger.t
+  ; evidence : compaction_evidence
+  }
 (** Exact structural evidence from the LLM-selected plan. Byte, message, and
     tool-block counts are measured from the actual checkpoint on both sides;
     no token estimate is synthesized. *)
 
 val compaction_evidence_to_json : compaction_evidence -> Yojson.Safe.t
+
+val with_compaction_receipt :
+  generation:int ->
+  trigger:Compaction_trigger.t ->
+  evidence:compaction_evidence ->
+  Keeper_types.working_context ->
+  Keeper_types.working_context * compaction_receipt
+
+val compaction_receipt_for_request :
+  checkpoint:Agent_sdk.Checkpoint.t ->
+  generation:int ->
+  trigger:Compaction_trigger.t ->
+  (compaction_receipt option, string) result
 (** Lossless wire projection shared by every MASC compaction producer. *)
 
 type compaction_preparation =

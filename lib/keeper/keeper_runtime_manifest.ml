@@ -379,7 +379,7 @@ let decision_public_allowlist =
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
     ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"
-    ; "payload_role"; "trigger"; "trigger_detail"; "kind"; "limit_tokens"
+    ; "payload_role"; "operation_id"; "trigger"; "trigger_detail"; "kind"; "limit_tokens"
     ; "ratio"; "threshold"; "count"
     ; "owner_lane_resume_requested"; "exact_evidence"
     ; "before_checkpoint_bytes"; "after_checkpoint_bytes"

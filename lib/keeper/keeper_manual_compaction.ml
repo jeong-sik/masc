@@ -49,7 +49,8 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
            (Keeper_runtime_manifest.with_payload_role
               ~payload_role:Keeper_runtime_manifest.Checkpoint
               (`Assoc
-                [ "trigger", `String (Compaction_trigger.to_label trigger)
+                [ "operation_id", `String recovery.operation_id
+                ; "trigger", `String (Compaction_trigger.to_label trigger)
                 ; "trigger_detail", Compaction_trigger.to_detail_json trigger
                 ; ( "exact_evidence"
                   , Keeper_compact_policy.compaction_evidence_to_json recovery.evidence )

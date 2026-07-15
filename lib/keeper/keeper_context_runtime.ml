@@ -109,6 +109,7 @@ type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
   compaction : compaction_event;
   evidence : Keeper_compact_policy.compaction_evidence;
+  operation_id : string;
   turn_generation : int;
 }
 

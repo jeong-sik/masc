@@ -31,13 +31,6 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 ;;
 
-let enabled () =
-  (* Default on: a keeper without conversation ingestion is the pathology
-     the Memory OS exists to fix (2026-06-12 diagnosis, issue #20909).
-     The env var stays as the kill switch. *)
-  Env_config.KeeperMemoryOs.librarian_enabled ()
-;;
-
 let max_messages () =
   Env_config.KeeperMemoryOs.librarian_max_messages ()
 ;;

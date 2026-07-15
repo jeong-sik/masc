@@ -13,9 +13,6 @@ type complete_fn =
   unit ->
   (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
 
-val enabled : unit -> bool
-(** Opt-in gate controlled by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
-
 val max_messages : unit -> int
 (** Exact cap on checkpoint messages sent to one librarian operation. *)
 
@@ -188,8 +185,8 @@ val execute_operation
   -> (Keeper_memory_os_types.episode, operation_error) result
 (** Execute one explicitly requested LLM Memory operation.
 
-    This boundary does not consult the legacy enable flag and never
-    converts failure into [unit]. Cancellation propagates; every other outcome
+    This boundary never converts failure into [unit]. Cancellation propagates;
+    every other outcome
     is returned to its caller. Production execution is claimed by the durable
     per-Keeper owner drain before entering this function; no provider-slot drop
     or replacement concurrency heuristic exists here. *)

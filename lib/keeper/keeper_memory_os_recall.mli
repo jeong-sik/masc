@@ -13,9 +13,9 @@ val render_context
     truncation, ranking, deduplication, or fixed-size slices. *)
 
 val enabled : unit -> bool
-(** Kill-switch flag [MASC_KEEPER_MEMORY_OS_RECALL] (default [true]).
-    Read side of Memory OS; the write side (librarian) is gated
-    separately by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
+(** Kill-switch flag [MASC_KEEPER_MEMORY_OS_RECALL] (default [true]). This
+    controls prompt injection only; durable Memory work remains an independent
+    Keeper-owned lane. *)
 
 val render_if_enabled
   :  keeper_id:string

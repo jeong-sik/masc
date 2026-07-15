@@ -918,11 +918,6 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
       "blank bool token is treated as unset"
       true
       (Env_config.KeeperMemoryOs.recall_enabled ()));
-  with_memory_os_env Env_config.KeeperMemoryOs.librarian_env_key "disabled" (fun () ->
-    Alcotest.(check bool)
-      "disabled disables librarian"
-      false
-      (Env_config.KeeperMemoryOs.librarian_enabled ()));
   with_memory_os_env Env_config.KeeperMemoryOs.gc_env_key "enabled" (fun () ->
     Alcotest.(check bool)
       "enabled enables GC"
@@ -949,14 +944,6 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
         false
         (Env_config.KeeperMemoryOs.recall_enabled ()));
     check_log_contains lines Env_config.KeeperMemoryOs.recall_env_key;
-    check_log_contains lines "fail-closed false");
-  with_captured_console_lines (fun lines ->
-    with_memory_os_env Env_config.KeeperMemoryOs.librarian_env_key "maybe" (fun () ->
-      Alcotest.(check bool)
-        "invalid default-on librarian fail-closes to false"
-        false
-        (Env_config.KeeperMemoryOs.librarian_enabled ()));
-    check_log_contains lines Env_config.KeeperMemoryOs.librarian_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
     with_memory_os_env Env_config.KeeperMemoryOs.gc_env_key "maybe" (fun () ->
@@ -1042,10 +1029,6 @@ let find_config_env env entries =
 let memory_os_knob_readers : (string * (unit -> unit)) list =
   [ ( Env_config.KeeperMemoryOs.recall_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.recall_enabled () : bool) )
-  ; ( Env_config.KeeperMemoryOs.librarian_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_enabled () : bool) )
-  ; ( Env_config.KeeperMemoryOs.librarian_cadence_turns_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_cadence_turns () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_max_messages_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_messages () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key

@@ -63,8 +63,6 @@ module KeeperMemoryOs : sig
       knob rename breaks compilation instead of silently drifting. *)
 
   val recall_env_key : string
-  val librarian_env_key : string
-  val librarian_cadence_turns_env_key : string
   val librarian_max_messages_env_key : string
   val librarian_timeout_sec_env_key : string
   val librarian_max_tokens_env_key : string
@@ -74,8 +72,6 @@ module KeeperMemoryOs : sig
   val consolidation_runtime_id_env_key : string
 
   val recall_enabled_default : bool
-  val librarian_enabled_default : bool
-  val librarian_cadence_turns_default : int
   val librarian_max_messages_default : int
   val librarian_timeout_sec_default : float
   val librarian_max_tokens_default : int
@@ -89,8 +85,6 @@ module KeeperMemoryOs : sig
       decimal digit so that values like [600.] display as ["600.0"]. *)
 
   val recall_enabled : unit -> bool
-  val librarian_enabled : unit -> bool
-  val librarian_cadence_turns : unit -> int
   val librarian_max_messages : unit -> int
   val librarian_timeout_sec : unit -> float
 

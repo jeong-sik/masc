@@ -462,14 +462,6 @@ let memory_entries =
       Memory_os_defaults.recall_env_key
       "Memory OS recall prompt injection enabled; invalid values fail closed";
     entry
-      ~default:(string_of_bool Memory_os_defaults.librarian_enabled_default)
-      Memory_os_defaults.librarian_env_key
-      "Memory OS post-turn librarian extraction enabled; invalid values fail closed";
-    entry
-      ~default:(string_of_int Memory_os_defaults.librarian_cadence_turns_default)
-      Memory_os_defaults.librarian_cadence_turns_env_key
-      "Turns between librarian extraction attempts per keeper (floor 1)";
-    entry
       ~default:(string_of_int Memory_os_defaults.librarian_max_messages_default)
       Memory_os_defaults.librarian_max_messages_env_key
       "Recent-message window for librarian extraction (floor 1)";

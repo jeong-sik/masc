@@ -875,8 +875,6 @@ let run_keepalive_unified_turn
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
 
-let dispatch_recurring_keepalive = Keeper_heartbeat_loop_dispatch_recurring.dispatch_recurring_keepalive
-
 let maybe_write_heartbeat_snapshot = Keeper_heartbeat_loop_snapshot_timing.maybe_write_heartbeat_snapshot
 let record_keepalive_stage_timing = Keeper_heartbeat_loop_snapshot_timing.record_keepalive_stage_timing
 
@@ -942,7 +940,6 @@ let run_heartbeat_loop
       ; snapshot_ms = 0.0
       ; board_ms = 0.0
       ; turn_ms = 0.0
-      ; recurring_ms = 0.0
       }
   in
   let timing_cursor = ref 0 in
@@ -1203,14 +1200,6 @@ let run_heartbeat_loop
               ~last_successful_heartbeat_ts
               ~consecutive_failures);
         let t_turn_end = Time_compat.now () in
-        let t_recurring_start = t_turn_end in
-        (* Recurring task dispatch (#3190) *)
-        let _recurring_dispatch_count =
-          if lifecycle_blocked
-          then 0
-          else dispatch_recurring_keepalive ~ctx ~meta_after_proactive ~now_ts
-        in
-        let t_recurring_end = Time_compat.now () in
         let interval =
           float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
         in
@@ -1227,9 +1216,7 @@ let run_heartbeat_loop
           ~t_board_start
           ~t_board_end
           ~t_turn_start
-          ~t_turn_end
-          ~t_recurring_start
-          ~t_recurring_end;
+          ~t_turn_end;
         (* Carry the inter-cycle sleep result into the next iteration so the
            turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
            keeper's configured cadence ([Timeout]). *)

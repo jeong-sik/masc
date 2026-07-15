@@ -181,7 +181,6 @@ type t =
   | UsageAnomalyReason
   | ConfigEnvParseFailures
   | PostTurnWireinFailures
-  | RecurringFailures
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors

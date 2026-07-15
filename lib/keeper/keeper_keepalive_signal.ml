@@ -588,7 +588,6 @@ type stage_timing =
   ; snapshot_ms : float
   ; board_ms : float
   ; turn_ms : float
-  ; recurring_ms : float
   }
 
 let stage_timing_ring_size () =
@@ -625,7 +624,6 @@ let stage_timing_to_json ~ring ~count =
       ; "snapshot", extract (fun t -> t.snapshot_ms)
       ; "board", extract (fun t -> t.board_ms)
       ; "turn", extract (fun t -> t.turn_ms)
-      ; "recurring", extract (fun t -> t.recurring_ms)
       ])
 ;;
 

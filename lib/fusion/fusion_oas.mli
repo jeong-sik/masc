@@ -8,9 +8,8 @@
 
 (** runtime_id("provider.model")로 OAS 에이전트를 빌드한다.
 
-    [tools]를 주면 패널/심판이 tool call을 할 수 있다.
-    [max_tokens]는 지정된 패널/심판 호출의 출력 토큰 예산이다. 생략하면
-    Runtime_agent 기본값을 보존한다.
+    [tools]를 주면 패널/심판이 tool call을 할 수 있다. Fusion은 호출별 출력
+    토큰 예산을 합성하지 않고 resolved runtime의 요청 설정을 그대로 보존한다.
     [timeout_s]는 OAS transport idle/body budget에만 매핑한다. Fusion의 구조적
     wall-clock budget은 호출자가 [Masc_oas_bridge.run_safe]로 소유한다.
     [name]은 에이전트 카드명 — [Async_agent.all]이 결과 키로 반환하는 패널 정체성이다
@@ -26,7 +25,6 @@ val build_agent
   -> system_prompt:string
   -> ?tools:Agent_sdk.Tool.t list
   -> ?timeout_s:float
-  -> ?max_tokens:int
   -> ?name:string
   -> ?provider_config_transform:
        (Llm_provider.Provider_config.t

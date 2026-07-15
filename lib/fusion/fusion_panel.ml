@@ -84,7 +84,6 @@ let run ~sw ~net ~outer_timeout_s ~groups ~prompt ()
             match
               Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
                 ~timeout_s:g.timeout_s
-                ?max_tokens:g.max_output_tokens
                 ~name:panelist model
             with
             | Ok agent -> ((agent, panelist, model) :: oks, fails)

@@ -289,7 +289,7 @@
 ;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —
 ;; CI determinism rules forbid network calls in test/). Calls Fusion_panel.run
-;; + Fusion_judge.run directly (bypasses the orchestrator's gate/budget/sink).
+;; + Fusion_judge.run directly (bypasses the orchestrator's gate/sink).
 
 (executable
  (name fusion_run)

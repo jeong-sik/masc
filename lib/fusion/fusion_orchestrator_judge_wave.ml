@@ -177,7 +177,6 @@ let run_fallback_judge
         ~sw
         ~net
         ~timeout_s:j.jtimeout_s
-        ?max_tokens:j.jmax_output_tokens
         ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
         ~judge_model:model
         ~question

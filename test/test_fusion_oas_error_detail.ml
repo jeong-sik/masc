@@ -224,7 +224,11 @@ let test_timeout_budget_sets_transport_timeouts () =
   Alcotest.(check (option (float 0.001)))
     "body timeout"
     (Some 300.0)
-    config.body_timeout_s
+    config.body_timeout_s;
+  Alcotest.(check (option int))
+    "fusion does not synthesize an output token budget"
+    None
+    config.max_tokens
 ;;
 
 let () =

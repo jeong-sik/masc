@@ -123,7 +123,6 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
     ~web_tools:
       (Fusion_policy.judge_web_tools_of ~req_web_tools:false
          preset.Fusion_policy.panels)
-    ~max_tool_calls:(Fusion_policy.judge_tool_budget_of preset.Fusion_policy.panels)
     ()
   |> Result.map_error (fun (failure, _usage) ->
     Fusion_types.judge_failure_text failure)

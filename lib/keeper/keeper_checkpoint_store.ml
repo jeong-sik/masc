@@ -391,6 +391,67 @@ let load_canonical_strict path =
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Io_error (Printexc.to_string exn))
 
+(* masc P0 perf fix (checkpoint save-path read-modify-write): every save
+   transaction for one session runs under [with_session_lock_typed], which
+   serializes writers for that [canonical_path] across Eio fibers, raw
+   Domains, and other OS processes (Eio.Mutex + Stdlib.Mutex + flock -- see
+   File_lock_eio). Inside that single-writer critical section, a
+   process-local watermark is exactly as authoritative as a fresh
+   [load_canonical_strict] of the same path, because every successful write
+   updates the cache before the session lock is released. A cache miss
+   (process cold-start, or a session this process has never written) always
+   falls back to [load_canonical_strict], preserving the original
+   crash-recovery contract: RFC-0225 §3.2's "disk is the only admission
+   watermark" invariant now reads as "disk is the only watermark this
+   process has not already durably confirmed."
+
+   The per-session lock does NOT protect the cache table itself: two
+   DIFFERENT sessions' transactions run under two different lock_paths and
+   can hold their save transactions concurrently on different Domains (the
+   payload encode step already runs on the executor pool -- see
+   [Executor_pool_ref.submit_or_inline] in [Keeper_fs]), so every access to
+   [watermark_cache] -- a plain, non-domain-safe Hashtbl -- is additionally
+   guarded by a dedicated [Stdlib.Mutex.t]. A plain OS mutex (not the
+   cooperative-yield [File_lock_eio] machinery) is enough here because the
+   guarded section is always a single O(1) Hashtbl operation: it is only ever
+   held across [load_canonical_strict]'s disk I/O by NOT wrapping that call,
+   so a cache miss for one session cannot stall a concurrent cache hit for
+   another, and the brief cross-domain wait this mutex can impose is
+   negligible next to the disk read it replaces.
+
+   This does not protect against a writer bypassing [save_oas_classified]
+   entirely (e.g. an operator manually restoring a checkpoint file while the
+   server keeps running) -- rg confirms [oas_checkpoint_path] has exactly one
+   production writer in lib/ (this module); every other reference is a
+   read-only dashboard/history consumer. See the PR body for the full audit. *)
+type watermark = { session_id : string; turn_count : int }
+
+let watermark_cache : (string, watermark) Hashtbl.t = Hashtbl.create 64
+let watermark_cache_mu = Stdlib.Mutex.create ()
+
+let find_cached_watermark canonical_path =
+  Stdlib.Mutex.protect watermark_cache_mu (fun () ->
+    Hashtbl.find_opt watermark_cache canonical_path)
+
+let record_watermark canonical_path watermark =
+  Stdlib.Mutex.protect watermark_cache_mu (fun () ->
+    Hashtbl.replace watermark_cache canonical_path watermark)
+
+let known_watermark ~canonical_path
+  : (watermark option, checkpoint_load_error) result =
+  match find_cached_watermark canonical_path with
+  | Some cached -> Ok (Some cached)
+  | None ->
+    (match load_canonical_strict canonical_path with
+     | Error _ as error -> error
+     | Ok None -> Ok None
+     | Ok (Some existing) ->
+       let watermark =
+         { session_id = existing.session_id; turn_count = existing.turn_count }
+       in
+       record_watermark canonical_path watermark;
+       Ok (Some watermark))
+
 let save_oas_classified_typed
     ~(session_dir : string)
     (ckpt : Agent_sdk.Checkpoint.t)
@@ -401,7 +462,7 @@ let save_oas_classified_typed
     with_session_lock_typed ~session_dir (fun session_dir ->
       let session_id = Keeper_id.Trace_id.to_string trace_id in
       let canonical_path = oas_checkpoint_path ~session_dir ~session_id in
-      match load_canonical_strict canonical_path with
+      match known_watermark ~canonical_path with
       | Error error -> Error (Existing_checkpoint_unreadable error)
       | Ok (Some existing) when not (String.equal existing.session_id session_id) ->
         Error
@@ -424,16 +485,18 @@ let save_oas_classified_typed
              ; known_turn_count = existing.turn_count
              })
       | Ok existing ->
-        let known = Option.map (fun checkpoint -> checkpoint.Agent_sdk.Checkpoint.turn_count) existing in
+        let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
         let ownership_root = Filename.dirname session_dir in
         (match
            Keeper_fs.save_json_durable_atomic
              ~ownership_root
+             ~pretty:false
              canonical_path
              (Agent_sdk.Checkpoint.to_json ckpt)
          with
          | Error error -> Error (Canonical_write_failed error)
          | Ok () ->
+           record_watermark canonical_path { session_id; turn_count = ckpt.turn_count };
            archive_oas_history_best_effort ~session_dir ckpt;
            Ok
              (Saved

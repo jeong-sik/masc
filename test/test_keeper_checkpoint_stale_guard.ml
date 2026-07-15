@@ -5,7 +5,13 @@
     the conversation the newer lane had just saved (turn_count=1355).
     [Keeper_checkpoint_store.save_oas_classified] skips a save whose [turn_count] is older
     than the canonical checkpoint observed inside the save transaction, without
-    turning that watermark hit into keeper lifecycle failure. *)
+    turning that watermark hit into keeper lifecycle failure.
+
+    Also covers the checkpoint save-path read-modify-write perf fix: an
+    in-process watermark cache replaces the unconditional canonical-file
+    reload on every save (cache-miss/cache-hit semantics must match the
+    disk-only behavior above bit-for-bit), and the canonical file itself is
+    now written compact rather than pretty-printed. *)
 
 open Alcotest
 open Masc
@@ -106,8 +112,13 @@ let test_forward_equal_and_stale () =
         on_disk.Agent_sdk.Checkpoint.turn_count
     | Error _ -> fail "load after rejection failed")
 
-(* Every decision reloads the canonical disk SSOT; there is no process cache to
-   reset or reconstruct after a restart. *)
+(* The canonical checkpoint file is still the only durable admission
+   watermark: whether a given decision is served from the in-process
+   watermark cache or backfilled from [load_canonical_strict], the disk file
+   is always the ground truth the cache mirrors. This test exercises a
+   session already warm in this process's cache (the seed save populates it);
+   [test_cache_miss_backfills_from_a_pre_existing_canonical_file] below
+   exercises the genuine cache-miss / cold-start path. *)
 let test_disk_is_the_watermark_ssot () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -129,6 +140,64 @@ let test_disk_is_the_watermark_ssot () =
     | Error e -> fail ("cold stale save returned lifecycle failure: " ^ e));
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:9 ~marker:"v9")
       "forward save from disk SSOT")
+
+(* Cache-miss path: this process has never written this session's canonical
+   file, so it is not in the in-memory watermark cache -- a checkpoint placed
+   on disk by writing bytes directly (standing in for a different process, or
+   this process before a restart) must still be discovered and honored. *)
+let test_cache_miss_backfills_from_a_pre_existing_canonical_file () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let sid = "sess-preexisting-on-disk" in
+    let path = Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid in
+    Fs_compat.save_file path
+      (make_checkpoint ~session_id:sid ~turn_count:8 ~marker:"v8-on-disk"
+       |> Agent_sdk.Checkpoint.to_string);
+    match
+      Keeper_checkpoint_store.save_oas_classified ~session_dir
+        (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"v3-stale")
+    with
+    | Ok (Keeper_checkpoint_store.Stale_noop
+            { incoming_turn_count; known_turn_count }) ->
+      check int "cache-miss stale incoming turn_count" 3 incoming_turn_count;
+      check int "cache-miss known turn_count backfilled from disk" 8 known_turn_count
+    | Ok (Keeper_checkpoint_store.Saved _) ->
+      fail "stale save advanced on a cache-miss backfill"
+    | Error e -> fail ("cache-miss stale save returned lifecycle failure: " ^ e))
+
+(* Cache-hit path: once a session's watermark is warm in this process, a
+   later decision for the same canonical path must not re-read the file --
+   proven behaviorally by corrupting the on-disk bytes after the cache is
+   warm and observing that both a stale rejection and a forward write still
+   succeed from the cache, instead of failing on a disk parse error. *)
+let test_cache_hit_survives_disk_corruption () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let sid = "sess-cache-warm" in
+    let path = Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid in
+    save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:5 ~marker:"v5")
+      "seed save (warms the cache)";
+    Fs_compat.save_file path "{not-a-checkpoint-anymore";
+    (match
+       Keeper_checkpoint_store.save_oas_classified ~session_dir
+         (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"v3-stale")
+     with
+     | Ok (Keeper_checkpoint_store.Stale_noop
+             { incoming_turn_count; known_turn_count }) ->
+       check int "warm-cache stale incoming turn_count" 3 incoming_turn_count;
+       check int "warm-cache known turn_count served from cache" 5 known_turn_count
+     | Ok (Keeper_checkpoint_store.Saved _) ->
+       fail "stale save advanced despite a warm cache"
+     | Error e ->
+       fail
+         ("stale save read the corrupted canonical file instead of the cache: " ^ e));
+    save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:6 ~marker:"v6")
+      "forward save must succeed from the cache despite corrupted disk bytes";
+    match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:sid with
+    | Ok on_disk ->
+      check int "forward save overwrote the corrupted bytes with turn_count 6" 6
+        on_disk.Agent_sdk.Checkpoint.turn_count
+    | Error _ -> fail "load after cache-driven forward save failed")
 
 (* The OAS per-turn pipeline builds checkpoints with an empty session_id (the
    OAS agent carries no session field). The keeper sink stamps a validated,
@@ -242,6 +311,38 @@ let test_multi_domain_writers_leave_max_turn_on_disk () =
       check int "canonical disk retains the maximum turn" expected
         checkpoint.Agent_sdk.Checkpoint.turn_count)
 
+(* The canonical checkpoint file is written compact (Yojson.Safe.to_string),
+   not pretty-printed, to cut idle-CPU serialization cost. The read path is a
+   JSON parser and is format-agnostic; this test asserts the on-disk bytes are
+   actually single-line and that the round-trip through the compact encoding
+   is lossless for session identity, turn_count, and message content. *)
+let test_canonical_checkpoint_is_written_compact () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let sid = "sess-compact" in
+    let path = Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid in
+    save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:7 ~marker:"compact-marker")
+      "compact save";
+    let raw = Fs_compat.load_file path in
+    check bool "canonical checkpoint bytes are single-line (compact, not pretty)"
+      true
+      (not (String.contains raw '\n'));
+    match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:sid with
+    | Error _ -> fail "load after compact save failed"
+    | Ok on_disk ->
+      check string "session_id round-trips through compact encoding" sid
+        on_disk.Agent_sdk.Checkpoint.session_id;
+      check int "turn_count round-trips through compact encoding" 7
+        on_disk.Agent_sdk.Checkpoint.turn_count;
+      let marker_present =
+        List.exists
+          (fun (msg : Agent_sdk.Types.message) ->
+             String.equal (Agent_sdk.Types.text_of_message msg) "compact-marker")
+          on_disk.Agent_sdk.Checkpoint.messages
+      in
+      check bool "message content round-trips through compact encoding" true
+        marker_present)
+
 let test_ready_runtime_raw_domain_save () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -289,5 +390,11 @@ let () =
             test_multi_domain_writers_leave_max_turn_on_disk;
           test_case "ready runtime raw Domain saves through Unix context" `Quick
             test_ready_runtime_raw_domain_save;
+          test_case "cache miss backfills the watermark from a pre-existing canonical file"
+            `Quick test_cache_miss_backfills_from_a_pre_existing_canonical_file;
+          test_case "cache hit survives canonical file corruption" `Quick
+            test_cache_hit_survives_disk_corruption;
+          test_case "canonical checkpoint is written compact and round-trips" `Quick
+            test_canonical_checkpoint_is_written_compact;
         ] );
     ]

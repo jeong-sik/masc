@@ -1,7 +1,7 @@
 (* Fusion — 결정론적 발동 게이트 (구현).
    계약/문서: fusion_policy.mli, docs/rfc/RFC-0252 §6 *)
 
-(* 한 패널 그룹 — 공통 system_prompt/web_tools/max_tool_calls/timeout으로 실행되는
+(* 한 패널 그룹 — 공통 system_prompt/web_tools/timeout으로 실행되는
    모델 묶음. 한 preset이 이종(heterogeneous) 그룹 여럿을 가질 수 있다(RFC-0252-A).
    닫힌 record (option-dual 없음); preset이 [panel_group list]를 deriving하므로
    nested deriving 필수. *)
@@ -13,7 +13,6 @@ type panel_group =
           → legacy/단일-occurrence는 byte-identical. 정체성 derive는 [panelist_id]. *)
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부 *)
-  ; max_tool_calls : int  (** 그룹 모델당 최대 tool 호출 수 (0=무제한) *)
   ; max_output_tokens : int option  (** 그룹 모델당 출력 토큰 예산 override *)
   ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초) *)
   }
@@ -27,7 +26,6 @@ type judge_spec =
   ; jlabel : string  (** 정체성 라벨 ([panelist_id]와 동형). ""면 정체성=jmodel *)
   ; jsystem_prompt : string  (** 이 1차 심판의 lens (config 필수) *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부 *)
-  ; jmax_tool_calls : int  (** 최대 tool 호출 수 (0=무제한) *)
   ; jmax_output_tokens : int option  (** 출력 토큰 예산 override *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초) *)
   ; jmax_timeout_s : float option
@@ -66,10 +64,6 @@ let default_min_answered = min_answered_floor
 let default_max_concurrent_judges = max_panel
 let min_staged_judge_group_size = 2
 let default_staged_judge_group_size = 3
-
-(* 그룹 모델당 max_tool_calls 상한 (0..max). 0=무제한, 그 외 양수는 에이전트
-   max_turns에 근사. SSOT 상수 (Magic Number 회피, RFC-0280에서 검증을 한 곳으로 모음). *)
-let max_tool_calls_ceiling = 16
 
 let valid_max_output_tokens = function
   | None -> true
@@ -254,13 +248,6 @@ let panel_outer_timeout_of ~max_fibers (groups : panel_group list) =
 let judge_web_tools_of ~req_web_tools (groups : panel_group list) =
   req_web_tools || List.exists (fun (g : panel_group) -> g.web_tools) groups
 
-(* 심판 tool budget을 그룹들에서 derive. 0=무제한이 흡수자(어느 그룹이 무제한이면
-   심판도 무제한), 그 외엔 그룹 max. 단일 그룹이면 그 값 = 오늘의
-   max_tool_calls_per_panel (byte-identity). *)
-let judge_tool_budget_of (groups : panel_group list) =
-  if List.exists (fun (g : panel_group) -> g.max_tool_calls = 0) groups then 0
-  else List.fold_left (fun acc (g : panel_group) -> max acc g.max_tool_calls) 0 groups
-
 (* 적응형 타임아웃 임계값들. [adaptive_extension_threshold]는 adaptive 확장을 끄는
    factor 값(config default 1.0; 검증이 >= 1.0을 강제). 1.0은 IEEE754에서 정확히
    표현되지만, 의도를 명시하고 drift를 막기 named 상수로 둔다 — callers 도 float
@@ -321,8 +308,6 @@ module Validated_preset = struct
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
-    | Bad_max_tool_calls of int
-        (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..max_tool_calls_ceiling 밖 *)
     | Bad_max_output_tokens of int
         (** 그룹/심판 출력 토큰 예산 override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
@@ -340,9 +325,8 @@ module Validated_preset = struct
         (** [adaptive_timeout_factor]가 1.0 미만. *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
-     judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → 패널 max_output_tokens
-     범위 → (RFC-0283) 1차 심판 prompt → 1차 심판 정체성 중복 → 1차 심판
-     max_tool_calls 범위 → 심판 max_output_tokens 범위 → min_answered.
+     judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
+     1차 심판 prompt → 1차 심판 정체성 중복 → 심판 max_output_tokens 범위 → min_answered.
      judges=[]면 1차 심판 관련 셋은 통과(simple/refine/conditional preset은 기존과 동일
      결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =
@@ -354,71 +338,51 @@ module Validated_preset = struct
       | Some id -> Error (Duplicate_panelist id)
       | None ->
         (match
-           List.find_opt
+           List.find_map
              (fun (g : panel_group) ->
-               g.max_tool_calls < 0 || g.max_tool_calls > max_tool_calls_ceiling)
+               match g.max_output_tokens with
+               | Some n when not (valid_max_output_tokens (Some n)) -> Some n
+               | _ -> None)
              p.panels
          with
-         | Some g -> Error (Bad_max_tool_calls g.max_tool_calls)
+         | Some n -> Error (Bad_max_output_tokens n)
          | None ->
-           (match
-              List.find_map
-                (fun (g : panel_group) ->
-                  match g.max_output_tokens with
-                  | Some n when not (valid_max_output_tokens (Some n)) -> Some n
-                  | _ -> None)
-                p.panels
-            with
-            | Some n -> Error (Bad_max_output_tokens n)
-            | None ->
-              if not (preset_judge_prompts_present p) then Error Judge_panel_prompt_missing
-              else (
-                match preset_duplicate_judge p with
-                | Some id -> Error (Duplicate_judge id)
-                | None ->
-                  (match
-                     List.find_opt
-                       (fun (j : judge_spec) ->
-                         j.jmax_tool_calls < 0
-                         || j.jmax_tool_calls > max_tool_calls_ceiling)
-                       p.judges
-                   with
-                   | Some j -> Error (Bad_max_tool_calls j.jmax_tool_calls)
-                   | None ->
-                     (match
-                        p.judge_max_output_tokens
-                        :: List.map
-                             (fun (j : judge_spec) -> j.jmax_output_tokens)
-                             p.judges
-                        |> List.find_opt (fun v -> not (valid_max_output_tokens v))
-                      with
-                      | Some (Some n) -> Error (Bad_max_output_tokens n)
-                      | Some None | None ->
-                        let total = List.length (preset_models p) in
-                        if p.min_answered < min_answered_floor
-                        then Error (Min_answered_below_min p.min_answered)
-                        else if p.min_answered > total
-                        then Error (Min_answered_above_max p.min_answered)
-                        else if
-                          not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
-                        then Error (Bad_meta_timeout p.meta_timeout_s)
-                        else if p.adaptive_timeout_factor < 1.0
-                        then Error (Bad_adaptive_factor p.adaptive_timeout_factor)
-                        else if p.judge_wave_budget_s < 0.0
-                        then Error (Bad_judge_wave_budget p.judge_wave_budget_s)
-                        else if
-                          p.judge_wave_budget_s > 0.0
-                          && Float.is_finite p.judge_wave_budget_s
-                          && (let longest_judge =
-                                List.fold_left
-                                  (fun acc (j : judge_spec) ->
-                                    Float.max acc j.jtimeout_s)
-                                  0.0 p.judges
-                              in
-                              p.judge_wave_budget_s < longest_judge
-                              || p.judge_wave_budget_s < p.meta_timeout_s)
-                        then Error (Bad_judge_wave_budget p.judge_wave_budget_s)
-                        else Ok p)))))
+           if not (preset_judge_prompts_present p) then Error Judge_panel_prompt_missing
+           else (
+             match preset_duplicate_judge p with
+             | Some id -> Error (Duplicate_judge id)
+             | None ->
+               (match
+                  p.judge_max_output_tokens
+                  :: List.map (fun (j : judge_spec) -> j.jmax_output_tokens) p.judges
+                  |> List.find_opt (fun v -> not (valid_max_output_tokens v))
+                with
+                | Some (Some n) -> Error (Bad_max_output_tokens n)
+                | Some None | None ->
+                  let total = List.length (preset_models p) in
+                  if p.min_answered < min_answered_floor
+                  then Error (Min_answered_below_min p.min_answered)
+                  else if p.min_answered > total
+                  then Error (Min_answered_above_max p.min_answered)
+                  else if
+                    not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
+                  then Error (Bad_meta_timeout p.meta_timeout_s)
+                  else if p.adaptive_timeout_factor < 1.0
+                  then Error (Bad_adaptive_factor p.adaptive_timeout_factor)
+                  else if p.judge_wave_budget_s < 0.0
+                  then Error (Bad_judge_wave_budget p.judge_wave_budget_s)
+                  else if
+                    p.judge_wave_budget_s > 0.0
+                    && Float.is_finite p.judge_wave_budget_s
+                    && (let longest_judge =
+                          List.fold_left
+                            (fun acc (j : judge_spec) -> Float.max acc j.jtimeout_s)
+                            0.0 p.judges
+                        in
+                        p.judge_wave_budget_s < longest_judge
+                        || p.judge_wave_budget_s < p.meta_timeout_s)
+                  then Error (Bad_judge_wave_budget p.judge_wave_budget_s)
+                  else Ok p)))
 
   let preset (t : t) : preset = t
 

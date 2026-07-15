@@ -17,7 +17,6 @@ type panel_group =
   ; system_prompt : string
       (** 그룹 패널 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부. *)
-  ; max_tool_calls : int  (** 그룹 모델당 최대 tool 호출 수 (0=무제한). *)
   ; max_output_tokens : int option
       (** 그룹 모델당 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초). *)
@@ -32,7 +31,6 @@ type judge_spec =
   ; jlabel : string  (** 정체성 라벨. ""면 정체성=jmodel *)
   ; jsystem_prompt : string  (** 이 1차 심판의 lens — config에서 필수(코드 default 없음). *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
-  ; jmax_tool_calls : int  (** 최대 tool 호출 수 (0=무제한). *)
   ; jmax_output_tokens : int option
       (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초). *)
@@ -97,9 +95,6 @@ val default_staged_judge_group_size : int
 (** Smallest useful staged JOJ group size. Size 1 degenerates into a serial
     pass-through and is rejected. *)
 val min_staged_judge_group_size : int
-
-(** 그룹 모델당 [max_tool_calls] 상한 (0..이 값). 0=무제한. named SSOT. *)
-val max_tool_calls_ceiling : int
 
 (** Optional max-output-token overrides must be positive when present. *)
 val valid_max_output_tokens : int option -> bool
@@ -185,10 +180,6 @@ val panel_outer_timeout_of : max_fibers:int -> panel_group list -> float
     단일 그룹이면 [req_web_tools || group.web_tools] (오늘과 byte-identical). *)
 val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
 
-(** 심판 tool budget을 그룹들에서 derive: 0(무제한)이 흡수자, 그 외엔 그룹 max.
-    단일 그룹이면 그 그룹 [max_tool_calls] (오늘과 byte-identical). *)
-val judge_tool_budget_of : panel_group list -> int
-
 (** [adaptive_timeout_enabled preset] — preset의 [adaptive_timeout_factor]가 확장
     임계값(1.0)을 넘는가. callers(orchestrator)가 float equality 비교 없이 typed bool로
     adaptive 재시도 분기를 판정한다. *)
@@ -227,8 +218,6 @@ module Validated_preset : sig
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성({!panelist_id}) *)
-    | Bad_max_tool_calls of int
-        (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..[max_tool_calls_ceiling] 밖 *)
     | Bad_max_output_tokens of int
         (** 그룹/심판 max_output_tokens override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
@@ -245,9 +234,9 @@ module Validated_preset : sig
     | Bad_adaptive_factor of float
         (** [adaptive_timeout_factor]가 1.0 미만. *)
 
-  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls →
-      max_output_tokens → 1차 심판 prompt/정체성/max_tool_calls/max_output_tokens →
-      min_answered → timeout 예산/계수. 통과 시 [Ok vp], 첫 위반에서 [Error invalid].
+  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_output_tokens →
+      1차 심판 prompt/정체성/max_output_tokens → min_answered → timeout 예산/계수.
+      통과 시 [Ok vp], 첫 위반에서 [Error invalid].
       config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result
 

@@ -266,6 +266,16 @@ let resolve_judgment (entry : Keeper_approval_queue.pending_approval) ~approval_
      | Ok _ -> Ok Judgment_finalized
      | Error (Keeper_approval_queue.Not_found _ | Keeper_approval_queue.Already_resolved _) ->
        Ok Judgment_skipped
+     | Error (Keeper_approval_queue.Delivery_failed _ as delivery_error) ->
+       (match Keeper_approval_queue.requeue_failed_auto_judge_delivery ~id:approval_id with
+        | Ok () -> Error (Keeper_approval_queue.resolve_error_to_string delivery_error)
+        | Error requeue_error ->
+          Error
+            (Printf.sprintf
+               "%s; durable Auto Judge requeue failed: %s"
+               (Keeper_approval_queue.resolve_error_to_string delivery_error)
+               (Keeper_approval_queue.auto_judge_delivery_requeue_error_to_string
+                  requeue_error)))
      | Error error -> Error (Keeper_approval_queue.resolve_error_to_string error))
 ;;
 
@@ -472,6 +482,8 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
       "auto_judge_restart_retryable_recovered", "restart_retryable_recovered"
     | `Lane_activity_retry ->
       "auto_judge_lane_activity_retry", "lane_activity_retry"
+    | `Lane_activity_finalize ->
+      "auto_judge_lane_activity_judgment_recovered", "lane_activity_judgment_recovered"
   in
   Log.Keeper.warn
     ~keeper_name:entry.keeper_name
@@ -639,7 +651,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
 ;;
 
 let decide ?cycle_grant ~keeper_always_allow request =
-  let retry_lane_failures () =
+  let recover_lane_auto_judges () =
     Keeper_approval_queue.list_pending_entries ()
     |> List.iter (fun (entry : Keeper_approval_queue.pending_approval) ->
       if String.equal entry.audit_base_path request.base_path
@@ -656,12 +668,25 @@ let decide ?cycle_grant ~keeper_always_allow request =
                "lane-local Auto Judge state recovery failed approval=%s: %s"
                entry.id
                reason)
+        | Keeper_approval_queue.Summary_available
+            ({ judgment = (Keeper_approval_queue.Approve | Keeper_approval_queue.Deny); _ }
+             as summary) ->
+          observe_recovered_work `Lane_activity_finalize entry;
+          (match resolve_judgment entry ~approval_id:entry.id summary with
+           | Ok (Judgment_finalized | Judgment_skipped) -> ()
+           | Error reason ->
+             Log.Keeper.error
+               ~keeper_name:request.keeper_name
+               "lane-local Auto Judge delivery recovery failed approval=%s: %s"
+               entry.id
+               reason)
         | Keeper_approval_queue.Summary_not_requested
         | Keeper_approval_queue.Summary_pending
-        | Keeper_approval_queue.Summary_available _
+        | Keeper_approval_queue.Summary_available
+            { judgment = Keeper_approval_queue.Require_human; _ }
         | Keeper_approval_queue.Summary_failed { retryable = false; _ } -> ())
   in
-  (try retry_lane_failures () with
+  (try recover_lane_auto_judges () with
    | Eio.Cancel.Cancelled _ as exn -> raise exn
    | exn ->
      Log.Keeper.error

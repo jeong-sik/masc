@@ -43,6 +43,12 @@ let durable_resolution_opt ~base_path ~keeper_name ~approval_id =
     | _ -> None)
 ;;
 
+let event_queue_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue.json"
+;;
+
 let require_some message = function
   | Some value -> value
   | None -> Alcotest.fail message
@@ -784,6 +790,85 @@ let test_retryable_auto_judge_recovery_is_lane_local () =
          [ keeper_a, id_a; keeper_b, id_b ])
 ;;
 
+let test_auto_judge_delivery_failure_returns_to_origin_lane () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-auto-judge-delivery-recovery" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "request", `String "recover-delivery" ])
+       in
+       check_update "mark pending" true (AQ.mark_summary_pending ~id);
+       let summary : AQ.hitl_context_summary =
+         { summary_version = 2
+         ; generated_at = Unix.gettimeofday ()
+         ; model_run_id = "judge-delivery-recovery"
+         ; context_summary = "The exact request is justified."
+         ; key_questions = []
+         ; judgment = AQ.Approve
+         ; rationale = "Visible context supports this exact request."
+         }
+       in
+       check_update "persist decisive summary" true (AQ.attach_summary ~id summary);
+       let event_queue_path = event_queue_snapshot_path ~base_path ~keeper_name in
+       ensure_dir (Filename.dirname event_queue_path);
+       Unix.mkdir event_queue_path 0o755;
+       let failed = Gate.resume_persisted_auto_judges ~base_path in
+       Alcotest.(check int) "one decisive candidate" 1 failed.requested;
+       Alcotest.(check int) "delivery was not finalized" 0
+         (List.length failed.finalized_ids);
+       Alcotest.(check int) "delivery failure is explicit" 1
+         (List.length failed.failures);
+       Alcotest.(check string)
+         "failed approval identified"
+         id
+         (List.hd failed.failures).approval_id;
+       (match AQ.get_pending_entry ~id with
+        | Some
+            { summary_status = AQ.Summary_available { judgment = AQ.Approve; _ }
+            ; keeper_name = pending_keeper
+            ; _
+            } ->
+          Alcotest.(check string) "origin lane preserved" keeper_name pending_keeper
+        | Some _ | None -> Alcotest.fail "decisive Auto Judge work was stranded");
+       let open Yojson.Safe.Util in
+       Alcotest.(check int) "failed delivery journal returned to pending" 0
+         (read_pending_snapshot ~base_path
+          |> member "deliveries"
+          |> to_list
+          |> List.length);
+       Unix.rmdir event_queue_path;
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input = `Assoc [ "request", `String "next-origin-lane-activity" ]
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       (match Gate.decide ~keeper_always_allow:true request with
+        | Gate.Allow { source = Gate.Keeper_always_allow } -> ()
+        | Gate.Allow _ | Gate.Deferred _ | Gate.Unavailable _ ->
+          Alcotest.fail "origin lane activity did not retain Keeper Always Allow");
+       Alcotest.(check bool) "recovered verdict left pending" true
+         (Option.is_none (AQ.get_pending_entry ~id));
+       let resolution =
+         match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
+         | Some resolution -> resolution
+         | None -> Alcotest.fail "origin lane activity did not redeliver verdict"
+       in
+       drop_resolution ~base_path ~keeper_name resolution)
+;;
+
 let test_decisive_summary_finalizes_after_restart () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-finalize-restart" in
@@ -1311,6 +1396,10 @@ let () =
             "retryable Auto Judge recovery is lane-local"
             `Quick
             test_retryable_auto_judge_recovery_is_lane_local
+        ; Alcotest.test_case
+            "Auto Judge delivery recovery stays in origin lane"
+            `Quick
+            test_auto_judge_delivery_failure_returns_to_origin_lane
         ; Alcotest.test_case
             "decisive summary finalizes after restart"
             `Quick

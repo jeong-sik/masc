@@ -1665,6 +1665,13 @@ type resolve_error =
       ; storage_error : storage_error
       }
 
+type auto_judge_delivery_requeue_error =
+  | Requeue_delivery_not_found of string
+  | Requeue_delivery_not_auto_judge of string
+  | Requeue_delivery_summary_not_decisive of string
+  | Requeue_delivery_pending_conflict of string
+  | Requeue_delivery_persistence_failed of storage_error
+
 let resolve_error_to_string = function
   | Not_found id -> Printf.sprintf "approval %s not found" id
   | Already_resolved id -> Printf.sprintf "approval %s already resolved" id
@@ -1675,6 +1682,18 @@ let resolve_error_to_string = function
       "approval %s queue persistence failed: %s"
       approval_id
       (storage_error_to_string storage_error)
+;;
+
+let auto_judge_delivery_requeue_error_to_string = function
+  | Requeue_delivery_not_found id ->
+    Printf.sprintf "approval %s has no durable delivery to requeue" id
+  | Requeue_delivery_not_auto_judge id ->
+    Printf.sprintf "approval %s delivery is not owned by Auto Judge" id
+  | Requeue_delivery_summary_not_decisive id ->
+    Printf.sprintf "approval %s has no decisive durable Auto Judge summary" id
+  | Requeue_delivery_pending_conflict id ->
+    Printf.sprintf "approval %s already exists in the pending queue" id
+  | Requeue_delivery_persistence_failed error -> storage_error_to_string error
 ;;
 
 module Resolution_claims = Set_util.StringSet
@@ -1730,6 +1749,40 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
          Atomic.set pending updated_pending;
          Atomic.set deliveries updated_deliveries;
          Ok delivery))
+;;
+
+let requeue_failed_auto_judge_delivery ~id =
+  with_pending_store_lock (fun () ->
+    let pending_map = Atomic.get pending in
+    let delivery_map = Atomic.get deliveries in
+    match SMap.find_opt id delivery_map with
+    | None -> Error (Requeue_delivery_not_found id)
+    | Some { source = (Always_allowed | Human_operator); _ } ->
+      Error (Requeue_delivery_not_auto_judge id)
+    | Some { entry; source = Auto_judge; _ } ->
+      (match entry.summary_status with
+       | Summary_available { judgment = (Approve | Deny); _ } ->
+         if SMap.mem id pending_map
+         then Error (Requeue_delivery_pending_conflict id)
+         else
+           let updated_pending = SMap.add id entry pending_map in
+           let updated_deliveries = SMap.remove id delivery_map in
+           (match
+              persist_snapshot_unlocked
+                ~base_path:entry.audit_base_path
+                ~pending_map:updated_pending
+                ~delivery_map:updated_deliveries
+            with
+            | Error error -> Error (Requeue_delivery_persistence_failed error)
+            | Ok () ->
+              Atomic.set pending updated_pending;
+              Atomic.set deliveries updated_deliveries;
+              Ok ())
+       | Summary_available { judgment = Require_human; _ }
+       | Summary_not_requested
+       | Summary_pending
+       | Summary_failed _ ->
+         Error (Requeue_delivery_summary_not_decisive id)))
 ;;
 
 let remove_delivery_from_store delivery =
@@ -2030,8 +2083,9 @@ let resolve_with_policy
 (** Resolve a pending approval. Returns [Ok ()] if found and resolved,
     [Error (Not_found _)] if the id is not in the queue, or
     [Error (Already_resolved _)] if another concurrent resolution owns the
-    approval claim. A delivery failure leaves the entry pending for retry.
-    Called from the dashboard approval HTTP handler
+    approval claim. A delivery failure remains in the durable delivery journal;
+    the Auto Judge boundary can atomically return its own decisive work to the
+    pending queue. Called from the dashboard approval HTTP handler
     ([server_dashboard_http.ml]) and MCP runtime.
 
     [base_path] is sourced from the entry's captured [audit_base_path]

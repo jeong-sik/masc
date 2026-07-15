@@ -504,11 +504,10 @@ let with_temp_runtime_toml content f =
 
 (* The structured-output capability gate (SDK [validate_output_schema_request])
    resolves a model's [supports_structured_output] from the global
-   [Model_catalog], not from the runtime.toml [capabilities] block. Production
-   wires this by walking cwd parents for oas-models.toml and exporting
-   OAS_MODEL_CATALOG (server_runtime_bootstrap), which the SDK lazily loads.
-   These pure tests never run that bootstrap, so without an installed catalog
-   the synthetic ollama vision runtimes resolve to [default_capabilities]
+   [Model_catalog], not from the runtime.toml [capabilities] block. OAS owns
+   production catalog loading from its packaged models.toml or an explicit
+   operator override. These pure tests use synthetic model ids that are absent
+   from the packaged catalog, so they resolve to [default_capabilities]
    (supports_structured_output = false); [vision_runtime_candidates] then
    filters them out and the tool short-circuits to no_capable_runtime before
    ever reaching the provider sub-call. Install a minimal catalog so the

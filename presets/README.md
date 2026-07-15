@@ -9,7 +9,8 @@ install boots zero keepers until an operator opts a team in.
 `personas/` into `<base-path>/.masc/config/`. The four team keepers inherit
 `[runtime].default` from `runtime.toml` (shipped as
 `ollama_cloud.deepseek-v4-flash`), so a preset never edits the model catalog and
-stays coherent with `runtime.toml` / `oas-models.toml` by construction.
+stays coherent with `runtime.toml` and OAS's embedded catalog plus the
+deployment `oas-models-overlay.toml` by construction.
 
 Presets live at the repo top level (`presets/`), not under `config/`, so the
 server's config-root bootstrap never copies them into a live runtime config

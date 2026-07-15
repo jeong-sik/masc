@@ -18,18 +18,6 @@ open Masc
 module J = Yojson.Safe.Util
 module KMC = Keeper_meta_contract
 
-(* Test hermeticity: runtime capability checks resolve through the OAS
-   [Model_catalog], which is loaded once (memoized via Atomic) from the
-   [OAS_MODEL_CATALOG] env var. Production seeds this in
-   server_runtime_bootstrap. Set at module top so it precedes the first
-   [global ()] access regardless of test ordering, and only when unset so an
-   external/CI value is honored. *)
-let () =
-  match Sys.getenv_opt "OAS_MODEL_CATALOG" with
-  | Some _ -> ()
-  | None ->
-    Unix.putenv "OAS_MODEL_CATALOG" (Masc_test_deps.source_path "oas-models.toml")
-
 (* ---- temp config-dir + keeper TOML fixtures
    (helper shape mirrors test_keeper_runtime_denylist.ml) ---- *)
 
@@ -80,11 +68,17 @@ let fixture_int_field fields key =
   | Some value -> value
   | None -> Alcotest.failf "fixture field %S is not an int" key
 
+let restore_model_catalog = function
+  | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+  | None -> Llm_provider.Model_catalog.clear_global ()
+;;
+
 let with_model_catalog_content content f =
   let path = Filename.temp_file "runtime-thinking-oas-models" ".toml" in
+  let previous = Llm_provider.Model_catalog.global () in
   Fun.protect
     ~finally:(fun () ->
-      Llm_provider.Model_catalog.clear_global ();
+      restore_model_catalog previous;
       try Sys.remove path with
       | _ -> ())
     (fun () ->
@@ -1742,6 +1736,9 @@ let test_assignment_typo_keeps_not_found () =
 ;;
 
 let () =
+  (match Llm_provider.Model_catalog.load_default () with
+   | Error msg -> Alcotest.failf "packaged OAS models.toml should load: %s" msg
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
   Alcotest.run
     "runtime_per_keeper_routing"
     [ ( "runtime-assignment routing"

@@ -16,8 +16,9 @@
 > `aliases = ["runpod_mtp"]`) instead of a masc-side `capability-namespace`
 > key. The masc key remains the better ergonomics when the declaration should
 > live next to the endpoint in runtime.toml; decide at D3 implementation time.
-> Remaining masc-side work: overlay file resolution at bootstrap (after the
-> oas release + pin bump), D2, D4.
+> MASC D1 now resolves and seeds only `oas-models-overlay.toml`; automatic
+> config-root/parent full-catalog discovery and the repo full fork are retired.
+> Remaining masc-side work: D2 and D4.
 
 ## 1. Problem
 
@@ -62,7 +63,7 @@ ownership. Two defects compounded:
      radius is not.
 
 Interim state after the incident: masc#24528 restores boot, with a
-deployment-local full fork (`~/.masc/config/oas-models.toml` = upstream copy +
+deployment-local full fork (`<base-path>/.masc/config/oas-models.toml` = upstream copy +
 five alias rows, labeled `WORKAROUND … removal target: overlay RFC merge`).
 That fork is the debt this RFC removes.
 

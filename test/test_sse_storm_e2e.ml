@@ -288,9 +288,9 @@ let initialize_mcp_session ~port ~auth_token =
            "initialize response missing Mcp-Session-Id (curl_exit=%d stderr=%s body=%s)"
            result.curl_exit result.stderr result.body)
 
-let merge_env_overrides overrides =
+let merge_env_overrides ?(remove = []) overrides =
   let override_keys =
-    List.map fst overrides
+    remove @ List.map fst overrides
   in
   let is_override_key entry =
     match String.index_opt entry '=' with
@@ -317,18 +317,12 @@ let ensure_dir path =
   else
     Unix.mkdir path 0o755
 
-let find_repo_file relative =
-  let roots = [ "."; ".."; "../.."; "../../.."; "../../../.." ] in
-  roots
-  |> List.map (fun root -> Filename.concat root relative)
-  |> List.find_opt Sys.file_exists
-
 let runtime_seed =
   {|
 [runtime]
-default = "sse_storm.smoke"
+default = "deepseek.smoke"
 
-[providers.sse_storm]
+[providers.deepseek]
 display-name = "SSE Storm Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
@@ -341,7 +335,7 @@ max-context = 32768
 tools-support = true
 streaming = true
 
-[sse_storm.smoke]
+[deepseek.smoke]
 is-default = true
 max-concurrent = 1
 |}
@@ -373,23 +367,17 @@ let with_server f =
   (try Sys.remove base_path with _ -> ());
   Unix.mkdir base_path 0o755;
   seed_server_config ~base_path;
-  let oas_model_catalog =
-    match find_repo_file "oas-models.toml" with
-    | Some path -> path
-    | None -> fail "oas-models.toml fixture not found"
-  in
   let log_fd =
     Unix.openfile log_file [Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC] 0o644
   in
   let env =
-    merge_env_overrides
+    merge_env_overrides ~remove:[ "OAS_MODEL_CATALOG" ]
       [
         ("MASC_BASE_PATH", base_path);
         ("MASC_BASE_PATH_INPUT", base_path);
         ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-        ("OAS_MODEL_CATALOG", oas_model_catalog);
       ]
   in
   let argv =

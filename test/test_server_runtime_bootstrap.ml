@@ -86,7 +86,8 @@ let read_file path =
 
 let repo_runtime_toml = "# repo runtime seed\n"
 let local_runtime_toml = "# local runtime seed\n"
-let repo_model_catalog_toml = "[[models]]\nid_prefix = \"repo-runtime\"\n"
+let repo_model_catalog_overlay_toml =
+  "[[models]]\nid_prefix = \"repo-runtime\"\nprovider_name = \"repo-provider\"\n"
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
@@ -156,7 +157,10 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat root "oas-models.toml") repo_model_catalog_toml;
+  write_file
+    (Filename.concat config "oas-models-overlay.toml")
+    repo_model_catalog_overlay_toml;
+  write_file (Filename.concat root "oas-models.toml") "legacy full catalog must be ignored";
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
   write_file
@@ -165,141 +169,56 @@ let make_config_root root =
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
-let model_catalog_resolution_source_label
-    (resolution : Server_runtime_bootstrap.model_catalog_env_resolution)
-  =
-  Server_runtime_bootstrap.model_catalog_env_source_to_string
-    resolution.Server_runtime_bootstrap.source
-
-let test_model_catalog_resolution_prefers_explicit_env () =
+let test_model_catalog_configuration_installs_explicit_env_override () =
   let env = function
     | "OAS_MODEL_CATALOG" -> Some "/explicit/oas-models.toml"
-    | "MASC_MODEL_CATALOG" -> Some "/ignored/masc-models.toml"
     | _ -> None
   in
-  (match
-     Server_runtime_bootstrap.resolve_oas_model_catalog_path
-       ~env
-       ~cwd:"/tmp/outside"
-       ~argv0:"/tmp/repo/_build/default/bin/main_eio.exe"
-       ()
-   with
-   | None -> Alcotest.fail "expected explicit OAS_MODEL_CATALOG resolution"
-   | Some resolution ->
-     Alcotest.(check string)
-       "source"
-       "OAS_MODEL_CATALOG"
-       (model_catalog_resolution_source_label resolution);
-     Alcotest.(check string)
-       "path"
-       "/explicit/oas-models.toml"
-       resolution.Server_runtime_bootstrap.path);
-  let env = function
-    | "MASC_MODEL_CATALOG" -> Some "/explicit/masc-models.toml"
-    | _ -> None
-  in
-  match
-    Server_runtime_bootstrap.resolve_oas_model_catalog_path
+  let load_calls = ref [] in
+  let set_calls = ref 0 in
+  let result =
+    Server_runtime_bootstrap.configure_oas_model_catalog_env
       ~env
-      ~cwd:"/tmp/outside"
-      ~argv0:"/tmp/repo/_build/default/bin/main_eio.exe"
+      ~load_catalog:(fun path ->
+        load_calls := path :: !load_calls;
+        Ok Llm_provider.Model_catalog.empty)
+      ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
       ()
-  with
-  | None -> Alcotest.fail "expected MASC_MODEL_CATALOG resolution"
-  | Some resolution ->
-    Alcotest.(check string)
-      "source"
-      "MASC_MODEL_CATALOG"
-      (model_catalog_resolution_source_label resolution);
-    Alcotest.(check string)
-	      "path"
-	      "/explicit/masc-models.toml"
-	      resolution.Server_runtime_bootstrap.path
+  in
+  Alcotest.(check (option string))
+    "explicit override path"
+    (Some "/explicit/oas-models.toml")
+    result;
+  Alcotest.(check (list string))
+    "load explicit catalog"
+    [ "/explicit/oas-models.toml" ]
+    (List.rev !load_calls);
+  Alcotest.(check int) "set catalog override" 1 !set_calls
 
-let test_model_catalog_configuration_installs_resolved_catalog () =
-  with_temp_dir "model-catalog-bootstrap-install" (fun dir ->
-    let repo = Filename.concat dir "repo" in
-    let cwd = Filename.concat dir "base" in
-    let bin = Filename.concat repo "_build/default/bin/main_eio.exe" in
-    let catalog = Filename.concat repo "oas-models.toml" in
-    mkdir_p (Filename.dirname bin);
-    mkdir_p cwd;
-    write_file bin "";
-    write_file catalog "[[models]]\nid_prefix = \"example\"\n";
-    let putenv_calls = ref [] in
-    let load_calls = ref [] in
-    let set_calls = ref 0 in
-    let result =
-      Server_runtime_bootstrap.configure_oas_model_catalog_env
-        ~env:(fun _ -> None)
-        ~cwd
-        ~argv0:bin
-        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~load_catalog:(fun path ->
-          load_calls := path :: !load_calls;
-          Ok Llm_provider.Model_catalog.empty)
-        ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected executable-parent model catalog resolution"
-     | Some resolution ->
-       Alcotest.(check string)
-         "source"
-         "argv0-parent:oas-models.toml"
-         (model_catalog_resolution_source_label resolution);
-       Alcotest.(check string)
-         "path"
-         (canonical_path catalog)
-         (canonical_path resolution.Server_runtime_bootstrap.path));
-    Alcotest.(check (list (pair string string)))
-      "putenv"
-      [ "OAS_MODEL_CATALOG", catalog ]
-      (List.rev !putenv_calls);
-    Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
-    Alcotest.(check int) "set catalog override" 1 !set_calls)
-
-let test_model_catalog_configuration_prefers_config_root_catalog () =
-  with_temp_dir "model-catalog-bootstrap-config-root" (fun dir ->
-    let config_root = Filename.concat dir "config-root" in
-    let outside = Filename.concat dir "outside" in
-    let catalog = Filename.concat config_root "oas-models.toml" in
-    mkdir_p config_root;
-    mkdir_p outside;
-    write_file catalog "[[models]]\nid_prefix = \"config-root-runtime\"\n";
-    let putenv_calls = ref [] in
-    let load_calls = ref [] in
-    let set_calls = ref 0 in
-    let result =
-      Server_runtime_bootstrap.configure_oas_model_catalog_env
-        ~env:(fun _ -> None)
-        ~config_root
-        ~cwd:outside
-        ~argv0:(Filename.concat outside "main_eio.exe")
-        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~load_catalog:(fun path ->
-          load_calls := path :: !load_calls;
-          Ok Llm_provider.Model_catalog.empty)
-        ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected config-root model catalog resolution"
-     | Some resolution ->
-       Alcotest.(check string)
-         "source"
-         "config-root:oas-models.toml"
-         (model_catalog_resolution_source_label resolution);
-       Alcotest.(check string)
-         "path"
-         (canonical_path catalog)
-         (canonical_path resolution.Server_runtime_bootstrap.path));
-    Alcotest.(check (list (pair string string)))
-      "putenv"
-      [ "OAS_MODEL_CATALOG", catalog ]
-      (List.rev !putenv_calls);
-    Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
-    Alcotest.(check int) "set catalog override" 1 !set_calls)
+let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
+  let catalog_calls = ref 0 in
+  let load_calls = ref 0 in
+  let set_calls = ref 0 in
+  let env = function
+    | "MASC_MODEL_CATALOG" -> Some "/legacy/masc-models.toml"
+    | _ -> None
+  in
+  let result =
+    Server_runtime_bootstrap.configure_oas_model_catalog_env
+      ~env
+      ~agent_sdk_catalog:(fun () ->
+        incr catalog_calls;
+        Some Llm_provider.Model_catalog.empty)
+      ~load_catalog:(fun (_ : string) ->
+        incr load_calls;
+        Ok Llm_provider.Model_catalog.empty)
+      ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+      ()
+  in
+  Alcotest.(check bool) "ambient catalog selected" true (Option.is_none result);
+  Alcotest.(check int) "ambient catalog queried" 1 !catalog_calls;
+  Alcotest.(check int) "legacy catalog not loaded" 0 !load_calls;
+  Alcotest.(check int) "legacy catalog not installed" 0 !set_calls
 
 let test_model_catalog_overlay_installs_config_root_overlay () =
   with_temp_dir "model-catalog-overlay-install" (fun dir ->
@@ -367,84 +286,68 @@ let test_model_catalog_overlay_invalid_fails_loud () =
         (contains_substring message "oas-models-overlay.toml");
       Alcotest.(check int) "no install" 0 !set_overlay_calls)
 
-let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path () =
-  with_temp_dir "model-catalog-bootstrap" (fun dir ->
-    let repo = Filename.concat dir "repo" in
-    let bin_dir = Filename.concat repo "_build/default/bin" in
-    mkdir_p bin_dir;
-    let outside = Filename.concat dir "base-path" in
-    Unix.mkdir outside 0o755;
-    let catalog = Filename.concat repo "oas-models.toml" in
-    write_file catalog "# repo-local OAS catalog\n";
-    let argv0 = Filename.concat bin_dir "main_eio.exe" in
-    let env _ = None in
-    match
-      Server_runtime_bootstrap.resolve_oas_model_catalog_path
-        ~env
-        ~cwd:outside
-        ~argv0
-        ()
-    with
-    | None ->
-      Alcotest.fail
-        "expected repo oas-models.toml from executable parent when cwd has no catalog"
-    | Some resolution ->
-      Alcotest.(check string)
-        "source"
-        "argv0-parent:oas-models.toml"
-        (model_catalog_resolution_source_label resolution);
-      Alcotest.(check string)
-        "path"
-        (canonical_path catalog)
-        (canonical_path resolution.Server_runtime_bootstrap.path))
-
-let test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd () =
-  with_temp_dir "model-catalog-bootstrap-relative" (fun dir ->
-    let repo = Filename.concat dir "repo" in
-    let bin_dir = Filename.concat repo "_build/default/bin" in
-    mkdir_p bin_dir;
-    let outside = Filename.concat dir "base-path" in
-    Unix.mkdir outside 0o755;
-    let catalog = Filename.concat repo "oas-models.toml" in
-    write_file catalog "# repo-local OAS catalog\n";
-    let env _ = None in
-    with_cwd repo @@ fun () ->
-    match
-      Server_runtime_bootstrap.resolve_oas_model_catalog_path
-        ~env
-        ~cwd:outside
-        ~argv0:"./_build/default/bin/main_eio.exe"
-        ()
-    with
-    | None ->
-      Alcotest.fail
-        "expected repo oas-models.toml from relative executable argv0"
-    | Some resolution ->
-      Alcotest.(check string)
-        "source"
-        "argv0-parent:oas-models.toml"
-        (model_catalog_resolution_source_label resolution);
-      Alcotest.(check string)
-        "path"
-        (canonical_path catalog)
-        (canonical_path resolution.Server_runtime_bootstrap.path))
+let test_explicit_model_catalog_replacement_precedes_overlay () =
+  with_temp_dir "model-catalog-explicit-precedence" (fun config_root ->
+    let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
+    write_file overlay_path "overlay fixture";
+    let parse source toml =
+      match Llm_provider.Model_catalog.of_toml_string ~source toml with
+      | Ok catalog -> catalog
+      | Error detail -> Alcotest.failf "%s catalog fixture invalid: %s" source detail
+    in
+    let explicit =
+      parse
+        "explicit"
+        "[[models]]\nid_prefix = \"explicit-model\"\nbase = \"openai_chat\"\n"
+    in
+    let overlay =
+      parse
+        "overlay"
+        "[[models]]\nid_prefix = \"overlay-model\"\nbase = \"openai_chat\"\n"
+    in
+    let previous = Llm_provider.Model_catalog.global () in
+    Fun.protect
+      ~finally:(fun () ->
+        match previous with
+        | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+        | None -> Llm_provider.Model_catalog.clear_global ())
+      (fun () ->
+        Llm_provider.Model_catalog.clear_global ();
+        ignore
+          (Server_runtime_bootstrap.configure_oas_model_catalog_env
+             ~env:(function
+               | "OAS_MODEL_CATALOG" -> Some "/explicit/catalog.toml"
+               | _ -> None)
+             ~load_catalog:(fun _ -> Ok explicit)
+             ());
+        ignore
+          (Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+             ~config_root
+             ~load_catalog:(fun _ -> Ok overlay)
+             ());
+        match Llm_provider.Model_catalog.global () with
+        | None -> Alcotest.fail "expected explicit global catalog"
+        | Some effective ->
+          Alcotest.(check bool)
+            "explicit row remains"
+            true
+            (Option.is_some
+               (Llm_provider.Model_catalog.lookup effective "explicit-model"));
+          Alcotest.(check bool)
+            "overlay row does not override explicit full replacement"
+            true
+            (Option.is_none
+               (Llm_provider.Model_catalog.lookup effective "overlay-model"))))
 
 let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
-  with_temp_dir "model-catalog-bootstrap-agent-sdk" (fun dir ->
-    let putenv_calls = ref [] in
-    let env _ = None in
-    let result =
-      Server_runtime_bootstrap.configure_oas_model_catalog_env
-        ~env
-        ~cwd:dir
-        ~argv0:(Filename.concat dir "main_eio.exe")
-        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
-        ()
-    in
-    Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result);
-    Alcotest.(check int) "does not write OAS_MODEL_CATALOG" 0
-      (List.length !putenv_calls))
+  let env _ = None in
+  let result =
+    Server_runtime_bootstrap.configure_oas_model_catalog_env
+      ~env
+      ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
+      ()
+  in
+  Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result)
 
 let write_config_root_keeper_toml config_root name =
   write_file
@@ -938,8 +841,14 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
         (read_file (Filename.concat config_root "runtime.toml"));
-      Alcotest.(check string) "model catalog copied" repo_model_catalog_toml
-        (read_file (Filename.concat config_root "oas-models.toml"));
+      Alcotest.(check string)
+        "model catalog overlay copied"
+        repo_model_catalog_overlay_toml
+        (read_file (Filename.concat config_root "oas-models-overlay.toml"));
+      Alcotest.(check bool)
+        "legacy full model catalog not copied"
+        false
+        (Sys.file_exists (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
@@ -948,7 +857,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
-let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog () =
+let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay () =
   with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -974,8 +883,14 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog (
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
       Alcotest.(check string) "backfilled prompt content" "prompt"
         (read_file (Filename.concat config_root "prompts/keeper.unified.system.md"));
-      Alcotest.(check string) "model catalog backfilled" repo_model_catalog_toml
-        (read_file (Filename.concat config_root "oas-models.toml"));
+      Alcotest.(check string)
+        "model catalog overlay backfilled"
+        repo_model_catalog_overlay_toml
+        (read_file (Filename.concat config_root "oas-models-overlay.toml"));
+      Alcotest.(check bool)
+        "legacy full model catalog not backfilled"
+        false
+        (Sys.file_exists (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "versioned persona not resurrected" false
         (Sys.file_exists (Filename.concat config_root "personas/example.txt"));
       ())
@@ -4705,14 +4620,11 @@ let () =
       ( "bootstrap",
         [
           Alcotest.test_case
-            "model catalog resolution prefers explicit env"
-            `Quick test_model_catalog_resolution_prefers_explicit_env;
+            "model catalog installs explicit env override"
+            `Quick test_model_catalog_configuration_installs_explicit_env_override;
           Alcotest.test_case
-            "model catalog configuration installs resolved catalog"
-            `Quick test_model_catalog_configuration_installs_resolved_catalog;
-          Alcotest.test_case
-            "model catalog configuration prefers config-root catalog"
-            `Quick test_model_catalog_configuration_prefers_config_root_catalog;
+            "model catalog ignores legacy discovery inputs"
+            `Quick test_model_catalog_configuration_ignores_legacy_discovery_inputs;
           Alcotest.test_case
             "model catalog overlay installs config-root overlay"
             `Quick test_model_catalog_overlay_installs_config_root_overlay;
@@ -4723,13 +4635,8 @@ let () =
             "model catalog overlay invalid fails loud"
             `Quick test_model_catalog_overlay_invalid_fails_loud;
           Alcotest.test_case
-            "model catalog resolution falls back to executable parent"
-            `Quick
-            test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path;
-          Alcotest.test_case
-            "model catalog resolution uses process cwd for relative argv0"
-            `Quick
-            test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd;
+            "explicit model catalog replacement precedes overlay"
+            `Quick test_explicit_model_catalog_replacement_precedes_overlay;
           Alcotest.test_case
             "model catalog configuration delegates to agent_sdk ambient catalog"
             `Quick
@@ -4739,9 +4646,9 @@ let () =
             `Quick
             test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
-            "bootstrap base-path config backfills prompts and catalog"
+            "bootstrap base-path config backfills prompts and catalog overlay"
             `Quick
-            test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog;
+            test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick

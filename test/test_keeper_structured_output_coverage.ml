@@ -125,11 +125,9 @@ let expected_all_fusion_agent_build_files =
      @ expected_freeform_fusion_agent_build_files)
 ;;
 
-let with_repo_oas_model_catalog f =
-  let path = Ast_grep.resolve_path "oas-models.toml" in
-  check bool "repo oas-models.toml present" true (Sys.file_exists path);
-  match Llm_provider.Model_catalog.load_file path with
-  | Error msg -> failf "repo oas-models.toml should load: %s" msg
+let with_default_oas_model_catalog f =
+  match Llm_provider.Model_catalog.load_default () with
+  | Error msg -> failf "packaged OAS models.toml should load: %s" msg
   | Ok catalog ->
     Fun.protect
       ~finally:Llm_provider.Model_catalog.clear_global
@@ -324,7 +322,7 @@ let test_fusion_agent_builds_do_not_degrade_to_json_mode () =
 (* 2-tier 계약: native schema 미선언 runtime도 prompt tier로 Ok — 계약 적용은
    total이다. seed 설정의 어떤 judge runtime도 빌드 단계에서 실패하지 않는다. *)
 let test_repo_fusion_seed_judge_contract_is_total () =
-  with_repo_oas_model_catalog @@ fun _catalog ->
+  with_default_oas_model_catalog @@ fun _catalog ->
   let path = Ast_grep.resolve_path "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
   match Runtime.load_list ~config_path:path with

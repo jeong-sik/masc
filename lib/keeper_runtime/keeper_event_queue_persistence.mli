@@ -17,6 +17,7 @@ type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Retry_after_observed
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 

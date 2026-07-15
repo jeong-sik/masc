@@ -318,6 +318,15 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Filename.concat (Common.masc_dir_from_base_path ~base_path) "fusion-runs.jsonl"
   in
   Fusion_run_registry.set_global (Fusion_run_registry.replay registry_path);
+  (* Product-neutral completion addresses and unacknowledged payloads hydrate
+     before any upper MASC delivery adapter can drain them. *)
+  let completion_outbox_path =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path)
+      "fusion-completion-outbox.jsonl"
+  in
+  Fusion_completion_outbox.set_global
+    (Fusion_completion_outbox.replay completion_outbox_path);
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
   Eio_context.set_switch sw;

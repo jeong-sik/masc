@@ -298,6 +298,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_ts = 0.0;
             last_before_tokens = 0;
             last_after_tokens = 0;
+            last_operation_id = None;
             last_check_ts = now_ts;
             last_decision = compaction_runtime_decision_of_string "initialized";
           };

@@ -1,6 +1,8 @@
 open Keeper_meta_contract
 type success =
-  { recovery : Keeper_context_runtime.overflow_retry_recovery }
+  { recovery : Keeper_context_runtime.overflow_retry_recovery
+  ; meta : keeper_meta
+  }
 type failure =
   | Unsupported_trigger of Compaction_trigger.t
   | Lifecycle of string * bool * Keeper_context_runtime.lifecycle_dispatch_error
@@ -13,6 +15,55 @@ type failure =
       ; failure_dispatch :
           (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
       }
+  | Metadata_projection of
+      { operation_id : string
+      ; detail : string
+      ; failure_dispatch :
+          (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
+      }
+
+let project_compaction_runtime ~operation_id ~applied_at ~trigger rt =
+  if Option.equal String.equal rt.last_operation_id (Some operation_id)
+  then rt
+  else
+    { rt with
+      count = rt.count + 1
+    ; last_ts = applied_at
+    ; last_operation_id = Some operation_id
+    ; last_check_ts = applied_at
+    ; last_decision =
+        Keeper_compact_policy.compaction_decision_to_string
+          (Keeper_compact_policy.Applied trigger)
+        |> compaction_runtime_decision_of_string
+    }
+;;
+
+let persist_compaction_projection ~config ~meta ~trigger recovery =
+  let operation_id = recovery.Keeper_context_runtime.operation_id in
+  let applied_at = Time_compat.now () in
+  let project meta =
+    map_compaction_rt
+      (project_compaction_runtime ~operation_id ~applied_at ~trigger)
+      meta
+  in
+  match
+    Keeper_meta_store.write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> project latest)
+      config
+      (project meta)
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    (match Keeper_meta_store.read_meta config meta.name with
+     | Ok (Some latest)
+       when Option.equal String.equal
+              latest.runtime.compaction_rt.last_operation_id
+              (Some operation_id) ->
+       Ok latest
+     | Ok (Some _) -> Error "persisted compaction operation identity did not round-trip"
+     | Ok None -> Error "persisted compaction metadata disappeared"
+     | Error detail -> Error detail)
+;;
 let primary_max_context meta =
   let min_context = Keeper_config.min_keeper_context_tokens in
   let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
@@ -124,15 +175,22 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) ~trigger =
            | Ok
                ( Keeper_runtime_manifest.Appended
                | Keeper_runtime_manifest.Already_present ) ->
-             (match
-                Keeper_context_runtime.dispatch_compaction_completed
-                  ~config
-                  ~keeper_name:meta.name
-                  ~origin:Keeper_registry.Requested_compaction
-              with
-              | Error error ->
-                Error (Lifecycle ("compaction_completed", true, error))
-              | Ok () -> Ok { recovery }))))
+             (match persist_compaction_projection ~config ~meta ~trigger recovery with
+              | Error detail ->
+                let failure_dispatch = dispatch_failed "metadata_projection_failed" in
+                Error
+                  (Metadata_projection
+                     { operation_id = recovery.operation_id; detail; failure_dispatch })
+              | Ok meta ->
+                (match
+                   Keeper_context_runtime.dispatch_compaction_completed
+                     ~config
+                     ~keeper_name:meta.name
+                     ~origin:Keeper_registry.Requested_compaction
+                 with
+                 | Error error ->
+                   Error (Lifecycle ("compaction_completed", true, error))
+                 | Ok () -> Ok { recovery; meta })))))
 ;;
 
 let dispatch_result_to_string = function
@@ -161,4 +219,14 @@ let failure_to_string = function
       operation_id
       detail
       (dispatch_result_to_string failure_dispatch)
+  | Metadata_projection { operation_id; detail; failure_dispatch } ->
+    Printf.sprintf
+      "operation_id=%s checkpoint_applied=true metadata_projection=%s failure_dispatch=%s"
+      operation_id
+      detail
+      (dispatch_result_to_string failure_dispatch)
 ;;
+
+module For_testing = struct
+  let project_compaction_runtime = project_compaction_runtime
+end

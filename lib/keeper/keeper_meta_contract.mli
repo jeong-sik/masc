@@ -65,6 +65,7 @@ type compaction_runtime = {
   last_ts : float;
   last_before_tokens : int;
   last_after_tokens : int;
+  last_operation_id : string option;
   last_check_ts : float;
   last_decision : compaction_runtime_decision;
 }

@@ -186,6 +186,8 @@ let handle_keeper_list ctx args : tool_result =
               ("trace_history_count", `Int trace_history_count);
               ("handoff_count_total", `Int trace_history_count);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
+              ( "last_compaction_operation_id"
+              , Json_util.string_opt_to_json m.runtime.compaction_rt.last_operation_id );
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
               ("compaction_profile", `String m.compaction.profile);
               ("compaction_ratio_gate", `Float compact_ratio_gate);

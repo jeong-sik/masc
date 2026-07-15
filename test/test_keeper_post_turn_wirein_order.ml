@@ -420,6 +420,25 @@ let test_configured_compaction_wakes_only_owner_and_preserves_ready_work () =
       | [ { Queue.payload = Configured_compaction_requested _; _ } ] -> ()
       | _ -> fail "ready claim consumed or lost configured compaction")
 
+let test_compaction_runtime_projection_is_operation_idempotent () =
+  let meta = make_meta () in
+  let trigger =
+    Compaction_trigger.Message_count { count = 3; threshold = 2 }
+  in
+  let project =
+    Masc.Keeper_manual_compaction.For_testing.project_compaction_runtime
+      ~operation_id:"compaction:exact-operation"
+      ~applied_at:123.0
+      ~trigger
+  in
+  let first = project meta.runtime.compaction_rt in
+  let replay = project first in
+  check int "operation increments once" (meta.runtime.compaction_rt.count + 1) first.count;
+  check (option string) "operation identity persisted"
+    (Some "compaction:exact-operation")
+    first.last_operation_id;
+  check bool "same operation replay is immutable" true (first = replay)
+
 let only_compaction_manifest config meta =
   let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
@@ -651,6 +670,8 @@ let () =
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "configured compaction wakes only owner and preserves ready work"
         `Quick test_configured_compaction_wakes_only_owner_and_preserves_ready_work;
+      test_case "compaction metadata projection is operation-idempotent"
+        `Quick test_compaction_runtime_projection_is_operation_idempotent;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
     ];

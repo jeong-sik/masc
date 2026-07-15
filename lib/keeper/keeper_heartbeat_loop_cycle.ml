@@ -225,10 +225,10 @@ let run_keeper_cycle_admitted
                ~trigger
            with
            | Error failure -> `Compaction_failed failure
-           | Ok _ -> `Run (obs, true))
+           | Ok success -> `Run (obs, true, success.Keeper_manual_compaction.meta))
         | None ->
           (match failure_judgment with
-          | None -> `Run (obs, false)
+          | None -> `Run (obs, false, meta_after_triage)
           | Some request ->
             (match
                prepare_failure_judgment_turn
@@ -237,20 +237,20 @@ let run_keeper_cycle_admitted
                  ~request
                  obs
              with
-             | `Run observation -> `Run (observation, false)
+             | `Run observation -> `Run (observation, false, meta_after_triage)
              | `Settle outcome -> `Settle outcome))
       in
       match prepared with
       | `Compaction_failed failure -> `Compaction_failed failure
       | `Settle outcome -> `Judgment outcome
-      | `Run (observation, manual_compaction_applied) ->
+      | `Run (observation, manual_compaction_applied, turn_meta) ->
         `Turn
           ( Keeper_unified_turn.run_keeper_cycle
               ~config:ctx.config
-              ~meta:meta_after_triage
+              ~meta:turn_meta
               ~publication_recovery_provider:ctx.publication_recovery_provider
               ~observation
-              ~generation:meta_after_triage.runtime.generation
+              ~generation:turn_meta.runtime.generation
               ~wake
               ~channel:turn_decision.channel
               ?hitl_resolution

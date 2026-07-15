@@ -3564,21 +3564,15 @@ let classify_keeper_directory_entries_blocking entries_path entries =
          ; observed_entries = (entry_name, stats) :: inventory.observed_entries
          }
        | ({ Unix.st_kind = Unix.S_REG; _ } as stats) ->
-         (match Keeper_runtime_root_entry.classify_basename entry_name with
-          | _ :: _ ->
-            { inventory with
-              observed_entries = (entry_name, stats) :: inventory.observed_entries
-            }
-          | [] ->
-            { inventory with
-              rejected_entries =
-                ( entry_name
-                , load_error Invalid_path ~path:entry_path
-                    "Keeper chat queue inventory found an unowned regular entry"
-                )
-                :: inventory.rejected_entries
-            ; observed_entries = (entry_name, stats) :: inventory.observed_entries
-            })
+         (* A regular file in the shared Keeper runtime root is not a chat
+            queue lane. Other subsystems own their canonical artifacts and may
+            retain operator-created backups or diagnostics here. Keep the
+            inode in the inventory snapshot so replacement is still detected,
+            but do not classify or reject a file outside this directory-only
+            queue authority. *)
+         { inventory with
+           observed_entries = (entry_name, stats) :: inventory.observed_entries
+         }
        | ({ Unix.st_kind = st_kind; _ } as stats) ->
          { inventory with
            rejected_entries =

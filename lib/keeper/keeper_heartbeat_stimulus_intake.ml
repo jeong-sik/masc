@@ -265,6 +265,22 @@ let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
     true
 ;;
 
+let ready_stimulus_count ~excluding queue =
+  Keeper_event_queue.to_list queue
+  |> List.fold_left
+       (fun count stimulus ->
+          let excluded =
+            match excluding with
+            | None -> false
+            | Some excluded ->
+              Keeper_event_queue.stimulus_identity_equal stimulus excluded
+          in
+          if (not excluded) && stimulus_ready_for_intake stimulus
+          then count + 1
+          else count)
+       0
+;;
+
 let heartbeat_event_intake
       ~ctx
       ~meta_after_triage

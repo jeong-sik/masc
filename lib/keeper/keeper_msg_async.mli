@@ -296,6 +296,11 @@ val submit
     that status until an exact executor adapter claims the record. *)
 val poll : base_path:string -> caller:string -> string -> load_result
 
+(** Canonical-disk lookup for an accepted request in either partition. Unlike
+    {!poll}, this never substitutes process-local state for the durable row. *)
+val load_canonical_durable_entry :
+  base_path:string -> caller:string -> string -> load_result
+
 (** Exact O(1) canonical-disk lookup for a durably committed terminal request.
     It checks only the request's terminal and active filenames; it never
     inventories a partition.  Process-local nonterminal ownership and a visible

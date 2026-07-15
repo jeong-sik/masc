@@ -232,6 +232,18 @@ let test_keeper_msg_async_roundtrip () =
     "prompt persisted in typed request"
     "durable dotted request"
     (Keeper_invocation_types.request_prompt entry.request);
+  (match
+     Keeper_msg_async.load_canonical_durable_entry ~base_path ~caller request_id
+   with
+   | Keeper_msg_async.Found durable ->
+     Alcotest.(check bool)
+       "canonical lookup returns the exact durable request"
+       true
+       (Keeper_invocation_types.request_equal entry.request durable.request)
+   | Keeper_msg_async.Absent
+   | Keeper_msg_async.Unreadable _
+   | Keeper_msg_async.Rejected _ ->
+     Alcotest.fail "canonical durable request lookup failed");
   Alcotest.(check bool)
     "request completed"
     true

@@ -2351,6 +2351,24 @@ let poll ~base_path ~caller request_id : load_result =
          | Located_rejected rejection -> Rejected rejection))
 ;;
 
+let load_canonical_durable_entry ~base_path ~caller request_id : load_result =
+  match resolve_access_identity ~base_path ~caller with
+  | Error rejection -> Rejected rejection
+  | Ok (base_path, caller) ->
+    if not (is_safe_request_id request_id)
+    then Rejected Invalid_request_id
+    else
+      with_store_transition_lock ~base_path ~request_id (fun () ->
+        match load_record_canonical_located ~base_path ~request_id with
+        | Located_absent -> Absent
+        | Located_unreadable reason -> Unreadable reason
+        | Located_rejected rejection -> Rejected rejection
+        | Located (entry, _) ->
+          (match owner_rejection ~caller entry with
+           | Some rejection -> Rejected rejection
+           | None -> Found entry))
+;;
+
 let load_canonical_durable_terminal ~base_path ~caller request_id =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Canonical_terminal_access_rejected rejection)

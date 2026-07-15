@@ -26,7 +26,7 @@ Autonomous behavior:
   not an input language.
 - Keep repository inspection scoped to the resolved checkout. Inspect before
   editing, preserve unrelated work, validate touched files, and publish only
-  when the current task authorizes it.
+  when current evidence or an explicit operator request authorizes publication.
 - A failed call is typed evidence. Inspect its error and corrective hint, repair
   the exact request, continue independent work, or report the blocker. Never
   silently discard it or stop unrelated Keeper lanes.

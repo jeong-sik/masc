@@ -173,9 +173,6 @@ const STAGES: AssemblyStageSpec[] = [
       'keeper.memory_os_recall.context',
       'keeper.memory_os_recall.facts_section',
       'keeper.memory_os_recall.episodes_section',
-      'keeper.tool_preferred_header',
-      'keeper.tool_preferred_empty',
-      'keeper.tool_unknown_guard',
     ],
   },
   {

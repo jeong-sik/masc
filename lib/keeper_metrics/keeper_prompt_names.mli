@@ -11,9 +11,6 @@ val deliberation : string
 val unified_system : string
 val reply_guidelines : string
 val core_behavior : string
-val tool_preferred_header : string
-val tool_preferred_empty : string
-val tool_unknown_guard : string
 val recovery_block : string
 val failure_judgment : string
 val board_attention_judgment : string

@@ -15,6 +15,27 @@ let record_schedule_runner_tick_outcome outcome =
     ()
 ;;
 
+let log_schedule_dispatch (dispatch : Schedule_runner.dispatch_result) =
+  let occurrence_id =
+    Schedule_occurrence_id.to_string dispatch.occurrence_id
+  in
+  let status = Schedule_runner.dispatch_status_to_string dispatch.status in
+  match dispatch.error with
+  | None ->
+    Log.Server.info
+      "schedule_runner: occurrence=%s schedule_id=%s dispatch=%s"
+      occurrence_id
+      dispatch.schedule_id
+      status
+  | Some error ->
+    Log.Server.warn
+      "schedule_runner: occurrence=%s schedule_id=%s dispatch=%s error=%s"
+      occurrence_id
+      dispatch.schedule_id
+      status
+      error
+;;
+
 let wake_enqueue_counts_of_dispatches dispatches =
   let module Consumers = Server_schedule_consumers in
   let bump_wake_failed
@@ -283,6 +304,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                ~finished_at
                result;
              record_schedule_runner_tick_outcome "ok";
+             List.iter log_schedule_dispatch result.dispatches;
              if result.Schedule_runner.emitted <> []
                 || result.rescheduled > 0
                 || result.dispatches <> []
@@ -293,6 +315,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  (List.length result.emitted)
                  result.rescheduled
                  (List.length result.dispatches)
+             else
+               Log.Server.debug
+                 "schedule_runner: idle due_changed=0 emitted=0 rescheduled=0 dispatched=0"
            | Error err ->
              let finished_at = Time_compat.now () in
              let error = Schedule_runner.runner_error_to_string err in

@@ -2734,7 +2734,8 @@ let schedule_signal_payload_kind_json (signal : Schedule_runner.wake_signal) =
 let schedule_signal_dashboard_json (signal : Schedule_runner.wake_signal) =
   let kind = Schedule_runner.signal_kind_to_string signal.kind in
   `Assoc
-    [ "signal_id", `String signal.signal_id
+    [ ( "occurrence_id"
+      , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
     ; "kind", `String kind
     ; "event_type", `String kind
     ; "schedule_id", `String signal.schedule_id

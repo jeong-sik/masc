@@ -14,8 +14,6 @@ import {
   fetchLogs,
   fetchDashboardExecutionTrust,
   fetchDashboardGate,
-  fetchDashboardGoalDetail,
-  fetchDashboardGoalsTree,
   fetchDashboardBriefing,
   fetchDashboardTools,
   parseDashboardKeeperWaitingSource,
@@ -59,38 +57,6 @@ afterEach(() => {
   devTokenMock.ensureDevToken.mockClear()
   devTokenMock.ensureDevToken.mockResolvedValue(undefined)
 })
-
-function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 'goal-1',
-    title: 'Goal 1',
-    status: 'active',
-    status_color: '#fff',
-    phase: 'executing',
-    phase_color: '#0ea5e9',
-    priority: 1,
-    metric: null,
-    target_value: null,
-    due_date: null,
-    parent_goal_id: null,
-    tasks: [],
-    task_count: 0,
-    task_done_count: 0,
-    timeline_events: [],
-    children: [],
-    child_count: 0,
-    last_activity_at: '2026-04-23T00:00:00Z',
-    stagnation_seconds: 0,
-    linked_keeper_names: [],
-    pending_approval_count: 0,
-    linkage_source: 'none',
-    latest_keeper_ref: null,
-    latest_turn_ref: null,
-    created_at: '2026-04-23T00:00:00Z',
-    updated_at: '2026-04-23T00:00:00Z',
-    ...overrides,
-  }
-}
 
 describe('fetchDashboardShell', () => {
   it('uses the hot-path shell fetcher as the API SSOT', () => {
@@ -394,34 +360,6 @@ describe('keeper tool telemetry fetchers', () => {
       stale_reason: 'tool_call_io_append_failed',
       trace_id: 'trace-tool-call-gap',
     })
-  })
-
-  it('decodes objective success and goal_ids on an entry', async () => {
-    const fetchMock = vi.fn(() => Promise.resolve(
-      new Response(JSON.stringify({
-        keeper: 'keeper-alpha',
-        count: 1,
-        source: 'tool_call_io',
-        entries: [
-          {
-            ts: 1,
-            keeper: 'keeper-alpha',
-            tool: 'keeper_context_status',
-            input: {},
-            output: 'ok',
-            success: true,
-            duration_ms: 5,
-            goal_ids: ['g-1', 'g-2'],
-          },
-        ],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchKeeperToolCalls('keeper-alpha')
-    const entry = result.entries[0]
-    expect(entry?.success).toBe(true)
-    expect(entry?.goal_ids).toEqual(['g-1', 'g-2'])
   })
 
   it('keeps missing or malformed tool-call duration unmeasured', async () => {
@@ -1345,35 +1283,6 @@ describe('fetchDashboardGate', () => {
     expect(result.recent_resolved?.[0]).not.toHaveProperty('requested_at')
   })
 
-  it('derives the immutable Always rule timestamp from its canonical numeric field', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        approval_queue: [],
-        recent_resolved: [],
-        approval_rules: [{
-          id: 'rule-1',
-          keeper_name: 'keeper-a',
-          tool_name: 'fs_write',
-          request_fingerprint: 'abcdef1234567890',
-          created_at: 1_783_123_200,
-        }],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGate()
-
-    expect(result.approval_rules).toEqual([
-      expect.objectContaining({
-        request_fingerprint: 'abcdef1234567890',
-        created_at: '2026-07-04T00:00:00.000Z',
-      }),
-    ])
-  })
-
   it('does not retry structured computation timeouts', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -1421,344 +1330,10 @@ describe('setGateMode', () => {
   })
 })
 
-describe('dashboard goals decoding', () => {
-  it('retains direct keeper references without projecting blocker metadata', async () => {
-    const rawResponse = {
-      tree: [
-        makeRawGoalNode({
-          latest_keeper_ref: 'keeper-sangsu',
-          latest_turn_ref: 42,
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]).toMatchObject({
-      latest_keeper_ref: 'keeper-sangsu',
-      latest_turn_ref: 42,
-    })
-  })
-
-  it('decodes explicit phase counts separately from active status', async () => {
-    const rawResponse = {
-      tree: [makeRawGoalNode()],
-      summary: {
-        total_goals: 3,
-        active_goals: 2,
-        phase_counts: { executing: 1, blocked: 1, completed: 1 },
-      },
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.summary.active_goals).toBe(2)
-    expect(result.summary.phase_counts).toEqual({ executing: 1, blocked: 1, completed: 1 })
-  })
-
-  it('decodes goal attainment projections on tree payloads', async () => {
-    const rawResponse = {
-      tree: [
-        makeRawGoalNode({
-          metric: 'completion_pct',
-          target_value: '75%',
-          attainment: {
-            state: 'attained',
-            basis: 'metric_target_percent',
-            metric: 'completion_pct',
-            target_value: '75%',
-            target_parse_status: 'parseable',
-            unit: 'percent',
-            observed_value: 75,
-            target_numeric: 75,
-            attainment_pct: 100,
-            task_done_count: 3,
-            task_count: 4,
-            note: 'Derived from linked task completion against a percent target.',
-          },
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]?.attainment).toMatchObject({
-      state: 'attained',
-      basis: 'metric_target_percent',
-      metric: 'completion_pct',
-      target_value: '75%',
-      target_parse_status: 'parseable',
-      unit: 'percent',
-      observed_value: 75,
-      target_numeric: 75,
-      attainment_pct: 100,
-      task_done_count: 3,
-      task_count: 4,
-    })
-  })
-
-  it('falls back to unmeasured goal attainment when payloads are old', async () => {
-    const rawResponse = {
-      tree: [
-        makeRawGoalNode({
-          metric: 'latency',
-          target_value: 'fast enough',
-          task_done_count: 1,
-          task_count: 2,
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]?.attainment).toMatchObject({
-      state: 'unmeasured',
-      basis: 'unmeasured',
-      metric: 'latency',
-      target_value: 'fast enough',
-      target_parse_status: 'unparseable',
-      task_done_count: 1,
-      task_count: 2,
-    })
-  })
-
-  it('retains keeper trust summary and latest event on goal detail payloads', async () => {
-    const rawResponse = {
-      goal: makeRawGoalNode(),
-      linked_tasks: [],
-      linked_keepers: [
-        {
-          name: 'keeper-sangsu',
-          agent_name: 'sangsu',
-          current_task_id: 'task-1',
-          active_goal_ids: ['goal-1'],
-          sandbox_profile: 'docker',
-          network_mode: 'none',
-          runtime_id: 'keeper_unified',
-          runtime_outcome: 'passed_to_next_model',
-          latest_execution_outcome: 'completed',
-          latest_execution_at: '2026-04-23T00:10:00Z',
-          latest_receipt: { outcome: 'completed' },
-          runtime_trust: {
-            disposition: 'Blocked',
-            disposition_reason: 'approval_waiting',
-            needs_attention: true,
-            attention_reason: 'approval_pending',
-            next_human_action: 'resolve_approval',
-            approval: {
-              state: 'pending',
-              summary: '1 approval request is waiting for an operator.',
-              pending_count: 1,
-              pending_first: {
-                id: 'approval-1',
-                tool_name: 'Execute',
-                task_id: 'task-1',
-                blocker_class: 'blocked_before_worktree',
-              },
-              latest_event_at: '2026-04-23T00:09:30Z',
-            },
-            execution: {
-              tools_used: ['keeper_task_claim'],
-              provider_attempt_count: 2,
-              provider_fallback_applied: true,
-              provider_selected_model: 'runtime-lane',
-              runtime_outcome: 'fallback_exhausted',
-              sandbox_summary: 'docker / none',
-              sandbox_root: '/tmp/keeper-sandbox',
-              completion_observation_summary: 'not_observed',
-              latest_receipt_at: '2026-04-23T00:10:00Z',
-            },
-            latest_causal_event: {
-              kind: 'approval_pending',
-              ts: '2026-04-23T00:11:00Z',
-              ts_unix: 1776903060,
-              keeper_turn_id: 42,
-              task_id: 'task-1',
-              goal_ids: ['goal-1'],
-              title: 'Approval pending',
-              summary: 'Waiting for operator approval before resuming.',
-              severity: 'warn',
-              next_human_action: 'resolve_approval',
-              trace_id: 'trace-approval-42',
-            },
-          },
-          latest_causal_event: {
-            kind: 'approval_pending',
-            ts: '2026-04-23T00:11:00Z',
-            ts_unix: 1776903060,
-            keeper_turn_id: 42,
-            task_id: 'task-1',
-            goal_ids: ['goal-1'],
-            title: 'Approval pending',
-            summary: 'Waiting for operator approval before resuming.',
-            severity: 'warn',
-            next_human_action: 'resolve_approval',
-          },
-        },
-      ],
-      approvals: [],
-      execution_receipts: [],
-      timeline: [],
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalDetail('goal-1')
-
-    expect(result.linked_keepers[0]).toMatchObject({
-      runtime_trust: {
-        disposition: 'Blocked',
-        disposition_reason: 'approval_waiting',
-        needs_attention: true,
-        attention_reason: 'approval_pending',
-        next_human_action: 'resolve_approval',
-        approval_state: {
-          state: 'pending',
-          summary: '1 approval request is waiting for an operator.',
-          pending_count: 1,
-          pending_first: {
-            id: 'approval-1',
-            tool_name: 'Execute',
-            task_id: 'task-1',
-            blocker_class: 'blocked_before_worktree',
-          },
-          latest_event_at: '2026-04-23T00:09:30Z',
-        },
-        execution_summary: {
-          provider_attempt_count: 2,
-          provider_fallback_applied: true,
-          provider_selected_model: 'runtime-lane',
-          runtime_outcome: 'fallback_exhausted',
-          sandbox_summary: 'docker / none',
-          sandbox_root: '/tmp/keeper-sandbox',
-          completion_observation_summary: 'not_observed',
-          latest_receipt_at: '2026-04-23T00:10:00Z',
-        },
-        latest_causal_event: {
-          kind: 'approval_pending',
-          keeper_turn_id: 42,
-          title: 'Approval pending',
-          trace_id: 'trace-approval-42',
-        },
-      },
-      latest_causal_event: {
-        kind: 'approval_pending',
-        summary: 'Waiting for operator approval before resuming.',
-        next_human_action: 'resolve_approval',
-      },
-    })
-  })
-
-  it('accepts raw runtime_trust approval/execution keys on goal detail payloads', async () => {
-    const rawResponse = {
-      goal: makeRawGoalNode(),
-      linked_tasks: [],
-      linked_keepers: [
-        {
-          name: 'keeper-sangsu',
-          agent_name: 'sangsu',
-          current_task_id: null,
-          active_goal_ids: ['goal-1'],
-          sandbox_profile: 'docker',
-          network_mode: 'none',
-          runtime_id: 'keeper_unified',
-          runtime_outcome: null,
-          latest_execution_outcome: null,
-          latest_execution_at: null,
-          latest_receipt: null,
-          runtime_trust: {
-            disposition: 'Pass',
-            approval: {
-              state: 'always_allowed',
-              summary: 'Exact Always rule allowed the request.',
-              pending_count: 0,
-            },
-            execution: {
-              sandbox_summary: 'docker / none',
-              completion_observation_summary: 'tool_execution_observed',
-              latest_receipt_at: '2026-04-23T00:10:00Z',
-            },
-          },
-          latest_causal_event: null,
-        },
-      ],
-      approvals: [],
-      execution_receipts: [],
-      timeline: [],
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalDetail('goal-1')
-
-    expect(result.linked_keepers[0]?.runtime_trust).toMatchObject({
-      disposition: 'Pass',
-      approval_state: {
-        state: 'always_allowed',
-        summary: 'Exact Always rule allowed the request.',
-        pending_count: 0,
-      },
-      execution_summary: {
-        sandbox_summary: 'docker / none',
-        completion_observation_summary: 'tool_execution_observed',
-        latest_receipt_at: '2026-04-23T00:10:00Z',
-      },
-    })
-  })
-})
-
 describe('fetchKeeperConfig', () => {
   it('normalizes singleton string, numeric string, and boolean string fields', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
-      active_goal_ids: ['goal-runtime'],
       autoboot_enabled: 'false',
       max_context_override: '64000',
       limits: {
@@ -1841,12 +1416,6 @@ describe('fetchKeeperConfig', () => {
       workspace: {
         mention_targets: 'sangsu',
         bound_workspace_ids: 'default',
-        active_goal_ids: ['goal-runtime'],
-        active_goals: [
-          { id: 'goal-runtime', title: 'Ship runtime clarity' },
-        ],
-        active_goal_count: '1',
-        missing_active_goal_ids: [],
       },
       sources: {
         live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
@@ -1854,7 +1423,6 @@ describe('fetchKeeperConfig', () => {
         default_source_kind: 'toml',
         precedence: 'live_meta',
         has_live_override: 'true',
-        override_fields: 'goal',
       },
       metrics: {
         generation: '3',
@@ -1906,9 +1474,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')
     expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
-    expect(result.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
     expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')
     expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')
@@ -2863,7 +2428,6 @@ describe('fetchKeeperDecisions', () => {
             context: {
               file_path: 'runtime.ts',
               line: 19,
-              goal_id: 'goal-decision',
               task_id: 'task-decision',
               board_post_id: 'post-decision',
               comment_id: 'comment-decision',
@@ -2894,7 +2458,6 @@ describe('fetchKeeperDecisions', () => {
     expect(result.events[0]?.context).toEqual({
       file_path: 'runtime.ts',
       line: 19,
-      goal_id: 'goal-decision',
       task_id: 'task-decision',
       board_post_id: 'post-decision',
       comment_id: 'comment-decision',

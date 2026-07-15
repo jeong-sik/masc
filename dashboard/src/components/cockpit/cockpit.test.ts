@@ -50,13 +50,13 @@ describe('Cockpit command map', () => {
   it('links cockpit entries to their canonical production routes', () => {
     render(h(Cockpit, null))
 
-    const goalTree = screen.getByRole('link', { name: /Open Goal Horizon in #workspace \/ planning \/ goal-tree/ })
-    expect(goalTree).toHaveAttribute('href', '#workspace?section=planning&view=goal-tree')
+    const taskBoard = screen.getByRole('link', { name: /Open Task Board in #workspace \/ planning/ })
+    expect(taskBoard).toHaveAttribute('href', '#workspace?section=planning')
 
-    fireEvent.click(goalTree)
+    fireEvent.click(taskBoard)
     expect(route.value).toMatchObject({
       tab: 'workspace',
-      params: { section: 'planning', view: 'goal-tree' },
+      params: { section: 'planning' },
     })
   })
 })

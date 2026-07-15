@@ -1850,8 +1850,6 @@ let internal_descriptors : t list =
      |> with_current_task_state_description)
   ; masc_task_descriptor "update_priority" "masc_update_priority"
       "Update the priority of a task." ~readonly:false
-  ; masc_task_descriptor "set_goal" "masc_task_set_goal"
-      "Assign an existing, currently goalless task to a goal." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
   ; masc_plan_descriptor "init" "masc_plan_init"
       "Initialise a workspace plan." ~readonly:false
@@ -1901,12 +1899,6 @@ let internal_descriptors : t list =
       "Read a workspace assertion check." ~readonly:true
   ; masc_workspace_descriptor "reset" "masc_reset"
       "Reset workspace state." ~readonly:false
-  ; masc_workspace_descriptor "goal_list" "masc_goal_list"
-      "List workspace goals." ~readonly:true
-  ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
-      "Create or update a workspace goal." ~readonly:false
-  ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
-      "Transition a goal status." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
   ; masc_misc_descriptor "config" "masc_config"
       "Read workspace configuration." ~readonly:true

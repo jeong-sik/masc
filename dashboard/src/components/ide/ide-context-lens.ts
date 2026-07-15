@@ -18,7 +18,6 @@ export type IdeContextSurfaceId =
   | 'lsp'
   | 'line'
   | 'keeper'
-  | 'goal'
   | 'task'
   | 'board'
   | 'git'
@@ -73,7 +72,6 @@ export interface IdeContextRouteContext {
   readonly surface?: string
   readonly label?: string
   readonly sourceId?: string
-  readonly goalId?: string
   readonly taskId?: string
   readonly boardPostId?: string
   readonly commentId?: string
@@ -117,7 +115,6 @@ const SURFACE_LABELS: Readonly<Record<IdeContextSurfaceId, string>> = {
   lsp: 'LSP',
   line: 'Line',
   keeper: 'Keeper',
-  goal: 'Goal',
   task: 'Task',
   board: 'Board',
   git: 'Git',
@@ -132,7 +129,6 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
   'lsp',
   'line',
   'keeper',
-  'goal',
   'task',
   'board',
   'git',
@@ -157,7 +153,6 @@ const CONTEXT_ANCHOR_BUCKET_ORDER = [
   'board',
   'log',
   'runtime',
-  'goal',
   'comment',
   'telemetry',
   'line',
@@ -169,7 +164,6 @@ const SURFACE_ROUTE_LABELS: Readonly<Record<IdeContextSurfaceId, ReadonlyArray<s
   lsp: ['Code'],
   line: ['Code'],
   keeper: ['Keeper'],
-  goal: ['Goal'],
   task: ['Task'],
   board: ['Board'],
   git: ['Git'],
@@ -552,10 +546,6 @@ function surfaceCount(
     for (const thread of state.threads) keepers.add(thread.author_keeper_id)
     return keepers.size
   }
-  if (id === 'goal') {
-    return state.annotations.filter(annotation => annotation.goal_id).length
-      + state.events.filter(event => event.context?.goal_id).length
-  }
   if (id === 'task') {
     return state.annotations.filter(annotation => annotation.task_id).length
       + state.events.filter(event => event.context?.task_id).length
@@ -599,7 +589,6 @@ function surfaceEvidence(id: IdeContextSurfaceId, count: number): string {
   if (id === 'lsp') return `${count} LSP annotation or diagnostic anchor${plural(count)}`
   if (id === 'line') return `${count} line-level anchor${plural(count)}`
   if (id === 'keeper') return `${count} keeper identity link${plural(count)}`
-  if (id === 'goal') return `${count} goal reference${plural(count)}`
   if (id === 'task') return `${count} task reference${plural(count)}`
   if (id === 'board') return `${count} board/post reference${plural(count)}`
   if (id === 'git') return `${count} git or diff signal${plural(count)}`
@@ -682,7 +671,6 @@ function buildAnchors(
         surface: annotation.kind,
         label: truncate(annotation.content || '(no content)', 48),
         sourceId,
-        goalId: annotation.goal_id ?? undefined,
         taskId: annotation.task_id ?? undefined,
         keeperId: annotation.keeper_id,
       }),
@@ -777,7 +765,6 @@ function buildAnchors(
         surface: eventSurface,
         label: truncate(event.detail || `${event.verb} ${event.target}`, 48),
         sourceId: `event-${event.id}`,
-        goalId: event.context?.goal_id ?? refs.goalId,
         taskId: event.context?.task_id ?? refs.taskId,
         boardPostId: event.context?.board_post_id ?? refs.boardPostId,
         commentId: event.context?.comment_id ?? refs.commentId,
@@ -801,7 +788,6 @@ function surfaceFromEvent(event: RunActivityEvent): string {
   if (event.context?.comment_id) return 'Comment'
   if (event.context?.pr_id) return 'PR'
   if (event.context?.board_post_id) return 'Board'
-  if (event.context?.goal_id) return 'Goal'
   if (event.context?.task_id) return 'Task'
   if (event.context?.git_ref) return 'Git'
   if (event.context?.log_id) return 'Log'
@@ -850,7 +836,6 @@ function diagnosticTelemetryQuery(diagnostic: IdeContextDiagnostic): string | un
 
 export interface IdeContextTextRouteRefs {
   readonly line?: number
-  readonly goalId?: string
   readonly taskId?: string
   readonly boardPostId?: string
   readonly commentId?: string
@@ -864,7 +849,6 @@ export interface IdeContextTextRouteRefs {
 
 const REF_VALUE_PATTERN = '([A-Za-z0-9][A-Za-z0-9._/@:-]*)'
 const EVENT_REF_PATTERNS = {
-  goalId: new RegExp(`\\bgoal[:#/]+${REF_VALUE_PATTERN}`, 'i'),
   taskId: new RegExp(`\\btask[:#/]+${REF_VALUE_PATTERN}`, 'i'),
   boardPostId: new RegExp(`\\b(?:board|post)[:#/]+${REF_VALUE_PATTERN}`, 'i'),
   commentId: new RegExp(`\\bcomment[:#/]+${REF_VALUE_PATTERN}`, 'i'),
@@ -883,7 +867,6 @@ function eventRouteRefs(event: RunActivityEvent): IdeContextTextRouteRefs {
 export function routeRefsFromText(text: string): IdeContextTextRouteRefs {
   return {
     line: eventLineRef(text),
-    goalId: firstEventRef(text, EVENT_REF_PATTERNS.goalId),
     taskId: firstEventRef(text, EVENT_REF_PATTERNS.taskId),
     boardPostId: firstEventRef(text, EVENT_REF_PATTERNS.boardPostId),
     commentId: firstEventRef(text, EVENT_REF_PATTERNS.commentId),
@@ -925,7 +908,6 @@ function eventLineRef(text: string): number | undefined {
 
 function eventContextMeta(event: RunActivityEvent, refs: IdeContextTextRouteRefs): string {
   const context = event.context
-  const goalId = context?.goal_id ?? refs.goalId
   const taskId = context?.task_id ?? refs.taskId
   const prId = context?.pr_id ?? refs.prId
   const boardPostId = context?.board_post_id ?? refs.boardPostId
@@ -936,7 +918,6 @@ function eventContextMeta(event: RunActivityEvent, refs: IdeContextTextRouteRefs
   const operationId = context?.operation_id ?? refs.operationId
   const workerRunId = context?.worker_run_id ?? refs.workerRunId
   return compactMeta([
-    goalId ? `goal ${goalId}` : null,
     taskId ? `task ${taskId}` : null,
     prId ? `PR ${prId}` : null,
     boardPostId ? `board ${boardPostId}` : null,
@@ -952,7 +933,6 @@ function eventContextMeta(event: RunActivityEvent, refs: IdeContextTextRouteRefs
 
 function annotationContextMeta(annotation: IdeAnnotation): string {
   return compactMeta([
-    annotation.goal_id ? `goal ${annotation.goal_id}` : null,
     annotation.task_id ? `task ${annotation.task_id}` : null,
     ...annotation.references.map(reference => `${reference.relation} ${reference.reference}`),
     `keeper ${annotation.keeper_id}`,
@@ -1001,23 +981,13 @@ export function routeLinksForContext(
       evidence: `Code ${filePath}${line !== undefined ? `:${line}` : ''}`,
     })
   }
-  const goalId = cleanId(context.goalId)
-  if (goalId) {
-    add({
-      id: `goal:${goalId}`,
-      label: 'Goal',
-      tab: 'workspace',
-      params: { section: 'planning', goal: goalId },
-      evidence: `Goal ${goalId}`,
-    })
-  }
   const taskId = cleanId(context.taskId)
   if (taskId) {
     add({
       id: `task:${taskId}`,
       label: 'Task',
       tab: 'workspace',
-      params: { section: 'planning', view: 'default', task: taskId },
+      params: { section: 'planning', task: taskId },
       evidence: `Task ${taskId}`,
     })
   }

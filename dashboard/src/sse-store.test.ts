@@ -33,7 +33,6 @@ const invalidateDashboardCache = vi.fn<() => void>(() => {})
 const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateShellSnapshot = vi.fn<(payload: unknown, opts?: unknown) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
-const hydratePlanningSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const removeBoardPost = vi.fn<(postId?: string) => void>(() => {})
 const refreshForRoute = vi.fn<(nextRoute: CurrentRoute) => void>()
 const requestNamespaceTruthNow = vi.fn<() => void>()
@@ -42,8 +41,6 @@ const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) =>
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
-const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
-const hydrateGoalLoopSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
 const refreshActiveKeeperChatHistory = vi.fn<(opts?: { force?: boolean }) => void>()
 const reconcileKeeperChatReceipts = vi.fn<(name: string) => Promise<void>>(async () => {})
@@ -63,7 +60,6 @@ async function loadSseStore() {
     hydrateBoardSnapshot,
     hydrateShellSnapshot,
     hydrateExecutionSnapshot,
-    hydratePlanningSnapshot,
     refreshDashboard,
     refreshExecution,
     refreshBoard,
@@ -95,12 +91,6 @@ async function loadSseStore() {
     compositeTick,
     hydrateFleetCompositeSnapshot,
   }))
-  vi.doMock('./goal-tree-state', () => ({
-    hydrateGoalTreeSnapshot,
-  }))
-  vi.doMock('./goal-loop-state', () => ({
-    hydrateGoalLoopSnapshot,
-  }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
     reconcileKeeperChatReceipts,
@@ -127,7 +117,6 @@ describe('setupSSEReaction reconnect hydration', () => {
     hydrateBoardSnapshot.mockClear()
     hydrateShellSnapshot.mockClear()
     hydrateExecutionSnapshot.mockClear()
-    hydratePlanningSnapshot.mockClear()
     removeBoardPost.mockClear()
     refreshForRoute.mockClear()
     requestNamespaceTruthNow.mockClear()
@@ -139,10 +128,6 @@ describe('setupSSEReaction reconnect hydration', () => {
     reconcileKeeperChatReceipts.mockReset()
     reconcileKeeperChatReceipts.mockResolvedValue(undefined)
     hydrateFleetCompositeSnapshot.mockClear()
-    hydrateGoalTreeSnapshot.mockClear()
-    hydrateGoalTreeSnapshot.mockReturnValue(true)
-    hydrateGoalLoopSnapshot.mockClear()
-    hydrateGoalLoopSnapshot.mockReturnValue(true)
     namespaceTruth.value = null
     namespaceTruthError.value = null
     boardPosts.value = []
@@ -166,7 +151,6 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.doUnmock('./components/common/toast')
     vi.doUnmock('./oas-runtime-store')
     vi.doUnmock('./composite-signals')
-    vi.doUnmock('./goal-tree-state')
     vi.doUnmock('./router')
   })
 
@@ -831,15 +815,10 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshBoard).not.toHaveBeenCalled()
   })
 
-  it('hydrates websocket dashboard snapshots for board, goals, and composite slices', async () => {
+  it('hydrates websocket dashboard snapshots for board and composite slices', async () => {
     const { sseStore } = await loadSseStore()
 
     sseStore.hydrateDashboardSlice('board', { posts: [], generated_at: 'now' })
-    sseStore.hydrateDashboardSlice('goals', {
-      planning: { goals: [], generated_at: 'now' },
-      tree: { tree: [], summary: { total_goals: 0 } },
-      loop: { schema_version: 1, loop_iteration: '3', overall_status: 'ok' },
-    })
     sseStore.hydrateDashboardSlice('composite', {
       generated_at: 1,
       count: 0,
@@ -847,33 +826,11 @@ describe('setupSSEReaction reconnect hydration', () => {
     })
 
     expect(hydrateBoardSnapshot).toHaveBeenCalledWith({ posts: [], generated_at: 'now' })
-    expect(hydratePlanningSnapshot).toHaveBeenCalledWith({ goals: [], generated_at: 'now' })
-    expect(hydrateGoalTreeSnapshot).toHaveBeenCalledWith({ tree: [], summary: { total_goals: 0 } })
-    // RFC-0284: the goals snapshot's loop sub-field hydrates the goal-loop store.
-    expect(hydrateGoalLoopSnapshot).toHaveBeenCalledWith({
-      schema_version: 1,
-      loop_iteration: '3',
-      overall_status: 'ok',
-    })
     expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith({
       generated_at: 1,
       count: 0,
       snapshots: [],
     })
-  })
-
-  it('routes the goal_loop_status delta to the goal-loop store, not as a goals snapshot', async () => {
-    const { sseStore } = await loadSseStore()
-
-    // RFC-0284: live goal-loop delta bridged onto the "goals" slice carries the
-    // status directly + the goal_loop_status event type. It must hydrate the
-    // goal-loop store and must NOT be unpacked as a {planning,tree} snapshot.
-    const status = { schema_version: 1, loop_iteration: '8', overall_status: 'warning' }
-    sseStore.hydrateDashboardSlice('goals', status, 'goal_loop_status')
-
-    expect(hydrateGoalLoopSnapshot).toHaveBeenCalledWith(status)
-    expect(hydratePlanningSnapshot).not.toHaveBeenCalled()
-    expect(hydrateGoalTreeSnapshot).not.toHaveBeenCalled()
   })
 
   it('handles every dashboard push slice advertised to route subscriptions', async () => {
@@ -883,10 +840,6 @@ describe('setupSSEReaction reconnect hydration', () => {
       namespace: { root: { status: { project: 'default' } } },
       transport: { transports: [] },
       execution: { agents: [], tasks: [], messages: [], keepers: [] },
-      goals: {
-        planning: { goals: [], generated_at: 'now' },
-        tree: { tree: [], summary: { total_goals: 0 } },
-      },
       board: { posts: [], generated_at: 'now' },
       composite: { generated_at: 1, count: 0, snapshots: [] },
       operator: { snapshot: { keepers: [] }, digest: { target_type: 'namespace' } },

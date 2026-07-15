@@ -22,7 +22,6 @@ let dedupe_schemas_by_name (schemas : tool_schema list) =
     (avoids Tools -> Config -> Tools cycle) *)
 let raw_schemas : tool_schema list =
   Tool_schemas_workspace_core.schemas
-  @ Tool_schemas_workspace_extra.schemas
   @ Tool_schemas_inline.schemas
   @ Tool_schemas_agent.schemas
   @ Tool_schemas_run.schemas

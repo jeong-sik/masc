@@ -36,7 +36,6 @@ type wake_producer =
   | Keeper_turn_admission
   | Operator_pending_confirm_store
   | Keeper_turn_failure_route
-  | Keeper_goal_assignment
   | Read_model_reader
 
 type waiting_row =
@@ -113,7 +112,6 @@ let wake_producer_to_string = function
   | Keeper_turn_admission -> "keeper_turn_admission"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
   | Keeper_turn_failure_route -> "keeper_turn_failure_route"
-  | Keeper_goal_assignment -> "keeper_goal_assignment"
   | Read_model_reader -> "read_model_reader"
 ;;
 
@@ -128,7 +126,6 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
   | Failure_judgment _ -> Keeper_turn_failure_route
-  | Goal_assigned _ -> Keeper_goal_assignment
 ;;
 
 let unix_iso_json = function
@@ -502,8 +499,6 @@ let hitl_rows keeper_name pending =
           ; "summary_status", Keeper_approval_queue.summary_status_to_yojson entry.summary_status
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id
-          ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-          ; "goal_ids", `List (List.map (fun id -> `String id) entry.goal_ids)
           ]
     })
 ;;

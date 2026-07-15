@@ -104,7 +104,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_binding_health_config",
     "masc.keeper_transition_audit_types",
     "masc.keeper_path_rejection",
-    "masc.keeper_approval_queue_rules_types",
+    "masc.keeper_approval_queue_types",
     "masc.keeper_toml_parser",
     "masc.keeper_toml_loader",
     "masc.keeper_runtime_config",

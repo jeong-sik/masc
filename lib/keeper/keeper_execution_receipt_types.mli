@@ -59,7 +59,6 @@ type t = {
   oas_dispatch_mode : string option;
   oas_internal_runtime_disabled : bool;
   current_task_id : string option;
-  goal_ids : string list;
   outcome : outcome_kind;
   terminal_reason_code : string;
   response_text_present : bool;

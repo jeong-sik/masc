@@ -26,7 +26,7 @@ cognitive layer:
 | Dim01 #5 Semantic Gravity | `lib/cognitive_gravity.ml` (PR-1, #13797) | — (genuinely host-only) |
 | Dim01 #6 Intentional Projection | `lib/intentional_projection.ml` (PR-2, #13821) | **`lib/context_intent.{ml,mli}`** (`intent` enum + heuristic + model-assisted classify) |
 | Dim06 FSM-based Tools / Structured Execute | `lib/agent_tool_execute_*`, `lib/tool_*` | **`lib/agent_tool.mli` (agent-as-tool)**, **`lib/typed_tool.{ml,mli}` (strong-typed tools)** |
-| Dim09 Goal-driven design — execution gate | `lib/goal_loop` etc | **`lib/autonomy_exec.ml` (orchestration-agnostic exec primitive)** |
+| Dim09 Objective-driven design — execution gate | MASC Task/Keeper lane | **`lib/autonomy_exec.ml` (orchestration-agnostic exec primitive)** |
 | Dim03 Code-Plan Alignment — diff guard | (none yet) | **`lib/autonomy_diff_guard.ml` (banned-pattern + path filter on unified-diff)** |
 | Dim01 #1~#4 (cognitive UI flow) | dashboard PRs | — (UI is genuinely host-only) |
 | Dim02 Chronicle / Librarian | `lib/chronicle_event.ml` (TBD), dashboard read model | — (event source is host-side) |

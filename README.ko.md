@@ -32,11 +32,11 @@
 ## MASC로 할 수 있는 일 / What you can do
 
 - **Goal·Task를 MCP 도구로 공유합니다.** 작업 소유권, 상태 전이, 검증 증거를 하나의 로컬 workspace에 둡니다.
-- **상주 Keeper를 굴리고 관찰합니다.** Keeper마다 페르소나·목표·지시문을 주고, 같은 주제나 저장소 위에서 서로 소통하게 둡니다.
+- **상주 Keeper를 굴리고 관찰합니다.** Keeper마다 페르소나·지시문을 주고, 같은 주제나 저장소 위에서 서로 소통하게 둡니다.
 - **서로 다른 에이전트 스타일을 실험합니다.** Keeper마다 다른 관심사와 지시문을 줄 수 있고, 한 환경에서 무엇을 결정하고 어디서 부딪히는지 봅니다.
-- **기성 코딩 에이전트를 붙입니다.** MASC는 MCP 서버라, Claude Code·Codex 같은 MCP 클라이언트를 `/mcp`에 연결하면 같은 워크스페이스에 참여합니다 — 태스크 claim·전이, 보드, goal을 공유하고 `masc_broadcast`·@mention으로 Keeper를 깨웁니다. (외부에서 Keeper turn을 동기로 직접 호출하는 도구는 없고, 워크스페이스와 멘션으로 상호작용합니다.)
+- **기성 코딩 에이전트를 붙입니다.** MASC는 MCP 서버라, Claude Code·Codex 같은 MCP 클라이언트를 `/mcp`에 연결하면 같은 워크스페이스에 참여합니다 — 태스크 claim·전이와 보드 활동을 공유하고 `masc_broadcast`·@mention으로 Keeper를 깨웁니다. (외부에서 Keeper turn을 동기로 직접 호출하는 도구는 없고, 워크스페이스와 멘션으로 상호작용합니다.)
 - **같이 코드를 만질 때 뻔한 충돌을 줄입니다.** 여러 Keeper가 한 저장소를 고치면 turn·lock·작업자 소유권으로 조율을 시도하지만, concurrency safety를 보장하지는 않습니다.
-- **결정과 실패를 들여다봅니다.** 웹 대시보드로 Keeper / Goal / Task / Board를 실시간으로 보고, turn마다 receipt가 남습니다.
+- **결정과 실패를 들여다봅니다.** 웹 대시보드로 Keeper / Task / Board를 실시간으로 보고, turn마다 receipt가 남습니다.
 - **외부 효과는 하나의 Gate로 보냅니다.** Always Allow·LLM Auto Judge·HITL은 비계층 명시 모드입니다. HITL은 exact request를 영속화하되 Keeper를 멈추지 않고, 결정이 오면 해당 lane을 깨웁니다.
 - **Keeper마다 모델을 다르게 설정합니다.** `runtime.toml` 한 줄로 runtime catalog에 있는 provider × model을 Keeper별로 지정합니다.
 
@@ -48,15 +48,15 @@
 
 | 기능 | 상태 | 한 줄 설명 | 사용자 진입점 |
 |------|:----:|-----------|--------------|
-| **Keepers** | ✅ | 페르소나·목표·지시문을 가진 상주 에이전트. 서버 기동 시 자동 부팅, 상태는 디스크에 영속 | `.masc/config/keepers/*.toml` |
+| **Keepers** | ✅ | 페르소나·지시문을 가진 상주 에이전트. 서버 기동 시 자동 부팅, 상태는 디스크에 영속 | `.masc/config/keepers/*.toml` |
 | **Gate: Always Allow / Auto Judge / HITL** | 🟡 | exact 1회성 grant와 Keeper별 wake-up을 갖는 제품 중립 외부 효과 경계 | 대시보드 승인 큐 |
 | **Board** | ✅ | Keeper들이 글·댓글·투표로 비동기 협업, 게시가 관련 Keeper를 깨움 | `masc_board_*` 툴 / 대시보드 |
 | **Sandbox (Docker)** | 🟡 | Docker profile 셸 실행은 컨테이너를 쓰지만, local profile과 fallback 경로가 있어 security boundary가 아님 | keeper toml `sandbox_profile` |
-| **Dashboard** | ✅ | Keeper/Goal/Task/Board를 실시간으로 보고 명령을 내리는 웹 SPA | `dashboard/` (vite) |
+| **Dashboard** | ✅ | Keeper/Task/Board를 실시간으로 보고 명령을 내리는 웹 SPA | `dashboard/` (vite) |
 | **TUI** | ❌ | Not working — `masc-tui` 실행 파일이 있으나, CJK/emoji 레이아웃·스트리밍 진행·rich-block 렌더링 등 주요 공백으로 실제로 사용할 수 없음 | `masc-tui` |
 | **CODE / IDE (관망형)** | ❌ | Not working — LSP 프록시·주석 오버레이·대시보드 CODE 셸은 구현되어 있으나, 사람이 명령만 내리는 관망형 흐름이 검증되지 않아 실제로 사용할 수 없음 | 대시보드 Code |
 | **OpenTelemetry** | 🟡 | OTLP HTTP exporter + GenAI semconv span/metric은 동작하나, 아직 수집되지 않는 signal과 instrumentation 공백이 많음 | `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| **Goal + Task** | 🟡 | Goal/Task CRUD·전이·검증·프롬프트 주입은 동작. 자동 스케줄링은 미구현 | `masc_goal_*` / `masc_*task*` 툴 |
+| **Task** | 🟡 | Task CRUD·typed 전이·완료 review·evidence 처리 | `masc_*task*` 툴 |
 | **Multi-Runtime** | 🟡 | Keeper별 provider×model 라우팅 | `runtime.toml` |
 | **Provider Failover** | ❌ | provider 장애 시 자동 failover 없음; 수동 설정 변경 + 서버 재시작 필요 | `runtime.toml` |
 | **Fusion (+ JoJ)** | 🟡 | 여러 모델에 같은 질문 후 심판 모델이 종합. Simple/Refine/Conditional 동작, JoJ 미배선 | `masc_fusion` 툴 |
@@ -70,7 +70,7 @@
 - **Multi-Runtime** — `runtime.toml`의 `runtime.assignments`에 `keeper = provider.model` 한 줄이면 그 Keeper의 매 turn이 해당 provider로 갑니다.
 - **Provider Failover** — provider 장애 시 순서 failover는 미구현입니다. 장애가 나면 default/assignment를 손으로 고치고 서버를 재시작해야 합니다.
 - **Fusion + JoJ** — Keeper가 `masc_fusion`을 호출하면 패널 모델들이 같은 질문에 각자 답고 심판 모델이 합의/모순/맹점을 종합합니다. *한계*: JoJ(Judge of Judges) 위상은 코드·호출 경로가 있으나, 라이브 설정에 1차 심판 목록이 없어 호출 시 **fail-closed로 에러를 반환합니다**. 결과 registry는 in-memory라 재시작 시 사라집니다.
-- **Goal + Task** — Goal/Task는 MCP 툴로 만들고 상태 전이하며, active goal은 Keeper system prompt에 주입됩니다. *한계*: goal-loop 스케줄러는 Keeper turn을 구동하지 않습니다(관측용). turn은 채널/이벤트로 구동됩니다.
+- **Task** — Task는 MCP 툴로 만들고 claim·실행·검증·완료·release·cancel의 typed 상태를 거칩니다. 완료는 configured LLM reviewer와 명시적 evidence를 사용하며, Task 상태가 Keeper lane을 소유하지 않습니다.
 - **OpenTelemetry** — OTLP HTTP exporter와 GenAI semconv span/metric이 동작합니다. *한계*: 아직 수집되지 않는 signal과 instrumentation 공백이 많습니다. 예를 들어 Keeper turn 낮은 수준 이벤트, fusion 나이부 metric, provider별 latency breakdown 등은 부분적으로만 커버됩니다.
 - **CODE / IDE (관망형, 미동작)** — 사람이 코드를 직접 수정하지 않고 에이전트에게 명령만 내리는 관망형 IDE를 지향합니다. LSP 프록시·주석 오버레이·대시보드 CODE 셸은 구현되어 있으나, **관망형 명령 흐름이 검증되지 않아 현재 실사용 가능한 상태가 아닙니다.**
 
@@ -225,12 +225,10 @@ Keeper 정의 예시 (`keepers/<name>.toml`):
 [keeper]
 name = "albini"
 persona_name = "albini"
-goal = "흐름이 끊긴 task의 owner를 호명해 추궁합니다. 본인은 코드를 만들지 않습니다."
-active_goal_ids = ["goal-pm-flow"]
 sandbox_profile = "docker"     # 또는 "local"
 
 instructions = """
-... Keeper 행동 지시 ...
+흐름이 끊긴 task의 owner를 호명해 추궁합니다. 본인은 코드를 만들지 않습니다.
 """
 ```
 
@@ -261,8 +259,7 @@ masc/
 <base-path>/.masc/ (런타임 상태, --base-path 아래)
 ├── config/         runtime.toml, keepers/, repositories.toml, credentials.toml …
 ├── keepers/        Keeper별 런타임 상태·메모리 (*.json + *.jsonl 로그, 서버 생성)
-├── goals.json      Goal 상태
-├── tasks/          Task 백로그, goal↔task 링크
+├── tasks/          Task 백로그·lifecycle·evidence 상태
 ├── board_*.jsonl   Board 글·댓글·투표 (append-only)
 └── audit-approvals/  HITL 승인 이력
 ```
@@ -330,7 +327,7 @@ masc/
 | 1 | **Keepers / Fleet** | 배포된 `runtime.toml`에서 죽은 `[autonomous] concurrency` 키를 제거하고, 전역 상한이 없는 런타임 계약과 fleet 문서를 맞춥니다. | 🟡→✅ |
 | 2 | **Provider Failover** | provider healthcheck 기반 **자동 순서 failover**를 구현합니다. 장애 시 다음 후보 provider로 Keeper turn을 자동 전환하고, 복구 시 로그/메트릭을 남깁니다. | ❌→✅ |
 | 3 | **Fusion + JoJ** | `runtime.toml`에 JoJ(Judge of Judges)용 1차 심판 패널(`judges`) 설정을 추가하고, fusion 결과 registry를 디스크에 영속화합니다. | 🟡→✅ |
-| 4 | **Goal + Task** | goal-loop 스케줄러가 채널 이벤트 외에도 Keeper turn을 구동할 수 있도록 합니다. 예: goal 상태 변화·마감 임박·blocked 태스크 발견 시 자동 wake. | 🟡→✅ |
+| 4 | **Task** | 두 번째 scheduler나 lifecycle authority를 만들지 않고 verification timeout과 lane-local wake 경로를 완성합니다. | 🟡→✅ |
 | 5 | **TUI** | `masc-tui`를 실제로 사용 가능한 상태로 만듭니다. 실행 파일은 있으나 CJK/emoji 레이아웃·스트리밍 진행·rich-block 렌더링 공백으로 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
 | 6 | **IDE** | 관망형 IDE를 실제로 사용 가능한 상태로 만듭니다. LSP 프록시·주석 오버레이·대시보드 IDE 셸은 있으나, 사람이 명령만 내리는 흐름이 검증되지 않아 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
 | 7 | **Multi-Channel** | Slack·Telegram 등 Discord 외 채널용 **사이드카**를 추가하고, gate message 스키마를 채널별로 확장합니다. | 🟡→✅ |

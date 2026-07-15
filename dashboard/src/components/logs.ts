@@ -713,16 +713,14 @@ function renderLogKindGrid(
     `
   }
   if (kind === 'approval') {
-    const goalJob = [d(details, 'goal_id') ?? d(details, 'goal'), d(details, 'job_id') ?? d(details, 'job')]
-      .filter((v): v is string => v !== null)
-      .join(' · ')
+    const job = d(details, 'job_id') ?? d(details, 'job')
     const request = detailNote(details, 'req', 'request')
     const extra = detailNote(details, 'detail')
     return html`
       ${grid(
         row('tool', d(details, 'tool')),
         row('severity', d(details, 'severity')),
-        row('goal · job', goalJob || null),
+        row('job', job),
       )}
       ${request ? html`<div class="lg-note">“${request}”</div>` : null}
       ${note(extra, true)}

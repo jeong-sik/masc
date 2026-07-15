@@ -4,7 +4,7 @@
     tool/product name. It records an exact request, accepts an explicit
     resolution, and wakes only the originating Keeper lane. *)
 
-include module type of Keeper_approval_queue_rules_types
+include module type of Keeper_approval_queue_types
 
 type storage_error =
   { path : string
@@ -79,7 +79,7 @@ val approved_resolution_state :
 
 (** Atomically consume an approved resolution only when the Keeper, opaque
     operation identity, and canonical complete input match its durable request.
-    Turn, Task, Goal, and channel fields remain provenance and never become
+    Turn, Task, and channel fields remain provenance and never become
     authorization constraints. *)
 val consume_approved_resolution :
   base_path:string ->
@@ -88,38 +88,6 @@ val consume_approved_resolution :
   tool_name:string ->
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
-
-(** {1 Exact Always Allowed rules} *)
-
-val list_rules :
-  base_path:string -> unit -> (approval_rule list, rule_store_error) result
-
-val list_rules_dashboard_json :
-  base_path:string -> unit -> (Yojson.Safe.t, rule_store_error) result
-
-(** Insert or fetch the rule for the exact
-    [(keeper_name, tool_name, canonical complete input)] identity. *)
-val upsert_rule :
-  base_path:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  ?created_by:string ->
-  ?source_approval_id:string ->
-  unit ->
-  (approval_rule * bool, rule_store_error) result
-
-val delete_rule :
-  base_path:string -> id:string -> unit -> (approval_rule, rule_store_error) result
-
-(** Find the exact remembered request and atomically update its match audit. *)
-val find_matching_rule :
-  base_path:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  unit ->
-  (rule_match option, rule_store_error) result
 
 (** {1 Audit log} *)
 
@@ -131,18 +99,12 @@ val audit_approval_event :
   tool_name:string ->
   ?turn_id:int ->
   ?task_id:string ->
-  ?goal_id:string ->
-  ?goal_ids:string list ->
-  ?rule_match:rule_match ->
   ?source_approval_id:string ->
   ?actor:string ->
   ?decision_source:decision_source ->
   ?decision:decision ->
   unit ->
   unit
-
-val audit_rule_event :
-  base_path:string -> event_type:string -> approval_rule -> unit
 
 val approval_audit_pending_event : string
 val approval_audit_resolved_event : string
@@ -164,14 +126,13 @@ module For_testing : sig
     after_load:(unit -> unit) ->
     (install_report, install_error) result
   val pending_store_path : base_path:string -> string
-  val always_allowed_store_path : base_path:string -> string
 end
 
 (** {1 Nonblocking submission and explicit resolution} *)
 
 (** Durably enqueue an exact request without suspending the caller. Returns an
     existing id only when the same Keeper, operation identity, canonical input,
-    turn/task/goal identity, and continuation channel are already pending. *)
+    turn/task identity and continuation channel are already pending. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
@@ -180,8 +141,6 @@ val submit_pending :
   ?turn_id:int ->
   ?request_context:Yojson.Safe.t ->
   ?task_id:string ->
-  ?goal_id:string ->
-  ?goal_ids:string list ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   (string, storage_error) result
@@ -200,16 +159,14 @@ type resolve_error =
 
 val resolve_error_to_string : resolve_error -> string
 
-(** Commit a resolution, optionally persist an exact Always Allowed rule for
-    [Decision.Approve], then wake only the Keeper captured by the pending entry. *)
+(** Commit a resolution, then wake only the Keeper captured by the pending
+    entry. *)
 val resolve_with_policy :
   id:string ->
   decision:decision ->
   ?source:decision_source ->
-  ?remember_rule:bool ->
-  ?created_by:string ->
   unit ->
-  (resolution_result, resolve_error) result
+  (unit, resolve_error) result
 
 val resolve :
   id:string ->

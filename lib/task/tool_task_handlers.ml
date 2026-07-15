@@ -54,13 +54,11 @@ type context = {
 type task_owner_hooks =
   { is_registered_agent_alias : Workspace.config -> string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-  ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
 
 let default_task_owner_hooks =
   { is_registered_agent_alias = (fun _ _ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
-  ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
 ;;
 
@@ -286,7 +284,7 @@ include Tool_task_contract_gate
 
 let handle_add_task ~tool_name ~start_time ctx args =
   let valid_keys =
-    [ "title"; "priority"; "description"; "goal_id"; "contract"; "predecessor_task_id" ]
+    [ "title"; "priority"; "description"; "contract"; "predecessor_task_id" ]
   in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
@@ -303,11 +301,6 @@ let handle_add_task ~tool_name ~start_time ctx args =
   let title = get_string args "title" "" in
   let priority = get_int args "priority" 3 in
   let description = get_string args "description" "" in
-  let goal_id =
-    match Safe_ops.json_string_opt "goal_id" args with
-    | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
-    | _ -> None
-  in
   (* RFC-0323 W2: existence + terminal validation happens in
      [Workspace.add_task_with_result] inside the backlog lock (typed
      [Unknown_predecessor] / [Predecessor_not_terminal] errors). *)
@@ -319,7 +312,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
-  (* RFC-0189: title/priority/goal_id/contract validation — all
+  (* RFC-0189: title/priority/contract validation — all
      caller-input violations. [Workflow_rejection]. *)
   if String.equal trimmed_title "" then
     Tool_result.error
@@ -331,21 +324,6 @@ let handle_add_task ~tool_name ~start_time ctx args =
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
-  else if Option.is_some goal_id
-          && not
-               (* DET-OK: [Option.value ~default:""] is guarded by
-                  the [Option.is_some goal_id] guard above; the
-                  empty default is unreachable.  Refactoring to a
-                  match would split the boolean chain awkwardly. *)
-               (Goal_store.list_goals ctx.config ()
-                |> List.exists (fun (goal : Goal_store.goal) ->
-                       String.equal goal.id (Option.value ~default:"" goal_id)))
-  then
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time
-      (* DET-OK: same guarded branch — goal_id is [Some _]. *)
-      (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
     match contract_result with
     | Error error ->
@@ -355,12 +333,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
     | Ok contract ->
         let add_result =
           Workspace.add_task_with_result ?contract
-            ?goal_id
             ?predecessor_task_id
-            ~reject_if:
-              (Workspace_task_capacity.rejection_for_add_task_for_config
-                 ctx.config
-                 ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description
         in
@@ -377,7 +350,6 @@ let handle_add_task ~tool_name ~start_time ctx args =
                   ; "title", `String trimmed_title
                   ; "priority", `Int priority
                   ; "description", `String description
-                  ; "goal_id", Json_util.string_opt_to_json goal_id
                   ; ( "predecessor_task_id"
                     , Json_util.string_opt_to_json predecessor_task_id )
                   ])
@@ -389,54 +361,8 @@ let handle_add_task ~tool_name ~start_time ctx args =
              ~start_time
              (Workspace.add_task_error_to_string err))
 
-(* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
-   over [Task_goal_assignment.set_task_goal] — the single validated backend
-   shared with the dashboard HTTP route, so neither surface re-implements the
-   precondition checks. All caller-input violations are [Workflow_rejection]. *)
-let handle_set_goal ~tool_name ~start_time ctx args =
-  let valid_keys = [ "task_id"; "goal_id" ] in
-  let unknown = unknown_args ~valid_keys args in
-  if Stdlib.List.length unknown > 0 then
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time
-      (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
-        (String.concat ", " unknown)
-        (String.concat ", " valid_keys))
-  else
-    let task_id = String.trim (get_string args "task_id" "") in
-    let goal_id = String.trim (get_string args "goal_id" "") in
-    if String.equal task_id "" then
-      Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
-        ~tool_name ~start_time
-        "task_id is required and cannot be empty"
-    else if String.equal goal_id "" then
-      Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
-        ~tool_name ~start_time
-        "goal_id is required and cannot be empty"
-    else (
-      match Task_goal_assignment.set_task_goal ctx.config ~task_id ~goal_id with
-      | Ok () ->
-        Tool_result.make_ok
-          ~tool_name
-          ~start_time
-          ~data:
-            (`Assoc
-               [ ("ok", `Bool true)
-               ; ("task_id", `String task_id)
-               ; ("goal_id", `String goal_id)
-               ])
-          ()
-      | Error err ->
-        Tool_result.error
-          ~failure_class:(Some Tool_result.Workflow_rejection)
-          ~tool_name ~start_time
-          (Task_goal_assignment.set_task_goal_error_to_string err))
-
 let handle_batch_add_tasks ~tool_name ~start_time ctx args =
-  let valid_item_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
+  let valid_item_keys = [ "title"; "priority"; "description"; "contract" ] in
   let tasks_json = match Json_util.assoc_member_opt "tasks" args with
     | Some (`List l) -> l
     | _ -> []
@@ -451,11 +377,6 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
     let title = String.trim (Json_util.get_string t "title" |> Option.value ~default:"") in
     let priority = Json_util.get_int t "priority" |> Option.value ~default:3 in
     let description = Json_util.get_string t "description" |> Option.value ~default:"" in
-    let goal_id =
-      match Json_util.get_string t "goal_id" with
-      | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
-      | _ -> None
-    in
     let contract =
       match Json_util.assoc_member_opt "contract" t with
       | None | Some `Null -> Ok None
@@ -492,7 +413,7 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
                  (String.concat ", " unknown)
                  (String.concat ", " valid_item_keys))
           else
-            Ok (title, priority, description, contract, goal_id)
+            Ok (title, priority, description, contract)
       | Error error -> Error error
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
@@ -574,19 +495,6 @@ let handle_claim ~tool_name ~start_time ctx args =
   in
   result_to_response ~tool_name ~start_time response_result
 
-(* Look up the current Goal_store phase for each goal id in the agent's
-   active_goal_ids. Returns a list of "<goal_id>=<phase>" strings, e.g.
-   ["goal-1777967605002-004b=executing"; "goal-other=completed"].
-
-   This is consumed only by [format_no_eligible] below, to give the LLM
-   the *current* goal phase instead of letting it infer "completed goal"
-   from the bare excluded_count. See PR body for the velvet-hammer
-   misdiagnosis that motivated this surface. *)
-let active_goal_phases_for_agent ctx =
-  (current_task_owner_hooks ()).active_goal_phases_for_agent
-    ctx.config
-    ~agent_name:ctx.agent_name
-
 let no_eligible_diagnostics_json =
   Tool_task_no_eligible.no_eligible_diagnostics_json
 let no_eligible_blocker_summary =
@@ -605,24 +513,10 @@ let format_no_eligible
       ~verification_blocked_count
       ~scope_excluded_count
   in
-  match active_goal_phases_for_agent ctx with
-  | [] ->
-      Printf.sprintf
-        "No eligible tasks available (blocked/excluded: %d). This agent has no \
-         active_goal_ids — every open task is out of scope. Operator should \
-         configure active_goal_ids via the owner runtime. %s"
-        excluded_count
-        diagnostics
-  | phases ->
-      Printf.sprintf
-        "No eligible tasks available (blocked/excluded: %d). active goal \
-         phases: [%s]. NOTE: excluded ≠ completed. If every phase above is \
-         'executing', the cause is goal-scope mismatch — open tasks are \
-         scoped to a goal not in this agent's active_goal_ids — not goal \
-         completion. %s"
-        excluded_count
-        (String.concat ", " phases)
-        diagnostics
+  Printf.sprintf
+    "No eligible tasks available (blocked/excluded: %d). %s"
+    excluded_count
+    diagnostics
 
 let handle_claim_next ~tool_name ~start_time ctx _args =
   (* #18965 — removed [is_agent_session_bound] hard gate (same rationale as

@@ -11,7 +11,6 @@ import type {
   BoardPost,
   ServerStatus,
   BoardSortMode,
-  Goal,
   RefreshOptions,
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
@@ -52,12 +51,9 @@ import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
-import { goalTreeData, goalTreeError, goalTreeLoading, hydrateGoalTreeSnapshot } from './goal-tree-state'
-import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import {
-  WORK_GOAL_LOAD_ERROR,
-  WORK_GOAL_LOAD_PARTIAL_ERROR,
-  WORK_GOAL_TOAST_DURATION_MS,
+  WORK_PLANNING_LOAD_ERROR,
+  WORK_PLANNING_TOAST_DURATION_MS,
 } from './lib/work-copy'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
@@ -264,7 +260,7 @@ function keeperRenderEqual(previous: Keeper, next: Keeper): boolean {
  *  The backend emits relative age fields as floating seconds, so every
  *  fresh snapshot can differ even when the keeper's actual state did not.
  *  Keep those fields at display-resolution while still updating immediately
- *  for status, lifecycle, model, goal, blocker, tool, and context changes.
+ *  for status, lifecycle, model, instructions, blocker, tool, and context changes.
  */
 export function reconcileKeepers(previous: Keeper[], next: Keeper[]): Keeper[] {
   if (previous.length === 0) return next
@@ -312,10 +308,10 @@ export function removeBoardPost(postId: string | undefined): void {
   }
 }
 
-// --- Goals state ---
+// --- Planning state ---
 
-export const goals = signal<Goal[]>([])
-export const goalsLoading = signal(false)
+export const planningLoading = signal(false)
+export const planningError = signal<string | null>(null)
 export const workspaceFsmSnapshot = signal<DashboardWorkspaceFsmSnapshot | null>(null)
 
 // --- Fusion run registry state (RFC-0266 §7 Phase 4) ---
@@ -574,7 +570,7 @@ export const boardLoading = signal(false)
 // --- Refresh timestamps ---
 
 export const lastBoardRefreshAt = signal<string | null>(null)
-export const lastGoalsRefreshAt = signal<string | null>(null)
+export const lastPlanningRefreshAt = signal<string | null>(null)
 
 export const tasksByStatus = computed(() => {
   const all = tasks.value
@@ -732,14 +728,6 @@ function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
       normalized.root.status ?? null,
     )
   }
-  if (data.goals && !bootstrapSliceError(data.goals)) {
-    hydrateGoalTreeSnapshot(data.goals)
-  }
-  if (data.goal_loop_status && !bootstrapSliceError(data.goal_loop_status)) {
-    // RFC-0284: seed the goal-loop store on first page load so the panel
-    // renders without its own fetch; live updates then arrive over SSE.
-    hydrateGoalLoopSnapshot(data.goal_loop_status)
-  }
 }
 
 export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
@@ -770,7 +758,6 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
 function normalizeWorkspaceFsmRefs(raw: unknown): DashboardWorkspaceFsmRefs {
   const refsRecord = isRecord(raw) ? raw : {}
   return {
-    goal_id: asString(refsRecord.goal_id) ?? null,
     task_ids: asStringArray(refsRecord.task_ids),
     post_ids: asStringArray(refsRecord.post_ids),
     agent_name: asString(refsRecord.agent_name) ?? null,
@@ -803,7 +790,6 @@ function refsOverlap(
   right: DashboardWorkspaceFsmRefs | undefined,
 ): boolean {
   if (!left || !right) return false
-  if (left.goal_id && left.goal_id === right.goal_id) return true
   if (left.agent_name && left.agent_name === right.agent_name) return true
   if ((left.task_ids ?? []).some(taskId => (right.task_ids ?? []).includes(taskId))) return true
   return (left.post_ids ?? []).some(postId => (right.post_ids ?? []).includes(postId))
@@ -889,33 +875,6 @@ function normalizeWorkspaceFsmSnapshot(raw: unknown): DashboardWorkspaceFsmSnaps
 
 function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
   workspaceFsmSnapshot.value = normalizeWorkspaceFsmSnapshot(data.workspace_fsm)
-  goals.value = (Array.isArray(data.goals) ? data.goals : [])
-    .map((row): Goal | null => {
-      if (!isRecord(row)) return null
-      const id = asString(row.id)
-      const title = asString(row.title)
-      const status = asString(row.status)
-      const phase = asString(row.phase)
-      const createdAt = asString(row.created_at)
-      const updatedAt = asString(row.updated_at)
-      if (!id || !title || !status || !phase || !createdAt || !updatedAt) return null
-      return {
-        id,
-        title,
-        metric: asString(row.metric) ?? null,
-        target_value: asString(row.target_value) ?? null,
-        due_date: asString(row.due_date) ?? null,
-        priority: asNumber(row.priority) ?? 3,
-        status,
-        phase,
-        parent_goal_id: asString(row.parent_goal_id) ?? null,
-        last_review_note: asString(row.last_review_note) ?? null,
-        last_review_at: asString(row.last_review_at) ?? null,
-        created_at: createdAt,
-        updated_at: updatedAt,
-      }
-    })
-    .filter((row): row is Goal => row !== null)
 }
 
 export function hydratePlanningSnapshot(
@@ -924,7 +883,7 @@ export function hydratePlanningSnapshot(
 ): void {
   applyPlanningEnvelope(data)
   if (opts?.markRefreshAt !== false) {
-    lastGoalsRefreshAt.value = data.generated_at ?? new Date().toISOString()
+    lastPlanningRefreshAt.value = data.generated_at ?? new Date().toISOString()
   }
 }
 
@@ -1260,68 +1219,22 @@ export async function loadMoreBoardPosts(): Promise<void> {
   }
 }
 
-// --- Goals fetcher ---
+// --- Planning fetcher ---
 
-export async function refreshGoals(): Promise<void> {
-  goalsLoading.value = true
-  goalTreeLoading.value = true
-  goalTreeError.value = null
+export async function refreshPlanning(): Promise<void> {
+  planningLoading.value = true
+  planningError.value = null
   try {
-    const [
-      { fetchDashboardPlanning },
-      { fetchDashboardGoalsTree },
-    ] = await Promise.all([
-      import('./api/dashboard-mission'),
-      import('./api/dashboard-goals'),
-    ])
-    const [planning, tree] = await Promise.allSettled([
-      fetchDashboardPlanning(),
-      fetchDashboardGoalsTree(),
-    ])
-    const errors: string[] = []
-    let generatedAt: string | undefined
-    if (planning.status === 'fulfilled') {
-      hydratePlanningSnapshot(planning.value, { markRefreshAt: false })
-      generatedAt = planning.value.generated_at
-    } else {
-      console.warn('[Planning] fetch error:', planning.reason)
-      errors.push(errorMessageOr(planning.reason, 'Planning data failed to load'))
-    }
-    if (tree.status === 'fulfilled') {
-      const hydrated = hydrateGoalTreeSnapshot(tree.value)
-      if (hydrated) {
-        generatedAt ??= tree.value.generated_at
-      } else {
-        const message = 'Goal Store tree payload was malformed'
-        goalTreeError.value = message
-        errors.push(message)
-      }
-    } else {
-      console.warn('[Goals] tree fetch error:', tree.reason)
-      const message = errorMessageOr(tree.reason, 'Goal Store tree failed to load')
-      goalTreeError.value = message
-      errors.push(message)
-    }
-    if (errors.length > 0) {
-      // Any failure invalidates the combined goal/tree snapshot so consumers
-      // do not act on stale or partially-hydrated data.
-      goalTreeData.value = null
-      lastGoalsRefreshAt.value = null
-      goalTreeError.value = errors.join('; ')
-      showToast(WORK_GOAL_LOAD_PARTIAL_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
-    } else {
-      lastGoalsRefreshAt.value = generatedAt ?? new Date().toISOString()
-    }
+    const { fetchDashboardPlanning } = await import('./api/dashboard-mission')
+    const planning = await fetchDashboardPlanning()
+    hydratePlanningSnapshot(planning)
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
-    const message = errorMessageOr(err, 'Goal refresh failed')
-    goalTreeError.value = message
-    goalTreeData.value = null
-    lastGoalsRefreshAt.value = null
-    showToast(WORK_GOAL_LOAD_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
+    planningError.value = errorMessageOr(err, 'Planning refresh failed')
+    lastPlanningRefreshAt.value = null
+    showToast(WORK_PLANNING_LOAD_ERROR, 'error', WORK_PLANNING_TOAST_DURATION_MS)
   } finally {
-    goalsLoading.value = false
-    goalTreeLoading.value = false
+    planningLoading.value = false
   }
 }
 

@@ -275,7 +275,6 @@ type keeper_meta = {
   (* Performance & limits *)
   max_context_override : int option;
   (* Operational control *)
-  active_goal_ids : string list;
   paused : bool;
   latched_reason : Keeper_latched_reason.t option;
       (** Typed companion to [paused]. Only explicit operator pause and terminal

@@ -16,13 +16,13 @@ Current concepts stay independent and communicate through their public typed
 boundaries:
 
 - Keeper owns one continuous lane and receives wake-up events.
-- Goal and Task own intent and work state without becoming Keeper lifecycle
-  constraints.
+- Task owns planned work state without becoming a Keeper lifecycle constraint.
 - Board and Connector publish observations or wake-up events without taking
   ownership of a Keeper lane.
 - Runtime selects Provider and Model capabilities.
 - Tools submit normalized external-effect requests to Gate.
-- Gate applies exact Always Allowed rules, LLM Auto Judge, or nonblocking HITL.
+- Gate applies an explicit configured mode: Always Allow, LLM Auto Judge, or
+  nonblocking HITL.
 - Operator surfaces project state and request explicit actions; they do not
   create a parallel authorization hierarchy.
 

@@ -48,7 +48,6 @@ interface KeeperTraceBase {
 export interface KeeperTraceContextFields {
   readonly filePath?: string
   readonly line?: number
-  readonly goalId?: string
   readonly taskId?: string
   readonly boardPostId?: string
   readonly commentId?: string
@@ -85,7 +84,6 @@ export type KeeperTraceEvent =
       readonly filePath: string
       readonly line: number
       readonly surface: string
-      readonly goalId?: string
       readonly taskId?: string
       readonly boardPostId?: string
       readonly commentId?: string
@@ -261,7 +259,6 @@ function traceContextKey(event: KeeperTraceEvent): string {
   return [
     event.filePath ?? '',
     event.line ?? '',
-    event.goalId ?? '',
     event.taskId ?? '',
     event.boardPostId ?? '',
     event.commentId ?? '',

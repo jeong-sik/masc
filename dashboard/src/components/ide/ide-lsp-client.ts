@@ -96,7 +96,6 @@ export type SelectedAnnotation = Pick<
   | 'keeper_id'
   | 'kind'
   | 'content'
-  | 'goal_id'
   | 'task_id'
   | 'references'
   | 'file_path'

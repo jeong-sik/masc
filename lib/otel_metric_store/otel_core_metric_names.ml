@@ -1,4 +1,4 @@
-(** Core runtime, LLM, provider, task, goal, and SSE activity metric-name
+(** Core runtime, LLM, provider, task, keeper, and SSE activity metric-name
     constants.
 
     Included by {!Otel_metric_store} so existing callers keep using
@@ -25,8 +25,6 @@ let metric_pending_tasks = "masc_pending_tasks"
    whose assignee is no longer active), labeled by status_class. A gauge (current
    count), not a counter — no [_total] suffix, matching masc_pending_tasks. *)
 let metric_orphan_tasks = "masc_orphan_tasks"
-let metric_goal_attainment_pct = "masc_goal_attainment_pct"
-let metric_goal_attainment_measured = "masc_goal_attainment_measured"
 let metric_sse_reconnects = Otel_metric_store_core.declare_counter "masc_sse_reconnects_total"
 let metric_sse_idle_evictions = Otel_metric_store_core.declare_counter "masc_sse_idle_evictions_total"
 let metric_sse_rejects = Otel_metric_store_core.declare_counter "masc_sse_rejects_total"

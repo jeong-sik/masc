@@ -220,7 +220,7 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
 
 ## 7. 비범위 (out of scope for A0.1)
 
-- 다른 emitter (`lib/keeper/keeper_approval_queue.ml`, `lib/keeper/keeper_gate.ml`, `lib/server/server_dashboard_http*.ml`, `lib/workspace_goals.ml`) 의 ad-hoc Yojson — **Wave 2 이후**
+- 다른 emitter (`lib/keeper/keeper_approval_queue.ml`, `lib/keeper/keeper_gate.ml`, `lib/server/server_dashboard_http*.ml`) 의 ad-hoc Yojson — **Wave 2 이후**
 - Frontend TS gen (atdts) — **A0.3**
 - `SSEMessageSchema` 교체 — **A0.4**
 - OAS event passthrough 정책 — **A0.2 또는 별 RFC**
@@ -239,7 +239,7 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
 
 ## 9. Open follow-ups
 
-- frontend SSEEventType 68 vs backend distinct emit 39 = gap 29. 별도 inventory 필요 (`lib/keeper/`, `lib/workspace_goals.ml`, `lib/server/server_dashboard_http*.ml` 분포 — Wave 2 작업)
+- frontend SSEEventType 68 vs backend distinct emit 39 = gap 29. 별도 inventory 필요 (`lib/keeper/`, `lib/server/server_dashboard_http*.ml` 분포 — Wave 2 작업)
 - IDE crash root cause = `AnchoredThread` 가공 layer (research §6 별 트랙). A0.4 에서 nested 검증 도입 시 자동 해결 예상
 - atd schema repo 위치 — `lib/sse_event.atd` (lib 내부) vs `schema/sse_event.atd` (top-level). 본 plan 은 lib 내부 가정
 

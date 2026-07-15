@@ -128,14 +128,6 @@ describe('navigate', () => {
     expect(route.value.params.view).toBeUndefined()
   })
 
-  it('redirects retired goal-loop links into planning goal-loop view', () => {
-    navigate('monitoring', { section: 'goal-loop', goal: 'goal-1' })
-    expect(route.value.tab).toBe('workspace')
-    expect(route.value.params.section).toBe('planning')
-    expect(route.value.params.view).toBe('goal-loop')
-    expect(route.value.params.goal).toBe('goal-1')
-  })
-
   it('redirects retired command connectors links directly to the connectors surface', () => {
     navigate('command', { section: 'connectors' })
     expect(route.value.tab).toBe('connectors')

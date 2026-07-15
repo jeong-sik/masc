@@ -123,7 +123,6 @@ code_refs:
   - overview + runtime shell metadata
 - `GET /api/v1/dashboard/namespace-truth`
   - journey / agents / shared namespace truth
-- `GET /api/v1/dashboard/goal-loop/status`
   - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph

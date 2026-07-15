@@ -416,7 +416,6 @@ let dashboard_config_float_fields =
 
 let dashboard_config_string_list_fields =
   [
-    "active_goal_ids";
     "mention_targets";
     "allowed_paths";
   ]

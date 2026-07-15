@@ -25,7 +25,7 @@ module Cache = struct
       | Some annotations -> annotations
       | None ->
         let filter : annotation_filter =
-          { file_path = Some file_path; keeper_id = None; goal_id = None; task_id = None }
+          { file_path = Some file_path; keeper_id = None; task_id = None }
         in
         let annotations = Ide_annotations.list ~base_dir ~filter () in
         Hashtbl.replace tbl k annotations;
@@ -58,8 +58,7 @@ let tag_opt label value =
 ;;
 
 let annotation_route_tags (a : annotation) =
-  tag_opt "goal" a.goal_id
-  @ tag_opt "task" a.task_id
+  tag_opt "task" a.task_id
   @ List.map
       (fun ({ relation; reference } : annotation_reference) ->
          Printf.sprintf "%s:%s" relation reference)
@@ -250,17 +249,15 @@ let definition_links ~base_dir ~file_path ~line : Yojson.Safe.t list =
   ) matching
 
 (** Generate LSP Location[] for annotations related to those at [line].
-    Finds annotations sharing the same goal_id or task_id across the file.
+    Finds annotations sharing the same task_id across the file.
     Used by textDocument/references. *)
 let reference_locations ~base_dir ~file_path ~line ~include_declaration:_ :
     Yojson.Safe.t list =
   let matching = annotations_at_line ~base_dir ~file_path ~line in
-  let goal_ids = List.filter_map (fun (a : annotation) -> a.goal_id) matching in
   let task_ids = List.filter_map (fun (a : annotation) -> a.task_id) matching in
   let all = Cache.get ~base_dir ~file_path in
   let related = List.filter (fun (a : annotation) ->
-    (match a.goal_id with Some g -> List.mem g goal_ids | None -> false)
-    || (match a.task_id with Some t -> List.mem t task_ids | None -> false)
+    match a.task_id with Some t -> List.mem t task_ids | None -> false
   ) all in
   let seen = Hashtbl.create 16 in
   let deduped = List.filter (fun (a : annotation) ->
@@ -400,18 +397,16 @@ let folding_ranges ~base_dir ~file_path : Yojson.Safe.t list =
       else None
   ) groups
 
-(** Generate DocumentHighlight[] for annotations sharing goal/task context.
+(** Generate DocumentHighlight[] for annotations sharing task context.
     Used by textDocument/documentHighlight. *)
 let document_highlights ~base_dir ~file_path ~line : Yojson.Safe.t list =
   let matching = annotations_at_line ~base_dir ~file_path ~line in
   if matching = [] then []
   else
-    let goal_ids = List.filter_map (fun (a : annotation) -> a.goal_id) matching in
     let task_ids = List.filter_map (fun (a : annotation) -> a.task_id) matching in
     let all = Cache.get ~base_dir ~file_path in
     let related = List.filter (fun (a : annotation) ->
-      (match a.goal_id with Some g -> List.mem g goal_ids | None -> false)
-      || (match a.task_id with Some t -> List.mem t task_ids | None -> false)
+      match a.task_id with Some t -> List.mem t task_ids | None -> false
     ) all in
     List.map (fun (a : annotation) ->
       `Assoc [

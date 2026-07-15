@@ -4,7 +4,6 @@ let tool_query_text_of_user_message (text : string) : string =
   let allowed_sections =
     [ "### Pending Mentions"
     ; "### Scope Messages"
-    ; "### Active Goals"
     ; "### Namespace State"
     ; "### Board Activity"
     ; "### Live Worktree Delta"

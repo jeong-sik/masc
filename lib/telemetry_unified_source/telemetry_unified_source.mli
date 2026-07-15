@@ -8,7 +8,6 @@ type source =
   | Tool_usage
   | Oas_event
   | Execution_receipt
-  | Goal_event
   | Tool_metric
 
 val source_to_string : source -> string

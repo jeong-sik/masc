@@ -382,8 +382,7 @@ type keeper_meta =
   ; (* -- Performance & Limits -- *)
     max_context_override : int option
   ; (* -- Operational control (top-level, not runtime) -- *)
-    active_goal_ids : string list
-  ; paused : bool
+    paused : bool
   ; latched_reason : Keeper_latched_reason.t option
     (** Typed companion to [paused]. Only explicit operator pause and terminal
         dead-tombstone paths may write it. [None] while paused is a fail-closed
@@ -510,8 +509,6 @@ let effective_meta_of_profile_defaults
             (match defaults.mention_targets with
              | [] -> meta.mention_targets
              | targets -> targets);
-          active_goal_ids =
-            apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
           sandbox_profile;
           sandbox_image =
             apply_profile_default_opt defaults.sandbox_image meta.sandbox_image;

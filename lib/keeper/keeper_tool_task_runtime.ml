@@ -112,151 +112,18 @@ let validation_error_json message =
        ])
 ;;
 
-let validate_goal_id config goal_id =
-  match Goal_store.get_goal config ~goal_id with
-  | Some _ -> Ok goal_id
-  | None -> Error (Printf.sprintf "unknown goal_id: %s" goal_id)
-;;
-
-let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
-  match Safe_ops.json_string_opt "goal_id" args with
-  | Some s when String.trim s <> "" ->
-      validate_goal_id config (String.trim s) |> Result.map Option.some
-  | _ ->
-      (match meta.active_goal_ids with
-       | [] -> Ok None
-       | [ goal_id ] ->
-           validate_goal_id config goal_id |> Result.map Option.some
-       | _ :: _ :: _ -> Ok None)
-;;
-
-(* RFC-0034.v2: per-goal task creation cap moved to
-   [Workspace_task_capacity] so all 5 task creation entrypoints share the
-   same guard. Pre-RFC-0034.v2, these helpers (and the constant
-   [keeper_task_create_goal_open_limit]) lived here as introduced by
-   #13981. *)
-
-let active_goal_scope_json
-      ~(meta : keeper_meta)
-      ?matched_goal_id
-      ?excluded_count
-      ?blocked_count
-      ?verification_blocked_count
-      ?scope_excluded_count
-      ?explicit_excluded_count
-      ?claim_pool_candidate_count
-      ?effective_mode
-      ?effective_goal_ids
-      ?fallback_reason
-      ()
-  =
-  let scoped = meta.active_goal_ids <> [] in
-  let mode =
-    let scope_mode =
-      match effective_mode with
-      | Some mode -> mode
-      | None ->
-        if scoped then Keeper_runtime_contract.Active_goal_ids
-        else Keeper_runtime_contract.All_tasks
-    in
-    Keeper_runtime_contract.claim_scope_mode_to_string scope_mode
-  in
-  let effective_goal_ids =
-    match effective_goal_ids with
-    | Some goal_ids -> goal_ids
-    | None -> meta.active_goal_ids
-  in
-  let fields =
-    [
-      ("mode", `String mode);
-      ("scoped", `Bool scoped);
-      ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-      );
-      ( "effective_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) effective_goal_ids)
-      );
-      ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
-      ("matched_goal_id", Json_util.string_opt_to_json matched_goal_id);
-    ]
-  in
-  let fields =
-    match excluded_count with
-    | Some count -> fields @ [ ("excluded_count", `Int count) ]
-    | None -> fields
-  in
-  let int_fields =
-    [ "blocked_count", blocked_count
-    ; "verification_blocked_count", verification_blocked_count
-    ; "scope_excluded_count", scope_excluded_count
-    ; "explicit_excluded_count", explicit_excluded_count
-    ; "claim_pool_candidate_count", claim_pool_candidate_count
-    ]
-    |> List.filter_map (fun (name, value) ->
-      Option.map (fun count -> name, `Int count) value)
-  in
-  let fields = fields @ int_fields in
-  `Assoc fields
-;;
-
-let claim_scope_context_suffix ~(meta : keeper_meta) claim_goal_scope =
-  match claim_goal_scope.Keeper_runtime_contract.mode with
-  | Keeper_runtime_contract.Active_goal_ids ->
-    (match meta.active_goal_ids with
-     | [] -> " in active goal scope"
-     | goal_ids ->
-       Printf.sprintf
-         " within active_goal_ids=[%s]"
-         (String.concat ", " goal_ids))
-  | Keeper_runtime_contract.All_tasks -> " across all tasks"
-  | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks ->
-    " after active-goal fallback to all tasks"
-;;
-
-let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
-  match claim_goal_scope.Keeper_runtime_contract.fallback_reason with
-  | Some _ ->
-    Printf.sprintf
-      "ACTION: Stop scope-lock diagnosis; claim_scope.mode=%s already searched all \
-       tasks; resolve blockers/excluded=%d."
-      (Keeper_runtime_contract.claim_scope_mode_to_string
-         claim_goal_scope.Keeper_runtime_contract.mode)
-      excluded_count
-  | None ->
-    let scope_hint =
-      match claim_goal_scope.Keeper_runtime_contract.mode with
-      | Keeper_runtime_contract.Active_goal_ids ->
-        (* Scope only stays in [active_goal_ids] mode when a Todo task IS linked
-           to the goal (otherwise the resolver falls back to all_tasks). So a
-           no-eligible here means those scoped tasks exist but are blocked /
-           awaiting verification — not a scope lock to clear. *)
-        " Scoped tasks exist but are blocked or awaiting verification; resolve those blockers."
-      | Keeper_runtime_contract.All_tasks
-      | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks -> ""
-    in
-    Printf.sprintf
-      "ACTION: Stop task-checking — blocked/excluded=%d.%s"
-      excluded_count
-      scope_hint
-;;
-
 let no_eligible_blocker_summary
       ~blocked_count
       ~verification_blocked_count
       ~scope_excluded_count
   =
   Printf.sprintf
-    "Diagnostics: goal_scope_or_filter=%d, verification=%d, blocked=%d."
+    "Diagnostics: task_scope_or_filter=%d, verification=%d, blocked=%d."
     scope_excluded_count
     verification_blocked_count
     blocked_count
 ;;
 
-
-let find_task_goal_id config task_id =
-  let index = Workspace_goal_index.build_task_goal_index_for_config config in
-  try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None
-;;
 
 let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
   {
@@ -483,12 +350,6 @@ let handle_keeper_task_tool_with_outcome
         (validation_error_json
            "description is required. Explain what needs to be done and why.")
     else (
-      match resolve_task_create_goal_id ~config ~meta args with
-      | Error message ->
-        Keeper_tool_execution.failure
-          ~class_:Tool_result.Policy_rejection
-          (validation_error_json message)
-      | Ok goal_id ->
           (* De-duplicated: this keeper-internal path now shares the canonical
              [Task.Args.parse_task_contract] used by the public
              masc_task_create facade. The previous local copy
@@ -497,30 +358,15 @@ let handle_keeper_task_tool_with_outcome
              with a wrong-typed value, which falsely failed keeper_task_create.
              Same lib, no
              dependency wall; the canonical parser handles [None | Some `Null]. *)
-          (match Task.Args.parse_task_contract args with
+          match Task.Args.parse_task_contract args with
            | Error message ->
              Keeper_tool_execution.failure
                ~class_:Tool_result.Policy_rejection
                (validation_error_json message)
            | Ok contract ->
-              let capacity_error =
-                let backlog = Workspace.read_backlog config in
-                Workspace_task_capacity.check_for_config config ?goal_id backlog
-              in
-              (match capacity_error with
-               | Some error ->
-                 Keeper_tool_execution.failure
-                   ~class_:Tool_result.Workflow_rejection
-                   (Workspace_task_capacity.error_to_json_string error)
-               | None ->
               let result =
                 Workspace_task.add_task
                   ?contract
-                  ?goal_id
-                  ~reject_if:
-                    (Workspace_task_capacity.rejection_for_add_task_for_config
-                       config
-                       ?goal_id)
                   config
                   ~title
                   ~priority
@@ -532,14 +378,10 @@ let handle_keeper_task_tool_with_outcome
                      [
                        "ok", `Bool true;
                        "result", `String result;
-                       "goal_id", Json_util.string_opt_to_json goal_id;
                        ( "typed_outcome"
                        , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
-                     ])))))
+                     ])))
     | Task_claim ->
-    let claim_goal_scope =
-      Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
-    in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
     in
@@ -578,26 +420,13 @@ let handle_keeper_task_tool_with_outcome
         if requested_task_id <> "" then
           explicit_claim_result ()
         else
-          Workspace.claim_next_r config ~agent_name:meta.agent_name
-            ~task_filter:claim_goal_scope.task_filter
-            ~allow_scope_fallback:true
-            ()
+          Workspace.claim_next_r config ~agent_name:meta.agent_name ()
       in
       let result = claim_requested_task () in
     let auto_started_ok = ref false in
     (match result with
-     | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
+     | Workspace.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
-       (* Make the scope override visible: this is a claim outside the keeper's
-          active_goal_ids, taken because no in-scope task was eligible
-          (schedule-level fallback). Silent widening would let operators misread
-          the keeper's scope. *)
-       if scope_widened then
-         Log.Keeper.info ~keeper_name:meta.name
-           "goal-scope widened to all_tasks for claim of %s: no in-scope task was \
-            eligible (active_goal_ids=[%s])"
-           task_id
-           (String.concat ", " meta.active_goal_ids);
        (* Guard: claim_next_r returns existing active tasks via Existing_claim
           (task_state_schedule.ml:302). When the task is already InProgress,
           dispatching Start produces an InvalidState transition error every
@@ -641,29 +470,20 @@ let handle_keeper_task_tool_with_outcome
           ; scope_excluded_count
           ; _
           } ->
-        let action =
-          no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count
-        in
         Printf.sprintf
-          "No eligible tasks%s. %s %s"
-          (claim_scope_context_suffix ~meta claim_goal_scope)
-          action
+          "No eligible tasks. ACTION: Stop task-checking — blocked/excluded=%d. %s"
+          excluded_count
           (no_eligible_blocker_summary
              ~blocked_count
              ~verification_blocked_count
              ~scope_excluded_count)
       | Workspace.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
-    let claim_scope, claimed_task_fields =
+    let claimed_task_fields =
       match result with
       | Workspace.Claim_next_claimed
           { task_id; title; priority; released_task_id; scope_widened; _ } ->
-          let matched_goal_id = find_task_goal_id config task_id in
-          ( active_goal_scope_json ~meta ?matched_goal_id
-              ~effective_mode:claim_goal_scope.mode
-              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
-          , [
+          [
               ( "claim_observation",
                 Task.Tool.build_claim_observation_payload
                   ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
@@ -674,37 +494,13 @@ let handle_keeper_task_tool_with_outcome
                     ("task_id", `String task_id);
                     ("title", `String title);
                     ("priority", `Int priority);
-                    ( "goal_id",
-                      Json_util.string_opt_to_json matched_goal_id );
                     ( "released_task_id",
                       Json_util.string_opt_to_json released_task_id );
                   ] );
-            ] )
-      | Workspace.Claim_next_no_eligible
-          { excluded_count
-          ; blocked_count
-          ; verification_blocked_count
-          ; scope_excluded_count
-          ; explicit_excluded_count
-          ; claim_pool_candidate_count
-          } ->
-          ( active_goal_scope_json
-              ~meta
-              ~excluded_count
-              ~blocked_count
-              ~verification_blocked_count
-              ~scope_excluded_count
-              ~explicit_excluded_count
-              ~claim_pool_candidate_count
-              ~effective_mode:claim_goal_scope.mode
-              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
-          , [] )
+            ]
+      | Workspace.Claim_next_no_eligible _ -> []
       | Workspace.Claim_next_no_unclaimed | Workspace.Claim_next_error _ ->
-          ( active_goal_scope_json ~meta ~effective_mode:claim_goal_scope.mode
-              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
-          , [] )
+          []
     in
     let typed_outcome_field =
       match result with
@@ -714,11 +510,6 @@ let handle_keeper_task_tool_with_outcome
           ; verification_blocked_count
           ; _
           } ->
-        let all_goals_excluded =
-          match claim_goal_scope.effective_goal_ids with
-          | [] -> true
-          | _ -> false
-        in
         Some
           ( "typed_outcome"
           , Keeper_tool_outcome.to_json
@@ -728,7 +519,6 @@ let handle_keeper_task_tool_with_outcome
                        { scope_excluded_count
                        ; blocked_count
                        ; verification_blocked_count
-                       ; all_goals_excluded
                        }
                  }) )
       | Workspace.Claim_next_no_unclaimed ->
@@ -750,7 +540,6 @@ let handle_keeper_task_tool_with_outcome
         (`Assoc
            ([
               ("result", `String message);
-              ("claim_scope", claim_scope);
               ("auto_started", `Bool !auto_started_ok);
             ]
              @ (match typed_outcome_field with

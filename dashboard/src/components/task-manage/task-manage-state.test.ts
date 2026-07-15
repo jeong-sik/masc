@@ -6,13 +6,13 @@ import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
 const mockCallMcpTool = vi.fn()
 const mockShowToast = vi.fn()
 const mockRefreshExecution = vi.fn()
-const mockRefreshGoals = vi.fn()
+const mockRefreshPlanning = vi.fn()
 
 vi.mock('../../api/mcp', () => ({ callMcpTool: (...args: any[]) => mockCallMcpTool(...args) }))
 vi.mock('../common/toast', () => ({ showToast: (...args: any[]) => mockShowToast(...args) }))
 vi.mock('../../store', () => ({
   refreshExecution: (...args: any[]) => mockRefreshExecution(...args),
-  refreshGoals: () => mockRefreshGoals(),
+  refreshPlanning: () => mockRefreshPlanning(),
 }))
 
 const flushAsync = () => new Promise<void>((r) => setTimeout(() => r(), 10))
@@ -24,10 +24,10 @@ describe('task-manage-state', () => {
     mockCallMcpTool.mockReset()
     mockShowToast.mockReset()
     mockRefreshExecution.mockReset()
-    mockRefreshGoals.mockReset()
+    mockRefreshPlanning.mockReset()
     mockCallMcpTool.mockResolvedValue(undefined)
     mockRefreshExecution.mockResolvedValue(undefined)
-    mockRefreshGoals.mockResolvedValue(undefined)
+    mockRefreshPlanning.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -61,17 +61,6 @@ describe('task-manage-state', () => {
     expect(mockCallMcpTool).toHaveBeenCalledWith('masc_add_task', expect.objectContaining({ priority: 2 }))
   })
 
-  it('createTask includes goal_id when provided and trimmed', async () => {
-    await createTask({ title: 't', description: '', goal_id: '  g-123  ' })
-    expect(mockCallMcpTool).toHaveBeenCalledWith('masc_add_task', expect.objectContaining({ goal_id: 'g-123' }))
-  })
-
-  it('createTask omits goal_id when empty', async () => {
-    await createTask({ title: 't', description: '', goal_id: '' })
-    const args = mockCallMcpTool.mock.calls[0]![1] as Record<string, unknown>
-    expect(args.goal_id).toBeUndefined()
-  })
-
   it('sets taskCreating true while working and false after success', async () => {
     let resolveMcp: () => void
     mockCallMcpTool.mockImplementation(() => new Promise<void>((r) => { resolveMcp = r }))
@@ -89,10 +78,10 @@ describe('task-manage-state', () => {
     expect(showTaskCreate.value).toBe(false)
   })
 
-  it('refreshes execution and goals on success', async () => {
+  it('refreshes execution and planning on success', async () => {
     await createTask({ title: 't', description: '' })
     expect(mockRefreshExecution).toHaveBeenCalledWith({ force: true })
-    expect(mockRefreshGoals).toHaveBeenCalled()
+    expect(mockRefreshPlanning).toHaveBeenCalled()
   })
 
   it('shows error toast and returns false on MCP failure', async () => {

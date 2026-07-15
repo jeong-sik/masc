@@ -21,8 +21,6 @@ type stimulus_kind =
   | Hitl_resolved  (** HITL resolution delivered as an ordinary Keeper wake. *)
   | Failure_judgment
       (** RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
-  | Goal_assigned
-      (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
 
 type reaction_kind =
   | Turn_started
@@ -124,7 +122,6 @@ val record_execution_receipt_reaction :
   trace_id:string ->
   ?turn_count:int ->
   current_task_id:string option ->
-  goal_ids:string list ->
   outcome:string ->
   reaction_kind:reaction_kind ->
   terminal_reason_code:string ->

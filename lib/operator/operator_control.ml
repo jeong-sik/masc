@@ -117,13 +117,8 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
       let description =
         get_string request.payload "description" "Injected by operator control plane"
       in
-      (* RFC-0034.v2: per-goal cap guard. operator [task_inject] payload
-         has no [goal_id] today; guard is a no-op for orphan tasks but
-         wired so a future goal-aware payload inherits the cap. *)
       let result =
-        Workspace.add_task
-          ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
-          ctx.config ~title ~priority ~description
+        Workspace.add_task ctx.config ~title ~priority ~description
       in
       workspace_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)

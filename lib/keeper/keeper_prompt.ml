@@ -39,7 +39,7 @@ let critical_prompt_recovery_block_fallback =
     [ "<continuity>";
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
       "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
-      "Continuity is runtime-owned: use the checkpoint, typed task/goal state, events, and tool results. Never infer a runtime transition from prose.";
+      "Continuity is runtime-owned: use the checkpoint, typed task state, events, and tool results. Never infer a runtime transition from prose.";
       "</continuity>";
       "";
       "<world>";
@@ -138,7 +138,7 @@ let behavior_prompt_block name =
 
 let build_keeper_system_prompt
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(home_ground = "") ?(active_goals = []) () =
+    ?(home_ground = "") () =
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
      [Keeper_prompt_external.get]. Missing/unreadable files no longer inject
@@ -166,23 +166,6 @@ let build_keeper_system_prompt
     match Keeper_persona_block.render ~persona_extended with
     | None -> ""
     | Some block -> block ^ "\n\n"
-  in
-  let active_goals_block =
-    match active_goals with
-    | [] -> ""
-    | goals ->
-        let lines =
-          List.map
-            (fun (id, title) ->
-               (* RFC-0294: available-goals line was "- <id> [<horizon>] <title>";
-                  horizon removed, so it is now "- <id> <title>". *)
-               Printf.sprintf "- %s %s"
-                 (String_util.escape_xml id)
-                 (String_util.escape_xml title))
-            goals
-        in
-        Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"
-          (String.concat "\n" lines)
   in
   let home_ground_block =
     if home_ground = "" then ""
@@ -270,7 +253,6 @@ let build_keeper_system_prompt
       persona_block;
       "<identity>";
       custom;
-      active_goals_block;
       "</identity>";
     ]
   |> ensure_critical_prompt_anchors

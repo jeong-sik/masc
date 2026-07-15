@@ -779,7 +779,6 @@ let dispatch_with_task_list_projection task_list_projection ctx ~name ~args =
          ctx
          args)
   | "masc_update_priority" -> Some (handle_update_priority ~tool_name:name ~start_time:start ctx args)
-  | "masc_task_set_goal" -> Some (handle_set_goal ~tool_name:name ~start_time:start ctx args)
   | "masc_tasks" -> Some (handle_tasks ~tool_name:name ~start_time:start ctx args)
   | "masc_task_history" -> Some (handle_task_history ~tool_name:name ~start_time:start ctx args)
   | _ -> None

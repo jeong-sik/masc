@@ -176,7 +176,6 @@ let is_workspace_target_type value =
   match Operator_action_constants.target_type_of_string value with
   | Some Operator_action_constants.Workspace -> true
   | Some Operator_action_constants.Keeper
-  | Some Operator_action_constants.Goal
   | None -> false
 ;;
 

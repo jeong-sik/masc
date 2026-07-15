@@ -35,7 +35,7 @@
   overflow: hidden;
 }
 
-/* ── Generic sidebar items (tasks / goals / decisions / memory) ── */
+/* ── Generic sidebar items (tasks / decisions / memory) ── */
 .sb-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

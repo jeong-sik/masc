@@ -22,7 +22,6 @@ let route_annotation : Types.annotation =
   ; keeper_id = "sangsu"
   ; kind = Types.Comment
   ; content = "Connect this line to the active review context."
-  ; goal_id = Some "goal-ide"
   ; task_id = Some "task-42"
   ; references =
       [ { relation = "discussion"; reference = "thread-1" }
@@ -130,7 +129,6 @@ let test_create_lists_route_context () =
         ~line_end:14
         ~kind:Types.Question
         ~content:"Should this trace be attached to the PR review?"
-        ~goal_id:"goal-ide"
         ~task_id:"task-42"
         ~references:route_annotation.references
         ()
@@ -141,7 +139,6 @@ let test_create_lists_route_context () =
       let filter =
         { Types.file_path = Some "lib/keeper/keeper_tool_ide_runtime.ml"
         ; keeper_id = None
-        ; goal_id = None
         ; task_id = None
         }
       in
@@ -166,7 +163,6 @@ let test_lsp_overlay_exposes_route_context () =
         ~line_end:14
         ~kind:Types.Question
         ~content:"Should this trace be attached to the PR review?"
-        ~goal_id:"goal-ide"
         ~task_id:"task-42"
         ~references:route_annotation.references
         ()
@@ -257,7 +253,7 @@ let test_region_tracker_writes_fixed_regions_file () =
 (* RFC-0128 §4.2 — partition-aware store routing. *)
 
 let make_filter () : Types.annotation_filter =
-  { file_path = None; keeper_id = None; goal_id = None; task_id = None }
+  { file_path = None; keeper_id = None; task_id = None }
 
 let create_in_partition ~base_dir ~partition ~kind ~content () =
   Store.create
@@ -554,7 +550,7 @@ let test_reference_locations_related () =
         ~line_end:5
         ~kind:Types.Comment
         ~content:"first"
-        ~goal_id:"goal-x"
+        ~task_id:"task-x"
         ()
     with
     | Error msg -> fail msg
@@ -567,8 +563,8 @@ let test_reference_locations_related () =
            ~line_start:20
            ~line_end:20
            ~kind:Types.Comment
-           ~content:"second same goal"
-           ~goal_id:"goal-x"
+           ~content:"second same task"
+           ~task_id:"task-x"
            ()
        with
        | Error msg -> fail msg
@@ -715,7 +711,6 @@ let test_compact_preserves_annotations () =
           ~line_end:2
           ~kind:Types.Comment
           ~content
-          ~goal_id:"g"
           ~task_id:"t"
           ~references:[ { relation = "evidence"; reference = "opaque-1" } ]
           ()
@@ -727,7 +722,7 @@ let test_compact_preserves_annotations () =
     let a2 = mk "second" in
     Store.compact ~base_dir ();
     let filter =
-      { Types.file_path = None; keeper_id = None; goal_id = None; task_id = None }
+      { Types.file_path = None; keeper_id = None; task_id = None }
     in
     let listed = Store.list ~base_dir ~filter () in
     check int "compact preserves count" 2 (List.length listed);

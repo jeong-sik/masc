@@ -431,7 +431,7 @@ describe('LogViewer Code links', () => {
         message: 'tool warning',
         details: {
           context: {
-            goal_id: 'goal-runtime',
+
             task_id: 'task-runtime',
             board_post_id: 'post-1',
             comment_id: 'comment-1',
@@ -458,7 +458,6 @@ describe('LogViewer Code links', () => {
     const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.logs-route-link')]
     expect(routeLinks.map(link => link.textContent)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',

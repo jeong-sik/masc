@@ -31,6 +31,7 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
         in
         let removed_fields =
           [ "goal"
+          ; "active_goal_ids"
           ; "tool_access"
           ; "tool_denylist"
           ; "shards"
@@ -71,7 +72,6 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               sandbox_image = None;
               network_mode = None;
               multimodal_policy = None;
-              active_goal_ids = None;
               telemetry_feedback_enabled =
                 Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
               telemetry_feedback_window_hours =

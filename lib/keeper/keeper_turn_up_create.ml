@@ -36,26 +36,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some paths -> paths
     | None -> Option.value ~default:[] p.profile_defaults.allowed_paths
   in
-  let active_goal_ids =
-    match p.active_goal_ids_opt with
-    | Some ids -> ids
-    | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
-  in
-  let active_goal_ids_error =
-    match p.active_goal_ids_opt with
-    | None -> None
-    | Some _ ->
-        let missing =
-          List.filter
-            (fun goal_id -> Option.is_none (Goal_store.get_goal ctx.config ~goal_id))
-            active_goal_ids
-        in
-        if missing = [] then None
-        else
-          Some
-            (Printf.sprintf "unknown active_goal_ids: %s"
-               (String.concat ", " missing))
-  in
   let sandbox_profile =
     resolve_sandbox_profile ~fallback:p.profile_defaults.sandbox_profile
   in
@@ -77,10 +57,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
-  match active_goal_ids_error with
-  | Some msg -> tool_result_error msg
-  | None ->
-    match
+  match
       validate_sandbox_settings ~allowed_paths
     with
     | Error err ->
@@ -209,22 +186,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           |> Keeper_types_profile.load_persona_extended
           |> Option.value ~default:""
         in
-        let active_goals =
-          List.filter_map
-            (fun goal_id ->
-               match Goal_store.get_goal ctx.config ~goal_id with
-               (* RFC-0294: active_goals tuple dropped its horizon element. *)
-               | Some { Goal_store.id; title; _ } ->
-                   Some (id, title)
-               | None -> None)
-            active_goal_ids
-        in
         let system_prompt =
           build_keeper_system_prompt
             ~instructions
             ~persona_extended
             ~keeper_name:p.name
-            ~active_goals
             ()
       in
       let ctx0 =
@@ -271,8 +237,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
-        active_goal_ids =
-          active_goal_ids;
         paused = false;
         latched_reason = None;
         autoboot_enabled;

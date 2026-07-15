@@ -321,8 +321,6 @@ let docker_workspace_state_mounts =
   ; Workspace_state_file, "board_votes.jsonl"
   ; Workspace_state_file, "board_reactions.jsonl"
   ; Workspace_state_file, "current_task"
-  ; Workspace_state_file, "goals.json"
-  ; Workspace_state_file, "goal_events.jsonl"
   ]
 ;;
 

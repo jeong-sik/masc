@@ -89,7 +89,6 @@ let degraded_keeper_dashboard_row
      ; ("current_task_id",
         Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id))
-     ; ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids))
      ; ("created_at", `String m.created_at)
      ; ("updated_at", `String m.updated_at)
      ; ("phase", `String "degraded")
@@ -336,7 +335,6 @@ let running_keeper_count (config : Workspace.config) : int =
        0
 
 let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojson.Safe.t =
-  let include_goals = true in
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
@@ -617,9 +615,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           let runtime_contract =
             Keeper_runtime_contract.runtime_observability_contract_json ~config m
           in
-          let goal_progress =
-            Option.value ~default:`Null (Json_util.assoc_member_opt "goal_progress" runtime_contract)
-          in
           let blocked_task_count =
             Safe_ops.json_int "blocked_task_count" ~default:0 runtime_contract
           in
@@ -854,27 +849,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ( "current_task_id",
                 Json_util.string_opt_to_json
                   (Option.map Keeper_id.Task_id.to_string m.current_task_id) );
-              ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
               ("trace_history_count", `Int trace_history_count);
-              ("active_goal_ids",
-                `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
-              ( "active_goals_tree",
-                if (not compact) && include_goals && m.active_goal_ids <> [] then
-                  let all_goals = Goal_store.list_goals config () in
-                  let linked = List.filter (fun (g : Goal_store.goal) ->
-                    List.mem g.id m.active_goal_ids) all_goals in
-                  let tasks = Workspace.get_tasks_safe config in
-                  let forest =
-                    Dashboard_goals.build_forest ~config ~goals:linked ~tasks
-                  in
-                  `Assoc [
-                    ("count", `Int (List.length linked));
-                    ("nodes", `List (List.map Dashboard_goals.tree_node_to_json forest));
-                  ]
-                else
-                  `Null );
               ( "persona",
                 match m.persona with
                 | Some persona when String.trim persona <> "" -> `String persona
@@ -897,7 +874,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("sandbox_last_error",
                 Json_util.string_opt_to_json sandbox_last_error);
               ("runtime_contract", runtime_contract);
-              ("goal_progress", goal_progress);
               ("blocked_task_count", `Int blocked_task_count);
               ("runtime_trust", runtime_trust);
               ("paused", `Bool m.paused);
@@ -1107,7 +1083,6 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
                      ("trace_id", Option.value ~default:`Null (Json_util.assoc_member_opt "trace_id" row));
                      ("generation", Option.value ~default:`Null (Json_util.assoc_member_opt "generation" row));
                      ("current_task_id", Option.value ~default:`Null (Json_util.assoc_member_opt "current_task_id" row));
-                     ("active_goal_ids", Option.value ~default:`Null (Json_util.assoc_member_opt "active_goal_ids" row));
                      ("trust", Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row));
                    ])
         | _ -> [])

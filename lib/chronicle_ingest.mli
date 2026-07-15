@@ -26,7 +26,6 @@ type candidate_epoch =
   ; end_commit : string
   ; start_date : string
   ; end_date : string
-  ; goal_ids : string list
   ; file_paths : string list
   ; commit_count : int
   }
@@ -62,16 +61,9 @@ val ingest_since :
     Visible for testing. *)
 val parse_git_log : string -> commit_event list
 
-(** Extract goal IDs from a commit's subject and file paths.
-
-    Recognized patterns: [PK-12345], [TASK-123], [task-123], [#123].
-
-    Visible for testing. *)
-val extract_goal_ids : commit_event -> string list
-
 (** Group commit events into candidate epochs.
 
-    First groups by shared goal-ID, then groups remaining by time window.
+    Groups commits by the configured time window.
 
     Visible for testing. *)
 val group_events :

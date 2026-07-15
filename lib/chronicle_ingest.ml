@@ -2,7 +2,7 @@
     Pure OCaml, no LLM dependency.
 
     Ingest reads git history, extracts commit metadata, groups commits
-    into candidate epochs by goal-ID clustering, and produces
+    into candidate epochs by an explicit time window, and produces
     {!candidate_epoch} values ready for the synthesize phase.
 
     @since Project Chronicle Phase 2 *)
@@ -66,7 +66,6 @@ type candidate_epoch =
   ; end_commit : string
   ; start_date : string
   ; end_date : string
-  ; goal_ids : string list
   ; file_paths : string list
   ; commit_count : int
   }
@@ -120,75 +119,7 @@ let parse_git_log raw =
   in
   loop commits [] [] None
 
-(* --- Goal-ID extraction --- *)
-
-(* Patterns: PK-12345, TASK-123, task-123, #123 *)
-let goal_id_re =
-  let re = Str.regexp_case_fold
-    "\\([A-Z][A-Z_]*-[0-9]+\\)\\|\\(task-[0-9]+\\)\\|\\(#[0-9]+\\)"
-  in
-  fun s ->
-    let rec extract_all acc pos =
-      if pos >= String.length s then List.rev acc
-      else if Str.string_match re s pos then
-        let m = Str.matched_string s in
-        let m = String.trim m in
-        let next = pos + max 1 (String.length (Str.matched_string s)) in
-        extract_all (m :: acc) next
-      else
-        extract_all acc (pos + 1)
-    in
-    extract_all [] 0
-
-let extract_goal_ids (ev : commit_event) =
-  let from_subject = goal_id_re ev.subject in
-  let from_files =
-    ev.files
-    |> List.filter_map (fun f ->
-      match goal_id_re f with [] -> None | ids -> Some ids)
-    |> List.concat
-  in
-  from_subject @ from_files
-  |> List.sort_uniq String.compare
-
 (* --- Epoch grouping --- *)
-
-(* Group contiguous commits sharing at least one goal ID. *)
-let group_by_goal_id events =
-  let rec loop current_group groups remaining =
-    match remaining with
-    | [] ->
-      let groups =
-        match current_group with
-        | [] -> groups
-        | _ -> List.rev current_group :: groups
-      in
-      List.rev groups
-    | ev :: rest ->
-      let goals = extract_goal_ids ev in
-      match current_group with
-      | [] ->
-        if goals = [] then
-          loop [] ([ ev ] :: groups) rest
-        else
-          loop [ ev ] groups rest
-      | first :: _ ->
-        let first_goals = extract_goal_ids first in
-        let shared =
-          goals <> []
-          && first_goals <> []
-          && List.exists (fun g -> List.mem g first_goals) goals
-        in
-        if shared then
-          loop (ev :: current_group) groups rest
-        else
-          let groups = List.rev current_group :: groups in
-          if goals = [] then
-            loop [] ([ ev ] :: groups) rest
-          else
-            loop [ ev ] groups rest
-  in
-  loop [] [] events
 
 (* Group remaining commits by time window (days). *)
 let rec group_by_time_window events ~days =
@@ -242,12 +173,6 @@ and within_days d1 d2 days =
 let make_candidate first rest =
   let commits = first :: rest in
   let last = List.fold_left (fun _ ev -> ev) first rest in
-  let all_goals =
-    commits
-    |> List.map extract_goal_ids
-    |> List.concat
-    |> List.sort_uniq String.compare
-  in
   let all_files =
     commits
     |> List.map (fun ev -> ev.files)
@@ -261,20 +186,14 @@ let make_candidate first rest =
       else subj
     in
     let year = String.sub first.author_date 0 4 in
-    let id =
-      match all_goals with
-      | g :: _ -> g
-      | [] ->
-        let short = String.sub first.sha 0 (min 7 (String.length first.sha)) in
-        Printf.sprintf "%s-cluster-%s" year short
-    in
+    let short = String.sub first.sha 0 (min 7 (String.length first.sha)) in
+    let id = Printf.sprintf "%s-cluster-%s" year short in
     { id
     ; label
     ; start_commit = first.sha
     ; end_commit = last.sha
     ; start_date = String.sub first.author_date 0 10
     ; end_date = String.sub last.author_date 0 10
-    ; goal_ids = all_goals
     ; file_paths = all_files
     ; commit_count = List.length commits
     }
@@ -303,27 +222,11 @@ let ingest_since_last ~workdir ~last_commit =
     else ingest_raw ~workdir ~from:last_commit ~to_:head
 
 let group_events ?(time_window_days = 7) events =
-  let goal_groups = group_by_goal_id events in
-  let ungrouped =
-    goal_groups
-    |> List.filter_map (function
-      | [ ev ] when extract_goal_ids ev = [] -> Some ev
-      | _ -> None)
-  in
-  let grouped =
-    goal_groups
-    |> List.filter (function
-      | [] -> false
-      | [ ev ] -> extract_goal_ids ev <> []
-      | _ -> true)
-  in
-  let time_groups = group_by_time_window ungrouped ~days:time_window_days in
-  let all_groups = grouped @ time_groups in
-  List.filter_map (fun g ->
+  group_by_time_window events ~days:time_window_days
+  |> List.filter_map (fun g ->
     match g with
     | [] -> None
     | first :: rest -> Some (make_candidate first rest))
-    all_groups
   |> List.sort (fun a b -> String.compare a.start_date b.start_date)
 
 let ingest_range ?(time_window_days = 7) ~workdir ~from ~to_ () =

@@ -1,6 +1,55 @@
 (** Durable, nonblocking HITL requests for Keeper external effects. *)
 
-include Keeper_approval_queue_rules
+include Keeper_approval_queue_types
+
+let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ApprovalQueueFailures)
+    ~labels:[ "keeper", keeper_name; "site", site ]
+    ();
+  Log.Keeper.warn
+    "approval_queue: %s failed keeper=%s id=%s event=%s err=%s"
+    site
+    keeper_name
+    id
+    event_type
+    (Printexc.to_string exn)
+;;
+
+module SMap = Set_util.StringMap
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then () else atomic_update atomic f
+;;
+
+let pending : pending_approval SMap.t Atomic.t = Atomic.make SMap.empty
+
+let id_rng = Random.State.make_self_init ()
+let id_rng_mu = Stdlib.Mutex.create ()
+
+let make_generated_id prefix =
+  let uuid =
+    Stdlib.Mutex.protect id_rng_mu (fun () -> Uuidm.v4_gen id_rng ())
+  in
+  prefix ^ "_" ^ Uuidm.to_string uuid
+;;
+
+let rec canonical_request_json = function
+  | `Assoc fields ->
+    fields
+    |> List.map (fun (key, value) -> key, canonical_request_json value)
+    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
+    |> fun canonical -> `Assoc canonical
+  | `List items -> `List (List.map canonical_request_json items)
+  | other -> other
+;;
+
+let request_fingerprint (input : Yojson.Safe.t) =
+  let canonical_json = canonical_request_json input |> Yojson.Safe.to_string in
+  Digestif.SHA256.(digest_string canonical_json |> to_hex)
+;;
 
 type storage_error =
   { path : string
@@ -50,8 +99,6 @@ type persisted_delivery =
   { entry : pending_approval
   ; decision : decision
   ; source : decision_source
-  ; remember_rule : bool
-  ; created_by : string option
   ; grant_consumed : bool
   }
 
@@ -80,7 +127,7 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 2
+let pending_store_version = 3
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_eio_gate = Eio.Mutex.create ()
 let pending_store_cross_context_mu = Stdlib.Mutex.create ()
@@ -163,8 +210,6 @@ let pending_entry_to_yojson (entry : pending_approval) =
         | Some context -> context
         | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
-    ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-    ; "goal_ids", Json_util.json_string_list entry.goal_ids
     ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
     ; "summary_status", summary_status_to_yojson entry.summary_status
     ]
@@ -183,8 +228,6 @@ let persisted_delivery_to_yojson delivery =
     [ "entry", pending_entry_to_yojson delivery.entry
     ; "decision", approval_decision_to_yojson delivery.decision
     ; "source", `String (decision_source_to_string delivery.source)
-    ; "remember_rule", `Bool delivery.remember_rule
-    ; "created_by", Json_util.string_opt_to_json delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
     ]
 ;;
@@ -283,20 +326,6 @@ let required_float ~surface field fields =
   | None -> Error (Printf.sprintf "%s.%s is required" surface field)
 ;;
 
-let required_string_list ~surface field fields =
-  match List.assoc_opt field fields with
-  | Some (`List values) ->
-    let rec parse index acc = function
-      | [] -> Ok (List.rev acc)
-      | `String value :: rest -> parse (index + 1) (value :: acc) rest
-      | _ :: _ ->
-        Error (Printf.sprintf "%s.%s[%d] must be a string" surface field index)
-    in
-    parse 0 [] values
-  | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface field)
-  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
-;;
-
 let pending_entry_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
@@ -315,8 +344,6 @@ let pending_entry_of_yojson ~base_path json =
           ; "turn_id"
           ; "request_context"
           ; "task_id"
-          ; "goal_id"
-          ; "goal_ids"
           ; "continuation_channel"
           ; "summary_status"
           ]
@@ -341,8 +368,6 @@ let pending_entry_of_yojson ~base_path json =
       | Some context -> Some context
     in
     let* task_id = optional_string ~surface "task_id" fields in
-    let* goal_id = optional_string ~surface "goal_id" fields in
-    let* goal_ids = required_string_list ~surface "goal_ids" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
     let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
     let* summary_json = required_member ~surface "summary_status" fields in
@@ -357,8 +382,6 @@ let pending_entry_of_yojson ~base_path json =
       ; turn_id
       ; request_context
       ; task_id
-      ; goal_id
-      ; goal_ids
       ; continuation_channel
       ; audit_base_path = base_path
       ; summary_status
@@ -414,8 +437,6 @@ let persisted_delivery_of_yojson ~base_path json =
           [ "entry"
           ; "decision"
           ; "source"
-          ; "remember_rule"
-          ; "created_by"
           ; "grant_consumed"
           ]
         fields
@@ -430,13 +451,6 @@ let persisted_delivery_of_yojson ~base_path json =
       | Some source -> Ok source
       | None -> Error (Printf.sprintf "%s.source %S is unknown" surface source_raw)
     in
-    let* remember_rule =
-      match List.assoc_opt "remember_rule" fields with
-      | Some (`Bool value) -> Ok value
-      | Some _ -> Error (surface ^ ".remember_rule must be a boolean")
-      | None -> Error (surface ^ ".remember_rule is required")
-    in
-    let* created_by = optional_string ~surface "created_by" fields in
     let* grant_consumed =
       match List.assoc_opt "grant_consumed" fields with
       | Some (`Bool value) -> Ok value
@@ -450,7 +464,7 @@ let persisted_delivery_of_yojson ~base_path json =
       | (Decision.Reject _ | Decision.Edit _), true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
     in
-    Ok { entry; decision; source; remember_rule; created_by; grant_consumed }
+    Ok { entry; decision; source; grant_consumed }
   | _ -> Error "gate_pending.delivery must be a JSON object"
 ;;
 
@@ -745,9 +759,6 @@ let audit_approval_event
       ~tool_name
       ?turn_id
       ?task_id
-      ?goal_id
-      ?(goal_ids = [])
-      ?rule_match
       ?source_approval_id
       ?actor
       ?decision_source
@@ -774,17 +785,12 @@ let audit_approval_event
          ; "decision", `String decision
          ; "turn_id", Json_util.int_opt_to_json turn_id
          ; "task_id", Json_util.string_opt_to_json task_id
-         ; "goal_id", Json_util.string_opt_to_json goal_id
-         ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
          ; "actor", Json_util.string_opt_to_json actor
          ; ( "decision_source"
            , match decision_source with
              | Some source -> `String (decision_source_to_string source)
              | None -> `Null )
          ]
-         @ (match rule_match with
-            | Some matched -> [ "rule_match", rule_match_to_yojson matched ]
-            | None -> [])
          @ (match source_approval_id with
             | Some approval_id -> [ "source_approval_id", `String approval_id ]
             | None -> [])
@@ -803,17 +809,6 @@ let audit_approval_event
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
-;;
-
-let audit_rule_event ~base_path ~event_type (rule : approval_rule) =
-  audit_approval_event
-    ~base_path
-    ~event_type
-    ~id:rule.id
-    ~keeper_name:rule.keeper_name
-    ~tool_name:rule.tool_name
-    ?source_approval_id:rule.source_approval_id
-    ()
 ;;
 
 let audit_scan_window ?keeper_name n =
@@ -905,11 +900,8 @@ let resolved_approval_json_of_audit_event json =
     ; "resolved_at", Json_util.float_opt_to_json resolved_at
     ; "turn_id", json_member_or_null "turn_id" json
     ; "task_id", json_member_or_null "task_id" json
-    ; "goal_id", json_member_or_null "goal_id" json
-    ; "goal_ids", json_member_or_null "goal_ids" json
     ; "actor", json_member_or_null "actor" json
     ; "decision_source", json_member_or_null "decision_source" json
-    ; "rule_match", json_member_or_null "rule_match" json
     ]
 ;;
 
@@ -1065,8 +1057,6 @@ let consume_approved_resolution
       ~tool_name:entry.tool_name
       ?turn_id:entry.turn_id
       ?task_id:entry.task_id
-      ?goal_id:entry.goal_id
-      ~goal_ids:entry.goal_ids
       ~source_approval_id:id
       ~decision_source:delivery.source
       ~decision:Decision.Approve
@@ -1092,8 +1082,6 @@ let create_entry
       ?turn_id
       ?request_context
       ?task_id
-      ?goal_id
-      ?(goal_ids = [])
       ~continuation_channel
       ~audit_base_path
       ()
@@ -1108,8 +1096,6 @@ let create_entry
   ; turn_id
   ; request_context
   ; task_id
-  ; goal_id
-  ; goal_ids
   ; continuation_channel
   ; audit_base_path
   ; summary_status = Summary_not_requested
@@ -1127,8 +1113,6 @@ let pending_entry_json_fields
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
   ; "task_id", Json_util.string_opt_to_json entry.task_id
-  ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-  ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
   ]
   @ (if include_input
      then
@@ -1177,8 +1161,6 @@ let record_pending (entry : pending_approval) =
     ~tool_name:entry.tool_name
     ?turn_id:entry.turn_id
     ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
     ();
   broadcast_pending entry
 ;;
@@ -1480,8 +1462,6 @@ let resolve_entry
     ~tool_name:entry.tool_name
     ?turn_id:entry.turn_id
     ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
     ~decision_source:source
     ~decision
     ();
@@ -1517,8 +1497,6 @@ let pending_entry_matches
       ~input_hash
       ~turn_id
       ~task_id
-      ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   String.equal entry.audit_base_path base_path
@@ -1527,8 +1505,6 @@ let pending_entry_matches
   && String.equal entry.input_hash input_hash
   && entry.turn_id = turn_id
   && entry.task_id = task_id
-  && entry.goal_id = goal_id
-  && entry.goal_ids = goal_ids
   && Yojson.Safe.equal
        (Keeper_continuation_channel.to_yojson entry.continuation_channel)
        (Keeper_continuation_channel.to_yojson continuation_channel)
@@ -1542,8 +1518,6 @@ let find_pending_id_in_map
       ~input_hash
       ~turn_id
       ~task_id
-      ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   SMap.fold
@@ -1560,8 +1534,6 @@ let find_pending_id_in_map
              ~input_hash
              ~turn_id
              ~task_id
-             ~goal_id
-             ~goal_ids
              ~continuation_channel
          then Some id
          else None)
@@ -1587,8 +1559,6 @@ let submit_pending
       ?turn_id
       ?request_context
       ?task_id
-      ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ()
   : (string, storage_error) result
@@ -1609,8 +1579,6 @@ let submit_pending
           ~input_hash
           ~turn_id
           ~task_id
-          ~goal_id
-          ~goal_ids
           ~continuation_channel
       with
       | Some id -> Ok (id, None)
@@ -1625,8 +1593,6 @@ let submit_pending
             ?turn_id
             ?request_context
             ?task_id
-            ?goal_id
-            ~goal_ids
             ~continuation_channel
             ~audit_base_path:base_path
             ()
@@ -1702,7 +1668,7 @@ type journal_error =
   | Journal_not_found
   | Journal_storage of storage_error
 
-let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
+let journal_resolution ~id ~decision ~source =
   with_pending_store_lock (fun () ->
     let pending_map = Atomic.get pending in
     match SMap.find_opt id pending_map with
@@ -1712,8 +1678,6 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
         { entry
         ; decision
         ; source
-        ; remember_rule
-        ; created_by
         ; grant_consumed = false
         }
       in
@@ -1758,101 +1722,38 @@ let approval_decision_equal left right =
     false
 ;;
 
-let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
-  try
-    match
-      upsert_rule
-        ~base_path
-        ~keeper_name:entry.keeper_name
-        ~tool_name:entry.tool_name
-        ~input:entry.input
-        ?created_by
-        ~source_approval_id:entry.id
-        ()
-    with
-    | Ok (rule, created) ->
-      if created then audit_rule_event ~base_path ~event_type:"rule_created" rule;
-      Ok rule
-    | Error reason -> Error reason
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    let reason = Printexc.to_string exn in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ApprovalQueueFailures)
-      ~labels:
-        [ "keeper", entry.keeper_name
-        ; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule)
-        ]
-      ();
-    Log.Keeper.warn
-      "approval_queue: remember rule failed id=%s err=%s"
-      entry.id
-      reason;
-    Error
-      ({ path = rules_path ~base_path ()
-       ; reason
-       }
-       : rule_store_error)
-;;
-
-let remember_rule_for_delivery delivery =
-  match delivery.decision, delivery.remember_rule with
-  | Decision.Approve, true ->
-    (match
-       remember_rule_for_entry
-         ~base_path:delivery.entry.audit_base_path
-         ?created_by:delivery.created_by
-         delivery.entry
-     with
-     | Ok rule -> Ok (Some rule)
-     | Error rule_error ->
-       Error
-         { path = rule_error.path
-         ; reason = rule_error.reason
-         })
-  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
-    false ->
-    Ok None
-  | (Decision.Reject _ | Decision.Edit _), true -> Ok None
-;;
-
 let complete_delivery delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
   if delivery.grant_consumed
-  then Ok { remembered_rule = None }
+  then Ok ()
   else
   match deliver_resolution ~base_path delivery.entry delivery.decision with
   | Error reason -> Error (Delivery_failed { approval_id = id; reason })
   | Ok () ->
-    (match remember_rule_for_delivery delivery with
-     | Error storage_error ->
-       Error (Persistence_failed { approval_id = id; storage_error })
-     | Ok remembered_rule ->
-       let finish () =
-         resolve_entry
-           ~base_path
-           delivery.entry
-           ~source:delivery.source
-           delivery.decision;
-         signal_resolution_after_commit
-           ~base_path
-           ~keeper_name:delivery.entry.keeper_name
-           ~approval_id:id;
-         Ok { remembered_rule }
-       in
-       (match delivery.decision with
-        | Decision.Approve ->
-          (* Keep the resolved journal entry until the exact Gate request
-             consumes it. The wake event is only a correlation message and
-             cannot become a second authorization SSOT. *)
-          finish ()
-        | Decision.Reject _ | Decision.Edit _ ->
-          (match remove_delivery_from_store delivery with
-           | Error storage_error ->
-             Error (Persistence_failed { approval_id = id; storage_error })
-           | Ok () -> finish ())))
+    let finish () =
+      resolve_entry
+        ~base_path
+        delivery.entry
+        ~source:delivery.source
+        delivery.decision;
+      signal_resolution_after_commit
+        ~base_path
+        ~keeper_name:delivery.entry.keeper_name
+        ~approval_id:id;
+      Ok ()
+    in
+    (match delivery.decision with
+     | Decision.Approve ->
+       (* Keep the resolved journal entry until the exact Gate request
+          consumes it. The wake event is only a correlation message and
+          cannot become a second authorization SSOT. *)
+       finish ()
+     | Decision.Reject _ | Decision.Edit _ ->
+       (match remove_delivery_from_store delivery with
+        | Error storage_error ->
+          Error (Persistence_failed { approval_id = id; storage_error })
+        | Ok () -> finish ()))
 ;;
 
 let install_persistence_internal ~after_load ~base_path =
@@ -1975,17 +1876,14 @@ module For_testing = struct
   ;;
 
   let pending_store_path = pending_store_path
-  let always_allowed_store_path ~base_path = rules_path ~base_path ()
 end
 
 let resolve_with_policy
       ~id
       ~(decision : decision)
       ?(source = Human_operator)
-      ?(remember_rule = false)
-      ?created_by
       ()
-  : (resolution_result, resolve_error) result
+  : (unit, resolve_error) result
   =
   if not (claim_resolution id)
   then Error (Already_resolved id)
@@ -1995,18 +1893,11 @@ let resolve_with_policy
       (fun () ->
          match SMap.find_opt id (Atomic.get pending) with
          | Some _ ->
-           let remember_rule =
-             match decision with
-             | Decision.Approve -> remember_rule
-             | Decision.Reject _ | Decision.Edit _ -> false
-           in
            (match
               journal_resolution
                 ~id
                 ~decision
                 ~source
-                ~remember_rule
-                ~created_by
             with
             | Error Journal_not_found -> Error (Not_found id)
             | Error (Journal_storage storage_error) ->
@@ -2019,8 +1910,6 @@ let resolve_with_policy
               let same_request =
                 approval_decision_equal decision delivery.decision
                 && source = delivery.source
-                && remember_rule = delivery.remember_rule
-                && created_by = delivery.created_by
               in
               if same_request
               then complete_delivery delivery

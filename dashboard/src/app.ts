@@ -29,7 +29,7 @@ import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } fro
 import { RemoteWarningBanner } from './components/auth-status'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
-import { selectedTask } from './components/goals/task-detail-selection'
+import { selectedTask } from './components/tasks/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { commandPaletteRequested, requestCommandPaletteOpen } from './components/common/command-palette-state'
@@ -100,7 +100,7 @@ const LazyAgentDetailOverlay = lazy(async () => ({
   default: (await import('./components/agent-detail')).AgentDetailOverlay,
 }))
 const LazyTaskDetailOverlay = lazy(async () => ({
-  default: (await import('./components/goals/task-detail-overlay')).TaskDetailOverlay,
+  default: (await import('./components/tasks/task-detail-overlay')).TaskDetailOverlay,
 }))
 const LazyCommandPalette = lazy(async () => ({
   default: (await import('./components/common/command-palette')).CommandPalette,

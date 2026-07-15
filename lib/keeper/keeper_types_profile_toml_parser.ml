@@ -99,10 +99,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     | false, false -> Ok ()
   in
   let legacy_goal_result =
-    if has "goal" then
-      Error
-        "keeper.goal is removed. Link Goal entities through active_goal_ids; \
-         keeper instructions remain under keeper.instructions."
+    if has "goal" || has "active_goal_ids" then
+      Error "keeper.goal and keeper.active_goal_ids are removed"
     else Ok ()
   in
   let result =
@@ -130,10 +128,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           Option.bind (str "network_mode") network_mode_of_string;
         multimodal_policy =
           Option.bind (str "multimodal_policy") multimodal_policy_of_string;
-        active_goal_ids =
-          if has "active_goal_ids" then
-            Some (normalize_name_list (strs "active_goal_ids"))
-          else None;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         always_allow = bool_ "always_allow";
@@ -157,7 +151,6 @@ let parsed_field_key_names =
   ; "sandbox_image"
   ; "network_mode"
   ; "multimodal_policy"
-  ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "always_allow"
@@ -184,7 +177,6 @@ let canonical_keeper_toml_key_names =
   ; "sandbox_image"
   ; "network_mode"
   ; "multimodal_policy"
-  ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "always_allow"
@@ -299,7 +291,6 @@ let merge_keeper_profile_defaults
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
     multimodal_policy = prefer overlay.multimodal_policy base.multimodal_policy;
-    active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     telemetry_feedback_enabled =
       prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
     telemetry_feedback_window_hours =

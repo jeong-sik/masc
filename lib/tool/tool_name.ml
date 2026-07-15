@@ -21,9 +21,9 @@ module Float = Stdlib.Float
     Parse boundary: [of_string] at MCP/JSON ingress only.
     Internal code uses [t] directly — typos become compile errors.
 
-    PR-S1 (tool-domain decouple): the Task/Board/Goal/Operator tool *names*
+    PR-S1 (tool-domain decouple): the Task/Board/Operator tool *names*
     are owned by domain-scoped submodules ([Task_name], [Board_name],
-    [Goal_name], [Operator_name]) instead of being enumerated flat in
+    [Operator_name]) instead of being enumerated flat in
     [Masc.t]. The substrate ([Tool_name], [tool_dispatch]) no longer
     hard-codes those domain operation names in a god-enum + static routing
     table. Every MCP tool-name STRING is preserved exactly — each domain
@@ -143,28 +143,6 @@ module Board_name = struct
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 
-module Goal_name = struct
-  type t =
-    | Goal_list
-    | Goal_transition
-    | Goal_upsert
-
-  let to_string = function
-    | Goal_list -> "masc_goal_list"
-    | Goal_transition -> "masc_goal_transition"
-    | Goal_upsert -> "masc_goal_upsert"
-  ;;
-
-  let of_string = function
-    | "masc_goal_list" -> Some Goal_list
-    | "masc_goal_transition" -> Some Goal_transition
-    | "masc_goal_upsert" -> Some Goal_upsert
-    | _ -> None
-  ;;
-
-  let pp fmt t = Format.pp_print_string fmt (to_string t)
-end
-
 module Operator_name = struct
   type t =
     | Operator_action
@@ -219,7 +197,7 @@ module Operator_remote_name = struct
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 
-(** Domain_tool — the single domain-owned grouping of Task/Board/Goal/Operator
+(** Domain_tool — the single domain-owned grouping of Task/Board/Operator
     tool names.
 
     This module owns only name construction and string round-tripping. Dispatch
@@ -229,13 +207,11 @@ module Domain_tool = struct
   type t =
     | Task of Task_name.t
     | Board of Board_name.t
-    | Goal of Goal_name.t
     | Operator of Operator_name.t
 
   let to_string = function
     | Task t -> Task_name.to_string t
     | Board b -> Board_name.to_string b
-    | Goal g -> Goal_name.to_string g
     | Operator o -> Operator_name.to_string o
   ;;
 
@@ -249,24 +225,21 @@ module Domain_tool = struct
       match Board_name.of_string s with
       | Some b -> Some (Board b)
       | None ->
-        match Goal_name.of_string s with
-        | Some g -> Some (Goal g)
-        | None ->
-          match Operator_name.of_string s with
-          | Some o -> Some (Operator o)
-          | None -> None
+        match Operator_name.of_string s with
+        | Some o -> Some (Operator o)
+        | None -> None
   ;;
 
   let is_board = function
     | Board _ -> true
-    | Task _ | Goal _ | Operator _ -> false
+    | Task _ | Operator _ -> false
   ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 
 module Masc = struct
-  (* Domain tool-NAME operations (Task/Board/Goal/Operator) are owned by
+  (* Domain tool-NAME operations (Task/Board/Operator) are owned by
      [Domain_tool]; [Masc.t] carries them behind one neutral [Domain] arm so
      the Tool substrate never enumerates domain constructors. Non-domain
      public masc_* names are owned by their schema/descriptor modules instead

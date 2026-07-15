@@ -340,41 +340,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
-  it('preserves backend attention, sandbox, and goal progress fields', () => {
-    const [keeper] = normalizeKeepers([
-      {
-        name: 'attention-keeper',
-        status: 'active',
-        needs_attention: true,
-        attention_reason: 'approval_pending',
-        next_human_action: 'resolve_approval',
-        sandbox_target: 'docker',
-        blocked_task_count: 2,
-        goal_progress: {
-          active_goal_count: 1,
-          linked_task_count: 4,
-          done_task_count: 1,
-          open_task_count: 3,
-          blocked_task_count: 2,
-          convergence: 0.25,
-        },
-      },
-    ])
-
-    expect(keeper).toMatchObject({
-      needs_attention: true,
-      attention_reason: 'approval_pending',
-      next_human_action: 'resolve_approval',
-      sandbox_target: 'docker',
-      blocked_task_count: 2,
-      goal_progress: {
-        linked_task_count: 4,
-        blocked_task_count: 2,
-        convergence: 0.25,
-      },
-    })
-  })
-
   it('preserves trust summary and latest causal event fields', () => {
     const [keeper] = normalizeKeepers([
       {
@@ -403,7 +368,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             ts_unix: 1776903060,
             keeper_turn_id: 42,
             task_id: 'task-1',
-            goal_ids: ['goal-1'],
             title: 'Approval pending',
             summary: 'Waiting for operator approval before resuming.',
             severity: 'warn',

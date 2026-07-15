@@ -53,7 +53,6 @@ let base_observation : WO.world_observation =
     pending_messages = [];
     pending_board_events = [];
     idle_seconds = 0;
-    active_goals = [];
     unclaimed_task_count = 0;
     claimable_task_count = 0;
     failed_task_count = 0;

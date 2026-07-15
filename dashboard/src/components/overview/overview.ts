@@ -5,7 +5,7 @@
 //   0. Alert Panel     — failing agents and stalled tasks, actionable alerts first
 //   1. (Removed: Highlight moved to Lab)
 //   2. Funnel          — 5 task-count cells (new/active/verify/done/target)
-//   3. Mission party   — one active session (goal, members, progress bar, blocker)
+//   3. Mission party   — one active session (objective, members, progress bar, blocker)
 //   4. Keeper strip    — top three keepers by recent heartbeat
 //
 // Keeper-v2 port additions:
@@ -18,8 +18,8 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
-import { tasks, keepers, boardPosts, goals, fusionRuns } from '../../store'
-import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
+import { tasks, keepers, boardPosts, fusionRuns } from '../../store'
+import type { Agent, Task, Keeper, Message, BoardPost, KeeperRuntimeBlockerClass } from '../../types/core'
 import type { FusionRunRecord } from '../../api/dashboard'
 import { SYSTEM_ACTOR_NAME } from '../../types/core'
 import type {
@@ -164,8 +164,8 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
 
 // ─── Cross-surface digest (overview.jsx:71-92) ───────────────────────────────
 //
-// The prototype reads window.GOALS / APPROVALS / CONNECTORS / FUSION_RUNS etc.
-// from a mock. The live v2 dashboard exposes goals + fusion runs as signals, and
+// The prototype reads APPROVALS / CONNECTORS / FUSION_RUNS etc. from a mock.
+// The live v2 dashboard exposes fusion runs as a signal and
 // surfaces operator-awaiting keepers as the approval queue. Connectors and the
 // scheduled-automation queue have no live store on this surface yet, so their KPI
 // values render as "—" (em dash) rather than inventing data — see CLAUDE.md
@@ -174,10 +174,6 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
 export interface OverviewDigest {
   /** Exact pending requests from the Gate queue SSOT. */
   openGateRequests: number
-  /** Top goals by priority (highest first), up to 3. */
-  topGoals: Goal[]
-  /** Most urgent goal label for the "최우선 목표" KPI, or null when none. */
-  topGoalLabel: string | null
   /** Fusion runs currently executing. */
   fusionRunning: number
   /** Completed fusion runs (status === 'completed'). */
@@ -188,31 +184,16 @@ export interface OverviewDigest {
   fusionLatest: FusionRunRecord | null
 }
 
-function goalPriorityClass(priority: number): 'high' | 'normal' | 'low' {
-  // overview.jsx:166 — priority >= 7 high, >= 4 normal, else low
-  if (priority >= 7) return 'high'
-  if (priority >= 4) return 'normal'
-  return 'low'
-}
-
 export function computeOverviewDigest(
   openGateRequests: number,
-  goalList: readonly Goal[],
   fusionList: readonly FusionRunRecord[],
 ): OverviewDigest {
-  // Highest priority first; ties keep input order (stable sort).
-  const topGoals = [...goalList].sort((a, b) => b.priority - a.priority).slice(0, 3)
-  const lead = topGoals[0] ?? null
-  const topGoalLabel = lead ? (lead.due_date ?? `P${lead.priority}`) : null
-
   const fusionRunning = fusionList.filter(r => r.status === 'running').length
   const fusionDone = fusionList.filter(r => r.status === 'completed').length
   const fusionLatest = [...fusionList].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
 
   return {
     openGateRequests,
-    topGoals,
-    topGoalLabel,
     fusionRunning,
     fusionDone,
     fusionTotal: fusionList.length,
@@ -663,7 +644,7 @@ function OverviewHeader() {
         <!-- eyebrow + display header + purpose: overview.jsx:99-101 (copy verbatim) -->
         <span class="ov-eyebrow">운영 홈</span>
         <h1>지금, 전체</h1>
-        <p class="ov-sub">fleet 전체 — 목표 · Gate · Fusion · 연결 한눈에</p>
+        <p class="ov-sub">fleet 전체 — 작업 · Gate · Fusion · 연결 한눈에</p>
       </div>
       <div class="ov-clock v2-overview-clock mono" data-testid="overview-clock">
         ${clock} <span>KST</span>
@@ -719,7 +700,7 @@ function OverviewKpiStrip({ stats, digest }: { stats: OverviewStats; digest: Ove
       <${OverviewKpi} label="실행 중 keeper" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="열린 Gate" value=${String(digest.openGateRequests)} tone=${digest.openGateRequests > 0 ? 'warn' : undefined} testId="kpi-approvals" onClick=${() => navigate('approvals')} />
-      <${OverviewKpi} label="최우선 목표" value=${digest.topGoalLabel ?? '—'} tone="volt" testId="kpi-top-goal" onClick=${() => navigate('workspace', { section: 'work' })} />
+      <${OverviewKpi} label="배정 태스크" value=${String(stats.tasks)} tone="volt" testId="kpi-assigned-tasks" onClick=${() => navigate('workspace', { section: 'work' })} />
       <${OverviewKpi} label="활성 커넥터" value="—" testId="kpi-connectors" onClick=${() => navigate('connectors')} />
       <${OverviewKpi} label="예약 HITL" value="—" testId="kpi-schedule" onClick=${() => navigate('schedule')} />
       <${OverviewKpi} label="진행 심의" value=${String(digest.fusionRunning)} sub=${digest.fusionDone > 0 ? ` · 완료 ${digest.fusionDone}` : undefined} tone=${digest.fusionRunning > 0 ? 'volt' : undefined} testId="kpi-fusion" onClick=${() => navigate('fusion')} />
@@ -909,23 +890,8 @@ function OverviewDomainSection({
   return html`
     <h2 class="ov-section-h v2-overview-section-h" data-testid="overview-domains-header">도메인 현황</h2>
     <div class="ov-domains v2-overview-domains" data-testid="overview-domains">
-      <!-- WORK · overview.jsx:162-179 -->
-      <${DomainCard} title="작업 · 목표" linkLabel="작업" nav=${{ tab: 'workspace', params: { section: 'work' } }} testId="domain-work">
-        ${digest.topGoals.length > 0
-          ? digest.topGoals.map(g => {
-              const pri = goalPriorityClass(g.priority)
-              return html`
-                <div key=${g.id} class="ov-goal">
-                  <div class="ov-goal-top">
-                    <span class=${`ov-goal-pri ${pri}`}></span>
-                    <span class="ov-goal-title">${g.title}</span>
-                    <span class="ov-goal-due mono">${g.due_date ?? ''}</span>
-                  </div>
-                  <div class="ov-goal-sub mono">P${g.priority} · ${g.phase}</div>
-                </div>
-              `
-            })
-          : html`<div class="ov-mini-empty ov-empty">활성 목표 없음</div>`}
+      <${DomainCard} title="작업" linkLabel="작업" nav=${{ tab: 'workspace', params: { section: 'work' } }} testId="domain-work">
+        <div class="ov-stat-row"><span class="k">배정 태스크</span><span class="v mono">${stats.tasks}</span></div>
       <//>
 
       <!-- APPROVALS · overview.jsx:182-198 -->
@@ -1021,13 +987,12 @@ export function Overview() {
   }, [])
   const taskList = tasks.value
   const keeperList = keepers.value
-  const goalList = goals.value
   const fusionList = fusionRuns.value
   const openGateRequests = gateData.value?.approval_queue?.length ?? 0
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
-    () => computeOverviewDigest(openGateRequests, goalList, fusionList),
-    [openGateRequests, goalList, fusionList],
+    () => computeOverviewDigest(openGateRequests, fusionList),
+    [openGateRequests, fusionList],
   )
   const telemetry = overviewTelemetryResource.state.value
 

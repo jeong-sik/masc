@@ -56,14 +56,7 @@ let backend () =
 let add_task config ~title ~priority ~description =
   match backend () with
   | Jsonl ->
-      (* RFC-0034.v2: pass per-goal cap guard. The current dispatch path
-         does not carry [goal_id], so the guard is a no-op (orphan tasks
-         bypass the cap). Wired now so future [goal_id]-aware callers
-         (or a backend rewrite) inherit the same invariant for free. *)
-      Ok
-        (Workspace.add_task
-           ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
-           config ~title ~priority ~description)
+      Ok (Workspace.add_task config ~title ~priority ~description)
 
 (** Get a task by ID *)
 let get_task config ~task_id =

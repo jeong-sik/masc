@@ -5,7 +5,6 @@
     admin-only routes:
     - [/api/v1/dashboard/board/delete] — delete one board post
     - [/api/v1/dashboard/tasks/delete] — delete one task
-    - [/api/v1/dashboard/goals/delete] — delete one goal
     - [/api/v1/dashboard/agents/purge] — delete an exact agent or accept a
       durable Keeper purge operation
 

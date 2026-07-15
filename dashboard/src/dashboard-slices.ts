@@ -6,7 +6,6 @@ export const DASHBOARD_PUSH_SLICES = [
   'namespace',
   'transport',
   'execution',
-  'goals',
   'board',
   'composite',
   'operator',

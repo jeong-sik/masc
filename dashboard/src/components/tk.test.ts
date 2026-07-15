@@ -50,8 +50,8 @@ describe('Tk', () => {
   })
 
   it('forwards testId to data-testid', () => {
-    const el = mount({ children: 'GOAL_ID', testId: 'goal-token' })
-    expect(el.getAttribute('data-testid')).toBe('goal-token')
+    const el = mount({ children: 'TASK_ID', testId: 'task-token' })
+    expect(el.getAttribute('data-testid')).toBe('task-token')
   })
 
   it('forwards title attribute', () => {
@@ -60,8 +60,8 @@ describe('Tk', () => {
   })
 
   it('renders children content', () => {
-    const el = mount({ children: 'GOAL_ID' })
-    expect(el.textContent).toBe('GOAL_ID')
+    const el = mount({ children: 'TASK_ID' })
+    expect(el.textContent).toBe('TASK_ID')
   })
 
   // ── SPEC font / geometry ──

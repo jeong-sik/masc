@@ -553,8 +553,6 @@ function bootstrapInitializingPayload(path: string): unknown | null {
     case '/api/v1/dashboard/planning':
       return {
         generated_at: generatedAt,
-        goals: [],
-        rollup: {},
         task_backlog: {
           todo: 0,
           claimed: 0,

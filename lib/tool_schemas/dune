@@ -8,7 +8,6 @@
   tool_schemas_workspace
   tool_schemas_misc
   tool_schemas_workspace_core
-  tool_schemas_workspace_extra
   tool_schemas_inline_infra
   tool_schemas_inline_episodes
   tool_schemas_inline
@@ -31,8 +30,7 @@
   masc_types
   masc_core
   masc.task_handlers
-  masc.masc_tool_surface
-  masc.masc_goal))
+  masc.masc_tool_surface))
 
 ;; RFC-0057 Phase 0 — capture bin/gen_tool_descriptors.exe stdout into
 ;; tool_descriptors_gen.ml. %{exe:...} gives dune the build-graph dep

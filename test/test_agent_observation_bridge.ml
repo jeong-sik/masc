@@ -178,7 +178,6 @@ let test_annotation_request_reaches_ide_storage () =
         ; line_end = 9
         ; kind = Agent_observation.Decision
         ; content = "route through neutral observation bus"
-        ; goal_id = Some "goal-17"
         ; task_id = None
         ; references =
             [ { relation = "discussion"; reference = "thread-3" } ]
@@ -193,7 +192,6 @@ let test_annotation_request_reaches_ide_storage () =
       let filter : Ide_annotation_types.annotation_filter =
         { file_path = Some "lib/annotated.ml"
         ; keeper_id = Some "keeper-epsilon"
-        ; goal_id = Some "goal-17"
         ; task_id = None
         }
       in

@@ -471,12 +471,10 @@ describe('get bootstrap warm-up mapping', () => {
 
     const data = await get<{
       generated_at?: string
-      goals?: unknown[]
       task_backlog?: { todo?: number }
     }>('/api/v1/dashboard/planning')
 
     expect(data.generated_at).toBeDefined()
-    expect(data.goals).toEqual([])
     expect(data.task_backlog?.todo).toBe(0)
   })
 

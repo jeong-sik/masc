@@ -61,67 +61,6 @@ let status ~(config : Workspace.config) (meta : keeper_meta) =
   in
   Keeper_status_runtime.keeper_surface_status ~agent_status ~diagnostic
 
-type active_goal_scope_audit = {
-  active_goal_ids : string list;
-  scoped_task_count : int;
-  scoped_open_task_count : int;
-  scoped_terminal_task_count : int;
-  global_open_task_count : int;
-  stale : bool;
-}
-
-let active_goal_scope_audit ~(config : Workspace.config) (meta : keeper_meta) =
-  let active_goal_ids = meta.active_goal_ids in
-  let task_is_open (task : Masc_domain.task) =
-    not (Masc_domain.task_status_is_terminal task.task_status)
-  in
-  let tasks = Workspace.get_tasks_safe config in
-  let count_open tasks =
-    List.fold_left
-      (fun acc task -> if task_is_open task then acc + 1 else acc)
-      0 tasks
-  in
-  let scoped_tasks =
-    if active_goal_ids = [] then []
-    else
-      List.filter
-        (Keeper_runtime_contract.task_is_linked_to_keeper_goals active_goal_ids)
-        tasks
-  in
-  let scoped_task_count = List.length scoped_tasks in
-  let scoped_open_task_count = count_open scoped_tasks in
-  let scoped_terminal_task_count = scoped_task_count - scoped_open_task_count in
-  let global_open_task_count = count_open tasks in
-  let stale =
-    active_goal_ids <> [] && scoped_open_task_count = 0
-    && global_open_task_count > 0
-  in
-  {
-    active_goal_ids;
-    scoped_task_count;
-    scoped_open_task_count;
-    scoped_terminal_task_count;
-    global_open_task_count;
-    stale;
-  }
-
-let active_goal_scope_audit_to_json audit =
-  `Assoc
-    [
-      ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) audit.active_goal_ids) );
-      ("scoped_task_count", `Int audit.scoped_task_count);
-      ("scoped_open_task_count", `Int audit.scoped_open_task_count);
-      ("scoped_terminal_task_count", `Int audit.scoped_terminal_task_count);
-      ("global_open_task_count", `Int audit.global_open_task_count);
-      ("stale", `Bool audit.stale);
-      ( "next_action",
-        if audit.stale then
-          `String
-            "update keeper active_goal_ids or create/link an eligible scoped task"
-        else `Null );
-    ]
-
 let profile_candidates ~base_path persona_name =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
   (resolution.personas.path
@@ -236,7 +175,6 @@ let item ~(config : Workspace.config) requested_name =
     | None -> None
   in
   let runtime_status = runtime_meta |> Option.map (status ~config) in
-  let active_goal_scope = runtime_meta |> Option.map (active_goal_scope_audit ~config) in
   let autoboot_enabled =
     match runtime_meta with
     | Some meta -> Some meta.autoboot_enabled
@@ -268,16 +206,6 @@ let item ~(config : Workspace.config) requested_name =
           | Some true -> true
           | _ -> false)
          "keeper_paused"
-    |> add
-         (match runtime_meta with
-          | Some meta when Stdlib.List.length meta.active_goal_ids = 0 -> true
-          | _ -> false)
-         "empty_active_goal_ids"
-    |> add
-         (match active_goal_scope with
-          | Some scope when scope.stale -> true
-          | _ -> false)
-         "stale_active_goal_ids"
     |> add
          (match runtime_meta, autoboot_enabled, paused, keepalive_running with
           | Some _, (Some true | None), (Some false | None), Some false -> true
@@ -315,10 +243,6 @@ let item ~(config : Workspace.config) requested_name =
       ("registry_present", `Bool (Option.is_some registry_entry));
       ("phase", Json_util.string_opt_to_json phase);
       ("runtime_status", Json_util.string_opt_to_json runtime_status);
-      ( "active_goal_scope",
-        match active_goal_scope with
-        | Some scope -> active_goal_scope_audit_to_json scope
-        | None -> `Null );
       ("autoboot_enabled", Json_util.bool_opt_to_json autoboot_enabled);
       ("dormant", `Bool dormant_autoboot_disabled);
       ( "dormant_reason",
@@ -379,8 +303,6 @@ let summary items =
       ("autoboot_disabled", `Int count_autoboot_disabled);
       ("keeper_paused", `Int (count_issue "keeper_paused"));
       ("keepalive_not_running", `Int (count_issue "keepalive_not_running"));
-      ("empty_active_goal_ids", `Int (count_issue "empty_active_goal_ids"));
-      ("stale_active_goal_ids", `Int (count_issue "stale_active_goal_ids"));
     ]
 
 let handle ~(config : Workspace.config) args : tool_result =

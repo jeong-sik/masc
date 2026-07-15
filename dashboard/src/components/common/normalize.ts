@@ -89,7 +89,6 @@ export function extractCodeLocation(record: Record<string, unknown> | null): Cod
 export interface MutableRouteContext {
   filePath?: string
   line?: number
-  goalId?: string
   taskId?: string
   boardPostId?: string
   commentId?: string
@@ -111,8 +110,6 @@ export function mergeRouteRecord(
   if (location?.filePath && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
   if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
 
-  const goalId = idString(record.goal_id)
-  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
   const taskId = idString(record.task_id)
   if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
   const boardPostId = idString(record.board_post_id) ?? idString(record.post_id)
@@ -135,7 +132,6 @@ export function mergeRouteRecord(
 
 export function hasRouteContext(context: MutableRouteContext): boolean {
   return context.filePath !== undefined
-    || context.goalId !== undefined
     || context.taskId !== undefined
     || context.boardPostId !== undefined
     || context.commentId !== undefined

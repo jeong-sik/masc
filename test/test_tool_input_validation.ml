@@ -471,9 +471,6 @@ let find_schema_exn name schemas =
 let masc_transition_schema =
   find_schema_exn "masc_transition" Task.Schemas.schemas
 
-let masc_goal_list_schema =
-  find_schema_exn "masc_goal_list" Tool_schemas_workspace_extra.schemas
-
 let tool_edit_file_schema =
   find_schema_exn "tool_edit_file" Config.raw_all_tool_schemas
 
@@ -1474,50 +1471,6 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
   Alcotest.(check string) "agent_name preserved" "codex-local-admin"
     (assoc_string "agent_name" forwarded)
 
-let test_registered_hook_goal_list_strips_blank_optional_enums () =
-  let args =
-    `Assoc
-      [
-        ("phase", `String " ");
-      ]
-  in
-  let blocked, forwarded =
-    run_registered_hook
-      ~schema:masc_goal_list_schema
-      ~tool_name:"masc_goal_list"
-      ~args
-      ()
-  in
-  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check bool) "phase removed" true
-    (Yojson.Safe.Util.member "phase" forwarded = `Null)
-
-let test_registered_hook_goal_list_rejects_status_filter () =
-  let args = `Assoc [ ("status", `String "active") ] in
-  let blocked, _forwarded =
-    run_registered_hook
-      ~schema:masc_goal_list_schema
-      ~tool_name:"masc_goal_list"
-      ~args
-      ()
-  in
-  Alcotest.(check bool) "blocked" true (Option.is_some blocked)
-
-let test_registered_hook_goal_list_preserves_invalid_enum_for_handler () =
-  (* RFC-0294: horizon removed; phase is the surviving optional enum. An invalid
-     enum value must pass the hook so the handler performs the rejection. *)
-  let args = `Assoc [("phase", `String "notaphase")] in
-  let blocked, forwarded =
-    run_registered_hook
-      ~schema:masc_goal_list_schema
-      ~tool_name:"masc_goal_list"
-      ~args
-      ()
-  in
-  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check string) "invalid value preserved for handler validation" "notaphase"
-    (assoc_string "phase" forwarded)
-
 let test_registered_hook_required_enum_blank_is_not_stripped () =
   let schema =
     `Assoc
@@ -2199,12 +2152,6 @@ let () =
         test_registered_hook_transition_preserves_canonical_action;
       Alcotest.test_case "masc_transition strips internal markers" `Quick
         test_registered_hook_transition_strips_internal_agent_marker;
-      Alcotest.test_case "masc_goal_list strips blank optional enum filters"
-        `Quick test_registered_hook_goal_list_strips_blank_optional_enums;
-      Alcotest.test_case "masc_goal_list rejects status filter" `Quick
-        test_registered_hook_goal_list_rejects_status_filter;
-      Alcotest.test_case "masc_goal_list preserves invalid enum filters" `Quick
-        test_registered_hook_goal_list_preserves_invalid_enum_for_handler;
       Alcotest.test_case "required enum blanks are not stripped" `Quick
         test_registered_hook_required_enum_blank_is_not_stripped;
     ]);

@@ -4,7 +4,6 @@ import { normalizeIdeContextFilePath, normalizeIdeContextLine } from './ide-stat
 export interface KeeperTraceProducerContextInput {
   readonly file_path?: string | null
   readonly line?: number | null
-  readonly goal_id?: string
   readonly task_id?: string
   readonly board_post_id?: string
   readonly comment_id?: string
@@ -25,7 +24,6 @@ export function normalizeTraceProducerContext(
   return {
     filePath: filePath ?? undefined,
     line,
-    goalId: context.goal_id,
     taskId: context.task_id,
     boardPostId: context.board_post_id,
     commentId: context.comment_id,

@@ -21,15 +21,12 @@ val assoc_json_opt : string -> (string * Yojson.Safe.t) list -> Yojson.Safe.t op
 
 val take : int -> 'a list -> 'a list
 
-val goal_ids_of_json : Yojson.Safe.t -> string list
-
 val keeper_turn_id_of_json : Yojson.Safe.t -> int option
 
 val timeline_event_json :
   ?trace_id:string ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
-  ?goal_ids:string list ->
   ?next_human_action:string ->
   ?observed_at_unix:float ->
   ?observation_only:bool ->
@@ -56,7 +53,6 @@ val receipt_timeline_event : Yojson.Safe.t -> Yojson.Safe.t option
 
 val blocker_timeline_event :
   ?task_id:string ->
-  ?goal_ids:string list ->
   ?trace_id:string ->
   ?observed_at_unix:float ->
   ts_unix:float ->

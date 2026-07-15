@@ -48,15 +48,6 @@ let build_base_system_prompt
     |> Keeper_types_profile.load_persona_extended
     |> Option.value ~default:""
   in
-  let active_goals =
-    List.filter_map
-      (fun goal_id ->
-         match Goal_store.get_goal config ~goal_id with
-         (* RFC-0294: active_goals tuple dropped its horizon element. *)
-         | Some { Goal_store.id; title; _ } -> Some (id, title)
-         | None -> None)
-      meta.active_goal_ids
-  in
   (* RFC-0324 B-1: no catalog-fed repository list is injected into the
      prompt any more — the filesystem is the repo truth and the prompt's
      constant <repositories> block instructs self-discovery. *)
@@ -65,7 +56,6 @@ let build_base_system_prompt
       (prompt_profile_default profile_defaults.instructions meta.instructions)
     ~persona_extended
     ~keeper_name:meta.name
-    ~active_goals
     ~home_ground:config.base_path
     ()
 
@@ -83,15 +73,6 @@ let prepare_run_context
   =
   let receipt_started_at = Masc_domain.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
-  let validated_goal_ids =
-    Keeper_runtime_contract.validate_active_goal_ids ~config ~meta ()
-  in
-  let meta =
-    if List.length validated_goal_ids <> List.length meta.active_goal_ids then
-      { meta with active_goal_ids = validated_goal_ids }
-    else
-      meta
-  in
   (* 0. Resolve inference parameters via Runtime_inference *)
   let fallback_temperature () =
     match temperature with

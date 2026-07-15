@@ -9,8 +9,8 @@
 // the union surface via warnUnknownAttentionToken (dev console) and fall back
 // to the raw token rather than slipping through unnoticed.
 //
-// The union mirrors the keeper_status_bridge needs_attention vocabulary (plus
-// keeper_turn_disposition / dashboard_goals) arm-for-arm: every
+// The union mirrors the keeper_status_bridge needs_attention vocabulary plus
+// keeper_turn_disposition arm-for-arm: every
 // distinct reason/action those closed, non-composite emit sites produce has its
 // own Korean label, with no lossy fold — a keeper blocked on
 // `runtime_attempts_exhausted` and one blocked on `fiber_unresolved` get
@@ -37,7 +37,6 @@ function warnUnknownAttentionToken(kind: 'attention_reason' | 'next_human_action
 //     (approval_pending, paused,
 //      runtime_attempts_exhausted, provider_runtime_error, stale_turn_timeout,
 //      fiber_unresolved, runtime_blocked)
-//   - lib/dashboard/dashboard_goals.ml ('runtime_trust_snapshot_unavailable')
 //   - lib/keeper/keeper_execution_receipt.ml operator disposition reasons that
 //     can become trust attention_reason via keeper_runtime_trust_snapshot.ml
 export const ATTENTION_REASONS = [
@@ -114,7 +113,6 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
 //   - lib/keeper/keeper_turn_disposition.ml next_action
 //     (provide_input_or_decline, rerun_if_still_relevant, inspect_turn_timeout,
 //      inspect_runtime_attempts, inspect_latest_error)
-//   - lib/dashboard/dashboard_goals.ml ('inspect_keeper_runtime_trust')
 //   - lib/keeper/keeper_status_bridge.ml runtime_trust fallback
 //     ('inspect_keeper_runtime_trust')
 export const NEXT_HUMAN_ACTIONS = [

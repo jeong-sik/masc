@@ -33,7 +33,6 @@ export function bridgeRunActivityEventsToTrace(
       filePath,
       line,
       surface: activityTraceSurface(event),
-      goalId: event.context?.goal_id,
       taskId: event.context?.task_id,
       boardPostId: event.context?.board_post_id,
       commentId: event.context?.comment_id,
@@ -52,7 +51,6 @@ export function bridgeRunActivityEventsToTrace(
 function activityTraceSurface(event: RunActivityEvent): string {
   if (event.context?.pr_id) return 'PR'
   if (event.context?.board_post_id) return 'Board'
-  if (event.context?.goal_id) return 'Goal'
   if (event.context?.task_id) return 'Task'
   if (event.context?.git_ref) return 'Git'
   if (event.context?.log_id) return 'Log'

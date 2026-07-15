@@ -289,7 +289,7 @@ export function executionOutcomeLabel(value: string | null | undefined): string 
  *  `STATE_DISPLAY_NAMES` to avoid collision on generic PascalCase
  *  tokens that other axes also emit. Two prior inline copies of this
  *  map (`keeper-detail-alert-strip.ts:201-205` and
- *  `goals/goal-tree.ts:194-199`) were identical 4-entry literals —
+ *  the former planning tree implementation were identical 4-entry literals —
  *  consolidating here closes the duplicate-definition surface in the
  *  same spirit as #16343 (5th invariant grid). */
 const TRUST_DISPOSITION_LABELS: Record<string, string> = {

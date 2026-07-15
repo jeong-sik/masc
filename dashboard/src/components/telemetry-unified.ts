@@ -490,11 +490,6 @@ function entryPreview(e: TelemetryEntry): string {
       const reason = asNullableString(e.terminal_reason_code)
       return reason ? `${keeper} receipt ${outcome} (${reason})` : `${keeper} receipt ${outcome}`
     }
-    case 'goal_event': {
-      const goal = asNullableString(e.goal_id) ?? '(unknown goal)'
-      const eventType = asNullableString(e.event_type) ?? '(unknown event_type)'
-      return `${goal} ${eventType}`
-    }
     case 'tool_metric': {
       const tool = asNullableString(e.tool_name) ?? ''
       const dur = typeof e.duration_ms === 'number' ? e.duration_ms : null

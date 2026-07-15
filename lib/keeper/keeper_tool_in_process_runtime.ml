@@ -57,7 +57,6 @@ let external_gate_decision
       ; base_path = config.Workspace.base_path
       ; causal_context = Option.map (fun current -> current ()) gate_context
       ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-      ; goal_ids = meta.active_goal_ids
       ; continuation_channel
       }
   with

@@ -3,7 +3,7 @@
     SSOT for the 9-variant [Telemetry_unified.source] enum that names
     each durable telemetry stream (keeper_metric, agent_event,
     tool_call_io, trajectory_tool_call, tool_usage, oas_event,
-    execution_receipt, goal_event, tool_metric).
+    execution_receipt, tool_metric).
 
     Pure variant + total bijection (modulo unknown-string → None on
     parse). Verbatim extract from the head of [Telemetry_unified];
@@ -19,7 +19,6 @@ type source =
   | Tool_usage     (** Non-public registered tool invocations *)
   | Oas_event      (** Durable OAS native/custom event bus relays *)
   | Execution_receipt  (** Keeper execution receipt rows *)
-  | Goal_event     (** Goal FSM lifecycle and verification events *)
   | Tool_metric    (** Tool duration and success metrics *)
 
 let source_to_string = function
@@ -30,7 +29,6 @@ let source_to_string = function
   | Tool_usage -> "tool_usage"
   | Oas_event -> "oas_event"
   | Execution_receipt -> "execution_receipt"
-  | Goal_event -> "goal_event"
   | Tool_metric -> "tool_metric"
 
 let source_of_string = function
@@ -41,7 +39,6 @@ let source_of_string = function
   | "tool_usage" -> Some Tool_usage
   | "oas_event" -> Some Oas_event
   | "execution_receipt" -> Some Execution_receipt
-  | "goal_event" -> Some Goal_event
   | "tool_metric" -> Some Tool_metric
   | _ -> None
 
@@ -53,6 +50,5 @@ let all_sources =
   ; Tool_usage
   ; Oas_event
   ; Execution_receipt
-  ; Goal_event
   ; Tool_metric
   ]

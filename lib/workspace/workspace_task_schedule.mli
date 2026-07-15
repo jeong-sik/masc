@@ -64,7 +64,7 @@ val claim_next_r
   -> ?exclude_task_ids:string list
   -> ?task_filter:(Masc_domain.task -> bool)
   -> ?allow_scope_fallback:bool
-       (** When [true] and no goal-scoped task passes [task_filter], widen the
+       (** When [true] and no scoped task passes [task_filter], widen the
            claim pool to all_tasks. Result carries [scope_widened = true].
            Default [false] preserves the hard scope. *)
   -> unit

@@ -6,7 +6,6 @@ import { deriveIdeRunProgressSummary, IdeActivityPanel } from './ide-activity-pa
 import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
-import { goals, tasks } from '../../store'
 
 const renderedContainers = new Set<Parameters<typeof preactRender>[1]>()
 
@@ -42,8 +41,6 @@ afterEach(() => {
     workspace_identity: { kind: 'project' },
     availability: 'available',
   })
-  goals.value = []
-  tasks.value = []
   window.location.hash = ''
   clearTraces()
 })
@@ -224,7 +221,6 @@ describe('IdeActivityPanel', () => {
         keeper_id: 'sangsu',
         kind: 'Comment',
         content: 'Task status belongs next to this line',
-        goal_id: 'goal-runtime',
         task_id: 'task-runtime',
         references: [],
         created_at_ms: 1,
@@ -235,7 +231,6 @@ describe('IdeActivityPanel', () => {
 
     expect(container.textContent).toContain('CONTEXT LENS')
     expect(container.textContent).toContain('runtime.ml')
-    expect(container.textContent).toContain('goal goal-runtime')
     expect(container.textContent).toContain('1 changed rows')
   })
 
@@ -280,7 +275,6 @@ describe('IdeActivityPanel', () => {
           payload: {
             file_path: 'lib/runtime.ml',
             line: 4,
-            goal_id: 'goal-runtime',
             comment_id: 'comment-1',
             pr_number: 15000,
             session_id: 'sess-runtime',
@@ -295,7 +289,6 @@ describe('IdeActivityPanel', () => {
     render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('goal goal-runtime')
       expect(container.textContent).toContain('task task-runtime')
       expect(container.textContent).toContain('PR 15000')
       expect(container.textContent).toContain('1 line anchors')
@@ -306,7 +299,6 @@ describe('IdeActivityPanel', () => {
     const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
       .map(node => node.textContent)
     expect(surfaces).toEqual([
-      'Goal1',
       'Task1',
       'Board1',
       'Comment1',
@@ -322,7 +314,6 @@ describe('IdeActivityPanel', () => {
     const surfaceLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-surface-link')]
     expect(surfaceLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(surfaceLinks.map(link => link.textContent)).toEqual([
-      'Goal1',
       'Task1',
       'Board1',
       'Comment1',
@@ -358,7 +349,6 @@ describe('IdeActivityPanel', () => {
     expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',
@@ -387,7 +377,6 @@ describe('IdeActivityPanel', () => {
     })
     expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',
@@ -544,7 +533,6 @@ describe('IdeActivityPanel', () => {
           subject: { kind: 'log', id: 'turn-8' },
           payload: {
             context: {
-              goal_id: 'goal-runtime',
               task_id: 'task-runtime',
               board_post_id: 'post-1',
               comment_id: 'comment-1',
@@ -571,7 +559,6 @@ describe('IdeActivityPanel', () => {
     render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('goal goal-runtime')
       expect(container.textContent).toContain('PR 15008')
       expect(container.textContent).toContain('1 line anchors')
     })
@@ -580,7 +567,6 @@ describe('IdeActivityPanel', () => {
     expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',
@@ -630,7 +616,6 @@ describe('IdeActivityPanel', () => {
           payload: {
             file_path: 'lib/runtime.ml',
             line: 8,
-            goal_id: 'goal-refresh',
             log_id: 'turn-2',
           },
           tags: [],
@@ -668,7 +653,6 @@ describe('IdeActivityPanel', () => {
 
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
-      expect(container.textContent).toContain('goal goal-refresh')
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('turn-2')
@@ -811,63 +795,6 @@ describe('IdeActivityPanel', () => {
     expect(container.textContent).toContain('sangsu')
   })
 
-  it('renders active run goal progress from activity goal and task links', async () => {
-    goals.value = [{
-      id: 'goal-runtime',
-      title: 'Runtime goal',
-      metric: 'green CI',
-      target_value: 'merged',
-      priority: 1,
-      status: 'active',
-      phase: 'executing',
-      created_at: '2026-05-05T09:00:00Z',
-      updated_at: '2026-05-05T09:30:00Z',
-    }]
-    tasks.value = [
-      { id: 'task-runtime-a', title: 'Done runtime task', goal_id: 'goal-runtime', status: 'done' },
-      { id: 'task-runtime-b', title: 'Open runtime task', goal_id: 'goal-runtime', status: 'in_progress' },
-    ]
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      new Response(JSON.stringify({
-        events: [{
-          seq: 1,
-          ts_ms: 100,
-          ts_iso: '2026-05-05T10:00:00Z',
-          workspace_id: 'run-default',
-          kind: 'telemetry.turn',
-          actor: { kind: 'keeper', id: 'sangsu' },
-          subject: { kind: 'task', id: 'task-runtime-b' },
-          payload: {
-            goal_id: 'goal-runtime',
-            task_id: 'task-runtime-b',
-            log_id: 'turn-1',
-          },
-          tags: [],
-        }],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-
-    const container = document.createElement('div')
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('GOAL TRACK')
-      expect(container.textContent).toContain('Runtime goal')
-      expect(container.textContent).toContain('1/2 tasks')
-      expect(container.textContent).not.toContain('50%')
-    })
-
-    const goalLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-goal-links button')]
-    expect(goalLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
-    expect(goalLinks.map(link => link.textContent)).toEqual(['Goal', 'Task'])
-
-    fireEvent.click(goalLinks[0]!)
-    expect(window.location.hash).toBe('#workspace?section=planning&goal=goal-runtime')
-
-    fireEvent.click(goalLinks[1]!)
-    expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-runtime-b')
-  })
-
   it('ignores non-positive numeric payload ids when deriving context links', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({
@@ -898,7 +825,6 @@ describe('IdeActivityPanel', () => {
       const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
         .map(node => node.textContent)
       expect(surfaces).toEqual([
-        'Goal0',
         'Task0',
         'Board0',
         'Comment0',
@@ -1052,7 +978,6 @@ describe('IdeActivityPanel', () => {
         context: {
           file_path: 'lib/runtime.ml',
           line: 4,
-          goal_id: 'goal-runtime',
           task_id: 'task-runtime',
           log_id: 'turn-1',
         },
@@ -1082,23 +1007,7 @@ describe('IdeActivityPanel', () => {
         },
       },
     ]
-    const summary = deriveIdeRunProgressSummary(
-      events,
-      'lib/runtime.ml',
-      [{
-        id: 'goal-runtime',
-        title: 'Runtime goal',
-        priority: 1,
-        status: 'active',
-        phase: 'executing',
-        created_at: '2026-05-05T09:00:00Z',
-        updated_at: '2026-05-05T09:30:00Z',
-      }],
-      [
-        { id: 'task-runtime', title: 'Runtime task', goal_id: 'goal-runtime', status: 'done' },
-        { id: 'task-followup', title: 'Runtime follow-up', goal_id: 'goal-runtime', status: 'todo' },
-      ],
-    )
+    const summary = deriveIdeRunProgressSummary(events, 'lib/runtime.ml')
 
     expect(summary).toMatchObject({
       totalEvents: 3,
@@ -1108,16 +1017,8 @@ describe('IdeActivityPanel', () => {
       linkedCoverageLabel: '100%',
       keeperTotalCount: 2,
       latestAgeLabel: '30s ago',
-      activeGoal: {
-        goalId: 'goal-runtime',
-        taskId: 'task-runtime',
-        title: 'Runtime goal',
-        progress: { done: 1, total: 2, ratio: 0.5 },
-        progressLabel: '1/2 tasks',
-      },
     })
     expect(summary.surfaceCounts.map(surface => [surface.label, surface.count])).toEqual([
-      ['Goal', 1],
       ['Task', 1],
       ['Board', 1],
       ['Comment', 1],

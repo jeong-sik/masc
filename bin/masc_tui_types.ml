@@ -68,19 +68,6 @@ type board_mode =
   | Board_list
   | Board_read of string
 
-(** Planning surface sub-mode *)
-type planning_mode =
-  | Planning_list
-  | Planning_detail of string
-
-(** Goal status from /api/v1/dashboard/planning. Unknown wire values are
-    rejected at decode time so the renderer cannot silently dim a new state. *)
-type planning_goal_status =
-  | Planning_goal_active
-  | Planning_goal_paused
-  | Planning_goal_done
-  | Planning_goal_dropped
-
 (** Approval / pending confirmation item *)
 type approval_item = {
   ap_token: string;
@@ -125,27 +112,6 @@ type overview_snapshot = {
   ov_generated_at: string;
 }
 
-(** Planning goal from /api/v1/dashboard/planning *)
-type planning_goal = {
-  pg_id: string;
-  pg_title: string;
-  pg_status: planning_goal_status;
-  pg_phase: string;
-  pg_priority: int;
-  pg_due_date: string option;
-  pg_parent_goal_id: string option;
-  pg_metric: string option;
-  pg_target_value: string option;
-}
-
-(** Planning rollup from /api/v1/dashboard/planning *)
-type planning_rollup = {
-  pr_active: int;
-  pr_paused: int;
-  pr_done: int;
-  pr_dropped: int;
-}
-
 (** Planning task backlog summary *)
 type planning_backlog = {
   pb_todo: int;
@@ -157,29 +123,9 @@ type planning_backlog = {
 
 (** Planning snapshot from /api/v1/dashboard/planning *)
 type planning_snapshot = {
-  pl_goals: planning_goal list;
-  pl_rollup: planning_rollup;
   pl_backlog: planning_backlog;
   pl_generated_at: string;
 }
-
-let planning_goal_depth (goals : planning_goal list) (goal : planning_goal) =
-  Tui_decode.bounded_parent_depth ~id_of:(fun g -> g.pg_id)
-    ~parent_id_of:(fun g -> g.pg_parent_goal_id)
-    goals goal
-
-let planning_visible_goals (goals : planning_goal list) : planning_goal list =
-  goals
-  |> List.mapi (fun index goal -> (index, goal))
-  |> List.stable_sort (fun (left_index, left_goal) (right_index, right_goal) ->
-         match
-           Int.compare
-             (planning_goal_depth goals left_goal)
-             (planning_goal_depth goals right_goal)
-         with
-         | 0 -> Int.compare left_index right_index
-         | depth_cmp -> depth_cmp)
-  |> List.map snd
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -227,9 +173,6 @@ type state = {
   mutable board_mode: board_mode;
   mutable planning: planning_snapshot option;
   mutable planning_error: string option;
-  mutable planning_cursor: int;
-  mutable planning_scroll: int;
-  mutable planning_mode: planning_mode;
   mutable msg_input: Buffer.t;
   mutable msg_history: msg_entry list;
   mutable msg_sending: bool;
@@ -267,9 +210,6 @@ let create_state ~workspace ~port ~refresh_interval = {
   board_mode = Board_list;
   planning = None;
   planning_error = None;
-  planning_cursor = 0;
-  planning_scroll = 0;
-  planning_mode = Planning_list;
   msg_input = Buffer.create 256;
   msg_history = [];
   msg_sending = false;

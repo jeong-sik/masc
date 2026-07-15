@@ -10,7 +10,7 @@ vi.mock('./store', async (importOriginal) => {
     refreshBoard: vi.fn(),
     refreshFusionBoard: vi.fn(),
     refreshFusionRuns: vi.fn(),
-    refreshGoals: vi.fn(),
+    refreshPlanning: vi.fn(),
   }
 })
 
@@ -134,24 +134,23 @@ describe('refreshPlanForRoute', () => {
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {
-    // The default Work board (section: 'work') reads the same flat goals + tasks
-    // signals as planning, so it must fetch both. Regression guard: a missing
-    // 'work' branch left the board empty (0 goals / 0 jobs) despite live data.
+    // Work and planning both consume the task execution snapshot plus the
+    // planning evidence projection.
     expect(refreshPlanForRoute({
       tab: 'workspace',
       params: { section: 'work' },
-    })).toEqual(['goals', 'execution'])
+    })).toEqual(['planning', 'execution'])
 
     // Bare workspace route normalizes to the 'work' default section.
     expect(refreshPlanForRoute({
       tab: 'workspace',
       params: {},
-    })).toEqual(['goals', 'execution'])
+    })).toEqual(['planning', 'execution'])
 
     expect(refreshPlanForRoute({
       tab: 'workspace',
       params: { section: 'planning' },
-    })).toEqual(['goals', 'execution'])
+    })).toEqual(['planning', 'execution'])
 
     expect(refreshPlanForRoute({
       tab: 'workspace',

@@ -412,7 +412,6 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
   }
   if (routeState.tab === 'workspace' && routeState.params.section === 'planning') {
     slices.add('execution')
-    slices.add('goals')
   }
   // Board rows are actor/filter scoped (`voter`, blind-vote policy, author and
   // hearth filters) and are loaded through refreshBoard's HTTP query. The WS

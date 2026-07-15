@@ -218,7 +218,6 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
       ("network_mode", network_mode_to_string meta.network_mode);
       ("allowed_paths", cache_fingerprint_list meta.allowed_paths);
       ("mention_targets", cache_fingerprint_list meta.mention_targets);
-      ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
       ("proactive_enabled", string_of_bool meta.proactive.enabled);
       ("autoboot_enabled", string_of_bool meta.autoboot_enabled);
       ("telemetry_feedback_enabled", opt_bool meta.telemetry_feedback_enabled);

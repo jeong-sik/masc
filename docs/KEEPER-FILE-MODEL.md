@@ -8,8 +8,8 @@ code_refs:
 
 # Keeper File Model
 
-**Status**: Active  
-**Audience**: operator, keeper implementer, dashboard maintainer  
+**Status**: Active
+**Audience**: operator, keeper implementer, dashboard maintainer
 **One sentence**: keeper data is split into identity (`persona`), deployment declaration (`keeper.toml`), durable runtime state (`keeper.json`), and append-only runtime artifacts (`.masc/keepers/<name>/...`).
 
 ## Example
@@ -118,7 +118,6 @@ persona_name = "analyst"
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container. Hard mode requires `docker`. |
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `inherit`. Hard mode requires `none`. |
-| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` only claims tasks linked to these goals and reports scope health in audit/status surfaces. |
 
 ### Additional supported overlay fields
 
@@ -131,7 +130,6 @@ These are still accepted by the loader, but for consistency they should be used 
 | `proactive_enabled` | bool | Override default proactive scheduling |
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
 | `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on the single sandbox root |
-| `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
 
@@ -177,7 +175,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 | Field | Replacement / rationale |
 | --- | --- |
-| `goal` | Link typed Goal Store entities through `active_goal_ids`. Free-form keeper goal text is removed. |
+| `goal`, `active_goal_ids` | Legacy Goal inputs are removed. Planned work is represented by Workspace Tasks, not Keeper profile scope. |
 | `tool_access`, `tool_denylist`, `shards`, `policy_voice_enabled` | Per-Keeper tool hierarchies are removed. The immutable catalog and descriptor/registry projection define which typed tools exist; each concrete external effect then reaches the Gate. |
 | `runtime_id`, `model`, `runtime_ref` | Runtime assignment lives in `runtime.toml` `[runtime.assignments]`, keyed by keeper name. |
 | `models`, `allowed_models`, `active_model` | Models are resolved from the assigned runtime. Do not pin per-keeper. |

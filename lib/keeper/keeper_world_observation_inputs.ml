@@ -19,17 +19,6 @@ let backlog_updated_since_last_scheduled_autonomous
     | None -> false)
 ;;
 
-let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
-    ~(tasks : Masc_domain.task list) () =
-  (* [read_backlog_counts] already loaded [tasks]. Reuse them to get the same
-     empty-scope fallback as the claim path without a second backlog read. *)
-  let scope =
-    Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks ~config ~meta
-      ~tasks ()
-  in
-  scope.task_filter
-;;
-
 let actionable_verification_request_ids ~(config : Workspace.config) : string list =
   Verification.list_requests config.Workspace.base_path
   |> List.filter Verification.request_is_actionable
@@ -88,15 +77,12 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter =
-      claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
-    in
+    ignore meta;
     let claimable =
       List.length
         (List.filter
            (fun task ->
-              Workspace_task_schedule.task_is_claim_pool_candidate task
-              && claim_scope_filter task)
+              Workspace_task_schedule.task_is_claim_pool_candidate task)
            unclaimed_tasks)
     in
     let failed =
@@ -108,7 +94,6 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
       Workspace.audit_orphan_tasks config
       |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
       |> List.map fst
-      |> List.filter claim_scope_filter
       |> List.length
     in
     let pending_verification =

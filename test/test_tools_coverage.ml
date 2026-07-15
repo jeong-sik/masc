@@ -311,27 +311,12 @@ let test_masc_add_task_schema () =
            Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
            Alcotest.(check bool) "has priority" true (List.mem_assoc "priority" props);
            Alcotest.(check bool) "has description" true (List.mem_assoc "description" props);
-           Alcotest.(check bool) "has goal_id" true (List.mem_assoc "goal_id" props);
-           Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props);
-           (match List.assoc_opt "goal_id" props with
-            | Some goal_id_schema ->
-                let description =
-                  Option.value ~default:"" (get_json_string "description" goal_id_schema)
-                in
-                Alcotest.(check bool) "goal_id is optional in prose" true
-                  (contains_substring ~needle:"Optional structured goal link" description);
-                Alcotest.(check bool) "goal_id does not reference prompt markers" false
-                  (contains_substring ~needle:"<available_goals>" description);
-                Alcotest.(check bool) "goal_id does not label omitted links orphaned" false
-                  (contains_substring ~needle:"orphaned" description)
-            | None -> Alcotest.fail "masc_add_task missing goal_id property")
+           Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props)
        | None -> Alcotest.fail "masc_add_task missing properties");
       (match get_json_list "required" schema.input_schema with
        | Some reqs ->
            Alcotest.(check bool) "title required" true
-             (List.mem (`String "title") reqs);
-           Alcotest.(check bool) "goal_id not required" false
-             (List.mem (`String "goal_id") reqs)
+             (List.mem (`String "title") reqs)
        | None -> Alcotest.fail "masc_add_task missing required field")
 
 let test_masc_batch_add_tasks_schema () =
@@ -347,16 +332,12 @@ let test_masc_batch_add_tasks_schema () =
                      (match List.assoc_opt "properties" item_fields with
                       | Some (`Assoc item_props) ->
                           Alcotest.(check bool) "item has title" true
-                            (List.mem_assoc "title" item_props);
-                          Alcotest.(check bool) "item has goal_id" true
-                            (List.mem_assoc "goal_id" item_props)
+                            (List.mem_assoc "title" item_props)
                       | _ -> Alcotest.fail "masc_batch_add_tasks item missing properties");
                      (match List.assoc_opt "required" item_fields with
                       | Some (`List item_reqs) ->
                           Alcotest.(check bool) "item title required" true
-                            (List.mem (`String "title") item_reqs);
-                          Alcotest.(check bool) "item goal_id not required" false
-                            (List.mem (`String "goal_id") item_reqs)
+                            (List.mem (`String "title") item_reqs)
                       | _ -> Alcotest.fail "masc_batch_add_tasks item missing required")
                  | None -> Alcotest.fail "masc_batch_add_tasks tasks missing items")
             | None -> Alcotest.fail "masc_batch_add_tasks missing tasks property")
@@ -364,63 +345,8 @@ let test_masc_batch_add_tasks_schema () =
       (match get_json_list "required" schema.input_schema with
        | Some reqs ->
            Alcotest.(check bool) "tasks required" true
-             (List.mem (`String "tasks") reqs);
-           Alcotest.(check bool) "top-level goal_id not required" false
-             (List.mem (`String "goal_id") reqs)
+             (List.mem (`String "tasks") reqs)
        | None -> Alcotest.fail "masc_batch_add_tasks missing required field")
-
-let test_masc_goal_list_schema () =
-  match find_registered_tool "masc_goal_list" with
-  | None -> Alcotest.fail "masc_goal_list not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "horizon filter removed (RFC-0294)" false (List.mem_assoc "horizon" props);
-          Alcotest.(check bool) "has phase" true (List.mem_assoc "phase" props);
-          Alcotest.(check bool) "no legacy status filter" false (List.mem_assoc "status" props)
-      | None -> Alcotest.fail "masc_goal_list missing properties"
-
-let test_masc_goal_upsert_schema () =
-  match find_registered_tool "masc_goal_upsert" with
-  | None -> Alcotest.fail "masc_goal_upsert not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has id" true (List.mem_assoc "id" props);
-          Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
-          Alcotest.(check bool) "horizon removed (RFC-0294)" false (List.mem_assoc "horizon" props);
-          Alcotest.(check bool) "omits status lifecycle field" false
-            (List.mem_assoc "status" props);
-          Alcotest.(check bool) "omits phase lifecycle field" false
-            (List.mem_assoc "phase" props);
-          Alcotest.(check bool) "has parent_goal_id" true
-            (List.mem_assoc "parent_goal_id" props)
-      | None -> Alcotest.fail "masc_goal_upsert missing properties"
-
-let test_masc_goal_transition_schema () =
-  match find_registered_tool "masc_goal_transition" with
-  | None -> Alcotest.fail "masc_goal_transition not found"
-  | Some schema ->
-      (match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has goal_id" true
-            (List.mem_assoc "goal_id" props);
-          Alcotest.(check bool) "has action" true
-            (List.mem_assoc "action" props);
-          Alcotest.(check bool) "actor is authenticated context, not input" false
-            (List.mem_assoc "actor" props);
-          Alcotest.(check bool) "has note" true
-            (List.mem_assoc "note" props)
-      | None -> Alcotest.fail "masc_goal_transition missing properties");
-      match get_json_list "required" schema.input_schema with
-      | Some reqs ->
-          Alcotest.(check bool) "goal_id required" true
-            (List.mem (`String "goal_id") reqs);
-          Alcotest.(check bool) "action required" true
-            (List.mem (`String "action") reqs);
-          Alcotest.(check bool) "actor is not required input" false
-            (List.mem (`String "actor") reqs)
-      | None -> Alcotest.fail "masc_goal_transition missing required field"
 
 let test_retired_front_door_tools_absent_from_schema_inventory () =
   let retired_tools =
@@ -434,7 +360,6 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       "masc_keeper_repair";
       "masc_operation_start";
       "masc_dispatch_tick";
-      "masc_goal_review";
     ]
   in
   List.iter
@@ -833,11 +758,6 @@ let () =
       Alcotest.test_case "plan_update" `Quick test_masc_plan_update_schema;
       Alcotest.test_case "plan_get" `Quick test_masc_plan_get_schema;
       Alcotest.test_case "deliver" `Quick test_masc_deliver_schema;
-    ];
-    "goal_tools", [
-      Alcotest.test_case "goal_list" `Quick test_masc_goal_list_schema;
-      Alcotest.test_case "goal_upsert" `Quick test_masc_goal_upsert_schema;
-      Alcotest.test_case "goal_transition" `Quick test_masc_goal_transition_schema;
     ];
     "vote_tools", [
     ];

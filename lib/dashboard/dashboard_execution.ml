@@ -531,27 +531,7 @@ let task_execution_links_json (task : Masc_domain.task) =
   | None -> `Null
 ;;
 
-(* RFC-0267 Phase 1: project the registry's canonical goal_id onto the wire.
-   The task record carries no goal_id (the goal_task_links registry is SSOT);
-   this is a read-time projection so the Work board can nest jobs under goals.
-   A task may appear under multiple goals in the legacy registry — the first
-   match is chosen deterministically and the multi-goal case is logged rather
-   than hidden, surfacing the single-goal-per-task invariant violation. *)
-let task_canonical_goal_id goal_task_index (task : Masc_domain.task) =
-  match Hashtbl.find_opt goal_task_index task.id with
-  | None | Some [] -> None
-  | Some [ goal_id ] -> Some goal_id
-  | Some (goal_id :: extra) ->
-    Log.Dashboard.warn
-      "[dashboard_execution] task %s linked to %d goals; projecting canonical %s (extra: %s)"
-      task.id
-      (1 + List.length extra)
-      goal_id
-      (String.concat "," extra);
-    Some goal_id
-;;
-
-let task_json ~goal_task_index (task : Masc_domain.task) =
+let task_json (task : Masc_domain.task) =
   let fields =
     match Masc_domain.task_to_yojson task with
     | `Assoc assoc -> assoc
@@ -562,12 +542,6 @@ let task_json ~goal_task_index (task : Masc_domain.task) =
   in
   let fields = assoc_upsert fields "updated_at" (`String (task_updated_at task)) in
   let fields = assoc_upsert fields "execution_links" (task_execution_links_json task) in
-  let fields =
-    assoc_upsert
-      fields
-      "goal_id"
-      (Json_util.string_opt_to_json (task_canonical_goal_id goal_task_index task))
-  in
   let fields =
     match task_completed_at task with
     | Some timestamp -> assoc_upsert fields "completed_at" (`String timestamp)
@@ -711,9 +685,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          so other fibers (SSE, health checks) can progress. *)
     Eio.Fiber.yield ();
     let tasks = tasks_safe config in
-    (* RFC-0267 Phase 1: build the task→goals index once; task_json projects the
-       canonical goal_id per task from it (registry is SSOT for the linkage). *)
-    let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let operation_contexts = build_operation_contexts ~tasks in
     let session_contexts = [] in
     let execution_queue = build_execution_queue session_contexts operation_contexts in
@@ -846,7 +817,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          number. The raw list is surfaced instead; frontend paginates. *)
     let all_visible = active_tasks @ recent_done in
     let task_fields =
-      [ "tasks", `List (List.map (task_json ~goal_task_index) all_visible)
+      [ "tasks", `List (List.map task_json all_visible)
       ; ( "task_counts"
         , `Assoc
             [ "active", `Int (List.length active_tasks)

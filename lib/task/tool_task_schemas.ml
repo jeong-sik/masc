@@ -69,10 +69,6 @@ Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot log
           ("type", `String "string");
           ("description", `String "Task description");
         ]);
-        ("goal_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional structured goal link for rollups. If omitted, the task is created unscoped (goalless); pass goal_id explicitly to link it to a goal.");
-        ]);
         ("predecessor_task_id", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional re-run provenance link (RFC-0323): the terminal (done/cancelled) task this one re-runs. Rejected if the id is unknown or the predecessor is not terminal. To re-run completed work, create a new task with this link instead of re-claiming the old one.");
@@ -106,7 +102,7 @@ Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot log
 Use when: loading sprint backlog, importing from JIRA, creating related tasks. \
 Tasks default to the same advisory verification contract/evidence requirements as %s. \
 Each task gets unique ID (task-XXX). Atomic: all succeed or all fail. \
-Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})"
+Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: 'Task B', priority: 3}]})"
       masc_add_task_name
       masc_add_task_name;
     input_schema = `Assoc [
@@ -130,10 +126,6 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
               ("description", `Assoc [
                 ("type", `String "string");
                 ("description", `String "Task description");
-              ]);
-              ("goal_id", `Assoc [
-                ("type", `String "string");
-                ("description", `String "Optional structured goal link for rollups. If omitted, the task is created unscoped (goalless); pass goal_id explicitly to link it to a goal.");
               ]);
               ("contract", `Assoc [
                 ("type", `String "object");
@@ -298,25 +290,6 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);
-    ];
-  };
-  (* RFC-0267 Phase 2: assign an existing goalless task to a goal. *)
-  {
-    name = "masc_task_set_goal";
-    description = "Assign an existing, currently goalless task to a goal. Both task_id and goal_id are required and validated against the backlog and the goal store; an unknown id is rejected (never silently ignored or auto-picked). A task that already has a goal is rejected — reassignment is out of scope.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "ID of the task to assign");
-        ]);
-        ("goal_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "ID of the goal to assign the task to");
-        ]);
-      ]);
-      ("required", `List [`String "task_id"; `String "goal_id"]);
     ];
   };
 ]

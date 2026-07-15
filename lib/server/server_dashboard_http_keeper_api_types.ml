@@ -337,13 +337,9 @@ let claim_scope_summary_absent =
     ; ("result", `Null)
     ; ("mode", `Null)
     ; ("scoped", `Null)
-    ; ("active_goal_ids", `List [])
-    ; ("effective_goal_ids", `List [])
     ; ("fallback_reason", `Null)
-    ; ("matched_goal_id", `Null)
     ; ("excluded_count", `Null)
     ; ("claimed_task_id", `Null)
-    ; ("claimed_goal_id", `Null)
     ; ("trace_id", `Null)
     ; ("keeper_turn_id", `Null)
     ]

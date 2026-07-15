@@ -16,7 +16,6 @@ val build_keeper_system_prompt :
   ?persona_extended:string ->
   ?keeper_name:string ->
   ?home_ground:string ->
-  ?active_goals:(string * string) list ->
   unit ->
   string
 (** RFC-0324 B-1: no repository list is injected. The prompt carries a

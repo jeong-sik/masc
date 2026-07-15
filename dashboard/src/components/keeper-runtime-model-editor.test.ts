@@ -24,7 +24,6 @@ vi.mock('../api/dashboard', () => ({
   fetchRuntimeProviders: refs.providers,
   fetchRuntimeResolved: refs.resolved,
   fetchKeeperConfig: vi.fn(),
-  fetchDashboardGoalsTree: vi.fn(),
 }))
 
 // Keep the real keeper-config-panel (via ...actual) so [keeperRuntimeConfigCanWrite]

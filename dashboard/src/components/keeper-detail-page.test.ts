@@ -15,7 +15,6 @@ function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
     lifecycle_phase: 'Running',
     active_model_label: 'claude-sonnet-4',
     runtime_canonical: 'oas-seoul-1',
-    active_goal_ids: ['goal-runtime-lane-cleanup'],
     context_ratio: 0.62,
     context_tokens: 124_000,
     context_max: 200_000,

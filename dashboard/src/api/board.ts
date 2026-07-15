@@ -135,8 +135,6 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     waiting_s: asNumber(raw.waiting_s),
     turn_id: asInt(raw.turn_id),
     task_id: asNullableString(raw.task_id),
-    goal_id: asNullableString(raw.goal_id),
-    goal_ids: asStringList(raw.goal_ids),
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),
     summary_status: normalizeHitlSummaryStatus(raw.summary_status),

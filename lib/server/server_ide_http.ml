@@ -316,7 +316,6 @@ let annotation_post_allowed_fields =
   ; "keeper_id"
   ; "kind"
   ; "content"
-  ; "goal_id"
   ; "task_id"
   ; "references"
   ]
@@ -635,11 +634,6 @@ let add_routes router =
            | Some k when k <> "" -> Some k
            | _ -> None
          in
-         let goal_id =
-           match Uri.get_query_param uri "goal_id" with
-           | Some g when g <> "" -> Some g
-           | _ -> None
-         in
          let task_id =
            match Uri.get_query_param uri "task_id" with
            | Some t when t <> "" -> Some t
@@ -654,7 +648,7 @@ let add_routes router =
               with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
               let partition = partition_of_ide_scope scope in
               let filter =
-                { Ide_annotation_types.file_path; keeper_id; goal_id; task_id }
+                { Ide_annotation_types.file_path; keeper_id; task_id }
               in
               let annotations =
                 Ide_annotations.list
@@ -758,7 +752,6 @@ let add_routes router =
                        (json_error msg)
                        reqd
                    | Ok kind ->
-                     let goal_id = find_string "goal_id" in
                      let task_id = find_string "task_id" in
                      let references_json = Yojson.Safe.Util.member "references" json in
                      (match
@@ -787,7 +780,6 @@ let add_routes router =
                                 ~line_end
                                 ~kind
                                 ~content
-                                ?goal_id
                                 ?task_id
                                 ~references
                                 ()
@@ -1307,7 +1299,7 @@ let add_routes router =
               with_keeper_lane_read_auth ~state ~request ~reqd:inner_reqd ~scope (fun () ->
               let partition = partition_of_ide_scope scope in
               let filter : Ide_annotation_types.annotation_filter =
-                { file_path = None; keeper_id; goal_id = None; task_id = None }
+                { file_path = None; keeper_id; task_id = None }
               in
               let annotations = Ide_annotations.list ~base_dir:base ~partition ~filter () in
               let entries =
@@ -1323,7 +1315,6 @@ let add_routes router =
                     ("created_at_ms", `Intlit (Int64.to_string a.created_at_ms));
                     ("source_kind", `String ide_memory_source_kind);
                     ("retrieval_status", `String ide_memory_retrieval_status);
-                    ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
                     ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
                   ])
                 (List.filteri (fun i _ -> i < limit) annotations)

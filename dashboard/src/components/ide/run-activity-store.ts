@@ -29,7 +29,6 @@ export type RunActivityVerb = (typeof RUN_ACTIVITY_VERBS)[number]
 export interface RunActivityContext {
   readonly file_path?: string
   readonly line?: number
-  readonly goal_id?: string
   readonly task_id?: string
   readonly board_post_id?: string
   readonly comment_id?: string
@@ -154,7 +153,6 @@ function isRunActivityContext(value: unknown): value is RunActivityContext {
   if (!isRecord(value)) return false
   return optionalNonEmptyString(value.file_path)
     && optionalPositiveInteger(value.line)
-    && optionalNonEmptyString(value.goal_id)
     && optionalNonEmptyString(value.task_id)
     && optionalNonEmptyString(value.board_post_id)
     && optionalNonEmptyString(value.comment_id)

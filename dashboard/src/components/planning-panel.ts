@@ -1,54 +1,18 @@
-// Planning Panel — Phase 7 unified view for planning section.
-// FilterChips toggle between goal-loop status, goal tree, and kanban.
-// Revives GoalTree which became dead code after Phase 1 removed the
-// standalone goals section.
+// Planning Panel — task backlog and workspace evidence.
 
 import { html } from 'htm/preact'
-import { computed } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { replaceRoute, route } from '../router'
-import { workspaceFsmSnapshot, goals, tasks } from '../store'
-import { FilterChips } from './common/filter-chips'
-import { Planning } from './goals/planning'
-import { GoalTree } from './goals/goal-tree'
-import { GoalLoopPanel } from './goal-loop-panel'
+import { workspaceFsmSnapshot, tasks } from '../store'
+import { Planning } from './tasks/planning'
 import { PlanningFocusPanel } from './planning-focus-panel'
-import { openTaskDetail } from './goals/task-detail-state'
+import { openTaskDetail } from './tasks/task-detail-state'
 import type {
   DashboardWorkspaceFsmEvidence,
   DashboardWorkspaceFsmRefs,
   DashboardWorkspaceFsmSnapshot,
   DashboardWorkspaceFsmViolation,
 } from '../types'
-
-type PlanningView = 'default' | 'goal-tree' | 'goal-loop'
-
-const PLANNING_VIEWS: PlanningView[] = ['default', 'goal-tree', 'goal-loop']
-
-function isPlanningView(v: string | undefined): v is PlanningView {
-  return !!v && (PLANNING_VIEWS as string[]).includes(v)
-}
-
-const activeView = computed<PlanningView>(() => {
-  const v = route.value.params.view
-  return isPlanningView(v) ? v : 'goal-tree'
-})
-
-const VIEW_CHIPS: Array<{ key: PlanningView; label: string }> = [
-  { key: 'goal-loop', label: '목표 루프' },
-  { key: 'goal-tree', label: '목표 관리자' },
-  { key: 'default',   label: '백로그' },
-]
-
-function updateViewParam(view: PlanningView): void {
-  const params: Record<string, string> = { ...route.value.params, section: 'planning' }
-  if (view === 'goal-tree') {
-    delete params.view
-  } else {
-    params.view = view
-  }
-  replaceRoute('workspace', params)
-}
 
 function workspaceCount(
   snapshot: DashboardWorkspaceFsmSnapshot | null,
@@ -75,7 +39,6 @@ function severityToneClass(severity: string | undefined): string {
 function refsLabel(refs: DashboardWorkspaceFsmRefs | undefined): string {
   if (!refs) return 'refs: -'
   const parts: string[] = []
-  if (refs.goal_id) parts.push(`goal: ${refs.goal_id}`)
   if (refs.task_ids && refs.task_ids.length > 0) parts.push(`tasks: ${refs.task_ids.join(', ')}`)
   if (refs.post_ids && refs.post_ids.length > 0) parts.push(`posts: ${refs.post_ids.join(', ')}`)
   if (refs.agent_name) parts.push(`agent: ${refs.agent_name}`)
@@ -95,29 +58,25 @@ function cleanRouteFocusId(value: string | undefined): string | null {
 
 function clearPlanningRouteFocus(): void {
   const params: Record<string, string> = { ...route.value.params, section: 'planning' }
-  delete params.goal
   delete params.task
   replaceRoute('workspace', params)
 }
 
 function PlanningRouteFocusPanel() {
   const params = route.value.params as Record<string, string | undefined>
-  const goalId = cleanRouteFocusId(params.goal)
   const taskId = cleanRouteFocusId(params.task)
-  const goal = goalId ? goals.value.find(item => item.id === goalId) ?? null : null
   const task = taskId ? tasks.value.find(item => item.id === taskId) ?? null : null
 
   useEffect(() => {
     if (task) openTaskDetail(task)
   }, [task])
 
-  if (!goalId && !taskId) return null
+  if (!taskId) return null
 
   return html`
     <section
       class="v2-workspace-panel rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
       data-testid="planning-route-focus"
-      data-route-focused-goal=${goalId ?? undefined}
       data-route-focused-task=${taskId ?? undefined}
       aria-label="Planning route focus"
     >
@@ -127,15 +86,6 @@ function PlanningRouteFocusPanel() {
             ROUTE FOCUS
           </div>
           <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-text-body">
-            ${goalId ? html`
-              <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
-                GOAL ${goalId}
-              </span>
-              <span class="min-w-0 truncate text-sm font-semibold text-text-strong">
-                ${goal?.title ?? 'goal not loaded'}
-              </span>
-              ${goal?.status ? html`<span class="font-mono text-3xs text-text-muted">${goal.status}</span>` : null}
-            ` : null}
             ${taskId ? html`
               <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
                 TASK ${taskId}
@@ -263,25 +213,12 @@ function WorkspaceHealthPanel() {
 }
 
 export function PlanningPanel() {
-  const view = activeView.value
-
   return html`
     <div class="v2-workspace-surface flex flex-col gap-4">
-      <${FilterChips}
-        chips=${VIEW_CHIPS}
-        value=${view}
-        onChange=${updateViewParam}
-        size="sm"
-        tone="accent"
-      />
       <${PlanningRouteFocusPanel} />
       <${WorkspaceHealthPanel} />
       <${PlanningFocusPanel} />
-      ${view === 'goal-loop'
-        ? html`<${GoalLoopPanel} />`
-      : view === 'goal-tree'
-        ? html`<${GoalTree} />`
-        : html`<${Planning} />`}
+      <${Planning} />
     </div>
   `
 }

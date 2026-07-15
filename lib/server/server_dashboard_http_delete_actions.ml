@@ -1,9 +1,8 @@
-(** Dashboard delete action handlers — board, tasks, goals, agents.
+(** Dashboard delete action handlers — board, tasks, agents.
 
     Extracted from server_routes_http_routes_dashboard.ml.
     Contains POST handler logic for /api/v1/dashboard/board/delete,
-    /api/v1/dashboard/tasks/delete, /api/v1/dashboard/goals/delete,
-    /api/v1/dashboard/goals/sweep, /api/v1/dashboard/agents/purge.
+    /api/v1/dashboard/tasks/delete, /api/v1/dashboard/agents/purge.
     Keeper purge is durable and asynchronous; plain-agent purge remains an
     exact synchronous cleanup. *)
 
@@ -597,68 +596,6 @@ let add_delete_action_routes router =
                       (Masc_domain.masc_error_to_string err))
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "task_id")
-         )
-       ) request reqd)
-
-  (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Operator
-     surface (CanAdmin); shares the validated backend
-     [Task.Goal_assignment.set_task_goal] with the masc_task_set_goal MCP tool,
-     so the precondition checks live in exactly one place. *)
-  |> Http.Router.post "/api/v1/dashboard/tasks/assign-goal" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             match
-               ( Safe_ops.json_string_opt "task_id" json
-               , Safe_ops.json_string_opt "goal_id" json )
-             with
-             | None, _ -> respond_error ~request:req reqd (invalid_request "task_id")
-             | _, None -> respond_error ~request:req reqd (invalid_request "goal_id")
-             | Some task_id, Some goal_id ->
-             let config = (Mcp_server.workspace_config state) in
-             (match Task.Goal_assignment.set_task_goal config ~task_id ~goal_id with
-              | Ok () -> respond_ok ~request:req reqd
-              | Error
-                  (( Task.Goal_assignment.Unknown_task _
-                   | Task.Goal_assignment.Unknown_goal _ ) as err) ->
-                respond_error ~status:`Not_found ~request:req reqd
-                  (Task.Goal_assignment.set_task_goal_error_to_string err)
-              | Error (Task.Goal_assignment.Already_assigned _ as err) ->
-                respond_error ~status:`Conflict ~request:req reqd
-                  (Task.Goal_assignment.set_task_goal_error_to_string err)
-              | Error (Task.Goal_assignment.Link_write_failed _ as err) ->
-                respond_error ~status:`Internal_server_error ~request:req reqd
-                  (Task.Goal_assignment.set_task_goal_error_to_string err))
-           with Yojson.Json_error _ ->
-             respond_error ~request:req reqd (invalid_request "task_id")
-         )
-       ) request reqd)
-
-  |> Http.Router.post "/api/v1/dashboard/goals/delete" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             match Safe_ops.json_string_opt "goal_id" json with
-             | None ->
-                 respond_error ~request:req reqd (invalid_request "goal_id")
-             | Some goal_id ->
-             let config = (Mcp_server.workspace_config state) in
-             match Goal_store.delete_goal config ~goal_id with
-             | Ok Goal_store.Deleted -> respond_ok ~request:req reqd
-             | Ok (Goal_store.Deleted_with_orphaned_links warning) ->
-                 respond_ok_with_warning ~request:req reqd warning
-             | Error (Goal_store.Unknown_goal _ as err) ->
-                 respond_error ~status:`Not_found ~request:req reqd
-                  (Goal_store.delete_goal_error_to_string err)
-             | Error (Goal_store.Persistence_failed _ as err) ->
-                 respond_error ~status:`Internal_server_error ~request:req reqd
-                   (Goal_store.delete_goal_error_to_string err)
-           with Yojson.Json_error _ ->
-             respond_error ~request:req reqd (invalid_request "goal_id")
          )
        ) request reqd)
 

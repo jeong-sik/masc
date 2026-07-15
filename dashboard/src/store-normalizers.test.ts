@@ -151,7 +151,7 @@ describe('normalizeExecutionQueueItem', () => {
 })
 
 describe('normalizeTaskStatus', () => {
-  it('keeps Goal Store vocabulary out of the generic execution-task normalizer', () => {
+  it('keeps retired status vocabulary out of the generic execution-task normalizer', () => {
     expect(normalizeTaskStatus('completed')).toBeUndefined()
     expect(normalizeTaskStatus('pending')).toBeUndefined()
   })

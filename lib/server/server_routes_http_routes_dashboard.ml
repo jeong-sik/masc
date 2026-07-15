@@ -440,10 +440,10 @@ let handle_gate_mode_body state operator_name request reqd body_str =
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
 ;;
 
-let handle_gate_resolve_body operator_name request reqd body_str =
+let handle_gate_resolve_body request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    match dashboard_gate_resolve_http_json ~created_by:operator_name ~args with
+    match dashboard_gate_resolve_http_json ~args with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error (Gone _ as error) ->
       respond_json_value_with_cors
@@ -463,27 +463,6 @@ let handle_gate_resolve_body operator_name request reqd body_str =
         request
         reqd
         (operator_error_json (approval_resolve_http_error_to_string error))
-  with
-  | Yojson.Json_error message ->
-    respond_json_value_with_cors
-      ~status:`Bad_request
-      request
-      reqd
-      (operator_error_json (Printf.sprintf "invalid json: %s" message))
-;;
-
-let handle_gate_rule_delete_body state request reqd body_str =
-  try
-    let args = Yojson.Safe.from_string body_str in
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    match dashboard_gate_rule_delete_http_json ~base_path ~args with
-    | Ok json -> respond_json_value_with_cors request reqd json
-    | Error message ->
-      respond_json_value_with_cors
-        ~status:`Bad_request
-        request
-        reqd
-        (operator_error_json message)
   with
   | Yojson.Json_error message ->
     respond_json_value_with_cors
@@ -560,14 +539,6 @@ let add_routes ~sw ~clock router =
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_operator_nudges.json
                  ~config:(Mcp_server.workspace_config state) ~limit ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/goal-loop/status" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let json =
-           Dashboard_goal_loop.status_json
-             ~base_path:(Mcp_server.workspace_config state).base_path ()
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -1187,9 +1158,9 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/resolve" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state operator_name _req reqd ->
+         (fun _state _operator_name _req reqd ->
            Http.Request.read_body_async reqd
-             (handle_gate_resolve_body operator_name request reqd))
+             (handle_gate_resolve_body request reqd))
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/schedule/prune" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -1202,13 +1173,6 @@ let add_routes ~sw ~clock router =
                (operator_error_json message)
          )
          request reqd)
-  |> Http.Router.post "/api/v1/dashboard/gate/rules/delete" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _operator_name _req reqd ->
-           Http.Request.read_body_async reqd
-             (handle_gate_rule_delete_body state request reqd))
-         request reqd)
-
   (* Operator surface restored after cp-purge (#7349): handlers existed in
      server_dashboard_http_core/.ml but their Router.get/post registrations
      were deleted together with the Command Plane. Dashboard SSE hydrates
@@ -1303,42 +1267,6 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let json = dashboard_bootstrap_http_json ~state ~sw ~clock req in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let cache_key =
-           Printf.sprintf "goals_tree:%s"
-             (Mcp_server.workspace_config state).base_path
-         in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_goals_tree_http_json ~config:(Mcp_server.workspace_config state)))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/goals/detail" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let goal_id =
-           Server_utils.query_param req "goal_id"
-           |> Option.map String.trim
-           |> Option.value ~default:""
-         in
-         if goal_id = "" then
-           respond_public_read_json_value ~status:`Bad_request req reqd
-             (dashboard_error_json ~ok:false "goal_id query param is required")
-         else
-           let cache_key =
-             Printf.sprintf "goal_detail:%s:%s"
-               (Mcp_server.workspace_config state).base_path goal_id
-           in
-           let json =
-             Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-               Domain_pool_ref.submit_io_or_inline (fun () ->
-                 dashboard_goal_detail_http_json
-                   ~config:(Mcp_server.workspace_config state) ~goal_id))
-           in
-           Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/history" (fun request reqd ->
        with_public_read (fun state req reqd ->

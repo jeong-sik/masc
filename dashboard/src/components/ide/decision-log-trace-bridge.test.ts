@@ -133,7 +133,7 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
       [dec('scholar', 1_715_000_000, 'tool_use', 'error_retryable', {
         file_path: 'runtime.ts',
         line: 9,
-        goal_id: 'goal-decision',
+
         task_id: 'task-decision',
         board_post_id: 'post-decision',
         comment_id: 'comment-decision',
@@ -150,7 +150,6 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
     expect(event).toMatchObject({
       filePath: 'runtime.ts',
       line: 9,
-      goalId: 'goal-decision',
       taskId: 'task-decision',
       boardPostId: 'post-decision',
       commentId: 'comment-decision',

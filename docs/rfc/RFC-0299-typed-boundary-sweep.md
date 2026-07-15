@@ -40,7 +40,6 @@ The 2026-06-29 audit found the pattern compounds: `string catch-all` → `silent
 |---|---|---|---|
 | Keeper lifecycle / blocker_class / disposition / tool_failure_class | #22071 | variants reverse-classified via string match, `_ -> None/Unknown`. HIGH site `server_dashboard_http_execution_surfaces.ml:395-441`: 4 patchers silently stop on new variant | closed-sum + exhaustive `of_string` per type; one SSOT module |
 | Evidence gate | #18840 | Historical substring and magic-threshold defect | **Withdrawn phase** — structured evidence is LLM context, not a completion classifier |
-| Goal scope | #20674 | `claim_goal_scope.mode` is string; consumers branch on string match; dead fossilized arm `empty_goal_scope_fallback_all_tasks` | `claim_scope_mode = All_tasks \| Active_goal_ids \| Empty_goal_scope_fallback_all_tasks` |
 | Tool capability axis | #22042 | Historical name-based semantic classification | **Withdrawn phase** — descriptors do not authorize, hide, or rank tools |
 | Attempt state | #22246 | `Attempt_state` (SSOT from #8930) has **0 production consumers**; sidecar reimplements `attempt_record` with `last_attempt_result:string` + ISO-string time | retire sidecar record; route through `Attempt_state` (result as closed variant, not string) |
 | Health / keeper status | #22639 | stringly-typed status + severity rank reimplemented 6 places; `health_level_of_string` doesn't recognize `'blocked'` → `HL_unknown` → rank 0 (silently down-ranks a blocked fleet) | `health_status` closed-sum + single rank function SSOT |

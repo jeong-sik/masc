@@ -262,7 +262,6 @@ let create
       ~line_end
       ~kind
       ~content
-      ?goal_id
       ?task_id
       ?(references = [])
       ()
@@ -298,7 +297,6 @@ let create
       ; keeper_id
       ; kind
       ; content
-      ; goal_id
       ; task_id
       ; references
       ; created_at_ms = ts
@@ -324,17 +322,6 @@ let list ~base_dir ?(partition = Ide_paths.Legacy_default) ~filter () =
     | Some k -> List.filter (fun (a : annotation) -> a.keeper_id = k) by_file
     | None -> by_file
   in
-  let by_goal =
-    match filter.goal_id with
-    | Some g ->
-      List.filter
-        (fun (a : annotation) ->
-           match a.goal_id with
-           | Some gid -> gid = g
-           | None -> false)
-        by_keeper
-    | None -> by_keeper
-  in
   let by_task =
     match filter.task_id with
     | Some t ->
@@ -343,8 +330,8 @@ let list ~base_dir ?(partition = Ide_paths.Legacy_default) ~filter () =
            match a.task_id with
            | Some tid -> tid = t
            | None -> false)
-        by_goal
-    | None -> by_goal
+        by_keeper
+    | None -> by_keeper
   in
   List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_task
 ;;

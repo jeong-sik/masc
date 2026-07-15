@@ -28,7 +28,7 @@ const PLANE_ORDER = ['work', 'comms', 'observe', 'cognition', 'ide'] as const sa
 const PLANE_META: Record<CockpitPlane, PlaneMeta> = {
   work: {
     label: 'Work',
-    summary: 'Goals, tasks, and accountability routes',
+    summary: 'Tasks, ownership, and accountability routes',
   },
   comms: {
     label: 'Comms',

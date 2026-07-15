@@ -196,7 +196,7 @@ describe('keeper-trace-store', () => {
       eventId: 'evt-1',
       filePath: 'runtime.ts',
       line: 12,
-      surface: 'Goal',
+      surface: 'Task',
     })
     pushTrace({
       id: 'activity-2',
@@ -233,7 +233,6 @@ describe('keeper-trace-store', () => {
       semanticOutcome: 'success',
       filePath: 'runtime.ts',
       line: 12,
-      goalId: 'goal-runtime',
     })
     pushTrace({
       id: 'decision-2',
@@ -244,7 +243,6 @@ describe('keeper-trace-store', () => {
       semanticOutcome: 'success',
       filePath: 'runtime.ts',
       line: 13,
-      goalId: 'goal-runtime',
     })
     pushTrace({
       id: 'decision-3',
@@ -255,7 +253,6 @@ describe('keeper-trace-store', () => {
       semanticOutcome: 'success',
       filePath: 'runtime.ts',
       line: 12,
-      goalId: 'goal-other',
     })
 
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual([
@@ -504,7 +501,7 @@ describe('keeper-trace-store', () => {
       eventId: 'evt-1',
       filePath: 'runtime.ts',
       line: 9,
-      surface: 'Goal',
+      surface: 'Task',
     })
 
     for (const event of keeperTraceState.value.events) {
@@ -526,7 +523,7 @@ describe('keeper-trace-store', () => {
           expect(event.eventId).toBe('evt-1')
           expect(event.filePath).toBe('runtime.ts')
           expect(event.line).toBe(9)
-          expect(event.surface).toBe('Goal')
+          expect(event.surface).toBe('Task')
           break
       }
     }

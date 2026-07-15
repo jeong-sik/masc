@@ -73,7 +73,6 @@ let test_events_json_derives_ide_context () =
            ~payload:
              (`Assoc
                 [
-                  ("goal_id", `String "goal-ide");
                   ("comment_id", `String "comment-7");
                   ("pr_number", `Int 15035);
                 ])
@@ -90,8 +89,6 @@ let test_events_json_derives_ide_context () =
       check string "context file path" "lib/keeper/keeper_tool_ide_runtime.ml"
         (context |> member "file_path" |> to_string);
       check int "context line" 27 (context |> member "line" |> to_int);
-      check string "context goal" "goal-ide"
-        (context |> member "goal_id" |> to_string);
       check string "context task" "task-42"
         (context |> member "task_id" |> to_string);
       check string "context board" "post-1"

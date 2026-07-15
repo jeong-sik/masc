@@ -247,7 +247,7 @@ let hitl_context_summary_schema =
     [ "context_summary", string_schema
     ; "key_questions", string_array_schema
     ; ( "judgment"
-      , enum_schema Keeper_approval_queue_rules_types.advisory_judgment_values )
+      , enum_schema Keeper_approval_queue_types.advisory_judgment_values )
     ; "rationale", string_schema
     ]
   in

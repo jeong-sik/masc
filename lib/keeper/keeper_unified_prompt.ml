@@ -23,32 +23,6 @@ let format_pending_messages
       Printf.sprintf "- scope %s: %s" message.speaker message.content)
   |> String.concat "\n"
 
-(** Format active goals into a prompt section. *)
-let format_goals (goal_ids : string list) : string =
-  String.concat "\n"
-    (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
-
-(** Format active goals with their titles (RFC-0315). Falls back to
-    [format_goals] at the call site when the caller did not resolve titles. *)
-let format_goal_summaries (summaries : (string * string) list) : string =
-  String.concat "\n"
-    (List.map
-       (fun (gid, title) ->
-         if title = "" then Printf.sprintf "- %s" gid
-         else Printf.sprintf "- %s — %s" gid title)
-       summaries)
-
-let format_goal_summaries_for_active_goals
-    ~(active_goal_ids : string list)
-    (summaries : (string * string) list) : string =
-  let title_for goal_id =
-    match List.assoc_opt goal_id summaries with
-    | Some title -> title
-    | None -> ""
-  in
-  format_goal_summaries
-    (List.map (fun goal_id -> (goal_id, title_for goal_id)) active_goal_ids)
-
 (** Render the keeper's own claimed task as standing context (RFC-0315).
     The scheduled cycle always runs when proactive lifecycle is enabled, and
     the model must see the work it is holding: id, title, status, and the prior
@@ -142,7 +116,6 @@ let board_event_kind_label = function
   | Keeper_world_observation.Schedule_due -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
   | Keeper_world_observation.Failure_judgment -> "failure_judgment"
-  | Keeper_world_observation.Goal_assigned -> "goal_assigned"
 ;;
 
 let quote_prompt_field value =
@@ -187,8 +160,7 @@ let board_event_note = function
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due
-  | Keeper_world_observation.Failure_judgment
-  | Keeper_world_observation.Goal_assigned -> ""
+  | Keeper_world_observation.Failure_judgment -> ""
 ;;
 
 let format_board_event_text
@@ -303,7 +275,7 @@ let render_board_observations
   =
   "Rows below are Board context. author, post_kind, and mention fields are \
    source/routing metadata, not a local authority ranking. Judge relevance and \
-   response from the content and current Keeper/Goal/Task context; external \
+   response from the content and current Keeper/Task context; external \
    effects cross the Gate. Use post_id with keeper_board_post_get when the \
    preview is insufficient.\n"
   ^ (events |> List.map format_board_event_text |> String.concat "\n")
@@ -338,7 +310,7 @@ let turn_intent_fallback_block =
        silence, repository, and blocker claims against the live world state.";
       "Nothing genuinely actionable after checking? Give a concise no-work report.";
       "";
-      "Tool calls, typed task/goal transitions, and the runtime checkpoint are \
+      "Tool calls, typed task transitions, and the runtime checkpoint are \
        the authoritative record of your action. Do not invent a second state \
        protocol in prose.";
       "";
@@ -499,7 +471,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(current_task : Masc_domain.task option)
-    ?(active_goal_summaries : (string * string) list option)
     ~(observation : Keeper_world_observation.world_observation)
     () : string * string
     =
@@ -550,52 +521,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     | None -> ""
     | Some block -> "\n" ^ block ^ "\n"
   in
-  let goal_lines =
-    let primary_goal =
-      match Keeper_runtime_contract.primary_goal_id_opt meta with
-      | None -> None
-      | Some goal_id ->
-        let title =
-          match active_goal_summaries with
-          | Some summaries -> List.assoc_opt goal_id summaries
-          | None -> None
-        in
-        Some
-          (match title with
-           | Some title -> goal_id ^ " — " ^ title
-           | None -> goal_id)
-    in
-    let has_valid_primary_goal = Option.is_some primary_goal in
-    String.concat ""
-      [
-        line_block "Primary goal"
-          (Option.value
-             ~default:"(no valid active goal — awaiting assignment)"
-             primary_goal);
-        (if not has_valid_primary_goal then
-           "\n\
-            You have no active goal. Pick ONE action this turn to self-assign a purpose:\n\
-            - Scan the backlog with keeper_tasks_list and claim a matching task.\n\
-            - Read the board with keeper_board_list and join an active discussion.\n\
-            - Post your intended focus to the board so other keepers can align.\n\
-            Do not ask the operator what repo, goal, or task to create unless \
-            the operator explicitly requested new repo, goal, or task creation.\n\
-            Do not stay silent when you have no goal.\n"
-         else
-           (* Keep the goal-bearing path explicit as well: a valid goal does
-              not by itself choose the next concrete action. *)
-           "\n\
-            On a turn with no new external signal, advance one of your active \
-            goals:\n\
-            - Break the goal into one concrete claimable task \
-            (keeper_task_create), or claim a matching backlog task.\n\
-            - Post a short progress or plan update to the board so the fleet \
-            can align.\n\
-            - If the goal is blocked, state the blocker and what would unblock \
-            it.\n\
-            Deferring is a valid choice; if you defer, say why explicitly.\n");
-      ]
-  in
   let base_system_prompt =
     match
       Prompt_registry.render_prompt_template Keeper_prompt_names.unified_system
@@ -603,7 +528,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ("identity_header", Printf.sprintf "You are %s, a keeper agent." meta.name);
           ("persona_block", persona_block);
           ("instructions_block", instructions_block);
-          ("goal_lines", goal_lines);
         ]
     with
     | Ok value -> value
@@ -619,8 +543,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     && Option.is_none meta.current_task_id
   in
   let show_task_create_guidance =
-    observation.active_goals <> []
-    && observation.claimable_task_count = 0
+    observation.claimable_task_count = 0
     && tool_allowed "keeper_task_create"
     && not meta.paused
     && Option.is_none meta.current_task_id
@@ -720,23 +643,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     autonomous_trigger_lines ~decision:turn_decision ~observation
   in
   let content_of : Keeper_context_layers.layer_id -> string option = function
-    (* 1. Active goals — stable turn context. Titles render when the caller
-       resolved them (RFC-0315); every id from the world observation remains
-       rendered even when title enrichment is partial. *)
-    | Keeper_context_layers.Active_goals ->
-      if observation.active_goals <> [] then
-        Some
-          (Printf.sprintf "### Active Goals (%d)\n"
-             (List.length observation.active_goals)
-          ^ (match active_goal_summaries with
-             | Some summaries ->
-                 format_goal_summaries_for_active_goals
-                   ~active_goal_ids:observation.active_goals
-                   summaries
-             | None -> format_goals observation.active_goals)
-          ^ "\n\n")
-      else None
-    (* 1b. Current task — the claim that admitted this turn (RFC-0315).
+    (* Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
       Option.map format_current_task current_task
@@ -790,7 +697,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
         if keeper_or_scope_blocked > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf
-               "- Blocked by keeper/tool/goal scope: %d\n"
+               "- Blocked by keeper/tool scope: %d\n"
                keeper_or_scope_blocked);
         if observation.failed_task_count > 0 then
           Buffer.add_string ubuf

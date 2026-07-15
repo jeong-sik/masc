@@ -25,14 +25,12 @@ type add_task_success =
   ; title : string
   ; priority : int
   ; description : string
-  ; goal_id : string option
   }
 
 type add_task_error =
   | Backlog_read_failed of string
   | Rejected of string
   | Duplicate of { title : string; existing_id : string }
-  | Goal_link_write_failed of string
   | Backlog_write_failed of string
   | Unexpected_error of string
   | Unknown_predecessor of string
@@ -49,7 +47,6 @@ type batch_add_tasks_success =
 
 type batch_add_tasks_error =
   | Batch_backlog_read_failed of string
-  | Batch_goal_link_write_failed of string
   | Batch_backlog_write_failed of string
   | Batch_unexpected_error of string
 
@@ -59,7 +56,6 @@ val batch_add_tasks_error_to_string : batch_add_tasks_error -> string
 
 val add_task_with_result :
   ?contract:Masc_domain.task_contract ->
-  ?goal_id:string ->
   ?created_by:string ->
   ?predecessor_task_id:string ->
   ?reject_if:(Masc_domain.backlog -> string option) ->
@@ -71,31 +67,30 @@ val add_task_with_result :
 
 val add_task :
   ?contract:Masc_domain.task_contract ->
-  ?goal_id:string ->
   ?created_by:string ->
   ?reject_if:(Masc_domain.backlog -> string option) ->
   config -> title:string -> priority:int -> description:string -> string
 
 val batch_add_tasks :
   ?created_by:string ->
-  config -> (string * int * string * string option) list -> string
+  config -> (string * int * string) list -> string
 
 val batch_add_tasks_with_contracts :
   ?created_by:string ->
   config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
+  (string * int * string * Masc_domain.task_contract option) list ->
   string
 
 val batch_add_tasks_with_contracts_result :
   ?created_by:string ->
   config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
+  (string * int * string * Masc_domain.task_contract option) list ->
   (batch_add_tasks_success, batch_add_tasks_error) result
 
 val batch_add_tasks_internal :
   ?created_by:string ->
   config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
+  (string * int * string * Masc_domain.task_contract option) list ->
   string
 (** Internal batch implementation shared by [batch_add_tasks] and
     [batch_add_tasks_with_contracts]. *)

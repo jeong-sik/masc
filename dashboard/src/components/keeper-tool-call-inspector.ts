@@ -202,13 +202,11 @@ function durationTone(durationMs: number): StatusChipTone {
 }
 
 function entryScopeLabel(entry: ToolCallEntry): string {
-  const goalIds = entry.goal_ids ?? []
   const parts = [
     typeof entry.turn === 'number' ? `turn ${entry.turn}` : null,
     typeof entry.keeper_turn_id === 'number' ? `keeper ${entry.keeper_turn_id}` : null,
     entry.lane ? `lane ${entry.lane}` : null,
     entry.task_id ? `task ${entry.task_id}` : null,
-    goalIds.length > 0 ? `goal ${goalIds.join(',')}` : null,
     entry.trace_id ? `trace ${entry.trace_id}` : null,
     entry.session_id ? `session ${entry.session_id}` : null,
     entry.model ? `model ${entry.model}` : null,

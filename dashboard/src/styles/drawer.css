@@ -129,7 +129,7 @@
 .bar-fill.k-noop { background: var(--idle); }
 .bar-fill.k-error { background: var(--err); }
 
-/* ── Domain-detail drawer (tasks/goals/memory) ── */
+/* ── Domain-detail drawer (tasks/memory) ── */
 .dd-tag-row { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: 10px; }
 .dd-section { margin-bottom: 14px; }
 .dd-section .label {
@@ -142,21 +142,6 @@
   white-space: pre-wrap; word-break: break-word;
 }
 .dd-text.muted { color: var(--color-fg-secondary); }
-.dd-goal-stack { display: flex; flex-direction: column; gap: var(--sp-1); }
-.dd-goal-row {
-  display: grid; grid-template-columns: 48px 1fr;
-  gap: var(--sp-2); align-items: start;
-  padding: 6px 8px; border-radius: var(--r-1);
-  background: var(--color-bg-elevated); border: 1px solid var(--color-border-default);
-  font-size: var(--fs-12);
-}
-.dd-goal-row.is-active { border-color: var(--brass-3); background: var(--color-bg-hover); }
-.dd-goal-tag {
-  font-family: var(--font-mono); font-size: var(--fs-10);
-  color: var(--color-fg-muted); text-transform: uppercase;
-  letter-spacing: .05em;
-}
-.dd-goal-row.is-active .dd-goal-tag { color: var(--brass-1); }
 
 .chip.k-active   { color: var(--ok); border-color: rgb(var(--ok-glow) / .4); }
 .chip.k-blocked  { color: var(--warn); border-color: rgb(var(--warn-glow) / .4); }

@@ -25,7 +25,6 @@ import {
 } from './overview'
 import type { FusionRunRecord, TelemetryEntry, TelemetrySourceSummary } from '../../api/dashboard'
 import { keepers } from '../../store'
-import type { Goal } from '../../types/core'
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
 function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
@@ -800,19 +799,6 @@ describe('Overview StyleSeed surfaces', () => {
 
 // ─── Cross-surface digest ─────────────────────────────────────────────────────
 
-function makeGoal(partial: Partial<Goal>): Goal {
-  return {
-    id: 'g-1',
-    title: 'goal',
-    priority: 5,
-    status: 'active',
-    phase: 'observe',
-    created_at: localIsoAt(1),
-    updated_at: localIsoAt(1),
-    ...partial,
-  }
-}
-
 function makeFusionRun(partial: Partial<FusionRunRecord>): FusionRunRecord {
   return {
     runId: 'fr-1',
@@ -826,10 +812,8 @@ function makeFusionRun(partial: Partial<FusionRunRecord>): FusionRunRecord {
 
 describe('computeOverviewDigest', () => {
   it('returns zeroed digest with no data', () => {
-    const digest = computeOverviewDigest(0, [], [])
+    const digest = computeOverviewDigest(0, [])
     expect(digest.openGateRequests).toBe(0)
-    expect(digest.topGoals).toEqual([])
-    expect(digest.topGoalLabel).toBeNull()
     expect(digest.fusionRunning).toBe(0)
     expect(digest.fusionDone).toBe(0)
     expect(digest.fusionTotal).toBe(0)
@@ -837,37 +821,13 @@ describe('computeOverviewDigest', () => {
   })
 
   it('uses the exact Gate queue count supplied by its SSOT', () => {
-    const digest = computeOverviewDigest(
-      2,
-      [],
-      [],
-    )
+    const digest = computeOverviewDigest(2, [])
     expect(digest.openGateRequests).toBe(2)
-  })
-
-  it('orders top goals by priority and labels the leader by due date', () => {
-    const digest = computeOverviewDigest(
-      0,
-      [
-        makeGoal({ id: 'low', priority: 2 }),
-        makeGoal({ id: 'lead', priority: 9, due_date: '2026-07-01' }),
-        makeGoal({ id: 'mid', priority: 5 }),
-      ],
-      [],
-    )
-    expect(digest.topGoals.map(g => g.id)).toEqual(['lead', 'mid', 'low'])
-    expect(digest.topGoalLabel).toBe('2026-07-01')
-  })
-
-  it('falls back to priority label when the leader has no due date', () => {
-    const digest = computeOverviewDigest(0, [makeGoal({ id: 'lead', priority: 8, due_date: null })], [])
-    expect(digest.topGoalLabel).toBe('P8')
   })
 
   it('summarizes fusion runs by status and picks the newest as latest', () => {
     const digest = computeOverviewDigest(
       0,
-      [],
       [
         makeFusionRun({ runId: 'older', status: 'completed', startedAt: 100 }),
         makeFusionRun({ runId: 'newest', status: 'running', startedAt: 300 }),
@@ -893,7 +853,7 @@ describe('Overview prototype surface', () => {
     const head = container.querySelector('[data-testid="overview-head"]')
     expect(head?.querySelector('.ov-eyebrow')?.textContent).toBe('운영 홈')
     expect(head?.querySelector('h1')?.textContent).toBe('지금, 전체')
-    expect(head?.querySelector('.ov-sub')?.textContent).toBe('fleet 전체 — 목표 · Gate · Fusion · 연결 한눈에')
+    expect(head?.querySelector('.ov-sub')?.textContent).toBe('fleet 전체 — 작업 · Gate · Fusion · 연결 한눈에')
   })
 
   it('renders exactly 7 cross-surface KPI cells with the prototype labels', () => {

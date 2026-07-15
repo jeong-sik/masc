@@ -43,9 +43,6 @@ Retired sections are not canonical dashboard surfaces:
 - `monitoring:sessions`, `monitoring:telemetry`, `monitoring:fleet`,
   `monitoring:tool-quality`, `monitoring:governance`, `monitoring:metrics`,
   and `monitoring:fsm-hub` remain legacy redirect inputs only.
-- `monitoring:goal-loop` remains a legacy redirect input only. The canonical
-  home is `workspace:planning?view=goal-loop`.
-
 The historical tables below are kept to explain the consolidation work that
 led to the current route table.
 

@@ -50,7 +50,6 @@ function AnnotationRailCard({ annotation }: { readonly annotation: IdeAnnotation
     surface: annotation.kind,
     label: annotation.content,
     sourceId: `annotation:${annotation.id}`,
-    goalId: annotation.goal_id ?? undefined,
     taskId: annotation.task_id ?? undefined,
     keeperId: annotation.keeper_id,
   })

@@ -66,11 +66,11 @@ type SurfaceSectionId =
   // ConnectorOverviewStrip rather than top-level navigation.
   | 'connector-status'      // all connectors with internal connector picker
   // workspace
-  | 'work'           // Goal/job breakdown surface
+  | 'work'           // Task ownership surface
   | 'board'
   | 'sub-boards'     // Phase 2: SubBoard named spaces within the board
   | 'moderation'     // Board moderation queue and actions
-  | 'planning'       // Phase 1: absorbs goals
+  | 'planning'
   | 'repositories'   // Multi-repository cockpit and keeper access mapping
   | 'verification'   // Contract follow-up (#7531): Mission detail verification table
   // lab
@@ -218,7 +218,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'approvals',
     label: 'Gate',
     icon: 'approvals',
-    description: 'Nonblocking Keeper HITL queue and exact Always rules',
+    description: 'Nonblocking Keeper HITL queue and explicit Gate modes',
     defaultTab: 'approvals',
     tabs: ['approvals'],
   },
@@ -252,7 +252,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'workspace',
     label: 'Work',
     icon: 'workspace',
-    description: 'Work goals, planning, repositories, and verification',
+    description: 'Tasks, planning, repositories, and verification',
     defaultTab: 'workspace',
     defaultParams: { section: 'work' },
     tabs: ['workspace'],
@@ -401,7 +401,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'work',
       label: 'Work',
-      description: 'Goal/job breakdown and keeper assignment board.',
+      description: 'Task breakdown and keeper assignment board.',
       params: { section: 'work' },
     },
     {
@@ -427,8 +427,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'planning',
-      label: 'Plans & Goals',
-      description: 'Goal loop, goal tree, and task kanban.',
+      label: 'Planning',
+      description: 'Task planning, backlog pressure, and execution evidence.',
       params: { section: 'planning' },
     },
     {
@@ -548,9 +548,6 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'command:gate':         { section: 'operations', view: 'gate' },
   'command:inspector':    { section: 'operations', view: 'inspector' },
 
-  // Dashboard consolidation Phase 1: workspace surface
-  'workspace:goals': { section: 'planning' },
-
   // Dashboard consolidation Phase 7: per-connector sections collapsed into one picker.
   'connectors:connector-discord': { section: 'connector-status', params: { connector: 'discord' } },
   'connectors:connector-imessage': { section: 'connector-status', params: { connector: 'imessage' } },
@@ -629,12 +626,9 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   // (this file, line 332+) that carry `view` as part of the canonical destination
   // (e.g. `monitoring:git-graph → workspace:repositories`,
   // cockpit IDE `?mode=Split → code:ide-shell?view=split-diff`).
-  // `planning` does not gain `view` via redirect (`workspace:goals → planning`
-  // drops view); instead, direct `replaceRoute` callers pass `view: 'default'`
-  // as the canonical planning entry point (see router.test.ts replaceRoute case).
   const SECTIONS_WITH_VIEW = new Set([
     'fleet-health', 'runtime', 'agents', 'observatory',
-    'repositories', 'operations', 'ide-shell', 'planning',
+    'repositories', 'operations', 'ide-shell',
   ])
   if (!next.section || !SECTIONS_WITH_VIEW.has(next.section)) {
     delete next.view

@@ -186,7 +186,6 @@ export function normalizeTask(raw: unknown): Task | null {
   return {
     id,
     title,
-    goal_id: asString(raw.goal_id) ?? null,
     status: normalizeTaskStatus(raw.status),
     status_raw: asString(raw.status_raw) ?? null,
     priority: asNumber(raw.priority),

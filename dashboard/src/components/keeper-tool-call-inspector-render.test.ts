@@ -142,7 +142,7 @@ describe('KeeperToolCallInspector render', () => {
           tool: 'keeper_apply_patch',
           input: {
             context: {
-              goal_id: 'goal-runtime',
+
               task_id: 'task-runtime',
               board_post_id: 'post-1',
               comment_id: 'comment-1',
@@ -184,7 +184,6 @@ describe('KeeperToolCallInspector render', () => {
     const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.keeper-tool-route-link')]
     expect(routeLinks.map(link => link.textContent?.trim())).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',

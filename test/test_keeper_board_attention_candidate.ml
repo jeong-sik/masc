@@ -34,7 +34,6 @@ let meta keeper_name =
       [ "name", `String keeper_name
       ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
       ; "trace_id", `String ("trace-" ^ keeper_name)
-      ; "goal", `String "Ship the active Board-related goal"
       ; "instructions", `String "Use the lane context and complete the task"
       ; "sandbox_profile", `String "local"
       ; "network_mode", `String "inherit"
@@ -42,7 +41,7 @@ let meta keeper_name =
       ]
   in
   match Masc.Keeper_meta_json_parse.meta_of_json json with
-  | Ok meta -> { meta with active_goal_ids = [ "goal-board" ] }
+  | Ok meta -> meta
   | Error detail -> Alcotest.failf "keeper meta fixture invalid: %s" detail
 ;;
 
@@ -153,7 +152,7 @@ let test_roundtrip_preserves_full_evidence_and_pending_state () =
        (List.mem_assoc "content" comment_fields)
    | _ -> Alcotest.fail "full comment list missing");
   Alcotest.(check bool)
-    "Keeper Goal Task lane context"
+    "Keeper Task lane context"
     true
     (List.mem_assoc "keeper_context" request_fields);
   match A.candidate_of_json (A.candidate_to_json candidate) with

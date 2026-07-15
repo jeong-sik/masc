@@ -3,7 +3,7 @@
 - Status: Implemented
 - Updated: 2026-07-13
 
-A Keeper can wake from a message, mention, Board activity, Task/Goal context,
+A Keeper can wake from a message, mention, Board activity, Task context,
 configured Schedule, completed Job, Connector input, Gate/HITL resolution, or
 explicit operator request. Proactive opportunities requiring semantic judgment
 are assessed by the configured LLM.

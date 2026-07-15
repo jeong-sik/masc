@@ -14,8 +14,6 @@ type stimulus_kind =
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Failure_judgment
       (* RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
-  | Goal_assigned
-      (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
 
 type reaction_kind =
   | Turn_started
@@ -42,7 +40,6 @@ let stimulus_kind_to_string = function
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
   | Failure_judgment -> "failure_judgment"
-  | Goal_assigned -> "goal_assigned"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -58,7 +55,6 @@ let stimulus_kind_of_string = function
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
   | "failure_judgment" -> Some Failure_judgment
-  | "goal_assigned" -> Some Goal_assigned
   | _ -> None
 ;;
 
@@ -113,7 +109,6 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Failure_judgment _ -> Failure_judgment
-  | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -217,11 +212,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       fj.fj_runtime_id
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
-  | Keeper_event_queue.Goal_assigned ga ->
-    Printf.sprintf
-      "goal_assigned goal_id=%s assigned_by=%s"
-      ga.ga_goal_id
-      ga.ga_assigned_by
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -238,8 +228,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
-    | Keeper_event_queue.Failure_judgment _
-    | Keeper_event_queue.Goal_assigned _ -> None
+    | Keeper_event_queue.Failure_judgment _ -> None
   in
   `Assoc
     (base_fields
@@ -412,7 +401,6 @@ let record_execution_receipt_reaction
       ~trace_id
       ?turn_count
       ~current_task_id
-      ~goal_ids
       ~outcome
       ~reaction_kind
       ~terminal_reason_code
@@ -449,7 +437,6 @@ let record_execution_receipt_reaction
                ; "trace_id", `String trace_id
                ; "turn_count", option_json (fun value -> `Int value) turn_count
                ; "current_task_id", option_json (fun value -> `String value) current_task_id
-               ; "goal_ids", list_json goal_ids
                ; "outcome", `String outcome
                ; "terminal_reason_code", `String terminal_reason_code
                ; "receipt", receipt_json
@@ -992,7 +979,7 @@ let summarize_rows ~keeper_name ~limit rows =
        | Some
            ( Board_signal | Bootstrap | Fusion_completed
            | Bg_completed | Schedule_due | Connector_attention | Hitl_resolved
-           | Failure_judgment | Goal_assigned )
+           | Failure_judgment )
          -> ())
   in
   let note_payload_parse_error row =

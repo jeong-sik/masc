@@ -57,7 +57,7 @@
 .pill.is-stalled { color: var(--stalled-fg); background: var(--stalled-soft); }
 
 /* ════════ BAR ════════
-   Progress bar — fill inside track. Used in tasks, goals, budgets. */
+   Progress bar — fill inside track. Used in tasks, progress displays, and budgets. */
 .bar {
   display: inline-block;
   height: var(--sp-1); width: 100%;

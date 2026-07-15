@@ -6,10 +6,7 @@
     [no_eligible_blocker_summary] formats the blocker summary
     that goes into the human-readable response message body.
 
-    Pure builders — no parent-local state, no I/O. Verbatim extract
-    from [Tool_task]; consumed only by the parent's
-    [format_no_eligible] (which still lives in the parent because it
-    also reads [ctx] and calls [active_goal_phases_for_agent]). *)
+    Pure builders — no parent-local state and no I/O. *)
 
 let no_eligible_diagnostics_json
       ~excluded_count
@@ -35,7 +32,7 @@ let no_eligible_blocker_summary
       ~scope_excluded_count
   =
   Printf.sprintf
-    "diagnostics: goal_scope_or_filter=%d, verification=%d, blocked=%d."
+    "diagnostics: task_scope_or_filter=%d, verification=%d, blocked=%d."
     scope_excluded_count
     verification_blocked_count
     blocked_count

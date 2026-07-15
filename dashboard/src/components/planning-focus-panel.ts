@@ -1,10 +1,10 @@
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
 import { navigate, replaceRoute, route } from '../router'
-import { goals, tasks } from '../store'
-import type { Goal, Task } from '../types'
+import { tasks } from '../store'
+import type { Task } from '../types'
 import { FilterChips } from './common/filter-chips'
-import { deriveStaleTaskEntries, STALE_THRESHOLD_SECONDS, type StaleEntry } from './goals/task-stale-alert'
+import { deriveStaleTaskEntries, STALE_THRESHOLD_SECONDS, type StaleEntry } from './tasks/task-stale-alert'
 
 type PlanningFocus = 'none' | 'stale' | 'accountability-ledger' | 'accountability-matrix'
 type TaskStatusBucket = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'done' | 'other'
@@ -13,7 +13,6 @@ interface AccountabilityTask {
   task: Task
   status: TaskStatusBucket
   stale: boolean
-  goalTitle: string | null
 }
 
 interface AccountabilityRow {
@@ -61,7 +60,6 @@ function updateFocusParam(focus: PlanningFocus): void {
   }
 
   params.focus = focus
-  if (focus === 'stale') params.view = 'default'
   replaceRoute('workspace', params)
 }
 
@@ -88,19 +86,11 @@ function principalForTask(task: Task): string {
   return assignee && assignee.length > 0 ? assignee : 'unassigned'
 }
 
-function buildGoalTitleLookup(goalList: Goal[]): Map<string, string> {
-  const lookup = new Map<string, string>()
-  for (const goal of goalList) lookup.set(goal.id, goal.title)
-  return lookup
-}
-
 function deriveAccountabilityRows(
   taskList: Task[],
-  goalList: Goal[],
   staleEntries: StaleEntry[],
 ): AccountabilityRow[] {
   const staleIds = new Set(staleEntries.map(entry => entry.task.id))
-  const goalTitles = buildGoalTitleLookup(goalList)
   const rows = new Map<string, AccountabilityRow>()
 
   for (const task of taskList) {
@@ -123,7 +113,6 @@ function deriveAccountabilityRows(
       task,
       status: bucket,
       stale,
-      goalTitle: task.goal_id ? goalTitles.get(task.goal_id) ?? null : null,
     })
     rows.set(principal, row)
   }
@@ -138,7 +127,7 @@ function deriveAccountabilityRows(
 
 const staleEntriesForPlanning = computed<StaleEntry[]>(() => deriveStaleTaskEntries(tasks.value))
 const accountabilityRowsForPlanning = computed<AccountabilityRow[]>(() =>
-  deriveAccountabilityRows(tasks.value, goals.value, staleEntriesForPlanning.value),
+  deriveAccountabilityRows(tasks.value, staleEntriesForPlanning.value),
 )
 
 function statusToneClass(status: TaskStatusBucket): string {
@@ -213,14 +202,13 @@ function StaleFocus({ entries }: { entries: StaleEntry[] }) {
                   type="button"
                   class="font-mono text-2xs text-text-strong hover:underline"
                   title=${entry.task.id}
-                  onClick=${() => navigate('workspace', { section: 'planning', view: 'default', task: entry.task.id, focus: 'stale' })}
+                  onClick=${() => navigate('workspace', { section: 'planning', task: entry.task.id, focus: 'stale' })}
                 >
                   ${shortTaskId(entry.task.id)}
                 </button>
                 <div class="mt-1 truncate text-sm font-medium text-text-strong">${entry.task.title}</div>
                 <div class="mt-1 flex flex-wrap gap-1.5 text-3xs text-text-muted">
                   ${entry.task.assignee ? html`<span>@${entry.task.assignee}</span>` : html`<span>unassigned</span>`}
-                  ${entry.task.goal_id ? html`<span>goal ${entry.task.goal_id}</span>` : null}
                 </div>
               </div>
               <div class="flex flex-wrap items-center gap-1.5 md:justify-end">
@@ -288,7 +276,7 @@ function LedgerFocus({ rows }: { rows: AccountabilityRow[] }) {
                     key=${item.task.id}
                     type="button"
                     class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--r-1)] border border-card-border/40 bg-[var(--color-bg-elevated)] px-2 py-1.5 text-left hover:border-card-border/80"
-                    onClick=${() => navigate('workspace', { section: 'planning', view: 'default', task: item.task.id })}
+                    onClick=${() => navigate('workspace', { section: 'planning', task: item.task.id })}
                   >
                     <span class="font-mono text-3xs text-text-muted">${shortTaskId(item.task.id)}</span>
                     <span class="min-w-0 truncate text-xs text-text-body">${item.task.title}</span>

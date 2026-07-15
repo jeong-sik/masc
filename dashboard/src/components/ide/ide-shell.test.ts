@@ -355,7 +355,6 @@ describe('IdeShell', () => {
         label: 'Runtime review',
         source_id: 'trace:evt-42',
         keeper: 'sangsu',
-        goal: 'goal-runtime',
         task: 'task-runtime',
         post: 'post-runtime',
         comment: 'comment-runtime',
@@ -373,7 +372,6 @@ describe('IdeShell', () => {
 
     await waitFor(() => expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',
@@ -392,7 +390,6 @@ describe('IdeShell', () => {
     const routeButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
     expect(routeButtons.map(button => button.getAttribute('aria-label'))).toEqual([
       'Open Code lib/runtime.ml:42',
-      'Open Goal goal-runtime',
       'Open Task task-runtime',
       'Open Board post post-runtime',
       'Open Comment comment-runtime',
@@ -422,7 +419,6 @@ describe('IdeShell', () => {
         surface: 'PR',
         label: 'Runtime review',
         line: '42',
-        goal: 'goal-runtime',
         task: 'task-runtime',
         post: 'post-runtime',
         comment: 'comment-runtime',
@@ -460,7 +456,6 @@ describe('IdeShell', () => {
       'find',
       'rails hidden',
       'PR L42 Runtime review',
-      'Goal goal-runtime',
       'Task task-runtime',
       'Board post-runtime',
       'Comment comment-runtime',
@@ -486,13 +481,6 @@ describe('IdeShell', () => {
         keeper_id: 'sangsu',
         activated_at_ms: Date.now(),
         route_links: [
-          {
-            id: 'goal:goal-runtime',
-            label: 'Goal',
-            tab: 'workspace',
-            params: { section: 'planning', goal: 'goal-runtime' },
-            evidence: 'Goal goal-runtime',
-          },
           {
             id: 'task:task-runtime',
             label: 'Task',
@@ -556,7 +544,6 @@ describe('IdeShell', () => {
       'SOURCE',
       'lib/runtime.ml',
       'Task L42 task task-runtime',
-      'Goal goal-runtime',
       'Task task-runtime',
       'PR #15035',
       'Git main',

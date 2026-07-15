@@ -3,7 +3,6 @@ module Types = Masc_domain
 module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 module Config = Masc.Config
-module Goal_store = Goal_store
 
 type init_mode =
   | Fresh
@@ -31,7 +30,6 @@ type fixture = {
   mutable handover_id : string option;
   mutable library_topic : string option;
   mutable code_file_path : string option;
-  mutable goal_id : string option;
 }
 
 type contract_case = {
@@ -369,7 +367,6 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
       handover_id = None;
       library_topic = None;
       code_file_path = None;
-      goal_id = None;
     }
   in
   (match init_mode with
@@ -379,21 +376,6 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
       ensure_initialized fixture;
       ensure_bound fixture);
   fixture
-
-let ensure_goal fixture =
-  match fixture.goal_id with
-  | Some goal_id -> goal_id
-  | None ->
-      let goal =
-        match
-          Goal_store.upsert_goal (Mcp_server.workspace_config fixture.state)
-            ~title:"Tool Matrix Goal" ()
-        with
-        | Ok (goal, _status) -> goal
-        | Error err -> failwith ("failed to seed tool matrix goal: " ^ err)
-      in
-      fixture.goal_id <- Some goal.Goal_store.id;
-      goal.Goal_store.id
 
 let ensure_task fixture =
   match fixture.task_id with
@@ -407,7 +389,6 @@ let ensure_task fixture =
                 ("title", `String "Tool Matrix Task");
                 ("priority", `Int 2);
                 ("description", `String "task fixture");
-                ("goal_id", `String (ensure_goal fixture));
               ])
       in
       let task_id =
@@ -584,7 +565,7 @@ let field_type = function
 
 let task_id_for_tool fixture _tool_name = ensure_task fixture
 
-let goal_principal fixture =
+let principal_value fixture =
   `Assoc
     [
       ("kind", `String "agent");
@@ -616,8 +597,7 @@ let field_value fixture ~tool_name field_name schema =
   | "new_string" -> `String "after"
   | "key" -> `String "tool-matrix-cache"
   | "task_id" -> `String (task_id_for_tool fixture tool_name)
-  | "goal_id" -> `String (ensure_goal fixture)
-  | "actor" | "principal" -> goal_principal fixture
+  | "actor" | "principal" -> principal_value fixture
   | "task_title" -> `String "Tool Matrix Started Task"
   | "title" -> `String "Tool Matrix Title"
   | "summary" -> `String "tool matrix summary"
@@ -645,7 +625,6 @@ let field_value fixture ~tool_name field_name schema =
               ("title", `String "Tool Matrix Batch Task");
               ("priority", `Int 2);
               ("description", `String "batch");
-              ("goal_id", `String (ensure_goal fixture));
             ];
         ]
   | "post_id" | "parent_id" -> `String (ensure_board_post fixture)
@@ -720,7 +699,7 @@ let field_value fixture ~tool_name field_name schema =
       | None -> `String "active")
   | "objective" -> `String "tool matrix objective"
   | "invariants" | "artifact_priors" | "roster" | "capability_profile"
-  | "active_goal_ids" | "depends_on_operation_ids" ->
+  | "depends_on_operation_ids" ->
       `List [ `String "tool-matrix-item" ]
   | "success_metric" | "current_focus" | "policy" | "budget" | "chain_input"
   | "meta" ->
@@ -764,7 +743,6 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
              (validated at the handler layer), but the matrix fixture must
              supply a non-empty body or the handler rejects the edit. *)
           [ "body" ]
-      | "masc_goal_transition" -> [ "note" ]
       | _ -> []
     in
     List.sort_uniq String.compare (required @ optional)

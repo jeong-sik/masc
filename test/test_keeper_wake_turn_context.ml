@@ -8,9 +8,7 @@
       wake-reason section (before: build_prompt recomputed with
       reactive_wake=false / event_queue_triggers=[], so stimulus-driven wakes
       rendered no reason).
-   3. [?active_goal_summaries] renders goal titles next to ids, and a keeper
-      WITH goals receives a self-direction directive (parity with the
-      pre-existing no-goal branch). *)
+   *)
 
 open Alcotest
 
@@ -60,7 +58,6 @@ let base_observation : WO.world_observation =
     pending_messages = [];
     pending_board_events = [];
     idle_seconds = 0;
-    active_goals = [];
     unclaimed_task_count = 0;
     claimable_task_count = 0;
     failed_task_count = 0;
@@ -163,10 +160,10 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
     do_not_reclaim_reason = None;
   }
 
-let user_message ?turn_decision ?current_task ?active_goal_summaries observation =
+let user_message ?turn_decision ?current_task observation =
   let _system, user =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?turn_decision
-      ?current_task ?active_goal_summaries ~observation ()
+      ?current_task ~observation ()
   in
   user
 
@@ -254,66 +251,6 @@ let test_unthreaded_recompute_renders_no_reason_on_empty_world () =
   check bool "no reactive scheduler line" false
     (contains ~needle:"- Scheduler: reactive turn (external stimulus)." user)
 
-(* --- 3. Goal titles + self-direction parity --- *)
-
-let test_goal_summaries_render_titles () =
-  let observation = { base_observation with active_goals = [ "goal-x" ] } in
-  let with_titles =
-    user_message
-      ~active_goal_summaries:[ ("goal-x", "Improve wake context") ]
-      observation
-  in
-  check bool "id and title" true
-    (contains ~needle:"- goal-x — Improve wake context" with_titles);
-  let bare = user_message observation in
-  check bool "bare id" true (contains ~needle:"- goal-x" bare);
-  check bool "bare id has no title" false
-    (contains ~needle:"Improve wake context" bare)
-
-let test_partial_goal_summaries_preserve_missing_ids () =
-  let observation =
-    { base_observation with active_goals = [ "goal-a"; "goal-b" ] }
-  in
-  let user =
-    user_message
-      ~active_goal_summaries:[ ("goal-a", "Improve wake context") ]
-      observation
-  in
-  check bool "header keeps full active-goal count" true
-    (contains ~needle:"### Active Goals (2)" user);
-  check bool "resolved goal title renders" true
-    (contains ~needle:"- goal-a — Improve wake context" user);
-  check bool "missing title falls back to bare id" true
-    (contains ~needle:"- goal-b" user)
-
-let test_goal_holder_gets_self_direction_directive () =
-  with_repo_prompt_config @@ fun () ->
-  let meta_with_goal =
-    meta_of_json
-      (`Assoc
-        [
-          ("name", `String "wake-context-keeper");
-          ("trace_id", `String "test-trace-wake-context");
-          ("active_goal_ids", `List [ `String "goal-x" ]);
-        ])
-  in
-  let system, _user =
-    Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
-      ~observation:base_observation ()
-  in
-  check bool "goal-holder directive present" true
-    (contains ~needle:"advance one of your active" system);
-  check bool "defer is stated as valid" true
-    (contains ~needle:"Deferring is a valid choice" system);
-  let no_goal_system, _user =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
-      ~observation:base_observation ()
-  in
-  check bool "no-goal branch keeps its own directive" true
-    (contains ~needle:"You have no active goal" no_goal_system);
-  check bool "goal-holder directive absent without goals" false
-    (contains ~needle:"advance one of your active" no_goal_system)
-
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
@@ -334,14 +271,5 @@ let () =
             test_hitl_resolution_steers_continuation;
           test_case "unthreaded recompute stays blind on empty world" `Quick
             test_unthreaded_recompute_renders_no_reason_on_empty_world;
-        ] );
-      ( "goal titles and parity directive",
-        [
-          test_case "summaries render titles, unresolved ids stay bare" `Quick
-            test_goal_summaries_render_titles;
-          test_case "partial summaries preserve missing goal ids" `Quick
-            test_partial_goal_summaries_preserve_missing_ids;
-          test_case "goal holder gets self-direction directive" `Quick
-            test_goal_holder_gets_self_direction_directive;
         ] );
     ]

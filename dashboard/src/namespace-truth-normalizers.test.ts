@@ -366,12 +366,12 @@ describe('normalizeNamespaceTruth', () => {
             metrics: { keeper_count: 4 },
           },
           {
-            key: 'goal_coherence',
-            label: 'Goal Coherence',
+            key: 'task_ownership',
+            label: 'Task Ownership',
             status: 'warn',
             score: 0.25,
             summary: 'One keeper is unscoped.',
-            blocking_reasons: ['1 keeper has no active goal link.'],
+            blocking_reasons: ['1 keeper has no claimed task link.'],
             metrics: { unscoped_keepers: 1 },
           },
         ],
@@ -394,7 +394,7 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.readiness!.score).toBe(0.61)
     expect(result.readiness!.decision_required_count).toBe(2)
     expect(result.readiness!.pillars).toHaveLength(2)
-    expect(result.readiness!.pillars[1]!.blocking_reasons).toEqual(['1 keeper has no active goal link.'])
+    expect(result.readiness!.pillars[1]!.blocking_reasons).toEqual(['1 keeper has no claimed task link.'])
     expect(result.attention_events).toHaveLength(1)
     expect(result.attention_events![0]!.kind).toBe('hitl_pending')
     expect(result.attention_events![0]!.requires_decision).toBe(true)

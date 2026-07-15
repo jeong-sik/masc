@@ -89,7 +89,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | 03d5feaf25 2026-07-08 | - |
 | 0064 | Descriptor-Owned Tool Surface | Superseded | 03d5feaf25 2026-07-08 | - |
 | 0065 | Withdraw policy-bearing tool-selection model | Withdrawn | 03d5feaf25 2026-07-08 | - |
-| 0067 | Goal-Scope Observation→Claim Atomicity | Draft | 03d5feaf25 2026-07-08 | - |
 | 0068 | Withdraw operator disposition hierarchy | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0069 | Awareness Channel Split | Active | 03d5feaf25 2026-07-08 | - |
 | 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Active | 03d5feaf25 2026-07-08 | - |
@@ -102,7 +101,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0077 | Write-side silent failure — typed propagation | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0079 | Log row typed encoder + silent-drop removal | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0080 | Registered descriptors are the tool-surface SSOT | Implemented | 03d5feaf25 2026-07-08 | - |
-| 0081 | OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0082 | Withdraw automatic blocker escalation and recovery | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0083 | Dashboard system-actor convention typed unification | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0084 | Tool dispatch handler and observation unification | Implemented | 03d5feaf25 2026-07-08 | - |
@@ -128,9 +126,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0106 | Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation) | Active | 03d5feaf25 2026-07-08 | - |
 | 0107 | Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker ... | Active | 03d5feaf25 2026-07-08 | - |
 | 0108 | PR / Worktree Operation Safety Gates | Implemented | 03d5feaf25 2026-07-08 | - |
-| 0109 | Withdraw CDAL authority over Goal transitions | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0110 | Tool-pair atomicity at write boundary — sunset compaction repair fabrication | Implemented | 03d5feaf25 2026-07-08 | - |
-| 0111 | Goal mint atomicity — auto-goal uniqueness invariant at write boundary | Implemented | 434a7f5a76 2026-07-10 | - |
 | 0112 | Typed JSON parse boundary — eliminate silent-drop fallback across read sites | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0113 | Withdraw KeeperReactionLiveness runtime hierarchy | Withdrawn | 434a7f5a76 2026-07-10 | - |
 | 0114 | Withdraw compact-retry and lifecycle guard model | Withdrawn | 03d5feaf25 2026-07-08 | - |
@@ -245,7 +241,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0242 | Retired continuity prose-filter draft | Superseded | 434a7f5a76 2026-07-10 | - |
 | 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | 03d5feaf25 2026-07-08 | - |
 | 0244 | Memory OS recall: turn-seeded deterministic lexical retrieval, with provenanc... | Draft | 03d5feaf25 2026-07-08 | - |
-| 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0246 | Wake-cascade Recovery Tombstone | Draft | 03d5feaf25 2026-07-08 | - |
 | 0247 | Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0248 | Announce-as-data — typed observation provenance for board activity | Draft | 434a7f5a76 2026-07-10 | - |
@@ -266,7 +261,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0264 | Memory OS recall outcome-anchored eval harness | Draft | 03d5feaf25 2026-07-08 | - |
 | 0265 | Withdraw MASC modality capability rerouting | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0266 | Fusion async-completion wake + in-progress 가시성 | Draft | 03d5feaf25 2026-07-08 | - |
-| 0267 | Make task↔goal links visible and explicitly assignable | Draft | 03d5feaf25 2026-07-08 | - |
 | 0269 | Process Critic Loop for Keeper Work Traces | Draft | 03d5feaf25 2026-07-08 | - |
 | 0270 | CI Gate merge guard: block merges on a non-success CI Gate and trip on red main | Draft | 03d5feaf25 2026-07-08 | - |
 | 0271 | Withdraw progress-based turn rejection and pause | Withdrawn | 03d5feaf25 2026-07-08 | - |
@@ -286,13 +280,11 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0285 | Memory OS — Self-Observation Claim Volatility (closing RFC-0259's internal-st... | Draft | 434a7f5a76 2026-07-10 | - |
 | 0286 | Superseded exec and Keeper boundary diagnosis | Superseded | 03d5feaf25 2026-07-08 | - |
 | 0287 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | 03d5feaf25 2026-07-08 | - |
-| 0288 | Remove per-Keeper goal-horizon fields | Implemented | 434a7f5a76 2026-07-10 | - |
 | 0289 | Extract progress-classification into its own library for a single substantive... | Draft | 03d5feaf25 2026-07-08 | - |
 | 0290 | Generic keeper background-work tool (spawn → wake-on-completion) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0291 | Closed SSE event-type sum + typed broadcast — RFC-0004 Phase A0 Wave 2 increment | Draft | 03d5feaf25 2026-07-08 | - |
 | 0292 | Complete lib/auth de-duplication — remove drifted Masc.Auth* test copies | Draft | 03d5feaf25 2026-07-08 | - |
 | 0293 | Withdraw policy-bearing execution endpoints | Withdrawn | 03d5feaf25 2026-07-08 | - |
-| 0294 | Remove workspace Goal horizon | Implemented | 434a7f5a76 2026-07-10 | - |
 | 0295 | Withdraw derived fleet runtime bands | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0296 | CI skip-gate main-push safety-net: always run Build and Test on non-PR events | Draft | 03d5feaf25 2026-07-08 | - |
 | 0298 | fusion judge pool — judge 모델을 preset에서 분리 | Draft | 03d5feaf25 2026-07-08 | - |
@@ -307,7 +299,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0307 | Mid-turn advisor consult for keepers — evaluation and deferral | Draft | 03d5feaf25 2026-07-08 | - |
 | 0308 | Withdraw verifier-required Task routing | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0309 | Withdrawn product-specific capability hierarchy | Withdrawn | 03d5feaf25 2026-07-08 | - |
-| 0310 | Goal convergence loop — typed metric contract, LLM evaluator boundary, audite... | Draft | 434a7f5a76 2026-07-10 | - |
 | 0311 | Withdraw deterministic evidence floors | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0312 | Keeper repo mappings are advisory default scope, not access caps | Accepted | 03d5feaf25 2026-07-08 | - |
 | 0314 | Keeper Recurring Producer (register the autonomous-repeat tasks the runtime a... | Draft | 03d5feaf25 2026-07-08 | - |
@@ -367,7 +358,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0108 | Atomic JSONL Append (in-process) | Draft | (this PR) 2026-05-17 | 2026-05-17 `<base-path>/.masc/` 전수 스캔에서 4 카테고리 JSONL 출력에 **43 파일 / 379 라인 malformed** 발견. 손상은 `}{` concat (system_log, oas-events) + utf-8 multibyte 절단 (trajectories, reaction-ledger) 두 패턴. 코드베이스에 **3 단계 동시성 보호 누적** (Tier-0: 없음 / Tier-1: `Stdlib.Mutex` + `Append_fd_cache` / Tier-2: `Eio.Mutex`) — 모든 tier 에서 손상 발생. 직접 원인 두 가지: (a) `output_string + flush` 가 두 syscall 이라 race window 존재, (b) record + '\n' 의 *직렬화 단계와 write 단계 분리*로 large record (PIPE_BUF 초과 trajectory prompt dump) 가 multiple `write(2)` 로 쪼개져 다른 writer 끼어듦. 새 `lib/jsonl_atomic/` 모듈 + Eio.Mutex per-path registry + single write(2) loop 으로 SSOT 수렴. 4 writer (`log.ml`, `trajectory.ml`, `dated_jsonl.ml`, → runtime_event_bridge / keeper_reaction_ledger 자동 fix) 마이그레이션. Cross-process flock + Stdlib.Mutex 전역 audit 는 명시적 비목표. 5-PR sprint (RFC → 모듈 → log → trajectory → dated_jsonl). Originally allocated as RFC-0107 but renumbered after RFC-0107 (outbound HTTP) merged first to main (#15900). Related RFC-0079, RFC-0088. |
 | 0107 | Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker socket transport | Active | (this PR) 2026-05-17 | 2026-05-16 ENFILE storm 의 진짜 근본 원인 4개를 다룬다. RFC-0101 (Fd_accountant) 는 같은 사고의 transitional defense — 1/4 kind 만 wired, 3 kind dead branch. (1) cohttp-eio 6.1.1 socket-not-closed bug → `make_closing_client` 워크어라운드 (Eio issue #244 권고 위반); (2) connection pool 부재 (masc + oas); (3) `run_turn:196` ambient switch (turn-scoped FD boundary 없음); (4) subprocess-heavy Docker (`docker run/exec`, `/var/run/docker.sock` 미사용, RFC-0097 spec-only). 4-layer 설계: L1 Transport (Phase B spike → piaf default / cohttp-eio latest 검토), L2 `(host:port) → Client.t` keyed pool, L3 `run_turn` fresh `Eio.Switch.run`, L4 Docker UDS + RFC-0097 활성화. RFC-0101 은 머지 직후 transitional → Phase D + 30일 production soak gate 후 retire. PR #15881 (Sandbox_exec wrap) close. Prior Art: piaf, Tarides Ocsigen→Eio (2025-03), cohttp #85, Eio #244, Eio.Switch axiom. Related RFC-0097, RFC-0100, RFC-0101. |
 | 0108 | Atomic JSONL Append (in-process) | Draft | (this PR) 2026-05-17 | 2026-05-17 `<base-path>/.masc/` 전수 스캔에서 4 카테고리 JSONL 출력에 **43 파일 / 379 라인 malformed** 발견. 손상은 `}{` concat (system_log, oas-events) + utf-8 multibyte 절단 (trajectories, reaction-ledger) 두 패턴. 코드베이스에 **3 단계 동시성 보호 누적** (Tier-0: 없음 / Tier-1: `Stdlib.Mutex` + `Append_fd_cache` / Tier-2: `Eio.Mutex`) — 모든 tier 에서 손상 발생. 직접 원인 두 가지: (a) `output_string + flush` 가 두 syscall 이라 race window 존재, (b) record + '\n' 의 *직렬화 단계와 write 단계 분리*로 large record (PIPE_BUF 초과 trajectory prompt dump) 가 multiple `write(2)` 로 쪼개져 다른 writer 끼어듦. 새 `lib/jsonl_atomic/` 모듈 + Eio.Mutex per-path registry + single write(2) loop 으로 SSOT 수렴. 4 writer (`log.ml`, `trajectory.ml`, `dated_jsonl.ml`, → runtime_event_bridge / keeper_reaction_ledger 자동 fix) 마이그레이션. Cross-process flock + Stdlib.Mutex 전역 audit 는 명시적 비목표. 5-PR sprint (RFC → 모듈 → log → trajectory → dated_jsonl). Originally allocated as RFC-0107 but renumbered after RFC-0107 (outbound HTTP) merged first to main (#15900). Related RFC-0079, RFC-0088. |
-| 0109 | CDAL × GOAL Integration Contract — historical | Withdrawn | (this PR) 2026-07-13 | CDAL output is observation only and cannot transition Goal or Task state. Semantic completion uses the configured LLM. |
 | 0124 | Keeper admission denial boundary — historical | Withdrawn | (this PR) 2026-07-13 | FD, disk, and fleet measurements are observations only; they do not deny unrelated Keeper lanes. |
 | 0125 | Withdraw Keeper watchdog and force-release discipline | Withdrawn | (this PR) 2026-05-21 | Elapsed-time watchdog, restart authority, and semaphore force-release are retired. Process/socket resource scopes remain local typed boundaries. |
 | 0126 | Silent fallback discipline (typed split for option/result wildcard arms) | Active | (this PR) 2026-05-21 | 본 RFC body (#15959) + amendment (#16000) + Phase 1 PR-1 (#16019 runtime attempt provenance) + Phase 1 PR-2 (#16024 provider health probe loop) + Phase 1 cross-listed (#16189 RFC-0127 PR-1, §6.1.b absorbs into Phase 1 canary). Phase 2a (`scripts/lint/no-unknown-permissive-default.sh` grep-based) in place. **Phase 2b (ppxlib AST) / Phase 3 (codemod) / Phase 4 (CI hard-fail) 미시작** — Phase 2b 는 RFC-0106 §3.3 dependency. Phase 1 OAS upstream (C2/C3/V16 labels) 도 별도 OAS RFC 대기. Status promoted Draft → Active. Related RFC-0042, RFC-0088, RFC-0106, RFC-0127. |
@@ -410,7 +400,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 - [RFC-0077 — Write-side silent failure — typed propagation](RFC-0077-write-side-silent-failure-typed.md)
 - [RFC-0079 — Log row typed encoder + silent-drop removal](RFC-0079-log-row-typed-encoder.md)
 - [RFC-0080 — Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary](RFC-0080-tool-registry-ssot.md)
-- [RFC-0081 — OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline](RFC-0081-telemetry-envelope-and-pivot-timeline.md)
 - [RFC-0084 — Keeper→Tool Dispatch Unification + 100% Trace/Telemetry](RFC-0084-keeper-tool-dispatch-unification.md)
 - [RFC-0086 — Keeper namespace bulk promotion to sub-library](RFC-0086-keeper-namespace-bulk-promotion.md)
 - [RFC-0087 — Tool Dispatch Path Unification + Legacy Purge](RFC-0087-tool-dispatch-path-unification-and-legacy-purge.md)
@@ -424,7 +413,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 - [RFC-0102 — Pre-turn runtime availability gate — reuse, not new surface](RFC-0102-pre-turn-runtime-availability-gate.md)
 - [RFC-0105 — Provider-D-compat boundary: Agent_sdk.Error.t → HTTP status + typed envelope](RFC-0105-provider-d-compat-typed-error-mapping.md)
 - [RFC-0110 — Tool-pair atomicity at write boundary — sunset compaction repair fabrication](RFC-0110-tool-pair-atomicity-write-boundary.md)
-- [RFC-0111 — Goal mint atomicity — auto-goal uniqueness invariant at write boundary](RFC-0111-goal-mint-atomicity-uniqueness-invariant.md)
 - [RFC-0112 — Typed JSON parse boundary — eliminate silent-drop fallback across read sites](RFC-0112-typed-json-parse-boundary.md)
 - [RFC-0113 — Withdraw KeeperReactionLiveness runtime hierarchy](RFC-0113-keeper-reaction-liveness-runtime.md)
 - [RFC-0114 — KSM event precondition enforcement at apply_event boundary](RFC-0114-ksm-precondition-enforcement.md)

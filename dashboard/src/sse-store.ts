@@ -18,7 +18,6 @@ import type {
   BoardPost,
   DashboardExecutionResponse,
   DashboardMemoryResponse,
-  DashboardPlanningResponse,
   DashboardShellResponse,
   SSEEvent,
 } from './types'
@@ -29,7 +28,6 @@ import {
   hydrateBoardSnapshot,
   hydrateShellSnapshot,
   hydrateExecutionSnapshot,
-  hydratePlanningSnapshot,
   refreshDashboard,
   refreshExecution,
   refreshBoard,
@@ -55,8 +53,6 @@ import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-n
 import { operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
 import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
 import { isRecord } from './lib/type-guards'
-import { hydrateGoalTreeSnapshot } from './goal-tree-state'
-import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
@@ -705,12 +701,6 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
     case 'transport_health_snapshot':
       hydrateServerPushEvent({ type: eventType, payload } as SSEEvent)
       return
-    case 'goal_loop_status':
-      // RFC-0284: live goal-loop delta bridged onto the "goals" slice. The
-      // payload is the goal-loop status itself (not a {planning,tree,loop}
-      // snapshot), so hydrate it directly rather than falling to case 'goals'.
-      hydrateGoalLoopSnapshot(payload)
-      return
   }
   if (eventType) {
     routeServerPushEvent({
@@ -746,22 +736,6 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
     case 'board':
       hydrateBoardSnapshot(payload as DashboardMemoryResponse)
       return
-    case 'goals': {
-      if (!payload || typeof payload !== 'object') return
-      const record = payload as { planning?: unknown; tree?: unknown; loop?: unknown }
-      if (record.planning) {
-        hydratePlanningSnapshot(record.planning as DashboardPlanningResponse)
-      }
-      if (record.tree) {
-        hydrateGoalTreeSnapshot(record.tree)
-      }
-      if (record.loop) {
-        // RFC-0284: the goals snapshot carries the goal-loop status so the
-        // initial WS snapshot paints the panel without a separate fetch.
-        hydrateGoalLoopSnapshot(record.loop)
-      }
-      return
-    }
     case 'composite':
       hydrateFleetCompositeSnapshot(payload)
       return

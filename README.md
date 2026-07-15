@@ -38,12 +38,12 @@ Agents in this environment are called **Keepers**, a nickname borrowed from Bull
 
 ## What you can do with MASC
 
-- **Run shared Goals and Tasks through MCP tools.** Keep task ownership, status transitions, and verification evidence in one local workspace.
-- **Run and observe resident Keepers.** Give a Keeper its own persona, goal, and instructions, and let it communicate over shared topics or repositories.
+- **Run shared Tasks through MCP tools.** Keep task ownership, status transitions, and verification evidence in one local workspace.
+- **Run and observe resident Keepers.** Give a Keeper its own persona and instructions, and let it communicate over shared topics or repositories.
 - **Experiment with different agent styles.** Keepers can carry different concerns and instructions, so you can watch what they decide and where they clash.
-- **Attach existing coding agents.** Because MASC is an MCP server, MCP clients such as Claude Code or Codex can connect to `/mcp` and join the same workspace — sharing task claim/transition, board, and goals, and waking Keepers via `masc_broadcast` or @mention. (There is no synchronous external tool for directly invoking a Keeper turn; interaction is through the workspace and mentions.)
+- **Attach existing coding agents.** Because MASC is an MCP server, MCP clients such as Claude Code or Codex can connect to `/mcp` and join the same workspace — sharing task claim/transition and Board activity, and waking Keepers via `masc_broadcast` or @mention. (There is no synchronous external tool for directly invoking a Keeper turn; interaction is through the workspace and mentions.)
 - **Reduce obvious collisions when multiple agents touch the same code.** Turns, locks, and worker ownership can coordinate multiple Keepers working on one repository, but this is not a concurrency-safety guarantee.
-- **Inspect decisions and failures.** The web dashboard shows Keeper / Goal / Task / Board state in real time, and every turn leaves a receipt.
+- **Inspect decisions and failures.** The web dashboard shows Keeper / Task / Board state in real time, and every turn leaves a receipt.
 - **Route external effects through one Gate.** Always Allow, LLM Auto Judge, and HITL are explicit non-hierarchical modes. HITL persists the exact request without blocking the Keeper; its lane is woken when the decision arrives.
 - **Run each Keeper on a different model.** A single line in `runtime.toml` routes a Keeper to a provider × model from the runtime catalog.
 
@@ -55,15 +55,15 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 
 | Feature | Status | One-line description | Entry point |
 |------|:----:|-----------|--------------|
-| **Keepers** | ✅ | Resident agents with persona, goal, and instructions. Auto-boot when the server starts; state persists to disk | `.masc/config/keepers/*.toml` |
+| **Keepers** | ✅ | Resident agents with persona and instructions. Auto-boot when the server starts; state persists to disk | `.masc/config/keepers/*.toml` |
 | **Gate: Always Allow / Auto Judge / HITL** | 🟡 | Product-neutral external-effect boundary with exact one-use grants and per-Keeper wake-up | Dashboard approvals queue |
 | **Board** | ✅ | Keepers collaborate asynchronously via posts, comments, and votes; publishing wakes related Keepers | `masc_board_*` tools / dashboard |
 | **Sandbox (Docker)** | 🟡 | Docker-profile shell execution uses containers, but local profiles and fallback paths mean this is not a security boundary | keeper toml `sandbox_profile` |
-| **Dashboard** | ✅ | Web SPA for observing and commanding Keeper/Goal/Task/Board in real time | `dashboard/` (vite) |
+| **Dashboard** | ✅ | Web SPA for observing and commanding Keeper/Task/Board in real time | `dashboard/` (vite) |
 | **TUI** | ❌ | Not working — `masc-tui` binary exists, but major gaps (CJK/emoji layout, streaming progress, rich-block rendering) make it unusable in practice | `masc-tui` |
 | **CODE / IDE (observational)** | ❌ | Not working — LSP proxy, annotation overlay, and dashboard CODE shell are implemented, but the observational command-only flow is not validated, so it is unusable in practice | Dashboard Code |
 | **OpenTelemetry** | 🟡 | OTLP HTTP exporter + GenAI semconv spans/metrics work, but many signals and instrumentation gaps are not yet collected | `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| **Goal + Task** | 🟡 | Goal/Task CRUD, transitions, verification, and prompt injection work. Automatic scheduling is not implemented | `masc_goal_*` / `masc_*task*` tools |
+| **Task** | 🟡 | Task CRUD, typed transitions, completion review, and evidence handling | `masc_*task*` tools |
 | **Multi-Runtime** | 🟡 | Keeper-specific provider × model routing | `runtime.toml` |
 | **Provider Failover** | ❌ | No automatic failover on provider failure; requires manual config change + server restart | `runtime.toml` |
 | **Fusion (+ JoJ)** | 🟡 | Ask several models the same question and let a judge synthesize consensus/contradictions/blind spots. Simple/Refine/Conditional work; JoJ is not wired | `masc_fusion` tool |
@@ -77,7 +77,7 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 - **Multi-Runtime** — A single line in `runtime.toml` under `runtime.assignments`, `keeper = provider.model`, sends every turn for that Keeper to the chosen provider.
 - **Provider Failover** — Ordered automatic failover on provider failure is not implemented. When a provider fails, you must manually edit default/assignment and restart the server.
 - **Fusion + JoJ** — When a Keeper calls `masc_fusion`, panel models answer the same question independently and a judge synthesizes consensus, contradictions, and blind spots. *Limit*: The Judge-of-Judges (JoJ) phase has code and call paths, but the live config lacks a first-order `judges` panel, so JoJ calls **fail-closed with an error**. The result registry is in-memory and is lost on restart.
-- **Goal + Task** — Goals and tasks are created via MCP tools, transitioned through states, and active goals are injected into the Keeper system prompt. *Limit*: the goal-loop scheduler does not drive Keeper turns (it is observational). Turns are driven by channels/events.
+- **Task** — Tasks are created via MCP tools and move through typed claim, execution, verification, completion, release, and cancellation transitions. Completion uses the configured LLM reviewer and explicit evidence; Task state does not own the Keeper lane.
 - **OpenTelemetry** — The OTLP HTTP exporter and GenAI semconv spans/metrics work. *Limit*: many signals and instrumentation gaps are not yet collected. For example, low-level Keeper turn events, internal fusion metrics, and per-provider latency breakdowns are only partially covered.
 - **CODE / IDE (observational, not working)** — The aim is an observational IDE where humans issue commands rather than editing code directly. The LSP proxy, annotation overlay, and dashboard CODE shell are implemented, but **the observational command-only flow is not validated, so CODE is not usable in practice.**
 
@@ -274,12 +274,10 @@ Example Keeper definition (`keepers/<name>.toml`):
 [keeper]
 name = "albini"
 persona_name = "albini"
-goal = "Call out and chase owners of stalled tasks. Does not write code."
-active_goal_ids = ["goal-pm-flow"]
 sandbox_profile = "docker"     # or "local"
 
 instructions = """
-... Keeper behavior instructions ...
+Call out and chase owners of stalled tasks. Do not write code.
 """
 ```
 
@@ -310,8 +308,7 @@ masc/
 <base-path>/.masc/ (runtime state, under --base-path)
 ├── config/         runtime.toml, keepers/, repositories.toml, credentials.toml …
 ├── keepers/        Per-Keeper runtime state and memory (*.json + *.jsonl logs, created by server)
-├── goals.json      Goal state
-├── tasks/          Task backlog and goal↔task links
+├── tasks/          Task backlog, lifecycle, and evidence state
 ├── board_*.jsonl   Board posts, comments, votes (append-only)
 └── audit-approvals/  HITL approval history
 ```
@@ -394,7 +391,7 @@ The table below lists concrete remaining tasks derived from the current limits d
 | 1 | **Keepers / Fleet** | Remove the dead `[autonomous] concurrency` key from deployed `runtime.toml` files and keep fleet documentation aligned with the no-global-cap runtime contract. | 🟡→✅ |
 | 2 | **Provider Failover** | Implement provider-health based **ordered automatic failover**. When a provider fails, automatically route a Keeper's turn to the next candidate provider and log/metric recovery. | ❌→✅ |
 | 3 | **Fusion + JoJ** | Add a first-order judge panel config for the Judge-of-Judges (JoJ) phase in `runtime.toml`, and persist the fusion result registry to disk. | 🟡→✅ |
-| 4 | **Goal + Task** | Let the goal-loop scheduler drive Keeper turns in addition to channel events, e.g. auto-wake on goal state change, deadline proximity, or blocked task detection. | 🟡→✅ |
+| 4 | **Task** | Complete the verification timeout and lane-local wake paths without adding a second scheduler or lifecycle authority. | 🟡→✅ |
 | 5 | **TUI** | Make `masc-tui` usable in practice. The binary exists but is currently unusable due to CJK/emoji layout, streaming progress, and rich-block rendering gaps. | ❌→🟡/✅ |
 | 6 | **IDE** | Make the observational IDE usable in practice. The LSP proxy, annotation overlay, and dashboard IDE shell exist, but the command-only flow is not validated and the IDE is currently unusable. | ❌→🟡/✅ |
 | 7 | **Multi-Channel** | Add **sidecars** for Slack, Telegram, and other channels outside Discord, and extend the gate message schema per channel. | 🟡→✅ |

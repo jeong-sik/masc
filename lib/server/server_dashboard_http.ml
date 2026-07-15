@@ -363,15 +363,12 @@ let approval_resolve_http_error_to_string = function
   | Unavailable err -> Keeper_approval_queue.resolve_error_to_string err
 ;;
 
-let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
+let dashboard_gate_resolve_http_json ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, approval_resolve_http_error) result
   =
   match Safe_ops.json_string_opt "id" args with
   | None -> Error (Bad_request "id is required")
   | Some id ->
-    let remember_rule =
-      Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
-    in
     (* RFC-0305: a missing [decision] field must not default to approve — this
        resolves a pending HITL approval, so an omitted/malformed decision is a
        bad request, not a silent grant. Mirrors the [id]-required check above. *)
@@ -387,20 +384,14 @@ let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
           Keeper_approval_queue.resolve_with_policy
             ~id
             ~decision
-            ~remember_rule
-            ~created_by
             ()
         with
-        | Ok result ->
+        | Ok () ->
           Ok
             (`Assoc
                 [ "ok", `Bool true
                 ; "id", `String id
                 ; "decision", `String decision_name
-                ; ( "rule_id"
-                  , match result.remembered_rule with
-                    | Some rule -> `String rule.id
-                    | None -> `Null )
                 ])
         | Error (Keeper_approval_queue.Delivery_failed _ as err) ->
           Error (Unavailable err)
@@ -410,23 +401,6 @@ let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
             (( Keeper_approval_queue.Not_found _
              | Keeper_approval_queue.Already_resolved _ ) as err) ->
           Error (Gone err)))
-;;
-
-let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
-  : (Yojson.Safe.t, string) result
-  =
-  match Safe_ops.json_string_opt "id" args with
-  | None -> Error "id is required"
-  | Some id ->
-    (match Keeper_approval_queue.delete_rule ~base_path ~id () with
-     | Ok deleted ->
-         Keeper_approval_queue.audit_rule_event
-           ~base_path
-           ~event_type:"rule_deleted"
-           deleted;
-         Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
-       | Error error ->
-         Error (Keeper_approval_queue.rule_store_error_to_string error))
 ;;
 
 let dashboard_schedule_prune_http_json
@@ -550,8 +524,6 @@ let dashboard_verification_resolve_http_json
 ;;
 
 let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
-  let goals = Goal_store.list_goals config () in
-  let rollup = Goal_store.compute_rollup goals in
   let task_rollup =
     dashboard_tasks_safe config
     |> List.fold_left
@@ -570,8 +542,6 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
-    ; "goals", `List (List.map Goal_store.goal_to_yojson goals)
-    ; "rollup", Goal_store.rollup_to_yojson rollup
     ; ( "task_backlog"
       , `Assoc
           [ "todo", `Int todo_count
@@ -581,23 +551,6 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
           ; "cancelled", `Int cancelled_count
           ] )
     ]
-;;
-
-let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t =
-  Dashboard_goals.dashboard_goals_tree_json ~config
-;;
-
-let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
-  (* RFC-0284: carry the goal-loop OODA status alongside planning/tree so the
-     WS "goals" slice's initial snapshot (and the /goals HTTP pull) paint the
-     goal-loop panel without a separate fetch. Live updates arrive via the
-     [goal_loop_status] delta (Server_dashboard_http_goal_loop_broadcast). *)
-  `Assoc
-    [ "planning", dashboard_planning_http_json ~config
-    ; "tree", dashboard_goals_tree_http_json ~config
-    ; "loop", Dashboard_goal_loop.status_json ~base_path:config.base_path ()
-    ]
-
 let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
   let base_path = config.base_path in
   let partition = Ide_paths.Legacy_default in
@@ -622,7 +575,7 @@ let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
     Ide_annotations.list
       ~base_dir:base_path
       ~partition
-      ~filter:{ file_path = None; keeper_id = None; goal_id = None; task_id = None }
+      ~filter:{ file_path = None; keeper_id = None; task_id = None }
       ()
   in
   let regions =
@@ -686,13 +639,6 @@ let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
 (* Composite fleet snapshot / runtime attention / recommended-actions
    extracted to [Server_dashboard_http_composite] (godfile decomp). *)
 include Server_dashboard_http_composite
-
-let dashboard_goal_detail_http_json ~(config : Workspace.config) ~goal_id : Yojson.Safe.t =
-  match Dashboard_goals.goal_detail_json ~config ~goal_id with
-  | Ok json -> json
-  | Error message ->
-    `Assoc [ "ok", `Bool false; "error", `String message; "goal_id", `String goal_id ]
-;;
 
 let explicit_operator_actor ~authorized_actor request =
   match
@@ -782,10 +728,8 @@ let operator_error_json message =
    stack-derived strings).  The full exception text still goes to the
    server warn log for ops debugging.
 
-   The full goals tree is intentionally omitted from this startup payload:
-   [/api/v1/dashboard/goals] owns that heavier route-specific read.  The
-   overview already gets the flat planning goals here, and planning/work
-   routes call [refreshGoals] when they need the tree.
+   Planning state is exposed as the task backlog; no secondary hierarchy is
+   synthesized during bootstrap.
 
    Both the HTTP/1.1 router (server_routes_http_routes_dashboard) and
    the HTTP/2 gateway (server_h2_gateway) call this single SSOT so the
@@ -844,10 +788,6 @@ let dashboard_bootstrap_http_json
       Server_dashboard_snapshot_select.select_project_snapshot_json
         ~state ~sw ~clock request)
   in
-  let goal_loop_status =
-    slice "goal_loop_status" (fun () ->
-      Dashboard_goal_loop.status_json ~base_path:(Mcp_server.workspace_config state).base_path ())
-  in
   `Assoc
     [ "served_at", `String (Masc_domain.now_iso ())
     ; "milestone", `Int 1
@@ -855,6 +795,5 @@ let dashboard_bootstrap_http_json
     ; execution
     ; planning
     ; namespace_truth
-    ; goal_loop_status
     ]
 ;;

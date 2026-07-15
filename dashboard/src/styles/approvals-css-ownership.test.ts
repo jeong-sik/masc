@@ -78,7 +78,7 @@ function topLevelSelectors(css: string): Set<string> {
 // Declaration property keys the bare top-level rule for `selector` owns — the
 // union of `prop` (left of the first `:`) across every matching rule's block.
 // Only the EXACT base selector counts: pseudo/descendant variants
-// (`.ap-req-goal:hover`) are separate rules and excluded, since the augmentation
+// (`.ap-req-task:hover`) are separate rules and excluded, since the augmentation
 // contract is about the base rule's property keys, not its variant rules. Nested
 // rules inside at-rules (@media etc.) are not top-level, so they are skipped by
 // the same depth walk as topLevelSelectors.
@@ -126,9 +126,9 @@ function declarationsOf(css: string, selector: string): Set<string> {
 // Selectors approvals-v2.css is allowed to share with surfaces.css because it
 // augments the surfaces.css base rule with a declaration surfaces.css does not
 // provide (not a full redefinition):
-//   .ap-req-goal  — the goal link renders as a <button>, needs the chrome reset
+//   .ap-req-task  — the task link renders as a <button>, needs the chrome reset
 //   .ap-req-quote — word wrapping for long single-token input previews
-const AUGMENTATION_ALLOWLIST = new Set(['.ap-req-goal', '.ap-req-quote'])
+const AUGMENTATION_ALLOWLIST = new Set(['.ap-req-task', '.ap-req-quote'])
 
 // Representative shared selectors that MUST stay owned by surfaces.css (SSOT) and
 // MUST NOT be redefined by approvals-v2.css. If surfaces.css ever drops one, the
@@ -183,7 +183,7 @@ describe('approvals CSS ownership (no surfaces.css split-brain)', () => {
     // round-7 invariant: an augmentation may share a selector with surfaces.css,
     // but the property keys it declares must be DISJOINT from surfaces.css's keys
     // for that same selector. If a shared key re-appears (e.g. someone re-adds
-    // `color:` to .ap-req-goal), main.ts's load order makes surfaces.css win, so
+    // `color:` to .ap-req-task), main.ts's load order makes surfaces.css win, so
     // the augmentation's value becomes dead split-brain again. The existence check
     // above cannot catch this — only a content (property-key) comparison can.
     for (const sel of AUGMENTATION_ALLOWLIST) {

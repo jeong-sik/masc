@@ -205,7 +205,7 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
         eventId: 'evt-1',
         filePath: 'runtime.ts',
         line: 2,
-        surface: 'Goal',
+        surface: 'Task',
       },
       {
         id: 'decision-1',
@@ -219,7 +219,6 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
         decisionReason: 'verify touched test target',
         filePath: 'runtime.ts',
         line: 2,
-        goalId: 'goal-decision',
         taskId: 'task-decision',
       },
     ]
@@ -236,7 +235,6 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
       tsMs: 6000,
       filePath: 'runtime.ts',
       line: 2,
-      goalId: 'goal-decision',
       taskId: 'task-decision',
       decisionChoice: 'use_shell',
       decisionReason: 'verify touched test target',
@@ -250,7 +248,7 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
       filePath: 'runtime.ts',
       line: 2,
       eventId: 'evt-1',
-      surface: 'Goal',
+      surface: 'Task',
     })
     expect(traceLines[0]?.events[2]).toMatchObject({
       id: 'thread-1',
@@ -309,7 +307,6 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
             tsMs: 3000,
             surface: 'PR',
             eventId: 'evt-1',
-            goalId: 'goal-1',
           },
           {
             id: 'thread-1',
@@ -365,7 +362,6 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
             tsMs: 3000,
             surface: 'PR',
             eventId: 'evt-1',
-            goalId: 'goal-runtime',
             taskId: 'task-runtime',
             boardPostId: 'post-runtime',
             commentId: 'comment-runtime',
@@ -388,7 +384,7 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
       },
     ])
 
-    const expectedText = 'Trace · PR · event evt-1 · goal goal-runtime · task task-runtime · board post-runtime · comment comment-runtime · pr #15035 · git review-response · log turn-2 · session sess-runtime · op op-runtime · run worker-runtime · keeper sangsu · +1'
+    const expectedText = 'Trace · PR · event evt-1 · task task-runtime · board post-runtime · comment comment-runtime · pr #15035 · git review-response · log turn-2 · session sess-runtime · op op-runtime · run worker-runtime · keeper sangsu · +1'
     const chip = container.querySelector('.cm-masc-trace-chip')
     expect(chip?.textContent).toBe(expectedText)
     expect(chip?.getAttribute('aria-label')).toBe(`Line 2 keeper trace context: ${expectedText}`)

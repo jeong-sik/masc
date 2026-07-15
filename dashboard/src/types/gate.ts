@@ -40,7 +40,7 @@ export type GateJudgment = 'approve' | 'deny' | 'require_human'
 
 /** LLM-generated operator briefing attached to a pending approval by the HITL
  *  context-summary worker (`hitl_summary_worker.ml`). Mirrors
- *  `keeper_approval_queue_rules_types.ml:hitl_context_summary`. */
+ *  `keeper_approval_queue_types.ml:hitl_context_summary`. */
 export interface HitlContextSummary {
   summary_version: number
   generated_at: string | null
@@ -52,7 +52,7 @@ export interface HitlContextSummary {
 }
 
 /** Discriminated union mirroring the backend `summary_status` variant
- *  (`keeper_approval_queue_rules_types.ml:summary_status`). `available` carries
+ *  (`keeper_approval_queue_types.ml:summary_status`). `available` carries
  *  the briefing the operator reads before deciding; `pending`/`failed` are
  *  in-flight/error states worth surfacing rather than hiding. */
 export type HitlSummaryStatus =
@@ -69,8 +69,6 @@ export interface KeeperApprovalQueueItem {
   waiting_s?: number
   turn_id?: number | null
   task_id?: string | null
-  goal_id?: string | null
-  goal_ids?: string[]
   input?: unknown
   input_preview?: string | null
   /** HITL operator briefing state. `null` when the backend payload omits it or
@@ -88,22 +86,7 @@ export interface KeeperResolvedApprovalItem {
   resolved_at?: string | null
   turn_id?: number | null
   task_id?: string | null
-  goal_id?: string | null
-  goal_ids?: string[]
   decision_source?: GateDecisionSource | null
-  rule_match?: {
-    rule_id?: string | null
-  } | null
-}
-
-export interface KeeperApprovalRule {
-  id: string
-  keeper_name: string
-  tool_name: string
-  request_fingerprint?: string
-  created_at?: string | null
-  created_by?: string | null
-  source_approval_id?: string | null
 }
 
 export type GateMode = 'manual' | 'auto_judge' | 'always_allow'
@@ -120,7 +103,6 @@ export interface DashboardGateResponse {
   note?: string
   approval_queue?: KeeperApprovalQueueItem[]
   recent_resolved?: KeeperResolvedApprovalItem[]
-  approval_rules?: KeeperApprovalRule[]
   hitl?: {
     gate_mode?: GateModeStatus
   }

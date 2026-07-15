@@ -1312,10 +1312,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
               (Server_dashboard_http.dashboard_board_json
                  ~sort_by:Board_dispatch.Recent ~exclude_system:true
                  ~limit:100 ~offset:0 ())
-        | "goals" ->
-            Some
-              (Server_dashboard_http.dashboard_goals_snapshot_json
-                 ~config:(Mcp_server.workspace_config state))
         | "ide" ->
             Some
               (Server_dashboard_http.dashboard_ide_snapshot_json
@@ -1508,11 +1504,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
-      (* RFC-0284: push goal-loop OODA status over SSE on change so the panel
-         stops polling. The worker is out-of-process (Python), so the trigger
-         is this server-side tick reading the cached status.json. *)
-      Server_dashboard_http_goal_loop_broadcast.start_goal_loop_refresh_loop
-        ~state ~sw ~clock;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)

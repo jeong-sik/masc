@@ -297,7 +297,6 @@ describe('KeeperDetailPage', () => {
       agent_name: 'keeper-analyst-agent',
       runtime_class: 'keeper',
       keepalive_running: true,
-      active_goal_ids: ['goal-evidence-first'],
       recent_output_preview: '현재 대화의 근거와 핵심 수치를 먼저 정리한다.',
       generation: 0,
       turn_count: 97,

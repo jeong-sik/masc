@@ -25,7 +25,7 @@ code_refs:
 Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
 
 Keeper 하나는 다음을 소유한다:
-- **identity**: `keeper_meta` 레코드 (이름, persona, instructions, typed goal/task links)
+- **identity**: `keeper_meta` 레코드 (이름, persona, instructions, typed Task link)
 - **context**: `working_context` (system prompt + messages + token count + OAS context)
 - **memory**: memory bank + memory policy + recall scoring
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
@@ -92,7 +92,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
 - **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
-- **Goal/Task links**: `active_goal_ids`, `current_task_id`, typed goal/task transitions
+- **Task link**: `current_task_id`; Task transitions remain owned by Workspace
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
 - **Capability boundary**: the flat Tool catalog plus objective `allowed_paths`
   containment; external effects pass through the Gate.
@@ -101,7 +101,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Compaction**: `compaction_profile`, `compaction_ratio_gate`, `compaction_message_gate`
 - **Handoff**: `auto_handoff`, `handoff_threshold`, `handoff_cooldown_sec`
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
-- **Team/Autonomy**: `active_goal_ids`, `autonomous_turn_count`, `board_reactive_turn_count`, `mention_reactive_turn_count`
+- **Team/Autonomy**: `autonomous_turn_count`, `board_reactive_turn_count`, `mention_reactive_turn_count`
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
 
@@ -244,9 +244,9 @@ stateDiagram-v2
   CooldownHold --> [*]
 ```
 
-MASC에는 message importance scorer나 deterministic reducer fallback이 없다.
-실제 provider context-window compaction과 overflow retry는 OAS가 소유하며,
-MASC의 post-turn 경로는 configured LLM plan만 선택적으로 적용한다.
+OAS는 provider가 반환한 context overflow를 typed outcome으로 전달할 뿐,
+Keeper context 정책을 소유하지 않는다. Context 최적화, checkpoint 교체,
+compaction 및 retry 여부는 MASC의 Keeper lane이 명시적으로 결정한다.
 
 Compaction profile별 gate 기본값:
 
@@ -261,7 +261,7 @@ Compaction profile별 gate 기본값:
 
 Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute -> RecordDecision
 
-9가지 triage 트리거: `DirectMention`, `NewUnclaimedTask`, `FailedTask`, `AgentJoinedOrLeft`, `GoalDeadline`, `BoardActivity(string)`, `IdleTimeout`, `MetricsAnomaly(string)`, `StrategicReview`. 트리거가 없으면 Skip.
+9가지 triage 트리거: `DirectMention`, `NewUnclaimedTask`, `FailedTask`, `KeeperFiberStartedOrStopped`, `BoardActivity(string)`, `IdleTimeout`, `MetricsAnomaly(string)`, `StrategicReview`, `SelfDirectedExplore`. 트리거가 없으면 Skip.
 
 ---
 
@@ -361,7 +361,7 @@ proposed_action
 | `ProceedWithCaution(reason)` | 실행하되 trajectory에 경고 기록 |
 | `Block(reason)` | 실행 거부, broadcast 알림 |
 
-Risk 판단은 goal metadata의 고정 조합으로 계산하지 않는다. 판단이 필요한
+Risk 판단은 Task나 Keeper metadata의 고정 조합으로 계산하지 않는다. 판단이 필요한
 경우 verifier LLM 경계가 구조화된 verdict를 내고, 비용/turn 정보는 관측만 한다.
 
 ### 7.2 Eval Harness (`lib/eval_harness.ml`)
@@ -434,7 +434,7 @@ Keeper work budget.
 
 **Other**: `DEBUG`(0), `SKILL_SELECTION`(agent), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
 
-**Context capacity**: compaction/handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
+**Context capacity**: compaction/handoff decisions are typed capacity signals. They do not classify model text or infer intent; semantic decisions remain at the model boundary.
 
 ### 9.2 TOML Configuration
 

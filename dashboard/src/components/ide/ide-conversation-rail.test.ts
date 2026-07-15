@@ -440,8 +440,8 @@ describe('IdeConversationRail', () => {
           id: 'thread-line',
           author: 'scholar',
           title: 'Review lib/runtime.ml:42',
-          body: 'question fn:run comment:comment-1 PR 15035 task:task-runtime goal:goal-runtime branch:feat/ide-routes log:turn-7',
-          content: 'question fn:run comment:comment-1 PR 15035 task:task-runtime goal:goal-runtime branch:feat/ide-routes log:turn-7',
+          body: 'question fn:run comment:comment-1 PR 15035 task:task-runtime branch:feat/ide-routes log:turn-7',
+          content: 'question fn:run comment:comment-1 PR 15035 task:task-runtime branch:feat/ide-routes log:turn-7',
           tags: [],
           author_identity: { kind: 'keeper', id: 'scholar', key: 'scholar', display_name: 'scholar', raw: 'scholar' },
           votes: 0,
@@ -467,14 +467,13 @@ describe('IdeConversationRail', () => {
     })
 
     const badge = container.querySelector('.ide-conversation-context-badge')
-    expect(badge?.textContent).toBe('CTX 10')
+    expect(badge?.textContent).toBe('CTX 9')
     expect(badge?.getAttribute('title'))
-      .toBe('Linked context: Code, Goal, Task, Board, Comment, PR, Git, Log, Telemetry, Keeper')
+      .toBe('Linked context: Code, Task, Board, Comment, PR, Git, Log, Telemetry, Keeper')
 
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
     expect(links.map(link => link.textContent)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',

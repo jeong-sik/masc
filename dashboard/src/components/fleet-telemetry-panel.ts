@@ -268,12 +268,6 @@ function ControlWorkspacePanel({ state }: { state: FleetTelemetryState }) {
           detail=${attentionEvents.length > 0 ? '심각한 차단 요인과 일시정지 후보 상태를 표시합니다.' : '활성 주의 이벤트가 없습니다.'}
           tone=${attentionEvents.length > 0 ? 'warn' : 'ok'}
         />
-        <${SummaryCard}
-          title="목표 범위"
-          value=${state.rows.length > 0 ? `${state.rows.filter(row => row.goal_linked).length}/${state.rows.length}` : '0/0'}
-          detail=${state.rows.some(row => !row.goal_linked) ? '일부 키퍼가 목표 링크 없이 활동 중입니다.' : '모든 표시된 키퍼에 목표가 연결되어 있습니다.'}
-          tone=${state.rows.length === 0 || state.rows.every(row => row.goal_linked) ? 'ok' : 'warn'}
-        />
       </div>
 
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
@@ -425,16 +419,6 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 </div>
                 <div class="mt-1 flex max-w-60 flex-wrap gap-1">
                   <span
-                    class=${row.goal_linked
-                      ? 'rounded-[var(--r-1)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)]'
-                      : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
-                    title=${row.goal_label ?? '이 키퍼에 연결된 활성 목표가 없습니다.'}
-                  >
-                    ${row.goal_label
-                      ? (row.active_goal_count > 1 ? `goal ${row.active_goal_count}` : 'goal linked')
-                      : 'goal missing'}
-                  </span>
-                  <span
                     class=${row.sandbox_profile
                       ? 'rounded-[var(--r-1)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
                       : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
@@ -455,9 +439,6 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     `
                     : null}
                 </div>
-                ${row.goal_label
-                  ? html`<div class="max-w-60 truncate text-3xs text-[var(--color-fg-disabled)]" title=${row.goal_label}>${row.goal_label}</div>`
-                  : null}
                 ${row.sandbox_last_error
                   ? html`
                     <div class="max-w-60 truncate text-3xs text-[var(--bad-light)]" title=${row.sandbox_last_error}>

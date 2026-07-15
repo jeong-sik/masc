@@ -179,7 +179,6 @@ export function executeOutputRouteLinks({
     surface: 'Terminal',
     label: taskId ? `Execute output ${taskId}` : 'Execute output',
     sourceId: sourceParts.join(':'),
-    goalId: task?.goal_id ?? undefined,
     taskId: taskId ?? undefined,
     keeperId,
     telemetry: true,

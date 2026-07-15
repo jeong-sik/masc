@@ -28,15 +28,6 @@
 }
 .stat-row .v.wrap { white-space: normal; overflow: visible; text-overflow: clip; }
 
-.goal-text {
-  font-size: var(--fs-12); color: var(--fg-1); line-height: 1.5;
-  background: var(--bg-2); border-left: 2px solid var(--brass-3);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: 0 var(--r-1) var(--r-1) 0; margin: 4px 0 8px;
-}
-.goal-text.is-short { border-left-color: var(--brass-1); }
-.goal-text.is-mid { border-left-color: var(--brass-2); }
-.goal-text.is-long { border-left-color: var(--brass-3); }
 
 .blocker-banner {
   background: rgb(196 106 90 / .08);

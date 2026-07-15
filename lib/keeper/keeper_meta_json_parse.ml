@@ -34,7 +34,6 @@ type parsed_keeper_policy =
 type parsed_keeper_state =
   { ps_created_at_raw : string
   ; ps_updated_at_raw : string
-  ; ps_active_goal_ids : string list
   ; ps_paused : bool
   ; ps_latched_reason : Keeper_latched_reason.t option
   ; ps_autoboot_enabled : bool
@@ -270,7 +269,6 @@ let parse_keeper_state
   let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
   let ps_created_at_raw = Safe_ops.json_string ~default:"" "created_at" json in
   let ps_updated_at_raw = Safe_ops.json_string ~default:"" "updated_at" json in
-  let ps_active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
   let last_autonomous_action_at =
     Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
   in
@@ -360,7 +358,6 @@ let parse_keeper_state
   let ps_max_context_override = Safe_ops.json_int_opt "max_context_override" json in
   { ps_created_at_raw
   ; ps_updated_at_raw
-  ; ps_active_goal_ids
   ; ps_paused
   ; ps_latched_reason
   ; ps_autoboot_enabled
@@ -520,7 +517,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (if state.ps_updated_at_raw = ""
                         then now_iso ()
                         else state.ps_updated_at_raw)
-                   ; active_goal_ids = state.ps_active_goal_ids
                    ; paused = state.ps_paused
                    ; latched_reason = state.ps_latched_reason
                    ; autoboot_enabled = state.ps_autoboot_enabled

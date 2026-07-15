@@ -38,7 +38,7 @@ const annotation = {
   keeper_id: 'sangsu',
   kind: 'Comment',
   content: 'Review this line',
-  goal_id: null,
+
   task_id: null,
   references: [],
   created_at_ms: 1,

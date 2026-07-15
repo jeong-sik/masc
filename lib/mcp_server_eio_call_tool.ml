@@ -166,7 +166,6 @@ type keeper_runtime_mcp_log_context = {
   turn : int option;
   keeper_turn_id : int option;
   task_id : string option;
-  goal_ids : string list option;
   sandbox_profile : string option;
   sandbox_root : string option;
   allowed_paths : string list option;
@@ -195,11 +194,6 @@ let runtime_mcp_keeper_log_context_of_entry
     | Some obs -> Some obs.turn_id
     | None -> None
   in
-  let goal_ids =
-    match entry.meta.active_goal_ids with
-    | [] -> None
-    | ids -> Some ids
-  in
   let config = Workspace.default_config entry.base_path in
   {
     keeper_name = entry.name;
@@ -211,7 +205,6 @@ let runtime_mcp_keeper_log_context_of_entry
     turn;
     keeper_turn_id = turn;
     task_id = Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id;
-    goal_ids;
     sandbox_profile =
       Some (Keeper_types_profile_sandbox.sandbox_profile_to_string entry.meta.sandbox_profile);
     sandbox_root =
@@ -325,7 +318,6 @@ let record_runtime_mcp_keeper_trajectory
       ?generation:ctx.generation
       ?keeper_turn_id:ctx.keeper_turn_id
       ?task_id:ctx.task_id
-      ?goal_ids:ctx.goal_ids
       ?sandbox_profile:ctx.sandbox_profile
       ?sandbox_root:ctx.sandbox_root
       ?allowed_paths:ctx.allowed_paths
@@ -413,7 +405,6 @@ let record_runtime_mcp_keeper_tool_trace
     ?turn:ctx.turn
     ?keeper_turn_id:ctx.keeper_turn_id
     ?task_id:ctx.task_id
-    ?goal_ids:ctx.goal_ids
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
       ?allowed_paths:ctx.allowed_paths

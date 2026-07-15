@@ -24,8 +24,6 @@ let sample_entry : Q.pending_approval =
         (`Assoc
            [ "user_message", `String "inspect the exact requested operation" ])
   ; task_id = None
-  ; goal_id = None
-  ; goal_ids = []
   ; continuation_channel = Keeper_continuation_channel.unrouted "test"
   ; audit_base_path = Filename.get_temp_dir_name ()
   ; summary_status = Q.Summary_not_requested

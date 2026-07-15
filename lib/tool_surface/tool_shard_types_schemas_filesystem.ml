@@ -162,8 +162,6 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; "description", `String "Short annotation text shown in the IDE"
                       ] )
-                ; ( "goal_id"
-                  , `Assoc [ "type", `String "string"; "description", `String "Optional Goal route id" ] )
                 ; ( "task_id"
                   , `Assoc [ "type", `String "string"; "description", `String "Optional Task route id" ] )
                 ; ( "references"

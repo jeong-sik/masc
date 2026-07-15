@@ -9,7 +9,6 @@ include Keeper_config_rp_helpers
     intent explicit and satisfies sw-dev §"Magic Number 금지". *)
 let two_days_seconds_int = Masc_time_constants.day_int * 2
 
-(** One-day upper bound expressed in seconds for goal observation windows. *)
 (* runtime→Runtime 숙청: per-phase runtime name 구분 제거. runtime 세계의
    phase_recovery / phase_buffer / tool_action / routing 은 서로 다른 route
    였으나, Runtime 모델에서는 모든 phase 가 동일한 default Runtime 을 쓴다 —

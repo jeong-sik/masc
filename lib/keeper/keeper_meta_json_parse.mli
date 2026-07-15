@@ -38,7 +38,6 @@ type parsed_keeper_policy =
 type parsed_keeper_state =
   { ps_created_at_raw : string
   ; ps_updated_at_raw : string
-  ; ps_active_goal_ids : string list
   ; ps_paused : bool
   ; ps_latched_reason : Keeper_latched_reason.t option
   ; ps_autoboot_enabled : bool

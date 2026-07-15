@@ -17,7 +17,7 @@ code_refs:
 
 ## 1. One timeline per Keeper
 
-Each Keeper owns one durable FIFO lane. Board mentions, Task/Goal changes,
+Each Keeper owns one durable FIFO lane. Board mentions, Task changes,
 Channel and Connector messages, Scheduler events, Job completions, Gate
 resolutions, Fusion results, and operator messages enter that lane as typed
 stimuli with correlation and source-space identity.
@@ -51,7 +51,7 @@ name cannot make that decision.
 MASC supplies OAS with the selected runtime, conversation, multimodal parts,
 and the registered tool surface. OAS owns provider/model calls, streaming,
 reasoning/tool protocol support, and typed provider outcomes. OAS remains
-generic and imports no Keeper, Task, Goal, Board, Connector, or Gate module.
+generic and imports no Keeper, Task, Board, Connector, or Gate module.
 
 Provider/model errors return as typed observations. They may cause the Keeper
 to choose a fallback runtime on a later action, but they do not increment a
@@ -111,7 +111,7 @@ what happened, not authority to pause, retry, or stop the Keeper.
 
 Only explicit operator stop and durable process-death tombstone end a Keeper
 lane. Ordinary provider failure, context compaction, a pending Gate, an unmet
-Task/Goal, FD/disk pressure, no tool call, or lack of recent activity cannot do
+Task, FD/disk pressure, no tool call, or lack of recent activity cannot do
 so. Compaction and handoff are lane-local maintenance and must wake or continue
 the lane when complete.
 

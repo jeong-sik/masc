@@ -752,31 +752,22 @@
 .bubble a, .inline-link { color: var(--volt-strong); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in oklab, var(--volt-strong) 45%, transparent); transition: color 0.15s ease; }
 .bubble a:hover, .inline-link:hover { color: var(--volt); text-decoration-color: var(--volt); }
 
-/* work / goal surface */
+/* work / task surface */
 .wk-list { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
-.wk-goal { background: var(--bg-card); border: 1px solid var(--border-main); border-radius: var(--radius-sm); overflow: hidden; }
-.wk-goal.has-block { border-color: color-mix(in oklab, var(--status-bad) 32%, var(--border-main)); }
-.wk-goal-h { display: flex; align-items: center; gap: 10px; width: 100%; padding: 13px 15px 11px; background: none; border: 0; cursor: pointer; text-align: left; color: inherit; }
-.wk-goal-h:hover { background: color-mix(in oklab, var(--volt) 3%, transparent); }
 .wk-caret { flex: none; color: var(--text-dim); font-size: var(--fs-11); width: 12px; }
 .wk-pri { flex: none; font-family: var(--font-ui); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-soft); color: var(--text-dim); }
 .wk-pri.high { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); background: color-mix(in oklab, var(--status-bad) 10%, transparent); }
 .wk-pri.normal { color: var(--volt-strong); border-color: color-mix(in oklab, var(--volt) 32%, transparent); }
 .wk-pri.low { color: var(--text-dim); }
-.wk-goal-id { flex: none; font-size: 11.5px; color: var(--text-dim); }
-.wk-goal-title { font-family: var(--font-ui); font-size: 14.5px; font-weight: 600; color: var(--text-bright); }
-.wk-goal-ns { flex: none; font-size: var(--fs-11); color: var(--text-mid); background: var(--bg-sunken); border: 1px solid var(--border-soft); padding: 1px 7px; border-radius: var(--radius-pill); }
 .wk-spacer { flex: 1; }
 .wk-due { flex: none; font-size: var(--fs-11); color: var(--text-dim); }
 .wk-lead { flex: none; display: inline-flex; }
-.wk-goal-sub { display: flex; align-items: center; gap: 11px; padding: 0 15px 13px 37px; }
 .wk-prog { flex: none; width: 300px; max-width: 42%; height: 6px; display: flex; gap: 1.5px; background: var(--bg-sunken); border-radius: var(--radius-pill); overflow: hidden; }
 .wk-seg { height: 100%; }
 .wk-seg.done { background: var(--status-ok); }
 .wk-seg.wip { background: var(--volt); }
 .wk-seg.blocked { background: var(--status-bad); }
 .wk-prog-lbl { flex: none; font-size: var(--fs-11); color: var(--text-mid); }
-.wk-metric { margin-left: auto; flex: none; font-size: var(--fs-11); color: var(--text-dim); }
 .wk-jobs { border-top: 1px solid var(--border-soft); padding: 10px 15px 13px; display: flex; flex-direction: column; gap: 2px; }
 .wk-note { font-size: var(--fs-12); color: var(--text-mid); line-height: 1.5; padding: 2px 0 9px; border-bottom: 1px dashed var(--border-soft); margin-bottom: 7px; }
 .wk-job { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: var(--radius-xs); }
@@ -798,16 +789,12 @@
 .wk-job-kp { flex: none; display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 130px; padding: 3px 6px; border-radius: var(--radius-pill); border: 1px solid transparent; background: none; cursor: pointer; color: var(--text-mid); font-size: 11.5px; white-space: nowrap; transition: border-color 0.15s ease, color 0.15s ease; }
 .wk-job-kp:hover { border-color: var(--border-highlight); color: var(--text-bright); }
 .wk-job-kp.none { color: var(--text-dim); cursor: default; }
-.set-add.wk-newgoal { width: auto; margin: 0; flex: none; align-self: center; white-space: nowrap; }
 .wk-blk-n { color: var(--status-bad); }
 .wk-foot { margin: 16px 2px 4px; font-size: var(--fs-11); color: var(--text-dim); }
 
-/* ── work v2: goal list (priority-sorted), task lifecycle, gate contract, backlog ── */
+/* ── work v2: task list (priority-sorted), lifecycle, gate contract, backlog ── */
 
 
-.wk-goal.st-warn { border-color: color-mix(in oklab, var(--status-warn) 30%, var(--border-main)); }
-.wk-goal.st-bad { border-color: color-mix(in oklab, var(--status-bad) 32%, var(--border-main)); }
-.wk-goal.st-volt { border-color: var(--volt-dim); }
 .wk-prio { flex: none; font-size: var(--fs-10); color: var(--text-mid); border: 1px solid var(--border-main); border-radius: var(--radius-xs); padding: 1px 6px; }
 .wk-gstatus { flex: none; font-family: var(--font-ui); font-size: 9.5px; letter-spacing: 0.06em; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); color: var(--text-dim); }
 .wk-gstatus.ok { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 38%, transparent); }
@@ -815,7 +802,6 @@
 .wk-gstatus.bad { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 42%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
 .wk-gstatus.volt { color: var(--volt-strong); border-color: var(--volt-dim); background: var(--volt-wash); }
 .wk-approval { flex: none; font-size: var(--fs-10); color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); border-radius: var(--radius-pill); padding: 2px 8px; }
-.wk-goal-phase { flex: none; font-size: 10.5px; color: var(--text-dim); }
 .wk-seg.verify { background: var(--volt-strong); }
 
 .wk-tasks { border-top: 1px solid var(--border-soft); padding: 10px 15px 13px; display: flex; flex-direction: column; gap: 3px; }
@@ -880,7 +866,6 @@
 .wk-backlog-list { display: flex; flex-direction: column; gap: 4px; }
 .wk-bl-row { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: var(--radius-sm); background: var(--bg-card); border: 1px solid var(--border-soft); }
 .wk-bl-title { font-size: 12.5px; color: var(--text-primary); display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.wk-bl-goal { font-size: var(--fs-10); color: var(--text-dim); }
 .wk-bl-prio { flex: none; font-size: var(--fs-10); color: var(--text-dim); }
 
 /* small inline label for jargon keys (room / 세션 / …) */
@@ -1537,8 +1522,8 @@ textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; bo
    Work/Schedule deltas — vendored verbatim from the keeper-v2
    prototype v2.css (design tokens are native here). Backs:
    · schedule aside pulse + terminal marks (schedule-surface.ts SchAside)
-   · task activity lineage rail (goals/task-detail-overlay.ts)
-   · kanban card → owning goal jump (work.ts KanbanCard)
+   · task activity lineage rail (tasks/task-detail-overlay.ts)
+   · kanban card → task detail jump (work.ts KanbanCard)
    ══════════════════════════════════════════════════════════════ */
 
 /* schedule aside — pulse summary */
@@ -1594,6 +1579,4 @@ textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; bo
 .wk-lin-arr { color: var(--volt-strong); font-size: var(--fs-12); }
 .wk-lin-note { display: block; font-size: var(--fs-11); color: var(--text-dim); line-height: 1.5; margin-top: 3px; }
 
-/* kanban card — owning goal jump */
-.wk-kcard-goal { display: block; width: 100%; box-sizing: border-box; text-align: left; font-size: 10.5px; color: var(--text-dim); background: none; border: 0; padding: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.14s ease; }
-.wk-kcard-goal:hover { color: var(--volt-strong); }
+/* kanban card — task detail jump */

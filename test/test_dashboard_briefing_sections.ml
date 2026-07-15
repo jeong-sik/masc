@@ -215,8 +215,7 @@ let test_compact_keeper_json_normalizes_missing_fields () =
   check_null_field compact "agent_name";
   check_null_field compact "current_task";
   check_null_field compact "last_reply_status";
-  check_null_field compact "last_reply_preview";
-  check_list_field compact "active_goal_ids" 0
+  check_null_field compact "last_reply_preview"
 
 let test_compact_agent_json_uses_current_focus () =
   let agent : Masc_domain.agent =

@@ -53,7 +53,7 @@ describe('createRunActivityStore', () => {
         context: {
           file_path: 'lib/runtime.ml',
           line: 42,
-          goal_id: 'goal-runtime',
+
           task_id: 'task-runtime',
           board_post_id: 'post-1',
           comment_id: 'comment-1',
@@ -67,7 +67,7 @@ describe('createRunActivityStore', () => {
     expect(s.events()[0]?.context).toMatchObject({
       file_path: 'lib/runtime.ml',
       line: 42,
-      goal_id: 'goal-runtime',
+
       task_id: 'task-runtime',
       comment_id: 'comment-1',
       pr_id: '15000',

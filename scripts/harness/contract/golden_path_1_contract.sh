@@ -21,7 +21,6 @@ source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
 PASS=0
 FAIL=0
-GOAL_ID=""
 CLEANUP_TASK_FINALIZED=0
 START_PATH="${BASE_PATH:-$PWD}"
 
@@ -44,18 +43,6 @@ if [ -z "${MCP_SESSION_ID:-}" ]; then
   exit 1
 fi
 
-ensure_contract_goal() {
-  local goal_payload
-  local goal_json
-
-  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","priority":1}')"
-  goal_json="$(printf '%s' "$goal_payload" | extract_result)"
-  GOAL_ID="$(printf '%s' "$goal_json" | jq -r '.goal_id // empty')"
-  if [ -z "$GOAL_ID" ]; then
-    mcp_fail_with_context "could not create goal for contract goal_id" "$goal_payload"
-  fi
-}
-
 step_pass() { PASS=$((PASS + 1)); echo "  PASS"; }
 step_fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
@@ -74,12 +61,10 @@ if [ -z "${MCP_SESSION_ID:-}" ]; then
   exit 1
 fi
 
-ensure_contract_goal
-
 # ── Step 2/8: add_task ──
 echo "[2/8] masc_add_task"
 task_title="GP1 contract task $(date +%s)"
-r2="$(call_tool 1002 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" --arg task_title "$task_title" '{title: $task_title, goal_id: $goal_id, priority: 2, description: "Automated golden path 1 contract verification"}')")"
+r2="$(call_tool 1002 "masc_add_task" "$(jq -cn --arg task_title "$task_title" '{title: $task_title, priority: 2, description: "Automated golden path 1 contract verification"}')")"
 if require_ok "$r2"; then
   step_pass
 else

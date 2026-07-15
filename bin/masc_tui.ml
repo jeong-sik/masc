@@ -263,13 +263,9 @@ let apply_board_list_load state = function
 let apply_planning_load state = function
   | Ok planning ->
       state.planning <- Some planning;
-      state.planning_error <- None;
-      let goals = planning_visible_goals planning.pl_goals in
-      if state.planning_cursor >= List.length goals then
-        state.planning_cursor <- max 0 (List.length goals - 1)
+      state.planning_error <- None
   | Error err ->
       state.planning <- None;
-      state.planning_mode <- Planning_list;
       remember_surface_error state ~surface:"planning"
         ~current_error:state.planning_error
         ~set_error:(fun value -> state.planning_error <- value)
@@ -591,16 +587,7 @@ let main () =
                        ~refresh_inflight:board_post_refresh_inflight
                        ~mailbox:async_messages
                  | Board_list -> ())
-            | Planning ->
-                (match state.planning_mode with
-                 | Planning_detail goal_id ->
-                     (match state.planning with
-                      | Some p ->
-                          (match List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals with
-                           | Some _ -> ()
-                           | None -> state.planning_mode <- Planning_list)
-                      | None -> state.planning_mode <- Planning_list)
-                 | Planning_list -> ())
+            | Planning -> ()
             | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
             | Approvals -> ());
            add_event state "system" "Manual refresh"
@@ -631,12 +618,7 @@ let main () =
                      state.board_mode <- Board_list;
                      state.board_scroll <- 0
                  | Board_list -> ())
-            | Planning ->
-                (match state.planning_mode with
-                 | Planning_detail _ ->
-                     state.planning_mode <- Planning_list;
-                     state.planning_scroll <- 0
-                 | Planning_list -> ())
+            | Planning -> ()
             | Overview | Keepers Keeper_list | Approvals -> ())
        | Some "j" | Some "down" ->
            (match state.view with
@@ -664,18 +646,7 @@ let main () =
                        state.board_cursor <- state.board_cursor + 1
                  | Board_read _ ->
                      state.board_scroll <- state.board_scroll + 1)
-            | Planning ->
-                (match state.planning_mode with
-                 | Planning_list ->
-                     let goals =
-                       match state.planning with
-                       | None -> []
-                       | Some p -> planning_visible_goals p.pl_goals
-                     in
-                     if state.planning_cursor < List.length goals - 1 then
-                       state.planning_cursor <- state.planning_cursor + 1
-                 | Planning_detail _ ->
-                     state.planning_scroll <- state.planning_scroll + 1)
+            | Planning -> ()
             | Overview | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
@@ -705,14 +676,7 @@ let main () =
                  | Board_read _ ->
                      if state.board_scroll > 0 then
                        state.board_scroll <- state.board_scroll - 1)
-            | Planning ->
-                (match state.planning_mode with
-                 | Planning_list ->
-                     if state.planning_cursor > 0 then
-                       state.planning_cursor <- state.planning_cursor - 1
-                 | Planning_detail _ ->
-                     if state.planning_scroll > 0 then
-                       state.planning_scroll <- state.planning_scroll - 1)
+            | Planning -> ()
             | Overview | Keepers Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
@@ -739,20 +703,7 @@ let main () =
                             ~mailbox:async_messages
                       | None -> ())
                  | Board_read _ -> ())
-            | Planning ->
-                (match state.planning_mode with
-                 | Planning_list ->
-                     let goals =
-                       match state.planning with
-                       | None -> []
-                       | Some p -> planning_visible_goals p.pl_goals
-                     in
-                     (match List.nth_opt goals state.planning_cursor with
-                      | Some g ->
-                          state.planning_mode <- Planning_detail g.pg_id;
-                          state.planning_scroll <- 0
-                      | None -> ())
-                 | Planning_detail _ -> ())
+            | Planning -> ()
             | Overview | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
             | Approvals -> ())
        | Some "l" | Some "L" ->
@@ -804,16 +755,7 @@ let main () =
                     ~refresh_inflight:board_post_refresh_inflight
                     ~mailbox:async_messages
               | Board_list -> ())
-         | Planning ->
-             (match state.planning_mode with
-              | Planning_detail goal_id ->
-                  (match state.planning with
-                   | Some p ->
-                       (match List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals with
-                        | Some _ -> ()
-                        | None -> state.planning_mode <- Planning_list)
-                   | None -> state.planning_mode <- Planning_list)
-              | Planning_list -> ())
+         | Planning -> ()
          | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
          | Approvals -> ());
         last_check := now

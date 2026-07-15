@@ -37,18 +37,11 @@ describe('TaskCreateForm', () => {
     expect(container.textContent).toContain('태스크 추가')
   })
 
-  it('shows default help text when no goalId', () => {
+  it('shows backlog priority help text', () => {
     const container = document.createElement('div')
     render(html`<${TaskCreateForm} />`, container)
     expect(container.textContent).toContain('P1')
     expect(container.textContent).toContain('가장 높습니다')
-  })
-
-  it('shows goal-linked text when goalId provided', () => {
-    const container = document.createElement('div')
-    render(html`<${TaskCreateForm} goalId="g-1" goalTitle="Build API" />`, container)
-    expect(container.textContent).toContain('Build API')
-    expect(container.textContent).toContain('backlog 태스크')
   })
 
   it('expands to full form when showTaskCreate is true', async () => {
@@ -60,16 +53,6 @@ describe('TaskCreateForm', () => {
     expect(container.textContent).toContain('새 태스크')
     expect(container.textContent).toContain('backlog에 추가')
     expect(container.textContent).toContain('취소')
-  })
-
-  it('shows linked goal banner in expanded form', async () => {
-    const container = document.createElement('div')
-    render(html`<${TaskCreateForm} goalId="g-2" goalTitle="Refactor" />`, container)
-    showTaskCreate.value = true
-    await flush()
-    expect(container.textContent).toContain('연결 목표')
-    expect(container.textContent).toContain('Refactor')
-    expect(container.textContent).toContain('g-2')
   })
 
   it('has required title input with placeholder', async () => {
@@ -127,7 +110,7 @@ describe('TaskCreateForm', () => {
 
   it('calls createTask with form data on submit', async () => {
     const container = document.createElement('div')
-    render(html`<${TaskCreateForm} goalId="g-1" />`, container)
+    render(html`<${TaskCreateForm} />`, container)
     showTaskCreate.value = true
     await flush()
     const input = container.querySelector('input') as HTMLInputElement
@@ -144,7 +127,6 @@ describe('TaskCreateForm', () => {
         title: 'My Task',
         description: '',
         priority: 3,
-        goal_id: 'g-1',
       }),
     )
   })

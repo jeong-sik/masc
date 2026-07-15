@@ -711,7 +711,7 @@ let run_turn
                  (* Root B (#22710): capture the world-observation actionable
                     signal alongside the contract status so the receipt carries
                     the real "is there anything to do" signal. [operator_disposition]
-                    uses it to replace the [goal_ids = []] proxy. [None] when no
+                    uses this observed signal directly. [None] when no
                     observation was threaded (disposition stays broadcast-required;
                     conservative). *)
                  acc.receipt_actionable_signal <-

@@ -64,7 +64,7 @@ OAS  ──does not know──→ MASC
 - OAS provider capability manifest / pricing override는 generic
   provider runtime contract다. MASC may pass logical runtime intent and
   capability requirements into those OAS contracts, but OAS must not learn MASC routes,
-  keeper phases, runtimes, Board/Goal/Task/Gate semantics, or dashboard policy.
+  keeper phases, runtimes, Board/Task/Gate semantics, or dashboard policy.
 - `provider/model-free` in MASC means MASC policy code routes by logical use,
   declared capability, profile order, health, capacity, and receipt state; it
   does not branch on vendor/model literals. Provider/model ids remain
@@ -236,7 +236,7 @@ These are the next changes that are generic enough to propose upstream:
 
 These stay in MASC:
 
-- workspace/Task/Goal/Board/Keeper/Gate semantics
+- workspace/Task/Board/Keeper/Gate semantics
 - planner session policy and repair-budget policy
 - proof/report JSON/markdown contracts and workspace collaboration-specific evidence rules
 
@@ -266,7 +266,7 @@ These stay in MASC:
 Use this checklist when reviewing boundary-touching PRs:
 
 1. **OAS가 MASC를 새로 알게 되는가?**
-   - generic runtime/harness primitive가 아니라 Workspace/Task/Goal/Board/Keeper/Gate semantics가 OAS public contract로 새어 나오면 안 된다.
+   - generic runtime/harness primitive가 아니라 Workspace/Task/Board/Keeper/Gate semantics가 OAS public contract로 새어 나오면 안 된다.
 2. **MASC core가 provider/model 세부를 새로 배우는가?**
    - model ID, vendor, token/cost detail은 config 또는 OAS-facing adapter/bridge에 머물러야 한다.
    - routing/policy code가 vendor/model literal로 분기하면 provider/model-free 위반이다.

@@ -16,7 +16,6 @@ type parsed_args = {
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
   mention_targets_opt : string list option;
-  active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
   proactive_enabled_opt : bool option;
@@ -132,21 +131,18 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       parse_compaction_profile_opt args "compaction_profile"
     in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
-    let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     match
       compaction_profile_opt_res, allowed_paths_opt_res,
-      active_goal_ids_opt_res, mention_targets_opt_res, runtime_id_opt_res
+      mention_targets_opt_res, runtime_id_opt_res
     with
-    | Error e, _, _, _, _
-    | _, Error e, _, _, _
-    | _, _, Error e, _, _
-    | _, _, _, Error e, _
-    | _, _, _, _, Error e -> Error (tool_result_error e)
+    | Error e, _, _, _
+    | _, Error e, _, _
+    | _, _, Error e, _
+    | _, _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
       Ok allowed_paths_opt,
-      Ok active_goal_ids_opt,
       Ok mention_targets_opt,
       Ok runtime_id_opt ->
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
@@ -204,7 +200,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       compaction_profile_opt;
       runtime_id_opt;
       allowed_paths_opt;
-      active_goal_ids_opt;
       autoboot_enabled_opt;
       mention_targets_opt;
       max_context_override_opt;

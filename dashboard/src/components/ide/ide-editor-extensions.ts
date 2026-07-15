@@ -165,7 +165,6 @@ export interface EditorAnnotationLine {
   readonly line: number
   readonly kind: string
   readonly keeperId: string
-  readonly goalId?: string | null
   readonly taskId?: string | null
 }
 
@@ -255,7 +254,6 @@ function annotationLineChipText(annotations: ReadonlyArray<EditorAnnotationLine>
   if (!first) return 'Annotation'
   const parts = [
     first.kind,
-    first.goalId ? `goal ${first.goalId}` : null,
     first.taskId ? `task ${first.taskId}` : null,
     `keeper ${first.keeperId}`,
     annotations.length > 1 ? `+${annotations.length - 1}` : null,
@@ -266,7 +264,6 @@ function annotationLineChipText(annotations: ReadonlyArray<EditorAnnotationLine>
 function annotationLineChipTitle(annotations: ReadonlyArray<EditorAnnotationLine>): string {
   return annotations.map(annotation => [
     annotation.kind,
-    annotation.goalId ? `goal ${annotation.goalId}` : null,
     annotation.taskId ? `task ${annotation.taskId}` : null,
     `keeper ${annotation.keeperId}`,
   ].filter((part): part is string => part !== null).join(' · ')).join('\n')
@@ -280,7 +277,7 @@ function annotationLineChipAriaLabel(annotations: ReadonlyArray<EditorAnnotation
 
 function annotationLineKey(annotations: ReadonlyArray<EditorAnnotationLine>): string {
   return annotations.map(annotation =>
-    `${annotation.id}:${annotation.line}:${annotation.kind}:${annotation.keeperId}:${annotation.goalId ?? ''}:${annotation.taskId ?? ''}`,
+    `${annotation.id}:${annotation.line}:${annotation.kind}:${annotation.keeperId}:${annotation.taskId ?? ''}`,
   ).join('|')
 }
 

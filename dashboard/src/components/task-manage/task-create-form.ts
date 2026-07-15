@@ -19,23 +19,12 @@ const PRIORITY_OPTIONS = [
 
 export function resetForm() { title.value = ''; description.value = ''; priority.value = 3 }
 
-export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: string | null } = {}) {
-  const linkedGoalId = props.goalId?.trim() || null
-  const linkedGoalTitle = props.goalTitle?.trim() || null
+export function TaskCreateForm() {
   if (!showTaskCreate.value) {
     return html`
       <div class="v2-workspace-surface flex flex-col gap-3">
         <div class="text-xs leading-relaxed text-text-muted">
-          ${linkedGoalId
-            ? html`
-              <span class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-1.5 py-0.5 text-2xs text-accent-fg">
-                goal ${linkedGoalTitle ?? linkedGoalId}
-              </span>
-              에 직접 연결된 backlog 태스크를 생성합니다.
-            `
-            : html`
-              이 프로젝트의 백로그에 바로 추가됩니다. 우선순위는 <${Tk}>P1<//>이 가장 높습니다.
-            `}
+          이 프로젝트의 백로그에 바로 추가됩니다. 우선순위는 <${Tk}>P1<//>이 가장 높습니다.
         </div>
         <${ActionButton}
           variant="primary"
@@ -53,22 +42,12 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
         <div>
           <h3 class="text-base font-semibold text-text-strong">새 태스크</h3>
           <p class="mt-1 text-xs leading-relaxed text-text-muted">
-            ${linkedGoalId
-              ? 'goal_id가 함께 저장됩니다. 제목에 [goal:<id>] 태그를 붙이지 않아도 Goal Manager에 연결됩니다.'
-              : '간단한 제목만 있어도 backlog에 등록됩니다. 설명은 나중에 보강해도 됩니다.'}
+            간단한 제목만 있어도 backlog에 등록됩니다. 설명은 나중에 보강해도 됩니다.
           </p>
         </div>
       </div>
 
       <div class="flex flex-col gap-3">
-        ${linkedGoalId ? html`
-          <div class="rounded-[var(--r-1)] border border-[var(--accent-25)] bg-[var(--accent-10)] px-3 py-2 text-2xs leading-relaxed text-accent-fg">
-            연결 목표:
-            <strong class="ml-1 text-text-strong">${linkedGoalTitle ?? linkedGoalId}</strong>
-            <span class="ml-1 text-text-muted">(${linkedGoalId})</span>
-          </div>
-        ` : null}
-
         <div class="flex flex-col gap-1.5">
           <label class="text-2xs font-medium text-text-muted">
             제목<span class="ml-0.5 text-[var(--color-status-err)]">*</span>
@@ -116,7 +95,6 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
                 title: title.value,
                 description: description.value,
                 priority: priority.value,
-                goal_id: linkedGoalId,
               })
                 .then(ok => { if (ok) resetForm() })
             }}

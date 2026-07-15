@@ -344,7 +344,6 @@ sandbox_profile = "docker"
 instructions = "Improve MASC autonomously"
 proactive_enabled = true
 allowed_paths = ["workspace/yousleepwhen/masc"]
-active_goal_ids = ["goal-masc-improver"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -361,7 +360,6 @@ active_goal_ids = ["goal-masc-improver"]
       instructions = "stale instructions";
       proactive = { enabled = false };
       allowed_paths = [ "/tmp/stale-local-path" ];
-      active_goal_ids = [ "stale-goal" ];
     }
   in
   (match Store.write_meta config stale with
@@ -410,11 +408,7 @@ active_goal_ids = ["goal-masc-improver"]
   Alcotest.(check (list string))
     "returned allowed_paths is TOML canonical"
     [ "workspace/yousleepwhen/masc" ]
-    returned.allowed_paths;
-  Alcotest.(check (list string))
-    "returned active_goal_ids is TOML canonical"
-    [ "goal-masc-improver" ]
-    returned.active_goal_ids
+    returned.allowed_paths
 
 let test_turn_setup_uses_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

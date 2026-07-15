@@ -164,9 +164,6 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
               let fields =
                 append_present_string_list_field fields "allowed_paths" json
               in
-              let fields =
-                append_present_string_list_field fields "active_goal_ids" json
-              in
               Ok
                 (String.concat "\n"
                    ([

@@ -124,7 +124,6 @@ export interface KeeperDecision {
 export interface KeeperDecisionContext {
   file_path?: string | null
   line?: number | null
-  goal_id?: string
   task_id?: string
   board_post_id?: string
   comment_id?: string
@@ -150,7 +149,6 @@ function decodeKeeperDecisionContext(raw: unknown): KeeperDecisionContext | null
   const line = asNumber(raw.line)
   if (line !== undefined) context.line = line
   const stringFields = [
-    ['goal_id', 'goal_id'],
     ['task_id', 'task_id'],
     ['board_post_id', 'board_post_id'],
     ['comment_id', 'comment_id'],

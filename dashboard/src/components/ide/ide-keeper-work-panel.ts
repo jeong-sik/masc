@@ -1,16 +1,10 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import type { Goal, Keeper, Task } from '../../types'
-import { goals, keepers, tasks } from '../../store'
+import type { Keeper, Task } from '../../types'
+import { keepers, tasks } from '../../store'
 import { firstNonEmptyString } from '../../lib/format-string'
 import { normalizeKeeperBlockerText } from '../../lib/keeper-runtime-display'
 import { KeeperBadge } from '../keeper-badge'
-import {
-  formatProgressPct,
-  goalPhaseLabel,
-  goalProgressFor,
-  type GoalProgress,
-} from '../goals/goal-helpers'
 import {
   canonicalKeeperName,
   keeperIdentityKeys,
@@ -33,7 +27,6 @@ interface KeeperWorkSummary {
   readonly displayName: string
   readonly keeper: Keeper | null
   readonly currentTaskId: string | null
-  readonly currentGoalId: string | null
   readonly currentTask: Task | null
   readonly activeTasks: ReadonlyArray<Task>
   readonly activeTaskCount: number
@@ -57,12 +50,6 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   const summary = keeperWorkSummary(keeperName, keepers.value, tasks.value)
   const keeper = summary.keeper
   const currentTask = summary.currentTask
-  const currentGoal = summary.currentGoalId
-    ? goals.value.find(goal => goal.id === summary.currentGoalId) ?? null
-    : null
-  const currentGoalProgress = summary.currentGoalId
-    ? goalProgressFor(summary.currentGoalId)
-    : null
   const queuedTasks = queuedActiveTasks(summary.activeTasks, currentTask)
   const attention = Boolean(
     keeper?.needs_attention
@@ -109,7 +96,6 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
         <div class="ide-keeper-work-strip">
           ${WorkMetric('phase', keeper?.phase ?? keeper?.status ?? 'unknown')}
           ${WorkMetric('task', summary.currentTaskId ?? 'none')}
-          ${WorkMetric('goal', summary.currentGoalId ?? 'none')}
           ${WorkMetric('active', String(summary.activeTaskCount))}
         </div>
         ${LiveTurnStrip(composite)}
@@ -121,7 +107,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
                 <span>${currentTask.status ?? 'unknown'}</span>
               </div>
               <strong title=${currentTask.title}>${currentTask.title}</strong>
-              ${TaskRouteLinks(currentTask, summary.currentGoalId, summary.displayName)}
+              ${TaskRouteLinks(currentTask, summary.displayName)}
             </div>
           `
           : summary.currentTaskId
@@ -133,25 +119,11 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
                 </div>
                 <strong>keeper runtime current task</strong>
                 <span>task row not present in execution projection</span>
-                ${RuntimeTaskRouteLinks(summary.currentTaskId, summary.currentGoalId, summary.displayName)}
+                ${RuntimeTaskRouteLinks(summary.currentTaskId, summary.displayName)}
               </div>
             `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
-        ${QueuedTaskCards(queuedTasks, summary.currentGoalId, summary.displayName)}
-        ${currentGoal
-          ? GoalProgressCard(currentGoal, currentGoalProgress, summary.currentTaskId)
-          : summary.currentGoalId
-            ? html`
-              <div class="ide-keeper-work-goal v2-ide-card" role="status">
-                <div class="ide-keeper-work-card-top">
-                  <span>GOAL PROGRESS</span>
-                  <span>${summary.currentGoalId}</span>
-                </div>
-                <strong>goal row not present in dashboard state</strong>
-                ${GoalRouteLinks(summary.currentGoalId, summary.currentTaskId)}
-              </div>
-            `
-            : null}
+        ${QueuedTaskCards(queuedTasks, summary.displayName)}
         ${RuntimeBlock(summary)}
         ${PresenceIndicator(cursor)}
         ${summary.recentOutput
@@ -171,7 +143,6 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
 
 function QueuedTaskCards(
   tasks: ReadonlyArray<Task>,
-  fallbackGoalId: string | null,
   keeperId: string,
 ) {
   if (tasks.length === 0) return null
@@ -190,7 +161,7 @@ function QueuedTaskCards(
             <span>${task.status ?? 'unknown'}</span>
           </div>
           <strong title=${task.title}>${task.title}</strong>
-          ${TaskRouteLinks(task, fallbackGoalId, keeperId)}
+          ${TaskRouteLinks(task, keeperId)}
         </div>
       `)}
       ${hiddenCount > 0
@@ -200,44 +171,9 @@ function QueuedTaskCards(
   `
 }
 
-function GoalProgressCard(
-  goal: Goal,
-  progress: GoalProgress | null,
-  taskId: string | null,
-) {
-  const taskCountLabel = progress ? formatProgressPct(progress) : 'no linked tasks'
-  const pctValue = progress ? Math.round(progress.ratio * 100) : 0
-  return html`
-    <div class="ide-keeper-work-goal v2-ide-card" role="status" aria-label=${`Goal ${goal.id} linked task count ${taskCountLabel}`}>
-      <div class="ide-keeper-work-card-top">
-        <span>GOAL TASKS</span>
-        <span>${goalPhaseLabel(goal.phase)}</span>
-      </div>
-      <strong title=${goal.title}>${goal.title}</strong>
-      <div class="ide-keeper-work-goal-bar" aria-hidden="true" title="Linked task count only; metric attainment is not available on this IDE summary card.">
-        <span style=${{ width: `${pctValue}%` }} />
-      </div>
-      <div class="ide-keeper-work-goal-meta">
-        <span>${taskCountLabel}</span>
-        ${goal.metric ? html`<span title=${goal.metric}>${goal.metric}</span>` : null}
-        ${goal.target_value ? html`<span title=${goal.target_value}>target ${goal.target_value}</span>` : null}
-      </div>
-      ${GoalRouteLinks(goal.id, taskId)}
-    </div>
-  `
-}
-
-function GoalRouteLinks(goalId: string, taskId: string | null) {
-  return KeeperWorkRouteLinks(routeLinksForContext({
-    goalId,
-    taskId: taskId ?? undefined,
-  }), 'Keeper work planning links')
-}
-
-function TaskRouteLinks(task: Task, fallbackGoalId: string | null, keeperId: string) {
+function TaskRouteLinks(task: Task, keeperId: string) {
   const execution = taskExecutionRouteContext(task)
   return KeeperWorkRouteLinks(routeLinksForContext({
-    goalId: task.goal_id ?? fallbackGoalId ?? undefined,
     taskId: task.id,
     sessionId: execution.sessionId ?? undefined,
     operationId: execution.operationId ?? undefined,
@@ -247,9 +183,8 @@ function TaskRouteLinks(task: Task, fallbackGoalId: string | null, keeperId: str
   }), 'Keeper task operational links')
 }
 
-function RuntimeTaskRouteLinks(taskId: string, goalId: string | null, keeperId: string) {
+function RuntimeTaskRouteLinks(taskId: string, keeperId: string) {
   return KeeperWorkRouteLinks(routeLinksForContext({
-    goalId: goalId ?? undefined,
     taskId,
     keeperId,
   }), 'Keeper runtime task links')
@@ -375,10 +310,6 @@ export function keeperWorkSummary(
   const currentTask = currentTaskId
     ? activeTasks.find(task => task.id === currentTaskId) ?? null
     : activeTasks[0] ?? null
-  const currentGoalId = firstNonEmptyString(
-    currentTask?.goal_id,
-    activeTasks.find(task => task.goal_id)?.goal_id,
-  )
   const trust = keeper?.trust ?? null
   const latestTerminal = trust?.latest_terminal_reason ?? null
   const terminalSummary = normalizeKeeperBlockerText(
@@ -396,7 +327,6 @@ export function keeperWorkSummary(
     displayName,
     keeper,
     currentTaskId,
-    currentGoalId,
     currentTask,
     activeTasks,
     activeTaskCount: currentTaskId && activeTasks.length === 0 ? 1 : activeTasks.length,

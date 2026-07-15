@@ -166,11 +166,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
-        ("active_goal_ids", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Goal IDs this keeper is allowed to claim work for. Empty clears goal scoping.");
-        ]);
         ("autoboot_enabled", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If false, persist the keeper but skip auto-start on future server boots.");
@@ -235,11 +230,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Exact direct-mention tokens that can wake the keeper in workspace traffic (for example ['sangsu']).");
-        ]);
-        ("active_goal_ids", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Goal IDs this keeper is allowed to claim work for. Empty clears goal scoping.");
         ]);
         ("autoboot_enabled", `Assoc [
           ("type", `String "boolean");
@@ -432,7 +422,7 @@ let keeper_schemas : tool_schema list = [
   {
     name = "masc_keeper_reset";
     description = "Reset a keeper's runtime state (usage counters, last_model_used, token stats). \
-Clears stale data from previous sessions. Does not affect configuration, goals, or persona.";
+Clears stale data from previous sessions. Does not affect configuration, instructions, or persona.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

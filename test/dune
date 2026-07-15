@@ -204,7 +204,6 @@
   test_ide_canonical_url_join
   test_ide_partition_resolution
   test_ide_diagnostics
-  test_keeper_runtime_contract
   test_schema_surface_index
   test_keeper_accountability
   test_reputation_ledger_v2
@@ -334,7 +333,6 @@
   test_chronicle_librarian
   test_alignment_score
   test_blocker_class_exhaustiveness
-  test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
   test_event_log
@@ -523,7 +521,6 @@
   test_ide_canonical_url_join
   test_ide_partition_resolution
   test_ide_diagnostics
-  test_keeper_runtime_contract
   test_schema_surface_index
   test_keeper_accountability
   test_reputation_ledger_v2
@@ -657,7 +654,6 @@
   test_chronicle_librarian
   test_alignment_score
   test_blocker_class_exhaustiveness
-  test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
   test_event_log
@@ -817,21 +813,6 @@
  (name test_runtime_modality_reroute)
  (modules test_runtime_modality_reroute)
  (libraries masc_test_deps))
-
-; RFC-0267 Phase 1: registry goal_id projection onto the /execution task wire.
-
-(test
- (name test_dashboard_goal_id_projection)
- (modules test_dashboard_goal_id_projection)
- (libraries masc_test_deps))
-
-; RFC-0267 Phase 2: validated task->goal assignment
-; (Task.Goal_assignment.set_task_goal).
-
-(test
- (name test_goal_task_assignment)
- (modules test_goal_task_assignment)
- (libraries masc_test_deps unix))
 
 ; Group 2: Property-based tests (QCheck)
 
@@ -1044,10 +1025,6 @@
   test_deterministic_evidence_evaluator
   test_mcp_session_store_roundtrip
   test_eval_calibration
-  test_goal_tools
-  test_goal_upsert_fsm_bypass_10247
-  test_goal_store
-  test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
   test_system_error_class
@@ -1218,10 +1195,6 @@
   test_deterministic_evidence_evaluator
   test_mcp_session_store_roundtrip
   test_eval_calibration
-  test_goal_tools
-  test_goal_upsert_fsm_bypass_10247
-  test_goal_store
-  test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
   test_system_error_class
@@ -1281,14 +1254,6 @@
   digestif
   eio_main
   unix))
-
-; RFC-0284: goal-loop status SSE broadcast is change-gated (new content emits
-; one event; unchanged / generated_at-only change emits none).
-
-(test
- (name test_goal_loop_broadcast)
- (modules test_goal_loop_broadcast)
- (libraries alcotest masc masc_server masc_test_deps eio_main))
 
 ; Focused dashboard nudge feed projection.
 
@@ -1773,7 +1738,6 @@
 
 (include stanzas/test_event_kind.inc)
 
-(include stanzas/test_export_symbol_graph.inc)
 
 (include stanzas/test_feature_flag_registry.inc)
 
@@ -1792,10 +1756,6 @@
 (include stanzas/test_gate_protocol.inc)
 
 (include stanzas/test_git_fetch_retry_script.inc)
-
-(include stanzas/test_goal_phase_all.inc)
-
-
 
 
 (include stanzas/test_heartbeat_integration.inc)
@@ -1946,9 +1906,7 @@
 (include stanzas/test_keeper_path_rejection.inc)
 (include stanzas/test_keeper_path_containment_objective.inc)
 
-(include stanzas/test_keeper_approval_queue_rules_types.inc)
-
-(include stanzas/test_keeper_approval_queue_rules.inc)
+(include stanzas/test_keeper_approval_queue_types.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 

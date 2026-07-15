@@ -295,7 +295,6 @@ let to_json_with_operator_disposition
       ~generation:receipt.generation
       ?keeper_turn_id:receipt.turn_count
       ?task_id:receipt.current_task_id
-      ~goal_ids:receipt.goal_ids
       ~sandbox_profile:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
       ?sandbox_root:receipt.sandbox_root
       ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode)
@@ -330,7 +329,6 @@ let to_json_with_operator_disposition
     ; ( "oas_internal_runtime_disabled"
       , `Bool receipt.oas_internal_runtime_disabled )
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
-    ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
     ; "operator_disposition", `String operator_disposition
@@ -588,7 +586,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
-    ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
     ; "runtime_id", `String (receipt.runtime_id)
     ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
@@ -661,7 +658,6 @@ let append (config : Workspace.config) (receipt : t) =
        ~trace_id:receipt.trace_id
        ?turn_count:receipt.turn_count
        ~current_task_id:receipt.current_task_id
-       ~goal_ids:receipt.goal_ids
        ~outcome:(outcome_kind_to_tla_receipt receipt.outcome)
        ~reaction_kind:(reaction_kind_of_operator_disposition disposition)
        ~terminal_reason_code:receipt.terminal_reason_code

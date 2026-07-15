@@ -42,7 +42,7 @@ let workspace_schema_names () =
 ;;
 
 let expected_workspace_read_only_names =
-  [ "masc_check"; "masc_goal_list"; "masc_status" ]
+  [ "masc_check"; "masc_status" ]
 ;;
 
 let expected_workspace_hidden_names = []
@@ -189,7 +189,7 @@ let test_retired_tools_are_absent () =
      registers them; they only appeared absent before when the
      Mcp_server_eio module-load bootstrap did not run in this executable. *)
   let retired_front_door_tools =
-    [ "masc_operation_start"; "masc_dispatch_tick"; "masc_goal_review" ]
+    [ "masc_operation_start"; "masc_dispatch_tick" ]
   in
   let retired_tool_admin_surface =
     [ "masc_tool_admin_snapshot"

@@ -9,7 +9,7 @@
 // across 4+ drifting class compositions:
 //
 //   <code class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-1">                — connector-{status,keeper-matrix}
-//   <code class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-1 py-0.5 text-2xs ...">    — goals/goal-tree, task-create-form
+//   <code class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-1 py-0.5 text-2xs ...">    — task planning, task-create-form
 //   <code class="text-xs font-mono text-[var(--color-fg-secondary)]"> — server-config
 //
 // Every one is the same intent (inline mono highlight) shaped by

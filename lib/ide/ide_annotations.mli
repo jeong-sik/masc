@@ -30,7 +30,6 @@ val create
   -> line_end:int
   -> kind:annotation_kind
   -> content:string
-  -> ?goal_id:string
   -> ?task_id:string
   -> ?references:annotation_reference list
   -> unit

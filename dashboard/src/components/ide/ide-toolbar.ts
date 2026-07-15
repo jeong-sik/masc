@@ -464,7 +464,7 @@ function toolbarContextRouteGroupId(link: IdeContextFocusRouteLink): ToolbarCont
   const section = link.params.section?.toLowerCase()
   const label = link.label.toLowerCase()
   if (link.tab === 'code' || label === 'code') return 'code'
-  if (section === 'planning' || label === 'goal' || label === 'task') return 'planning'
+  if (section === 'planning' || label === 'task') return 'planning'
   if (section === 'board' || label === 'board' || label === 'comment') return 'board'
   if (section === 'repositories' || label === 'pr' || label === 'git') return 'repo'
   if (link.tab === 'monitoring' || label === 'log' || label === 'telemetry' || label === 'keeper') {

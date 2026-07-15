@@ -462,13 +462,9 @@ describe('RuntimeLensSection', () => {
             result: null,
             mode: null,
             scoped: null,
-            active_goal_ids: [],
-            effective_goal_ids: [],
             fallback_reason: null,
-            matched_goal_id: null,
             excluded_count: null,
             claimed_task_id: null,
-            claimed_goal_id: null,
           },
           config_drift: {
             present: false,

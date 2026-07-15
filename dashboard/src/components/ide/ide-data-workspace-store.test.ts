@@ -51,7 +51,7 @@ import {
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
-import { selectedTask } from '../goals/task-detail-selection'
+import { selectedTask } from '../tasks/task-detail-selection'
 import { route } from '../../router'
 
 function repo(

@@ -27,7 +27,7 @@ export async function refreshAfterRuntimeAction(): Promise<void> {
   // execution slice and the light shell runtime-health slice — not the full
   // dashboard bootstrap.
   // The previous `refreshDashboard({ force: true })` re-hydrated shell,
-  // planning, namespace, goals and goal_loop and flipped dashboardLoading,
+  // planning and namespace state and flipped dashboardLoading,
   // re-rendering every panel ("the whole screen refreshes when I resume a
   // keeper"). The shared refresh stays on the store scheduler so rapid
   // post-action clicks coalesce while shell runtime-health updates before the

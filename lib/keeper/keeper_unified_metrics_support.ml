@@ -408,9 +408,6 @@ let observed_triggers_of_observation
       singleton_when
         (observation.scheduled_automation.due_ready_count > 0)
         "scheduled_automation_due_ready";
-      singleton_when
-        (observation.active_goals <> [] && observation.idle_seconds > 0)
-        "idle_timeout_candidate";
     ]
 
 let observed_affordances_of_observation

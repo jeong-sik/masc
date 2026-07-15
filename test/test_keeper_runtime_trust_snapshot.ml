@@ -401,7 +401,6 @@ let test_no_visible_output_no_work_receipt_does_not_mark_attention () =
              ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "no_visible_output"
              ; "current_task_id", `Null
-             ; "goal_ids", `List []
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
        let open Yojson.Safe.Util in
@@ -451,7 +450,6 @@ let test_no_visible_output_active_receipt_does_not_mark_attention () =
              ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "no_visible_output"
              ; "current_task_id", `String "task-1844"
-             ; "goal_ids", `List [ `String "goal-pm-flow" ]
              ]);
        let snapshot = K.snapshot_json ~config ~meta in
        let open Yojson.Safe.Util in

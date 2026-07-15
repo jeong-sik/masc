@@ -1,4 +1,4 @@
-import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
+import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore, KeeperTrustSummary } from './core'
 import type { BoardMonitoring, PendingConfirmSummary } from './gate'
 
 // --- Dashboard projection responses ---
@@ -265,8 +265,6 @@ export interface DashboardBootstrapResponse {
   execution?: DashboardBootstrapSlice<DashboardExecutionResponse>
   planning?: DashboardBootstrapSlice<DashboardPlanningResponse>
   namespace_truth?: DashboardBootstrapSlice<DashboardNamespaceTruthResponse>
-  goals?: DashboardBootstrapSlice<DashboardGoalsTreeResponse>
-  goal_loop_status?: DashboardBootstrapSlice<Record<string, unknown>>
 }
 
 export interface DashboardNamespaceTruthFocus {
@@ -424,7 +422,7 @@ export interface DashboardExecutionQueueItem {
   next_human_action?: string | null
   terminal_reason_code?: string | null
   stop_cause?: StopCause | null
-  runtime_trust?: GoalKeeperTrustSummary | null
+  runtime_trust?: KeeperTrustSummary | null
   top_handoff?: DashboardExecutionHandoff | null
   intervene_handoff?: DashboardExecutionHandoff | null
   command_handoff?: DashboardExecutionHandoff | null
@@ -548,8 +546,6 @@ export interface DashboardMemoryResponse {
 
 export interface DashboardPlanningResponse {
   generated_at?: string
-  goals?: unknown[]
-  rollup?: Record<string, unknown>
   task_backlog?: {
     todo?: number
     claimed?: number
@@ -561,7 +557,6 @@ export interface DashboardPlanningResponse {
 }
 
 export interface DashboardWorkspaceFsmRefs {
-  goal_id?: string | null
   task_ids?: string[]
   post_ids?: string[]
   agent_name?: string | null
@@ -616,258 +611,6 @@ export interface DashboardWorkspaceFsmSnapshot {
   violations?: DashboardWorkspaceFsmViolation[]
   projection_error?: string | null
 }
-
-// --- Goal Tree (hierarchical goal decomposition) ---
-
-export interface GoalTreeTask {
-  id: string
-  title: string
-  status: string
-  status_color: string
-  priority: number
-  assignee: string | null
-  goal_id: string | null
-  linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
-  is_terminal: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface GoalTaskSummary {
-  total: number
-  done: number
-  open: number
-  terminal: number
-  awaiting_verification: number
-  cancelled: number
-  unassigned: number
-  completion_pct: number | null
-  by_status: Record<string, number>
-  by_linkage_source: Record<string, number>
-}
-
-export interface GoalCompletionSummary {
-  state: string
-  pct: number | null
-  pct_source: string
-  attainment_state: string
-  attainment_basis: string
-  /** Mirror of {@link GoalAttainmentProjection.metric_evaluation} (task-1743). */
-  metric_evaluation: 'unevaluated' | 'absent'
-  task_total: number
-  task_done: number
-  task_open: number
-  is_complete: boolean
-  is_terminal: boolean
-  ready_to_request_completion: boolean
-}
-
-export interface GoalFsmProjection {
-  state: string
-  source: 'goal.phase' | string
-  next_actions: string[]
-  activity_observation: 'runtime' | 'approval' | 'task' | 'goal_metadata' | string
-}
-
-export interface GoalKeeperTrustLatestEvent {
-  kind: string
-  ts: string
-  ts_unix?: number | null
-  keeper_turn_id?: number | null
-  task_id?: string | null
-  goal_ids?: string[]
-  title: string
-  summary: string
-  severity: 'ok' | 'warn' | 'bad' | string
-  next_human_action?: string | null
-  // OTel/Jaeger trace id of the causal event (keeper_runtime_trust_timeline.ml),
-  // for deep-linking the latest event to its distributed trace.
-  trace_id?: string | null
-}
-
-export interface GoalKeeperTrustApprovalState {
-  state?: string | null
-  summary?: string | null
-  pending_count?: number | null
-  pending_first?: {
-    id?: string | null
-    tool_name?: string | null
-    task_id?: string | null
-    blocker_class?: string | null
-  } | null
-  // ISO8601 timestamp of the last approval-audit event
-  // (keeper_runtime_trust_snapshot.ml) — when the approval state last changed,
-  // not derivable from `state` alone.
-  latest_event_at?: string | null
-}
-
-export interface GoalKeeperTrustExecutionSummary {
-  provider_attempt_count?: number | null
-  provider_fallback_applied?: boolean | null
-  provider_selected_model?: string | null
-  runtime_outcome?: string | null
-  sandbox_summary?: string | null
-  sandbox_root?: string | null
-  completion_observation_summary?: string | null
-  latest_receipt_at?: string | null
-}
-
-export interface GoalKeeperTrustTerminalReason {
-  code?: string | null
-  source?: string | null
-  severity?: 'ok' | 'warn' | 'bad' | string | null
-  summary?: string | null
-  next_action?: string | null
-}
-
-export interface GoalKeeperTrustSummary {
-  snapshot_status?: string | null
-  snapshot_error?: string | null
-  disposition?: string | null
-  disposition_reason?: string | null
-  operator_disposition?: string | null
-  operator_disposition_reason?: string | null
-  needs_attention?: boolean | null
-  attention_reason?: string | null
-  next_human_action?: string | null
-  approval_state?: GoalKeeperTrustApprovalState | null
-  execution_summary?: GoalKeeperTrustExecutionSummary | null
-  latest_terminal_reason?: GoalKeeperTrustTerminalReason | null
-  latest_next_action?: string | null
-  latest_causal_event?: GoalKeeperTrustLatestEvent | null
-}
-
-export interface GoalTreeStatusProjection {
-  status: string
-  status_color: string
-  phase: string
-  phase_color: string
-  goal_fsm: GoalFsmProjection
-  priority: number
-}
-
-export interface GoalTreeMetricProjection {
-  metric: string | null
-  target_value: string | null
-  due_date: string | null
-  parent_goal_id: string | null
-  attainment: GoalAttainmentProjection
-}
-
-export interface GoalTreeTaskProjection {
-  tasks: GoalTreeTask[]
-  task_count: number
-  task_done_count: number
-  task_summary?: GoalTaskSummary
-  completion_summary?: GoalCompletionSummary
-}
-
-export interface GoalTreeActivityProjection {
-  timeline_events: unknown[]
-  last_activity_at: string
-  stagnation_seconds: number | null
-  activity_observation: GoalFsmProjection['activity_observation']
-  linked_keeper_names: string[]
-  pending_approval_count: number
-}
-
-export interface GoalTreeLinkageProjection {
-  linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
-  latest_keeper_ref?: string | null
-  latest_turn_ref?: number | null
-}
-
-export interface GoalTreeTimestamps {
-  created_at: string
-  updated_at: string
-}
-
-export interface GoalTreeNode extends
-  GoalTreeStatusProjection,
-  GoalTreeMetricProjection,
-  GoalTreeTaskProjection,
-  GoalTreeActivityProjection,
-  GoalTreeLinkageProjection,
-  GoalTreeTimestamps {
-  id: string
-  title: string
-  children: GoalTreeNode[]
-  child_count: number
-}
-
-export interface GoalAttainmentProjection {
-  state: 'attained' | 'in_progress' | 'not_started' | 'unmeasured' | string
-  basis: 'goal_phase' | 'linked_tasks' | 'metric_target_percent' | 'metric_target_count' | 'unmeasured' | string
-  metric: string | null
-  /**
-   * Whether the declared metric was actually evaluated (task-1743).
-   * 'unevaluated': a metric is declared but no evaluator produced a value —
-   * attainment_pct is task-derived, not a metric measurement.
-   * 'absent': no metric is declared. Distinguishes an unmeasured metric from
-   * a genuine measured zero.
-   */
-  metric_evaluation: 'unevaluated' | 'absent'
-  target_value: string | null
-  target_parse_status: 'absent' | 'parseable' | 'unparseable' | 'invalid_target' | 'unsupported_metric' | 'no_linked_tasks' | string
-  unit: 'percent' | 'count' | 'unknown' | string
-  observed_value: number | null
-  target_numeric: number | null
-  attainment_pct: number | null
-  task_done_count: number
-  task_count: number
-  note: string
-}
-
-export interface GoalTreeSummary {
-  total_goals: number
-  active_goals: number
-  phase_counts: Record<string, number>
-  total_tasks: number
-  done_tasks: number
-  pending_approvals: number
-}
-
-export interface DashboardGoalsTreeResponse {
-  generated_at?: string
-  tree: GoalTreeNode[]
-  summary: GoalTreeSummary
-}
-
-export interface GoalDetailKeeper {
-  name: string
-  agent_name: string
-  current_task_id: string | null
-  active_goal_ids: string[]
-  sandbox_profile: string
-  network_mode: string
-  runtime_id: string
-  runtime_outcome: string | null
-  latest_execution_outcome: string | null
-  latest_execution_at: string | null
-  latest_receipt: Record<string, unknown> | null
-  runtime_trust: GoalKeeperTrustSummary | null
-  latest_causal_event: GoalKeeperTrustLatestEvent | null
-}
-
-export interface GoalDetailTimelineEvent {
-  ts: string
-  kind: string
-  lane: string
-  title: string
-  summary: string
-  severity: 'ok' | 'warn' | 'bad' | string
-}
-
-export interface DashboardGoalDetailResponse {
-  generated_at?: string
-  goal: GoalTreeNode
-  linked_tasks: GoalTreeTask[]
-  linked_keepers: GoalDetailKeeper[]
-  approvals: Array<Record<string, unknown>>
-  execution_receipts: Array<Record<string, unknown>>
-  timeline: GoalDetailTimelineEvent[]
-}
-
 
 export interface ServerStatus {
   workspace_root?: string

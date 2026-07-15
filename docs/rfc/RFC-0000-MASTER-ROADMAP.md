@@ -144,7 +144,7 @@ consumer ──▶ MASC (workspace collaboration / orchestration) ──depends 
                                                             OAS ──does NOT know──▶ MASC
 ```
 
-**MASC knows OAS; OAS never knows MASC.** OAS의 변경은 모든 소비자에게 유익해야 하며, Workspace/Task/Goal/Board/Keeper/Gate 의미를 OAS public contract에 넣지 않는다.
+**MASC knows OAS; OAS never knows MASC.** OAS의 변경은 모든 소비자에게 유익해야 하며, Workspace/Task/Board/Keeper/Gate 의미를 OAS public contract에 넣지 않는다.
 
 ### 2.2 감사로 확정된 사실 (w1x2k66z2, 다중 HEAD 재확인)
 
@@ -229,6 +229,7 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 - **이유:** MASC는 AutoGPT식 goal-decomposition runtime이 아니다. 협업 실행 단위는 명시적 Task와 Keeper lane이다.
 - **삭제 범위:** `lib/goal` runtime, workspace/keeper legacy goal field와 decode path, goal-loop dashboard/scripts/tests, migration/backfill/compatibility row.
 - **acceptance:** production·fixture·dashboard에서 Legacy Goal dependency 0. 옛 persisted goal row를 읽기 위한 migration 없음.
+- **현재 hard-cut:** runtime·tool·dashboard·fixture·migration 경로 삭제를 구현했고, 옛 Keeper profile의 `goal`/`active_goal_ids` 및 옛 approval schema는 명시적으로 reject한다. 로컬 build 판정은 하지 않으며 CI 검증 대기 상태다.
 
 <a name="33-task"></a>
 ### 3.3 Task
@@ -245,11 +246,11 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 ### 3.4 Effect Permission Boundary (generic governance 아님)
 
 - **책임:** 정확한 외부 effect request의 permission 경계. 비차단 one-shot 판단. 범용 governance/risk hierarchy를 소유하지 않는다.
-- **소유 타입:** request-local decision **SOURCE 3종**: Manual HITL, configured LLM Auto Judge, explicit operator-recorded Always Allowed. **실존 타입:** `continuation_channel` closed sum(`Keeper_continuation_channel.t` `keeper_runtime/keeper_continuation_channel.mli:17`, RFC-0320: `Dashboard{thread_id}|Discord{ch,user}|Slack{ch,user}|Unrouted{reason}`); tool capability = `Tool_capability.kind`(`tool_surface/tool_capability.mli:11` = `Read_only|Mcp_context_required|Idempotent`). **[DESIGN, 미구현 타입 — 이름 아닌 목표로만 인용]** sealed `EffectIntent`(args_hash + precondition + ContinuationRef)와 세분화된 effect capability floor(`Workspace_write|External_message|Money|Destructive|Credential|Unknown`)는 HEAD에 부재(grep 0). 착수 시 이 타입들을 신설한다.
+- **소유 타입:** request-local decision **SOURCE 3종**: Manual HITL, configured LLM Auto Judge, explicit static Always Allow configuration. 런타임이 과거 결정을 standing rule로 기억하지 않는다. **실존 타입:** `continuation_channel` closed sum(`Keeper_continuation_channel.t` `keeper_runtime/keeper_continuation_channel.mli:17`, RFC-0320: `Dashboard{thread_id}|Discord{ch,user}|Slack{ch,user}|Unrouted{reason}`); tool capability = `Tool_capability.kind`(`tool_surface/tool_capability.mli:11` = `Read_only|Mcp_context_required|Idempotent`). **[DESIGN, 미구현 타입 — 이름 아닌 목표로만 인용]** sealed `EffectIntent`(args_hash + precondition + ContinuationRef)와 세분화된 effect capability floor(`Workspace_write|External_message|Money|Destructive|Credential|Unknown`)는 HEAD에 부재(grep 0). 착수 시 이 타입들을 신설한다.
 - **경계 계약:** approval은 **정확한 effect만** 대기 (sealed args_hash). approval 요청은 durable commit + **Keeper lane 즉시 해제(lane-held time = 0)**. edited args는 approval 무효화(새 EffectIntent). `submit_and_await` production path 없음. Unrouted는 fail-closed. Tool manifest의 Missing/Unknown effect → 정확한 effect pending 유지. LLM Judge는 context/scope/intent 해석 가능하나 structural floor를 **낮출 수 없다**.
 - **불변식:** 한 Keeper의 decision state가 다른 lane을 pause 못 함. Auto Judge failure는 explicit request-local unsettled state — silent approve/reject/global-stop 금지. 모든 decision이 source/request-id/model·operator-id/result/explanation 기록. **비-재도입 규칙:** default-deny boolean, unknown-risk bucket, global pause, pre-tool string classifier로 계층 승인 재생성 금지.
 - **결정론↔LLM:** "무엇을 말할지" = LLM; "어디로 답할지" = deterministic typed channel-match. objective enforcement(typed-input/path-jail/sandbox-confinement)는 소유 execution 경계 — Gate decision 아님.
-- **현재 상태 snapshot:** read model과 ApprovalsSurface route는 존재하나 wake/enqueue-on-resolution outcome은 재검증 필요. **[LANDED]** synchronous `submit_and_await`(현재 `submit_pending` `keeper_approval_queue.mli:167`)와 `governance_*` compatibility surface는 **이미 삭제됨**(HEAD grep 0, `governance_pipeline.ml` 부재) — 삭제 대상 아님. RFC-0305/0311/0318/0319/0337의 hierarchy는 부활시키지 않는다.
+- **현재 상태 snapshot:** read model과 ApprovalsSurface route는 존재하나 wake/enqueue-on-resolution outcome은 재검증 필요. **[LANDED]** synchronous `submit_and_await`(현재 `submit_pending` `keeper_approval_queue.mli:167`)와 `governance_*` compatibility surface는 이미 삭제됐다. 이 hard-cut은 standing remembered approval rule까지 제거했으며 CI 검증 대기 상태다. RFC-0305/0311/0318/0319/0337의 hierarchy는 부활시키지 않는다.
 - **open goals:** Goal 9(decision resolved→wake/enqueue end-to-end 증명, 비차단, audit trail; Auto Judge failure path 적대 검증).
 
 <a name="35-scheduler"></a>
@@ -422,6 +423,7 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 
 ### Goal 2 — 삭제 잔재 숙청 (heuristic estimator / Context_reducer / limit·budget)
 
+- **상태:** OAS `Context_reducer`/`Context_intent` 문서 계약과 MASC Legacy Goal/standing remembered approval rule hard-cut을 구현했고 CI 검증 대기 중이다. 아래 나머지 항목은 별도 slice로 유지한다.
 - **문제:** 삭제된 OAS 계약·heuristic estimator·Context_reducer 및 limit·budget 잔재를 stacked PR로 제거.
 - **경계:** **string 분류기 제거지 추가 아님.** unknown→typed Unknown/None (permissive default 금지). N-of-M은 codemod로 일괄(개별 site 패치 금지).
 - **touch:** RFC-0153 saturation signal(flag+variant+docs 삭제 또는 emit 구현); `Runtime_attempt_fsm.decide`(4 keeper driver의 inline try-next 라우팅); voice_bridge(catalog/config-declared voice choice + Result); OAS `pricing_for_model`(unknown→typed Unknown/option, RFC-OAS-018 Phase 2); `deliverable_claims_completion` SSOT 병합; keeper_recurring cap/cooldown 제거; OAS `Context_intent` heuristic classifier는 public owner가 없으면 삭제한다. MASC에는 이를 port하지 않고 MASC-owned explicit compaction request/typed overflow policy만 둔다.
@@ -457,7 +459,7 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 - **문제:** legacy recurring 계층 삭제, durable wake만 남김. effect permission은 Scheduler가 소유하지 않는다.
 - **경계:** typed closed action variant(하드코딩 `Broadcast(label)` 아님). re-enable을 health signal에 gate(fixed cooldown 아님 — cap/cooldown 증상억제 제거).
 - **touch:** recurring persist(`.masc/keeper/<name>/recurring.json` + init reload); `masc_recurring_add`(typed closed action); `keeper_wake` dispatch("keeper not registered" → `Dispatch_failed`); `has_current_approved_grant`와 digest-equality approval bypass 삭제.
-- **acceptance:** 재시작 후 recurring reload; typo'd target이 Succeeded 아닌 Dispatch_failed; approval-required occurrence마다 fresh request-local EffectIntent와 decision record 생성. operator-recorded Always Allowed rule을 쓰면 exact capability/target/argument constraint+expiry+revocation을 typed로 저장하고, 각 occurrence가 rule match와 decision source를 새 audit row로 기록한다. digest equality만으로 승인하지 않는다. execution record가 dashboard에 projection; live-safe reservation smoke(create→due→dispatch→success→board post_id→dashboard/Otel proof, proof_check.sh --require-pass).
+- **acceptance:** 재시작 후 recurring reload; typo'd target이 Succeeded 아닌 Dispatch_failed; approval-required occurrence마다 fresh request-local EffectIntent와 decision record 생성. static Always Allow는 명시적 config source이며 과거 occurrence·digest에서 durable grant를 합성하지 않는다. digest equality만으로 승인하지 않는다. execution record가 dashboard에 projection; live-safe reservation smoke(create→due→dispatch→success→board post_id→dashboard/Otel proof, proof_check.sh --require-pass).
 - **DoD:** recurring operational proof(현재 미증명); legacy row는 fake lifecycle event로 synthesize 안 함.
 
 ### Goal 7 — Schedule occurrence identity + 저장 실패 재시도 (동일 signal_id)
@@ -479,8 +481,8 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 ### Goal 9 — Exact EffectIntent permission 비차단 one-shot 판단 (적대 검증)
 
 - **문제:** request-local exact external effect permission을 비차단 one-shot 판단으로 적대적 검증. 범용 governance·Board semantic 판단을 소유하지 않는다.
-- **경계:** 3 decision SOURCE(Manual/Auto Judge/Always Allowed), risk level 아님. **암묵적 4번째 source(tool name/command string/provider brand/repo host/guessed irreversibility) 금지.** Auto Judge failure = explicit request-local unsettled(silent approve/reject/global-stop 금지). default-deny boolean/unknown-risk bucket/global pause/pre-tool string classifier 재도입 금지.
-- **touch:** `keeper_gate.ml`/`keeper_tool_policy.ml`/`keeper_tool_dispatch_runtime.ml`에서 exact `EffectIntent` validation+decision만 남기고 generic risk/governance classifier와 Gate 0 compatibility surface 삭제; ApprovalsSurface(HITL resolution read model with wake/enqueue outcome column); operator-recorded Always Allowed rule은 exact scope/expiry/revocation typed record와 occurrence별 fresh audit decision으로 제한.
+- **경계:** 3 decision SOURCE(Manual/Auto Judge/configured Always Allow), risk level 아님. **암묵적 4번째 source(tool name/command string/provider brand/repo host/guessed irreversibility) 금지.** Auto Judge failure = explicit request-local unsettled(silent approve/reject/global-stop 금지). default-deny boolean/unknown-risk bucket/global pause/pre-tool string classifier 재도입 금지.
+- **touch:** `keeper_gate.ml`/`keeper_tool_policy.ml`/`keeper_tool_dispatch_runtime.ml`에서 exact `EffectIntent` validation+decision만 남기고 generic risk/governance classifier와 Gate 0 compatibility surface 삭제; ApprovalsSurface(HITL resolution read model with wake/enqueue outcome column). 런타임 standing grant persistence·digest match는 두지 않는다.
 - **acceptance:** pending approval이 NO global pause + NO other-lane stall(outcome column이 wake vs enqueue); judge-unavailable 주입 테스트가 request unsettled + keeper other work 계속 + audit record; approve/deny/hold unit test.
 - **DoD:** decision resolved→wake/enqueue end-to-end + explicit audit trail.
 
@@ -903,7 +905,7 @@ FSM 전이 매트릭스는 `_ -> false` catch-all 금지 — 모든 쌍 명시. 
 - NORTH-STAR-OCAML.md · OAS-MASC-BOUNDARY.md · MASC-V2-DESIGN.md · **PRODUCT-OPERATING-PLAN.md** *(⚠ STALE worldview: "repo-local … one repository"·"supervised" — RFC-0318/0319/0322/0329/0337/0341이 폐기; §1.1 정본)* · PRODUCT-REVIEW.md · **external-comparison-and-positioning.md** *(⚠ STALE worldview: "operator-governed supervisor"·"supervised cycles not self-driven loops"·"autonomy bounded by phase policy" — 폐기; §1.1/§7 정본)* · VERSIONED-ROADMAP.md *(stale v2.87-v2.93; renumber 필요)* · sdk-independence-principle.md
 
 ### Keeper / Runtime / Scheduler
-- KEEPER-STATE-OWNERSHIP.md · KEEPER-FILE-MODEL.md · KEEPER-CAPABILITY-MATRIX.md · keeper-turn-lifecycle.md · KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md · KEEPER-SANDBOX-BOUNDARY-POLICY.md · IMMORTAL-SERVER-ROADMAP.md · GOAL-LOOP-RUNTIME-SCHEDULER.md · runtime-tunables.md · SUPERVISOR-MODE.md · Keeper Scheduler _ Waiting Goal Matrix - 2026-07-04.html
+- KEEPER-STATE-OWNERSHIP.md · KEEPER-FILE-MODEL.md · KEEPER-CAPABILITY-MATRIX.md · keeper-turn-lifecycle.md · KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md · KEEPER-SANDBOX-BOUNDARY-POLICY.md · IMMORTAL-SERVER-ROADMAP.md · runtime-tunables.md · SUPERVISOR-MODE.md
 
 ### Connector / Board / Fusion / Memory
 - CONNECTOR-CONFIG-SCHEMA.md · CONNECTOR-UI-DESIGN.md · DESIGN-RICH-CONNECTOR-RENDERING.md · Keeper Connector-Aware Continuation — Goal Matrix.html (RFC-0320) · RFC-0223-typed-connector-surfaces-presence-pull-speaker.md · RFC-0283-fusion-judge-of-judges.md · RFC-0277-fusion-heterogeneous-panels.md · RFC-0298-fusion-judge-pool.md · RFC-0266-fusion-async-completion-wake-and-visibility.md · RFC-0306-fusion-settings-typed-editor.md · RFC-0037-board-multimedia-vision-adapted.md · 2026-06-24-fusion-dashboard-wiring-rich-text-design.md · RFC-0247-memory-os-associative-graph-forgetting-brain.md · 2026-06-23-what-to-forget-keeper-memory-forgetting-policy.md · RFC-0332-memory-write-boundary-dedup.md (REJECTED)

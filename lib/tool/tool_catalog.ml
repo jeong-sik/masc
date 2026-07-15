@@ -267,9 +267,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_batch_add_tasks", add_task_tool);
     ("masc_update_priority", complete_task_tool);
     ("masc_heartbeat", broadcast_tool);
-    ("masc_goal_list", read_state_tool);
-    ("masc_goal_upsert", broadcast_tool);
-    ("masc_goal_transition", broadcast_tool);
     ("masc_plan_init", broadcast_tool);
     ("masc_plan_update", broadcast_tool);
     ("masc_keeper_list", read_state_tool);

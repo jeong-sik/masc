@@ -28,7 +28,7 @@ type hook_accumulator =
       Keeper_contract_classifier.actionable_signal option
     (* Root B (#22710): world-observation actionable signal computed from the
        turn's [world_observation] in run_turn, carried into the receipt so
-       [operator_disposition] can replace the [goal_ids = []] proxy. [None]
+       [operator_disposition] can use the observed actionable signal. [None]
        until the contract-status write site sets it. *)
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option

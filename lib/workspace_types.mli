@@ -1,9 +1,8 @@
 (** Workspace_types — Shared types for workspace modules.
 
     Type-SSOT for the [tool_workspace] / [workspace_status_rendering] /
-    [workspace_assertions] / [workspace_goals] cluster.  Consumers
-    typically [open Workspace_types] (4 sites: [tool_workspace],
-    [workspace_goals], [workspace_status_rendering], [workspace_assertions])
+    [workspace_assertions] cluster.  Consumers typically [open Workspace_types]
+    at the dispatch and rendering boundaries,
     so every type below is part of the cross-module contract.
 
     All records are concrete because callers construct +

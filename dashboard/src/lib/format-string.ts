@@ -105,7 +105,7 @@ export function escapeRegExp(value: string): string {
  * `dashboard-ws`, `lib/async-state` (file-internal helper),
  * `api/mcp`, `components/runtime-config-panel`,
  * `components/runtime-inspector`, `components/runtime-waterfall`,
- * `components/goal-loop-panel`, `components/goals/goal-tree`,
+ * planning components,
  * `components/ide/execute-output-drawer`,
  * `components/ide/interject-store`, `components/journey-panel`,
  * `components/keeper-shared`, `components/keeper-reactivity-monitor`,

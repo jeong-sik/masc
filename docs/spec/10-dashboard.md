@@ -14,7 +14,7 @@ code_refs:
 ## 1. Purpose and authority
 
 The dashboard is an observable projection and interaction surface for MASC. It
-does not own Keeper lifecycle, Tool authorization, Task/Goal transitions, or
+does not own Keeper lifecycle, Tool authorization, Task transitions, or
 runtime selection. Writes call the same typed domain APIs used by other clients;
 the dashboard never edits persistence directly.
 
@@ -23,7 +23,7 @@ the dashboard never edits persistence directly.
 The UI projects source facts from:
 
 - Keeper lanes, turns, transcripts, Jobs, and lifecycle events;
-- Task and Goal versions, judgments, and evidence references;
+- Task versions, completion judgments, and evidence references;
 - Board posts, comments, reactions, mentions, and LLM curation snapshots;
 - Channel/Connector scope and message correlations;
 - Gate pending/resolved records and LLM/operator provenance;
@@ -63,11 +63,11 @@ The dashboard does not calculate risk tiers, recognize product/tool names, or
 invent local vetoes. Resolving one request wakes only its originating Keeper
 lane. Pending HITL does not render the Keeper or Workspace as paused.
 
-## 5. Task, Goal, Board, and Fusion
+## 5. Task, Board, and Fusion
 
-Task and Goal controls send expected versions and display conflicts. Goal
-completion shows configured LLM judgment provenance; the UI does not aggregate
-votes or assign verifier authority.
+Task controls send expected versions and display conflicts. Task completion
+shows configured LLM judgment provenance; the UI does not aggregate votes or
+assign verifier authority.
 
 Board views render exact source ordering such as recent, updated, discussed,
 or voted. Semantic recommendations come from a separately persisted configured
@@ -107,7 +107,7 @@ source state.
 - `INV-DASH-003`: stream order preserves thinking/tool/multimodal interleaving.
 - `INV-DASH-004`: connection failure is client-local.
 - `INV-DASH-005`: no presentation classifier acquires runtime authority.
-- `INV-DASH-006`: Gate decisions and Goal judgments display provenance.
+- `INV-DASH-006`: Gate decisions and Task completion judgments display provenance.
 - `INV-DASH-007`: pending HITL never becomes a Keeper/Workspace pause.
 
 ## 9. Retired surfaces

@@ -132,7 +132,6 @@ export interface TraceLineFocusEvent {
   readonly surface?: string
   readonly eventId?: string
   readonly threadId?: string
-  readonly goalId?: string
   readonly taskId?: string
   readonly boardPostId?: string
   readonly commentId?: string
@@ -166,7 +165,6 @@ export function focusTraceLineContext(
       surface,
       label,
       sourceId,
-      goalId: event.goalId,
       taskId: event.taskId,
       boardPostId: event.boardPostId ?? event.threadId,
       commentId: event.commentId,

@@ -144,7 +144,7 @@ describe('SessionTraceEntry', () => {
           evidence_ref: {
             file_path: 'lib/keeper.ml',
             line: 7,
-            goal_id: 'goal-runtime',
+
             operation_id: 'op-runtime',
           },
         },
@@ -159,7 +159,6 @@ describe('SessionTraceEntry', () => {
     const contextLinks = screen.getAllByTestId('session-trace-context-link')
     expect(contextLinks.map(link => link.getAttribute('aria-label'))).toEqual([
       'Open Code lib/keeper.ml:7',
-      'Open Goal goal-runtime',
       'Open Fleet telemetry event log · operation op-runtime · query lifecycle-context-1',
       'Open Keeper sangsu',
     ])
@@ -175,14 +174,13 @@ describe('SessionTraceEntry', () => {
       agentName: 'keeper-alpha',
       detail: {
         context: {
-          goal_ids: ['goal-1'],
           board_post_id: 'post-1',
           comment_id: 'comment-1',
         },
       },
     }))
 
-    expect(links.map(link => link.label)).toEqual(['Goal', 'Board', 'Comment', 'Keeper'])
+    expect(links.map(link => link.label)).toEqual(['Board', 'Comment', 'Keeper'])
   })
 
   it('shows tok/sec for durable LLM response lifecycle details', () => {

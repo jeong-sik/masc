@@ -3,7 +3,7 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, post } from './core'
-import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type { KeeperConfig, KeeperFeatureStatus, KeeperHookSlot } from '../types'
@@ -76,17 +76,6 @@ function normalizeKeeperHookSlots(raw: unknown): Record<string, KeeperHookSlot> 
     if (slot) slots[name] = slot
   }
   return slots
-}
-
-function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace']['active_goals'] {
-  return asRecordArray(raw)
-    .map((item) => {
-      const id = asNullableString(item.id)
-      const title = asNullableString(item.title)
-      if (!id || !title) return null
-      return { id, title }
-    })
-    .filter((item): item is KeeperConfig['workspace']['active_goals'][number] => item !== null)
 }
 
 function dedupeStringList(values: readonly string[]): string[] {
@@ -167,7 +156,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
 
   return {
     name: asNullableString(data.name) ?? requestedName,
-    active_goal_ids: normalizeStringList(data.active_goal_ids),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: asInt(data.max_context_override) ?? null,
     limits: {
@@ -252,10 +240,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     workspace: {
       mention_targets: normalizeStringList(workspace.mention_targets),
       bound_workspace_ids: normalizeStringList(workspace.bound_workspace_ids),
-      active_goal_ids: normalizeStringList(workspace.active_goal_ids),
-      active_goals: normalizeKeeperConfigActiveGoals(workspace.active_goals),
-      active_goal_count: asInt(workspace.active_goal_count) ?? 0,
-      missing_active_goal_ids: normalizeStringList(workspace.missing_active_goal_ids),
     },
     sources: {
       live_meta_path: asNullableString(sources.live_meta_path) ?? '',
@@ -297,7 +281,6 @@ export type SandboxNetworkMode = 'none' | 'inherit'
 
 export type KeeperConfigUpdatePayload = {
   runtime_id?: string
-  active_goal_ids?: string[]
   mention_targets?: string[]
   autoboot_enabled?: boolean
   max_context_override?: number | null

@@ -198,9 +198,6 @@ let policy_tool_names =
       "masc_broadcast";
 
       "masc_dashboard";
-      "masc_goal_list";
-      "masc_goal_transition";
-      "masc_goal_upsert";
       "masc_heartbeat";
       "masc_keeper_list";
       "masc_keeper_delegate";

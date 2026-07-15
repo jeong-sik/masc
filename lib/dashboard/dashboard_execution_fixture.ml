@@ -418,7 +418,6 @@ let execution_smoke_fixture_json () =
                 ("context_tokens", `Int 245000);
                 ("last_autonomous_action_at", `String generated_at);
                 ("autonomous_action_count", `Int 11);
-                ("active_goal_ids", `List [ `String "goal-runtime"; `String "goal-story" ]);
                 ("model", `String "runtime");
                 ("active_model", `String "runtime");
                 ("updated_at", `String generated_at);

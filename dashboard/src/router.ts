@@ -32,11 +32,6 @@ export const CROSS_SURFACE_SECTION_REDIRECTS: Record<TabSectionKey, CrossSurface
     tab: 'workspace',
     section: 'repositories',
   },
-  'monitoring:goal-loop': {
-    tab: 'workspace',
-    section: 'planning',
-    view: 'goal-loop',
-  },
 }
 
 function isTabId(v: string | null | undefined): v is TabId {

@@ -363,9 +363,9 @@ let claim_next_r
             candidates
         in
         let scoped_eligible = eligible_from unclaimed in
-        (* Goal-scope must not starve a keeper: when [allow_scope_fallback] and no
+        (* A scoped claim must not starve a keeper: when [allow_scope_fallback] and no
            scoped task passes [task_filter], widen to all_tasks. [all_excluded] is
-           still enforced — only [task_filter] (the goal scope) is dropped — so an
+           still enforced — only [task_filter] is dropped — so an
            unscoped task can be claimed. Schedule-level companion to the RFC-0067 §1
            resolve-side fallback. *)
         let eligible, scope_widened =
@@ -585,7 +585,7 @@ let claim_next config ~agent_name =
       } ->
     Printf.sprintf
       "No eligible unclaimed tasks. ACTION: Stop task-checking — \
-       blocked/excluded=%d (goal_scope_or_filter=%d, verification=%d)."
+       blocked/excluded=%d (task_scope_or_filter=%d, verification=%d)."
       excluded_count
       scope_excluded_count
       verification_blocked_count

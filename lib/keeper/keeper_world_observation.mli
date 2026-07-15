@@ -26,9 +26,6 @@ type pending_board_event_kind =
   | Failure_judgment
       (** RFC-0313 W2: deterministic turn failure escalated for an
           LLM-boundary verdict on the keeper's next turn. *)
-  | Goal_assigned
-      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
-          the assignment edge surfaces as actionable turn input. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;
@@ -83,9 +80,6 @@ type world_observation = {
 
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
-
-  active_goals : string list;
-  (** Goal IDs currently assigned to this keeper. *)
 
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)

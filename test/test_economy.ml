@@ -237,7 +237,7 @@ let test_list_transactions () =
       ignore (Economy.earn
         ~base_path:dir ~agent_name:"reader"
         ~kind:Earn_task_done ~reason:"task done"
-        ~metadata:(`Assoc [ ("goal_id", `String "goal-1") ])
+        ~metadata:(`Assoc [ ("task_id", `String "task-1") ])
         ());
       ignore (Economy.spend
         ~base_path:dir ~agent_name:"reader"
@@ -246,8 +246,8 @@ let test_list_transactions () =
       Alcotest.(check int) "transaction count" 2 (List.length txns);
       let first = List.hd txns in
       let open Yojson.Safe.Util in
-      Alcotest.(check string) "metadata goal id" "goal-1"
-        (first.metadata |> member "goal_id" |> to_string)));
+      Alcotest.(check string) "metadata task id" "task-1"
+        (first.metadata |> member "task_id" |> to_string)));
   rm_rf dir
 
 (** {1 Serialization Tests} *)

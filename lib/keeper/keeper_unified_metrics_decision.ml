@@ -52,7 +52,6 @@ let append_decision_record
       , _turn_number
       , turn_id_opt
       , task_id_opt
-      , turn_goal_ids_opt
       , _sandbox_profile
       , _network_mode ) =
     Keeper_tool_call_log.get_turn_context ~cell:turn_ctx_cell ()
@@ -64,16 +63,6 @@ let append_decision_record
     match task_id_opt with
     | Some _ as value -> value
     | None -> Keeper_runtime_contract.current_task_id_opt meta
-  in
-  let goal_ids =
-    match turn_goal_ids_opt with
-    | Some values -> values
-    | None -> meta.active_goal_ids
-  in
-  let goal_id =
-    match goal_ids with
-    | value :: _ -> Some value
-    | [] -> None
   in
   let runtime_contract =
     Keeper_runtime_contract.runtime_observability_contract_json ~config meta
@@ -118,8 +107,6 @@ let append_decision_record
         ("keeper_name", `String meta.name);
         ("agent_name", `String meta.agent_name);
         ("task_id", Json_util.string_opt_to_json task_id);
-        ("goal_id", Json_util.string_opt_to_json goal_id);
-        ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
         ("runtime_contract", runtime_contract);
         ("terminal_reason", Keeper_turn_terminal.to_json terminal_reason);
         ("terminal_reason_code", `String terminal_reason_code);
@@ -161,7 +148,6 @@ let append_decision_record
                      (Keeper_world_observation_message_scope.pairs_of_kind
                         Keeper_world_observation_message_scope.Scope
                         observation.pending_messages)) );
-              ("active_goals", `Int (List.length observation.active_goals));
               ("idle_seconds", `Int observation.idle_seconds);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("claimable_task_count", `Int observation.claimable_task_count);

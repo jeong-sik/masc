@@ -94,7 +94,6 @@ type annotation_request =
   ; line_end : int
   ; kind : annotation_kind
   ; content : string
-  ; goal_id : string option
   ; task_id : string option
   ; references : annotation_reference list
   }

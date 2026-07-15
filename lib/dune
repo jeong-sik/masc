@@ -269,13 +269,11 @@
   masc_random_id
   ;; Workspace workspace (extracted sub-library)
   masc_workspace
-  ;; Goal domain (extracted sub-library — pure goal logic, decoupled from mega-lib)
-  masc_goal
   ;; Pure Turn FSM (extracted sub-library — states + transition matrix, Keeper-free)
   masc_turn
   ;; Agent token-ledger domain (extracted leaf — earn/spend/balance, Board-callable)
   masc_economy
-  ;; Tool dispatch substrate. The compiler enforces Tool⊥Keeper/Runtime/Goal/Task/Board
+  ;; Tool dispatch substrate. The compiler enforces Tool⊥Keeper/Runtime/Task/Board
   ;; via masc_tool_dispatch's neutral-only (libraries).
   masc.masc_tool_dispatch
   ;; Pure tool surface leaf above the dispatch substrate.

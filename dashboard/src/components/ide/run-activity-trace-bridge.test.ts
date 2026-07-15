@@ -23,7 +23,7 @@ describe('bridgeRunActivityEventsToTrace', () => {
         context: {
           file_path: ' lib\\runtime.ml ',
           line: 7,
-          goal_id: 'goal-runtime',
+
           task_id: 'task-runtime',
           board_post_id: 'post-runtime',
           comment_id: 'comment-runtime',
@@ -48,7 +48,6 @@ describe('bridgeRunActivityEventsToTrace', () => {
       filePath: 'lib/runtime.ml',
       line: 7,
       surface: 'PR',
-      goalId: 'goal-runtime',
       taskId: 'task-runtime',
       boardPostId: 'post-runtime',
       commentId: 'comment-runtime',

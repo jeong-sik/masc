@@ -7,7 +7,7 @@ updated: 2026-06-24
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0004", "0284", "0042"]
+related: ["0004", "0042"]
 implementation_prs: []
 ---
 
@@ -15,8 +15,8 @@ implementation_prs: []
 
 Status: Draft · The SSE wire `type` discriminator is stringly-typed across ~34
 backend emit sites. The frontend parity gate only inventories exact-match
-routes, so slice-bridged events (e.g. `goal_loop_status`) are protected only by
-hand-written drift-guard tests. This RFC closes the discriminator into an OCaml
+routes, so slice-bridged events require separate hand-written drift guards.
+This RFC closes the discriminator into an OCaml
 sum with a typed broadcast builder and a raw-string ban-lint, so the compiler —
 not a parallel test — enforces that every emitted event-type is declared and FE
 and BE stay in lockstep. This is the **RFC-0004 Phase A0 Wave 2** increment: it
@@ -53,10 +53,8 @@ nothing binds the two.
   (`hydrateDashboardSlice`'s `case 'X'`).
 - **The only guard today** is `sse-event-type-parity.test.ts`, whose regex
   (`:62-63`) matches **only** exact-match routes. Slice-bridged events are
-  invisible to it. RFC-0284 shipped `goal_loop_status` as a slice-bridged event
-  and had to add a hand-written 3-literal drift-guard
-  (`goal-loop-event-type-drift.test.ts`) as a **stopgap** because the parity gate
-  could not cover it. That gate's own header (`sse-event-type-parity.test.ts:21-25`)
+  invisible to it and therefore require hand-written drift guards as a
+  **stopgap**. That gate's own header (`sse-event-type-parity.test.ts:21-25`)
   already names the fix — "closed event-type sum + typed broadcast API +
   raw-string ban" — and files it as a **RFC-0004 increment**.
 
@@ -91,7 +89,7 @@ A full inventory of the ~34 broadcast sites (5-lens grounding, 2026-06-23) finds
 ### §3.1 Fixed-literal `type`-keyed events (closeable) — ~30
 Plain literals set at a single (or few) site(s). Examples: `project_snapshot`,
 `namespace_truth_snapshot`, `operator_snapshot`, `operator_digest`,
-`execution_snapshot`, `transport_health_snapshot`, `goal_loop_status`,
+`execution_snapshot`, `transport_health_snapshot`,
 `keeper_chat_appended`, `keeper_composite_changed`, `keeper_phase_changed`,
 `keeper_heartbeat`, `keeper_compaction`, `keeper_handoff`, `keeper_tool_skipped`,
 `keeper_turn_complete`, `keeper_tool_call`, `approval:pending`,
@@ -199,7 +197,7 @@ Add `scripts/ci/check-sse-event-type-safety.sh`, modeled on the existing
      helper signatures).
   3. **Variable-binding pair construction** in OCaml:
      `("type", \`String event_type)` or
-     `("type", \`String goal_loop_broadcast_event_type)` — i.e. the right-hand
+     `("type", \`String raw_event_type)` — i.e. the right-hand
      side is an identifier rather than a constructor, even when the identifier
      itself is bound from a typed value. These are permitted only when the
      identifier's type is `Sse_event_type.t` (or the expression is the typed
@@ -216,8 +214,8 @@ The backend sum is the SSOT. Export its `to_string` vocabulary (generated JSON o
 an atd-derived list, consistent with RFC-0004 §A0.5 round-trip gate) and have the
 FE parity test assert that **both** exact-match routes and slice-bridge `case`
 labels are a subset of the backend vocabulary. This:
-- covers slice-bridged events (the gap that forced the RFC-0284 stopgap),
-- lets `goal-loop-event-type-drift.test.ts` and the parity gate's hand-maintained
+- covers every slice-bridged event,
+- lets per-event drift guards and the parity gate's hand-maintained
   `BACKEND_EMITTED` map be **retired** rather than left as parallel substitutes,
 - realizes RFC-0004 §A0.5/A3's drift gate as a derived (not hand-kept) artifact.
 
@@ -232,7 +230,7 @@ labels are a subset of the backend vocabulary. This:
   OAS bridge (the `Unknown_oas` arm last). Each batch is one PR; co-emitter
   payload-shape compatibility (§3.1) confirmed before collapsing.
 - **Phase 3 (enforce + retire)** — add the ban-lint (§5), wire the FE lockstep
-  (§6), and delete the RFC-0284 drift guard + the parity gate's hand map. Only
+  (§6), and delete per-event drift guards plus the parity gate's hand map. Only
   after Phase 2 reaches zero raw literals (RFC-0004 §"기대 효용": emit-site → 0).
 
 ## §8 Verification

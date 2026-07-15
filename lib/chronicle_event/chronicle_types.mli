@@ -41,7 +41,6 @@ type chronicle_epoch =
   ; end_date : string
   ; start_commit : string
   ; end_commit : string
-  ; goal_ids : string list
   ; status : epoch_status
   ; causation : causation_entry list
   ; outcomes_achieved : string list

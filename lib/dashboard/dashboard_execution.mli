@@ -9,15 +9,7 @@ val json :
   unit ->
   Yojson.Safe.t
 
-(** [task_json ~goal_task_index task] serializes a task for the dashboard
-    execution payload.  [goal_task_index] maps a task id to the goal ids it is
-    linked to (RFC-0267 Phase 1); the task's canonical (first) goal is projected
-    as the ["goal_id"] field — [`Null] when the task is unlinked.  Exposed so
-    unit tests can pin the projection without booting Eio. *)
-val task_json :
-  goal_task_index:(string, string list) Hashtbl.t ->
-  Masc_domain.task ->
-  Yojson.Safe.t
+val task_json : Masc_domain.task -> Yojson.Safe.t
 
 (** #9766: per-render phase timing surfaced in the [slow render] WARN.
     Pure value type so unit tests can pin the formatter without

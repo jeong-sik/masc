@@ -1,6 +1,4 @@
-(** test_telemetry_unified_source — round-trip tests for Telemetry_unified_source.
-
-    Covers all 9 variants plus edge cases for [source_of_string]. *)
+(** test_telemetry_unified_source — round-trip tests for Telemetry_unified_source. *)
 
 open Masc
 open Telemetry_unified_source
@@ -24,7 +22,6 @@ let roundtrip_all_variants () =
     Tool_usage,               "Tool_usage";
     Oas_event,                "Oas_event";
     Execution_receipt,        "Execution_receipt";
-    Goal_event,               "Goal_event";
     Tool_metric,              "Tool_metric";
   ]
 
@@ -50,7 +47,7 @@ let source_of_string_edge_cases () =
 
 let all_sources_match_strings () =
   let count = List.length Telemetry_unified_source.all_sources in
-  Alcotest.(check int) "all_sources has 9 variants" 9 count;
+  Alcotest.(check int) "all_sources has 8 variants" 8 count;
   List.iter (fun src ->
     let s = Telemetry_unified_source.source_to_string src in
     match Telemetry_unified_source.source_of_string s with
@@ -63,7 +60,7 @@ let all_sources_match_strings () =
 (* ── Cases ──────────────────────────────────────── *)
 
 let cases = [
-  "all 9 variants round-trip via source_to_string/source_of_string",
+  "all variants round-trip via source_to_string/source_of_string",
     `Quick, roundtrip_all_variants;
   "source_of_string edge cases (empty, invalid, case, spacing)",
     `Quick, source_of_string_edge_cases;

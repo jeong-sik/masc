@@ -19,7 +19,7 @@ stimuli arrived without inventing a second state protocol.
 ## Ownership
 
 - The scheduler/heartbeat decision supplies the typed wake reason.
-- Goal and Task APIs own objectives, assignment, priority, and status.
+- Task APIs own planned work, assignment, priority, and status.
 - Board, connector, and reaction ledgers own incoming stimuli and delivery
   evidence.
 - OAS checkpoints own replayable typed message/tool/reasoning blocks.

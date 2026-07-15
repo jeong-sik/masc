@@ -13,7 +13,6 @@
     a layer fails to compile until the producing site renders it. *)
 
 type layer_id =
-  | Active_goals
   | Current_task
   | Connected_surfaces
   | Namespace_state

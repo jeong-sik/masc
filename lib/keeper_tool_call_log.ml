@@ -388,7 +388,6 @@ let log_call
       ?turn
       ?keeper_turn_id
       ?task_id
-      ?goal_ids
       ?sandbox_profile
       ?sandbox_root
       ?allowed_paths
@@ -496,12 +495,6 @@ let log_call
         | Some value -> [ "task_id", `String value ]
         | None -> []
       in
-      let goal_ids_field =
-        match goal_ids with
-        | Some values ->
-          [ "goal_ids", `List (List.map (fun value -> `String value) values) ]
-        | None -> []
-      in
       let sandbox_profile_field =
         match sandbox_profile with
         | Some value -> [ "sandbox_profile", `String value ]
@@ -526,7 +519,6 @@ let log_call
           ?generation
           ?keeper_turn_id
           ?task_id
-          ?goal_ids
           ?sandbox_profile
           ?sandbox_root
           ?allowed_paths
@@ -580,7 +572,6 @@ let log_call
            @ turn_field
            @ keeper_turn_id_field
            @ task_id_field
-           @ goal_ids_field
            @ sandbox_profile_field
            @ network_mode_field
            @ result_bytes_field

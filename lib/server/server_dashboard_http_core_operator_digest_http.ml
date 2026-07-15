@@ -63,7 +63,6 @@ let operator_digest_http_json ~state ~sw ~clock request =
       (match Operator_action_constants.target_type_of_string raw with
        | Some Operator_action_constants.Workspace -> true
        | Some Operator_action_constants.Keeper
-       | Some Operator_action_constants.Goal
        | None -> false)
   in
   let effective_target_type =

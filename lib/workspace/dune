@@ -29,7 +29,6 @@
   workspace_query
   workspace_status
   workspace_task
-  workspace_task_capacity
   workspace_task_classify
   workspace_task_cache_invariant
   task_cache_invariant
@@ -48,7 +47,6 @@
   mention
   mention_dedup
   workspace_resilience
-  workspace_goal_index
   heartbeat
   nickname)
  (libraries

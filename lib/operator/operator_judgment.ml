@@ -33,7 +33,6 @@ let target_type_of_string = function
       (match Operator_action_constants.target_type_of_string value with
        | Some Operator_action_constants.Workspace -> Some Workspace
        | Some Operator_action_constants.Keeper
-       | Some Operator_action_constants.Goal
        | None -> None)
 
 

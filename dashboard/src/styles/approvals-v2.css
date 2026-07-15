@@ -17,8 +17,8 @@
      - the accent severity band (.ap-*.sev-accent) the live risk model can emit
        but the 3-band prototype does not
      - the error banner (.ap-error) and nav-rail count badges (.ap-nav-*)
-     - two augmentations of surfaces.css base rules: .ap-req-goal button-reset
-       (the goal link renders as a keyboard-navigable <button>) and
+     - two augmentations of surfaces.css base rules: .ap-req-task button-reset
+       (the task link renders as a keyboard-navigable <button>) and
        .ap-req-quote word wrapping for long input previews
 
    Auto-imported via the *-v2.css glob in main.ts — do not add an import line.
@@ -59,13 +59,13 @@
 .ap-detail-toggle[aria-pressed="true"] { color: var(--text-bright); border-color: var(--volt-dim); background: var(--volt-wash); }
 
 /* Augmentations of surfaces.css base rules (size/colour come from there):
-   the goal link renders as a <button> so it needs the chrome reset; a long
+   the task link renders as a <button> so it needs the chrome reset; a long
    single-token input preview must wrap instead of overflowing the card. */
-.ap-req-goal { background: none; border: 0; padding: 0; font-family: var(--font-mono); }
+.ap-req-task { background: none; border: 0; padding: 0; font-family: var(--font-mono); }
 .ap-req-quote { word-break: break-word; }
 
-/* Static request metadata (e.g. sandbox profile) shown beside the keeper/goal
-   links. Mirrors .ap-req-goal's dim mono look but is NOT interactive — no
+/* Static request metadata (e.g. sandbox profile) shown beside the keeper/task
+   links. Mirrors .ap-req-task's dim mono look but is NOT interactive — no
    cursor:pointer / hover shift, so a non-clickable span is not a false affordance. */
 .ap-req-meta { font-size: var(--fs-10); color: var(--text-dim); }
 

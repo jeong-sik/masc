@@ -21,7 +21,6 @@ type turn_context =
   ; turn : int option
   ; keeper_turn_id : int option
   ; task_id : string option
-  ; goal_ids : string list option
   ; sandbox_profile : string option
   ; sandbox_root : string option
   ; allowed_paths : string list option
@@ -49,7 +48,6 @@ val set_turn_context :
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
-  ?goal_ids:string list ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
@@ -76,7 +74,6 @@ val get_turn_context :
   * int option
   * int option
   * string option
-  * string list option
   * string option
   * string option
 

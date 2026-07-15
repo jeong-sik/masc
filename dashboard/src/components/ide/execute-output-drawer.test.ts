@@ -107,14 +107,14 @@ describe('ExecuteOutputDrawer event mapping', () => {
     })
   })
 
-  it('builds operational routes from Execute output task, goal, cursor, and keeper', () => {
+  it('builds operational routes from Execute output task, cursor, and keeper', () => {
     const links = executeOutputRouteLinks({
       keeperName: 'sangsu',
       taskId: 'task-123',
       taskList: [{
         id: 'task-123',
         title: 'Runtime task',
-        goal_id: 'goal-ide',
+
       }],
       cursor: {
         keeper_id: 'sangsu',
@@ -129,7 +129,6 @@ describe('ExecuteOutputDrawer event mapping', () => {
 
     expect(links.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Telemetry',
       'Keeper',
@@ -222,7 +221,7 @@ describe('ExecuteOutputDrawer event mapping', () => {
     tasks.value = [{
       id: 'task-123',
       title: 'Runtime task',
-      goal_id: 'goal-ide',
+
       status: 'in_progress',
     }]
     cursorOverlaySignal.value = {
@@ -260,17 +259,16 @@ describe('ExecuteOutputDrawer event mapping', () => {
     const routeLinks = [...mounted.querySelectorAll<HTMLButtonElement>('.execute-output-context-links button')]
     expect(routeLinks.map(link => link.textContent)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Telemetry',
       'Keeper',
     ])
     const badge = mounted.querySelector<HTMLElement>('.execute-output-context-badge')
-    expect(badge?.textContent?.trim()).toBe('CTX 5')
-    expect(badge?.getAttribute('data-context-route-count')).toBe('5')
-    expect(badge?.getAttribute('title')).toBe('Linked context: Code, Goal, Task, Telemetry, Keeper')
+    expect(badge?.textContent?.trim()).toBe('CTX 4')
+    expect(badge?.getAttribute('data-context-route-count')).toBe('4')
+    expect(badge?.getAttribute('title')).toBe('Linked context: Code, Task, Telemetry, Keeper')
     expect(badge?.getAttribute('aria-label'))
-      .toBe('Execute output has 5 linked context routes: Code, Goal, Task, Telemetry, Keeper')
+      .toBe('Execute output has 4 linked context routes: Code, Task, Telemetry, Keeper')
 
     fireEvent.click(routeLinks.find(link => link.textContent === 'Code')!)
     expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Terminal&label=Execute+output+task-123&source_id=execute-output%3Asangsu%3Atask-123&keeper=sangsu')

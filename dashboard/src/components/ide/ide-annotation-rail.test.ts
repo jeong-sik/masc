@@ -29,7 +29,7 @@ describe('IdeAnnotationRail', () => {
         keeper_id: 'sangsu',
         kind: 'Decision',
         content: 'Move compact outside the round lock.',
-        goal_id: 'goal-1',
+
         task_id: 'task-1',
         references: [
           { relation: 'evidence', reference: 'urn:review:7741' },

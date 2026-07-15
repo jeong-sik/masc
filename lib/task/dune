@@ -9,7 +9,6 @@
   anti_rationalization
   planning_eio
   task_dispatch
-  task_goal_assignment
   tool_task
   tool_task_args
   tool_task_completion_review
@@ -43,7 +42,6 @@
   masc.tool_contract_prompts
   masc.config_dir_resolver
   masc.prompt_registry
-  masc_goal
   agent_sdk)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_tla)))

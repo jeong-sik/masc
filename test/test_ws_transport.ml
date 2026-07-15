@@ -543,14 +543,14 @@ let test_dashboard_delta_payload_text_excludes_seq () =
     Yojson.Safe.to_string
       (`Assoc
         [
-          ("type", `String "goal_loop_status");
-          ("payload", `Assoc [ ("status", `String "running") ]);
+          ("type", `String "execution_snapshot");
+          ("payload", `Assoc [ ("agents", `List []) ]);
         ])
   in
   match Ws.__test_dashboard_delta_payload_text_for_sse event with
   | None -> Alcotest.fail "expected shared dashboard delta payload"
   | Some frame ->
-      Alcotest.(check string) "slice" "goals" frame.slice;
+      Alcotest.(check string) "slice" "execution" frame.slice;
       let json = Yojson.Safe.from_string frame.text in
       let params =
         match json with
@@ -566,7 +566,7 @@ let test_dashboard_delta_payload_text_excludes_seq () =
         false
         (List.mem_assoc "seq" fields);
       Alcotest.(check (option string)) "event type preserved"
-        (Some "goal_loop_status")
+        (Some "execution_snapshot")
         (Option.bind (List.assoc_opt "event_type" fields) (function
           | `String s -> Some s
           | _ -> None))
@@ -1142,7 +1142,7 @@ let test_missed_pong_threshold_reads_env () =
 
 (* The per-session dashboard delivery counters are read and written on the SSE
    fanout callback, which fires from the main domain (keeper keepalive / event
-   bridge / registry / goal-loop refresh broadcasts) AND from serving handlers
+   bridge / registry refresh broadcasts) AND from serving handlers
    (HTTP-route broadcasts).  Today that is safe only because a single Eio
    domain runs cooperative fibers that never preempt mid-update.  RFC-0204
    Phase 3 moves serving to a second domain; the moment two domains run in

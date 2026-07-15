@@ -1,10 +1,10 @@
 // MASC Dashboard — Gate / HITL Surface
 // Pending external effects wait here for Human judgment without blocking the
-// Keeper lane. Exact Always rules and Auto Judge share this same Gate contract.
+// Keeper lane. Configured allow and Auto Judge share this same Gate contract.
 //
 // Data source: gateData.value?.approval_queue (KeeperApprovalQueueItem[]).
-// Actions: respondToKeeperApproval(id, 'approve' | 'reject', rememberRule).
-// The live decision model is the closed set {approve, reject} (+ rememberRule);
+// Actions: respondToKeeperApproval(id, 'approve' | 'reject').
+// The live decision model is the closed set {approve, reject};
 // there is no defer/undo endpoint, so the prototype's 보류/되돌리기 controls are
 // intentionally not rendered. History is read-only from recent_resolved.
 // Visual layout ports the keeper-v2 .ap-* design.
@@ -14,7 +14,6 @@ import { Fragment } from 'preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type {
   KeeperApprovalQueueItem,
-  KeeperApprovalRule,
   KeeperResolvedApprovalItem,
   GateDecisionSource,
   GateMode,
@@ -43,7 +42,7 @@ import {
 } from '../gate-store'
 
 type ApprovalsView = 'queue' | 'history'
-type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision | 'rule'
+type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision
 
 const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   id: ApprovalHistoryFilter
@@ -55,17 +54,12 @@ const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   { id: 'reject', label: '거부', predicate: item => item.decision === 'reject' },
   { id: 'edit', label: '수정됨', predicate: item => item.decision === 'edit' },
   { id: 'unknown', label: '처리됨', predicate: item => item.decision === 'unknown' },
-  { id: 'rule', label: 'Always 규칙', predicate: item => item.rule_match != null },
 ]
 const DEFAULT_APPROVAL_HISTORY_FILTER = APPROVAL_HISTORY_FILTERS[0]!
 
 // Aside preview caps. The recent list is a preview of recent_resolved — the full
-// set lives in the 이력 (history) tab, so its overflow is expected. The Always
-// Rules list has NO other view, so when it overflows we make the hidden count
-// explicit (exact Always rules bypass HITL; the Human must know the full set
-// exists even if it is not all shown here).
+// set lives in the 이력 (history) tab, so its overflow is expected.
 const ASIDE_RECENT_LIMIT = 5
-const ASIDE_RULES_LIMIT = 6
 
 // seconds-waited → compound elapsed + "대기" suffix ("2시간 5분 대기").
 // Delegates to the shared formatDurationCompound so long HITL waits render with
@@ -96,11 +90,7 @@ function approvalTitle(item: KeeperApprovalQueueItem): string {
 }
 
 function approvalWorkSummary(item: KeeperApprovalQueueItem): string | null {
-  return joinUnique([
-    item.task_id ? `task ${item.task_id}` : null,
-    item.goal_id ? `goal ${item.goal_id}` : null,
-    ...(item.goal_ids ?? []).map(id => `goal ${id}`),
-  ])
+  return item.task_id ? `task ${item.task_id}` : null
 }
 
 function decisionSourceLabel(source: GateDecisionSource | null | undefined): string {
@@ -125,9 +115,6 @@ function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
       <span class="ap-history-keeper">${item.keeper_name}</span>
       <span class="ap-history-source">${decisionSourceLabel(item.decision_source)}</span>
       <span class="ap-history-id mono">${item.id}</span>
-      ${item.rule_match?.rule_id
-        ? html`<span class="ap-history-rule mono">rule ${item.rule_match.rule_id}</span>`
-        : null}
       ${item.resolved_at
         ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
         : null}
@@ -152,7 +139,6 @@ function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
   const counts = useMemo(() => ({
     approve: sorted.filter(item => item.decision === 'approve').length,
     reject: sorted.filter(item => item.decision === 'reject').length,
-    rule: sorted.filter(item => item.rule_match != null).length,
     keepers: new Set(sorted.map(item => item.keeper_name)).size,
   }), [sorted])
 
@@ -161,7 +147,6 @@ function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
       <div class="ap-hist-summary" aria-label="승인 이력 요약">
         <div class="ap-hist-stat"><b class="mono ok">${counts.approve}</b> 승인</div>
         <div class="ap-hist-stat"><b class="mono bad">${counts.reject}</b> 거부</div>
-        <div class="ap-hist-stat"><b class="mono">${counts.rule}</b> Rule</div>
         <div class="ap-hist-stat"><b class="mono">${counts.keepers}</b> 관련 키퍼</div>
       </div>
       <div class="ap-hist-filters" role="tablist" aria-label="승인 이력 필터">
@@ -307,15 +292,13 @@ function ApprovalCard({
                 onClick=${() => openKeeperWorkspace(item.keeper_name)}
                 title=${`${item.keeper_name} 대화 열기`}
               >${item.keeper_name}</button>
-              ${item.task_id || item.goal_id
+              ${item.task_id
                 ? html`<button
                     type="button"
-                    class="ap-req-goal mono"
+                    class="ap-req-task mono"
                     onClick=${() => navigate('workspace', { section: 'work' })}
                     title="작업 보기"
-                  >${[item.task_id ? `task ${item.task_id}` : null, item.goal_id ? `goal ${item.goal_id}` : null]
-                    .filter(Boolean)
-                    .join(' · ')}</button>`
+                  >task ${item.task_id}</button>`
                 : null}
               <span class="ap-req-meta mono">nonblocking</span>
             </div>
@@ -331,13 +314,6 @@ function ApprovalCard({
             onClick=${() => void respondToKeeperApproval(item.id, 'approve')}
             disabled=${anyBusy}
           >${busy ? '처리 중…' : '승인'}</button>
-          <button
-            type="button"
-            class="ap-act always"
-            onClick=${() => void respondToKeeperApproval(item.id, 'approve', true)}
-            title="승인하고 동일 요청을 자동 승인하는 Always 규칙을 저장합니다"
-            disabled=${anyBusy}
-          >${busy ? '처리 중…' : '항상 승인'}</button>
           <button
             type="button"
             class="ap-act deny"
@@ -392,17 +368,6 @@ function ApprovalDetailPanel({
   `
 }
 
-function ApprovalRuleRow({ rule }: { rule: KeeperApprovalRule }) {
-  const fingerprintPreview = rule.request_fingerprint?.slice(0, 12)
-  return html`
-    <li class="ap-rule-row" data-testid="approval-rule-row">
-      <span class="ap-rule-keeper mono">${rule.keeper_name}</span>
-      <span class="ap-rule-tool mono">${rule.tool_name}</span>
-      ${fingerprintPreview ? html`<span class="ap-rule-fingerprint mono">${fingerprintPreview}</span>` : null}
-    </li>
-  `
-}
-
 const GATE_MODES: ReadonlyArray<{ mode: GateMode; label: string }> = [
   { mode: 'manual', label: 'Human' },
   { mode: 'auto_judge', label: 'Auto Judge' },
@@ -412,11 +377,9 @@ const GATE_MODES: ReadonlyArray<{ mode: GateMode; label: string }> = [
 function ApAside({
   openCount,
   resolvedItems,
-  rules,
 }: {
   openCount: number
   resolvedItems: KeeperResolvedApprovalItem[]
-  rules: KeeperApprovalRule[]
 }) {
   const hitl = gateData.value?.hitl
   const recent = [...resolvedItems]
@@ -425,7 +388,6 @@ function ApAside({
   const gateMode = hitl?.gate_mode
   const acting = gateApprovalActing.value
   const modeDisabled = acting !== null
-  const hiddenRules = Math.max(0, rules.length - ASIDE_RULES_LIMIT)
   return html`
     <aside class="ap-aside" data-testid="approvals-aside">
       <section class="wka-card ap-auto-card">
@@ -452,7 +414,7 @@ function ApAside({
               `)}
             </div>
           </div>
-          <div class="wka-auto-stat">${rules.length.toLocaleString()}개 Always 규칙 · 열린 승인 ${openCount.toLocaleString()}건</div>
+          <div class="wka-auto-stat">열린 승인 ${openCount.toLocaleString()}건</div>
           <div class="wka-auto-note">
             Human은 사람이 판단하고, Auto Judge는 LLM이 판단하며, Always Allow는 workspace의 명시적 선택입니다.
           </div>
@@ -460,21 +422,6 @@ function ApAside({
             ? html`<div class="ap-env-warn mono">Gate mode invalid: ${gateMode.read_error ?? '상태 파싱 실패'}</div>`
             : null}
         </div>
-      </section>
-
-      <section class="wka-card">
-        <div class="wka-h">
-          <h3>Always Rules</h3>
-          <span class="mono">${rules.length}</span>
-        </div>
-        ${rules.length > 0
-          ? html`
-              <ul class="ap-rule-list">${rules.slice(0, ASIDE_RULES_LIMIT).map(rule => html`<${ApprovalRuleRow} key=${rule.id} rule=${rule} />`)}</ul>
-              ${hiddenRules > 0
-                ? html`<div class="ap-side-empty mono" data-testid="approvals-rules-overflow">외 ${hiddenRules.toLocaleString()}건 더</div>`
-                : null}
-            `
-          : html`<div class="ap-side-empty">저장된 Always 규칙 없음</div>`}
       </section>
 
       <section class="wka-card">
@@ -518,7 +465,6 @@ export function ApprovalsSurface() {
 
   const items = gateData.value?.approval_queue ?? []
   const resolvedItems = gateData.value?.recent_resolved ?? []
-  const rules = gateData.value?.approval_rules ?? []
   const error = gateError.value
   // First load only: gateResource is stale-while-revalidate, so a refetch
   // keeps the previous data — gateData is null ONLY before the first load
@@ -576,7 +522,7 @@ export function ApprovalsSurface() {
           : view === 'history'
             ? html`<${ApHistory} items=${resolvedItems} />`
           : html`
-        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
           <div class="ov-kpi">
             <div class="ov-kpi-k">열린 승인</div>
             <div class=${`ov-kpi-v ${items.length ? 'warn' : 'ok'}`}>${items.length}</div>
@@ -584,10 +530,6 @@ export function ApprovalsSurface() {
           <div class="ov-kpi">
             <div class="ov-kpi-k">관련 Keeper</div>
             <div class="ov-kpi-v" data-testid="gate-kpi-keepers">${stats.keepers}</div>
-          </div>
-          <div class="ov-kpi">
-            <div class="ov-kpi-k">Always 규칙</div>
-            <div class="ov-kpi-v">${rules.length}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">처리 완료</div>
@@ -631,7 +573,6 @@ export function ApprovalsSurface() {
         <${ApAside}
           openCount=${items.length}
           resolvedItems=${resolvedItems}
-          rules=${rules}
         />
       ` : null}
     </main>

@@ -26,7 +26,6 @@ type source = Telemetry_unified_source.source =
   | Tool_usage
   | Oas_event
   | Execution_receipt
-  | Goal_event
   | Tool_metric
 
 let source_to_string = Telemetry_unified_source.source_to_string
@@ -163,12 +162,6 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
     ]
   | None ->
     let health, stale_reason =
-      (* [optional_when_missing] callers (Goal_event, which only materialises
-         after the first goal verification) have a legitimate "file does not
-         exist yet" state. Reporting that as a red [missing] alarm creates
-         dashboard fatigue; report a neutral [not_yet] with an explanatory
-         reason instead. Real write failures still surface via [coverage_gap]
-         regardless of this flag. *)
       if read_error then ("error", "read_failed")
       else if not exists && optional_when_missing then ("not_yet", "no_entries_yet")
       else if not exists then ("missing", "store_missing")
@@ -188,10 +181,7 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
         if stale_reason = "" then `Null else `String stale_reason );
     ]
 
-let source_optional_when_missing = function
-  | Goal_event -> true
-  | Keeper_metric | Agent_event | Tool_call_io | Trajectory_tool_call
-  | Tool_usage | Oas_event | Execution_receipt | Tool_metric -> false
+let source_optional_when_missing _ = false
 
 let coverage_gap_recovered ~latest_ts gap =
   match latest_ts, extract_ts gap with
@@ -640,34 +630,6 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
   let entries = if n <= 0 then entries else take_first n entries in
   List.map (tag_entry Trajectory_tool_call) entries
 
-let goal_events_path ~masc_root =
-  Filename.concat masc_root "goal_events.jsonl"
-
-let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
-  let path = goal_events_path ~masc_root in
-  if not (Sys.file_exists path) then []
-  else
-    let entries =
-      protect_source_read Goal_event ~site:"read_goal_events" ~default:[]
-        (fun () ->
-          (* Streaming filter — the time-window predicate drops most
-             entries on the typical {since_ts,until_ts} request shape,
-             so folding lets us hold only the survivors instead of the
-             full goal_events.jsonl content. The subsequent sort still
-             needs the filtered set in memory; that part can't stream. *)
-          Fs_compat.fold_jsonl_lines
-            ~init:[]
-            ~f:(fun acc ~line_no:_ json ->
-              if within_requested_window ?since_ts ?until_ts json
-              then json :: acc
-              else acc)
-            path
-          |> List.rev)
-    in
-    let entries = sort_newest_first entries in
-    let entries = if n <= 0 then entries else take_first n entries in
-    List.map (tag_entry Goal_event) entries
-
 (* ── Unified read ───────────────────────────────────── *)
 
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
@@ -699,8 +661,6 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
       | Execution_receipt ->
         read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts
           ~n:per_source ()
-      | Goal_event ->
-        read_goal_events ~masc_root ?since_ts ?until_ts ~n:per_source ()
       (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
          Oas_event, Tool_metric use directory-based storage. *)
       | Agent_event | Tool_call_io | Tool_usage | Oas_event | Tool_metric ->
@@ -901,16 +861,6 @@ let trajectory_tool_call_summary_stats ~masc_root =
                     (count_acc, latest_acc)))
        (0, None)
 
-let goal_event_summary_stats ~masc_root =
-  let path = goal_events_path ~masc_root in
-  if not (Sys.file_exists path) then (0, None)
-  else
-    let entries =
-      protect_source_read Goal_event ~site:"goal_event_summary_stats"
-        ~default:[] (fun () -> Fs_compat.load_jsonl path)
-    in
-    (List.length entries, latest_ts_of_entries entries)
-
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
   let now = Unix.gettimeofday () in
   let coverage_gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:50 in
@@ -1059,31 +1009,6 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ~freshness_slo_s
               ~optional_when_missing:(source_optional_when_missing source)
               ~read_error ?coverage_gap ()),
-        count )
-    | Goal_event ->
-      let path = goal_events_path ~masc_root in
-      let exists = Sys.file_exists path in
-      let count, latest_ts =
-        if exists then goal_event_summary_stats ~masc_root
-        else (0, None)
-      in
-      let coverage_gap_fields, coverage_gap =
-        coverage_gap_status_fields coverage_gaps source ~latest_ts
-      in
-      ( `Assoc
-          ([
-             ("source", `String (source_to_string source));
-             ("path", `String path);
-             ("exists", `Bool exists);
-             ("entry_count", `Int count);
-          ]
-          @ metadata_fields
-          @ coverage_gap_fields
-          @ freshness_fields ~now latest_ts
-          @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
-              ~freshness_slo_s
-              ~optional_when_missing:(source_optional_when_missing source)
-              ?coverage_gap ()),
         count )
     (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
        Oas_event, Tool_metric use directory-based storage. *)

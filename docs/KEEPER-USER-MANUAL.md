@@ -254,7 +254,6 @@ spawn 시 인자로 직접 설정하는 필드.
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
 | `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
 | `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none`이고 hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
-| `active_goal_ids` | string[] | 없음 | Goal Store 엔티티와 keeper lane의 유일한 목표 연결. 설정 시 `keeper_task_claim`이 goal-linked task만 claim한다. scoped pool에 현재 capability로 claim 가능한 task가 없으면 claim을 멈추며 전체 claimable task fallback은 없다. | `masc_keeper_up`, keeper config API 또는 `keeper.toml` |
 
 ### 3.1.1 Sandbox Core V1 사용법
 
@@ -263,7 +262,6 @@ spawn 시 인자로 직접 설정하는 필드.
 ```json
 {
   "name": "analyst",
-  "active_goal_ids": ["goal-review-incoming"],
   "instructions": "Prepare safe changes and report evidence.",
   "sandbox_profile": "docker",
   "network_mode": "none"
@@ -372,7 +370,7 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 | `mention_targets` | string array | persona 이름 fallback | profile.json의 `keeper.mention_targets` |
 | `proactive_*` | bool/int | keeper TOML 또는 runtime default 사용 | profile.json의 proactive defaults |
 
-`profile.json`의 `keeper.instructions`는 persona identity 기본값이다. 같은 keeper의 `keeper.toml`에 값이 있으면 TOML overlay가 persona 기본값을 덮어쓴다. 목표는 persona 문자열이 아니라 Goal Store와 `active_goal_ids`가 소유한다.
+`profile.json`의 `keeper.instructions`는 persona identity 기본값이다. 같은 keeper의 `keeper.toml`에 값이 있으면 TOML overlay가 persona 기본값을 덮어쓴다. 계획된 작업 상태는 Workspace Task가 소유한다.
 
 **페르소나 프로필 필드** (Neo4j Agent 노드에서 로드):
 
@@ -793,9 +791,9 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 [`docs/KEEPER-FILE-MODEL.md` §2 Keeper Declaration](./KEEPER-FILE-MODEL.md#2-keeper-declaration)을 참조한다. 요약:
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
-- **Overlay fields**: `instructions`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용. Runtime/model selection은 keeper TOML overlay가 아니라 `runtime.toml [runtime.assignments]`가 소유한다.
+- **Overlay fields**: `instructions`, `sandbox_profile`, `network_mode` 등 배치별 override 전용. Runtime/model selection은 keeper TOML overlay가 아니라 `runtime.toml [runtime.assignments]`가 소유한다.
 - **Allowed value sets**: `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`. 실제 실행 가능 여부는 descriptor/registry availability, per-turn OAS allowlist, eval gate까지 통과해야 한다.
-- **Removed / hard-rejected**: `goal`, `tool_access`, `tool_denylist`, `runtime_id`, `model`, `runtime_ref`, `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
+- **Removed / hard-rejected**: `goal`, `active_goal_ids`, `tool_access`, `tool_denylist`, `runtime_id`, `model`, `runtime_ref`, `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 
 Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/keeper_types_profile.ml`)와 `removed_keeper_input_key_names` (`lib/keeper/keeper_config.ml`)다.

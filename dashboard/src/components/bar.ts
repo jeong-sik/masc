@@ -2,7 +2,7 @@
 // (`<div class="bar"><div class="fill"></div></div>`). The SPEC defines
 // a 4px progress bar with kind-tinted fill (default brass + ok/warn/err
 // variants). Used wherever an inline progress signal lives next to a
-// metric — task counters, goal completion, budget consumption.
+// metric — task counters, execution progress, budget consumption.
 //
 // Distinct from Pill (16px stateful capsule) and Chip (sharp 2px label):
 // Bar is a pure *quantity* primitive — it shows "how full" without

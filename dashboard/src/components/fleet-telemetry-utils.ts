@@ -54,9 +54,6 @@ export interface FleetRow {
   terminal_reason_code?: string | null
   terminal_reason_severity?: string | null
   tool_audit_at: string | null
-  goal_label: string | null
-  goal_linked: boolean
-  active_goal_count: number
   sandbox_profile: string | null
   sandbox_last_error: string | null
   provider_health_status: 'healthy' | 'degraded' | 'unhealthy' | null
@@ -250,10 +247,6 @@ function keeperRecentTools(keeper: Keeper): string[] {
     ...(keeper.latest_tool_names ?? []),
     ...keeperMetricsWindowTools(keeper),
   ]).slice(0, 3)
-}
-
-function keeperGoalLabel(keeper: Keeper): string | null {
-  return keeper.active_goal_ids?.[0] ?? null
 }
 
 function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {
@@ -465,9 +458,6 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             terminal_reason_code: keeper.trust?.latest_terminal_reason?.code ?? null,
             terminal_reason_severity: keeper.trust?.latest_terminal_reason?.severity ?? null,
             tool_audit_at: keeper.tool_audit_at ?? null,
-            goal_label: keeperGoalLabel(keeper),
-            goal_linked: (keeper.active_goal_ids?.length ?? 0) > 0,
-            active_goal_count: keeper.active_goal_ids?.length ?? 0,
             sandbox_profile: keeper.sandbox_profile ?? null,
             sandbox_last_error: keeper.sandbox_last_error ?? null,
             provider_health_status: null,

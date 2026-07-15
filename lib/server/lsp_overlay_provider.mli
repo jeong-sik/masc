@@ -40,7 +40,7 @@ val reference_locations :
   base_dir:string -> file_path:string -> line:int -> include_declaration:bool ->
   Yojson.Safe.t list
 (** Generate LSP Location[] for annotations related to those at [line].
-    Finds annotations sharing the same goal_id or task_id.
+    Finds annotations sharing the same task_id.
     Used by textDocument/references. *)
 
 val completion_items : base_dir:string -> file_path:string -> line:int -> Yojson.Safe.t list
@@ -62,5 +62,5 @@ val folding_ranges : base_dir:string -> file_path:string -> Yojson.Safe.t list
     Used by textDocument/foldingRange. *)
 
 val document_highlights : base_dir:string -> file_path:string -> line:int -> Yojson.Safe.t list
-(** Generate DocumentHighlight[] for annotations sharing goal/task context.
+(** Generate DocumentHighlight[] for annotations sharing task context.
     Used by textDocument/documentHighlight. *)

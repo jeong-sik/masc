@@ -26,7 +26,6 @@ let handle_ide_annotate_with_outcome
   let line_end = Safe_ops.json_int ~default:line_start "line_end" args in
   let kind_str = Safe_ops.json_string ~default:"Comment" "kind" args in
   let content = Safe_ops.json_string ~default:"" "content" args in
-  let goal_id = Safe_ops.json_string_opt "goal_id" args in
   let task_id = Safe_ops.json_string_opt "task_id" args in
   let references_result =
     args
@@ -80,7 +79,6 @@ let handle_ide_annotate_with_outcome
         ; line_end
         ; kind
         ; content
-        ; goal_id
         ; task_id
         ; references
         }

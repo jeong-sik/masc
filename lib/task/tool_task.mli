@@ -44,7 +44,7 @@ val schemas : Masc_domain.tool_schema list
 (** [build_claim_observation_payload ~now ~agent_name ~task_id ~scope_widened]
     builds the downstream collaboration-observation fragment for a successful
     [keeper_task_claim] write/readback result. [scope_widened] records whether
-    the claim widened the agent's goal scope. MASC uses a central workspace
+    the claim widened the agent's task filter. MASC uses a central workspace
     store here, so CRDT-specific [logical_clock] and [convergence_delay_ms]
     are left null. *)
 val build_claim_observation_payload :

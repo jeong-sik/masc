@@ -203,8 +203,7 @@ without mutating the parent environment.
 | Planning context | `<base-path>/planning/<task_id>/` |
 | Runs | `<runtime_root>/runs/<task_id>/` |
 | Board | `<runtime_root>/board_posts.jsonl`, `board_comments.jsonl`, `board_votes.jsonl` |
-| Goals | `<runtime_root>/goals.json`, `goals_snapshots/`, `goals_scheduler_state.json` |
-| Keeper Gate state | `<runtime_root>/gate/mode.json`, `gate/pending.json`, `gate/always-allowed.json` |
+| Keeper Gate state | `<runtime_root>/gate/mode.json`, `gate/pending.json` |
 | Control plane | `<runtime_root>/control-plane/` |
 | Operator lane | `<runtime_root>/operator/` |
 | Logs | `<runtime_root>/logs/` |
@@ -250,25 +249,16 @@ Notes:
 
 - JSONL is the board backend. PostgreSQL board backend was removed; filesystem is the only supported lane.
 
-### 3.3 Goals
-
-- `<runtime_root>/goals.json`
-- `<runtime_root>/goals_snapshots/`
-- `<runtime_root>/goals_scheduler_state.json`
-
-Goal dispatch and long/mid/short-horizon behavior also depend on model-routing config and goal-related environment settings.
-
-### 3.4 Gate and HITL
+### 3.3 Gate and HITL
 
 - `<runtime_root>/gate/mode.json`
 - `<runtime_root>/gate/pending.json`
-- `<runtime_root>/gate/always-allowed.json`
 - `<runtime_root>/audit-approvals/YYYY-MM/DD.jsonl`
 
 The retired `governance*` trees are not active runtime inputs. Their presence on
 disk is historical residue and must not recreate a runtime authority.
 
-### 3.5 Keepers
+### 3.4 Keepers
 
 - `<runtime_root>/keepers/<name>.json`: keeper meta/state.
 - `<runtime_root>/keepers/<name>.decisions.jsonl`
@@ -296,7 +286,7 @@ Allowed path model:
 - Write access is still constrained by execution scope and allowed-path resolution.
 - PR-submit flow accepts a repo `cwd` inside the keeper playground, not only classic `.worktrees/` paths.
 
-### 3.7 Command Plane and Operator
+### 3.5 Command Plane and Operator
 
 - `<runtime_root>/control-plane/units.json`
 - `<runtime_root>/control-plane/operations.json`
@@ -311,7 +301,7 @@ Allowed path model:
 - `<runtime_root>/swarm.json`
 - `<runtime_root>/control-plane/swarm-live/`
 
-### 3.8 Logs, Audit, Metrics, and Tool Traces
+### 3.6 Logs, Audit, Metrics, and Tool Traces
 
 - `<runtime_root>/logs/`: service logs.
 - `<runtime_root>/audit/YYYY-MM/DD.jsonl`
@@ -330,7 +320,7 @@ Current host note:
 - Repo-local `masc/logs/` directories are non-canonical historical or
   harness captures. Live runtime service logs belong under `<runtime_root>/logs/`.
 
-### 3.9 Auth, Connectors, and Voice
+### 3.7 Auth, Connectors, and Voice
 
 - `<runtime_root>/auth/`
   - `config.json`
@@ -361,7 +351,7 @@ Notes:
   HTTP TTS (e.g. ElevenLabs direct) works without a session endpoint.
   Only Voice MCP session management requires a session endpoint.
 
-### 3.10 Legacy / Compat Execution Artifacts
+### 3.8 Legacy / Compat Execution Artifacts
 
 - `<runtime_root>/team-sessions/<session_id>/`
   - `session.json`

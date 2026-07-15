@@ -85,7 +85,7 @@ closing the self-assertion hole: an attacker who does not know the secret
 gets `Unauthorized`/`InvalidToken`, not `Ok ()`.
 
 `read_initial_admin` itself is untouched and keeps its other, legitimate
-consumers (`lib/workspace_goals.ml`, `lib/tool_workspace.ml`,
+consumers (`lib/tool_workspace.ml`,
 `lib/workspace_metric_hooks.ml`, `lib/server/server_runtime_startup_credentials.ml`)
 that use it purely to look up "who is the recorded admin name" for
 domain logic, not to authorize a request.

@@ -446,7 +446,6 @@ end
 type wakeup_intent =
   | Reactive_signal
   | Scheduled_signal
-  | Goal_signal
   | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal

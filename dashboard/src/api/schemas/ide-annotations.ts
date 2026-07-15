@@ -15,7 +15,6 @@ export interface IdeAnnotation {
   readonly keeper_id: string
   readonly kind: AnnotationKind
   readonly content: string
-  readonly goal_id: string | null
   readonly task_id: string | null
   readonly references: ReadonlyArray<IdeAnnotationReference>
   readonly created_at_ms: number
@@ -45,7 +44,6 @@ const ANNOTATION_FIELDS = new Set([
   'keeper_id',
   'kind',
   'content',
-  'goal_id',
   'task_id',
   'references',
   'created_at_ms',
@@ -107,7 +105,6 @@ export function parseIdeAnnotation(value: unknown): IdeAnnotation | null {
     : null
   const kind = annotationKind(value.kind)
   const content = typeof value.content === 'string' ? value.content : null
-  const goalId = nullableString(value.goal_id)
   const taskId = nullableString(value.task_id)
   const references = parseIdeAnnotationReferences(value.references)
   const createdAtMs = finiteNumber(value.created_at_ms)
@@ -121,7 +118,6 @@ export function parseIdeAnnotation(value: unknown): IdeAnnotation | null {
     || keeperId === null
     || kind === null
     || content === null
-    || goalId === undefined
     || taskId === undefined
     || references === null
     || createdAtMs === null
@@ -137,7 +133,6 @@ export function parseIdeAnnotation(value: unknown): IdeAnnotation | null {
     keeper_id: keeperId,
     kind,
     content,
-    goal_id: goalId,
     task_id: taskId,
     references,
     created_at_ms: createdAtMs,

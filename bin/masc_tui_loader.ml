@@ -442,52 +442,6 @@ let load_overview ~(host : string) ~(port : int) :
           ov_generated_at;
         }
 
-let decode_planning_goal json =
-  let* pg_id = required_string_field json "id" in
-  let* pg_title = required_string_field json "title" in
-  let* raw_status = required_string_field json "status" in
-  let* pg_status =
-    match String.lowercase_ascii raw_status with
-    | "active" -> Ok Planning_goal_active
-    | "paused" -> Ok Planning_goal_paused
-    | "done" -> Ok Planning_goal_done
-    | "dropped" -> Ok Planning_goal_dropped
-    | other ->
-        Error
-          (Printf.sprintf
-             "unknown planning goal status %S (normalized %S)"
-             raw_status
-             other)
-  in
-  let* pg_phase = required_string_field json "phase" in
-  let* pg_priority = required_int_field json "priority" in
-  let* pg_due_date = optional_string_field json "due_date" in
-  let* pg_parent_goal_id = optional_string_field json "parent_goal_id" in
-  let* pg_metric = optional_string_field json "metric" in
-  let* pg_target_value = optional_string_field json "target_value" in
-  Ok
-    {
-      pg_id;
-      pg_title;
-      pg_status;
-      pg_phase;
-      pg_priority;
-      pg_due_date;
-      pg_parent_goal_id;
-      pg_metric;
-      pg_target_value;
-    }
-
-let decode_planning_goals json_list =
-  decode_list "goals" decode_planning_goal json_list
-
-let decode_planning_rollup json =
-  let* pr_active = required_int_field json "active_count" in
-  let* pr_paused = required_int_field json "paused_count" in
-  let* pr_done = required_int_field json "done_count" in
-  let* pr_dropped = required_int_field json "dropped_count" in
-  Ok { pr_active; pr_paused; pr_done; pr_dropped }
-
 let decode_planning_backlog json =
   let* pb_todo = required_int_field json "todo" in
   let* pb_claimed = required_int_field json "claimed" in
@@ -502,17 +456,11 @@ let load_planning ~(host : string) ~(port : int) :
   match fetch_dashboard_planning ~host ~port with
   | Error err -> Error ("planning load failed: " ^ err)
   | Ok json ->
-      let* goals_json = required_list_field json "goals" in
-      let* goals = decode_planning_goals goals_json in
-      let* rollup_json = required_object_field json "rollup" in
-      let* rollup = decode_planning_rollup rollup_json in
       let* backlog_json = required_object_field json "task_backlog" in
       let* backlog = decode_planning_backlog backlog_json in
       let* generated_at = required_string_field json "generated_at" in
       Ok
         {
-          pl_goals = goals;
-          pl_rollup = rollup;
           pl_backlog = backlog;
           pl_generated_at = generated_at;
         }

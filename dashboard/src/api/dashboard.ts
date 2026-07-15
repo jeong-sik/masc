@@ -25,23 +25,6 @@ import {
   type ProviderLogTailResponse,
 } from './schemas/provider-logs'
 export type {
-  DashboardGoalsTreeResponse,
-  DashboardGoalDetailResponse,
-  GoalDetailKeeper,
-  GoalKeeperTrustApprovalState,
-  GoalKeeperTrustExecutionSummary,
-  GoalKeeperTrustLatestEvent,
-  GoalKeeperTrustSummary,
-  GoalDetailTimelineEvent,
-  GoalAttainmentProjection,
-  GoalCompletionSummary,
-  GoalTaskSummary,
-  GoalTreeNode,
-  GoalTreeSummary,
-  GoalTreeTask,
-} from '../types'
-export { fetchDashboardGoalsTree, fetchDashboardGoalDetail } from './dashboard-goals'
-export type {
   ConfigEntry,
   ConfigEntryProvenance,
   ConfigEntrySource,
@@ -126,7 +109,6 @@ export type {
 export {
   fetchDashboardGate,
   resolveGateApproval,
-  deleteGateApprovalRule,
   setGateMode,
 } from './dashboard-gate'
 export { pruneSchedules } from './dashboard-schedule'

@@ -564,18 +564,6 @@ let render_board_read (state : state) (post : board_post) =
   print_string (Buffer.contents buf);
   flush stdout
 
-let planning_status_label = function
-  | Planning_goal_active -> "active"
-  | Planning_goal_paused -> "paused"
-  | Planning_goal_done -> "done"
-  | Planning_goal_dropped -> "dropped"
-
-let planning_status_color = function
-  | Planning_goal_active -> Ansi.cyan
-  | Planning_goal_paused -> Ansi.yellow
-  | Planning_goal_done -> Ansi.green
-  | Planning_goal_dropped -> Ansi.red
-
 (** Render the Planning surface (list view). *)
 let render_planning_list (state : state) =
   let (rows, cols) = get_terminal_size () in
@@ -600,13 +588,6 @@ let render_planning_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
 
-  let goals =
-    match state.planning with
-    | None -> []
-    | Some p -> planning_visible_goals p.pl_goals
-  in
-  let count = List.length goals in
-
   (match state.planning with
    | None ->
        (match state.planning_error with
@@ -621,114 +602,16 @@ let render_planning_list (state : state) =
          box_empty buf cols
        done
    | Some p ->
-       let rollup =
-         Printf.sprintf "  Active: %d  Paused: %d  Done: %d  Dropped: %d"
-           p.pl_rollup.pr_active p.pl_rollup.pr_paused p.pl_rollup.pr_done p.pl_rollup.pr_dropped
-       in
-       let backlog =
-         Printf.sprintf "  Backlog: todo=%d  claimed=%d  running=%d  done=%d  cancelled=%d"
-           p.pl_backlog.pb_todo p.pl_backlog.pb_claimed p.pl_backlog.pb_running
-           p.pl_backlog.pb_done p.pl_backlog.pb_cancelled
-       in
-       box_line buf cols (Ansi.bold ^ rollup ^ Ansi.reset);
-       box_line buf cols (Ansi.dim ^ backlog ^ Ansi.reset);
-       box_divider buf cols;
-
-       if count = 0 then begin
-         box_line buf cols (Ansi.dim ^ "  (no goals)" ^ Ansi.reset);
-         for _ = 1 to rows - 11 do
-           box_empty buf cols
-         done
-       end else begin
-         let content_height = rows - 12 in
-         let scroll_offset =
-           if state.planning_cursor >= content_height then
-             state.planning_cursor - content_height + 1
-           else 0
-         in
-         for i = 0 to content_height - 1 do
-           let idx = i + scroll_offset in
-           if idx < count then begin
-             let g = List.nth goals idx in
-             let is_selected = idx = state.planning_cursor in
-             let depth = planning_goal_depth p.pl_goals g in
-             let indent = String.make (depth * 2) ' ' in
-             let branch = if depth > 0 then "└─ " else "  " in
-             let status_color = planning_status_color g.pg_status in
-             let status_label = planning_status_label g.pg_status in
-             let due = match g.pg_due_date with Some d -> "  " ^ d | None -> "" in
-             let line =
-               Printf.sprintf "%s%s%s[%s]%s P%d  %s%s"
-                 indent branch status_color
-                 (fit_width status_label 8)
-                 Ansi.reset
-                 g.pg_priority
-                 (fit_width g.pg_title (cols - 30 - (depth * 2) - String.length due))
-                 (Ansi.dim ^ due ^ Ansi.reset)
-             in
-             let content =
-               if is_selected then
-                 Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-               else
-                 "  " ^ line
-             in
-             box_line buf cols content
-           end else
-             box_empty buf cols
-         done
-       end);
+       let backlog = p.pl_backlog in
+       box_line buf cols
+         (Printf.sprintf
+            "  Backlog: todo=%d  claimed=%d  running=%d  done=%d  cancelled=%d"
+            backlog.pb_todo backlog.pb_claimed backlog.pb_running backlog.pb_done
+            backlog.pb_cancelled));
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  r:refresh  Tab:next  | Port: %d%s\n"
-    Ansi.dim state.port Ansi.reset);
-
-  print_string (Buffer.contents buf);
-  flush stdout
-
-(** Render the Planning surface (detail view). *)
-let render_planning_detail (state : state) (goal : planning_goal) =
-  let (rows, cols) = get_terminal_size () in
-  let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
-  let status_color = planning_status_color goal.pg_status in
-  let status_label = planning_status_label goal.pg_status in
-  let header = Printf.sprintf " MASC Planning  %s[%s]%s  %s"
-    status_color (fit_width status_label 8) Ansi.reset
-    (fit_width goal.pg_id 20)
-  in
-
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-
-  box_line buf cols (Printf.sprintf "  %s%s%s"
-    Ansi.bold (fit_width goal.pg_title (cols - 6)) Ansi.reset);
-  box_line buf cols (Printf.sprintf "  Phase: %s  Priority: P%d"
-    (fit_width goal.pg_phase 14) goal.pg_priority);
-  (match goal.pg_due_date with
-   | Some d -> box_line buf cols (Printf.sprintf "  Due: %s" d)
-   | None -> box_empty buf cols);
-  (match goal.pg_metric with
-   | Some m ->
-       let target = match goal.pg_target_value with Some t -> " = " ^ t | None -> "" in
-       box_line buf cols (Printf.sprintf "  Metric: %s%s" m target)
-   | None -> box_empty buf cols);
-  (match goal.pg_parent_goal_id with
-   | Some pid -> box_line buf cols (Printf.sprintf "  Parent: %s" pid)
-   | None -> box_empty buf cols);
-  box_divider buf cols;
-
-  for _ = 1 to rows - 14 do
-    box_empty buf cols
-  done;
-
-  box_bottom buf cols;
-
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
+  Buffer.add_string buf (Printf.sprintf "%s  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
   print_string (Buffer.contents buf);
@@ -765,8 +648,8 @@ let render_keeper_list (state : state) =
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
 
   (* Column headers *)
-  let col_header = Printf.sprintf "  %s  %-16s %-14s %5s  %-20s %s  %s"
-    " " "Name" "Profile" "Gen" "Model" "Pro" "Goal" in
+  let col_header = Printf.sprintf "  %s  %-16s %-14s %5s  %-20s %s"
+    " " "Name" "Profile" "Gen" "Model" "Pro" in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     Ansi.dim (fit_width col_header (cols - 4)) Ansi.reset
@@ -810,10 +693,6 @@ let render_keeper_list (state : state) =
         else
           Ansi.gray ^ "--" ^ Ansi.reset
         in
-        let goal_ids_width = max 10 (cols - 68) in
-        let goal_ids_trunc =
-          fit_width (String.concat "," k.k_active_goal_ids) goal_ids_width
-        in
         let name_col = Printf.sprintf "%-16s" k.k_name in
         let gen_col = Printf.sprintf "%5d" k.k_generation in
         let model_col = Printf.sprintf "%-20s" model_short in
@@ -824,14 +703,12 @@ let render_keeper_list (state : state) =
             ^ " " ^ gen_col
             ^ "  " ^ model_col
             ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_ids_trunc ^ Ansi.reset
           else
             " "
             ^ "  " ^ name_col
             ^ " " ^ gen_col
             ^ "  " ^ model_col
             ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_ids_trunc ^ Ansi.reset
         in
         Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
           Ansi.gray Ansi.box_v Ansi.reset
@@ -891,12 +768,6 @@ let render_keeper_detail (state : state) =
     add_row "Generation:" (string_of_int k.k_generation);
     add_row "Trigger Mode:" k.k_trigger_mode;
     add_row "Verify:" (bool_indicator k.k_verify);
-    add_empty ();
-
-    (* Goals section *)
-    add_section "Goals";
-    add_row "Active Goal IDs:"
-      (fit_width (String.concat ", " k.k_active_goal_ids) (inner - 26));
     add_empty ();
 
     (* Live Context section (Phase 2) *)
@@ -1217,11 +1088,5 @@ let render (state : state) =
            | Some post -> render_board_read state post
            | None -> render_board_list state)
   | Planning ->
-      (match state.planning_mode with
-       | Planning_list -> render_planning_list state
-       | Planning_detail goal_id ->
-           let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
-           match List.find_opt (fun g -> g.pg_id = goal_id) goals with
-           | Some goal -> render_planning_detail state goal
-           | None -> render_planning_list state)
+      render_planning_list state
   | Approvals -> render_approvals state

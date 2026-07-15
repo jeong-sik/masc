@@ -125,12 +125,11 @@ fi
 
 # §9-3 — Local normalizePhase declaration outside the SSOT.
 # `toKeeperPhase` in keeper-store-normalize.ts is canonical (PR-2).
-# Allow goal-loop-status.ts and ide-persistence-panel.ts (different
-# domains — GoalLoopPhase and IDE persistence — out of RFC-0135 scope).
+# Allow ide-persistence-panel.ts (a different persistence domain outside
+# RFC-0135 scope).
 local_normalize_phase=$(
   rg -n \
     --type ts \
-    -g '!dashboard/src/goal-loop-status.ts' \
     -g '!dashboard/src/components/ide/ide-persistence-panel.ts' \
     -g '!dashboard/src/keeper-store-normalize.ts' \
     '^(export\s+)?function normalizePhase\(' \

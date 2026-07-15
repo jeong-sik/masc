@@ -58,12 +58,11 @@ describe('cockpit entrypoint registry', () => {
     })
   })
 
-  it('keeps the visible cockpit command map to ten primary aliases', () => {
+  it('keeps the visible cockpit command map to nine primary aliases', () => {
     const aliases = visibleAliases()
 
-    expect(COCKPIT_ENTRYPOINTS).toHaveLength(10)
+    expect(COCKPIT_ENTRYPOINTS).toHaveLength(9)
     expect(aliases).toEqual([
-      'goal-horizon',
       'task-board',
       'board-feed',
       'composer',
@@ -98,7 +97,7 @@ describe('cockpit entrypoint registry', () => {
   })
 
   it('normalizes human tab labels and prototype ids to stable aliases', () => {
-    expect(normalizeCockpitEntrypoint('Goal · Horizon')).toBe('goal-horizon')
+    expect(normalizeCockpitEntrypoint('Task · Board')).toBe('task-board')
     expect(normalizeCockpitEntrypoint('SPLIT DIFF')).toBe('split-diff')
     expect(normalizeCockpitEntrypoint('Keeper / Tool Access')).toBe('keeper-tool-access')
   })
@@ -113,9 +112,9 @@ describe('cockpit entrypoint registry', () => {
   })
 
   it('resolves primary cockpit aliases to canonical production routes', () => {
-    expect(cockpitTargetForParams({ mode: 'Work', tab: 'goal-horizon' })).toEqual({
+    expect(cockpitTargetForParams({ mode: 'Work', tab: 'task-board' })).toEqual({
       tab: 'workspace',
-      params: { section: 'planning', view: 'goal-tree' },
+      params: { section: 'planning' },
     })
     expect(cockpitTargetForParams({ mode: 'Comms', tab: 'board-feed' })).toEqual({
       tab: 'board',

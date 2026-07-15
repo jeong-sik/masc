@@ -63,7 +63,6 @@ type keeper_runtime_mcp_log_context = {
   turn : int option;
   keeper_turn_id : int option;
   task_id : string option;
-  goal_ids : string list option;
   sandbox_profile : string option;
   sandbox_root : string option;
   allowed_paths : string list option;
@@ -81,7 +80,7 @@ val runtime_mcp_keeper_log_context_of_entry :
   keeper_runtime_mcp_log_context
 (** Builds a {!keeper_runtime_mcp_log_context} from a
     keeper registry entry.  [arguments] is inspected for
-    embedded [agent_name] / [task_id] / [goal_ids] /
+    embedded [agent_name] / [task_id] /
     [allowed_paths] overrides; the entry's
     [meta.runtime] supplies the rest. *)
 

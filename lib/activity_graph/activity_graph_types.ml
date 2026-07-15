@@ -241,7 +241,6 @@ let derive_context_from_payload payload fields =
   fields
   |> assoc_replace_string_opt "file_path" file_path
   |> assoc_replace_int_opt "line" line
-  |> assoc_replace_string_opt "goal_id" (json_string_non_empty_opt "goal_id" payload)
   |> assoc_replace_string_opt "task_id" (json_string_non_empty_opt "task_id" payload)
   |> assoc_replace_string_opt "board_post_id"
        (json_string_non_empty_opt "board_post_id" payload
@@ -275,7 +274,6 @@ let derive_context_from_tag fields raw =
     (match int_of_string_opt value with
      | Some line when line >= 1 -> assoc_replace "line" (`Int line) fields
      | _ -> fields)
-  | Some ("goal", value) -> assoc_replace "goal_id" (`String value) fields
   | Some ("task", value) -> assoc_replace "task_id" (`String value) fields
   | Some ("board", value) | Some ("post", value) ->
     assoc_replace "board_post_id" (`String value) fields

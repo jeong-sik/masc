@@ -397,5 +397,4 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             @ [ ("recent_reviews", recent_reviews) ]
             @ active_guidance))
     | Some Operator_action_constants.Keeper
-    | Some Operator_action_constants.Goal
     | None -> Error "unsupported target_type"

@@ -521,8 +521,6 @@ let model_routing_entries =
       "Default model id; None when unset";
     entry ~default:"(none)" "MASC_DEFAULT_PROVIDER"
       "Default provider name; None when unset";
-    entry ~default:"task" "MASC_GOAL_DISPATCH_RUNTIME"
-      "Goal dispatch runtime type";
     entry ~default:"(none)" "MASC_ROUTING_RUNTIME"
       "Routing runtime for team session routing";
   ]

@@ -12,7 +12,7 @@ import {
 } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
 import { route } from '../../router'
-import { selectedTask } from '../goals/task-detail-selection'
+import { selectedTask } from '../tasks/task-detail-selection'
 import {
   discoverRepositories,
   fetchRepositoriesList,
@@ -791,7 +791,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     }
 
     // Load annotations
-    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
+    fetchIdeAnnotations({ file_path: filePath, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
       if (signal.aborted) return
       clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
       annotationsSignal.value = annotations

@@ -361,15 +361,13 @@ describe('monitoring navigation labels', () => {
 })
 
 describe('workspace navigation labels', () => {
-  it('uses consolidated planning label (absorbs goals)', () => {
+  it('uses the task planning label', () => {
     const sections = visibleSectionItemsForTab('workspace')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('planning')).toBe('Plans & Goals')
+    expect(labelFor('planning')).toBe('Planning')
     expect(labelFor('moderation')).toBeUndefined()
-    // goals is no longer a standalone section
     const ids = sections.map(item => item.id)
-    expect(ids).not.toContain('goals')
     expect(ids).not.toContain('moderation')
   })
 
@@ -591,11 +589,6 @@ describe('consolidation redirects (Phase 1)', () => {
     expect(result.section).toBe('operations')
     expect(result.target_id).toBe('op-1')
     expect(result.target_type).toBe('operation')
-  })
-
-  it('workspace:goals → planning', () => {
-    const result = normalizeRouteParams('workspace', { section: 'goals' })
-    expect(result.section).toBe('planning')
   })
 
   it('does not keep command:connectors as an in-surface redirect', () => {

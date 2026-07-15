@@ -16,7 +16,6 @@ export interface EditorKeeperTraceLineEvent {
   readonly eventId?: string
   readonly threadId?: string
   readonly surface?: string
-  readonly goalId?: string
   readonly taskId?: string
   readonly boardPostId?: string
   readonly commentId?: string
@@ -235,7 +234,6 @@ export function keeperTraceLinesForFile(
       eventId: event.source === 'activity-event' ? event.eventId : undefined,
       threadId: event.source === 'anchored-thread' ? event.threadId : undefined,
       surface: traceEventSurface(event),
-      goalId: context.goalId,
       taskId: context.taskId,
       boardPostId: context.boardPostId,
       commentId: context.commentId,
@@ -423,7 +421,6 @@ function traceEventContextParts(event: EditorKeeperTraceLineEvent): ReadonlyArra
   return [
     event.eventId ? `event ${event.eventId}` : null,
     event.threadId ? `thread ${event.threadId}` : null,
-    event.goalId ? `goal ${event.goalId}` : null,
     event.taskId ? `task ${event.taskId}` : null,
     event.boardPostId ? `board ${event.boardPostId}` : null,
     event.commentId ? `comment ${event.commentId}` : null,
@@ -457,7 +454,6 @@ function traceLineKey(events: ReadonlyArray<EditorKeeperTraceLineEvent>): string
       event.keeperName,
       event.count,
       event.tsMs,
-      event.goalId ?? '',
       event.taskId ?? '',
       event.boardPostId ?? '',
       event.commentId ?? '',

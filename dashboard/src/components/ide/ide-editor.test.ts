@@ -335,7 +335,7 @@ describe('IdeEditor', () => {
           line_end: 2,
           symbol_hint: 'runtime',
         },
-        body: 'Is this task still tied to the active goal?',
+        body: 'Is this task still active?',
         created_ms: 1,
         resolved: false,
         reply_count: 1,
@@ -403,7 +403,7 @@ describe('IdeEditor', () => {
           keeper_id: 'sangsu',
           kind: 'Comment',
           content: 'Keep this task linked to the line',
-          goal_id: 'goal-1',
+
           task_id: 'task-1',
           references: [],
           created_at_ms: 1,
@@ -457,7 +457,7 @@ describe('IdeEditor', () => {
           keeper_id: 'sangsu',
           kind: 'Comment',
           content: 'Keep this task linked to the line',
-          goal_id: 'goal-1',
+
           task_id: 'task-1',
           references: [],
           created_at_ms: 1,
@@ -493,7 +493,7 @@ describe('IdeEditor', () => {
             keeper_id: 'sangsu',
             kind: 'Comment',
             content: 'Keep this task linked to the line',
-            goal_id: 'goal-1',
+
             task_id: 'task-1',
             references: [],
             created_at_ms: 1,
@@ -506,8 +506,8 @@ describe('IdeEditor', () => {
             line_end: 1,
             keeper_id: 'reviewer',
             kind: 'Question',
-            content: 'Is this still the active goal?',
-            goal_id: null,
+            content: 'Is this task still active?',
+
             task_id: null,
             references: [],
             created_at_ms: 2,
@@ -521,7 +521,7 @@ describe('IdeEditor', () => {
             keeper_id: 'other',
             kind: 'Comment',
             content: 'Not this file',
-            goal_id: null,
+
             task_id: null,
             references: [],
             created_at_ms: 3,
@@ -535,11 +535,11 @@ describe('IdeEditor', () => {
     await waitFor(() => {
       const chip = container.querySelector('.cm-masc-annotation-chip')
       expect(chip?.textContent)
-        .toBe('Comment · goal goal-1 · task task-1 · keeper sangsu · +1')
+        .toBe('Comment · task task-1 · keeper sangsu · +1')
     })
     expect(container.querySelectorAll('.cm-masc-annotation-chip')).toHaveLength(1)
     expect(container.querySelector('.cm-masc-annotation-chip')?.getAttribute('aria-label'))
-      .toBe('Line 1 annotation context: Comment · goal goal-1 · task task-1 · keeper sangsu · +1')
+      .toBe('Line 1 annotation context: Comment · task task-1 · keeper sangsu · +1')
   })
 
   it('maps annotation detail context into operational route links', () => {
@@ -550,13 +550,13 @@ describe('IdeEditor', () => {
       line_end: 7,
       keeper_id: 'sangsu',
       kind: 'Comment',
-      content: 'Keep this task linked to the active goal',
-      goal_id: 'goal-runtime',
+      content: 'Keep this task linked to the active lane',
+
       task_id: 'task-runtime',
       references: [{ relation: 'evidence', reference: 'urn:example:42' }],
     })
 
-    expect(links.map(link => link.label)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
+    expect(links.map(link => link.label)).toEqual(['Code', 'Task', 'Keeper'])
     expect(links.find(link => link.label === 'Code')).toMatchObject({
       tab: 'code',
       params: {
@@ -568,10 +568,6 @@ describe('IdeEditor', () => {
         source_id: 'annotation-ann-1',
         keeper: 'sangsu',
       },
-    })
-    expect(links.find(link => link.label === 'Goal')?.params).toMatchObject({
-      section: 'planning',
-      goal: 'goal-runtime',
     })
     expect(links.find(link => link.label === 'Task')?.params).toMatchObject({
       section: 'planning',
@@ -600,7 +596,6 @@ describe('IdeEditor', () => {
       filePath: 'runtime.ts',
       line: 2,
       surface: 'PR',
-      goalId: 'goal-runtime',
       taskId: 'task-runtime',
       boardPostId: 'post-runtime',
       commentId: 'comment-runtime',
@@ -638,7 +633,6 @@ describe('IdeEditor', () => {
     })
     expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',

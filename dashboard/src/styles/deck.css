@@ -1,5 +1,5 @@
 /* deck.css — info deck below center pane
-   Tabbed: board / tasks / goals / verified / providers / sandbox / runtime */
+   Tabbed: board / tasks / verified / providers / sandbox / runtime */
 
 .deck-head {
   height: 30px; flex-shrink: 0;
@@ -171,26 +171,7 @@
 .pr-state.merged { background: var(--stalled); }
 .pr-state.closed { background: var(--err); }
 
-/* ——— GOALS tree ——— */
-.goal-tree {
-  padding: 14px 20px;
-  display: flex; flex-direction: column; gap: var(--sp-1h);
-}
-.goal-node {
-  display: grid;
-  grid-template-columns: 70px 1fr 120px 120px 160px;
-  gap: 10px; align-items: center;
-  padding: 8px 12px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-2);
-  background: var(--color-bg-elevated);
-  font-size: var(--fs-13);
-}
-.goal-node.depth-1 { margin-left: 24px; background: var(--color-bg-surface); }
-.goal-node.depth-2 { margin-left: 48px; background: var(--color-bg-surface); border-style: dashed; }
-.goal-node .g-id { font-family: var(--font-mono); color: var(--color-fg-muted); font-size: var(--fs-10); }
-.goal-node .g-title { color: var(--color-fg-primary); font-weight: var(--fw-med); }
-.goal-node .g-meta { color: var(--color-fg-secondary); font-family: var(--font-mono); font-size: var(--fs-11); }
+/* ——— Task planning ——— */
 
 /* ——— VERIFIED list ——— */
 .verif-grid {

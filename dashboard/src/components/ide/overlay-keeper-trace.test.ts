@@ -80,7 +80,7 @@ function pushActivity(
     eventId: `evt-${id}`,
     filePath,
     line,
-    surface: 'Goal',
+    surface: 'Task',
     ...refs,
   })
 }
@@ -328,7 +328,6 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
   it('clicking a trace chip jumps the shared replay cursor and focuses IDE context', () => {
     pushActivity('a', 'scholar', 12, 2000, 'runtime.ts', {
       eventId: 'evt-a',
-      goalId: 'goal-runtime',
       taskId: 'task-runtime',
       logId: 'turn-12',
     })
@@ -344,14 +343,13 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     expect(ideContextFocus.value).toMatchObject({
       file_path: 'runtime.ts',
       line: 12,
-      surface: 'Goal',
-      label: 'Goal activity evt-a',
+      surface: 'Task',
+      label: 'Task activity evt-a',
       source_id: 'trace:a',
       keeper_id: 'scholar',
     })
     expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Log',
       'Telemetry',
@@ -362,7 +360,6 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
   it('renders operational route links for enriched activity traces', () => {
     pushActivity('a', 'scholar', 12, 1000, 'runtime.ts', {
       eventId: 'evt-a',
-      goalId: 'goal-runtime',
       taskId: 'task-runtime',
       prId: '15035',
       gitRef: 'main',
@@ -378,7 +375,6 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-trace-route-link')]
     expect(links.map(link => link.textContent)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'PR',
       'Git',
@@ -387,27 +383,27 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
       'Keeper',
     ])
     const badge = container.querySelector<HTMLElement>('.ide-trace-context-badge')
-    expect(badge?.textContent?.trim()).toBe('CTX 8')
-    expect(badge?.getAttribute('data-context-route-count')).toBe('8')
+    expect(badge?.textContent?.trim()).toBe('CTX 7')
+    expect(badge?.getAttribute('data-context-route-count')).toBe('7')
     expect(badge?.getAttribute('title'))
-      .toBe('Linked context: Code, Goal, Task, PR, Git, Log, Telemetry, Keeper')
+      .toBe('Linked context: Code, Task, PR, Git, Log, Telemetry, Keeper')
     expect(badge?.getAttribute('aria-label'))
-      .toBe('scholar trace has 8 linked context routes: Code, Goal, Task, PR, Git, Log, Telemetry, Keeper')
+      .toBe('scholar trace has 7 linked context routes: Code, Task, PR, Git, Log, Telemetry, Keeper')
 
     fireEvent.click(links[0]!)
     expect(window.location.hash).toBe(
-      '#code?section=ide-shell&view=source&file=runtime.ts&line=12&surface=Goal&label=Goal+activity+evt-a&source_id=trace%3Aa&keeper=scholar',
+      '#code?section=ide-shell&view=source&file=runtime.ts&line=12&surface=Task&label=Task+activity+evt-a&source_id=trace%3Aa&keeper=scholar',
     )
 
-    fireEvent.click(links[5]!)
+    fireEvent.click(links[4]!)
     expect(window.location.hash).toBe('#monitoring?section=runtime&view=audit&log_id=turn-12')
 
-    fireEvent.click(links[6]!)
+    fireEvent.click(links[5]!)
     expect(window.location.hash).toBe(
       '#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-12',
     )
 
-    fireEvent.click(links[7]!)
+    fireEvent.click(links[6]!)
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
   })
 
@@ -423,7 +419,6 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
       decisionReason: 'verify touched test target',
       filePath: 'runtime.ts',
       line: 19,
-      goalId: 'goal-decision',
       taskId: 'task-decision',
       boardPostId: 'post-decision',
       commentId: 'comment-decision',
@@ -443,7 +438,6 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-trace-route-link')]
     expect(links.map(link => link.textContent)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',
@@ -468,7 +462,6 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     })
     expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',

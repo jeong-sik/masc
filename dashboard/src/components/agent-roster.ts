@@ -395,14 +395,6 @@ function fleetRuntimeVitals(
     vitals.push({ k: 'turns', v: String(turns) })
   }
 
-  const openTasks = keeper.goal_progress?.open_task_count
-  const doneTasks = keeper.goal_progress?.done_task_count
-  if (typeof openTasks === 'number' || typeof doneTasks === 'number') {
-    const open = typeof openTasks === 'number' ? openTasks : 0
-    const done = typeof doneTasks === 'number' ? doneTasks : 0
-    vitals.push({ k: 'tasks', v: `${open} / ${done}` })
-  }
-
   if (contextDetail) vitals.push({ k: 'context', v: contextDetail })
 
   return vitals

@@ -20,7 +20,6 @@ type parsed_args =
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option
   ; mention_targets_opt : string list option
-  ; active_goal_ids_opt : string list option
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
   ; proactive_enabled_opt : bool option

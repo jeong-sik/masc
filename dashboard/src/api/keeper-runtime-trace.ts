@@ -146,13 +146,9 @@ export interface KeeperRuntimeLensClaimScopeAxis {
   result: string | null
   mode: string | null
   scoped: boolean | null
-  active_goal_ids: string[]
-  effective_goal_ids: string[]
   fallback_reason: string | null
-  matched_goal_id: string | null
   excluded_count: number | null
   claimed_task_id: string | null
-  claimed_goal_id: string | null
 }
 
 export interface KeeperRuntimeLensConfigDriftAxis {
@@ -632,13 +628,9 @@ function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimSco
     result: nullableStringField(obj, 'result'),
     mode: nullableStringField(obj, 'mode'),
     scoped: nullableBooleanField(obj, 'scoped'),
-    active_goal_ids: stringListField(obj, 'active_goal_ids'),
-    effective_goal_ids: stringListField(obj, 'effective_goal_ids'),
     fallback_reason: nullableStringField(obj, 'fallback_reason'),
-    matched_goal_id: nullableStringField(obj, 'matched_goal_id'),
     excluded_count: nullableNumberField(obj, 'excluded_count'),
     claimed_task_id: nullableStringField(obj, 'claimed_task_id'),
-    claimed_goal_id: nullableStringField(obj, 'claimed_goal_id'),
   }
 }
 

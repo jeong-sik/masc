@@ -41,7 +41,7 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
   | Oas_event    -> Some (Filename.concat masc_root "oas-events")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
-  | Keeper_metric | Trajectory_tool_call | Execution_receipt | Goal_event ->
+  | Keeper_metric | Trajectory_tool_call | Execution_receipt ->
       None
     (* handled separately *)
 
@@ -55,7 +55,6 @@ let source_freshness_slo_s = function
   (* Tool_usage covers non-public registered calls, which are sparse by
      design. Match the SSOT in tool_usage_log.ml. *)
   | Tool_usage -> Masc_time_constants.hour
-  | Goal_event -> Masc_time_constants.days_to_seconds 7
   | Tool_metric -> 900.0
 
 let source_producer = function
@@ -66,7 +65,6 @@ let source_producer = function
   | Tool_usage -> "tool_usage_log"
   | Oas_event -> "oas_event_bus"
   | Execution_receipt -> "keeper_agent_run.execution_receipt"
-  | Goal_event -> "goal_fsm"
   | Tool_metric -> "tool_metrics_persist"
 
 let source_dashboard_surface = function
@@ -77,14 +75,12 @@ let source_dashboard_surface = function
   | Tool_usage -> "/api/v1/dashboard/tools"
   | Oas_event -> "/api/v1/dashboard/telemetry"
   | Execution_receipt -> "/api/v1/dashboard/execution-trust"
-  | Goal_event -> "/api/v1/dashboard/goals"
   | Tool_metric -> "/api/v1/tool-metrics"
 
 let source_durable_store ~masc_root ~base_path = function
   | Keeper_metric -> Filename.concat masc_root "keepers/*/metrics"
   | Trajectory_tool_call -> Filename.concat masc_root "trajectories/*/*.jsonl"
   | Execution_receipt -> Filename.concat masc_root "keepers/*/execution-receipts"
-  | Goal_event -> Filename.concat masc_root "goal_events.jsonl"
   | source -> (
       match fixed_store_dir ~masc_root ~base_path source with
       | Some dir -> dir

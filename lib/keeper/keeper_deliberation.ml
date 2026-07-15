@@ -14,7 +14,6 @@ type deliberation_trigger =
   | NewUnclaimedTask
   | FailedTask
   | KeeperFiberStartedOrStopped
-  | GoalDeadline
   | BoardActivity of string
   | IdleTimeout
   | MetricsAnomaly of string
@@ -26,7 +25,6 @@ let deliberation_trigger_to_string = function
   | NewUnclaimedTask -> "new_unclaimed_task"
   | FailedTask -> "failed_task"
   | KeeperFiberStartedOrStopped -> "keeper_fiber_started_or_stopped"
-  | GoalDeadline -> "goal_deadline"
   | BoardActivity detail -> "board_activity:" ^ detail
   | IdleTimeout -> "idle_timeout"
   | MetricsAnomaly detail -> "metrics_anomaly:" ^ detail
@@ -144,7 +142,6 @@ type world_observation = {
   failed_task_count: int;
   running_keeper_fiber_count: int;
   keeper_fiber_count_changed: bool;
-  active_goal_count: int;
   idle_seconds: int;
   board_new_post_count: int;
   board_mention_count: int;
@@ -160,7 +157,6 @@ let empty_world_observation ~keeper_name =
     failed_task_count = 0;
     running_keeper_fiber_count = 0;
     keeper_fiber_count_changed = false;
-    active_goal_count = 0;
     idle_seconds = 0;
     board_new_post_count = 0;
     board_mention_count = 0;
@@ -177,7 +173,6 @@ let world_observation_to_json (obs : world_observation) : Yojson.Safe.t =
       ("failed_task_count", `Int obs.failed_task_count);
       ("running_keeper_fiber_count", `Int obs.running_keeper_fiber_count);
       ("keeper_fiber_count_changed", `Bool obs.keeper_fiber_count_changed);
-      ("active_goal_count", `Int obs.active_goal_count);
       ("idle_seconds", `Int obs.idle_seconds);
       ("board_new_post_count", `Int obs.board_new_post_count);
       ("board_mention_count", `Int obs.board_mention_count);
@@ -281,7 +276,6 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     \  - Failed tasks: %d\n\
     \  - Running keeper fibers: %d\n\
     \  - Keeper fiber count changed: %b\n\
-    \  - Active goals: %d\n\
     \  - Idle seconds: %d\n\
     \  - Board new posts: %d\n\
     \  - Board mentions: %d\n\
@@ -291,7 +285,6 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     obs.failed_task_count
     obs.running_keeper_fiber_count
     obs.keeper_fiber_count_changed
-    obs.active_goal_count
     obs.idle_seconds
     obs.board_new_post_count
     obs.board_mention_count

@@ -263,9 +263,6 @@ lib/keeper_catchup_digest.ml,179,None,unclassified
 lib/keeper_catchup_digest.ml,299,None,unclassified
 lib/keeper_contract/keeper_accountability_claim_types.ml,37,None,unclassified
 lib/keeper_contract/keeper_accountability_claim_types.ml,54,None,unclassified
-lib/keeper_contract/keeper_approval_queue_rules_types.ml,82,None,unclassified
-lib/keeper_contract/keeper_approval_queue_rules_types.ml,101,None,unclassified
-lib/keeper_contract/keeper_approval_queue_rules_types.ml,108,None,unclassified
 lib/keeper_contract/keeper_transition_audit_types.ml,73,None,unclassified
 lib/keeper_contract/keeper_transition_audit_types.ml,127,None,unclassified
 lib/keeper_contract/keeper_world_observation_turn_types.ml,136,None,unclassified
@@ -311,7 +308,6 @@ lib/keeper/keeper_accountability_types_codec.ml,247,None,unclassified
 lib/keeper/keeper_accountability_types_codec.ml,278,None,unclassified
 lib/keeper/keeper_agent_run_turn_helpers.ml,130,None,unclassified
 lib/keeper/keeper_agent_tool_surface.ml,31,None,unclassified
-lib/keeper/keeper_approval_queue_rules.ml,98,None,unclassified
 lib/keeper/keeper_approval_queue.ml,837,None,unclassified
 lib/keeper/keeper_binding_health.ml,231,None,unclassified
 lib/keeper/keeper_binding_health.ml,242,(),unclassified
@@ -976,7 +972,6 @@ lib/worker_execution_backend/worker_execution_backend.ml,13,None,unclassified
 lib/worker_execution_spec/worker_execution_spec.ml,33,None,unclassified
 lib/worker_runtime_helper_protocol.ml,24,None,unclassified
 lib/workspace_assertions.ml,44,None,unclassified
-lib/workspace_goals.ml,433,false,unclassified
 lib/workspace/event_kind.ml,37,None,unclassified
 lib/workspace/event_kind.ml,56,None,unclassified
 lib/workspace/event_kind.ml,79,None,unclassified

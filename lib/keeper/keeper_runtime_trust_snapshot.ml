@@ -230,7 +230,6 @@ let terminal_reason_timeline_event ~latest_decision ~latest_receipt =
              (match json_string_opt_member "task_id" source_json with
               | Some _ as value -> value
               | None -> json_string_opt_member "current_task_id" source_json)
-           ~goal_ids:(goal_ids_of_json source_json)
            ?next_human_action:reason.next_action
            ~ts_unix ~kind:"terminal_reason"
            ~title:"Terminal Reason"
@@ -452,12 +451,6 @@ let pending_first_json pending_approvals =
 
 let approval_state_json ~pending_approval_count ~pending_approvals
     ~latest_approval_audit =
-  let latest_rule_match =
-    Option.bind latest_approval_audit (fun json ->
-        match json_member "rule_match" json with
-        | `Assoc _ as rule_match -> Some rule_match
-        | _ -> None)
-  in
   let latest_event_kind =
     Option.bind latest_approval_audit (json_string_opt_member "event")
   in
@@ -482,10 +475,6 @@ let approval_state_json ~pending_approval_count ~pending_approvals
       ( "latest_event_at",
         match Option.bind latest_approval_audit (json_float_opt_member "ts") with
         | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-        | None -> `Null );
-      ( "rule_id",
-        match latest_rule_match with
-        | Some json -> json |> json_string_opt_member "rule_id" |> Json_util.string_opt_to_json
         | None -> `Null );
       ("pending_first", pending_first_json pending_approvals);
     ]
@@ -595,7 +584,6 @@ let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
          latest_receipt)
   in
   let task_id = Keeper_runtime_contract.current_task_id_opt meta in
-  let goal_ids = meta.active_goal_ids in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   [
     terminal_reason_timeline_event ~latest_decision ~latest_receipt;
@@ -604,7 +592,7 @@ let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
     Option.bind latest_tool_call tool_call_timeline_event;
     Option.bind latest_approval_audit approval_event_timeline_event;
     blocker_timeline_event ~ts_unix:observed_at_unix ~observed_at_unix
-      ~runtime_blocker_fields ?task_id ~goal_ids
+      ~runtime_blocker_fields ?task_id
       ~trace_id ~next_human_action
       ~observation_only:blocker_observation_only ();
   ]
@@ -734,7 +722,6 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   in
   let blocker_events =
     let task_id = Keeper_runtime_contract.current_task_id_opt meta in
-    let goal_ids = meta.active_goal_ids in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let observed_at_unix =
       runtime_blocker_timeline_ts ~meta ~runtime_blocker_fields latest_receipt
@@ -746,7 +733,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     in
     [
       blocker_timeline_event ~ts_unix:observed_at_unix ~observed_at_unix
-        ~runtime_blocker_fields ?task_id ~goal_ids
+        ~runtime_blocker_fields ?task_id
         ~trace_id ~next_human_action
         ~observation_only:blocker_observation_only ()
     ]
@@ -892,8 +879,6 @@ let snapshot_json_inner ~(config : Workspace.config) ~(meta : keeper_meta) =
       ("phase", runtime_phase);
       ("raw_phase", runtime_phase);
       ("current_task_id", Json_util.string_opt_to_json (Keeper_runtime_contract.current_task_id_opt meta));
-      ("goal_id", Json_util.string_opt_to_json (Keeper_runtime_contract.primary_goal_id_opt meta));
-      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
       ("active_model", Json_util.string_opt_to_json selected_model);
       ("selected_model", Json_util.string_opt_to_json selected_model);
       ("runtime_contract", runtime_contract);

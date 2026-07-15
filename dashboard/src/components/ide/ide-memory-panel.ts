@@ -16,7 +16,6 @@ interface MemoryEntry {
   readonly created_at_ms: number
   readonly source_kind?: string
   readonly retrieval_status?: string
-  readonly goal_id: string | null
   readonly task_id: string | null
 }
 
@@ -92,7 +91,6 @@ function memoryStatusLabel(status?: string): string {
 
 const LENS_NODE_TYPES: MemoryLensProps['nodeTypes'] = {
   memory: { kr: '기억', g: '◆', c: 'var(--volt)' },
-  goal: { kr: '골', g: '◎', c: 'var(--accent-ice)' },
   task: { kr: '태스크', g: '▣', c: 'var(--status-ok)' },
   board: { kr: '보드', g: '◈', c: '#8a6cf0' },
 }
@@ -112,19 +110,6 @@ function buildLensGraph(entries: ReadonlyArray<MemoryEntry>): {
       kp: entry.keeper_id || 'unknown',
       meta: entry.kind,
       ns: `${entry.file_path}:${entry.line_start}`,
-    }
-
-    if (entry.goal_id) {
-      if (!nodes[entry.goal_id]) {
-        nodes[entry.goal_id] = {
-          type: 'goal',
-          title: `Goal ${entry.goal_id}`,
-          kp: entry.keeper_id || 'unknown',
-          meta: 'linked',
-          ns: 'goal',
-        }
-      }
-      edges.push({ source: entry.id, target: entry.goal_id, rel: 'goal' })
     }
 
     if (entry.task_id) {
@@ -253,9 +238,6 @@ export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeM
                         <span class="ide-memory-panel__tag">
                           retrieval:${memoryStatusLabel(entry.retrieval_status ?? retrievalStatus)}
                         </span>
-                        ${entry.goal_id
-                          ? html`<span class="ide-memory-panel__tag">goal:${entry.goal_id}</span>`
-                          : null}
                         ${entry.task_id
                           ? html`<span class="ide-memory-panel__tag">task:${entry.task_id}</span>`
                           : null}

@@ -46,42 +46,9 @@ let test_parse_multiple_commits () =
   check int "second has 1 parent" 1 (List.length second.CI.parents);
   check string "parent sha" "abc0001" (List.hd second.CI.parents)
 
-(* --- extract_goal_ids tests --- *)
-
-let test_extract_from_subject () =
-  let ev = { CI.sha = "a"; CI.parents = []; CI.author_date = ""; CI.subject = "feat: PK-12345 new module"; CI.files = [] } in
-  let ids = CI.extract_goal_ids ev in
-  check int "1 goal id" 1 (List.length ids);
-  check string "goal id" "PK-12345" (List.hd ids)
-
-let test_extract_task_pattern () =
-  let ev = { CI.sha = "a"; CI.parents = []; CI.author_date = ""; CI.subject = "task-42 cleanup"; CI.files = [] } in
-  let ids = CI.extract_goal_ids ev in
-  check bool "contains task-42" (List.mem "task-42" ids) true
-
-let test_extract_hash_pattern () =
-  let ev = { CI.sha = "a"; CI.parents = []; CI.author_date = ""; CI.subject = "fix issue #789"; CI.files = [] } in
-  let ids = CI.extract_goal_ids ev in
-  check bool "contains #789" (List.mem "#789" ids) true
-
-let test_extract_from_files () =
-  let ev = { CI.sha = "a"; CI.parents = []; CI.author_date = ""; CI.subject = "misc"; CI.files = [ "planning/task-059/context.json"; "lib/core.ml" ] } in
-  let ids = CI.extract_goal_ids ev in
-  check bool "extracts task-059 from path" (List.mem "task-059" ids) true
-
-let test_extract_no_match () =
-  let ev = { CI.sha = "a"; CI.parents = []; CI.author_date = ""; CI.subject = "misc cleanup"; CI.files = [ "README.md" ] } in
-  let ids = CI.extract_goal_ids ev in
-  check int "no goal ids" 0 (List.length ids)
-
-let test_extract_dedup () =
-  let ev = { CI.sha = "a"; CI.parents = []; CI.author_date = ""; CI.subject = "PK-100 fix"; CI.files = [ "planning/PK-100/plan.md" ] } in
-  let ids = CI.extract_goal_ids ev in
-  check int "deduplicated" 1 (List.length ids)
-
 (* --- group_events tests --- *)
 
-let test_group_single_goal () =
+let test_group_single_window () =
   let events =
     [ { CI.sha = "a1"; CI.parents = []; CI.author_date = "2026-05-01T10:00:00Z"; CI.subject = "PK-100 start"; CI.files = [] }
     ; { CI.sha = "a2"; CI.parents = [ "a1" ]; CI.author_date = "2026-05-01T11:00:00Z"; CI.subject = "PK-100 continue"; CI.files = [] }
@@ -91,16 +58,15 @@ let test_group_single_goal () =
   let epochs = CI.group_events events in
   check int "1 epoch" 1 (List.length epochs);
   let ep = List.hd epochs in
-  check int "3 commits" 3 ep.CI.commit_count;
-  check bool "has PK-100 goal" (List.mem "PK-100" ep.CI.goal_ids) true
+  check int "3 commits" 3 ep.CI.commit_count
 
-let test_group_separate_goals () =
+let test_group_separate_windows () =
   let events =
     [ { CI.sha = "a1"; CI.parents = []; CI.author_date = "2026-05-01T10:00:00Z"; CI.subject = "PK-100 work"; CI.files = [] }
     ; { CI.sha = "b1"; CI.parents = []; CI.author_date = "2026-05-02T10:00:00Z"; CI.subject = "PK-200 work"; CI.files = [] }
     ]
   in
-  let epochs = CI.group_events events in
+  let epochs = CI.group_events ~time_window_days:0 events in
   check int "2 epochs" 2 (List.length epochs)
 
 let test_group_ungrouped_by_time () =
@@ -175,13 +141,13 @@ let test_candidate_epoch_fields () =
   let epochs = CI.group_events events in
   check int "1 epoch" 1 (List.length epochs);
   let ep = List.hd epochs in
-  check string "id" "PK-999" ep.CI.id;
+  check string "id" "2026-cluster-a1" ep.CI.id;
   check string "start_commit" "a1" ep.CI.start_commit;
   check string "end_commit" "a1" ep.CI.end_commit;
   check int "commit_count" 1 ep.CI.commit_count;
   check int "2 files" 2 (List.length ep.CI.file_paths)
 
-let test_candidate_epoch_no_goal_uses_sha () =
+let test_candidate_epoch_uses_sha () =
   let events =
     [ { CI.sha = "deadbeef1234567"; CI.parents = []; CI.author_date = "2026-03-15T10:00:00Z"; CI.subject = "random work"; CI.files = [] }
     ]
@@ -200,7 +166,6 @@ let sample_epoch : CI.candidate_epoch =
   ; end_commit = "abcdef1234569999"
   ; start_date = "2026-05-01"
   ; end_date = "2026-05-02"
-  ; goal_ids = [ "PK-999"; "task-123" ]
   ; file_paths = [ "lib/chronicle_memory.ml"; "test/test_chronicle_ingest.ml" ]
   ; commit_count = 2
   }
@@ -212,17 +177,9 @@ let () =
       test_case "single commit" `Quick test_parse_single_commit;
       test_case "multiple commits" `Quick test_parse_multiple_commits;
     ]);
-    ("extract_goal_ids", [
-      test_case "PK pattern" `Quick test_extract_from_subject;
-      test_case "task pattern" `Quick test_extract_task_pattern;
-      test_case "hash pattern" `Quick test_extract_hash_pattern;
-      test_case "from file path" `Quick test_extract_from_files;
-      test_case "no match" `Quick test_extract_no_match;
-      test_case "dedup" `Quick test_extract_dedup;
-    ]);
     ("group_events", [
-      test_case "single goal cluster" `Quick test_group_single_goal;
-      test_case "separate goals" `Quick test_group_separate_goals;
+      test_case "single time window" `Quick test_group_single_window;
+      test_case "separate time windows" `Quick test_group_separate_windows;
       test_case "ungrouped by time window" `Quick test_group_ungrouped_by_time;
       test_case "outside time window" `Quick test_group_ungrouped_outside_window;
       test_case "empty" `Quick test_group_empty;
@@ -233,6 +190,6 @@ let () =
     ]);
     ("candidate_epoch", [
       test_case "fields" `Quick test_candidate_epoch_fields;
-      test_case "no-goal uses sha" `Quick test_candidate_epoch_no_goal_uses_sha;
+      test_case "uses sha" `Quick test_candidate_epoch_uses_sha;
     ]);
   ]

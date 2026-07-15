@@ -54,7 +54,6 @@ let make_test_annotation () =
   ; keeper_id = "rondo"
   ; kind = Ide_annotation_types.Comment
   ; content = "test annotation"
-  ; goal_id = Some "goal-1"
   ; task_id = Some "task-1"
   ; references = []
   ; created_at_ms = 1700000000000L
@@ -75,7 +74,6 @@ let test_annotation_to_json_has_required_fields () =
       ; "keeper_id"
       ; "kind"
       ; "content"
-      ; "goal_id"
       ; "task_id"
       ; "references"
       ; "created_at_ms"
@@ -94,7 +92,7 @@ let test_annotation_to_json_optional_fields_null_when_none () =
       List.assoc_opt key fields |> Option.value ~default:`Null
     in
     Alcotest.check yojson "references is an empty array" (`List []) (find "references");
-    Alcotest.check yojson "goal_id is String" (`String "goal-1") (find "goal_id")
+    Alcotest.check yojson "task_id is String" (`String "task-1") (find "task_id")
   | _ -> Alcotest.fail "annotation_to_json did not produce Assoc"
 ;;
 

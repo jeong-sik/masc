@@ -827,9 +827,7 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let hangul_ga = "\234\176\128" in
   let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
-  (match Goal_store.upsert_goal config ~title () with
-   | Ok _ -> ()
-   | Error msg -> fail msg);
+  ignore (Lib.Workspace.add_task config ~title ~priority:1 ~description:"");
   let json = Server_dashboard_http.dashboard_planning_http_json ~config in
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
@@ -1631,7 +1629,7 @@ let assoc_has key = function
   | `Assoc fields -> List.mem_assoc key fields
   | _ -> false
 
-let test_dashboard_bootstrap_omits_eager_goal_tree () =
+let test_dashboard_bootstrap_uses_task_only_planning () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
   let clock = Eio.Stdenv.clock env in
@@ -1644,9 +1642,9 @@ let test_dashboard_bootstrap_omits_eager_goal_tree () =
     (assoc_has "planning" json);
   Alcotest.(check bool) "bootstrap includes namespace truth" true
     (assoc_has "namespace_truth" json);
-  Alcotest.(check bool) "bootstrap includes goal-loop status" true
+  Alcotest.(check bool) "bootstrap omits retired goal-loop status" false
     (assoc_has "goal_loop_status" json);
-  Alcotest.(check bool) "bootstrap omits eager goal tree" false
+  Alcotest.(check bool) "bootstrap omits retired goal tree" false
     (assoc_has "goals" json)
 
 (* Freeze guard: /api/v1/dashboard/telemetry must never default to an
@@ -1851,8 +1849,8 @@ let () =
             test_dashboard_proof_route_registered_in_http_routers;
           test_case "IDE snapshot exposes legacy partition metadata" `Quick
             test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata;
-          test_case "bootstrap omits eager goal tree" `Quick
-            test_dashboard_bootstrap_omits_eager_goal_tree;
+          test_case "bootstrap uses task-only planning" `Quick
+            test_dashboard_bootstrap_uses_task_only_planning;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "shell auth canonicalizes token owner" `Quick

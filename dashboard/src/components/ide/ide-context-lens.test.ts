@@ -17,8 +17,8 @@ const annotation: IdeAnnotation = {
   line_end: 14,
   keeper_id: 'sangsu',
   kind: 'Comment',
-  content: 'Wire goal and task progress into the code line.',
-  goal_id: 'goal-ide',
+  content: 'Wire task progress into the code line.',
+
   task_id: 'task-42',
   references: [],
   created_at_ms: 1,
@@ -39,13 +39,13 @@ const events: ReadonlyArray<RunActivityEvent> = [
     target: 'board:post-1',
     detail: 'reviewed git diff and task status',
     kind: 'board.comment.created',
-    tags: ['pr:15000', 'goal:goal-ide'],
+    tags: ['pr:15000'],
     timestamp_ms: 100,
     // Structured surface classification (#20513 replaced regex/tag/text
-    // parsing with event.context for surface counts). Drives goal/task/
-    // board/pr/git surfaces; comment stays sourced from the annotation.
+    // parsing with event.context for surface counts). Drives task/board/PR/Git
+    // surfaces; comment stays sourced from the annotation.
     context: {
-      goal_id: 'goal-ide',
+
       task_id: 'task-42',
       board_post_id: 'post-1',
       pr_id: '15000',
@@ -109,7 +109,6 @@ describe('IdeContextLens', () => {
       'lsp',
       'line',
       'keeper',
-      'goal',
       'task',
       'board',
       'git',
@@ -176,16 +175,14 @@ describe('IdeContextLens', () => {
 
     expect(container.querySelector('[data-testid="ide-context-lens"]')).not.toBeNull()
     expect(container.textContent).toContain('CONTEXT LENS')
-    expect(container.textContent).toContain('11/12 linked')
+    expect(container.textContent).toContain('10/11 linked')
     expect(container.textContent).toContain('keeper_tool_ide_runtime.ml')
     expect(container.textContent).toContain('4 anchors')
-    expect(container.textContent).toContain('goal goal-ide')
 
     const surfaceButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-surface-action')]
     expect(surfaceButtons.map(button => button.textContent)).toEqual([
       'Line1',
       'Keeper1',
-      'Goal2',
       'Task2',
       'Board1',
       'Git3',
@@ -328,7 +325,7 @@ describe('IdeContextLens', () => {
         context: {
           file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 27,
-          goal_id: 'goal-ide',
+
           task_id: 'task-42',
           pr_id: '15000',
           board_post_id: 'post-1',
@@ -353,7 +350,7 @@ describe('IdeContextLens', () => {
     ])
     expect(model.anchors[1]?.route_links?.map(link => link.label)).toContain('PR')
     expect(model.anchors[2]?.surface).toBe('Git')
-    expect(model.anchors[3]?.route_links?.map(link => link.label)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
+    expect(model.anchors[3]?.route_links?.map(link => link.label)).toEqual(['Code', 'Task', 'Keeper'])
   })
 
   it('publishes focused file and line when an anchor is clicked', () => {
@@ -492,7 +489,7 @@ describe('IdeContextLens', () => {
     expect(focus?.line).toBeUndefined()
   })
 
-  it('renders operational route links for linked goal, task, and keeper context', () => {
+  it('renders operational route links for linked task and keeper context', () => {
     const activated: unknown[] = []
     const container = document.createElement('div')
 
@@ -509,14 +506,14 @@ describe('IdeContextLens', () => {
     )
 
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-route-link')]
-    expect(container.querySelector('.ide-context-route-count')?.textContent).toBe('CTX 4')
-    expect(links.map(link => link.textContent)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
+    expect(container.querySelector('.ide-context-route-count')?.textContent).toBe('CTX 3')
+    expect(links.map(link => link.textContent)).toEqual(['Code', 'Task', 'Keeper'])
 
-    fireEvent.click(links.find(link => link.textContent === 'Goal')!)
+    fireEvent.click(links.find(link => link.textContent === 'Task')!)
     expect(activated[0]).toMatchObject({
-      id: 'goal:goal-ide',
+      id: 'task:task-42',
       tab: 'workspace',
-      params: { section: 'planning', goal: 'goal-ide' },
+      params: { section: 'planning', task: 'task-42' },
     })
   })
 
@@ -550,7 +547,6 @@ describe('IdeContextLens', () => {
     expect(model.anchors[0]?.meta).toContain('source opaque-context')
     expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Keeper',
     ])
@@ -588,8 +584,7 @@ describe('IdeContextLens', () => {
     expect(routeLinksForContext({
       filePath: '/tmp/runtime.ml',
       line: 42,
-      goalId: 'goal-ide',
-    }).map(link => link.label)).toEqual(['Goal'])
+    }).map(link => link.label)).toEqual([])
   })
 
   it('links conversation threads into board, comment, keeper, and line context', () => {
@@ -614,7 +609,7 @@ describe('IdeContextLens', () => {
     })
   })
 
-  it('uses structured activity context as file, line, PR, task, goal, log, and git evidence', () => {
+  it('uses structured activity context as file, line, PR, task, log, and git evidence', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
@@ -629,7 +624,7 @@ describe('IdeContextLens', () => {
         context: {
           file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 27,
-          goal_id: 'goal-ide',
+
           task_id: 'task-42',
           pr_id: '15000',
           board_post_id: 'post-1',
@@ -646,7 +641,6 @@ describe('IdeContextLens', () => {
 
     const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
     expect(counts.get('line')).toBe(1)
-    expect(counts.get('goal')).toBeGreaterThan(0)
     expect(counts.get('task')).toBeGreaterThan(0)
     expect(counts.get('board')).toBeGreaterThan(0)
     expect(counts.get('comment')).toBeGreaterThan(0)
@@ -660,10 +654,8 @@ describe('IdeContextLens', () => {
       line: 27,
       keeper_id: 'sangsu',
     })
-    expect(model.anchors[0]?.meta).toContain('goal goal-ide')
     expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',
@@ -739,7 +731,6 @@ describe('IdeContextLens', () => {
         target: 'PR #15000',
         timestamp_ms: 400,
         detail: [
-          'goal:goal-ide',
           'task:task-42',
           'board:post-1',
           'comment:comment-1',
@@ -776,10 +767,8 @@ describe('IdeContextLens', () => {
       line: 27,
       keeper_id: 'sangsu',
     })
-    expect(model.anchors[0]?.meta).toContain('goal goal-ide')
     expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
       'Code',
-      'Goal',
       'Task',
       'Board',
       'Comment',
@@ -922,11 +911,11 @@ describe('IdeContextLens', () => {
         verb: 'noted',
         target: 'telemetry',
         timestamp_ms: 400,
-        detail: 'goal:goal-other task:task-other pr:15001 log:turn-10',
+        detail: 'task:task-other pr:15001 log:turn-10',
         context: {
           file_path: 'lib/runtime.ml',
           line: 99,
-          goal_id: 'goal-other',
+
           task_id: 'task-other',
           pr_id: '15001',
           board_post_id: 'post-other',
@@ -1011,7 +1000,7 @@ describe('IdeContextLens', () => {
         timestamp_ms: 400,
         context: {
           line: 27,
-          goal_id: 'goal-ide',
+
           log_id: 'turn-9',
         },
       }],

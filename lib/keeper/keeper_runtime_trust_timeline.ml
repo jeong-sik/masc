@@ -37,14 +37,6 @@ let assoc_json_opt key fields =
 
 let take = List.take
 
-let goal_ids_of_json json =
-  match json_string_list_member "goal_ids" json with
-  | [] -> (
-      match json_string_opt_member "goal_id" json with
-      | Some goal_id -> [ goal_id ]
-      | None -> [])
-  | goal_ids -> goal_ids
-
 let keeper_turn_id_of_json json =
   match json_int_opt_member "keeper_turn_id" json with
   | Some _ as value -> value
@@ -53,7 +45,7 @@ let keeper_turn_id_of_json json =
       | Some _ as value -> value
       | None -> json_int_opt_member "turn" json)
 
-let timeline_event_json ?trace_id ?keeper_turn_id ?task_id ?(goal_ids = [])
+let timeline_event_json ?trace_id ?keeper_turn_id ?task_id
     ?next_human_action ?observed_at_unix ?(observation_only = false)
     ~ts_unix ~kind ~title ~summary ~severity () =
   let observed_at_unix = Option.value ~default:ts_unix observed_at_unix in
@@ -68,7 +60,6 @@ let timeline_event_json ?trace_id ?keeper_turn_id ?task_id ?(goal_ids = [])
       ("trace_id", Json_util.string_opt_to_json trace_id);
       ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
       ("task_id", Json_util.string_opt_to_json task_id);
-      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
       ("title", `String title);
       ("summary", `String summary);
       ("severity", `String severity);
@@ -82,15 +73,15 @@ let severity_of_decision = function
 
 let severity_of_tool_call success = if success then "ok" else "bad"
 
-let severity_of_approval_event event decision =
+let severity_of_approval_event event decision_kind =
   match event with
   | "pending" -> "warn"
   | "expired" | "approval_timeout" | "cancelled" -> "bad"
   | "resolved" -> (
-      match decision with
-      | Some raw when String_util.contains_substring_ci raw "reject" -> "bad"
+      match decision_kind with
+      | Some "reject" -> "bad"
       | _ -> "ok")
-  | "auto_approved_rule_match" | "auto_approved_always" | "rule_created" -> "ok"
+  | "auto_approved_always" -> "ok"
   | _ -> "warn"
 
 let tool_call_timeline_event json =
@@ -117,7 +108,6 @@ let tool_call_timeline_event json =
            ?trace_id:(json_string_opt_member "trace_id" json)
            ?keeper_turn_id:(keeper_turn_id_of_json json)
            ?task_id:(json_string_opt_member "task_id" json)
-           ~goal_ids:(goal_ids_of_json json)
            ~ts_unix ~kind:"tool_call"
            ~title:(Printf.sprintf "Tool · %s" tool_name)
            ~summary ~severity:(severity_of_tool_call success) ())
@@ -164,6 +154,7 @@ let approval_event_timeline_event json =
         | _ -> text
       in
       let decision = json_string_opt_member "decision" json in
+      let decision_kind = json_string_opt_member "decision_kind" json in
       let kind, title, summary, next_human_action =
         match event with
         | "pending" ->
@@ -202,20 +193,10 @@ let approval_event_timeline_event json =
               Printf.sprintf "Approval · %s" tool_name,
               approval_summary summary,
               Some "retry_or_rerun" )
-        | "auto_approved_rule_match" ->
-            ( "approval_rule_match",
-              Printf.sprintf "Approval Rule · %s" tool_name,
-              approval_summary "allowed by an exact Always Allowed rule",
-              None )
         | "auto_approved_always" ->
             ( "approval_always_flag",
               Printf.sprintf "Approval Always · %s" tool_name,
               approval_summary "allowed by keeper always_allow flag",
-              None )
-        | "rule_created" ->
-            ( "approval_rule_created",
-              Printf.sprintf "Approval Rule · %s" tool_name,
-              approval_summary "persistent approval rule recorded",
               None )
         | other ->
             ( "approval_event",
@@ -227,10 +208,9 @@ let approval_event_timeline_event json =
         (timeline_event_json
            ?keeper_turn_id:(keeper_turn_id_of_json json)
            ?task_id:(json_string_opt_member "task_id" json)
-           ~goal_ids:(goal_ids_of_json json)
            ?next_human_action
            ~ts_unix ~kind ~title ~summary
-           ~severity:(severity_of_approval_event event decision) ())
+           ~severity:(severity_of_approval_event event decision_kind) ())
   | _ -> None
 
 let decision_timeline_event json =
@@ -342,7 +322,6 @@ let receipt_timeline_event receipt =
              ?trace_id:(json_string_opt_member "trace_id" receipt)
              ?keeper_turn_id:(json_int_opt_member "turn_count" receipt)
              ?task_id:(json_string_opt_member "current_task_id" receipt)
-             ~goal_ids:(goal_ids_of_json receipt)
              ~ts_unix ~kind:"execution_receipt"
              ~title:"Execution Receipt"
              ~summary:
@@ -350,7 +329,7 @@ let receipt_timeline_event receipt =
                   outcome completion_contract_result runtime_outcome)
              ~severity ())
 
-let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
+let blocker_timeline_event ?task_id ?trace_id
     ?observed_at_unix ~ts_unix ~runtime_blocker_fields
     ~next_human_action ?(observation_only = true) () =
   let blocker_class = assoc_string_opt "runtime_blocker_class" runtime_blocker_fields in
@@ -362,7 +341,7 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
   | Some blocker_class, Some summary
     when String.trim summary <> "" ->
       Some
-        (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
+        (timeline_event_json ?trace_id ?task_id ?next_human_action
            ?observed_at_unix ~observation_only
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"
@@ -375,14 +354,14 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
   | None, Some summary
     when String.trim summary <> "" ->
       Some
-        (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
+        (timeline_event_json ?trace_id ?task_id ?next_human_action
            ?observed_at_unix ~observation_only
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"
            ~summary ~severity:"warn" ())
   | Some blocker_class, None ->
       Some
-        (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
+        (timeline_event_json ?trace_id ?task_id ?next_human_action
            ?observed_at_unix ~observation_only
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"

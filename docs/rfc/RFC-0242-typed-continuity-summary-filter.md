@@ -16,6 +16,6 @@ implementation_prs: []
 The draft correctly rejected filtering rendered prose, but retained a second
 continuity record as a proposed authority. That authority is now removed.
 
-Goal/Task, Board, HITL, Connector, Scheduler, Fusion, memory, and Keeper
+Task, Board, HITL, Connector, Scheduler, Fusion, memory, and Keeper
 lifecycle each retain their typed owner. Transcript summaries are context only.
 See [`KEEPER-STATE-OWNERSHIP.md`](../KEEPER-STATE-OWNERSHIP.md).

@@ -67,8 +67,6 @@ scan "shell HOME-anchored .masc fallback" \
   scripts/ start-masc.sh .githooks/ 2>/dev/null
 
 # 3. Python: Path(...).expanduser() on script base_path arguments.
-#    goal_loop_live_replay.py is intentionally permitted (already guards
-#    None / whitespace explicitly).
 scan "python expanduser on base_path arg" \
   'args\.base_path[^)]*expanduser' \
   scripts/

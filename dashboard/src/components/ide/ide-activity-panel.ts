@@ -9,13 +9,6 @@ import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import { KeeperBadge } from '../keeper-badge'
-import type { Goal, Task } from '../../types'
-import { goals, tasks } from '../../store'
-import {
-  formatProgressPct,
-  goalPhaseLabel,
-  type GoalProgress,
-} from '../goals/goal-helpers'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
@@ -104,7 +97,6 @@ interface ProgressSurfaceSpec {
 }
 
 const PROGRESS_SURFACES: ReadonlyArray<ProgressSurfaceSpec> = [
-  { key: 'goal_id', label: 'Goal' },
   { key: 'task_id', label: 'Task' },
   { key: 'board_post_id', label: 'Board' },
   { key: 'comment_id', label: 'Comment' },
@@ -131,7 +123,6 @@ export interface IdeRunProgressSummary {
   readonly latestAgeLabel: string
   readonly surfaceCounts: ReadonlyArray<IdeRunProgressSurfaceCount>
   readonly keeperCounts: ReadonlyArray<IdeRunProgressKeeperCount>
-  readonly activeGoal: IdeRunProgressGoal | null
 }
 
 export interface IdeRunProgressSurfaceCount {
@@ -144,15 +135,6 @@ export interface IdeRunProgressKeeperCount {
   readonly keeper_id: string
   readonly count: number
   readonly routeLink: IdeContextRouteLink | null
-}
-
-export interface IdeRunProgressGoal {
-  readonly goalId: string
-  readonly taskId: string | null
-  readonly title: string
-  readonly phase: string
-  readonly progress: GoalProgress
-  readonly progressLabel: string
 }
 
 export interface IdeActivityPanelProps {
@@ -370,8 +352,6 @@ function mergeContextRecord(
     ?? positiveInteger(record.line_start)
     ?? positiveInteger(record.lineno)
   if (line !== undefined && (overwrite || next.line === undefined)) next.line = line
-  const goalId = stringValue(record.goal_id)
-  if (goalId && (overwrite || next.goal_id === undefined)) next.goal_id = goalId
   const taskId = stringValue(record.task_id)
   if (taskId && (overwrite || next.task_id === undefined)) next.task_id = taskId
   const boardPostId = stringValue(record.board_post_id) ?? stringValue(record.post_id)
@@ -421,8 +401,7 @@ function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void 
     if (isPositiveSafeInteger(line)) next.line = line
     return
   }
-  if (key === 'goal') next.goal_id = value
-  else if (key === 'task') next.task_id = value
+  if (key === 'task') next.task_id = value
   else if (key === 'board' || key === 'post') next.board_post_id = value
   else if (key === 'comment' || key === 'reply') next.comment_id = value
   else if (key === 'pr' || key === 'pull_request' || key === 'review') next.pr_id = value
@@ -547,7 +526,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const diagnostics = activeFilePath === null
     ? EMPTY_DIAGNOSTICS
     : lspDiagnosticSnapshot.value.get(activeFilePath) ?? EMPTY_DIAGNOSTICS
-  const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value)
+  const progress = deriveIdeRunProgressSummary(events, activeFile)
 
   useEffect(() => {
     emittedTraceIds.current = bridgeRunActivityEventsToTrace(events, emittedTraceIds.current)
@@ -638,8 +617,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
 export function deriveIdeRunProgressSummary(
   events: ReadonlyArray<RunActivityEvent>,
   activeFile: string,
-  goalList: ReadonlyArray<Goal> = goals.value,
-  taskList: ReadonlyArray<Task> = tasks.value,
 ): IdeRunProgressSummary {
   const activeFilePath = normalizeIdeContextFilePath(activeFile)
   const currentFileEvents = activeFilePath === null
@@ -696,7 +673,6 @@ export function deriveIdeRunProgressSummary(
     latestAgeLabel: latestAgeLabel(events),
     surfaceCounts,
     keeperCounts,
-    activeGoal: activeRunGoal(events, goalList, taskList),
   }
 }
 
@@ -729,7 +705,6 @@ function RunProgressStrip({ summary }: { readonly summary: IdeRunProgressSummary
         <span role="listitem"><strong>${summary.keeperTotalCount}</strong> keepers</span>
         <span role="listitem">${summary.latestAgeLabel}</span>
       </div>
-      ${summary.activeGoal ? RunProgressGoalTrack(summary.activeGoal) : null}
       <div class="ide-run-progress-surfaces" role="list" aria-label="Linked operational surfaces">
         ${summary.surfaceCounts.map(surface => RunProgressSurfaceChip(surface))}
       </div>
@@ -795,109 +770,6 @@ function RunProgressSurfaceChip(surface: IdeRunProgressSurfaceCount) {
   `
 }
 
-function RunProgressGoalTrack(goal: IdeRunProgressGoal) {
-  const percent = Math.round(goal.progress.ratio * 100)
-  const links = routeLinksForContext({
-    goalId: goal.goalId,
-    taskId: goal.taskId ?? undefined,
-  })
-  return html`
-    <div
-      class="ide-run-progress-goal"
-      role="status"
-      aria-label=${`Run goal ${goal.goalId} progress ${goal.progressLabel}`}
-    >
-      <div class="ide-run-progress-goal-top">
-        <span>GOAL TRACK</span>
-        <span>${goal.phase}</span>
-      </div>
-      <strong title=${goal.title}>${goal.title}</strong>
-      <div class="ide-run-progress-goal-bar" aria-hidden="true">
-        <span style=${{ width: `${percent}%` }} />
-      </div>
-      <div class="ide-run-progress-goal-meta">
-        <span>${goal.progress.done}/${goal.progress.total} tasks</span>
-        <span>${goal.progressLabel}</span>
-        <span title=${goal.goalId}>${goal.goalId}</span>
-      </div>
-      ${links.length > 0
-        ? html`
-          <div class="ide-run-progress-goal-links" aria-label="Run goal planning links">
-            ${links.map(link => html`
-              <button
-                key=${link.id}
-                type="button"
-                class="v2-ide-action"
-                title=${link.evidence}
-                onClick=${() => openIdeContextRouteLink(link)}
-              >${link.label}</button>
-            `)}
-          </div>
-        `
-        : null}
-    </div>
-  `
-}
-
-function activeRunGoal(
-  events: ReadonlyArray<RunActivityEvent>,
-  goalList: ReadonlyArray<Goal>,
-  taskList: ReadonlyArray<Task>,
-): IdeRunProgressGoal | null {
-  const tasksById = new Map(taskList.map(task => [task.id, task]))
-  const goalHits = new Map<string, { count: number; latestMs: number; taskId: string | null }>()
-
-  for (const event of events) {
-    const taskId = cleanContextId(event.context?.task_id)
-    const taskGoalId = taskId ? cleanContextId(tasksById.get(taskId)?.goal_id) : null
-    const goalId = cleanContextId(event.context?.goal_id) ?? taskGoalId
-    if (!goalId) continue
-    const current = goalHits.get(goalId) ?? { count: 0, latestMs: Number.NEGATIVE_INFINITY, taskId: null }
-    goalHits.set(goalId, {
-      count: current.count + 1,
-      latestMs: Math.max(current.latestMs, event.timestamp_ms),
-      taskId: current.taskId ?? taskId,
-    })
-  }
-
-  const [goalId, hit] = [...goalHits.entries()]
-    .sort((left, right) =>
-      right[1].count - left[1].count
-      || right[1].latestMs - left[1].latestMs
-      || left[0].localeCompare(right[0]),
-    )[0] ?? []
-  if (!goalId || !hit) return null
-
-  const goal = goalList.find(candidate => candidate.id === goalId) ?? null
-  const progress = runGoalProgress(goalId, taskList)
-  return {
-    goalId,
-    taskId: hit.taskId,
-    title: goal?.title ?? goalId,
-    phase: goal ? goalPhaseLabel(goal.phase) : 'unknown',
-    progress,
-    progressLabel: formatProgressPct(progress),
-  }
-}
-
-function runGoalProgress(goalId: string, taskList: ReadonlyArray<Task>): GoalProgress {
-  const relevantTasks = taskList.filter(task =>
-    task.goal_id === goalId && task.status !== 'cancelled',
-  )
-  const done = relevantTasks.filter(task => task.status === 'done').length
-  const total = relevantTasks.length
-  return {
-    done,
-    total,
-    ratio: total > 0 ? done / total : 0,
-  }
-}
-
-function cleanContextId(value: string | null | undefined): string | null {
-  const trimmed = value?.trim()
-  return trimmed ? trimmed : null
-}
-
 function latestAgeLabel(events: ReadonlyArray<RunActivityEvent>): string {
   const latest = events[0]
   if (!latest) return 'idle'
@@ -960,7 +832,6 @@ function activityRouteContext(item: RunActivityEvent): IdeContextRouteContext {
     surface: activityContextSurface(item),
     label: item.detail ?? `${item.verb} ${item.target}`,
     sourceId: item.id,
-    goalId: item.context?.goal_id,
     taskId: item.context?.task_id,
     boardPostId: item.context?.board_post_id,
     commentId: item.context?.comment_id,
@@ -1129,7 +1000,6 @@ function ActivityRouteCount({ count }: { count: number }) {
 function activityContextSurface(item: RunActivityEvent): string {
   if (item.context?.pr_id) return 'PR'
   if (item.context?.board_post_id) return 'Board'
-  if (item.context?.goal_id) return 'Goal'
   if (item.context?.task_id) return 'Task'
   if (item.context?.git_ref) return 'Git'
   if (item.context?.log_id) return 'Log'

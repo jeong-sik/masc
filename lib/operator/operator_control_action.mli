@@ -103,7 +103,7 @@ val action_request_of_args :
 val normalize_request_target_type :
   action_request -> (action_request, string) result
 (** [normalize_request_target_type r] returns [r] with [target_type]
-    validated against the allowed set ([workspace] / [keeper] / [goal] / [""]).
+    validated against the allowed set ([workspace] / [keeper] / [""]).
     Empty [target_type] is replaced by the action-type default.
     Invalid inputs return the canonical operator-target validation error. *)
 

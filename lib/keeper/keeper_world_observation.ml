@@ -27,7 +27,6 @@ type pending_board_event_kind =
   | Schedule_due
   | External_attention
   | Failure_judgment
-  | Goal_assigned
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -76,7 +75,6 @@ type world_observation =
   { pending_messages : Keeper_world_observation_message_scope.pending_message list
   ; pending_board_events : pending_board_event list
   ; idle_seconds : int
-  ; active_goals : string list
   ; unclaimed_task_count : int
   ; claimable_task_count : int
   ; failed_task_count : int
@@ -634,41 +632,6 @@ let apply_failure_judgment_guidance
          events)
 ;;
 
-(* RFC-0315 P3 W0: surface a fresh goal assignment as actionable turn input.
-   Author is the assigning actor (tool caller or "toml_reconcile"); the event
-   records the assignment context and the keeper decides what to do with it. *)
-let pending_board_event_of_goal_assignment
-      ~meta:(_ : keeper_meta)
-      ~(arrived_at : float)
-      (ga : Keeper_event_queue.goal_assignment)
-  : pending_board_event
-  =
-  let author = ga.ga_assigned_by in
-  { event_kind = Goal_assigned
-  ; post_id = Keeper_event_queue.goal_assignment_post_id ga
-  ; author
-  ; title = Printf.sprintf "Goal assigned: %s" ga.ga_goal_title
-  ; preview =
-      short_preview
-        ~max_len:fusion_result_preview_max_len
-        (Printf.sprintf
-           "Goal %s is now in your active goals (assigned by %s). Review it \
-            in Active Goals and either break it into a claimable task or \
-            post your plan."
-           ga.ga_goal_id
-           ga.ga_assigned_by)
-  ; hearth = None
-  ; post_kind = Board.System_post
-  ; updated_at = arrived_at
-  ; explicit_mention = false
-  ; matched_targets = []
-  ; self_commented = false
-  ; new_external_since = 1
-  ; latest_external_author = Some ga.ga_assigned_by
-  ; latest_external_preview = None
-  }
-;;
-
 let pending_board_event_of_stimulus
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
@@ -703,12 +666,6 @@ let pending_board_event_of_stimulus
          sw)
   | Keeper_event_queue.Failure_judgment fj ->
     Some (pending_board_event_of_failure_judgment ~meta ~arrived_at:stimulus.arrived_at fj)
-  | Keeper_event_queue.Goal_assigned ga ->
-    Some
-      (pending_board_event_of_goal_assignment
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         ga)
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _ ->
@@ -827,7 +784,7 @@ let collect_board_events_with_cursor_policy
              consume_posts (Some next_cursor) acc rest)
            else
              consume_posts
-               
+
                (Some next_cursor)
                ({ event_kind = Board_post_created
                 ; post_id
@@ -860,7 +817,7 @@ let collect_board_events_with_cursor_policy
              in
              let matched = board_signal_match ~meta ~signal in
              consume_posts
-               
+
                (Some next_cursor)
                ({ event_kind = Board_post_created
                 ; post_id
@@ -1009,7 +966,6 @@ let observe
   { pending_messages
   ; pending_board_events
   ; idle_seconds
-  ; active_goals = meta.active_goal_ids
   ; unclaimed_task_count
   ; claimable_task_count
   ; failed_task_count
@@ -1042,7 +998,6 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   { pending_messages = []
   ; pending_board_events = []
   ; idle_seconds = compute_idle_seconds ~meta
-  ; active_goals = meta.active_goal_ids
   ; unclaimed_task_count
   ; claimable_task_count
   ; failed_task_count

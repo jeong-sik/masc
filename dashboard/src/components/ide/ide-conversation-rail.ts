@@ -333,7 +333,7 @@ function normalizePostAnchorFilePath(rawFilePath: string): string | null {
 }
 
 function symbolHintFromText(text: string): string | undefined {
-  const match = text.match(/\b(fn|token|if|goal|task|pr):([A-Za-z0-9_./-]+)/)
+  const match = text.match(/\b(fn|token|if|task|pr):([A-Za-z0-9_./-]+)/)
   if (!match) return undefined
   return `${match[1]}:${match[2]}`
 }
@@ -489,7 +489,6 @@ function conversationRouteLinks(
     surface: KIND_LABEL[kind],
     label: bodyText || post.title || 'board thread',
     sourceId: `thread-${post.id}`,
-    goalId: refs.goalId,
     taskId: refs.taskId,
     boardPostId: post.id,
     commentId: refs.commentId,

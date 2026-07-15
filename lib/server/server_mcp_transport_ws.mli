@@ -413,7 +413,7 @@ val dashboard_ack :
 val valid_dashboard_slice : string -> bool
 (** Returns [true] for the canonical slice names
     ([shell] / [execution] / [operator] / [transport] /
-    [namespace] / [composite] / [board] / [goals]).
+    [namespace] / [composite] / [board]).
     Mirrored into {!dashboard_subscribe}'s validation. *)
 
 val client_buffer_limit_bytes : unit -> int

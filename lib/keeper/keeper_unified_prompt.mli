@@ -17,7 +17,7 @@ val format_board_event_text : Keeper_world_observation.pending_board_event -> st
     - [system_prompt] contains keeper identity, instructions, and turn intent
     - [user_message] contains reactive triggers + resource state only
 
-    @param meta Keeper metadata (identity, soul, goals, instructions)
+    @param meta Keeper metadata (identity and instructions)
     @param observation Current world snapshot *)
 val build_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -25,7 +25,6 @@ val build_prompt :
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   ?turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   ?current_task:Masc_domain.task ->
-  ?active_goal_summaries:(string * string) list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   string * string
@@ -40,6 +39,4 @@ val build_prompt :
       or drained event-queue triggers). Omitted: legacy recompute.
     - [?current_task]: renders a "Current Task" layer for the task the keeper
       holds ([meta.current_task_id] admits scheduled-autonomous turns, so the
-      turn must see the work that admitted it). Omitted: layer absent.
-    - [?active_goal_summaries]: renders goal titles next to ids in the Active
-      Goals layer. Omitted or empty: bare ids. *)
+      turn must see the work that admitted it). Omitted: layer absent. *)

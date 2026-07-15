@@ -1,5 +1,5 @@
 import type { RouteState } from './types'
-import { refreshExecution, refreshBoard, refreshFusionBoard, refreshFusionRuns, refreshGoals, refreshShell } from './store'
+import { refreshExecution, refreshBoard, refreshFusionBoard, refreshFusionRuns, refreshPlanning, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
 import { refreshOperatorWorkspaceDigest, refreshOperatorSnapshot } from './operator-store'
@@ -45,7 +45,7 @@ type RefreshTask =
   | 'observatory'
   | 'board'
   | 'fusionBoard'
-  | 'goals'
+  | 'planning'
   | 'harness'
   | 'toolQuality'
   | 'inspector'
@@ -117,15 +117,10 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       return ['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest']
     case 'workspace': {
       const section = routeState.params.section
-      // 'work' (the default section) and 'planning' are both store-backed
-      // goal/task surfaces: WorkSurfaceV2 (work) and PlanningPanel (planning)
-      // render the flat `goals` + `tasks` signals. Those signals are only
-      // populated by the `goals` (planning fetch) and `execution` refreshers.
-      // Before this branch, landing on the default Work board returned [] and
-      // left both signals empty, so the board showed 0 goals / 0 jobs even
-      // though live planning/execution data existed.
+      // Work and planning both consume the task execution snapshot. Planning
+      // also refreshes its workspace evidence projection.
       if (!section || section === 'work' || section === 'planning') {
-        return ['goals', 'execution']
+        return ['planning', 'execution']
       }
       if (section === 'board') {
         return ['board']
@@ -167,7 +162,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   observatory: () => { void refreshObservatoryPanel() },
   board: () => { void refreshBoard() },
   fusionBoard: () => { void refreshFusionBoard() },
-  goals: () => { void refreshGoals() },
+  planning: () => { void refreshPlanning() },
   harness: () => { void refreshHarnessLabSurface() },
   toolQuality: () => { void refreshToolQualityLabSurface() },
   inspector: () => {

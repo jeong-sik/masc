@@ -245,11 +245,6 @@ export function AnnotationPopover({
             keeper: <strong>${annotation.keeper_id}</strong>
           </span>
         ` : null}
-        ${annotation.goal_id ? html`
-          <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
-            goal: ${annotation.goal_id}
-          </span>
-        ` : null}
         ${annotation.task_id ? html`
           <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
             task: ${annotation.task_id}
@@ -274,7 +269,6 @@ export function annotationRouteLinks(annotation: SelectedAnnotation): ReadonlyAr
     surface: annotation.kind,
     label: annotation.content,
     sourceId: `annotation-${annotation.id}`,
-    goalId: annotation.goal_id ?? undefined,
     taskId: annotation.task_id ?? undefined,
     keeperId: annotation.keeper_id,
   })

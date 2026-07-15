@@ -786,7 +786,6 @@ let install_agent_observation_sinks () =
            ; line_end
            ; kind
            ; content
-           ; goal_id
            ; task_id
            ; references
            }
@@ -801,7 +800,6 @@ let install_agent_observation_sinks () =
           ~line_end
           ~kind:(annotation_kind_to_ide kind)
           ~content
-          ?goal_id
           ?task_id
           ~references
           ()

@@ -26,10 +26,6 @@ describe('telemetrySourceLabel', () => {
     expect(telemetrySourceLabel('oas_event')).toBe('OAS 이벤트')
   })
 
-  it('returns Korean label for goal_event', () => {
-    expect(telemetrySourceLabel('goal_event')).toBe('Goal FSM 이벤트')
-  })
-
   it('returns Korean label for tool_metric', () => {
     expect(telemetrySourceLabel('tool_metric')).toBe('Tool 성능')
   })

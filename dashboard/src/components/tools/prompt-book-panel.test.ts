@@ -37,7 +37,7 @@ const PROMPTS: DashboardPromptItem[] = [
     file_path: 'config/prompts/keeper.unified.system.md',
     effective: '{{identity_header}}\n## Where you live\n\nYou are a keeper inside MASC.',
     char_count: 120,
-    template_variables: ['identity_header', 'goal_lines'],
+    template_variables: ['identity_header', 'instructions'],
   }),
   makePrompt({
     key: 'keeper.recovery_block',

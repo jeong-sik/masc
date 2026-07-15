@@ -1255,48 +1255,6 @@ let with_temp_dir prefix f =
     (fun () -> f dir)
 ;;
 
-(* RFC-0267 Phase 2 — [masc_task_set_goal] must have a descriptor that
-   projects from the task schema registry and must actually dispatch
-   through [Task.Tool.dispatch]. The descriptor makes the tool visible
-   to the keeper surface; the dispatch check proves the runtime handler
-   wiring is not stale. *)
-let test_masc_task_set_goal_is_described_and_dispatched () =
-  let descriptor = required_internal_descriptor "masc_task_set_goal" in
-  Alcotest.(check string)
-    "masc_task_set_goal descriptor id"
-    "masc.task.set_goal"
-    descriptor.Descriptor.id;
-  Alcotest.(check string)
-    "masc_task_set_goal runtime handler"
-    "tool_masc_task_dispatch"
-    (Descriptor.runtime_handler_to_string descriptor.runtime_handler);
-  let expected_schema =
-    match
-      List.find_opt
-        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_task_set_goal")
-        Task.Schemas.schemas
-    with
-    | Some schema -> schema.input_schema
-    | None -> Alcotest.fail "missing Task.Schemas schema for masc_task_set_goal"
-  in
-  Alcotest.(check bool)
-    "masc_task_set_goal schema projected from Task.Schemas"
-    true
-    (descriptor.Descriptor.input_schema = expected_schema);
-  with_temp_dir "masc_task_set_goal_dispatch" (fun dir ->
-    let config = Workspace.default_config dir in
-    ignore (Workspace.init config ~agent_name:(Some "test-agent"));
-    let ctx : Task.Tool.context =
-      { config; agent_name = "test-agent"; sw = None }
-    in
-    let args =
-      `Assoc [ "task_id", `String "task-001"; "goal_id", `String "goal-001" ]
-    in
-    match Task.Tool.dispatch ctx ~name:"masc_task_set_goal" ~args with
-    | Some _ -> ()
-    | None -> Alcotest.fail "masc_task_set_goal dispatch returned None")
-;;
-
 (* Dispatch gap integrity: every descriptor backed by the keeper
    dispatch cluster must be reachable through [Keeper_dispatch_ref.dispatch].
    This catches the common failure mode where a descriptor is added to
@@ -1524,10 +1482,6 @@ let () =
         ] )
     ; ( "dispatch-gap"
       , [ test_case
-            "masc_task_set_goal is described and dispatched"
-            `Quick
-            test_masc_task_set_goal_is_described_and_dispatched
-        ; test_case
             "every keeper descriptor is reachable via Keeper_dispatch_ref.dispatch"
             `Quick
             test_keeper_dispatch_ref_reaches_every_keeper_descriptor

@@ -71,9 +71,7 @@ let test_no_conflict_writes_first_attempt () =
       | Ok (Some m) -> m
       | _ -> fail "disk read failed"
     in
-    (* [goal] is TOML-only, so use the persisted typed goal-id list as the
-       round-trip payload marker. *)
-    let m1 = { disk with active_goal_ids = [ "goal-updated" ] } in
+    let m1 = { disk with instructions = "updated instructions" } in
     match
       Keeper_meta_store.write_meta_with_merge
         ~merge:Keeper_meta_merge.caller_wins config m1
@@ -83,8 +81,8 @@ let test_no_conflict_writes_first_attempt () =
         | Ok (Some m) -> m
         | _ -> fail "read after write failed"
       in
-      check (list string) "active_goal_ids updated" [ "goal-updated" ]
-        after.active_goal_ids
+      check string "instructions updated" "updated instructions"
+        after.instructions
     | Error e -> fail ("second write failed: " ^ e))
 
 let test_retry_succeeds_after_concurrent_bump () =
@@ -105,14 +103,14 @@ let test_retry_succeeds_after_concurrent_bump () =
     in
     (* Simulate a concurrent writer bumping the disk version while
        [caller_view] is held by the cycle-completion fiber. *)
-    let racing = { caller_view with active_goal_ids = [ "goal-racing" ] } in
+    let racing = { caller_view with instructions = "racing instructions" } in
     (match Keeper_meta_store.write_meta config racing with
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     (* Now the cycle attempts to write its own payload. CAS would fail
        once; caller_wins retry must lift the payload onto the new disk
        version and succeed. *)
-    let cycle_payload = { caller_view with active_goal_ids = [ "goal-cycle" ] } in
+    let cycle_payload = { caller_view with instructions = "cycle instructions" } in
     let before_retry_metric =
       Otel_metric_store.metric_value_or_zero
         Otel_metric_store.metric_write_meta_cas_retry_total
@@ -135,8 +133,8 @@ let test_retry_succeeds_after_concurrent_bump () =
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
-    check (list string) "cycle payload wins (last writer)" [ "goal-cycle" ]
-      final.active_goal_ids;
+    check string "cycle payload wins (last writer)" "cycle instructions"
+      final.instructions;
     check bool "version moved past racing write" true
       (final.meta_version > racing.meta_version + 1);
     check (float 0.001) "CAS retry metric increments" 1.0

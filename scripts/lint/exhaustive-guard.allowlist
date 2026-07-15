@@ -147,8 +147,6 @@ lib/chronicle_ingest.ml:230
 lib/chronicle_validate.ml:44
 lib/config/env_config_runtime.ml:343
 lib/workspace_assertions.ml:58
-lib/workspace_goals.ml:220
-lib/workspace_goals.ml:338
 lib/workspace/workspace_eio.ml:476
 lib/workspace/workspace_eio.ml:480
 lib/workspace/workspace_resilience.ml:112

@@ -110,7 +110,6 @@
   masc.task_handlers
   masc_random_id
   masc_workspace
-  masc_goal
   masc_turn
   masc_economy
   masc.masc_tool_dispatch

@@ -3,7 +3,7 @@
     Use [of_string] at MCP/JSON parse boundaries only.
     All internal code passes [t] values directly.
 
-    PR-S1: domain tool *names* (Task/Board/Goal/Operator) are owned by the
+    PR-S1: domain tool *names* (Task/Board/Operator) are owned by the
     submodules below; [Masc.t] composes them. Each submodule owns the complete
     [masc_*] string for its operations. *)
 
@@ -57,17 +57,6 @@ module Board_name : sig
   val pp : Stdlib.Format.formatter -> t -> unit
 end
 
-module Goal_name : sig
-  type t =
-    | Goal_list
-    | Goal_transition
-    | Goal_upsert
-
-  val to_string : t -> string
-  val of_string : string -> t option
-  val pp : Stdlib.Format.formatter -> t -> unit
-end
-
 module Operator_name : sig
   type t =
     | Operator_action
@@ -91,14 +80,13 @@ module Operator_remote_name : sig
   val pp : Stdlib.Format.formatter -> t -> unit
 end
 
-(** Domain_tool — single domain-owned grouping of Task/Board/Goal/Operator tool
+(** Domain_tool — single domain-owned grouping of Task/Board/Operator tool
     names. This module owns only names and string round-tripping; dispatch and
     execution decisions belong to their explicit boundaries. *)
 module Domain_tool : sig
   type t =
     | Task of Task_name.t
     | Board of Board_name.t
-    | Goal of Goal_name.t
     | Operator of Operator_name.t
 
   val to_string : t -> string

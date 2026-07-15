@@ -164,7 +164,6 @@ type TraceRouteContextFields = Pick<
   IdeContextRouteContext,
   | 'filePath'
   | 'line'
-  | 'goalId'
   | 'taskId'
   | 'boardPostId'
   | 'commentId'
@@ -284,8 +283,6 @@ function mergeTraceRouteRecord(
   if (location && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
   if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
 
-  const goalId = firstStringish(record, ['goal_id', 'goalId', 'goal'])
-  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
   const taskId = firstStringish(record, ['task_id', 'taskId', 'task'])
   if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
   const boardPostId = firstStringish(record, ['board_post_id', 'boardPostId', 'post_id', 'postId'])
@@ -311,24 +308,11 @@ function firstStringish(record: Record<string, unknown>, keys: ReadonlyArray<str
     const value = stringishField(record[key])
     if (value) return value
   }
-  const goalIds = keys.includes('goal_id') || keys.includes('goalId')
-    ? firstStringishArray(record.goal_ids) ?? firstStringishArray(record.goalIds)
-    : null
-  return goalIds
-}
-
-function firstStringishArray(value: unknown): string | null {
-  if (!Array.isArray(value)) return null
-  for (const item of value) {
-    const normalized = stringishField(item)
-    if (normalized) return normalized
-  }
   return null
 }
 
 function hasTraceRouteContext(context: MutableTraceRouteContext): boolean {
   return context.filePath !== undefined
-    || context.goalId !== undefined
     || context.taskId !== undefined
     || context.boardPostId !== undefined
     || context.commentId !== undefined

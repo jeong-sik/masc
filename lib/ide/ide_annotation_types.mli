@@ -27,7 +27,6 @@ type annotation =
   ; keeper_id : string
   ; kind : annotation_kind
   ; content : string
-  ; goal_id : string option
   ; task_id : string option
   ; references : annotation_reference list
   ; created_at_ms : int64
@@ -53,7 +52,6 @@ and region_source =
 type annotation_filter =
   { file_path : string option
   ; keeper_id : string option
-  ; goal_id : string option
   ; task_id : string option
   }
 

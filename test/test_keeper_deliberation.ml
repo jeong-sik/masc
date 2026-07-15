@@ -125,25 +125,6 @@ let test_triage_board_mention () =
       in
       check bool "contains BoardActivity" true has_board_activity
 
-let test_triage_idle_with_goals () =
-  let obs =
-    { base_obs with idle_seconds = 600; active_goal_count = 2 }
-  in
-  match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for idle timeout with goals"
-  | D.Triggered triggers ->
-      check bool "contains IdleTimeout" true
-        (List.mem D.IdleTimeout triggers)
-
-let test_triage_idle_without_goals_skips () =
-  let obs =
-    { base_obs with idle_seconds = 600; active_goal_count = 0 }
-  in
-  match D.triage obs with
-  | D.Skip _ -> ()
-  | D.Triggered _ ->
-      fail "idle without goals should not trigger"
-
 let test_triage_multiple_triggers () =
   let obs =
     { base_obs with
@@ -359,7 +340,7 @@ let test_prompt_contains_triggers () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"test-k"
-      
+
       ~goal:"Watch tasks"
       ~triggers:[ D.FailedTask; D.IdleTimeout ]
       base_obs
@@ -443,7 +424,7 @@ let test_parse_valid_task_claim_json () =
 
 let test_parse_valid_task_create_json () =
   let raw =
-    {|{"action":"task_create","params":{"title":"Add focused regression test","description":"Create a narrow test for active-goal task seeding.","priority":2},"reasoning":"Active goal has no claimable task","confidence":0.72}|}
+    {|{"action":"task_create","params":{"title":"Add focused regression test","description":"Create a narrow regression test.","priority":2},"reasoning":"No claimable task exists","confidence":0.72}|}
   in
   match D.parse_deliberation_response raw with
   | Error msg -> fail ("expected Ok, got Error: " ^ msg)
@@ -451,7 +432,7 @@ let test_parse_valid_task_create_json () =
       (match action with
        | D.TaskCreate { title; description; priority } ->
            check string "title" "Add focused regression test" title;
-           check string "description" "Create a narrow test for active-goal task seeding." description;
+           check string "description" "Create a narrow regression test." description;
            check (option int) "priority" (Some 2) priority
        | _ -> fail "expected TaskCreate action");
       check string "reasoning" "Active goal has no claimable task" reasoning;
@@ -503,32 +484,32 @@ let test_legality_verdict_accepts_model_task_claim () =
   | D.Illegal msg -> fail ("model task_claim was locally rejected: " ^ msg)
   | D.Legal -> ()
 
-let test_legality_verdict_allows_task_create_for_empty_goal_scope () =
+let test_legality_verdict_allows_task_create () =
   let obs =
-    D.{ base_obs with active_goal_count = 1; unclaimed_task_count = 0 }
+    D.{ base_obs with unclaimed_task_count = 0 }
   in
   match
     D.legality_verdict obs
       (D.TaskCreate
          {
-           title = "Seed goal task";
-           description = "Create concrete work for the active goal";
+           title = "Seed task";
+           description = "Create concrete work";
            priority = None;
          })
   with
   | D.Legal -> ()
   | D.Illegal msg -> fail ("expected legal task_create, got: " ^ msg)
 
-let test_legality_verdict_accepts_task_create_without_goal () =
+let test_legality_verdict_accepts_task_create_without_claimable_work () =
   let obs =
-    D.{ base_obs with active_goal_count = 0; unclaimed_task_count = 0 }
+    D.{ base_obs with unclaimed_task_count = 0 }
   in
   match
     D.legality_verdict obs
       (D.TaskCreate
          {
-           title = "Seed goal task";
-           description = "Create concrete work for the active goal";
+           title = "Seed task";
+           description = "Create concrete work";
            priority = None;
          })
   with
@@ -625,7 +606,7 @@ let test_delegation_request_from_propose_spawn_action () =
        "not a direct child-agent spawn")
 
 let test_delegation_request_from_execution_result_uses_selected_action () =
-  let obs = D.{ base_obs with active_goal_count = 1 } in
+  let obs = base_obs in
   let structured =
     D.
       {
@@ -690,7 +671,7 @@ let test_delegation_request_json_uses_stable_array_shape () =
     |> json_list_items "empty delegation requests"
   in
   check int "empty request list" 0 (List.length empty);
-  let delegation_obs = D.{ base_obs with active_goal_count = 1 } in
+  let delegation_obs = base_obs in
   let single_result =
     D.execute_structured_result delegation_obs
       D.
@@ -786,7 +767,7 @@ let test_delegation_request_store_dedups_unchanged_execution () =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let obs = D.{ base_obs with active_goal_count = 1 } in
+      let obs = base_obs in
       let execution =
         D.execute_structured_result obs
           D.
@@ -979,7 +960,7 @@ let test_prompt_always_includes_multi_step () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"strategic-keeper"
-      
+
       ~goal:"Plan and execute"
       ~triggers:[ D.DirectMention ]
       base_obs
@@ -1036,10 +1017,9 @@ let test_triage_board_new_posts_without_mention () =
 (* ---------- Self-directed legality tests ---------- *)
 
 let test_legality_self_directed_allows_board_post () =
-  (* Self-directed context (no goals, long idle) should allow board_post *)
+  (* A long-idle observation should allow board_post. *)
   let obs =
     { base_obs with
-      active_goal_count = 0;
       idle_seconds = 1300;
     }
   in
@@ -1049,10 +1029,9 @@ let test_legality_self_directed_allows_board_post () =
   | D.Illegal msg -> fail ("board_post should be legal in self-directed: " ^ msg)
 
 let test_legality_not_self_directed_rejects_board_post () =
-  (* Without self-directed context (idle too short), board_post is still illegal *)
+  (* With idle too short, board_post is still illegal. *)
   let obs =
     { base_obs with
-      active_goal_count = 0;
       idle_seconds = 500;  (* < 300 * 4 = 1200 *)
     }
   in
@@ -1154,10 +1133,10 @@ let () =
         [
           test_case "accepts model task_claim" `Quick
             test_legality_verdict_accepts_model_task_claim;
-          test_case "allows task_create for empty goal scope" `Quick
-            test_legality_verdict_allows_task_create_for_empty_goal_scope;
+          test_case "allows task_create without claimable work" `Quick
+            test_legality_verdict_allows_task_create;
           test_case "accepts task_create without goal" `Quick
-            test_legality_verdict_accepts_task_create_without_goal;
+            test_legality_verdict_accepts_task_create_without_claimable_work;
           test_case "rejects nested multi_step" `Quick
             test_legality_verdict_rejects_nested_multistep;
           test_case "keeps legal action" `Quick

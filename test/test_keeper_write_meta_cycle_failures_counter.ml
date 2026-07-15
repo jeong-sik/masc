@@ -86,12 +86,12 @@ let seed_meta_file config m0 =
   | Ok () -> ()
   | Error e -> fail ("seed write failed: " ^ e)
 
-let persist_terminal_turn_meta_for_done ~config ~m0 ~active_goal_ids =
+let persist_terminal_turn_meta_for_done ~config ~m0 ~instructions =
   let (_ : Keeper_meta_contract.keeper_meta) =
     Keeper_unified_turn_success.For_testing.persist_terminal_turn_meta_for_outcome
       ~config
       ~original_meta:m0
-      ~updated_meta:{ m0 with active_goal_ids }
+      ~updated_meta:{ m0 with instructions }
       ~terminal_outcome:Keeper_unified_turn_success.For_testing.Terminal_done
   in
   ()
@@ -112,7 +112,7 @@ let test_success_path_does_not_increment_failures () =
       persist_terminal_turn_meta_for_done
         ~config
         ~m0
-        ~active_goal_ids:[ "goal-cycle-ok" ];
+        ~instructions:"cycle completed";
       let after = cycle_failures_for ~keeper:name in
       check (float 0.0001) "WriteMetaCycleFailures unchanged on success cycle"
         before after)
@@ -134,7 +134,7 @@ let test_failure_path_increments_failures () =
       persist_terminal_turn_meta_for_done
         ~config
         ~m0
-        ~active_goal_ids:[ "goal-cycle-write-fails" ];
+        ~instructions:"cycle write fails";
       let after = cycle_failures_for ~keeper:name in
       check (float 0.0001) "WriteMetaCycleFailures increments on failure cycle"
         (before +. 1.0)

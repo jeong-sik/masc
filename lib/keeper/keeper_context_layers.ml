@@ -1,7 +1,6 @@
 (** See [keeper_context_layers.mli] for the contract. *)
 
 type layer_id =
-  | Active_goals
   | Current_task
   | Connected_surfaces
   | Namespace_state
@@ -14,12 +13,10 @@ type layer_id =
 
 (* Prefix-cache ordering: emit larger, more stable sections first so providers
    can reuse a longer shared prefix across cycles; highly volatile reactive
-   signals stay later in the same user message. [Current_task] sits directly
-   after [Active_goals]: the claimed task is standing context that changes on
-   claim/release, not per cycle. *)
+   signals stay later in the same user message. [Current_task] is standing
+   context that changes on claim/release, not per cycle. *)
 let ordered =
-  [ Active_goals
-  ; Current_task
+  [ Current_task
   ; Connected_surfaces
   ; Namespace_state
   ; Autonomous_trigger
@@ -35,16 +32,15 @@ let ordered =
    time, forcing both a position here and (via the [content_of] match at the
    call site) a rendering for the new layer. *)
 let order_index = function
-  | Active_goals -> 0
-  | Current_task -> 1
-  | Connected_surfaces -> 2
-  | Namespace_state -> 3
-  | Autonomous_trigger -> 4
-  | Scheduled_automation -> 5
-  | Pending_mentions -> 6
-  | Scope_messages -> 7
-  | Claimable_work -> 8
-  | Board_activity -> 9
+  | Current_task -> 0
+  | Connected_surfaces -> 1
+  | Namespace_state -> 2
+  | Autonomous_trigger -> 3
+  | Scheduled_automation -> 4
+  | Pending_mentions -> 5
+  | Scope_messages -> 6
+  | Claimable_work -> 7
+  | Board_activity -> 8
 ;;
 
 let assemble ~content_of =

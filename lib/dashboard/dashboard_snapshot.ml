@@ -236,14 +236,6 @@ let refresh_loop
       safe "activity_swimlane_default" (fun () ->
         Activity_graph.agent_spans_json config ~limit:500 ())
     in
-    (* Emit goal attainment metrics on every snapshot refresh so Grafana
-       panels stay current even when no client hits the goals API. *)
-    (try Dashboard_goals.emit_all_goal_attainment_metrics ~config with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Dashboard.warn
-         "dashboard_snapshot refresh: goal attainment metrics failed: %s"
-         (Printexc.to_string exn));
     {
       generated_at = Unix.gettimeofday ();
       generation = next_generation ();

@@ -108,11 +108,6 @@ describe('operator surface mobile touch targets', () => {
     expect(iconAction['min-width']).toBe(target)
   })
 
-  it('wraps backend-owned Goal metrics and Board action rows at mobile width', () => {
-    expect(declarationsForSelector(css('work-v2.css'), '.wk-metric')['overflow-wrap']).toBe('anywhere')
-    expect(declarationsForSelector(css('board-v2.css'), '.v2-board-surface .bd-post-foot')['flex-wrap']).toBe('wrap')
-  })
-
   it('covers FSM Hub controls and Board selection labels', () => {
     const fsmButton = declarationsForSelector(css('keeper-v2/fleet.css'), '.fsm-hub-surface button')
     const selection = declarationsForSelector(css('board-v2.css'), '.v2-board-surface .bd-post-select-target')

@@ -585,8 +585,7 @@ let test_declarative_boot_allows_empty_goal_links () =
   (match KR.load_or_materialize_boot_meta ctx name with
    | Error err -> fail err
    | Ok resolution ->
-     check bool "empty-goal keeper materialized" true resolution.materialized;
-     check (list string) "no active goal links" [] resolution.meta.active_goal_ids);
+     check bool "keeper materialized" true resolution.materialized);
   check bool "no boot failure recorded" true
     (Option.is_none (KR.boot_meta_failure_for ~base_path:config.base_path ~name))
 
@@ -1952,7 +1951,7 @@ let test_persisted_blocker_survives_unregister () =
         }
       in
       sweep_and_recover_no_materialize ctx;
-      
+
       (* Check if blocker is persisted *)
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
@@ -1963,10 +1962,10 @@ let test_persisted_blocker_survives_unregister () =
             | None -> fail "expected blocker after storm pause");
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
-      
+
       (* Unregister the keeper *)
       Reg.unregister ~base_path:config.base_path name;
-      
+
       (* Read again and verify *)
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->

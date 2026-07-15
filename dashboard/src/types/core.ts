@@ -52,7 +52,6 @@ export interface Agent {
 export interface Task {
   id: string
   title: string
-  goal_id?: string | null
   status?: 'todo' | 'in_progress' | 'claimed' | 'awaiting_verification' | 'done' | 'cancelled' | 'blocked' | 'paused' | 'unknown'
   status_raw?: string | null
   priority?: number
@@ -489,7 +488,6 @@ export interface KeeperTrustLatestEvent {
   ts_unix?: number | null
   keeper_turn_id?: number | null
   task_id?: string | null
-  goal_ids?: string[]
   title: string
   summary: string
   severity: 'ok' | 'warn' | 'bad'
@@ -567,22 +565,6 @@ export type KeeperLifecycleState =
   | 'crashed'
   | 'dead'
   | 'unknown'
-
-export interface Goal {
-  id: string
-  title: string
-  metric?: string | null
-  target_value?: string | null
-  due_date?: string | null
-  priority: number
-  status: string
-  phase: string
-  parent_goal_id?: string | null
-  last_review_note?: string | null
-  last_review_at?: string | null
-  created_at: string
-  updated_at: string
-}
 
 // --- Keeper ---
 
@@ -1187,19 +1169,10 @@ export interface Keeper {
   attention_reason?: string | null
   next_human_action?: string | null
   config_error?: KeeperProfileConfigError | null
-  active_goal_ids?: string[]
   sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
   sandbox_last_error?: string | null
   blocked_task_count?: number | null
-  goal_progress?: {
-    active_goal_count?: number
-    linked_task_count?: number
-    done_task_count?: number
-    open_task_count?: number
-    blocked_task_count?: number
-    convergence?: number | null
-  } | null
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number
   autonomous_turn_count?: number
@@ -1428,11 +1401,6 @@ interface KeeperConfigHandoff {
   cooldown_sec: number
 }
 
-export interface KeeperConfigActiveGoal {
-  id: string
-  title: string
-}
-
 export interface KeeperConfigRuntimeTrust {
   disposition?: string | null
   disposition_reason?: string | null
@@ -1459,10 +1427,6 @@ interface KeeperConfigRuntime {
 interface KeeperConfigWorkspace {
   mention_targets: string[]
   bound_workspace_ids: string[]
-  active_goal_ids: string[]
-  active_goals: KeeperConfigActiveGoal[]
-  active_goal_count: number
-  missing_active_goal_ids: string[]
 }
 
 interface KeeperConfigSources {
@@ -1520,7 +1484,6 @@ interface KeeperHookIntrospection {
 
 export interface KeeperConfig {
   name: string
-  active_goal_ids: string[]
   autoboot_enabled: boolean
   max_context_override: number | null
   limits: KeeperConfigLimits

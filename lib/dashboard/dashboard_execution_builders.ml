@@ -236,7 +236,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let noop_turn_count = int_field_default "noop_turn_count" keeper in
   let turn_count = int_field_default "turn_count" keeper in
   let generation = int_field_default "generation" keeper in
-  let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
     if Dashboard_utils.is_keeper_offline status then Lc_offline
     else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then Lc_handoff_imminent
@@ -266,13 +265,12 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
             (Exec_healthy, Tone_ok, "정상 동작 중")
   in
   let continuity =
-    Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d · Goals %d"
-      generation turn_count autonomous_turn_count autonomous_action_count goal_count
+    Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d"
+      generation turn_count autonomous_turn_count autonomous_action_count
   in
   let focus =
-    match string_list_of_field "active_goal_ids" keeper with
-    | goal_id :: _ -> goal_id
-    | [] -> "현재 활성 Goal 없음"
+    String_util.trim_to_option (string_field "current_task_id" keeper)
+    |> Option.value ~default:"현재 활성 Task 없음"
   in
   let recent_input_preview =
     String_util.trim_to_option (string_field "recent_input_preview" keeper)

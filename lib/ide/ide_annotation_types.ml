@@ -71,7 +71,6 @@ type annotation =
   ; keeper_id : string
   ; kind : annotation_kind
   ; content : string
-  ; goal_id : string option
   ; task_id : string option
   ; references : annotation_reference list
   ; created_at_ms : int64
@@ -99,7 +98,6 @@ and region_source =
 type annotation_filter =
   { file_path : string option
   ; keeper_id : string option
-  ; goal_id : string option
   ; task_id : string option
   }
 
@@ -113,7 +111,6 @@ let annotation_to_json (a : annotation) : Yojson.Safe.t =
     ; "keeper_id", `String a.keeper_id
     ; "kind", `String (annotation_kind_to_string a.kind)
     ; "content", `String a.content
-    ; "goal_id", string_opt_to_json a.goal_id
     ; "task_id", string_opt_to_json a.task_id
     ; "references", annotation_references_to_json a.references
     ; "created_at_ms", `Intlit (Int64.to_string a.created_at_ms)
@@ -151,7 +148,6 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
       ; "keeper_id"
       ; "kind"
       ; "content"
-      ; "goal_id"
       ; "task_id"
       ; "references"
       ; "created_at_ms"
@@ -210,7 +206,6 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
             ; keeper_id = find_string "keeper_id" ""
             ; kind
             ; content = find_string "content" ""
-            ; goal_id = find_opt_string "goal_id"
             ; task_id = find_opt_string "task_id"
             ; references
             ; created_at_ms = find_int64 "created_at_ms" 0L

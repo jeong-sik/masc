@@ -2,7 +2,7 @@
 
 - Status: Draft
 - Area: `lib/keeper/keeper_recurring.ml` (registry), `lib/keeper/keeper_heartbeat_loop_dispatch_recurring.ml` (consumer, already wired), MCP tool surface (`lib/tool_schemas/`, `lib/keeper_tool_surfaces.ml`), dashboard projection `lib/server_keeper_background.ml`
-- Builds on / touches: the keeper autonomous-background design (`docs/design/keeper-autonomous-background-goal-matrix.html`), PR #23543 (the display + projection half)
+- Builds on / touches: the keeper autonomous-background runtime, PR #23543 (the display + projection half)
 - Evidence base: adversarial self-review 2026-07-07 — `rg "Keeper_recurring.add" lib/ bin/` returns **zero** production call sites; the only callers are `test/test_keeper_recurring.ml` and `test/test_server_keeper_background.ml`.
 
 ## Problem (audited)

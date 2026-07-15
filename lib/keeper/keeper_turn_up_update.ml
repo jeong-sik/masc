@@ -11,27 +11,6 @@ open Keeper_types_profile
 open Keeper_keepalive
 open Keeper_turn_up_args
 
-let resolve_active_goal_ids config p old_ids =
-  let active_goal_ids =
-    match p.active_goal_ids_opt with
-    | Some ids -> ids
-    | None ->
-        Option.value ~default:old_ids p.profile_defaults.active_goal_ids
-  in
-  match p.active_goal_ids_opt with
-  | None -> Ok active_goal_ids
-  | Some _ ->
-      let missing =
-        List.filter
-          (fun goal_id -> Option.is_none (Goal_store.get_goal config ~goal_id))
-          active_goal_ids
-      in
-      if missing = [] then Ok active_goal_ids
-      else
-        Error
-          (Printf.sprintf "unknown active_goal_ids: %s"
-             (String.concat ", " missing))
-
 type revival_decision = {
   dead_revival_requested : bool;
   clear_pause_state : bool;
@@ -52,9 +31,6 @@ let revival_decision ~(latched_reason : Keeper_latched_reason.t option)
 let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
-  match resolve_active_goal_ids ctx.config p old.active_goal_ids with
-  | Error msg -> tool_result_error msg
-  | Ok active_goal_ids ->
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
@@ -137,7 +113,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
     sandbox_profile;
     network_mode;
     autoboot_enabled;
-    active_goal_ids;
     paused = if clear_pause_state then false else old.paused;
     (* Operator-sanctioned resume clears the terminal latch (Dead_tombstone
        included) so a sanctioned keeper_up revives a latched keeper.  Without
@@ -229,18 +204,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
               err;
             tool_result_error err
           | Ok () ->
-            let enqueue_goal_assignment_wakes (meta : keeper_meta) =
-              let (_ : string list) =
-                Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
-                  ~config:ctx.config
-                  ~keeper_name:meta.name
-                  ~assigned_by:"keeper_up"
-                  ~old_ids:old.active_goal_ids
-                  ~new_ids:meta.active_goal_ids
-                  ()
-              in
-              ()
-            in
             if dead_revival_requested
             then
               (match
@@ -257,7 +220,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  tool_result_error
                    (Keeper_dead_revival_transaction.error_to_string error)
                | Ok success ->
-                 enqueue_goal_assignment_wakes success.meta;
                  tool_result_ok_data (Keeper_meta_json.meta_to_json success.meta))
             else
             (* CAS-merge instead of a force write: a dashboard/turn-up edit
@@ -301,11 +263,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    | Ok
                        ( Keeper_shutdown_supersession.No_shutdown_admission
                        | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
-               (* RFC-0315 P3 W0: goals that newly entered active_goal_ids
-                  wake the keeper once at the assignment edge. Enqueue is
-                  durable, so the keepalive restart below delivers it on the
-                  new fiber's first cycle. Removals never wake. *)
-               enqueue_goal_assignment_wakes updated;
                let stop_outcome =
                  stop_keepalive_and_await
                    ~base_path:ctx.config.base_path

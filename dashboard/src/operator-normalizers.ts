@@ -254,7 +254,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     context_max: asNumber(raw.context_max) ?? asNumber(contextRaw?.context_max),
     context_source: asString(raw.context_source) ?? asString(contextRaw?.source),
     generation: asNumber(raw.generation),
-    active_goal_ids: asStringArray(raw.active_goal_ids),
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: hasModelLabel ? 'runtime' : undefined,

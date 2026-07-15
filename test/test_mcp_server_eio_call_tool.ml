@@ -21,7 +21,7 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
+let make_keeper_meta ?agent_name ?current_task_id name =
   let agent_name =
     Option.value agent_name
       ~default:(Masc.Keeper_identity.keeper_agent_name name)
@@ -36,14 +36,6 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
     (match current_task_id with
      | Some task_id -> [ ("current_task_id", `String task_id) ]
      | None -> [])
-    @
-    (match goal_ids with
-     | [] -> []
-     | ids ->
-         [
-           ( "active_goal_ids",
-             `List (List.map (fun goal_id -> `String goal_id) goal_ids) );
-         ])
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
   | Ok meta -> meta
@@ -462,7 +454,6 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-123"
-      ~goal_ids:[ "goal-1"; "goal-2" ]
       keeper_name
   in
   Fun.protect
@@ -498,9 +489,6 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check (option int) "turn" (Some 1) ctx.turn;
       check (option int) "keeper_turn_id" (Some 1) ctx.keeper_turn_id;
       check (option string) "task_id" (Some "task-123") ctx.task_id;
-      check (option (list string)) "goal_ids"
-        (Some [ "goal-1"; "goal-2" ])
-        ctx.goal_ids;
       check bool "model populated" true (String.trim ctx.model <> "");
       check bool "sandbox profile present" true (Option.is_some ctx.sandbox_profile);
       check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);
@@ -555,7 +543,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-456"
-      ~goal_ids:[ "goal-runtime" ]
       keeper_name
   in
   let subscriber_id = "test-runtime-mcp-tool-trace" in
@@ -615,8 +602,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "keeper_turn_id" |> U.to_int);
       check string "task id" "task-456"
         (row |> U.member "task_id" |> U.to_string);
-      check int "goal id count" 1
-        (row |> U.member "goal_ids" |> U.to_list |> List.length);
       let runtime_contract = row |> U.member "runtime_contract" in
       check string "runtime contract agent"
         (Masc.Keeper_identity.keeper_agent_name keeper_name)

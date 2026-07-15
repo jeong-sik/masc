@@ -110,8 +110,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     && isAttentionPairDuplicate(attentionReason, action)
   const suppressDuplicateNextAction = duplicatesAttentionReason(nextHumanAction)
   const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
-  const goalLinkedTasks = keeper.goal_progress?.linked_task_count
-  const goalConvergence = keeper.goal_progress?.convergence
   const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
   const pendingFirst = keeper.trust?.approval_state?.pending_first ?? null
   const pendingApprovalId = pendingFirst?.id?.trim() || null
@@ -274,7 +272,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
           : 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]'
   // Inline 4-entry copy moved to `./fsm-hub-types` so the same map
-  // doesn't drift between this surface and `goals/goal-tree.ts:194`.
+  // does not drift between keeper attention surfaces.
   // Local result var keeps a different name from the imported function so
   // there's no need for an `as resolveTrustDispositionLabel` alias.
   const trustDispositionDisplay = trustDispositionLabel(trustDisposition)
@@ -396,12 +394,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${sandboxTarget
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">샌드박스</strong> · ${sandboxTarget}</span>`
-          : null}
-        ${typeof goalLinkedTasks === 'number'
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">목표 작업</strong> · ${goalLinkedTasks}</span>`
-          : null}
-        ${typeof goalConvergence === 'number'
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">목표 진행률</strong> · ${Math.round(goalConvergence * 100)}%</span>`
           : null}
         ${hasActivitySignal
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">최근 신호</strong> · ${renderActivitySignal()}</span>`

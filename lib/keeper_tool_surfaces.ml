@@ -101,7 +101,6 @@ let select_public_local_worker_schemas () =
   dedupe_schemas
     (Board_tool.tools
     @ Tool_schemas_workspace_core.schemas
-    @ Tool_schemas_workspace_extra.schemas
     @ Task.Schemas.schemas
     @ Tool_schemas_agent.schemas
     @ local_worker_run_schemas)

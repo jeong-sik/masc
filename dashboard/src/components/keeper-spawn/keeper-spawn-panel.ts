@@ -28,7 +28,7 @@ export function KeeperSpawnPanel() {
         <${ActionButton} variant="subtle" size="sm" onClick=${() => { showSpawnPanel.value = false }}>닫기<//>
       </div>
       <p class="text-2xs text-[var(--color-fg-muted)] mb-3">
-        페르소나를 골라 키퍼를 시작합니다. 지시사항은 페르소나 기본값을 쓰며, Goal Store 목표는 생성 후 keeper 상세에서 연결합니다.
+        페르소나를 골라 키퍼를 시작합니다. 지시사항은 페르소나 기본값을 사용합니다.
       </p>
       <${PersonaBrowser} />
     </div>

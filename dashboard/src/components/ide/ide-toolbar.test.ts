@@ -117,20 +117,20 @@ describe('IdeToolbar', () => {
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
   })
 
-  it('adds current context route links to the command bar', () => {
+  it('adds current task context route links to the command bar', () => {
     ideContextFocus.value = {
       file_path: 'lib/runtime.ml',
       line: 12,
-      surface: 'Goal',
-      label: 'Runtime goal',
+      surface: 'Task',
+      label: 'Runtime task',
       source_id: 'event-2',
       activated_at_ms: Date.now(),
       route_links: [{
-        id: 'goal:goal-runtime',
-        label: 'Goal',
+        id: 'task:task-runtime',
+        label: 'Task',
         tab: 'workspace',
-        params: { section: 'planning', goal: 'goal-runtime' },
-        evidence: 'Goal goal-runtime',
+        params: { section: 'planning', task: 'task-runtime' },
+        evidence: 'Task task-runtime',
       }],
     }
     container = document.createElement('div')
@@ -144,10 +144,10 @@ describe('IdeToolbar', () => {
 
     const input = container.querySelector('[data-testid="ide-command-bar"] input') as HTMLInputElement
     fireEvent.focus(input)
-    fireEvent.input(input, { target: { value: 'goal-runtime' } })
+    fireEvent.input(input, { target: { value: 'task-runtime' } })
 
     const command = [...container.querySelectorAll('[role="option"]')]
-      .find(option => option.textContent === 'Open context: Goal · goal-runtime')
+      .find(option => option.textContent === 'Open context: Task · task-runtime')
     expect(command).toBeTruthy()
   })
 
@@ -221,11 +221,11 @@ describe('IdeToolbar', () => {
           evidence: 'Comment comment-1',
         },
         {
-          id: 'goal:goal-runtime',
-          label: 'Goal',
+          id: 'task:task-runtime',
+          label: 'Task',
           tab: 'workspace',
-          params: { section: 'planning', goal: 'goal-runtime' },
-          evidence: 'Goal goal-runtime',
+          params: { section: 'planning', task: 'task-runtime' },
+          evidence: 'Task task-runtime',
         },
         {
           id: 'log:turn-9',
@@ -251,7 +251,7 @@ describe('IdeToolbar', () => {
       evidence: group.evidence,
       routeLinkId: group.routeLink.id,
     }))).toEqual([
-      { id: 'planning', label: 'Plan', count: 1, evidence: 'Goal goal-runtime', routeLinkId: 'goal:goal-runtime' },
+      { id: 'planning', label: 'Plan', count: 1, evidence: 'Task task-runtime', routeLinkId: 'task:task-runtime' },
       { id: 'board', label: 'Board', count: 1, evidence: 'Comment comment-1', routeLinkId: 'comment:comment-1' },
       { id: 'repo', label: 'Repo', count: 1, evidence: 'Git abc123', routeLinkId: 'git:abc123' },
       { id: 'runtime', label: 'Runtime', count: 1, evidence: 'Log turn-9', routeLinkId: 'log:turn-9' },

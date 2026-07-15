@@ -23,7 +23,6 @@ let sample_epoch () =
   ; CT.end_date = "2026-05-01"
   ; CT.start_commit = "abc1234"
   ; CT.end_commit = "def5678"
-  ; CT.goal_ids = [ "g-chronicle" ]
   ; CT.status = CT.Active
   ; CT.causation = sample_causation ()
   ; CT.outcomes_achieved = [ "type model defined"; "JSON serialization verified" ]

@@ -218,7 +218,6 @@ let test_decisions_json_terminal_reason_duration_fallback () =
           , `Assoc
               [ "file_path", `String "runtime.ts"
               ; "line", `Int 19
-              ; "goal_id", `String "goal-decision"
               ; "task_id", `String "task-decision"
               ; "log_id", `String "decision-turn-19"
               ] )
@@ -257,8 +256,6 @@ let test_decisions_json_terminal_reason_duration_fallback () =
     Json.(compact_event |> member "context" |> member "file_path" |> to_string);
   check int "compact context line" 19
     Json.(compact_event |> member "context" |> member "line" |> to_int);
-  check string "compact context goal" "goal-decision"
-    Json.(compact_event |> member "context" |> member "goal_id" |> to_string);
   check string "compact context task" "task-decision"
     Json.(compact_event |> member "context" |> member "task_id" |> to_string);
   check string "compact context log" "decision-turn-19"

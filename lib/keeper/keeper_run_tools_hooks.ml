@@ -419,7 +419,6 @@ let assemble_hooks
                   ?keeper_turn_id:manifest_keeper_turn_id
                   ?task_id:
                     (Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id)
-                  ~goal_ids:meta.active_goal_ids
                   ~sandbox_profile:
                     (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
                   ~sandbox_root:

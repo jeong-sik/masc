@@ -11,7 +11,7 @@ const annotation: SelectedAnnotation = {
   keeper_id: 'sangsu',
   kind: 'Comment',
   content: '경계 조건 확인 필요',
-  goal_id: null,
+
   task_id: null,
   references: [
     { relation: 'evidence', reference: 'urn:example:42' },

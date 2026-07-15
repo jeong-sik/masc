@@ -382,7 +382,7 @@ describe('KeeperWorkspaceRoster', () => {
   })
 
   // The per-row work-preview line (.kw-kp-work — recent_output >
-  // goal/current_task > last_proactive_preview > empty fallback) was removed in
+  // retired definition/current_task > last_proactive_preview > empty fallback) was removed in
   // the v2 reskin: the prototype roster row is a compact picker (name + FSM state
   // + basepath handle + activity time/attention), and a selected keeper's work
   // is shown in the chat pane. The 4 work-preview rendering tests are dropped with

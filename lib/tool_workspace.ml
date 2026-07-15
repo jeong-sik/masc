@@ -715,9 +715,6 @@ let handle_check ~tool_name ~start_time ctx args =
 
 let dispatch_bindings : (string * dispatch_handler) list =
   [ "masc_heartbeat", handle_heartbeat
-  ; "masc_goal_list", Workspace_goals.handle_goal_list
-  ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
-  ; "masc_goal_transition", Workspace_goals.handle_goal_transition
   ; "masc_reset", handle_reset
   ; "masc_check", handle_check
   ]
@@ -764,7 +761,7 @@ let schemas = Tool_schemas_workspace.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only = [ "masc_status"; "masc_check"; "masc_goal_list" ];;
+let tool_spec_read_only = [ "masc_status"; "masc_check" ];;
 
 let () =
   List.iter

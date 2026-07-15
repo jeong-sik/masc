@@ -9,8 +9,6 @@ type context =
 type task_owner_hooks =
   { is_registered_agent_alias : Workspace_core.config -> string -> bool
   ; sync_current_task_binding : Workspace_core.config -> agent_name:string -> unit
-  ; active_goal_phases_for_agent :
-      Workspace_core.config -> agent_name:string -> string list
   }
 
 val record_verdict_fn :
@@ -68,11 +66,6 @@ val review_completion_notes :
   Masc_domain.configured_llm_completion_verdict option
 
 val handle_add_task :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-
-(** RFC-0267 Phase 2: [masc_task_set_goal] — assign an existing goalless task to
-    a goal. Thin adapter over {!Task_goal_assignment.set_task_goal}. *)
-val handle_set_goal :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 
 val handle_batch_add_tasks :

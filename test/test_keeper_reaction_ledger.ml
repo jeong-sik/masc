@@ -362,7 +362,6 @@ let test_execution_receipt_links_to_reaction_ledger () =
     ~trace_id:"trace-1"
     ~turn_count:7
     ~current_task_id:(Some "task-275")
-    ~goal_ids:[ "goal-world-reactivity-p0-20260517" ]
     ~outcome:"receipt_failed"
     ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
     ~terminal_reason_code:"provider_error"
@@ -411,7 +410,6 @@ let test_summary_observes_completion_evidence_without_attention () =
       ~trace_id
       ~turn_count:1
       ~current_task_id
-      ~goal_ids:[]
       ~outcome:"receipt_done"
       ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
       ~terminal_reason_code
@@ -477,7 +475,6 @@ let test_summary_degrades_unknown_completion_contract_result () =
       ~trace_id
       ~turn_count:1
       ~current_task_id:None
-      ~goal_ids:[]
       ~outcome:"receipt_done"
       ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
       ~terminal_reason_code:"success"
@@ -1069,7 +1066,6 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.Connector_attention
     ; Keeper_reaction_ledger.Hitl_resolved
     ; Keeper_reaction_ledger.Failure_judgment
-    ; Keeper_reaction_ledger.Goal_assigned
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))

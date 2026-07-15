@@ -1,7 +1,7 @@
 // MASC Dashboard — keeper tool call log (full I/O).
 // Extracted from dashboard.ts. Public symbols re-exported from dashboard.ts.
 
-import { isRecord, asBoolean, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asNumber, asRecordArray, asString } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
 import { decodeTelemetryFreshnessMetadata, type TelemetryFreshnessMetadata } from './dashboard-shared'
 
@@ -39,9 +39,6 @@ export type ToolCallEntry = {
   // join this entry's output onto the transcript. Absent when the call carried
   // no provider id (synthesised tc-<position> rows) or on pre-PR-2 logs.
   tool_use_id?: string
-  // Goal id(s) this call was attributed to (conditional on the row carrying
-  // them), for goal-scoped drill-down alongside task_id/turn.
-  goal_ids?: string[]
 }
 
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
@@ -94,7 +91,6 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     lane: asString(raw.lane),
     execution_id: asString(raw.execution_id),
     tool_use_id: asString(raw.tool_use_id),
-    goal_ids: asStringArray(raw.goal_ids),
   }
 }
 

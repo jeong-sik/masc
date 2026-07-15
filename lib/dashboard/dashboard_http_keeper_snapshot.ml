@@ -68,16 +68,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         |> Keeper_types_profile.load_persona_extended
         |> Option.value ~default:""
       in
-      let active_goals =
-        List.filter_map
-          (fun goal_id ->
-             match Goal_store.get_goal config ~goal_id with
-             (* RFC-0294: active_goals tuple dropped its horizon element. *)
-             | Some { Goal_store.id; title; _ } ->
-                 Some (id, title)
-               | None -> None)
-          m.active_goal_ids
-      in
       let default_prompt_string default live =
         match default with
         | Some value when String.trim live = "" -> value
@@ -86,44 +76,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let prompt_instructions =
         default_prompt_string defaults.instructions m.instructions
       in
-      let active_goal_ids_json =
-        `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids)
-      in
-      let active_goals_json =
-        `List
-          (List.map
-             (fun (id, title) ->
-                `Assoc [
-                  ("id", `String id);
-                  ("title", `String title);
-                ])
-             active_goals)
-      in
-      let resolved_active_goal_ids =
-        List.map (fun (id, _) -> id) active_goals
-      in
-      let missing_active_goal_ids =
-        m.active_goal_ids
-        |> List.filter (fun goal_id ->
-               not (List.mem goal_id resolved_active_goal_ids))
-      in
-      let workspace =
-        match workspace_surface_json m with
-        | `Assoc fields ->
-            `Assoc
-              (fields
-               @ [
-                   ("active_goal_ids", active_goal_ids_json);
-                   ("active_goals", active_goals_json);
-                   ("active_goal_count", `Int (List.length m.active_goal_ids));
-                   ( "missing_active_goal_ids",
-                     `List
-                       (List.map
-                          (fun goal_id -> `String goal_id)
-                          missing_active_goal_ids) );
-                 ])
-        | other -> other
-      in
+      let workspace = workspace_surface_json m in
       let runtime_trust =
         Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
       in
@@ -131,7 +84,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         Keeper_prompt.build_keeper_system_prompt
           ~instructions:prompt_instructions
           ~persona_extended ~keeper_name:m.name
-          ~active_goals
           ()
       in
       (* Preview the actual unified prompt the keeper turn uses.
@@ -284,7 +236,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let body =
        `Assoc [
          ("name", `String m.name);
-         ("active_goal_ids", active_goal_ids_json);
          ("autoboot_enabled", `Bool m.autoboot_enabled);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
          ( "limits",

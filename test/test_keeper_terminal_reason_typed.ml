@@ -218,7 +218,6 @@ let base_receipt : R.t =
   ; oas_dispatch_mode = None
   ; oas_internal_runtime_disabled = false
   ; current_task_id = None
-  ; goal_ids = []
   ; outcome = `Error
   ; terminal_reason_code = ""
   ; response_text_present = false
@@ -662,7 +661,6 @@ let () =
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Completion_no_visible_output
-    ; goal_ids = [ "GOAL-1" ]
     ; actionable_signal
     }
   in
@@ -670,7 +668,7 @@ let () =
   let want = R.Disp_pass, R.Reason_healthy in
   check
     (Printf.sprintf
-       "coordination keeper with goals + no actionable signal is healthy want=%s got=%s"
+       "coordination keeper with no actionable signal is healthy want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);

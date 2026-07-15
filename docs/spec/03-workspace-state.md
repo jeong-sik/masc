@@ -3,8 +3,6 @@ status: reference
 last_verified: 2026-07-13
 code_refs:
   - lib/workspace/
-  - lib/workspace_goals.ml
-  - lib/goal/
   - lib/task/tool_task.ml
   - lib/tool_agent.ml
   - lib/workspace/workspace_git.ml
@@ -18,7 +16,7 @@ code_refs:
 ## 1. Boundary
 
 Workspace is the durable collaboration boundary for Keepers. It owns typed
-identity and storage for Keeper, Task, Goal, Board, Channel, Connector, Job,
+identity and storage for Keeper, Task, Board, Channel, Connector, Job,
 Gate, Fusion, and their correlations. It does not own provider/model execution;
 MASC calls OAS for that boundary and OAS does not import MASC concepts.
 
@@ -31,8 +29,7 @@ boundary, never a branch in Workspace policy.
 | Concept | Authoritative state | Coupling rule |
 |---|---|---|
 | Keeper | identity plus durable lane reference | one lane per Keeper |
-| Task | typed state, owner, version, evidence references | may reference a Goal; never embeds Goal policy |
-| Goal | objective, typed state, version, Task references | Task results arrive as observations |
+| Task | typed state, owner, version, predecessor, evidence references | completion uses the Task lifecycle contract |
 | Board | posts, comments, reactions, mentions | publishes typed stimuli; never mutates Keeper lifecycle |
 | Channel / Connector | scoped external conversation identity | space and participant identity remain explicit |
 | Job | asynchronous work handle and result | completion wakes the originating lane |
@@ -72,23 +69,23 @@ silently choose a different Task.
 Numeric priority may be stored only as explicit user data. It is not an
 authorization rule or an automatic scheduler.
 
-## 5. Goal and Task lifecycle
+## 5. Task lifecycle
 
-Goal and Task remain weakly coupled. Completing a Task records its result and
-publishes a typed stimulus to the Goal owner. It does not complete the Goal.
-
-Semantic completion uses the configured LLM:
+Task is the durable unit of planned work. Its typed lifecycle is:
 
 ```text
-Executing
-  -> Awaiting_llm_judgment
-  -> Executing | Completed | Dropped
+Todo -> Claimed -> InProgress
+                    |-> AwaitingVerification -> InProgress | Done
+                    |-> Done
+                    |-> Cancelled
 ```
 
-The judgment input contains the Goal, related Tasks, Board/Job evidence, and
-the expected Goal version. The judgment result records verdict, rationale,
-model/runtime provenance, and evidence references. Workspace applies the
-verdict only if the version still matches.
+Every transition supplies the expected Task version. Completion uses the
+configured LLM reviewer with the Task, completion claim, acceptance criteria,
+and evidence references. A structured pass may produce `Done`; a rejection or
+unavailable evaluation leaves the Task nonterminal and returns an explicit
+result. Re-running terminal work creates a new Task with a typed predecessor
+reference rather than mutating the terminal record.
 
 Optional HITL is a separate nonblocking Gate. Submitting a Gate request returns
 `Deferred`; the Keeper can continue other work. Resolution is durable and wakes
@@ -110,7 +107,7 @@ scoped to that object and lane. It cannot pause the Workspace or other Keepers.
 - `INV-WORKSPACE-001`: every mutation is versioned and atomic.
 - `INV-WORKSPACE-002`: every error is typed and observable.
 - `INV-WORKSPACE-003`: Task claim changes only through an explicit mutation.
-- `INV-WORKSPACE-004`: Goal completion requires configured LLM judgment and
+- `INV-WORKSPACE-004`: Task completion requires configured LLM judgment and a
   matching version.
 - `INV-WORKSPACE-005`: Gate submission never blocks the originating lane.
 - `INV-WORKSPACE-006`: Gate resolution wakes only its origin lane.

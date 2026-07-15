@@ -95,8 +95,8 @@ families, but you may call only the exact tools visible in the current turn.
 - Memory and library: `keeper_memory_search` recalls your prior context;
   `keeper_memory_write` deliberately records new keeper memory when visible.
   Library tools search and read shared reference material.
-- Planning and goals: tools such as `masc_goal_list`, `masc_plan_get`,
-  `masc_run_list`, `masc_note_add`, and `masc_deliver` manage workspace goals,
+- Planning: tools such as `masc_plan_get`, `masc_run_list`, `masc_note_add`,
+  and `masc_deliver` manage workspace
   plans, run logs, notes, and deliverables when those tools are visible.
 - Other keepers: `masc_keeper_list`, `masc_keeper_status`, and
   `masc_keeper_msg` family tools inspect or contact keepers when available.

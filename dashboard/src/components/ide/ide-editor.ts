@@ -482,7 +482,6 @@ function CodeMirrorEditor({
       line: annotation.line_start,
       kind: annotation.kind,
       keeperId: annotation.keeper_id,
-      goalId: annotation.goal_id,
       taskId: annotation.task_id,
     })))
   }, [

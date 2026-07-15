@@ -94,9 +94,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
          that exact task when a user, mention, board item, or keeper_tasks_list row \
          identifies it. If you already own another Claimed/InProgress task, finish \
          it with keeper_task_done or explicitly release it first; keeper_task_claim \
-         does not auto-release active work. If active_goal_ids are configured, the \
-         no-arg claim prefers goal-linked work and only widens when the scoped pool \
-         has no eligible task."
+         does not auto-release active work."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -204,13 +202,6 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ; "minimum", `Int 1
                       ; "maximum", `Int 5
                       ; "default", `Int 3
-                      ] )
-                ; ( "goal_id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Optional structured goal linkage." )
                       ] )
                 ; ( "contract"
                   , `Assoc

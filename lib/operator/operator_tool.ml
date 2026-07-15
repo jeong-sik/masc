@@ -596,7 +596,7 @@ let () =
                 (Keeper_shutdown_types.Operation_id.to_string operation_id)))
       | Operator_action_constants.Keeper, None ->
         Error "Keeper pending-confirm target requires target_id"
-      | (Operator_action_constants.Workspace | Operator_action_constants.Goal), _ -> Ok ());
+      | Operator_action_constants.Workspace, _ -> Ok ());
   Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
     (fun config ~target_type ~target_id ->
       Operator_pending_confirm.remove_pending_confirms_by_typed_target

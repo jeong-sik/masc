@@ -104,7 +104,6 @@ type keeper_profile_defaults =
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
-  active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;

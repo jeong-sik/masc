@@ -93,14 +93,8 @@ val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_gate_resolve_http_json :
-  created_by:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, approval_resolve_http_error) result
-
-val dashboard_gate_rule_delete_http_json :
-  base_path:string ->
-  args:Yojson.Safe.t ->
-  (Yojson.Safe.t, string) result
 
 val dashboard_schedule_prune_http_json :
   config:Workspace_utils.config ->
@@ -118,17 +112,8 @@ val dashboard_verification_resolve_http_json :
 val dashboard_planning_http_json :
   config:Workspace.config -> Yojson.Safe.t
 
-val dashboard_goals_tree_http_json :
-  config:Workspace.config -> Yojson.Safe.t
-
-val dashboard_goals_snapshot_json :
-  config:Workspace.config -> Yojson.Safe.t
-
 val dashboard_ide_snapshot_json :
   config:Workspace.config -> Yojson.Safe.t
-
-val dashboard_goal_detail_http_json :
-  config:Workspace.config -> goal_id:string -> Yojson.Safe.t
 
 (** {1 Keeper / fleet composite} *)
 

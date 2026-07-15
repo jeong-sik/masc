@@ -18,7 +18,6 @@ let epoch ?(key_files = []) ?(rfc_refs = [])
   ; CT.end_date = "2026-01-15"
   ; CT.start_commit
   ; CT.end_commit
-  ; CT.goal_ids = [ "TEST-1" ]
   ; CT.status = CT.Completed
   ; CT.causation = []
   ; CT.outcomes_achieved = [ "built feature" ]

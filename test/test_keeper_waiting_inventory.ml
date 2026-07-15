@@ -702,17 +702,17 @@ let test_corrupt_chat_queue_snapshot_is_read_error () =
      | rows -> failf "expected one corrupt chat queue row, got %d" (List.length rows))
 ;;
 
-let pending_confirm_fixture ?(target_type = "goal") ?target_id ()
+let pending_confirm_fixture ?(target_type = "task") ?target_id ()
       : Operator_pending_confirm.pending_confirm
   =
-  { token = "confirm-goal-1"
-  ; trace_id = "trace-goal-1"
+  { token = "confirm-task-1"
+  ; trace_id = "trace-task-1"
   ; actor = "operator"
-  ; action_type = "approve_goal"
+  ; action_type = "approve_task"
   ; target_type
   ; target_id
-  ; payload = `Assoc [ "goal_id", `String "goal-123" ]
-  ; delegated_tool = "masc_goal_approve"
+  ; payload = `Assoc [ "task_id", `String "task-123" ]
+  ; delegated_tool = "masc_task_update"
   ; created_at = "2026-07-07T00:00:00Z"
   ; expires_at = None
   }
@@ -852,7 +852,7 @@ let test_global_pending_confirm_is_actionable_row () =
   ensure_keeper config "known-keeper";
   write_pending_confirms_exn
     config
-    [ pending_confirm_fixture ~target_id:"goal-123" () ];
+    [ pending_confirm_fixture ~target_id:"task-123" () ];
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "global pending-confirm metric"
     Otel_metric_store.metric_keeper_waiting_count
@@ -867,28 +867,28 @@ let test_global_pending_confirm_is_actionable_row () =
   | [ row ] ->
     let detail = U.(row |> member "detail") in
     check string "source" "operator_pending_confirm" (json_string_member "source" row);
-    check string "waiting_on" "approve_goal" (json_string_member "waiting_on" row);
+    check string "waiting_on" "approve_task" (json_string_member "waiting_on" row);
     check string "wake producer" "operator_pending_confirm_store"
       (json_string_member "wake_producer" row);
     check string "next action" "operator_confirm_action"
       (json_string_member "next_action" row);
-    check string "token" "confirm-goal-1" U.(detail |> member "token" |> to_string);
-    check string "trace_id" "trace-goal-1" U.(detail |> member "trace_id" |> to_string);
-    check string "target_type" "goal" U.(detail |> member "target_type" |> to_string);
-    check string "target_id" "goal-123" U.(detail |> member "target_id" |> to_string);
-    check string "delegated_tool" "masc_goal_approve"
+    check string "token" "confirm-task-1" U.(detail |> member "token" |> to_string);
+    check string "trace_id" "trace-task-1" U.(detail |> member "trace_id" |> to_string);
+    check string "target_type" "task" U.(detail |> member "target_type" |> to_string);
+    check string "target_id" "task-123" U.(detail |> member "target_id" |> to_string);
+    check string "delegated_tool" "masc_task_update"
       U.(detail |> member "delegated_tool" |> to_string)
   | rows -> failf "expected one global pending-confirm row, got %d" (List.length rows)
 ;;
 
-let test_goal_pending_confirm_id_collision_stays_global () =
+let test_task_pending_confirm_id_collision_stays_global () =
   with_workspace
   @@ fun config ->
   let keeper_name = "colliding-keeper" in
   ensure_keeper config keeper_name;
   write_pending_confirms_exn
     config
-    [ pending_confirm_fixture ~target_type:"goal" ~target_id:keeper_name () ];
+    [ pending_confirm_fixture ~target_type:"task" ~target_id:keeper_name () ];
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "global collision pending-confirm metric"
     Otel_metric_store.metric_keeper_waiting_count
@@ -904,7 +904,7 @@ let test_goal_pending_confirm_id_collision_stays_global () =
   | [ row ] ->
     let detail = U.(row |> member "detail") in
     check string "source" "operator_pending_confirm" (json_string_member "source" row);
-    check string "target_type" "goal" U.(detail |> member "target_type" |> to_string);
+    check string "target_type" "task" U.(detail |> member "target_type" |> to_string);
     check string "target_id" keeper_name U.(detail |> member "target_id" |> to_string)
   | rows -> failf "expected one global pending-confirm row, got %d" (List.length rows)
 ;;
@@ -966,7 +966,7 @@ let () =
         ; test_case "global pending confirm is actionable row" `Quick
             test_global_pending_confirm_is_actionable_row
         ; test_case "goal pending confirm id collision stays global" `Quick
-            test_goal_pending_confirm_id_collision_stays_global
+            test_task_pending_confirm_id_collision_stays_global
         ; test_case "corrupt pending confirms is read_error" `Quick
             test_corrupt_pending_confirms_is_read_error
         ] )

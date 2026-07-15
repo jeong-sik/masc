@@ -475,21 +475,8 @@ let run_keeper_cycle
                Eio.Fiber.yield ();
                (* 2. Build unified prompt — diversity entropy recorded in decision_audit
          (keeper_keepalive.ml), not injected into prompt (#6814). *)
-               (* RFC-0315: resolve the claimed task and goal titles here (the
-                  turn runner owns config), so the prompt can render what the
-                  keeper holds and why it woke. Both reads are total: a failed
-                  backlog read yields None, an unknown goal id remains a bare
-                  id instead of disappearing from the prompt. *)
                let current_task =
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
-               in
-               let active_goal_summaries =
-                 List.map
-                   (fun goal_id ->
-                     match Goal_store.get_goal config ~goal_id with
-                     | Some { Goal_store.title; _ } -> (goal_id, title)
-                     | None -> (goal_id, ""))
-                   meta.active_goal_ids
                in
                let system_prompt, user_message =
                  Keeper_unified_prompt.build_prompt
@@ -498,7 +485,6 @@ let run_keeper_cycle
                    ~profile_defaults
                    ?turn_decision
                    ?current_task
-                   ~active_goal_summaries
                    ~observation
                    ()
                in

@@ -90,8 +90,6 @@ type stimulus_payload =
   | Failure_judgment of failure_judgment
       (** RFC-0313 deterministic failure class was rejected/blocked and should
           produce an LLM-boundary verdict prompt on the keeper lane. *)
-  | Goal_assigned of goal_assignment
-      (** A goal was newly added to this keeper's [active_goal_ids]. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -185,14 +183,6 @@ and failure_judgment = {
     idle-loop count). [fj_detail] is display/prompt evidence and is never used
     for routing. *)
 
-and goal_assignment = {
-  ga_goal_id : string;
-  ga_goal_title : string;
-  ga_assigned_by : string;
-}
-(** Payload for [Goal_assigned]. *)
-
-
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
     sink created a board evidence post, otherwise falls back to
@@ -208,8 +198,6 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
     window. *)
 
 val failure_judgment_post_id : failure_judgment -> post_id
-
-val goal_assignment_post_id : goal_assignment -> post_id
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)

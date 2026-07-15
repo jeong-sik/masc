@@ -13,9 +13,9 @@
     the compiler catches typos that would otherwise silently create
     dead series. *)
 
-(** Goal-loop Observe turn-success denominator. Labels: [keeper_name]. *)
+(** Keeper runtime turn-success denominator. Labels: [keeper_name]. *)
 
-(** Goal-loop Observe turn-success numerator. Labels: [keeper_name]. *)
+(** Keeper runtime turn-success numerator. Labels: [keeper_name]. *)
 
 (** Current keeper world-observation idle seconds. Updated from
     [observation.idle_seconds] during keeper metrics emission so long idle
@@ -244,7 +244,7 @@ val metric_cache_desync_cleared : string
     actionable completion-contract failures before making execution/completion
     progress.  Incremented once per loop episode. Labels: [keeper, kind]. *)
 
-(** Goal-loop Observe counter for no-progress keeper loops. Emitted by the
+(** Keeper runtime counter for no-progress keeper loops. Emitted by the
     passive/completion-contract loop detector when progress-signalling turns make no
     execution or completion progress. Incremented once per loop episode.
     Labels: [keeper_name]. *)
@@ -263,7 +263,7 @@ val metric_cache_desync_cleared : string
     to specific runtime profiles. *)
 val metric_persistence_read_drops : string
 
-(** Goal-loop Observe counter for persistence UTF-8 repairs. No labels. *)
+(** Keeper runtime counter for persistence UTF-8 repairs. No labels. *)
 val metric_persistence_utf8_repair : string
 
 val metric_discovery_history_failures : string

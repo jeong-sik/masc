@@ -146,7 +146,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     status: asString(raw.status),
     context_ratio: asNumber(raw.context_ratio),
     generation: asNumber(raw.generation),
-    active_goal_ids: asStringArray(raw.active_goal_ids),
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: asString(raw.model),

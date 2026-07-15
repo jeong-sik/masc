@@ -145,8 +145,6 @@ check_json \
   "$BASE/api/v1/dashboard/namespace-truth" \
   "d.get('dashboard_surface') == '/api/v1/dashboard/namespace-truth' and d.get('source') == 'namespace_truth_read_model' and '/api/v1/dashboard/workspace-truth' not in d.get('dashboard_aliases', []) and d.get('retention', {}).get('scope') == 'dashboard_namespace_truth'" \
   '^True$'
-check_http "goal-loop status 200" "$BASE/api/v1/dashboard/goal-loop/status" "200"
-check_json "goal-loop status exposes phases" "$BASE/api/v1/dashboard/goal-loop/status" "'overall_status' in d and 'phases' in d" '^True$'
 check_http "activity graph 200" "$BASE/api/v1/activity/graph" "200"
 check_json "activity graph has nodes" "$BASE/api/v1/activity/graph" "len(d.get('nodes', [])) >= 0" '^True$'
 check_http "activity events 200" "$BASE/api/v1/activity/events?limit=1" "200"
@@ -180,7 +178,7 @@ check_json "attribution summary has gates" "$BASE/api/v1/attribution/summary" "'
 check_http "attribution recent 200" "$BASE/api/v1/attribution/recent?limit=1" "200"
 check_json "attribution recent exposes events" "$BASE/api/v1/attribution/recent?limit=1" "'events' in d and 'count' in d" '^True$'
 check_http "dashboard Gate 200" "$BASE/api/v1/dashboard/gate" "200"
-check_json "dashboard Gate exposes mode and queue" "$BASE/api/v1/dashboard/gate" "'hitl' in d and 'approval_queue' in d and 'approval_rules' in d" '^True$'
+check_json "dashboard Gate exposes mode and queue" "$BASE/api/v1/dashboard/gate" "'hitl' in d and 'approval_queue' in d" '^True$'
 check_http "dashboard proof 200" "$BASE/api/v1/dashboard/proof" "200"
 check_json "dashboard proof exposes verification and sources" "$BASE/api/v1/dashboard/proof" "'summary' in d and 'verification' in d and 'proof_sources' in d" '^True$'
 check_http "keeper feature proof 200" "$BASE/api/v1/dashboard/keeper-feature-proof?window_hours=24" "200"

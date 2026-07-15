@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { IdeKeeperWorkPanel, keeperWorkSummary } from './ide-keeper-work-panel'
-import { goals, keepers, tasks } from '../../store'
+import { keepers, tasks } from '../../store'
 import { fleetCompositeSnapshot } from '../../composite-signals'
-import type { Goal, Keeper, Task } from '../../types'
+import type { Keeper, Task } from '../../types'
 import type {
   FleetCompositeSnapshot,
   KeeperCompositeSnapshot,
@@ -19,7 +19,6 @@ describe('IdeKeeperWorkPanel', () => {
 
   afterEach(() => {
     render(null, container)
-    goals.value = []
     keepers.value = []
     tasks.value = []
     fleetCompositeSnapshot.value = null
@@ -109,43 +108,10 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).not.toContain('no active keeper task')
   })
 
-  it('shows the current task goal task count and links back to planning', () => {
-    keepers.value = [keeperFixture()]
-    goals.value = [goalFixture()]
-    tasks.value = [
-      taskFixture({ goal_id: 'goal-runtime', status: 'claimed' }),
-      taskFixture({ id: 'task-done', title: 'Done task', goal_id: 'goal-runtime', status: 'done' }),
-      taskFixture({ id: 'task-cancelled', title: 'Cancelled task', goal_id: 'goal-runtime', status: 'cancelled' }),
-    ]
-
-    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
-
-    expect(container.textContent).toContain('GOAL TASKS')
-    expect(container.textContent).toContain('Runtime goal')
-    expect(container.textContent).toContain('1/2 tasks')
-    expect(container.textContent).not.toContain('50%')
-    expect(container.textContent).toContain('Goal')
-    expect(container.textContent).toContain('Task')
-    expect(container.querySelectorAll('.ide-keeper-work-card.v2-ide-card').length).toBeGreaterThanOrEqual(1)
-    expect(container.querySelector('.ide-keeper-work-goal.v2-ide-card')).not.toBeNull()
-    expect(container.querySelector('.ide-keeper-work-goal .ide-keeper-work-route-count')?.textContent)
-      .toBe('CTX 2')
-
-    const goalLinks = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('.ide-keeper-work-goal .ide-keeper-work-links button'),
-    )
-    expect(goalLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
-
-    fireEvent.click(buttonByText(container, 'Goal'))
-    expect(window.location.hash).toBe('#workspace?section=planning&goal=goal-runtime')
-    fireEvent.click(buttonByText(container, 'Task'))
-    expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-151')
-  })
-
   it('links the current task to git, telemetry, and keeper context', () => {
     keepers.value = [keeperFixture()]
     tasks.value = [taskFixture({
-      goal_id: 'goal-runtime',
+
       execution_links: {
         session_id: 'sess-151',
         operation_id: 'op-151',
@@ -159,9 +125,8 @@ describe('IdeKeeperWorkPanel', () => {
     )
     expect(taskLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(container.querySelector('.ide-keeper-work-card .ide-keeper-work-route-count')?.textContent)
-      .toBe('CTX 4')
+      .toBe('CTX 3')
     expect(taskLinks.map(link => link.textContent)).toEqual([
-      'Goal',
       'Task',
       'Telemetry',
       'Keeper',
@@ -179,12 +144,12 @@ describe('IdeKeeperWorkPanel', () => {
   it('surfaces the rest of the active keeper task queue as routable work', () => {
     keepers.value = [keeperFixture()]
     tasks.value = [
-      taskFixture({ goal_id: 'goal-runtime' }),
+      taskFixture(),
       taskFixture({
         id: 'task-next',
         title: 'Wire keeper queue context',
         status: 'in_progress',
-        goal_id: 'goal-next',
+
         execution_links: {
           session_id: 'sess-next',
         },
@@ -193,7 +158,7 @@ describe('IdeKeeperWorkPanel', () => {
         id: 'task-done',
         title: 'Completed queue item',
         status: 'done',
-        goal_id: 'goal-next',
+
       }),
     ]
 
@@ -208,7 +173,6 @@ describe('IdeKeeperWorkPanel', () => {
 
     const queueButtons = Array.from(queue?.querySelectorAll('button') ?? [])
     expect(queueButtons.map(button => button.textContent)).toEqual([
-      'Goal',
       'Task',
       'Telemetry',
       'Keeper',
@@ -292,21 +256,6 @@ function taskFixture(partial: Partial<Task> = {}): Task {
     title: 'Fix codex runtime config',
     status: 'claimed',
     assignee: 'sangsu',
-    ...partial,
-  }
-}
-
-function goalFixture(partial: Partial<Goal> = {}): Goal {
-  return {
-    id: 'goal-runtime',
-    title: 'Runtime goal',
-    metric: 'green CI',
-    target_value: '100%',
-    priority: 1,
-    status: 'active',
-    phase: 'executing',
-    created_at: '2026-05-13T00:00:00Z',
-    updated_at: '2026-05-13T00:00:00Z',
     ...partial,
   }
 }

@@ -10,7 +10,6 @@ type deliberation_trigger =
   | NewUnclaimedTask
   | FailedTask
   | KeeperFiberStartedOrStopped
-  | GoalDeadline
   | BoardActivity of string
   | IdleTimeout
   | MetricsAnomaly of string
@@ -60,7 +59,6 @@ type world_observation = {
   failed_task_count: int;
   running_keeper_fiber_count: int;
   keeper_fiber_count_changed: bool;
-  active_goal_count: int;
   idle_seconds: int;
   board_new_post_count: int;
   board_mention_count: int;

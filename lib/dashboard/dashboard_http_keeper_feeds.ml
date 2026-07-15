@@ -240,7 +240,6 @@ let keeper_decisions_json
           let fields =
             []
             |> add_string "file_path"
-            |> add_string "goal_id"
             |> add_string "task_id"
             |> add_string "board_post_id"
             |> add_string "comment_id"

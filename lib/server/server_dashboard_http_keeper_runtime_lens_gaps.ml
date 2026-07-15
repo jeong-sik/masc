@@ -57,19 +57,6 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            gaps
        | _ -> gaps)
   |> (fun gaps ->
-       match claim_status, claim_mode with
-       | Some "no_eligible", Some "active_goal_ids" ->
-         add
-           { code = "claim_scope_global_backlog_outside_keeper"
-           ; severity = "warn"
-           ; lane = "keeper"
-           ; detail =
-               Some
-                 "active_goal_ids scope found no eligible work; global backlog may be outside this keeper or blocked by policy"
-           }
-           gaps
-       | _ -> gaps)
-  |> (fun gaps ->
        if runtime_override then
          add
            { code = "keeper_runtime_override_drift"

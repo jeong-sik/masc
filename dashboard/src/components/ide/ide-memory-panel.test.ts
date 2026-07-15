@@ -21,7 +21,7 @@ describe('IdeMemoryPanel', () => {
           created_at_ms: Date.now(),
           source_kind: 'ide_annotation',
           retrieval_status: 'annotation_index_only',
-          goal_id: 'goal-runtime',
+
           task_id: null,
         }],
         total: 1,

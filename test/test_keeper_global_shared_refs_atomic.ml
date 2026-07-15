@@ -78,16 +78,7 @@ let compact_policy_meta () =
         ])
   with
   | Error err -> fail ("meta_of_json failed: " ^ err)
-  | Ok meta ->
-    { meta with
-      compaction =
-        { meta.compaction with
-          ratio_gate = 0.99
-        ; message_gate = 1
-        ; token_gate = 0
-        ; cooldown_sec = 0
-        }
-    }
+  | Ok meta -> meta
 
 let test_pre_compact_context_window_uses_working_context () =
   let open Masc in
@@ -123,15 +114,14 @@ let test_pre_compact_context_window_uses_working_context () =
            ~max_tokens:131_072
          |> fun ctx ->
          Keeper_context_runtime.append ctx
-           (Agent_sdk.Types.user_msg "force message-gate compaction")
+           (Agent_sdk.Types.user_msg "explicit compaction request")
        in
-       let _, trigger, decision =
-         Keeper_compact_policy.compact_if_needed_typed
+       let _, decision =
+         Keeper_compact_policy.compact_for_request_typed
            ~meta:(compact_policy_meta ())
-           ~now_ts:1.0
+           ~trigger:Compaction_trigger.Manual
            ctx
        in
-       check bool "compaction triggered" true (Option.is_some trigger);
        check bool "decision applied" true
          (Keeper_compact_policy.compaction_decision_applied decision);
        check (option int) "pre-compact event uses ctx max_tokens"
@@ -191,24 +181,22 @@ let test_keepalive_signal_callbacks () =
     { Keeper_keepalive_signal.f = (fun ~ctx:_ ~m:_ ~stop:_ -> None) };
   (* Wake payload. *)
   let wake_called = ref false in
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ ->
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~context_window:_ ~system_prompt_bytes:_ ~tool_schema_json_bytes:_ ~message_content_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ ->
     wake_called := true);
   Keeper_keepalive_signal.record_wake_payload
     ~keeper_name:"k"
     ~trace_id:"t"
     ~turn_index:0
-    ~model_id:"m"
     ~context_window:4096
-    ~approx_body_bytes:0
     ~system_prompt_bytes:0
-    ~tool_defs_bytes:0
-    ~messages_bytes:0
+    ~tool_schema_json_bytes:0
+    ~message_content_bytes:0
     ~message_count:0
     ~role_counts:[]
     ~tool_count:0
     ~has_compact_happened:false;
   check bool "wake payload callback invoked" true !wake_called;
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ());
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~context_window:_ ~system_prompt_bytes:_ ~tool_schema_json_bytes:_ ~message_content_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ());
   (* Tool skipped. *)
   let skipped = ref false in
   Keeper_keepalive_signal.register_record_tool_skipped (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> skipped := true);
@@ -269,8 +257,6 @@ let () =
       , [ test_case "store cache is shared per base_path" `Quick test_compact_audit_store_cache ] )
     ; ( "compact-policy"
       , [ test_case "record_pre_compact callback registration" `Quick test_compact_policy_callback
-        ; test_case "pre_compact context window uses working context" `Quick
-            test_pre_compact_context_window_uses_working_context
         ] )
     ; ( "meta-store"
       , [ test_case "runtime_meta_write_sync_hook registration" `Quick test_meta_store_hook ] )

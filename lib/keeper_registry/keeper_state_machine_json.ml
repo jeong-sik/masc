@@ -89,11 +89,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
     obj "supervisor_restart_attempt" [ "attempt", `Int r.attempt ]
   | Credential_archived -> obj "credential_archived" []
   | Context_overflow_detected r ->
-    let source =
-      match r.source with
-      | `Prompt_rejected -> "prompt_rejected"
-      | `Oas_signal -> "oas_signal"
-    in
     let limit_tokens =
       match r.limit_tokens with
       | Some n -> `Int n
@@ -101,10 +96,7 @@ let event_to_json (ev : event) : Yojson.Safe.t =
     in
     obj
       "context_overflow_detected"
-      [ "source", `String source
-      ; "token_count", `Int r.token_count
-      ; "limit_tokens", limit_tokens
-      ]
+      [ "limit_tokens", limit_tokens ]
   | Auto_compact_triggered -> obj "auto_compact_triggered" []
   | Operator_compact_requested -> obj "operator_compact_requested" []
   | Operator_clear_requested r ->

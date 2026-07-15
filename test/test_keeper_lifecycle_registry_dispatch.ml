@@ -150,7 +150,7 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
         started_dispatched = false;
         failure_reason = None;
         trigger = None;
-        decision = KEC.Blocked_below_thresholds;
+        decision = KEC.Not_requested;
         before_tokens = 0;
         after_tokens = 0;
         saved_tokens = 0;
@@ -582,67 +582,6 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       check bool "keepalive registry rejection metric increments" true
         (after > before))
 
-let test_heartbeat_history_fallback_counts_malformed_rows () =
-  let base_dir = temp_dir "keeper_lifecycle_heartbeat_history_drops" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Eio.Switch.run @@ fun sw ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
-      let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:None);
-      let meta =
-        make_keeper_meta
-          ~name:"keeper-heartbeat-history-drop"
-          ~trace_id:"trace-heartbeat-history-drop"
-          ()
-      in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
-      let trace_id =
-        Keeper_id.Trace_id.to_string meta.runtime.trace_id
-      in
-      let history_path = KTS.keeper_history_path config trace_id in
-      write_lines history_path
-        [
-          {|{"role":"user","content":"keep continuity","source":"user"}|};
-          "[]";
-          "{not-json";
-        ];
-      let surface = "keeper_heartbeat_history" in
-      let entry_reason = "entry_load_error" in
-      let invalid_reason = "invalid_payload" in
-      let before_entry =
-        persistence_read_drop_total ~surface ~reason:entry_reason
-      in
-      let before_invalid =
-        persistence_read_drop_total ~surface ~reason:invalid_reason
-      in
-      let ctx : _ Keeper_types_profile.context =
-        {
-          config;
-          agent_name = "test-operator";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = None;
-        }
-      in
-      KHB.write_heartbeat_snapshot
-        ~ctx
-        ~meta_current:meta
-        ~now_ts:(Time_compat.now ())
-        ~consecutive_hb_failures:0
-        ~timing_ring:[||]
-        ~timing_filled:0;
-      check_persistence_read_drop_delta ~surface ~reason:entry_reason
-        ~before:before_entry ~delta:1;
-      check_persistence_read_drop_delta ~surface ~reason:invalid_reason
-        ~before:before_invalid ~delta:2)
-
 let () =
   run "keeper_lifecycle_registry_dispatch"
     [
@@ -670,7 +609,5 @@ let () =
             test_registry_canonicalizes_mismatched_meta_on_register;
           test_case "registry reload repairs stale meta from disk" `Quick
             test_registry_reload_meta_from_disk_repairs_stale_meta;
-          test_case "heartbeat history fallback counts malformed rows" `Quick
-            test_heartbeat_history_fallback_counts_malformed_rows;
         ] );
     ]

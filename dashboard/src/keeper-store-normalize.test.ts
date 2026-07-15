@@ -312,11 +312,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
             prompt_fingerprint: 'prompt-fp-001',
             prompt: {
               fingerprint: 'prompt-fp-001',
-              estimated_total_tokens: 321,
-              estimated_cacheable_tokens: 144,
-              system_prompt: { bytes: 512, estimated_tokens: 144, fingerprint: 'seg-system' },
-              dynamic_context: { bytes: 220, estimated_tokens: 61, fingerprint: 'seg-dynamic' },
-              user_message: { bytes: 98, estimated_tokens: 28, fingerprint: 'seg-user' },
+              total_bytes: 830,
+              cacheable_bytes: 512,
+              system_prompt: { bytes: 512, fingerprint: 'seg-system' },
+              dynamic_context: { bytes: 220, fingerprint: 'seg-dynamic' },
+              user_message: { bytes: 98, fingerprint: 'seg-user' },
             },
           },
         ],
@@ -330,12 +330,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(metric.prompt_fingerprint).toBe('prompt-fp-001')
     expect(metric.prompt_metrics).toEqual({
       fingerprint: 'prompt-fp-001',
-      estimated_total_tokens: 321,
-      estimated_cacheable_tokens: 144,
+      total_bytes: 830,
+      cacheable_bytes: 512,
       segments: {
-        system_prompt: { bytes: 512, estimated_tokens: 144, fingerprint: 'seg-system' },
-        dynamic_context: { bytes: 220, estimated_tokens: 61, fingerprint: 'seg-dynamic' },
-        user_message: { bytes: 98, estimated_tokens: 28, fingerprint: 'seg-user' },
+        system_prompt: { bytes: 512, fingerprint: 'seg-system' },
+        dynamic_context: { bytes: 220, fingerprint: 'seg-dynamic' },
+        user_message: { bytes: 98, fingerprint: 'seg-user' },
       },
     })
   })
@@ -667,14 +667,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
             compacted: false,
             ctx_composition: {
               actual_input_tokens: 1000,
-              display_total_tokens: 1000,
-              estimated_known_tokens: 740,
+              attributed_bytes: 1160,
               segments: {
-                system_prompt: { bytes: 320, estimated_tokens: 120, fingerprint: null },
-                history_user: { bytes: 210, estimated_tokens: 90, fingerprint: null },
-                history_tool_use: { bytes: 90, estimated_tokens: 60, fingerprint: null },
-                history_tool_result: { bytes: 540, estimated_tokens: 330, fingerprint: null },
-                unattributed: { bytes: 0, estimated_tokens: 260, fingerprint: null },
+                system_prompt: { bytes: 320, fingerprint: null },
+                history_user: { bytes: 210, fingerprint: null },
+                history_tool_use: { bytes: 90, fingerprint: null },
+                history_tool_result: { bytes: 540, fingerprint: null },
               },
             },
           },
@@ -686,14 +684,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
     const metric = keeper?.metrics_series?.[0]
     expect(metric?.ctx_composition).toEqual({
       actual_input_tokens: 1000,
-      display_total_tokens: 1000,
-      estimated_known_tokens: 740,
+      attributed_bytes: 1160,
       segments: {
-        system_prompt: { bytes: 320, estimated_tokens: 120, fingerprint: null },
-        history_user: { bytes: 210, estimated_tokens: 90, fingerprint: null },
-        history_tool_use: { bytes: 90, estimated_tokens: 60, fingerprint: null },
-        history_tool_result: { bytes: 540, estimated_tokens: 330, fingerprint: null },
-        unattributed: { bytes: 0, estimated_tokens: 260, fingerprint: null },
+        system_prompt: { bytes: 320, fingerprint: null },
+        history_user: { bytes: 210, fingerprint: null },
+        history_tool_use: { bytes: 90, fingerprint: null },
+        history_tool_result: { bytes: 540, fingerprint: null },
       },
     })
   })

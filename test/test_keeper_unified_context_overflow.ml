@@ -4,8 +4,6 @@ module EC = Masc.Keeper_error_classify
 module UT = Masc.Keeper_unified_turn
 module KP = Keeper_state_machine
 
-let keeper_name = "test-keeper"
-
 let source_path path =
   if Filename.is_relative path then
     match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -125,7 +123,7 @@ let test_overflow_failure_contract_keeps_lifecycle_active () =
     (contains_substring ~needle:"Keeper lifecycle remains active" budget_src);
   let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
   check bool "post-OAS retry overflow has dedicated phase label" true
-    (contains_substring ~needle:"Context_overflow_after_oas_retry" execution_src);
+    (contains_substring ~needle:"Provider_context_overflow" execution_src);
   check bool "post-OAS retry overflow records failure" true
     (contains_substring ~needle:"record_overflow_failure" execution_src);
   check bool "overflow path has no paused-meta override" false
@@ -168,180 +166,6 @@ let test_preflight_overflow_does_not_bypass_driver_retry () =
     (contains_substring ~needle:"record_overflow_failure" execution_src)
 ;;
 
-let test_summarize_turn_event_bus_extracts_overflow_signal () =
-  let events =
-    [ Agent_sdk.Event_bus.mk_event
-        ~correlation_id:"cid-123"
-        ~run_id:"run-1"
-        (Agent_sdk.Event_bus.TurnStarted { agent_name = keeper_name; turn = 1 })
-    ; Agent_sdk.Event_bus.mk_event
-        ~correlation_id:"cid-123"
-        ~run_id:"run-1"
-        (Agent_sdk.Event_bus.ContextOverflowImminent
-           { agent_name = keeper_name
-           ; estimated_tokens = 205_000
-           ; limit_tokens = 200_000
-           ; ratio = 1.025
-           })
-    ]
-  in
-  let summary = UT.summarize_turn_event_bus events in
-  check int "event count" 2 summary.event_count;
-  check
-    (list string)
-    "payload kinds"
-    [ "turn_started"; "context_overflow_imminent" ]
-    summary.payload_kinds;
-  check
-    (option string)
-    "correlation id from first event"
-    (Some "cid-123")
-    summary.correlation_id;
-  check (option string) "run id from first event" (Some "run-1") summary.run_id;
-  check int "no compact started" 0 summary.context_compact_started_count;
-  check int "no compacted" 0 summary.context_compacted_count;
-  match summary.overflow_imminent with
-  | Some overflow ->
-    check int "estimated tokens" 205_000 overflow.estimated_tokens;
-    check int "limit tokens" 200_000 overflow.limit_tokens
-  | None -> fail "expected overflow_imminent summary"
-;;
-
-let test_summarize_turn_event_bus_extracts_compaction_signal () =
-  let events =
-    [ Agent_sdk.Event_bus.mk_event
-        ~correlation_id:"cid-compact"
-        ~run_id:"run-compact-start"
-        ~caused_by:"parent-run"
-        (Agent_sdk.Event_bus.ContextCompactStarted
-           { agent_name = keeper_name; trigger = "proactive" })
-    ; Agent_sdk.Event_bus.mk_event
-        ~correlation_id:"cid-compact"
-        ~run_id:"run-compact-done"
-        (Agent_sdk.Event_bus.ContextCompacted
-           { agent_name = keeper_name
-           ; before_tokens = 210_000
-           ; after_tokens = 120_000
-           ; phase = "proactive(85%)"
-           })
-    ]
-  in
-  let summary = UT.summarize_turn_event_bus events in
-  check int "compaction event count" 2 summary.event_count;
-  check
-    (list string)
-    "compaction payload kinds"
-    [ "context_compact_started"; "context_compacted" ]
-    summary.payload_kinds;
-  check
-    (option string)
-    "compaction correlation"
-    (Some "cid-compact")
-    summary.correlation_id;
-  check (option string) "compaction first run id" (Some "run-compact-start") summary.run_id;
-  check (option string) "compaction caused_by" (Some "parent-run") summary.caused_by;
-  check int "compact started count" 1 summary.context_compact_started_count;
-  check int "compacted count" 1 summary.context_compacted_count;
-  match summary.last_compaction with
-  | Some compaction ->
-    check int "before tokens" 210_000 compaction.before_tokens;
-    check int "after tokens" 120_000 compaction.after_tokens;
-    check int "tokens freed" 90_000 compaction.tokens_freed;
-    check string "phase hint" "proactive(85%)" compaction.phase_hint
-  | None -> fail "expected last compaction summary"
-;;
-
-let test_overflow_evidence_detail_preserves_oas_retry_attempts () =
-  let events =
-    [ Agent_sdk.Event_bus.mk_event
-        ~correlation_id:"cid-retry"
-        ~run_id:"run-compact-start-1"
-        (Agent_sdk.Event_bus.ContextCompactStarted
-           { agent_name = keeper_name; trigger = "proactive" })
-    ; Agent_sdk.Event_bus.mk_event
-        ~correlation_id:"cid-retry"
-        ~run_id:"run-compact-start-2"
-        (Agent_sdk.Event_bus.ContextCompactStarted
-           { agent_name = keeper_name; trigger = "emergency_retry" })
-    ; Agent_sdk.Event_bus.mk_event
-        ~correlation_id:"cid-retry"
-        ~run_id:"run-compact-done"
-        (Agent_sdk.Event_bus.ContextCompacted
-           { agent_name = keeper_name
-           ; before_tokens = 220_000
-           ; after_tokens = 130_000
-           ; phase = "emergency_retry"
-           })
-    ; Agent_sdk.Event_bus.mk_event
-        ~correlation_id:"cid-retry"
-        ~run_id:"run-overflow"
-        (Agent_sdk.Event_bus.ContextOverflowImminent
-           { agent_name = keeper_name
-           ; estimated_tokens = 180_000
-           ; limit_tokens = 131_072
-           ; ratio = 1.37
-           })
-    ]
-  in
-  let summary = UT.summarize_turn_event_bus events in
-  let detail = UT.turn_event_bus_overflow_evidence_detail summary in
-  check bool "detail carries compact start count" true
-    (contains_substring ~needle:"context_compact_started=2" detail);
-  check bool "detail carries compact done count" true
-    (contains_substring ~needle:"context_compacted=1" detail);
-  check bool "detail carries emergency retry phase" true
-    (contains_substring ~needle:"last_compaction_phase=emergency_retry" detail);
-  check bool "detail carries final provider limit" true
-    (contains_substring ~needle:"overflow_limit_tokens=131072" detail);
-  let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
-  check bool "execution writes OAS retry evidence into blocker detail" true
-    (contains_substring
-       ~needle:"turn_event_bus_overflow_evidence_detail"
-       execution_src)
-;;
-
-let test_context_overflow_event_prefers_event_bus_signal () =
-  let turn_event_bus : UT.turn_event_bus_summary =
-    { correlation_id = Some "cid-123"
-    ; run_id = Some "run-1"
-    ; caused_by = None
-    ; event_count = 1
-    ; payload_kinds = [ "context_overflow_imminent" ]
-    ; overflow_imminent = Some { estimated_tokens = 205_000; limit_tokens = 200_000 }
-    ; context_compact_started_count = 0
-    ; context_compacted_count = 0
-    ; last_compaction = None
-    }
-  in
-  match
-    UT.context_overflow_event_of_error
-      ~fallback_tokens:32_768
-      ~turn_event_bus
-      (Agent_sdk.Error.Api
-         (ContextOverflow { message = "prompt exceeds context"; limit = Some 32_768 }))
-  with
-  | KP.Context_overflow_detected
-      { source = `Oas_signal; token_count; limit_tokens = Some limit_tokens } ->
-    check int "estimated tokens win" 205_000 token_count;
-    check int "event bus limit wins" 200_000 limit_tokens
-  | event -> fail ("expected oas_signal overflow event, got " ^ KP.event_to_string event)
-;;
-
-let test_context_overflow_event_falls_back_without_event_bus_signal () =
-  match
-    UT.context_overflow_event_of_error
-      ~fallback_tokens:32_768
-      (Agent_sdk.Error.Api
-         (ContextOverflow { message = "prompt exceeds context"; limit = Some 32_768 }))
-  with
-  | KP.Context_overflow_detected
-      { source = `Prompt_rejected; token_count; limit_tokens = Some limit_tokens } ->
-    check int "fallback uses error limit" 32_768 token_count;
-    check int "fallback preserves limit" 32_768 limit_tokens
-  | event ->
-    fail ("expected prompt_rejected overflow event, got " ^ KP.event_to_string event)
-;;
-
 let () =
   run
     "keeper_unified_context_overflow"
@@ -366,26 +190,6 @@ let () =
             "preflight overflow does not bypass driver retry"
             `Quick
             test_preflight_overflow_does_not_bypass_driver_retry
-        ; test_case
-            "summarize_turn_event_bus extracts overflow signal"
-            `Quick
-            test_summarize_turn_event_bus_extracts_overflow_signal
-        ; test_case
-            "summarize_turn_event_bus extracts compaction signal"
-            `Quick
-            test_summarize_turn_event_bus_extracts_compaction_signal
-        ; test_case
-            "overflow evidence detail preserves OAS retry attempts"
-            `Quick
-            test_overflow_evidence_detail_preserves_oas_retry_attempts
-        ; test_case
-            "context_overflow_event prefers event bus signal"
-            `Quick
-            test_context_overflow_event_prefers_event_bus_signal
-        ; test_case
-            "context_overflow_event falls back without event bus signal"
-            `Quick
-            test_context_overflow_event_falls_back_without_event_bus_signal
         ] )
     ]
 ;;

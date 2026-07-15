@@ -20,11 +20,8 @@ let running_conds : SM.conditions =
     dead_tombstone_latched = false;
   }
 
-let overflow_event ?(tokens = 205_000) ?(limit = Some 200_000) () =
-  SM.Context_overflow_detected
-    { source = `Prompt_rejected;
-      token_count = tokens;
-      limit_tokens = limit }
+let overflow_event ?(limit = Some 200_000) () =
+  SM.Context_overflow_detected { limit_tokens = limit }
 
 let apply_ok phase conds ev =
   match SM.apply_event ~current_phase:phase ~conditions:conds ~event:ev

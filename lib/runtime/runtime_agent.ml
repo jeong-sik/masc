@@ -141,14 +141,8 @@ type worker_lifecycle_classification =
 
 let worker_lifecycle_classification_of_result = function
   | Ok _ -> { event = "completed"; status = "completed"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
-    { event = "completed"; status = "turn_limit_observed"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _)) ->
     { event = "completed"; status = "input_required"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
-    { event = "completed"; status = "agent_execution_timeout_observed"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
-    { event = "completed"; status = "agent_idle_timeout_observed"; error = None }
   | Error e ->
     { event = "failed"; status = "failed"; error = Some (Agent_sdk.Error.to_string e) }
 
@@ -1170,41 +1164,6 @@ let run_blocks
           runtime_observation = Some runtime_observation;
           stop_reason = Completed;
         }
-    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded r)) ->
-      close_after_success ();
-      Log.Misc.warn
-        "oas_worker %s: observed unexpected MaxTurnsExceeded with the Keeper contract configured unbounded (turns=%d reported_limit=%d)"
-        config.name
-        r.turns
-        r.limit;
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          (* [MaxTurnsExceeded] carries no response payload. Do not fabricate a
-             user-visible checkpoint sentence; the typed stop reason and receipt
-             retain the observation while MASC treats it as non-gating. *)
-          ~text:""
-      in
-      record_dashboard_oas_response ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason
-                   (TurnLimitObserved { turns_used = r.turns; limit = r.limit }))
-        partial_response;
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms config
-      in
-      Ok
-        {
-          response = partial_response;
-          checkpoint;
-          session_id;
-          turns;
-          trace_ref;
-          run_validation;
-          runtime_observation = Some runtime_observation;
-          stop_reason = TurnLimitObserved { turns_used = r.turns; limit = r.limit };
-        }
     | Error
         (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
       close_after_success ();
@@ -1274,88 +1233,6 @@ let run_blocks
       | None ->
         close_agent_for_cleanup ~propagate_cancel:false ~config agent;
         Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.AgentExecutionTimeout r)) ->
-      close_after_success ();
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          ~text:""
-      in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason
-                   (ExecutionTimeoutObserved
-                      { elapsed_sec = r.elapsed_sec
-                      ; timeout_sec = r.timeout_sec
-                      ; turn_count = r.turn_count
-                      ; max_turns = r.max_turns
-                      }))
-        partial_response;
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms
-          config
-      in
-      Ok
-        { response = partial_response
-        ; checkpoint
-        ; session_id
-        ; turns
-        ; trace_ref
-        ; run_validation
-        ; runtime_observation = Some runtime_observation
-        ; stop_reason =
-            ExecutionTimeoutObserved
-              { elapsed_sec = r.elapsed_sec
-              ; timeout_sec = r.timeout_sec
-              ; turn_count = r.turn_count
-              ; max_turns = r.max_turns
-              }
-        }
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.AgentExecutionIdleTimeout r)) ->
-      close_after_success ();
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          ~text:""
-      in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason
-                   (ExecutionIdleTimeoutObserved
-                      { idle_sec = r.idle_sec
-                      ; idle_timeout_sec = r.idle_timeout_sec
-                      ; turn_count = r.turn_count
-                      ; max_turns = r.max_turns
-                      }))
-        partial_response;
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms
-          config
-      in
-      Ok
-        { response = partial_response
-        ; checkpoint
-        ; session_id
-        ; turns
-        ; trace_ref
-        ; run_validation
-        ; runtime_observation = Some runtime_observation
-        ; stop_reason =
-            ExecutionIdleTimeoutObserved
-              { idle_sec = r.idle_sec
-              ; idle_timeout_sec = r.idle_timeout_sec
-              ; turn_count = r.turn_count
-              ; max_turns = r.max_turns
-              }
-        }
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
       let error_response =

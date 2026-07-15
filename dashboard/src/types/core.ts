@@ -344,21 +344,19 @@ export interface InferenceTelemetry {
 
 export interface PromptSegmentTelemetry {
   bytes: number
-  estimated_tokens: number
   fingerprint: string | null
 }
 
 export interface PromptTelemetry {
   fingerprint: string | null
-  estimated_total_tokens: number | null
-  estimated_cacheable_tokens: number | null
+  total_bytes: number | null
+  cacheable_bytes: number | null
   segments: Record<string, PromptSegmentTelemetry>
 }
 
 export interface CtxCompositionTelemetry {
   actual_input_tokens: number | null
-  display_total_tokens: number
-  estimated_known_tokens: number
+  attributed_bytes: number
   segments: Record<string, PromptSegmentTelemetry>
 }
 

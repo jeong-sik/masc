@@ -1712,13 +1712,11 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir "shutdown-dead-tombstone-completion" in
-  let completion_bus =
-    Agent_sdk.Event_bus.create
-      ~policy:Agent_sdk.Event_bus.Drop_oldest
-      ()
-  in
+  let completion_bus = Agent_sdk.Event_bus.create () in
   let completion_subscription =
-    Agent_sdk.Event_bus.subscribe
+    Masc.Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"dead-tombstone-completion-test"
       completion_bus
   in
@@ -1964,13 +1962,11 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir "dashboard-purge-finalization" in
-  let completion_bus =
-    Agent_sdk.Event_bus.create
-      ~policy:Agent_sdk.Event_bus.Drop_oldest
-      ()
-  in
+  let completion_bus = Agent_sdk.Event_bus.create () in
   let completion_subscription =
-    Agent_sdk.Event_bus.subscribe
+    Masc.Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"dashboard-purge-completion-test"
       completion_bus
   in

@@ -158,7 +158,7 @@ let overflowed_conditions : SM.conditions =
 ;;
 
 (* [event_to_string] for payload-carrying events appends the payload
-   (e.g. "context_overflow_detected(prompt_rejected,...)"), so we use
+   (e.g. "context_overflow_detected(limit=...)"), so we use
    prefix match rather than equality. *)
 let assert_precondition_violation ~event_name err =
   match err with
@@ -175,7 +175,7 @@ let assert_precondition_violation ~event_name err =
 
 let overflow_event =
   SM.Context_overflow_detected
-    { source = `Prompt_rejected; token_count = 100_000; limit_tokens = Some 200_000 }
+    { limit_tokens = Some 200_000 }
 ;;
 
 let test_pre_overflow_during_compaction () =

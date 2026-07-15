@@ -224,7 +224,6 @@
   test_workspace_eio_pure
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
-  test_keeper_compact_policy_pure
   test_compaction_llm_summarizer
   test_keeper_runtime_failure_route
   test_keeper_allowed_paths
@@ -281,7 +280,6 @@
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
   test_cap_blocker_structured_error
-  test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
@@ -549,7 +547,6 @@
   test_workspace_eio_pure
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
-  test_keeper_compact_policy_pure
   test_compaction_llm_summarizer
   test_keeper_runtime_failure_route
   test_keeper_allowed_paths
@@ -606,7 +603,6 @@
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
   test_cap_blocker_structured_error
-  test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
@@ -2067,9 +2063,9 @@
 
 (include stanzas/test_timeout_policy.inc)
 
-(include stanzas/test_masc_event_bus_policy.inc)
-
 (include stanzas/test_timeout_policy_overshoot_counter.inc)
+
+(include stanzas/test_event_bus_subscription_contract.inc)
 
 (include stanzas/test_tool_call_replay_harness.inc)
 
@@ -2567,3 +2563,5 @@
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)
+
+(include stanzas/test_text_token_estimate.inc)

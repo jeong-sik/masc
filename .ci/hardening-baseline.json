@@ -19,8 +19,7 @@
       "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with",
       "lib/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
       "lib/autonomous/wirein_helpers.ml:5:match Sys.getenv_opt \"MASC_AUTONOMOUS\" with",
-      "lib/config_dir_resolver/config_dir_resolver.ml:74:let initial_env_home = Sys.getenv_opt \"HOME\" |> trim_opt",
-      "lib/context_overflow_action_tracker.ml:4:match Sys.getenv_opt \"MASC_CONTEXT_OVERFLOW_GRACE_SEC\" with"
+      "lib/config_dir_resolver/config_dir_resolver.ml:74:let initial_env_home = Sys.getenv_opt \"HOME\" |> trim_opt"
     ],
     "env_config_unclassified_typed_getters": [
       "lib/config/env_config_core.ml:538:(get_float ~default:120.0 git_fetch_timeout_sec_env_key)",

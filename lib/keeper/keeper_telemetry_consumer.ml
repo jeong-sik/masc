@@ -26,11 +26,10 @@ let spawn_subscriber ~sw ~clock ~base_path ~bus =
   in
   let sub =
     Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"telemetry_consumer"
-      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
-        match evt.payload with
-        | Agent_sdk.Event_bus.Custom ("telemetry_event", _) -> true
-        | _ -> false)
+      ~filter:(Agent_sdk.Event_bus.filter_topic "telemetry_event")
       bus
   in
   Eio.Switch.on_release sw (fun () ->

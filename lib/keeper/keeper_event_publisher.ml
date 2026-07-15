@@ -22,7 +22,8 @@
 let masc_publish event =
   match Masc_event_bus.get () with
   | Some mb -> Agent_sdk_metrics_bridge.publish mb event
-  | None -> ()
+  | None ->
+    Log.Misc.warn "MASC observation event was not published: event bus is not initialized"
 
 (** Publish a broadcast event to the shared Event_bus. *)
 let publish_broadcast ~agent_name ~content =

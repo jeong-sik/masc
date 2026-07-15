@@ -20,6 +20,6 @@ type t =
   | Persistent_escalation
   | Resilience_audit_store
   | Overflow_retry_oas_load
-  | Context_overflow_after_oas_retry
+  | Provider_context_overflow
 
 val to_label : t -> string

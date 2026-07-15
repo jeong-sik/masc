@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { formatTokens, isFiniteMetricValue } from '../lib/format-number'
+import { isFiniteMetricValue } from '../lib/format-number'
 import { SPARKLINE_W, SPARKLINE_H, SPARKLINE_PAD } from '../lib/sparkline-config'
 import { CopyIdButton } from './common/copy-id-button'
 import { Eyebrow } from './common/eyebrow'
@@ -49,11 +49,11 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const latestPrompt = latest?.prompt_metrics ?? null
   const latestSegments = Object.entries(latestPrompt?.segments ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
-  const promptTotals = promptPoints.map(
-    (p: KeeperMetricPoint) => p.prompt_metrics?.estimated_total_tokens ?? 0,
+  const promptBytes = promptPoints.map(
+    (p: KeeperMetricPoint) => p.prompt_metrics?.total_bytes ?? 0,
   )
-  const latestTotal = latestPrompt?.estimated_total_tokens ?? null
-  const latestCacheable = latestPrompt?.estimated_cacheable_tokens ?? null
+  const latestTotal = latestPrompt?.total_bytes ?? null
+  const latestCacheable = latestPrompt?.cacheable_bytes ?? null
   const cacheableRatio =
     latestTotal && latestCacheable != null && latestTotal > 0
       ? latestCacheable / latestTotal
@@ -71,7 +71,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
   }
 
   const W = SPARKLINE_W, H = SPARKLINE_H
-  const totalLine = miniSparkline(promptTotals)
+  const totalLine = miniSparkline(promptBytes)
 
   return html`
     <div class="mb-5 v2-monitoring-panel">
@@ -88,15 +88,15 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3 v2-monitoring-row">
         <${DetailCard} class="md:col-span-2">
           <${DetailRow}>
-            <${Eyebrow}>estimated prompt tokens</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
+            <${Eyebrow}>prompt bytes</${Eyebrow}>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotal != null ? latestTotal.toLocaleString() : '-'}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="프롬프트 토큰 추이" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="프롬프트 바이트 추이" style="background:var(--bg-deepest);">
             ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="var(--amber-bright)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="mt-1 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-disabled)]">
-            <span>latest ${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
-            <span>cacheable ${latestCacheable != null ? formatTokens(latestCacheable) : '-'}</span>
+            <span>latest ${latestTotal != null ? `${latestTotal.toLocaleString()} bytes` : '-'}</span>
+            <span>cacheable ${latestCacheable != null ? `${latestCacheable.toLocaleString()} bytes` : '-'}</span>
             ${cacheableRatio != null ? html`<span>${Math.round(cacheableRatio * 100)}% cacheable</span>` : null}
             ${latest?.runtime_strategy
               ? html`<span>strategy ${latest.runtime_strategy}</span>`
@@ -131,11 +131,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
                   ${segment.fingerprint ? html`<${CopyIdButton} value=${segment.fingerprint} label="segment fingerprint" size=${10} />` : null}
                 </span>
               </div>
-              <div class="grid grid-cols-2 gap-2 text-xs">
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-card">
-                  <${Eyebrow} tone="disabled">tokens</${Eyebrow}>
-                  <div class="mt-1 font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(segment.estimated_tokens)}</div>
-                </div>
+              <div class="text-xs">
                 <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-card">
                   <${Eyebrow} tone="disabled">bytes</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-fg-secondary)]">${segment.bytes.toLocaleString()}</div>

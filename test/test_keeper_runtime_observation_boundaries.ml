@@ -115,194 +115,23 @@ let test_runtime_provider_path_has_no_cumulative_run_timeout () =
     false
     (contains_substring source "Eio.Time.with_timeout_exn clock t run_fn")
 
-let make_tool name description : Agent_sdk.Tool.t =
-  Agent_sdk.Tool.create ~name ~description ~parameters:[]
-    (fun _input -> Ok { Agent_sdk.Types.content = "ok"; _meta = None })
-
-let test_tool_schema_estimate_adds_provider_payload () =
-  let tool = make_tool "large_schema_probe" (String.make 2048 'd') in
-  let estimate =
-    Keeper_run_prompt.estimate_tool_schema_context
-      ~estimated_input_tokens:10
-      ~tools:[ tool ]
+let test_extra_system_context_preserves_typed_blocks () =
+  let blocks =
+    [ Prompt_block_id.Dynamic_context, "dynamic"
+    ; Prompt_block_id.Retry_nudge, "retry"
+    ; Prompt_block_id.Connected_surface, "surface"
+    ]
   in
-  Alcotest.(check int) "tool count" 1 estimate.tool_count;
-  Alcotest.(check bool)
-    "tool schema contributes tokens"
-    true
-    (estimate.tool_schema_tokens > 0);
-  Alcotest.(check int)
-    "tool-inclusive estimate is prompt estimate plus schema"
-    (10 + estimate.tool_schema_tokens)
-    estimate.estimated_input_tokens_with_tools
-
-let test_hook_context_estimate_skips_base_prompt_layers () =
-  let dynamic = String.make 400 'd' in
-  let temporal = String.make 400 't' in
-  let retry = String.make 400 'r' in
-  let connected_surface = String.make 400 'u' in
-  let expected =
-    Agent_sdk.Context_reducer.estimate_char_tokens retry
-    + Agent_sdk.Context_reducer.estimate_char_tokens connected_surface
-  in
-  Alcotest.(check int)
-    "only hook-only blocks are added to the post-hook estimate"
-    expected
-    (Keeper_run_prompt.estimate_unaccounted_extra_system_context_tokens
-       ~preflight_accounted_blocks:
-         [ Prompt_block_id.Dynamic_context; Prompt_block_id.Temporal_summary ]
-       [ Prompt_block_id.Dynamic_context, dynamic
-       ; Prompt_block_id.Temporal_summary, temporal
-       ; Prompt_block_id.Retry_nudge, retry
-       ; Prompt_block_id.Connected_surface, connected_surface
-       ])
-
-let test_extra_system_context_assembly_preserves_over_window_blocks () =
   let assembly =
     Keeper_run_prompt.assemble_extra_system_context
-      ~estimated_input_tokens_with_tools:90
-      ~max_context:100
-      ~existing_extra_system_context:None
-      ~preflight_accounted_blocks:[ Prompt_block_id.Dynamic_context ]
-      ~blocks:
-        [ Prompt_block_id.Dynamic_context, String.make 400 'd'
-        ; Prompt_block_id.Retry_nudge, String.make 400 'r'
-        ; Prompt_block_id.Connected_surface, "short connected surface"
-        ]
+      ~existing_extra_system_context:(Some "existing")
+      ~blocks
   in
-  Alcotest.(check bool)
-    "dynamic context remains because preflight already accounted it"
-    true
-    (List.exists
-       (fun (block, _) ->
-          Prompt_block_id.equal block Prompt_block_id.Dynamic_context)
-       assembly.blocks);
-  Alcotest.(check bool)
-    "oversized hook-only retry nudge is preserved"
-    true
-    (List.exists
-       (fun (block, _) -> Prompt_block_id.equal block Prompt_block_id.Retry_nudge)
-       assembly.blocks);
-  Alcotest.(check bool)
-    "later hook-only block can still fit"
-    true
-    (List.exists
-       (fun (block, _) -> Prompt_block_id.equal block Prompt_block_id.Connected_surface)
-       assembly.blocks);
-  Alcotest.(check int) "every complete block reaches OAS" 3
-    (List.length assembly.blocks);
-  let assembled =
-    match assembly.extra_system_context with
-    | Some text -> text
-    | None -> Alcotest.fail "expected complete extra_system_context"
-  in
-  Alcotest.(check string)
-    "complete block text and source order reach OAS"
-    (String.make 400 'd'
-     ^ "\n\n"
-     ^ String.make 400 'r'
-     ^ "\n\nshort connected surface")
-    assembled;
-  Alcotest.(check bool)
-    "over-window estimate remains observational"
-    true
-    (assembly.post_hook_context_window_observation
-       .observed_over_context_tokens
-     > 0)
-
-let test_extra_system_context_assembly_accounts_assembled_overhead () =
-  let dynamic = String.make 40 'd' in
-  let hook_only = String.make 40 'u' in
-  let assembly =
-    Keeper_run_prompt.assemble_extra_system_context
-      ~estimated_input_tokens_with_tools:10
-      ~max_context:1_000
-      ~existing_extra_system_context:None
-      ~preflight_accounted_blocks:[ Prompt_block_id.Dynamic_context ]
-      ~blocks:
-        [ Prompt_block_id.Dynamic_context, dynamic
-        ; Prompt_block_id.Connected_surface, hook_only
-        ]
-  in
-  let assembled =
-    match assembly.extra_system_context with
-    | Some text -> text
-    | None -> Alcotest.fail "expected assembled extra_system_context"
-  in
-  let assembled_tokens =
-    Agent_sdk.Context_reducer.estimate_char_tokens assembled
-  in
-  let preflight_accounted_tokens =
-    Agent_sdk.Context_reducer.estimate_char_tokens dynamic
-  in
-  Alcotest.(check int)
-    "post-hook estimate accounts assembled context minus preflight-accounted blocks"
-    (10 + max 0 (assembled_tokens - preflight_accounted_tokens))
-    assembly.post_hook_estimated_input_tokens
-
-let test_keeper_preflight_wires_tool_inclusive_estimate () =
-  let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
-  let setup_source = read_file "lib/keeper/keeper_run_tools_setup.ml" in
-  Alcotest.(check bool)
-    "keeper computes tool schema context estimate"
-    true
-    (contains_substring setup_source "estimate_tool_schema_context");
-  Alcotest.(check bool)
-    "keeper preflight uses tool-inclusive estimate"
-    true
-    (contains_substring agent_run_source "estimated_input_tokens_with_tools");
-  Alcotest.(check bool)
-    "keeper writes context preflight manifest"
-    true
-    (contains_substring agent_run_source "context_preflight")
-
-let test_context_window_observation_reports_remaining_and_overage () =
-  let within =
-    Keeper_run_prompt.observe_context_window
-      ~estimated_input_tokens:100
-      ~max_context:128
-  in
-  Alcotest.(check int) "remaining under window" 28
-    within.observed_remaining_context_tokens;
-  Alcotest.(check int) "overage under window" 0
-    within.observed_over_context_tokens;
-  Alcotest.(check (float 0.0001))
-    "ratio under window"
-    (100.0 /. 128.0)
-    within.observed_context_usage_ratio;
-  let over =
-    Keeper_run_prompt.observe_context_window
-      ~estimated_input_tokens:140
-      ~max_context:128
-  in
-  Alcotest.(check int) "remaining over window" 0
-    over.observed_remaining_context_tokens;
-  Alcotest.(check int) "overage over window" 12
-    over.observed_over_context_tokens;
-  Alcotest.(check (float 0.0001))
-    "ratio over window"
-    (140.0 /. 128.0)
-    over.observed_context_usage_ratio
-
-let test_context_preflight_manifest_records_window_delta () =
-  let source = read_file "lib/keeper/keeper_agent_run.ml" in
-  Alcotest.(check bool)
-    "context preflight records remaining tokens"
-    true
-    (contains_substring source "remaining_context_tokens");
-  Alcotest.(check bool)
-    "context preflight records overage tokens"
-    true
-    (contains_substring source "over_context_tokens");
-  Alcotest.(check bool)
-    "context preflight records usage ratio"
-    true
-    (contains_substring source "context_usage_ratio");
-  Alcotest.(check bool)
-    "context preflight has no layer priority or fractional cap policy"
-    false
-    (contains_substring source "context_layers"
-     || contains_substring source "context_layer_policy")
+  Alcotest.(check bool) "typed blocks unchanged" true (assembly.blocks = blocks);
+  Alcotest.(check (option string))
+    "complete source order reaches OAS"
+    (Some "existing\n\ndynamic\n\nretry\n\nsurface")
+    assembly.extra_system_context
 
 let test_context_injection_hook_records_post_tool_ledger () =
   let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
@@ -323,14 +152,6 @@ let test_context_injection_hook_records_post_tool_ledger () =
     "hook records last tool result count"
     true
     (contains_substring hook_source "last_tool_result_count");
-  Alcotest.(check bool)
-    "hook records extra system context token estimate"
-    true
-    (contains_substring hook_source "extra_system_context_estimated_tokens");
-  Alcotest.(check bool)
-    "hook observes post-hook context against context window"
-    true
-    (contains_substring hook_source "post_hook_estimated_input_tokens");
   Alcotest.(check bool)
     "hook assembles all extra context before params are adjusted"
     true
@@ -359,35 +180,6 @@ let test_context_injection_hook_records_post_tool_ledger () =
     (contains_substring hook_source "post_hook_context_window_error_ref"
      || contains_substring agent_run_source "post_hook_context_window_error_ref")
 
-let test_keeper_preflight_reuses_setup_tool_estimate () =
-  let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
-  Alcotest.(check bool)
-    "keeper run reads setup tool estimate"
-    true
-    (contains_substring agent_run_source "s.Keeper_run_tools.tool_context_estimate");
-  Alcotest.(check bool)
-    "keeper run does not recompute tool schemas"
-    false
-    (contains_substring agent_run_source "estimate_tool_schema_context")
-
-let test_keeper_context_estimates_use_context_facade () =
-  let prompt_source = read_file "lib/keeper/keeper_run_prompt.ml" in
-  let hook_source = read_file "lib/keeper/keeper_run_tools_hooks.ml" in
-  Alcotest.(check bool)
-    "context estimation uses keeper facade"
-    true
-    (contains_substring prompt_source
-       "Keeper_context_core_accessors.estimate_char_tokens"
-     && contains_substring hook_source
-          "Keeper_context_core_accessors.estimate_char_tokens");
-  Alcotest.(check bool)
-    "context estimation avoids direct OAS estimator calls"
-    false
-    (contains_substring prompt_source
-       "Agent_sdk.Context_reducer.estimate_char_tokens"
-     || contains_substring hook_source
-          "Agent_sdk.Context_reducer.estimate_char_tokens")
-
 let () =
   Alcotest.run "keeper_runtime_observation_boundaries"
   [
@@ -405,31 +197,9 @@ let () =
           test_keeper_oas_path_has_no_bridge_total_timeout;
         Alcotest.test_case "runtime provider path has no cumulative timeout" `Quick
           test_runtime_provider_path_has_no_cumulative_run_timeout;
-        Alcotest.test_case "tool schema estimate adds provider payload" `Quick
-          test_tool_schema_estimate_adds_provider_payload;
-        Alcotest.test_case
-          "hook context estimate skips base prompt layers"
-          `Quick
-          test_hook_context_estimate_skips_base_prompt_layers;
-        Alcotest.test_case "extra system context preserves overflow blocks" `Quick
-          test_extra_system_context_assembly_preserves_over_window_blocks;
-        Alcotest.test_case
-          "extra system context assembly accounts overhead"
-          `Quick
-          test_extra_system_context_assembly_accounts_assembled_overhead;
-        Alcotest.test_case "keeper preflight wires tool-inclusive estimate" `Quick
-          test_keeper_preflight_wires_tool_inclusive_estimate;
-        Alcotest.test_case
-          "context window observation reports remaining and overage"
-          `Quick
-          test_context_window_observation_reports_remaining_and_overage;
-        Alcotest.test_case "context preflight manifest records window delta" `Quick
-          test_context_preflight_manifest_records_window_delta;
+        Alcotest.test_case "extra system context preserves typed blocks" `Quick
+          test_extra_system_context_preserves_typed_blocks;
         Alcotest.test_case "context injection hook records post-tool ledger" `Quick
           test_context_injection_hook_records_post_tool_ledger;
-        Alcotest.test_case "keeper preflight reuses setup tool estimate" `Quick
-          test_keeper_preflight_reuses_setup_tool_estimate;
-        Alcotest.test_case "keeper context estimates use context facade" `Quick
-          test_keeper_context_estimates_use_context_facade;
       ] );
   ]

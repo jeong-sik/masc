@@ -1,10 +1,10 @@
 (** P1-1c Harness: Keeper prompt structural metrics.
 
-    Measures system_prompt and dynamic_context token estimates after
+    Measures exact system_prompt and dynamic_context UTF-8 bytes after
     P1-1a hard/soft separation.  Validates that:
     1. system_prompt contains only hard constraints (shorter than combined)
     2. dynamic_context receives soft context elements
-    3. token budget is distributed correctly *)
+    3. byte attribution is exact *)
 
 open Alcotest
 
@@ -12,10 +12,7 @@ module KAR = Masc.Keeper_agent_run
 module KP = Masc.Keeper_prompt
 module KRP = Masc.Keeper_run_prompt
 
-(* CJK-aware token estimator from OAS *)
-let estimate_tokens s =
-  if s = "" then 0
-  else Agent_sdk.Context_reducer.estimate_char_tokens s
+let measure_bytes = String.length
 
 let has_in s needle =
   try ignore (Str.search_forward (Str.regexp_string needle) s 0); true
@@ -104,43 +101,47 @@ let build_combined () : string =
 let test_system_prompt_shorter_than_combined () =
   let tp = build_separated () in
   let combined = build_combined () in
-  let sys_tokens = estimate_tokens tp.system_prompt in
-  let combined_tokens = estimate_tokens combined in
-  let ratio =
-    Float.of_int sys_tokens /. Float.of_int combined_tokens
-  in
+  let system_bytes = measure_bytes tp.system_prompt in
+  let combined_bytes = measure_bytes combined in
   check bool
     (Printf.sprintf
-       "system_prompt (%d tok) < combined (%d tok), ratio=%.2f"
-       sys_tokens combined_tokens ratio)
-    true (sys_tokens < combined_tokens);
-  (* The separated system_prompt should be meaningfully shorter *)
-  check bool
-    (Printf.sprintf "ratio %.2f < 0.85 (meaningful reduction)" ratio)
-    true (ratio < 0.85)
+       "system_prompt (%d bytes) < combined (%d bytes)"
+       system_bytes combined_bytes)
+    true (system_bytes < combined_bytes)
 
 let test_dynamic_context_nonempty () =
   let tp = build_separated () in
-  let dyn_tokens = estimate_tokens tp.dynamic_context in
+  let dynamic_bytes = measure_bytes tp.dynamic_context in
   check bool
-    (Printf.sprintf "dynamic_context has %d tokens (> 0)" dyn_tokens)
-    true (dyn_tokens > 0)
+    (Printf.sprintf "dynamic_context has %d bytes (> 0)" dynamic_bytes)
+    true (dynamic_bytes > 0)
 
-let test_total_tokens_preserved () =
+let test_total_bytes_preserved () =
   let tp = build_separated () in
   let combined = build_combined () in
   let separated_total =
-    estimate_tokens tp.system_prompt + estimate_tokens tp.dynamic_context
+    measure_bytes tp.system_prompt + measure_bytes tp.dynamic_context
   in
-  let combined_total = estimate_tokens combined in
-  (* Token counts should be approximately equal.
-     Small differences are expected from separator formatting. *)
-  let diff = abs (separated_total - combined_total) in
-  check bool
-    (Printf.sprintf
-       "total tokens similar: separated=%d combined=%d diff=%d"
-       separated_total combined_total diff)
-    true (diff < 50)
+  let combined_total = measure_bytes combined in
+  check int "combined adds one two-byte separator"
+    (separated_total + String.length "\n\n")
+    combined_total
+
+let test_prompt_metrics_use_exact_utf8_bytes () =
+  let metrics =
+    KAR.build_prompt_metrics
+      ~system_prompt:"도구"
+      ~dynamic_context:"x"
+      ~user_message:""
+  in
+  check int "total UTF-8 bytes" 7 metrics.total_bytes;
+  check int "cacheable UTF-8 bytes" 6 metrics.cacheable_bytes;
+  let json = KAR.prompt_metrics_to_json metrics in
+  match json with
+  | `Assoc fields ->
+      check bool "retired token estimate is absent" false
+        (List.mem_assoc "estimated_total_tokens" fields)
+  | _ -> fail "prompt metrics must serialize as an object"
 
 let test_hard_constraints_in_system_only () =
   let tp = build_separated () in
@@ -297,30 +298,7 @@ let test_user_message_sanitizer_preserves_semantic_content () =
   check bool "preserves useful user request" true
     (has_in sanitized "Please inspect the current board status.")
 
-let test_token_report () =
-  (* Emit a structured report for A/B comparison *)
-  let tp = build_separated () in
-  let combined = build_combined () in
-  let sys_tok = estimate_tokens tp.system_prompt in
-  let dyn_tok = estimate_tokens tp.dynamic_context in
-  let combined_tok = estimate_tokens combined in
-  let cache_eligible_ratio =
-    Float.of_int sys_tok /. Float.of_int (sys_tok + dyn_tok)
-  in
-  Printf.printf "\n=== P1-1c Prompt Metrics Report ===\n";
-  Printf.printf "Pre-split (combined system_prompt):  %d tokens\n" combined_tok;
-  Printf.printf "Post-split system_prompt (hard):     %d tokens\n" sys_tok;
-  Printf.printf "Post-split dynamic_context (soft):   %d tokens\n" dyn_tok;
-  Printf.printf "Post-split total:                    %d tokens\n" (sys_tok + dyn_tok);
-  Printf.printf "System prompt reduction:             %.1f%%\n"
-    ((1.0 -. Float.of_int sys_tok /. Float.of_int combined_tok) *. 100.0);
-  Printf.printf "Cache-eligible ratio (system/total): %.1f%%\n"
-    (cache_eligible_ratio *. 100.0);
-  Printf.printf "===================================\n";
-  (* This test always passes — it's a measurement, not an assertion *)
-  check pass "report emitted" () ()
-
-let test_ctx_composition_splits_history_and_residual () =
+let test_ctx_composition_splits_history_bytes () =
   let history_messages =
     [
       {
@@ -375,40 +353,44 @@ let test_ctx_composition_splits_history_and_residual () =
       ~history_messages
       ~actual_input_tokens:(Some 1000)
   in
-  let segment_tokens key =
+  let segment_bytes key =
     metrics.segments
     |> List.assoc_opt key
-    |> Option.map (fun segment -> segment.KAR.estimated_tokens)
+    |> Option.map (fun segment -> segment.KAR.bytes)
     |> Option.value ~default:0
   in
   check bool "system prompt bucket present" true
-    (segment_tokens "system_prompt" > 0);
+    (segment_bytes "system_prompt" > 0);
   check bool "history user bucket present" true
-    (segment_tokens "history_user" > 0);
+    (segment_bytes "history_user" > 0);
   check bool "history assistant text bucket present" true
-    (segment_tokens "history_assistant_text" > 0);
+    (segment_bytes "history_assistant_text" > 0);
   check bool "history tool use bucket present" true
-    (segment_tokens "history_tool_use" > 0);
+    (segment_bytes "history_tool_use" > 0);
   check bool "history tool result bucket present" true
-    (segment_tokens "history_tool_result" > 0);
-  check bool "unattributed residual added" true
-    (segment_tokens "unattributed" > 0);
-  check int "display total anchored to actual input" 1000
-    metrics.display_total_tokens
+    (segment_bytes "history_tool_result" > 0);
+  check (option int) "provider token observation remains separate" (Some 1000)
+    metrics.actual_input_tokens;
+  check int "total bytes equal segment sum"
+    (List.fold_left (fun total (_, segment) -> total + segment.KAR.bytes) 0
+       metrics.segments)
+    metrics.attributed_bytes
 
 (* ── Suite ────────────────────────────────────────────── *)
 
 let () =
   run "keeper_prompt_metrics"
     [
-      ( "token_budget",
+      ( "byte_measurement",
         [
           test_case "system_prompt shorter than combined" `Quick
             test_system_prompt_shorter_than_combined;
           test_case "dynamic_context nonempty" `Quick
             test_dynamic_context_nonempty;
-          test_case "total tokens preserved" `Quick
-            test_total_tokens_preserved;
+          test_case "total bytes preserved" `Quick
+            test_total_bytes_preserved;
+          test_case "exact UTF-8 byte metrics" `Quick
+            test_prompt_metrics_use_exact_utf8_bytes;
         ] );
       ( "separation_harness",
         [
@@ -436,14 +418,9 @@ let () =
           test_case "user message sanitizer preserves semantic content" `Quick
             test_user_message_sanitizer_preserves_semantic_content;
         ] );
-      ( "metrics_report",
-        [
-          test_case "token report (A/B baseline)" `Quick
-            test_token_report;
-        ] );
       ( "ctx_composition",
         [
-          test_case "splits history buckets and residual" `Quick
-            test_ctx_composition_splits_history_and_residual;
+          test_case "splits history byte buckets" `Quick
+            test_ctx_composition_splits_history_bytes;
         ] );
     ]

@@ -404,7 +404,7 @@ let run_turn
           ]))
     Keeper_runtime_manifest.Context_compacted;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
-     user message append, token estimation — Keeper_run_prompt. *)
+     and user message append — Keeper_run_prompt. *)
   let prompt_ctx =
     Keeper_run_prompt.build_turn_context
       ~ctx
@@ -428,7 +428,6 @@ let run_turn
         { checkpoint with messages = history_messages })
       resume_oas_checkpoint
   in
-  let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   let history_messages_digest = digest_message_texts_as_joined history_messages in
   let context_digest =
@@ -450,7 +449,6 @@ let run_turn
             ("user_message_digest", `String (digest_text user_message));
             ("history_message_count", `Int (List.length history_messages));
             ("history_messages_digest", `String history_messages_digest);
-            ("estimated_input_tokens", `Int estimated_input_tokens);
             ("context_window", `Int max_context);
             ("context_digest", `String context_digest);
           ]))
@@ -471,8 +469,6 @@ let run_turn
       ~dynamic_context
       ~history_messages
       ~prompt_metrics
-      ~estimated_input_tokens
-      ~max_context
       ~shared_context
       ~context_injector
       ~start_turn_count
@@ -501,52 +497,6 @@ let run_turn
     Turn_helpers.run_with_setup_cleanup ~cleanup:cleanup_agent_setup
     @@ fun () ->
     let tools = s.Keeper_run_tools.tools in
-    let tool_context_estimate =
-      s.Keeper_run_tools.tool_context_estimate
-    in
-    let context_window_observation =
-      Keeper_run_prompt.observe_context_window
-        ~estimated_input_tokens:
-          tool_context_estimate.estimated_input_tokens_with_tools
-        ~max_context
-    in
-    (* This aggregate estimate is observation only. It neither suppresses
-       context nor fabricates a pre-dispatch failure. OAS transports the complete
-       request and reports typed ContextOverflow; MASC owns lane compaction. *)
-    let pre_dispatch_over_context_window =
-      context_window_observation.observed_over_context_tokens > 0
-    in
-    append_manifest ~site:"context_preflight"
-      ~keeper_turn_id:manifest_keeper_turn_id
-      ~status:
-        (if pre_dispatch_over_context_window
-         then "over_context_window_observed"
-         else "ok")
-      ~decision:
-        (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
-          (`Assoc
-            [
-              ( "prompt_estimated_input_tokens",
-                `Int estimated_input_tokens );
-              ( "tool_count",
-                `Int tool_context_estimate.tool_count );
-              ( "tool_schema_estimated_tokens",
-                `Int tool_context_estimate.tool_schema_tokens );
-              ( "estimated_input_tokens_with_tools",
-                `Int tool_context_estimate.estimated_input_tokens_with_tools );
-              ("context_window", `Int max_context);
-              ( "remaining_context_tokens",
-                `Int
-                  context_window_observation.observed_remaining_context_tokens );
-              ( "over_context_tokens",
-                `Int context_window_observation.observed_over_context_tokens );
-              ( "context_usage_ratio",
-                `Float
-                  context_window_observation.observed_context_usage_ratio );
-              ( "pre_dispatch_over_context_window",
-                `Bool pre_dispatch_over_context_window );
-            ]))
-      Keeper_runtime_manifest.Context_injected;
     let hooks = s.Keeper_run_tools.hooks in
     let model_input_projection =
       s.Keeper_run_tools.model_input_projection
@@ -588,15 +538,17 @@ let run_turn
        let stream_idle_timeout_s =
          Keeper_runtime_resolved.stream_idle_timeout_sec ()
        in
-       Keeper_agent_run_phase0_telemetry.record_if_enabled
+       Keeper_agent_run_phase0_telemetry.record
          ~meta
          ~turn_system_prompt
          ~tools
          ~history_messages
+         ?user_blocks
          ~user_message
          ~start_turn_count
          ~max_context
-         ~pre_dispatch_compacted;
+         ~pre_dispatch_compacted
+         ();
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let pre_dispatch_error = pre_dispatch_checkpoint_error in
        let turn_result =

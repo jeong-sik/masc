@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Summarize keeper wake-payload telemetry JSONL files.
+"""Summarize exact keeper wake-payload component observations.
 
-Phase 0 aggregator for the tiered-hydration redesign. Consumes records
-emitted by [Dashboard_harness_health.record_wake_payload] and prints
-per-keeper and overall distribution (p50, p95, max, mean) of the key
-payload-size fields in TSV.
+Consumes records emitted by [Dashboard_harness_health.record_wake_payload]
+and prints per-keeper and overall distributions (p50, p95, max, mean) of
+exact component byte counts and message/tool counts in TSV. Message bytes cover
+content blocks only; tool bytes cover canonical schema JSON values only.
 
 Usage:
     wake_payload_stats.py <path-to-jsonl> [<more> ...]
@@ -25,10 +25,9 @@ from typing import Iterable, List, Sequence
 
 
 NUMERIC_FIELDS = (
-    "approx_body_bytes",
     "system_prompt_bytes",
-    "tool_defs_bytes",
-    "messages_bytes",
+    "tool_schema_json_bytes",
+    "message_content_bytes",
     "message_count",
     "tool_count",
 )
@@ -113,7 +112,7 @@ def average_role_counts(records: List[dict]) -> dict[str, float]:
 
 def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="Summarize keeper wake-payload telemetry JSONL files.",
+        description="Summarize exact keeper wake-payload component observations.",
     )
     parser.add_argument(
         "paths",

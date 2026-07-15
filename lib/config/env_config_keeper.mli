@@ -216,9 +216,3 @@ module DashboardHealth : sig
   val penalty_warn : float
   val runtime_warning_ctx_ratio : float
 end
-
-(** {1 Wake-time payload telemetry} *)
-
-module KeeperTelemetry : sig
-  val payload_telemetry_enabled : unit -> bool
-end

@@ -14,12 +14,10 @@ val record_wake_payload :
   keeper_name:string ->
   trace_id:string ->
   turn_index:int ->
-  model_id:string ->
   context_window:int ->
-  approx_body_bytes:int ->
   system_prompt_bytes:int ->
-  tool_defs_bytes:int ->
-  messages_bytes:int ->
+  tool_schema_json_bytes:int ->
+  message_content_bytes:int ->
   message_count:int ->
   role_counts:(string * int) list ->
   tool_count:int ->
@@ -30,12 +28,10 @@ val register_record_wake_payload :
   (keeper_name:string ->
    trace_id:string ->
    turn_index:int ->
-   model_id:string ->
    context_window:int ->
-   approx_body_bytes:int ->
    system_prompt_bytes:int ->
-   tool_defs_bytes:int ->
-   messages_bytes:int ->
+   tool_schema_json_bytes:int ->
+   message_content_bytes:int ->
    message_count:int ->
    role_counts:(string * int) list ->
    tool_count:int ->

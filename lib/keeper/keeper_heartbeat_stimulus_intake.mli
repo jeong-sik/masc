@@ -1,6 +1,6 @@
 (** Event-Layer stimulus intake for the keeper heartbeat loop.
 
-    Leases the earliest ready Event Layer stimulus per turn following
+    Drains at most one ready Event Layer stimulus per turn following
     RFC-0020 §3 Rule 4. Payload families share one order; an unready input
     remains queued without blocking later ready work in the same Keeper lane. *)
 
@@ -52,20 +52,12 @@ val consume_single_heartbeat_stimulus
   -> Keeper_event_queue.stimulus
   -> Keeper_world_observation.pending_board_event list
 
-(** [consume_board_stimulus_batch ~meta_after_triage batch] increments
-    Otel_metric_store per stimulus, logs debounce coalescing, and returns the
-    pending board events derived from [batch]. *)
-val consume_board_stimulus_batch
-  :  meta_after_triage:keeper_meta
-  -> Keeper_event_queue.stimulus list
-  -> Keeper_world_observation.pending_board_event list
-
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
     drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges
     newly-consumed board events with the [pending_board_events] already
     accumulated by the caller, deduplicating by [post_id]. A
-    [Hitl_resolved] stimulus remains queued until its exact approval id has
+    A [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be leased.
     Runtime/provider availability cannot defer a durable claim; boundary
     failures settle explicitly through the existing failure route. *)

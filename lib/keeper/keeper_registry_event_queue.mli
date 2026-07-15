@@ -62,9 +62,6 @@ val claim_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (lease option, string) result
 
-val claim_board_result :
-  base_path:string -> string -> claimed_at:float -> (lease option, string) result
-
 val settle_result :
   base_path:string ->
   string ->

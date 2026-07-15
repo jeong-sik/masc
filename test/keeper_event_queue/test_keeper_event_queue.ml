@@ -40,44 +40,6 @@ let test_enqueue_dequeue_fifo () =
        | None -> assert false)
   | None -> assert false
 
-let test_dedup_within_window () =
-  let s1 = make_stim ~arrived_at:0.0 "p1" in
-  let s2 = make_stim ~arrived_at:30.0 "p1" in (* within 60s *)
-  let s3 = make_stim ~arrived_at:200.0 "p1" in (* outside 60s *)
-  let q = enqueue (enqueue (enqueue empty s1) s2) s3 in
-  let dedup = dedup_by_post_id q in
-  assert (length dedup = 2);
-  match dequeue dedup with
-  | Some (head, _) -> assert (head.arrived_at = 0.0) (* first survivor kept *)
-  | None -> assert false
-
-let test_dedup_custom_window () =
-  let s1 = make_stim ~arrived_at:0.0 "p1" in
-  let s2 = make_stim ~arrived_at:5.0 "p1" in
-  let q = enqueue (enqueue empty s1) s2 in
-  assert (length (dedup_by_post_id ~window_seconds:1.0 q) = 2);
-  assert (length (dedup_by_post_id ~window_seconds:10.0 q) = 1)
-
-let test_sort_by_urgency () =
-  let s_low = make_stim ~urgency:Low "p1" in
-  let s_imm = make_stim ~urgency:Immediate "p2" in
-  let s_norm = make_stim ~urgency:Normal "p3" in
-  let q = enqueue (enqueue (enqueue empty s_low) s_imm) s_norm in
-  let sorted = sort_by_urgency q in
-  match dequeue sorted with
-  | Some (head, _) -> assert (head.urgency = Immediate)
-  | None -> assert false
-
-let test_sort_stable_within_bucket () =
-  let s1 = make_stim ~urgency:Normal "p1" in
-  let s2 = make_stim ~urgency:Normal "p2" in
-  let s3 = make_stim ~urgency:Normal "p3" in
-  let q = enqueue (enqueue (enqueue empty s1) s2) s3 in
-  let sorted = sort_by_urgency q in
-  match dequeue sorted with
-  | Some (head, _) -> assert (head.post_id = "p1")
-  | None -> assert false
-
 (* ── TLA+ invariant correspondence ─────────────────────────────── *)
 
 (* Conservation: enqueued >= dequeued at all times. *)
@@ -136,10 +98,6 @@ let test_typed_payload_surface () =
 let () =
   test_empty ();
   test_enqueue_dequeue_fifo ();
-  test_dedup_within_window ();
-  test_dedup_custom_window ();
-  test_sort_by_urgency ();
-  test_sort_stable_within_bucket ();
   test_conservation ();
   test_queue_overrides_policy ();
   test_dequeue_only_consumes_enqueued ();

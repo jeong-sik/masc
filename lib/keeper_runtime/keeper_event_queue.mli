@@ -9,12 +9,11 @@
     This module is data only. The enqueue side is wired:
     [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
     before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
-    [keeper_heartbeat_loop.ml] leases every queued board signal at turn
-    start via [Keeper_registry_event_queue.claim_board_result] (a CAS loop
-    over [drain_board_all], RFC-0334 W2) and falls back to one typed non-board
-    lease when that batch is empty — either path pins the
-    [Conservation] invariant. The per-Keeper wakeup atomic cuts the configured
-    heartbeat sleep, and no policy layer may suppress the following cycle. *)
+    [keeper_heartbeat_loop.ml] leases the earliest ready typed stimulus at turn
+    start. An unready stimulus remains in place without blocking later ready
+    work in the same Keeper lane, and no payload family receives priority over
+    another. The per-Keeper wakeup atomic cuts the configured heartbeat sleep,
+    and no policy layer may suppress the following cycle. *)
 
 type urgency =
   | Immediate  (** operator commands and other latency-critical signals *)
@@ -22,7 +21,7 @@ type urgency =
   | Low        (** background polling, telemetry-driven nudges *)
 
 type post_id = string
-(** Identifier used by [dedup_by_post_id] to collapse repeat events.
+(** Stable producer-owned identity used to collapse repeat events.
 
     The runtime uses the originating board post id, the mention
     target id, or the operator directive token. The queue does
@@ -270,36 +269,18 @@ val remove_by_post_id_pair : post_id -> t -> t -> stimulus list * t * t
 (** Remove matching stimuli from two queues and return the de-duplicated
     removed stimuli plus both remaining queues. *)
 
-val dedup_by_post_id : ?window_seconds:float -> t -> t
-(** Drops later duplicates of the same [post_id] when their
-    [arrived_at] differs by less than [window_seconds] (default
-    [60.0]). FIFO order of survivors is preserved. *)
-
-val sort_by_urgency : t -> t
-(** Stable sort: [Immediate] < [Normal] < [Low]. Two stimuli of the
-    same urgency keep insertion order, so urgency reordering does
-    not invalidate per-bucket FIFO. *)
-
 val summary : t -> string
 (** Short human-readable description for log lines. *)
 
 val payload_kind_label : stimulus_payload -> string
 (** Stable short label for logs/metrics. *)
 
+val is_board_signal : stimulus_payload -> bool
+(** [true] for the two typed Board payload variants. This is an exhaustive
+    projection only; it does not assign scheduling priority. *)
+
 val urgency_to_string : urgency -> string
 val urgency_of_string : string -> (urgency, string) result
-
-val is_board_signal : stimulus_payload -> bool
-(** [true] iff the payload is a [Board_signal]. *)
-
-val drain_board_all : t -> stimulus list * t
-(** [drain_board_all q] separates every board-signal stimulus from the
-    rest of the queue, regardless of arrival time (RFC-0334 W2: the turn
-    is the batching unit, not an arrival window — identity dedup at
-    enqueue already bounds the batch).  Board signals are urgency-sorted
-    (explicit mentions enqueue as [Immediate], so they surface first);
-    non-board stimuli remain in the returned queue in their original
-    order. *)
 
 val stimulus_to_yojson : stimulus -> Yojson.Safe.t
 (** Stable JSON representation used by MASC-owned durable queue snapshots. *)

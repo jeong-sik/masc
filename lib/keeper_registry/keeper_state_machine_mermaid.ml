@@ -53,7 +53,7 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Overflowed --> Draining : stop requested\n";
   p "    Overflowed --> Crashed : fiber death\n";
   p "    Compacting --> Running : compact done\n";
-  p "    Compacting --> Overflowed : compact failed (overflow persists)\n";
+  p "    Compacting --> Running : compact failed (Lane retry queued)\n";
   p "    Compacting --> Failing : hb fail\n";
   p "    Compacting --> Crashed : fiber death\n";
   p "    Compacting --> Draining : stop requested\n";

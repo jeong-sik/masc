@@ -167,12 +167,11 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Compaction_completed ->
     { c with compaction_active = false; context_overflow = false }
   | Compaction_failed _ ->
-    (* Leave [context_overflow] set — the overflow has not been resolved.
-       The retry-exhausted latch is owned by the caller (keeper_unified_turn
-       retry loop) and is promoted into this state machine via a subsequent
-       [Operator_clear_requested] or [Context_overflow_detected] after
-       the retry budget is depleted. *)
-    { c with compaction_active = false }
+    (* Durable lane settlement owns the retry. Keeping [context_overflow]
+       latched here made the Keeper non-executable, so the exact requeued work
+       could never retry. The failure remains observable through turn health
+       and receipts while this buffer-operation latch is released. *)
+    { c with compaction_active = false; context_overflow = false }
   | Handoff_started -> { c with handoff_active = true }
   | Handoff_completed _ -> { c with handoff_active = false }
   | Handoff_failed _ -> { c with handoff_active = false }

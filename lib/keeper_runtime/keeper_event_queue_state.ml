@@ -11,6 +11,7 @@ type requeue_reason =
   | Cycle_crashed
   | Registration_recovery
   | Retry_after_observed
+  | Context_compaction_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -232,6 +233,7 @@ let requeue_reason_label = function
   | Cycle_crashed -> "cycle_crashed"
   | Registration_recovery -> "registration_recovery"
   | Retry_after_observed -> "retry_after_observed"
+  | Context_compaction_retry -> "context_compaction_retry"
   | Approval_grant_unconsumed -> "approval_grant_unconsumed"
   | Approval_grant_state_unavailable -> "approval_grant_state_unavailable"
 ;;
@@ -244,6 +246,7 @@ let requeue_reason_of_label = function
   | "cycle_crashed" -> Ok Cycle_crashed
   | "registration_recovery" -> Ok Registration_recovery
   | "retry_after_observed" -> Ok Retry_after_observed
+  | "context_compaction_retry" -> Ok Context_compaction_retry
   | "approval_grant_unconsumed" -> Ok Approval_grant_unconsumed
   | "approval_grant_state_unavailable" -> Ok Approval_grant_state_unavailable
   | label -> Error (Printf.sprintf "unknown event queue requeue reason: %s" label)
@@ -487,12 +490,12 @@ let settle ~settled_at ~lease ~settlement state =
       | Ack -> state.pending
       | Requeue
           ( Retry_after_observed
+          | Context_compaction_retry
           | Approval_grant_unconsumed
           | Approval_grant_state_unavailable ) ->
-        (* A retryable provider failure and a durable one-shot grant both
-           retain the exact leased stimuli without monopolizing the FIFO
-           front. Unrelated Board/Connector work can claim the next lane
-           cycle before the retained work is attempted again. *)
+        (* Retryable provider work, a completed context-compaction handoff,
+           and a durable one-shot grant retain the exact leased stimuli
+           without monopolizing the FIFO front. *)
         append_missing committed.stimuli state.pending
       | Requeue _ -> prepend_missing committed.stimuli state.pending
       | Escalate { successor = None; _ } -> state.pending

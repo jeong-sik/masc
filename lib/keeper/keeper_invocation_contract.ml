@@ -33,7 +33,6 @@ type result_contract = Keeper_invocation_types.result_contract =
 type request_error =
   | Invalid_target of string
   | Empty_prompt
-  | Invalid_entry_projection
   | Invalid_wire_value of
       { field : string
       ; expected : string
@@ -125,7 +124,6 @@ let request_of_json json =
 let request_error_to_string = function
   | Invalid_target reason -> reason
   | Empty_prompt -> "message is required"
-  | Invalid_entry_projection -> "Keeper invocation entry projection is not an object"
   | Invalid_wire_value { field; expected } ->
     Printf.sprintf "%s must be %s" field expected
   | Run_ref_mismatch -> "run_ref does not identify the stored Keeper invocation"
@@ -210,35 +208,36 @@ let run_ref_matches_entry reference (entry : Keeper_msg_async.entry) =
        entry.Keeper_msg_async.keeper_name
 ;;
 
+let validate_entry reference entry =
+  if run_ref_matches_entry reference entry
+  then Ok entry
+  else Error Run_ref_mismatch
+;;
+
+let poll ~base_path ~caller reference =
+  let run_id = run_id reference in
+  match Keeper_msg_async.poll ~base_path ~caller run_id with
+  | Keeper_msg_async.Found entry ->
+    validate_entry reference entry |> Result.map (fun entry -> Keeper_msg_async.Found entry)
+  | (Keeper_msg_async.Absent
+    | Keeper_msg_async.Unreadable _
+    | Keeper_msg_async.Rejected _) as result -> Ok result
+;;
+
+let cancel ~base_path ~caller reference =
+  match poll ~base_path ~caller reference with
+  | Error error -> Error error
+  | Ok (Keeper_msg_async.Found _) ->
+    Ok (Keeper_msg_async.cancel ~base_path ~caller (run_id reference))
+  | Ok Keeper_msg_async.Absent -> Ok Keeper_msg_async.Cancel_not_found
+  | Ok (Keeper_msg_async.Unreadable reason) ->
+    Ok (Keeper_msg_async.Cancel_unreadable reason)
+  | Ok (Keeper_msg_async.Rejected rejection) ->
+    Ok (Keeper_msg_async.Cancel_rejected rejection)
+;;
+
 let result_contract_to_string = Keeper_invocation_types.result_contract_to_string
 let result_contract_of_string = Keeper_invocation_types.result_contract_of_string
-
-let submission_to_json (request : request) outcome =
-  let common reference status contract =
-    [ "request_id", `String outcome.Keeper_msg_async.request_id
-    ; "keeper_name", `String (target_name request)
-    ; "status", `String status
-    ; "run_ref", run_ref_to_json reference
-    ; "result_contract", `String (result_contract_to_string contract)
-    ]
-  in
-  match submission_receipt request outcome with
-  | Durable_run reference ->
-    `Assoc
-      (common reference "queued" Awaiting_execution
-       @ [ ( "message"
-           , `String
-               "Keeper turn accepted. The caller lane may continue; query masc_keeper_msg_result with run_ref.run_id." )
-         ])
-  | Reconciliation_required { run_ref = reference; reason } ->
-    `Assoc
-      (common reference "reconciliation_required" Publication_uncertain
-       @ [ "reason", `String reason
-         ; ( "operator_instruction"
-           , `String
-               "Request publication is uncertain. Query masc_keeper_msg_result with this exact run_ref.run_id; do not resubmit." )
-         ])
-;;
 
 let delegate_submission_to_json (request : request) outcome =
   let common reference result_contract =
@@ -348,29 +347,6 @@ let delegate_entry_to_json (entry : Keeper_msg_async.entry) =
         ]
         @ timing
         @ entry_result entry.status))
-;;
-
-let entry_to_json entry =
-  let contract = result_contract entry in
-  let* target_name =
-    Keeper_id.Keeper_name.of_string entry.Keeper_msg_async.keeper_name
-    |> Result.map_error (fun reason -> Invalid_target reason)
-  in
-  let reference =
-    { run_id = entry.request_id
-    ; target = Keeper target_name
-    ; capability = Invoke_turn
-    }
-  in
-  match Keeper_msg_async.entry_to_json entry with
-  | `Assoc fields ->
-    Ok
-      (`Assoc
-         (fields
-          @ [ "run_ref", run_ref_to_json reference
-            ; "result_contract", `String (result_contract_to_string contract)
-            ]))
-  | _ -> Error Invalid_entry_projection
 ;;
 
 let delegate_cancellation_to_json reference result =

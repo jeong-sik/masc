@@ -125,10 +125,6 @@ let submit_keeper_msg_with_captured_event_bus
     ~f:(fun request request_sw -> f ?event_bus request request_sw)
     ()
 
-let submit_outcome_with_keeper_json ~request outcome =
-  Keeper_invocation_contract.submission_to_json request outcome
-;;
-
 module For_testing = struct
   let reset_keeper_list_cache () =
     Atomic.set keeper_list_cache (empty_json_cache ~generation:0)
@@ -137,7 +133,6 @@ module For_testing = struct
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
   let submit_keeper_msg_with_captured_event_bus =
     submit_keeper_msg_with_captured_event_bus
-  let submit_outcome_with_keeper_json = submit_outcome_with_keeper_json
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -664,8 +659,9 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
     Ok
       (submit_keeper_invocation
          ~submitted_by
-         ~submission_to_json:Keeper_invocation_contract.submission_to_json
-         ~submission_error_to_json:Keeper_msg_async.submit_error_to_json
+         ~submission_to_json:Keeper_invocation_contract.delegate_submission_to_json
+         ~submission_error_to_json:
+           (Keeper_invocation_contract.delegate_submission_error_to_json request)
          ~run_turn:(fun ?event_bus request worker_ctx ->
            let worker_args = with_invocation_request worker_args request in
            let result =
@@ -742,62 +738,49 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
   match run_ref_arg args with
   | Error error -> run_ref_error error
   | Ok reference ->
-    let run_id = Keeper_invocation_contract.run_id reference in
-    (match Keeper_msg_async.poll ~base_path:config.base_path ~caller run_id with
-    | Keeper_msg_async.Absent ->
-      tool_result_error_data
-        (`Assoc [ "error", `String "run_not_found"; "run_ref", Keeper_invocation_contract.run_ref_to_json reference ])
-    | Keeper_msg_async.Unreadable reason ->
-      tool_result_error_data
-        (`Assoc
-           [ "error", `String "invocation_record_unreadable"
-           ; "message", `String reason
-           ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
-           ])
-    | Keeper_msg_async.Rejected rejection ->
-      tool_result_error_data (delegate_access_rejection reference rejection)
-    | Keeper_msg_async.Found entry
-      when not (Keeper_invocation_contract.run_ref_matches_entry reference entry) ->
-      run_ref_error Keeper_invocation_contract.Run_ref_mismatch
-    | Keeper_msg_async.Found entry ->
-      (match Keeper_invocation_contract.delegate_entry_to_json entry with
-       | Ok json -> tool_result_ok_data json
-       | Error error ->
-         run_ref_error error))
+    (match Keeper_invocation_contract.poll ~base_path:config.base_path ~caller reference with
+     | Error error -> run_ref_error error
+     | Ok Keeper_msg_async.Absent ->
+       tool_result_error_data
+         (`Assoc [ "error", `String "run_not_found"; "run_ref", Keeper_invocation_contract.run_ref_to_json reference ])
+     | Ok (Keeper_msg_async.Unreadable reason) ->
+       tool_result_error_data
+         (`Assoc
+            [ "error", `String "invocation_record_unreadable"
+            ; "message", `String reason
+            ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
+            ])
+     | Ok (Keeper_msg_async.Rejected rejection) ->
+       tool_result_error_data (delegate_access_rejection reference rejection)
+     | Ok (Keeper_msg_async.Found entry) ->
+       (match Keeper_invocation_contract.delegate_entry_to_json entry with
+        | Ok json -> tool_result_ok_data json
+        | Error error ->
+          run_ref_error error))
 ;;
 
 let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
   match run_ref_arg args with
   | Error error -> run_ref_error error
   | Ok reference ->
-    let run_id = Keeper_invocation_contract.run_id reference in
-    (match Keeper_msg_async.poll ~base_path:config.base_path ~caller run_id with
-     | Keeper_msg_async.Found entry
-       when not (Keeper_invocation_contract.run_ref_matches_entry reference entry) ->
-       run_ref_error Keeper_invocation_contract.Run_ref_mismatch
-     | Keeper_msg_async.Found _ ->
-    let result =
-      Keeper_msg_async.cancel ~base_path:config.base_path ~caller run_id
-    in
-    let json = Keeper_invocation_contract.delegate_cancellation_to_json reference result in
-    match result with
-    | Keeper_msg_async.Cancellation_requested _ ->
-      tool_result_ok_data json
-    | Keeper_msg_async.Cancel_not_found
-    | Keeper_msg_async.Cancel_unreadable _
-    | Keeper_msg_async.Cancel_rejected _
-    | Keeper_msg_async.Cancel_worker_ownership_unknown _
-    | Keeper_msg_async.Cancel_already_terminal _
-    | Keeper_msg_async.Cancel_persistence_failed _
-    | Keeper_msg_async.Cancel_worker_signal_failed _
-    | Keeper_msg_async.Cancel_state_invariant_failed _ ->
-      tool_result_error_data json
-     | Keeper_msg_async.Absent ->
-       tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference Keeper_msg_async.Cancel_not_found)
-     | Keeper_msg_async.Unreadable reason ->
-       tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference (Keeper_msg_async.Cancel_unreadable reason))
-     | Keeper_msg_async.Rejected rejection ->
-       tool_result_error_data (delegate_access_rejection reference rejection))
+    (match Keeper_invocation_contract.cancel ~base_path:config.base_path ~caller reference with
+     | Error error -> run_ref_error error
+     | Ok result ->
+       let json =
+         Keeper_invocation_contract.delegate_cancellation_to_json reference result
+       in
+       match result with
+       | Keeper_msg_async.Cancellation_requested _ ->
+         tool_result_ok_data json
+       | Keeper_msg_async.Cancel_not_found
+       | Keeper_msg_async.Cancel_unreadable _
+       | Keeper_msg_async.Cancel_rejected _
+       | Keeper_msg_async.Cancel_worker_ownership_unknown _
+       | Keeper_msg_async.Cancel_already_terminal _
+       | Keeper_msg_async.Cancel_persistence_failed _
+       | Keeper_msg_async.Cancel_worker_signal_failed _
+       | Keeper_msg_async.Cancel_state_invariant_failed _ ->
+         tool_result_error_data json)
 ;;
 
 let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =

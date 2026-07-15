@@ -20,48 +20,23 @@ type turn_stats = {
   tokens_used : int;
 }
 
-type message_request_status =
-  | Accepted
-  | Acceptance_uncertain
-  | Queued
-  | Running
-  | Done
-  | Failed
-  | Lost
-  | Cancelled
+type message_request_tracking =
+  | Keeper_run of
+      { run_ref : Keeper_invocation_types.run_ref
+      ; result_contract : Keeper_invocation_types.result_contract
+      }
+  | Chat_receipt of { receipt_id : string }
 
 type message_request = {
-  request_id : string;
+  tracking : message_request_tracking;
   destination_type : string;
   destination_id : string;
   channel : string;
   actor_id : string option;
-  status : message_request_status;
   modalities : string list;
   transport : string option;
   metadata : (string * string) list;
 }
-
-let message_request_status_to_string = function
-  | Accepted -> "accepted"
-  | Acceptance_uncertain -> "acceptance_uncertain"
-  | Queued -> "queued"
-  | Running -> "running"
-  | Done -> "done"
-  | Failed -> "error"
-  | Lost -> "lost"
-  | Cancelled -> "cancelled"
-
-let message_request_status_of_string = function
-  | "accepted" -> Some Accepted
-  | "acceptance_uncertain" -> Some Acceptance_uncertain
-  | "queued" -> Some Queued
-  | "running" -> Some Running
-  | "done" -> Some Done
-  | "error" -> Some Failed
-  | "lost" -> Some Lost
-  | "cancelled" -> Some Cancelled
-  | _ -> None
 
 let string_list_json values =
   `List (List.map (fun value -> `String value) values)
@@ -74,14 +49,30 @@ let message_request_to_json request =
     | None -> `Null
     | Some value -> `String value
   in
+  let tracking =
+    match request.tracking with
+    | Keeper_run { run_ref; result_contract } ->
+      `Assoc
+        [ "kind", `String "keeper_run"
+        ; "run_ref", Keeper_invocation_types.run_ref_to_json run_ref
+        ; ( "result_contract"
+          , `String
+              (Keeper_invocation_types.result_contract_to_string result_contract) )
+        ]
+    | Chat_receipt { receipt_id } ->
+      `Assoc
+        [ "kind", `String "chat_receipt"
+        ; "receipt_id", `String receipt_id
+        ; "state", `String "queued"
+        ]
+  in
   `Assoc
     [
-      ("request_id", `String request.request_id);
+      ("tracking", tracking);
       ("destination_type", `String request.destination_type);
       ("destination_id", `String request.destination_id);
       ("channel", `String request.channel);
       ("actor_id", optional_string request.actor_id);
-      ("status", `String (message_request_status_to_string request.status));
       ("modalities", string_list_json request.modalities);
       ("transport", optional_string request.transport);
       ("metadata", string_assoc_json request.metadata);

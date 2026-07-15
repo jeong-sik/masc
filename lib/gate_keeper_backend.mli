@@ -20,7 +20,7 @@ type connector_kind =
     dispatch-construction time. [Discord] and [Slack] each have an in-process
     inbound gateway and an outbound adapter, so a busy message projects onto the
     chat queue; [Generic] (the HTTP gate-route lane: imessage-bot, cli-connector)
-    keeps the async [masc_keeper_msg] poll path. See
+    keeps the typed asynchronous Keeper-run tracking path. See
     RFC-connector-deferred-reply-via-chat-queue §3.2–3.3 and RFC-0317. *)
 
 type submission_owner =
@@ -163,17 +163,21 @@ val extract_turn_stats : string -> Gate_protocol.turn_stats option
 
     The Channel Gate's async dispatch path returns a JSON envelope that the
     downstream connector uses to track the keeper-side request lifecycle
-    (request_id, status, destination). Parsing this envelope is a wire
+    (run_ref, result contract, destination). Parsing this envelope is a wire
     boundary: malformed input must surface as a typed failure so the
     dispatch site can emit a deliberate degraded ACK rather than silently
     substitute the keeper's reply body. *)
 
 type ack_parse_failure =
   | Invalid_json of string
-  | Missing_request_id
-  | Empty_request_id
-  | Missing_status
-  | Invalid_status of string
+  | Missing_run_ref
+  | Invalid_run_ref of Keeper_invocation_contract.request_error
+  | Run_ref_target_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Missing_result_contract
+  | Invalid_result_contract of string
 (** Closed-sum typed parse failure for {!extract_message_request_ack}. Each
     variant names a distinct cause so the dispatch site can log structured
     backend drift and emit a degraded ACK that names the parse failure
@@ -192,9 +196,8 @@ val extract_message_request_ack :
   string ->
   (Gate_protocol.message_request, ack_parse_failure) result
 (** Parse the async ACK envelope from a keeper tool response body.
-    Returns [Ok request] when the body is a valid JSON object with both
-    a non-empty [request_id] and a [status] that maps to one of the closed
-    [Gate_protocol.message_request_status] variants.
+    Returns [Ok request] when the body carries a valid typed [run_ref] and
+    closed Keeper invocation result contract.
     Returns [Error reason] otherwise. JSON parse failures are isolated
     from the closed-sum status check so that a malformed envelope is
     surfaced as a backend-degraded path, distinct from a legitimately

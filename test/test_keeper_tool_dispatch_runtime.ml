@@ -990,12 +990,12 @@ let test_publication_write_cancellation_releases_exact_lane () =
            fail
              (Fs_compat.publication_recovery_registry_error_to_string error)
        in
-       (match Fs_compat.discover_publication_recovery_owners registry with
+       (match Fs_compat.Publication_recovery.discover_owners registry with
         | Ok [] -> ()
         | Ok _ -> fail "fresh recovery registry contained an owner"
         | Error error ->
           fail
-            (Fs_compat.publication_recovery_discovery_error_to_string
+            (Fs_compat.Publication_recovery.discovery_error_to_string
                error));
        let keeper_name = "publication-write-cancel" in
        let provider_reads = Atomic.make 0 in

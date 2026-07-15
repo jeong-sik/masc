@@ -50,10 +50,10 @@ let with_publication_recovery_access ~fs f =
   | Error error ->
     fail (Fs_compat.publication_recovery_registry_error_to_string error)
   | Ok registry ->
-    (match Fs_compat.discover_publication_recovery_owners registry with
+    (match Fs_compat.Publication_recovery.discover_owners registry with
      | Error error ->
        fail
-         (Fs_compat.publication_recovery_discovery_error_to_string
+         (Fs_compat.Publication_recovery.discovery_error_to_string
             error)
      | Ok [] ->
        (match
@@ -73,7 +73,7 @@ let with_publication_recovery_access ~fs f =
          (String.concat
             "; "
             (List.map
-               Fs_compat.publication_recovery_owner_discovery_row_to_string
+               Fs_compat.Publication_recovery.owner_discovery_row_to_string
                rows)))
 ;;
 

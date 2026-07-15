@@ -241,13 +241,13 @@ let with_publication_recovery_registry ~sw ~fs ~registry_root f =
        ^ Fs_compat.publication_recovery_registry_error_to_string error)
   | Ok publication_recovery_registry ->
     (match
-       Fs_compat.discover_publication_recovery_owners
+       Fs_compat.Publication_recovery.discover_owners
          publication_recovery_registry
      with
      | Error error ->
        failwith
          ("test publication recovery discovery failed: "
-          ^ Fs_compat.publication_recovery_discovery_error_to_string
+          ^ Fs_compat.Publication_recovery.discovery_error_to_string
               error)
      | Ok [] -> f publication_recovery_registry
      | Ok rows ->
@@ -256,7 +256,7 @@ let with_publication_recovery_registry ~sw ~fs ~registry_root f =
           ^ String.concat
               "; "
               (List.map
-                 Fs_compat.publication_recovery_owner_discovery_row_to_string
+                 Fs_compat.Publication_recovery.owner_discovery_row_to_string
                  rows)))
 ;;
 

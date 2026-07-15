@@ -30,7 +30,7 @@ let run
   (* (1) deterministic write, (2) librarian extraction, (3) compaction run on
      this keeper's memory lane (RFC-0257), detached from the turn lane. All
      three touch the keeper's memory bank (no internal lock); the lane's
-     per-keeper mutex serializes them. meta/config are immutable snapshots, so
+     per-keeper FIFO worker serializes them. meta/config are immutable snapshots, so
      using them after the turn returns does not race a later turn.
      See RFC #3646 Section 3: Det/NonDet boundary. *)
   let memory_series () =
@@ -145,15 +145,28 @@ let run
        (Keeper_meta_contract.runtime_id_of_meta meta)
        (Printexc.to_string exn))
   in
-  (* RFC-0257: detach (1)-(3) onto the per-keeper memory lane. When the executor
-     switch is not initialized (tests, early startup) the lane runs them inline,
-     so no memory work is lost. *)
-  let (_ : Keeper_memory_lane.outcome) =
-    Keeper_memory_lane.submit
-      ~base_path:config.base_path
-      ~keeper_name:meta.name
-      memory_series
-  in
+  (* RFC-0257: detach (1)-(3) onto the per-keeper memory lane. Admission failure
+     is explicit and observable; provider-backed work never falls back into the
+     submitting turn fiber. *)
+  (match
+     Keeper_memory_lane.submit
+       ~base_path:config.base_path
+       ~keeper_name:meta.name
+       memory_series
+   with
+   | Ok () -> ()
+   | Error error ->
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string DispatchEventFailures)
+       ~labels:
+         [ "keeper", meta.name
+         ; "site", "memory_lane_admission"
+         ; "reason", Keeper_memory_lane.admission_error_code error
+         ]
+       ();
+     Log.Keeper.error ~keeper_name:meta.name
+       "post-turn memory lane admission failed: %s"
+       (Keeper_memory_lane.admission_error_to_string error));
   (* Post-turn memory recall evidence is logged to decisions.jsonl. *)
   (try
      let used_search =

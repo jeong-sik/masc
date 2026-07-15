@@ -138,8 +138,8 @@ type t =
   | MemoryLaneUnitFailures
   | MemoryConsolidations
   | MemoryLaneSubmitted
-  | MemoryLaneRanInline
-  | MemoryLaneDropped
+  | MemoryLaneAdmissionRejected
+  | MemoryLaneCancelledUnits
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneProviderSlotBusy

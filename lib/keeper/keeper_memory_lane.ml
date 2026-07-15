@@ -1,35 +1,42 @@
 (** Per-keeper memory execution lane. See keeper_memory_lane.mli (RFC-0257). *)
 
+type work_item = unit -> unit
+
 type entry =
-  { mem_mu : Eio.Mutex.t
-    (* Serializes memory work within one keeper; held across a provider round
-       trip (seconds), hence the fiber-cooperative Eio.Mutex. Raw lock/unlock,
-       not [use_rw]: a raising unit must not poison the lane. *)
+  { queue : work_item Queue.t
   ; state_mu : Stdlib.Mutex.t
-    (* Guards [pending]. Critical sections never yield. *)
+    (* Guards [queue], [pending], and [worker_active]. Critical sections never
+       yield. *)
   ; mutable pending : int
+  ; mutable worker_active : bool
   }
 
-type outcome =
-  | Submitted
-  | Ran_inline
-  | Dropped
+type admission_error =
+  | Executor_not_initialized
+  | Executor_domain_mismatch
+  | Executor_stopping
+  | Worker_start_failed of exn
 
-type reservation =
-  { release_mu : Stdlib.Mutex.t
-  ; mutable released : bool
-  ; mutable switch_hook : Eio.Switch.hook option
+type executor =
+  { sw : Eio.Switch.t
+  ; owner_domain : Domain.id
   }
 
-(* Per-keeper reservation bound: 1 in-flight (holding [mem_mu]) plus 1 queued.
-   A third concurrent post-turn unit for the same keeper means turns outpace
-   extraction; the excess is best-effort and dropped rather than piling up
-   fibers. Tunable via environment for fleet-wide capacity experiments. *)
-let max_pending () =
-  Keeper_memory_bank_env.memory_env_int_logged
-    "MASC_KEEPER_MEMORY_LANE_MAX_PENDING"
-    ~default:2
-  |> max 1
+exception Worker_did_not_start
+
+let admission_error_code = function
+  | Executor_not_initialized -> "executor_not_initialized"
+  | Executor_domain_mismatch -> "executor_domain_mismatch"
+  | Executor_stopping -> "executor_stopping"
+  | Worker_start_failed _ -> "worker_start_failed"
+;;
+
+let admission_error_to_string = function
+  | Executor_not_initialized -> "memory lane executor is not initialized"
+  | Executor_domain_mismatch -> "memory lane submission came from a non-owner domain"
+  | Executor_stopping -> "memory lane executor is cancelling or finished"
+  | Worker_start_failed exn ->
+    Printf.sprintf "memory lane worker failed to start: %s" (Printexc.to_string exn)
 ;;
 
 let entries : (string, entry) Hashtbl.t = Hashtbl.create 16
@@ -39,37 +46,48 @@ let entries : (string, entry) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Stdlib.Mutex.create ()
 
 (* Set once by [init] at startup, before keepers run. Guarded by [registry_mu]
-   so a reader sees the write. *)
-let executor_sw : Eio.Switch.t option ref = ref None
+   so a reader sees the write. The owner domain is part of the executor
+   capability: Eio switches may only be used from their creating domain. *)
+let executor : executor option ref = ref None
 
 let init ~sw =
-  Stdlib.Mutex.protect registry_mu (fun () -> executor_sw := Some sw)
+  Stdlib.Mutex.protect registry_mu (fun () ->
+    executor := Some { sw; owner_domain = Domain.self () })
 ;;
 
-let current_sw () = Stdlib.Mutex.protect registry_mu (fun () -> !executor_sw)
+let current_executor () = Stdlib.Mutex.protect registry_mu (fun () -> !executor)
 
 let entry_for ~base_path ~keeper_name =
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   Stdlib.Mutex.protect registry_mu (fun () ->
     match Hashtbl.find_opt entries key with
-    | Some e -> e
+    | Some entry -> entry
     | None ->
-      let e =
-        { mem_mu = Eio.Mutex.create ()
+      let entry =
+        { queue = Queue.create ()
         ; state_mu = Stdlib.Mutex.create ()
         ; pending = 0
+        ; worker_active = false
         }
       in
-      Hashtbl.add entries key e;
-      e)
+      Hashtbl.add entries key entry;
+      entry)
 ;;
 
-let metric_name m = Keeper_metrics.(to_string m)
+let metric_name metric = Keeper_metrics.(to_string metric)
 
-let record_counter ~keeper_name metric =
+let record_counter ?(delta = 1.0) ~keeper_name metric =
   Otel_metric_store.inc_counter
     (metric_name metric)
     ~labels:[ "keeper", keeper_name ]
+    ~delta
+    ()
+;;
+
+let record_rejection ~keeper_name error =
+  Otel_metric_store.inc_counter
+    (metric_name MemoryLaneAdmissionRejected)
+    ~labels:[ "keeper", keeper_name; "reason", admission_error_code error ]
     ()
 ;;
 
@@ -80,10 +98,11 @@ let inc_pending ~keeper_name () =
     ()
 ;;
 
-let dec_pending ~keeper_name () =
+let dec_pending ?(delta = 1.0) ~keeper_name () =
   Otel_metric_store.dec_gauge
     (metric_name MemoryLanePending)
     ~labels:[ "keeper", keeper_name ]
+    ~delta
     ()
 ;;
 
@@ -101,186 +120,224 @@ let dec_in_flight ~keeper_name () =
     ()
 ;;
 
-let try_reserve ~keeper_name entry =
-  Stdlib.Mutex.protect entry.state_mu (fun () ->
-    let bound = max_pending () in
-    if entry.pending >= bound
-    then None
-    else (
+let admit ~keeper_name entry work =
+  let action =
+    Stdlib.Mutex.protect entry.state_mu (fun () ->
       entry.pending <- entry.pending + 1;
-      inc_pending ~keeper_name ();
-      Some bound))
-;;
-
-let release_reservation ~keeper_name entry =
-  Stdlib.Mutex.protect entry.state_mu (fun () ->
-    entry.pending <- entry.pending - 1;
-    dec_pending ~keeper_name ())
-;;
-
-let make_reservation () =
-  { release_mu = Stdlib.Mutex.create (); released = false; switch_hook = None }
-;;
-
-let reservation_released reservation =
-  Stdlib.Mutex.protect reservation.release_mu (fun () -> reservation.released)
-;;
-
-let release_reservation_once ~keeper_name entry reservation =
-  let should_release =
-    Stdlib.Mutex.protect reservation.release_mu (fun () ->
-      if reservation.released
-      then false
+      if entry.worker_active
+      then (
+        Queue.push work entry.queue;
+        `Enqueued)
       else (
-        reservation.released <- true;
-        true))
+        entry.worker_active <- true;
+        `Start_worker))
   in
-  if should_release then release_reservation ~keeper_name entry
+  inc_pending ~keeper_name ();
+  action
 ;;
 
-let disarm_switch_hook reservation =
-  let hook =
-    Stdlib.Mutex.protect reservation.release_mu (fun () ->
-      let hook = reservation.switch_hook in
-      reservation.switch_hook <- None;
-      hook)
+let rollback_worker_start ~keeper_name entry =
+  Stdlib.Mutex.protect entry.state_mu (fun () ->
+    entry.worker_active <- false;
+    entry.pending <- entry.pending - 1);
+  dec_pending ~keeper_name ()
+;;
+
+let finish_one ~keeper_name entry =
+  Stdlib.Mutex.protect entry.state_mu (fun () ->
+    entry.pending <- entry.pending - 1);
+  dec_pending ~keeper_name ()
+;;
+
+let take_next entry =
+  Stdlib.Mutex.protect entry.state_mu (fun () ->
+    match Queue.take_opt entry.queue with
+    | Some work -> Some work
+    | None ->
+      entry.worker_active <- false;
+      None)
+;;
+
+let cancel_queued ~keeper_name entry =
+  let cancelled =
+    Stdlib.Mutex.protect entry.state_mu (fun () ->
+      let count = Queue.length entry.queue in
+      Queue.clear entry.queue;
+      entry.pending <- entry.pending - count;
+      entry.worker_active <- false;
+      count)
   in
-  Option.iter (fun hook -> ignore (Eio.Switch.try_remove_hook hook)) hook
+  if cancelled > 0
+  then (
+    dec_pending ~keeper_name ~delta:(Float.of_int cancelled) ();
+    record_counter
+      ~keeper_name
+      ~delta:(Float.of_int cancelled)
+      MemoryLaneCancelledUnits);
+  cancelled
 ;;
 
-let protect_cleanup ~keeper_name label f =
-  try f () with
-  | exn ->
-    record_counter ~keeper_name MemoryLaneUnitFailures;
-    Log.Keeper.warn ~keeper_name
-      "memory lane cleanup failed (%s): %s"
-      label
-      (Printexc.to_string exn)
-;;
+type run_result =
+  | Continue
+  | Cancelled
 
-let release_after_run ~keeper_name entry reservation ~acquired ~in_flight =
-  if !in_flight
-  then protect_cleanup ~keeper_name "dec_in_flight" (fun () -> dec_in_flight ~keeper_name ());
-  if !acquired
-  then protect_cleanup ~keeper_name "unlock" (fun () -> Eio.Mutex.unlock entry.mem_mu);
-  protect_cleanup ~keeper_name "release_reservation" (fun () ->
-    release_reservation_once ~keeper_name entry reservation)
-;;
-
-let arm_switch_release ~keeper_name entry reservation sw =
-  let release_from_switch () =
-    protect_cleanup ~keeper_name "executor_switch_release" (fun () ->
-      release_reservation_once ~keeper_name entry reservation)
-  in
-  try
-    let hook = Eio.Switch.on_release_cancellable sw release_from_switch in
-    Stdlib.Mutex.protect reservation.release_mu (fun () ->
-      if reservation.released
-      then ignore (Eio.Switch.try_remove_hook hook)
-      else reservation.switch_hook <- Some hook)
-  with
-  | _exn ->
-    (* Finished switches can raise while running the release callback; any hook
-       registration failure means the executor cannot own this reservation. *)
-    release_from_switch ()
-;;
-
-(* Runs on a forked fiber owned by the executor switch. Holds [mem_mu] across
-   the unit. Releases the mutex (only if acquired) and the reservation on every
-   exit, including cancellation at shutdown. No exception escapes: a best-effort
-   unit must never propagate into the executor switch — that would cancel the
-   fleet. *)
-let run_unit ~keeper_name entry reservation sw f =
-  let acquired = ref false in
-  let in_flight = ref false in
-  Eio.Switch.run (fun cleanup_sw ->
-    Eio.Switch.on_release cleanup_sw (fun () ->
-      release_after_run ~keeper_name entry reservation ~acquired ~in_flight);
-      disarm_switch_hook reservation;
-      try
-        Eio.Mutex.lock entry.mem_mu;
-        (* No suspension point between [lock] returning and this assignment, so
-           cancellation cannot strand a held mutex with [acquired = false]. *)
-        acquired := true;
-        inc_in_flight ~keeper_name ();
-        in_flight := true;
-        Eio_context.with_turn_switch sw f
-      with
-      | Eio.Cancel.Cancelled _ -> () (* shutdown: silent, cleanup runs above *)
-      | exn ->
+let run_one ~keeper_name entry sw work =
+  inc_in_flight ~keeper_name ();
+  Fun.protect
+    ~finally:(fun () ->
+      dec_in_flight ~keeper_name ();
+      finish_one ~keeper_name entry)
+    (fun () ->
+      match Eio_context.with_turn_switch sw work with
+      | () -> Continue
+      | exception Eio.Cancel.Cancelled _ as exn ->
+        if Eio.Fiber.is_cancelled ()
+        then (
+          record_counter ~keeper_name MemoryLaneCancelledUnits;
+          Cancelled)
+        else (
+          (* A promise may carry [Cancelled] while this worker's own context is
+             still live. Treat that as a unit failure, not executor shutdown;
+             otherwise one foreign result could discard the rest of the FIFO. *)
+          record_counter ~keeper_name MemoryLaneUnitFailures;
+          Log.Keeper.warn ~keeper_name
+            "memory lane unit returned a foreign cancellation: %s"
+            (Printexc.to_string exn);
+          Continue)
+      | exception exn ->
         record_counter ~keeper_name MemoryLaneUnitFailures;
         Log.Keeper.warn ~keeper_name
           "memory lane unit failed: %s"
-          (Printexc.to_string exn))
+          (Printexc.to_string exn);
+        Continue)
 ;;
 
-let submit ~base_path ~keeper_name f =
-  match current_sw () with
-  | None ->
-    (* Not initialized: run inline. The caller is still inside the per-keeper
-       turn lane, so single-fiber-per-keeper memory access is preserved. A
-       raising unit is contained and counted rather than escaping. *)
-    (try f () with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       record_counter ~keeper_name MemoryLaneUnitFailures;
-       Log.Keeper.warn ~keeper_name
-         "memory lane unit failed (inline): %s"
-         (Printexc.to_string exn));
-    record_counter ~keeper_name MemoryLaneRanInline;
-    Ran_inline
-  | Some sw ->
-    let entry = entry_for ~base_path ~keeper_name in
-    (match try_reserve ~keeper_name entry with
-     | None ->
-       record_counter ~keeper_name MemoryLaneDropped;
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string DispatchEventFailures)
-         ~labels:[ "keeper", keeper_name; "site", "memory_lane_saturated" ]
-         ();
-       Log.Keeper.warn ~keeper_name
-         "memory lane saturated (pending>=%d): dropping post-turn memory unit"
-         (max_pending ());
-       Dropped
-     | Some _bound ->
-       let reservation = make_reservation () in
-       arm_switch_release ~keeper_name entry reservation sw;
-       if reservation_released reservation
-       then (
-         record_counter ~keeper_name MemoryLaneDropped;
-         Log.Keeper.warn ~keeper_name
-           "memory lane executor switch unavailable: dropping post-turn memory unit";
-         Dropped)
-       else (
-         try
+let rec worker_loop ~keeper_name entry sw work =
+  match run_one ~keeper_name entry sw work with
+  | Cancelled ->
+    let queued = cancel_queued ~keeper_name entry in
+    Log.Keeper.warn ~keeper_name
+      "memory lane executor cancelled: current unit cancelled, queued_units=%d"
+      queued
+  | Continue -> (
+    match Eio.Switch.get_error sw with
+    | Some _ ->
+      let queued = cancel_queued ~keeper_name entry in
+      Log.Keeper.warn ~keeper_name
+        "memory lane executor stopped after current unit: queued_units_cancelled=%d"
+        queued
+    | None -> (
+      match take_next entry with
+      | None -> ()
+      | Some next -> worker_loop ~keeper_name entry sw next))
+;;
+
+let cancel_before_first ~keeper_name entry =
+  record_counter ~keeper_name MemoryLaneCancelledUnits;
+  finish_one ~keeper_name entry;
+  let queued = cancel_queued ~keeper_name entry in
+  Log.Keeper.warn ~keeper_name
+    "memory lane executor cancelled before worker dispatch: cancelled_units=%d"
+    (queued + 1)
+;;
+
+let run_worker ~keeper_name entry sw first =
+  match Eio.Fiber.yield () with
+  | () -> (
+    try worker_loop ~keeper_name entry sw first with
+    | exn ->
+      let queued = cancel_queued ~keeper_name entry in
+      record_counter ~keeper_name MemoryLaneUnitFailures;
+      Log.Keeper.error ~keeper_name
+        "memory lane worker failed: queued_units_cancelled=%d error=%s"
+        queued
+        (Printexc.to_string exn))
+  | exception Eio.Cancel.Cancelled _ -> cancel_before_first ~keeper_name entry
+  | exception exn ->
+    finish_one ~keeper_name entry;
+    let queued = cancel_queued ~keeper_name entry in
+    record_counter ~keeper_name MemoryLaneUnitFailures;
+    Log.Keeper.error ~keeper_name
+      "memory lane worker dispatch failed: queued_units_cancelled=%d error=%s"
+      queued
+      (Printexc.to_string exn)
+;;
+
+let start_worker ~keeper_name entry sw first =
+  let started, set_started = Eio.Promise.create () in
+  match
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve set_started ();
+      run_worker ~keeper_name entry sw first)
+  with
+  | () -> (
+    match Eio.Promise.peek started with
+    | Some () -> Ok ()
+    | None ->
+      let error = Worker_start_failed Worker_did_not_start in
+      rollback_worker_start ~keeper_name entry;
+      Error error)
+  | exception exn ->
+    rollback_worker_start ~keeper_name entry;
+    Error (Worker_start_failed exn)
+;;
+
+let reject ~keeper_name error =
+  record_rejection ~keeper_name error;
+  Error error
+;;
+
+let submit ~base_path ~keeper_name work =
+  match current_executor () with
+  | None -> reject ~keeper_name Executor_not_initialized
+  | Some { sw; owner_domain } ->
+    if Domain.self () <> owner_domain
+    then reject ~keeper_name Executor_domain_mismatch
+    else (
+      match Eio.Switch.get_error sw with
+      | Some _ -> reject ~keeper_name Executor_stopping
+      | None ->
+        let entry = entry_for ~base_path ~keeper_name in
+        (match admit ~keeper_name entry work with
+         | `Enqueued ->
            record_counter ~keeper_name MemoryLaneSubmitted;
-           Eio.Fiber.fork ~sw (fun () -> run_unit ~keeper_name entry reservation sw f);
-           Submitted
-         with
-         | Eio.Cancel.Cancelled _ as e ->
-           protect_cleanup ~keeper_name "fork_cancel_release" (fun () ->
-             release_reservation_once ~keeper_name entry reservation);
-           raise e
-         | exn ->
-           protect_cleanup ~keeper_name "fork_failure_release" (fun () ->
-             release_reservation_once ~keeper_name entry reservation);
-           record_counter ~keeper_name MemoryLaneUnitFailures;
-           Log.Keeper.warn ~keeper_name
-             "memory lane fork failed: %s"
-             (Printexc.to_string exn);
-           Dropped))
+           Ok ()
+         | `Start_worker -> (
+           match start_worker ~keeper_name entry sw work with
+           | Ok () ->
+             record_counter ~keeper_name MemoryLaneSubmitted;
+             Ok ()
+           | Error error -> reject ~keeper_name error)))
 ;;
 
 module For_testing = struct
   let reset () =
     Stdlib.Mutex.protect registry_mu (fun () ->
       Hashtbl.reset entries;
-      executor_sw := None)
+      executor := None)
+  ;;
+
+  let find_entry ~base_path ~keeper_name =
+    let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+    Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
   ;;
 
   let pending ~base_path ~keeper_name =
-    let key = Keeper_registry_types.registry_key ~base_path keeper_name in
-    Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
-    |> Option.map (fun e -> Stdlib.Mutex.protect e.state_mu (fun () -> e.pending))
+    find_entry ~base_path ~keeper_name
+    |> Option.map (fun entry ->
+      Stdlib.Mutex.protect entry.state_mu (fun () -> entry.pending))
+  ;;
+
+  let queued ~base_path ~keeper_name =
+    find_entry ~base_path ~keeper_name
+    |> Option.map (fun entry ->
+      Stdlib.Mutex.protect entry.state_mu (fun () -> Queue.length entry.queue))
+  ;;
+
+  let active_workers ~base_path ~keeper_name =
+    find_entry ~base_path ~keeper_name
+    |> Option.map (fun entry ->
+      Stdlib.Mutex.protect entry.state_mu (fun () ->
+        if entry.worker_active then 1 else 0))
   ;;
 end

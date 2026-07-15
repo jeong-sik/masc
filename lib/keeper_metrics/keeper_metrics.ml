@@ -147,8 +147,8 @@ type t =
   | MemoryLaneUnitFailures
   | MemoryConsolidations
   | MemoryLaneSubmitted
-  | MemoryLaneRanInline
-  | MemoryLaneDropped
+  | MemoryLaneAdmissionRejected
+  | MemoryLaneCancelledUnits
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneProviderSlotBusy
@@ -374,8 +374,8 @@ let to_string = function
   | MemoryLaneUnitFailures -> "masc_keeper_memory_lane_unit_failures_total"
   | MemoryConsolidations -> "masc_keeper_memory_consolidations_total"
   | MemoryLaneSubmitted -> "masc_keeper_memory_lane_submitted_total"
-  | MemoryLaneRanInline -> "masc_keeper_memory_lane_ran_inline_total"
-  | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"
+  | MemoryLaneAdmissionRejected -> "masc_keeper_memory_lane_admission_rejected_total"
+  | MemoryLaneCancelledUnits -> "masc_keeper_memory_lane_cancelled_units_total"
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
   | MemoryLaneProviderSlotBusy -> "masc_keeper_memory_lane_provider_slot_busy_total"

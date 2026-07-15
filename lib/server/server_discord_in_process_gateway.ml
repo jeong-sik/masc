@@ -716,7 +716,7 @@ let start ~sw ~env ~clock ~state =
   | Some token ->
     let policy = resolved_trigger_policy () in
     State.set_trigger_policy policy;
-    let dispatch =
+    let dispatch_for_scope workspace_scope =
       (* RFC-connector-deferred-reply-via-chat-queue: tag this dispatch as the Discord connector so a message that
          arrives while the keeper is in flight is enqueued onto
          [Keeper_chat_queue] (drained by the serial consumer, delivered back to
@@ -728,7 +728,9 @@ let start ~sw ~env ~clock ~state =
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net
-        ~config:(Mcp_server.workspace_config state)
+        ~publication_recovery_registry:
+          (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+        ~config:workspace_scope.config
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
@@ -742,18 +744,15 @@ let start ~sw ~env ~clock ~state =
           ~intents:default_intents
           ~trigger_policy:policy
           ~on_event:(fun ev ->
-            (* Read base_path per event: [workspace_config] is mutable
-               (workspace-switch tools swap it). *)
+            let workspace_scope = Mcp_server.workspace_scope state in
             on_event
-              ~dispatch
+              ~dispatch:(dispatch_for_scope workspace_scope)
               ~clock
-              ~base_dir:(Mcp_server.workspace_config state).base_path
+              ~base_dir:workspace_scope.config.base_path
               ev)
           ~on_ambient:(fun ev ->
-            (* Read base_path per event: [workspace_config] is mutable
-               (workspace-switch tools swap it). *)
-            on_ambient
-              ~base_dir:(Mcp_server.workspace_config state).base_path ev)
+            let workspace_scope = Mcp_server.workspace_scope state in
+            on_ambient ~base_dir:workspace_scope.config.base_path ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

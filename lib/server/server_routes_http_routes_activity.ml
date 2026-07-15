@@ -351,7 +351,8 @@ let board_context_inference_submission_json ~post_id ~target_source tool_data =
 
 let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
     ~target_source ~(post : Board.post) ~comments =
-  let config = Mcp_server.workspace_config state in
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let config = workspace_scope.config in
   let agent_name = board_tool_agent_name_from_request request in
   let keeper_ctx : _ Keeper_tool_surface.context =
     {
@@ -361,6 +362,7 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
       clock;
       proc_mgr = state.Mcp_server.proc_mgr;
       net = state.Mcp_server.net;
+      publication_recovery_registry = (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
     }
   in
   let post_id = Board.Post_id.to_string post.id in

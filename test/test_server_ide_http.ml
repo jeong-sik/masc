@@ -297,7 +297,7 @@ let annotation_count router path =
 
 let setup_state base_path =
   save_auth_config base_path;
-  let state = Masc.Mcp_server.create_state ~base_path in
+  let state = Masc.Mcp_server.For_testing.create_state ~base_path in
   Server_auth.server_state := Some state;
   state
 ;;

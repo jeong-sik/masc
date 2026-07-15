@@ -1111,13 +1111,13 @@ let test_constructor_is_pure () =
       let agents_dir = Workspace.agents_dir (Workspace.default_config dir) in
       Fs_compat.mkdir_p agents_dir;
       write_file (Filename.concat agents_dir "alice.json") "{}";
-      let state = Mcp_server.create_state ~base_path:dir in
+      let state = Mcp_server.For_testing.create_state ~base_path:dir in
       Alcotest.(check int) "constructor does not restore persisted sessions" 0
         (List.length (Session.connected_agents state.Mcp_server.session_registry)))
 
 let test_restore_persisted_sessions_uses_flat_agents_dir () =
   with_temp_dir "startup-scope" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
+      let state = Mcp_server.For_testing.create_state ~base_path:dir in
       let agents = Workspace.agents_dir (Mcp_server.workspace_config state) in
       Fs_compat.mkdir_p agents;
       write_file (Filename.concat agents "test-agent.json") "{}";
@@ -1401,7 +1401,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
           Server_auth.server_state := previous_state;
           Config_dir_resolver.reset ())
         (fun () ->
-          let state = Mcp_server.create_state ~base_path:dir in
+          let state = Mcp_server.For_testing.create_state ~base_path:dir in
           Server_auth.server_state := Some state;
           let config = (Mcp_server.workspace_config state) in
           write_keeper_meta_exn config
@@ -1438,13 +1438,24 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let disk_observation = json |> member "disk_observation" in
           let runtime_truth = json |> member "runtime_truth" in
           let fleet_safety = json |> member "keeper_fleet_safety" in
+          let publication_recovery =
+            json |> member "publication_recovery_activation"
+          in
           let reaction_ledger = json |> member "keeper_reaction_ledger" in
           let durable_names =
             paused |> member "durable_names" |> to_list |> List.map to_string
           in
 	          let names = paused |> member "names" |> to_list |> List.map to_string in
-	          Alcotest.(check int) "durable paused count" 1
-	            (paused |> member "durable_count" |> to_int);
+          Alcotest.(check int) "durable paused count" 1
+            (paused |> member "durable_count" |> to_int);
+          Alcotest.(check string)
+            "pure test state exposes unavailable recovery activation"
+            "unavailable"
+            (publication_recovery |> member "status" |> to_string);
+          Alcotest.(check string)
+            "pure test state names its missing runtime"
+            "non_runtime_state"
+            (publication_recovery |> member "reason" |> to_string);
 	          Alcotest.(check int) "registry paused count" 0
 	            (paused |> member "registry_paused_count" |> to_int);
 	          Alcotest.(check string) "legacy running count semantics"
@@ -1588,7 +1599,7 @@ let test_health_json_observes_keeper_turn_admission_work () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let keeper_name = "example" in
         Eio.Switch.run (fun sw ->
@@ -1662,7 +1673,7 @@ let test_health_json_surfaces_board_event_collection_failure () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let keeper_name = "example" in
         Keeper_heartbeat_loop_board_events.For_testing.record_collection_failure
@@ -1731,7 +1742,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
@@ -1798,7 +1809,7 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
@@ -1832,7 +1843,7 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let timeout_paused =
@@ -1884,7 +1895,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let executor =
@@ -1960,7 +1971,7 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let executor =
@@ -2055,7 +2066,7 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let assignee = "missing-keeper-agent" in
@@ -2140,7 +2151,7 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let assignee = "codex-mcp-client" in
@@ -2217,7 +2228,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         write_file (Keeper_types_profile.keeper_meta_path config "broken")
@@ -2359,7 +2370,7 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let paused =
@@ -2499,7 +2510,7 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let target_running =
@@ -2548,7 +2559,7 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_counts :
@@ -2617,7 +2628,7 @@ let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         write_keeper_meta_exn config
@@ -2658,7 +2669,7 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_paused =
@@ -2704,7 +2715,7 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_dead =
@@ -2793,7 +2804,7 @@ let test_health_json_explains_terminal_capacity_blocker
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let terminal = make_keeper_meta ~name:keeper_name ~trace_id () in
@@ -2877,7 +2888,7 @@ let test_health_json_distinguishes_failing_executable_keepers () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let paused =
@@ -2933,7 +2944,7 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let failing =
@@ -3004,7 +3015,7 @@ let test_health_json_redacts_registry_failure_reason () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let failing =
@@ -3079,7 +3090,7 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let restored =
@@ -3141,7 +3152,7 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
           Config_dir_resolver.reset ())
         (fun () ->
         Config_dir_resolver.reset ();
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         write_keeper_meta_exn config
@@ -3391,7 +3402,7 @@ let test_health_response_full_query_uses_snapshot_cache () =
           Config_dir_resolver.reset ();
           Server_routes_http_runtime.For_testing.reset_full_health_snapshot ())
         (fun () ->
-          Server_auth.server_state := Some (Mcp_server.create_state ~base_path:dir);
+          Server_auth.server_state := Some (Mcp_server.For_testing.create_state ~base_path:dir);
           let request = Httpun.Request.create `GET "/health?full=1" in
           let first =
             Server_routes_http_runtime.make_health_response_json request
@@ -3417,6 +3428,12 @@ let test_health_response_full_query_uses_snapshot_cache () =
             (match first |> member "keeper_reaction_ledger" with
              | `Assoc _ -> true
              | _ -> false);
+          Alcotest.(check bool)
+            "full health response keeps recovery activation shape"
+            true
+            (match first |> member "publication_recovery_activation" with
+             | `Assoc _ -> true
+             | _ -> false);
           Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now
             request;
           let refreshed =
@@ -3436,7 +3453,12 @@ let test_health_response_full_query_uses_snapshot_cache () =
             true
             (match refreshed |> member "keeper_reaction_ledger" with
              | `Assoc _ -> true
-             | _ -> false)))
+             | _ -> false);
+          Alcotest.(check string)
+            "refreshed full health keeps recovery activation"
+            "unavailable"
+            (refreshed |> member "publication_recovery_activation"
+             |> member "status" |> to_string)))
 
 let test_full_health_refresh_timing_uses_dedicated_budget () =
   let interval_sec, timeout_sec, ttl_sec =
@@ -3678,7 +3700,7 @@ let test_mcp_transport_requires_explicit_readiness () =
        Server_startup_state.mark_blocking ~backend_mode:"filesystem";
        Server_auth.server_state :=
          Some
-           (Mcp_server.create_state
+           (Mcp_server.For_testing.create_state
               ~base_path:(Filename.get_temp_dir_name ()));
        let deps = Server_routes_http_common.mcp_transport_http_deps () in
        Alcotest.(check bool)

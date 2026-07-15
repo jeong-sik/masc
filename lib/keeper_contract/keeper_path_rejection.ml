@@ -3,6 +3,7 @@
 type keeper_path_rejection =
   | Path_required
   | Invalid_lexical_endpoint
+  | Invalid_normalized_path_projection of { path : string }
   | Allowed_paths_normalized_empty of { count : int }
   | Outside_sandbox of { raw : string }
 
@@ -10,6 +11,10 @@ let rejection_to_user_message = function
   | Path_required -> "path_required"
   | Invalid_lexical_endpoint ->
     "invalid_lexical_endpoint: path must name a file entry other than '.' or '..'"
+  | Invalid_normalized_path_projection { path } ->
+    Printf.sprintf
+      "invalid_normalized_path_projection: normalized path cannot be projected into lexical components: %s"
+      path
   | Allowed_paths_normalized_empty { count } ->
     Printf.sprintf
       "allowed_paths_normalized_empty: %d entries provided, none resolved to a \

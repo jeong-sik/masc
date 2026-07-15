@@ -136,7 +136,7 @@ let test_atomic_replace_effect_uses_lexical_symlink_leaf () =
        Eio.Path.with_open_dir Eio.Path.(fs / base) @@ fun root ->
        let parent =
          Keeper_alerting_path.path_effect_parent_scope
-           ~relative_path:"."
+           ~parent_components:[]
            ~resource:(Eio.Path.stat ~follow:true root)
            ~create_missing_parents:[]
            ~created_directory_permissions:0o755
@@ -148,8 +148,14 @@ let test_atomic_replace_effect_uses_lexical_symlink_leaf () =
             ~result_file_permissions:0o644
             confined
         with
-        | Error error -> failf "atomic effect projection failed: %s" error
-        | Ok gate_effect ->
+        | Error error ->
+          failf
+            "atomic effect projection failed: %s"
+            (Keeper_alerting_path.path_effect_projection_error_to_string error)
+        | Ok projection ->
+          let gate_effect =
+            Keeper_alerting_path.atomic_replace_gate_effect projection
+          in
           let json = Keeper_alerting_path.path_effect_to_yojson gate_effect in
           check string "Gate operation matches rename semantics"
             "atomic_replace_entry"
@@ -193,18 +199,21 @@ let test_missing_parent_effect_is_complete () =
        Eio.Path.with_open_dir Eio.Path.(fs / base) @@ fun root ->
        let parent =
          Keeper_alerting_path.path_effect_parent_scope
-           ~relative_path:"."
+           ~parent_components:[]
            ~resource:(Eio.Path.stat ~follow:true root)
            ~create_missing_parents:[ "missing"; "nested" ]
            ~created_directory_permissions:0o755
          |> Result.get_ok
        in
-       let gate_effect =
+       let projection =
          Keeper_alerting_path.atomic_replace_effect
            ~parent
            ~result_file_permissions:0o644
            confined
          |> Result.get_ok
+       in
+       let gate_effect =
+         Keeper_alerting_path.atomic_replace_gate_effect projection
        in
        let missing =
          Keeper_alerting_path.path_effect_to_yojson gate_effect
@@ -218,6 +227,99 @@ let test_missing_parent_effect_is_complete () =
        in
        check (list (pair string int)) "Gate sees every parent and exact mode it may create"
          [ "missing", 0o755; "nested", 0o755 ] missing)
+;;
+
+let test_component_containment_rejects_sibling_prefix () =
+  with_roots @@ fun ~base ~outside:_ ->
+  let root_norm = Keeper_alerting_path.normalize_path_for_check_stripped base in
+  let sibling = base ^ "-sibling/file.txt" in
+  check bool "sibling string prefix is not containment" false
+    (Keeper_alerting_path.is_within_root_norm ~root_norm sibling)
+;;
+
+let test_dotdot_is_normalized_before_component_projection () =
+  with_roots @@ fun ~base ~outside:_ ->
+  let nested = Filename.concat base "nested" in
+  Unix.mkdir nested 0o755;
+  let requested = Filename.concat nested "../file.txt" in
+  match
+    Keeper_alerting_path.resolve_keeper_confined_path
+      ~config:(Workspace.default_config base)
+      ~allowed_paths:[]
+      ~endpoint:Keeper_alerting_path.Lexical_entry
+      ~raw_path:requested
+  with
+  | Error rejection ->
+    failf
+      "dotdot projection failed: %s"
+      (Keeper_path_rejection.rejection_to_user_message rejection)
+  | Ok confined ->
+    check (list string) "component SSOT contains no reparsed dotdot"
+      [ "file.txt" ]
+      (Keeper_alerting_path.confined_relative_components confined)
+;;
+
+let test_patch_source_uses_endpoint_components () =
+  with_roots @@ fun ~base ~outside:_ ->
+  let actual = Filename.concat base "actual" in
+  Unix.mkdir actual 0o755;
+  let actual_file = Filename.concat actual "file.txt" in
+  Fs_compat.save_file actual_file "referent";
+  let requested = Filename.concat base "link.txt" in
+  Unix.symlink actual_file requested;
+  match
+    Keeper_alerting_path.resolve_keeper_confined_path
+      ~config:(Workspace.default_config base)
+      ~allowed_paths:[]
+      ~endpoint:Keeper_alerting_path.Follow_referent
+      ~raw_path:requested
+  with
+  | Error rejection ->
+    failf
+      "patch source projection failed: %s"
+      (Keeper_path_rejection.rejection_to_user_message rejection)
+  | Ok confined ->
+    check (list string) "endpoint component SSOT follows the referent"
+      [ "actual"; "file.txt" ]
+      (Keeper_alerting_path.confined_endpoint_components confined);
+    (match Fs_compat.get_fs_opt () with
+     | None -> fail "Eio filesystem capability is unavailable"
+     | Some fs ->
+       Eio.Path.with_open_dir Eio.Path.(fs / base) @@ fun root ->
+       let parent =
+         Keeper_alerting_path.path_effect_parent_scope
+           ~parent_components:[]
+           ~resource:(Eio.Path.stat ~follow:true root)
+           ~create_missing_parents:[]
+           ~created_directory_permissions:0o755
+         |> Result.get_ok
+       in
+       let source_resource =
+         Eio.Path.stat ~follow:true Eio.Path.(root / "actual" / "file.txt")
+       in
+       let projection =
+         Keeper_alerting_path.patch_then_atomic_replace_effect
+           ~parent
+           ~source_resource
+           ~result_file_permissions:0o644
+           confined
+         |> Result.get_ok
+       in
+       let json =
+         projection
+         |> Keeper_alerting_path.atomic_replace_gate_effect
+         |> Keeper_alerting_path.path_effect_to_yojson
+       in
+       check string "replacement keeps lexical target" "link.txt"
+         Yojson.Safe.Util.
+           (json |> member "locator" |> member "relative_path" |> to_string);
+       check string "patch source is the resolved endpoint" "actual/file.txt"
+         Yojson.Safe.Util.
+           (json
+            |> member "locator"
+            |> member "source"
+            |> member "relative_path"
+            |> to_string))
 ;;
 
 let test_external_root_swap_fails_capability_identity () =
@@ -317,6 +419,14 @@ let () =
             `Quick
             test_symlink_escape_requires_explicit_root
         ; test_case
+            "sibling prefix is not containment"
+            `Quick
+            test_component_containment_rejects_sibling_prefix
+        ; test_case
+            "dotdot is normalized before projection"
+            `Quick
+            test_dotdot_is_normalized_before_component_projection
+        ; test_case
             "lexical endpoint requires a file entry"
             `Quick
             test_lexical_endpoint_requires_file_entry
@@ -324,6 +434,10 @@ let () =
             "atomic effect identity uses lexical symlink leaf"
             `Quick
             test_atomic_replace_effect_uses_lexical_symlink_leaf
+          ; test_case
+              "patch source uses endpoint components"
+              `Quick
+              test_patch_source_uses_endpoint_components
           ; test_case
             "external root swap fails capability identity"
             `Quick

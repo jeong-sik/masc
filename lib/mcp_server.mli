@@ -14,8 +14,8 @@
       themed-SVG icon helper.
     - {b Server state} — the runtime record threaded
       through every request handler.  [Eio.Switch.t] and
-      friends are kept optional so the legacy non-Eio path
-      ({!create_state}) still compiles.
+      friends are kept optional for explicit pure test/replay
+      construction through {!For_testing.create_state}.
     - {b SSE broadcast} — atomic callback ref consumed by
       the HTTP / SSE transport.
 
@@ -172,8 +172,48 @@ val schema_markdown : string
 
 (** {1 Server state} *)
 
-type server_state = {
-  workspace_config : Workspace.config Atomic.t;
+type publication_recovery_activation_row =
+  | Publication_recovery_owner_pending of { owner : string }
+  | Publication_recovery_owner_running of { owner : string }
+  | Publication_recovery_owner_report of
+      Fs_compat.publication_recovery_reconciliation_report
+  | Publication_recovery_owner_identity_rejected of
+      { owner : string
+      ; error : string
+      }
+  | Publication_recovery_owner_reconciliation_failed of
+      { owner : string
+      ; error : Fs_compat.publication_recovery_reconciliation_error
+      }
+  | Publication_recovery_owner_reconciliation_crashed of
+      { owner : string
+      ; exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_cancelled of
+      { owner : string
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_inventory_issue of
+      Fs_compat.publication_recovery_owner_inventory_row
+
+type publication_recovery_activation_report
+
+type publication_recovery_runtime
+
+type workspace_scope =
+  { config : Workspace.config
+  ; publication_recovery : publication_recovery_runtime option
+  }
+(** One immutable snapshot of the active workspace, exact recovery registry,
+    and its retained activation report. [None] exists only in
+    {!For_testing.create_state}. *)
+
+type workspace_runtime
+
+type server_state = private {
+  workspace_runtime : workspace_runtime;
   session_registry : Session.registry;
   on_sse_broadcast :
     (Yojson.Safe.t -> unit) option Atomic.t;
@@ -185,23 +225,86 @@ type server_state = {
   net : Eio_context.eio_net option;
 }
 (** Runtime state threaded through every request handler.
-    [workspace_config] is stored in an atomic reference so
-    workspace-switch tools can swap backends without tearing reads
-    in concurrent request/background fibers.  Eio handles are
-    [option] because the legacy non-Eio bootstrap ({!create_state})
-    still needs to construct a state without an active switch. *)
+    The opaque [workspace_runtime] owns the one atomic scope and the
+    process-fixed MASC root, so callers can observe snapshots but cannot
+    mutate the cell directly. Eio handles are [option] because
+    {!For_testing.create_state} supports pure replay and test harnesses without
+    an active switch. *)
+
+val workspace_scope : server_state -> workspace_scope
+(** Current immutable workspace runtime snapshot. *)
 
 val workspace_config : server_state -> Workspace.config
 (** Current workspace configuration. *)
 
-val set_workspace_config : server_state -> Workspace.config -> unit
-(** Atomically replace the active workspace configuration. *)
+val workspace_scope_publication_recovery_registry :
+  workspace_scope -> Fs_compat.publication_recovery_registry option
 
-val create_state : base_path:string -> server_state
-(** Legacy bootstrap.  Every Eio handle is [None]; the
-    server runs without proc-mgr / fs / clock / net.
-    Used by tools that need a state-shaped value but no
-    runtime fibers (test fixtures, replay harnesses). *)
+val workspace_scope_publication_recovery_report :
+  workspace_scope -> publication_recovery_activation_report option
+
+val publication_recovery_activation_report_rows :
+  publication_recovery_activation_report ->
+  publication_recovery_activation_row list
+(** Immutable snapshot of every activation slot at the instant of the call. *)
+
+val publication_recovery_activation_report_to_health_yojson :
+  publication_recovery_activation_report -> Yojson.Safe.t
+(** Public-health projection. It exposes only typed aggregate counts and
+    status categories; owner identities, filesystem paths, exceptions,
+    backtraces, and nested reconciliation evidence remain internal. *)
+
+type workspace_switch_error =
+  | Workspace_masc_root_mismatch of
+      { runtime_root : string
+      ; requested_root : string
+      }
+
+val workspace_switch_error_to_string : workspace_switch_error -> string
+
+type publication_recovery_activation_error =
+  | Publication_recovery_registry_unavailable of
+      Fs_compat.publication_recovery_registry_error
+  | Publication_recovery_inventory_unavailable of
+      Fs_compat.publication_recovery_owner_inventory_error
+  | Publication_recovery_owner_activation_rejection_failed of
+      { owner : Fs_compat.publication_recovery_owner
+      ; keeper_identity_error : string
+      ; rejection_error :
+          Fs_compat.publication_recovery_activation_rejection_error
+      }
+
+val publication_recovery_activation_error_to_string :
+  publication_recovery_activation_error -> string
+
+val validate_workspace_config :
+  server_state -> Workspace.config -> (unit, workspace_switch_error) result
+(** Pure process-root validation shared by workspace preparation and
+    {!set_workspace_config}. *)
+
+val set_workspace_config :
+  server_state -> Workspace.config -> (unit, workspace_switch_error) result
+(** Atomically replace only the active workspace projection. The requested
+    {!Workspace.masc_root_dir} must exactly equal the process-fixed runtime
+    root; a mismatch is typed and leaves the previous scope unchanged. This
+    function performs no filesystem I/O. *)
+
+module For_testing : sig
+  val create_state : base_path:string -> server_state
+  (** Non-runtime state. Every Eio handle and the publication registry are
+      [None]. This constructor is isolated from the production bootstrap
+      surface. *)
+
+  val await_publication_recovery_activation :
+    publication_recovery_activation_report ->
+    publication_recovery_activation_row list
+  (** Await every exact slot-completion promise without timeout, polling, or a
+      retry budget, then return one immutable row snapshot. Cancellation of
+      the calling fiber propagates. *)
+end
+
+exception Publication_recovery_activation_failed of
+  publication_recovery_activation_error
 
 val create_state_eio :
   sw:Eio.Switch.t ->
@@ -215,7 +318,9 @@ val create_state_eio :
 (** Production bootstrap.  Wires every Eio handle into
     [Some], starts the [Session] actor consumer, starts
     the {!Runtime_observation} actor, and installs the
-    Subscriptions notification harness. *)
+    Subscriptions notification harness. Publication recovery opens and
+    inventories one process-lifetime registry synchronously, then reconciles
+    each valid owner in an independent child fiber. *)
 
 (** {1 SSE broadcast} *)
 

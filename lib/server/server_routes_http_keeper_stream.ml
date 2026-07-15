@@ -545,17 +545,21 @@ let execute_keeper_stream_tool
       ~arguments
       ~continuation_channel
   =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let config = workspace_scope.config in
   let start_time = Eio.Time.now clock in
   let success, body, failure_class =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = (Mcp_server.workspace_config state);
+          config;
           agent_name;
           sw;
           clock;
           proc_mgr = state.Mcp_server.proc_mgr;
           net = state.Mcp_server.net;
+          publication_recovery_registry =
+            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
         }
       in
       match
@@ -592,7 +596,7 @@ let execute_keeper_stream_tool
     if success then None
     else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
   in
-  Audit_log.log_tool_call (Mcp_server.workspace_config state)
+  Audit_log.log_tool_call config
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg:error_detail ();
   if not success then
     Log.Keeper.emit Log.Error
@@ -613,7 +617,7 @@ let execute_keeper_stream_tool
            let telemetry_failure_class =
              if success then None else Some failure_class
            in
-           Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
+           Telemetry_eio.track_tool_called ~fs config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
              ~source:(Tool_registry.string_of_source Agent_internal)
              ?failure_class:telemetry_failure_class
@@ -825,18 +829,22 @@ let execute_keeper_stream_tool_streaming
       ~continuation_channel
       ~on_text_delta
   =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let config = workspace_scope.config in
   let start_time = Eio.Time.now clock in
   let admission_rejection = ref None in
   let success, body, failure_class =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = (Mcp_server.workspace_config state);
+          config;
           agent_name;
           sw;
           clock;
           proc_mgr = state.Mcp_server.proc_mgr;
           net = state.Mcp_server.net;
+          publication_recovery_registry =
+            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
         }
       in
       match
@@ -879,7 +887,7 @@ let execute_keeper_stream_tool_streaming
         if success then None
         else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
       in
-      Audit_log.log_tool_call (Mcp_server.workspace_config state)
+      Audit_log.log_tool_call config
         ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success
         ~error_msg:error_detail ();
       if not success then
@@ -901,8 +909,7 @@ let execute_keeper_stream_tool_streaming
                let telemetry_failure_class =
                  if success then None else Some failure_class
                in
-               Telemetry_eio.track_tool_called ~fs
-                 (Mcp_server.workspace_config state)
+               Telemetry_eio.track_tool_called ~fs config
                  ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
                  ~duration_ms
                  ~source:(Tool_registry.string_of_source Agent_internal)
@@ -929,17 +936,21 @@ let execute_keeper_stream_tool_streaming_if_free
       ~continuation_channel
       ~on_text_delta
   =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let config = workspace_scope.config in
   let start_time = Eio.Time.now clock in
   let outcome =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = (Mcp_server.workspace_config state);
+          config;
           agent_name;
           sw;
           clock;
           proc_mgr = state.Mcp_server.proc_mgr;
           net = state.Mcp_server.net;
+          publication_recovery_registry =
+            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
         }
       in
       match
@@ -982,7 +993,7 @@ let execute_keeper_stream_tool_streaming_if_free
         if success then None
         else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
       in
-      Audit_log.log_tool_call (Mcp_server.workspace_config state)
+      Audit_log.log_tool_call config
         ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success
         ~error_msg:error_detail ();
       if not success then
@@ -1004,8 +1015,7 @@ let execute_keeper_stream_tool_streaming_if_free
                let telemetry_failure_class =
                  if success then None else Some failure_class
                in
-               Telemetry_eio.track_tool_called ~fs
-                 (Mcp_server.workspace_config state)
+               Telemetry_eio.track_tool_called ~fs config
                  ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
                  ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
                  ?failure_class:telemetry_failure_class

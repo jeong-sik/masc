@@ -102,6 +102,18 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let publication_recovery_registry env sw config =
+  let registry_root =
+    Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
+  in
+  match
+    Fs_compat.open_publication_recovery_registry ~sw ~registry_root
+  with
+  | Ok registry -> Some registry
+  | Error error ->
+    fail
+      (Fs_compat.publication_recovery_registry_error_to_string error)
+
 let make_meta name =
   let json = `Assoc [
     ("name", `String name);
@@ -552,6 +564,7 @@ let test_fresh_presence_preserves_turn_failures () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
+          publication_recovery_registry = None;
         }
       in
       let meta = make_meta "fresh-presence-turn-failure" in
@@ -653,6 +666,8 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            publication_recovery_registry env sw config;
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -692,6 +707,7 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
      Lane.fork
        ~sw:parent_sw
        lane
+       ~with_run_scope:(fun run -> run ())
        ~run:(fun lane_sw ->
          Eio.Fiber.fork ~sw:lane_sw (fun () ->
            Eio.Promise.await release_p;
@@ -713,6 +729,10 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
    | Lane.Completed -> ()
    | Lane.Shutdown_before_start -> fail "unexpected shutdown before lane start"
    | Lane.Shutdown_requested -> fail "unexpected lane shutdown"
+   | Lane.Shutdown_cancel_failed failure ->
+     fail
+       ("unexpected shutdown cancellation failure: "
+        ^ Printexc.to_string failure.cause)
    | Lane.Cancelled_by_parent cause ->
      fail ("unexpected parent cancellation: " ^ Printexc.to_string cause)
    | Lane.Failed exn -> fail ("unexpected lane failure: " ^ Printexc.to_string exn));
@@ -723,6 +743,101 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
     (Atomic.get cleanup_observed_child);
   check (option string) "cleanup succeeded" None exit.cleanup_error
 
+let test_keeper_lane_cancel_interrupts_blocked_run_scope () =
+  Eio_main.run
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun parent_sw ->
+  let lane = Lane.create () in
+  let scope_entered, resolve_scope_entered = Eio.Promise.create () in
+  let never_resolved, _ = Eio.Promise.create () in
+  let run_called = Atomic.make false in
+  (match
+     Lane.fork
+       ~sw:parent_sw
+       lane
+       ~with_run_scope:(fun _run ->
+         Eio.Promise.resolve resolve_scope_entered ();
+         Eio.Promise.await never_resolved)
+       ~run:(fun _lane_sw -> Atomic.set run_called true)
+       ~cleanup:(fun _ -> Ok ())
+   with
+   | Ok () -> ()
+   | Error error -> fail (Lane.start_error_to_string error));
+  Eio.Promise.await scope_entered;
+  (match Lane.request_cancel lane with
+   | Lane.Cancel_requested -> ()
+   | Lane.Cancel_already_requested ->
+     fail "lane cancellation was already requested"
+   | Lane.Cancel_already_exiting -> fail "lane exited before cancellation"
+   | Lane.Cancel_wrong_domain -> fail "lane cancellation crossed domains"
+   | Lane.Cancel_not_committed exn
+   | Lane.Cancel_committed_with_failure exn ->
+     fail ("lane cancellation failed: " ^ Printexc.to_string exn));
+  let exit = Lane.await_exit lane in
+  (match exit.outcome with
+   | Lane.Shutdown_requested -> ()
+   | Lane.Completed -> fail "blocked run scope completed after cancellation"
+   | Lane.Shutdown_before_start ->
+     fail "lane was cancelled before its scope started"
+   | Lane.Shutdown_cancel_failed failure ->
+     fail
+       ("operator cancellation cleanup failed: "
+        ^ Printexc.to_string failure.cause)
+   | Lane.Cancelled_by_parent cause ->
+     fail
+       ("operator cancellation was classified as parent cancellation: "
+        ^ Printexc.to_string cause)
+   | Lane.Failed exn ->
+     fail
+       ("blocked run scope failed instead of cancelling: "
+        ^ Printexc.to_string exn));
+  check bool "run body was never admitted" false (Atomic.get run_called)
+
+let test_keeper_lane_preserves_enriched_shutdown_cancellation () =
+  let exception Detach_failed in
+  Eio_main.run
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun parent_sw ->
+  let lane = Lane.create () in
+  let scope_entered, resolve_scope_entered = Eio.Promise.create () in
+  let never_resolved, _ = Eio.Promise.create () in
+  (match
+     Lane.fork
+       ~sw:parent_sw
+       lane
+       ~with_run_scope:(fun _run ->
+         Eio.Promise.resolve resolve_scope_entered ();
+         try Eio.Promise.await never_resolved with
+         | Eio.Cancel.Cancelled _ -> raise (Eio.Cancel.Cancelled Detach_failed))
+       ~run:(fun _lane_sw -> fail "run body crossed blocked admission")
+       ~cleanup:(fun _ -> Ok ())
+   with
+   | Ok () -> ()
+   | Error error -> fail (Lane.start_error_to_string error));
+  Eio.Promise.await scope_entered;
+  (match Lane.request_cancel lane with
+   | Lane.Cancel_requested -> ()
+   | Lane.Cancel_already_requested -> fail "cancellation was already requested"
+   | Lane.Cancel_already_exiting -> fail "lane exited before cancellation"
+   | Lane.Cancel_wrong_domain -> fail "lane cancellation crossed domains"
+   | Lane.Cancel_not_committed exn
+   | Lane.Cancel_committed_with_failure exn ->
+     fail ("lane cancellation signal failed: " ^ Printexc.to_string exn));
+  match (Lane.await_exit lane).outcome with
+  | Lane.Shutdown_cancel_failed { cause = Detach_failed; _ } -> ()
+  | Lane.Shutdown_cancel_failed failure ->
+    fail
+      ("wrong enriched cancellation cause: " ^ Printexc.to_string failure.cause)
+  | Lane.Completed -> fail "enriched cancellation completed normally"
+  | Lane.Shutdown_before_start -> fail "enriched cancellation happened before start"
+  | Lane.Shutdown_requested -> fail "enriched cancellation evidence was erased"
+  | Lane.Cancelled_by_parent cause ->
+    fail ("enriched cancellation became parent cancellation: " ^ Printexc.to_string cause)
+  | Lane.Failed exn ->
+    fail ("enriched cancellation became a generic failure: " ^ Printexc.to_string exn)
+
 let test_keeper_lane_surfaces_cleanup_failure () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun parent_sw ->
@@ -731,6 +846,7 @@ let test_keeper_lane_surfaces_cleanup_failure () =
      Lane.fork
        ~sw:parent_sw
        lane
+       ~with_run_scope:(fun run -> run ())
        ~run:(fun _lane_sw -> ())
        ~cleanup:(fun _outcome -> Error "cleanup evidence")
    with
@@ -756,25 +872,17 @@ let test_keeper_lane_identity_is_typed_and_unique () =
   | Ok decoded -> check bool "lane id round-trip" true (Lane.Id.equal first_id decoded)
   | Error detail -> fail detail
 
-(* Codex #24135 finding 1 (predicate half): [request_cancel] records a shutdown
-   request so a supervised body can classify the resulting cancellation as an
-   operator shutdown (graceful stop) rather than a parent/restart cancel. The
-   supervised-body routing that consumes this flag is covered by review against
-   the tested normal-exit path (a full fork+cancel finally harness is not
-   available: the supervisor tests mock [supervise_keepalive]). *)
-let test_lane_records_shutdown_request_on_cancel () =
+let test_lane_cancel_before_start_is_joinable () =
   Eio_main.run @@ fun _env ->
   let lane = Lane.create () in
-  check bool "fresh lane has no shutdown request" false
-    (Lane.shutdown_requested lane);
   (match Lane.request_cancel lane with
    | Lane.Cancel_requested -> ()
    | Lane.Cancel_already_requested
    | Lane.Cancel_already_exiting
-   | Lane.Cancel_signal_failed _ ->
+   | Lane.Cancel_wrong_domain
+   | Lane.Cancel_not_committed _
+   | Lane.Cancel_committed_with_failure _ ->
      fail "expected request_cancel to be accepted on a fresh lane");
-  check bool "request_cancel records the shutdown request" true
-    (Lane.shutdown_requested lane);
   match Lane.await_exit lane with
   | { outcome = Lane.Shutdown_before_start; _ } -> ()
   | { outcome = _; _ } ->
@@ -785,26 +893,55 @@ let test_keeper_lane_cancel_is_lane_local_and_joinable () =
   Eio.Switch.run @@ fun parent_sw ->
   let lane = Lane.create () in
   let never_p, _never_r = Eio.Promise.create () in
+  let observed_origin = Atomic.make None in
   (match
      Lane.fork
        ~sw:parent_sw
        lane
-       ~run:(fun _lane_sw -> Eio.Promise.await never_p)
+       ~with_run_scope:(fun run -> run ())
+       ~run:(fun _lane_sw ->
+         try Eio.Promise.await never_p with
+         | Eio.Cancel.Cancelled cause ->
+           Atomic.set observed_origin (Some (Lane.classify_cancellation_cause cause)))
        ~cleanup:(fun _outcome -> Ok ())
    with
    | Ok () -> ()
    | Error error -> fail (Lane.start_error_to_string error));
   Eio.Fiber.yield ();
+  (match Domain.join (Domain.spawn (fun () -> Lane.request_cancel lane)) with
+   | Lane.Cancel_wrong_domain -> ()
+   | Lane.Cancel_requested -> fail "cross-domain cancellation mutated the lane"
+   | Lane.Cancel_already_requested ->
+     fail "cross-domain cancellation observed a committed request"
+   | Lane.Cancel_already_exiting -> fail "lane exited during cross-domain probe"
+   | Lane.Cancel_not_committed exn
+   | Lane.Cancel_committed_with_failure exn ->
+     fail ("cross-domain cancellation touched Eio state: " ^ Printexc.to_string exn));
+  check bool
+    "cross-domain rejection leaves lane running"
+    true
+    (Option.is_none (Lane.peek_exit lane));
   (match Lane.request_cancel lane with
    | Lane.Cancel_requested -> ()
    | Lane.Cancel_already_requested
    | Lane.Cancel_already_exiting
-   | Lane.Cancel_signal_failed _ -> fail "first lane cancellation was not accepted");
+   | Lane.Cancel_wrong_domain
+   | Lane.Cancel_not_committed _
+   | Lane.Cancel_committed_with_failure _ ->
+     fail "first lane cancellation was not accepted");
   let exit = Lane.await_exit lane in
+  (match Atomic.get observed_origin with
+   | Some Lane.Shutdown_request -> ()
+   | Some (Lane.External_cancel cause) ->
+     fail ("lane body observed external cancellation: " ^ Printexc.to_string cause)
+   | None -> fail "lane body did not observe cancellation origin");
   match exit.outcome with
   | Lane.Shutdown_requested -> ()
   | Lane.Shutdown_before_start -> fail "running lane reported pre-start shutdown"
   | Lane.Completed -> fail "cancelled lane reported normal completion"
+  | Lane.Shutdown_cancel_failed failure ->
+    fail
+      ("lane shutdown cancellation failed: " ^ Printexc.to_string failure.cause)
   | Lane.Cancelled_by_parent cause ->
     fail ("lane cancellation escaped to parent: " ^ Printexc.to_string cause)
   | Lane.Failed exn -> fail ("lane cancellation failed: " ^ Printexc.to_string exn)
@@ -1437,6 +1574,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
          Lane.fork
            ~sw:parent_sw
            entry.lane
+           ~with_run_scope:(fun run -> run ())
            ~run:(fun _lane_sw -> Eio.Promise.await never_p)
            ~cleanup:(fun _outcome ->
              (match R.dispatch_event_exact entry KSM.Stop_requested with
@@ -2417,6 +2555,7 @@ let test_start_keepalive_denies_dead_tombstone_before_registration () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = None
+        ; publication_recovery_registry = None
         }
       in
       (match Masc.Keeper_keepalive.start_keepalive ctx meta with
@@ -2458,6 +2597,8 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            publication_recovery_registry env sw config;
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -2504,6 +2645,8 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_registry =
+            publication_recovery_registry env sw config;
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -2818,14 +2961,18 @@ let () =
         test_direct_start_keepalive_resolves_done_on_stop;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
+      test_case "lane cancellation interrupts blocked run scope" `Quick
+        test_keeper_lane_cancel_interrupts_blocked_run_scope;
+      test_case "lane preserves enriched shutdown cancellation" `Quick
+        test_keeper_lane_preserves_enriched_shutdown_cancellation;
       test_case "lane join surfaces cleanup failure" `Quick
         test_keeper_lane_surfaces_cleanup_failure;
       test_case "lane identity is typed and unique" `Quick
         test_keeper_lane_identity_is_typed_and_unique;
       test_case "lane cancellation is local and joinable" `Quick
         test_keeper_lane_cancel_is_lane_local_and_joinable;
-      test_case "lane records shutdown request on cancel" `Quick
-        test_lane_records_shutdown_request_on_cancel;
+      test_case "lane cancel before start is joinable" `Quick
+        test_lane_cancel_before_start_is_joinable;
       test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
       test_case "shutdown store isolates corrupt owner" `Quick

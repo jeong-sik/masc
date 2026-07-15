@@ -128,6 +128,8 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
         clock;
         proc_mgr;
         net = None;
+        (* Briefing sections use the read-only snapshot projection only. *)
+        publication_recovery_registry = None;
         mcp_session_id = None;
       }
     in

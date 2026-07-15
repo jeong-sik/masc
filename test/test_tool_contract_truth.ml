@@ -80,7 +80,7 @@ let test_public_tools_expose_only_truthful_statuses () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       let tools = tools_list_response ~clock ~sw state |> response_tools in
       List.iter
         (fun tool ->
@@ -97,7 +97,7 @@ let test_keeper_lifecycle_front_door_is_public () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       let tools = tools_list_response ~clock ~sw state |> response_tools in
       let names = tool_names tools in
       List.iter
@@ -120,7 +120,7 @@ let test_selected_tools_report_contract_status () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       let tools =
         tools_list_response ~clock ~sw ~include_hidden:true
           ~names:

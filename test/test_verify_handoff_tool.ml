@@ -32,9 +32,14 @@ let test_verify_handoff_removed_from_registry () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       let result =
-        Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_verify_handoff"
+        Mcp_eio.execute_tool_eio
+          ~sw
+          ~clock
+          ~workspace_scope:(Masc.Mcp_server.workspace_scope state)
+          state
+          ~name:"masc_verify_handoff"
           ~arguments:
             (`Assoc
               [

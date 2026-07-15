@@ -1,7 +1,13 @@
+type shutdown_cancel_failure =
+  { cause : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
 type outcome =
   | Completed
   | Shutdown_before_start
   | Shutdown_requested
+  | Shutdown_cancel_failed of shutdown_cancel_failure
   | Cancelled_by_parent of exn
   | Failed of exn
 
@@ -10,15 +16,30 @@ type exit =
   ; cleanup_error : string option
   }
 
+type cancellation_control =
+  { context : Eio.Cancel.t
+  ; owner_domain : Domain.id
+  }
+
 type state =
   | Not_started
   | Starting
-  | Running of Eio.Switch.t
+  | Running of cancellation_control
   | Cancellation_requested
   | Finalizing
   | Exited
 
 exception Shutdown_cancel
+exception Shutdown_cancel_failure of shutdown_cancel_failure
+
+type cancellation_origin =
+  | Shutdown_request
+  | External_cancel of exn
+
+let classify_cancellation_cause = function
+  | Shutdown_cancel -> Shutdown_request
+  | cause -> External_cancel cause
+;;
 
 module Id = struct
   type t = string
@@ -57,11 +78,6 @@ type t =
   ; state : state Atomic.t
   ; exited_p : exit Eio.Promise.t
   ; exited_r : exit Eio.Promise.u
-  ; shutdown_requested : bool Atomic.t
-    (* Set once [request_cancel] is called (shutdown of this lane). Lets a
-       supervised body distinguish an operator-sanctioned shutdown cancel
-       from a parent/restart cancel after the fact, since both surface as
-       [Eio.Cancel.Cancelled]. *)
   }
 
 type start_error =
@@ -73,7 +89,9 @@ type cancel_result =
   | Cancel_requested
   | Cancel_already_requested
   | Cancel_already_exiting
-  | Cancel_signal_failed of exn
+  | Cancel_wrong_domain
+  | Cancel_not_committed of exn
+  | Cancel_committed_with_failure of exn
 
 let start_error_to_string = function
   | Already_started -> "lane already started"
@@ -87,7 +105,6 @@ let create () =
   ; state = Atomic.make Not_started
   ; exited_p
   ; exited_r
-  ; shutdown_requested = Atomic.make false
   }
 ;;
 
@@ -95,7 +112,6 @@ let id t = t.id
 let exited t = t.exited_p
 let peek_exit t = Eio.Promise.peek t.exited_p
 let await_exit t = Eio.Promise.await t.exited_p
-let shutdown_requested t = Atomic.get t.shutdown_requested
 
 let rec claim_start t =
   if Atomic.compare_and_set t.state Not_started Starting
@@ -111,16 +127,17 @@ type attach_result =
   | Scope_attached
   | Cancel_before_attach
 
-let rec attach_scope t lane_sw =
+let rec attach_control t context =
   let current = Atomic.get t.state in
   match current with
   | Starting ->
-    if Atomic.compare_and_set t.state current (Running lane_sw)
+    let control = { context; owner_domain = Domain.self () } in
+    if Atomic.compare_and_set t.state current (Running control)
     then Scope_attached
-    else attach_scope t lane_sw
+    else attach_control t context
   | Cancellation_requested -> Cancel_before_attach
   | Not_started | Running _ | Finalizing | Exited ->
-    invalid_arg "Keeper_lane.attach_scope: invalid lane state"
+    invalid_arg "Keeper_lane.attach_control: invalid lane state"
 ;;
 
 let cleanup_result cleanup outcome =
@@ -163,10 +180,6 @@ let resolve_exit_without_cleanup t outcome =
 ;;
 
 let rec request_cancel t =
-  (* Record that a shutdown cancel was requested for this lane before we touch
-     the state, so a supervised body's cancellation handler can tell this apart
-     from a parent/restart cancel even if the state races to [Exited]. *)
-  Atomic.set t.shutdown_requested true;
   let current = Atomic.get t.state in
   match current with
   | Not_started ->
@@ -182,23 +195,37 @@ let rec request_cancel t =
     if Atomic.compare_and_set t.state current Cancellation_requested
     then Cancel_requested
     else request_cancel t
-  | Running lane_sw ->
-    if Atomic.compare_and_set t.state current Cancellation_requested
-    then
-      (try
-         Eio.Switch.fail lane_sw Shutdown_cancel;
-         Cancel_requested
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         let _ = Atomic.compare_and_set t.state Cancellation_requested current in
-         Cancel_signal_failed exn)
-    else request_cancel t
+  | Running control ->
+    if Domain.self () <> control.owner_domain
+    then Cancel_wrong_domain
+    else
+      (match Eio.Cancel.get_error control.context with
+       | Some _ -> Cancel_already_exiting
+       | None ->
+         if Atomic.compare_and_set t.state current Cancellation_requested
+         then
+           (try
+              Eio.Cancel.cancel control.context Shutdown_cancel;
+              Cancel_requested
+            with
+            | exn ->
+              (match Eio.Cancel.get_error control.context with
+               | Some (Eio.Cancel.Cancelled _) -> Cancel_committed_with_failure exn
+               | None ->
+                 let _ =
+                   Atomic.compare_and_set
+                     t.state
+                     Cancellation_requested
+                     (Running control)
+                 in
+                 Cancel_not_committed exn
+               | Some _ -> Cancel_not_committed exn))
+         else request_cancel t)
   | Cancellation_requested -> Cancel_already_requested
   | Finalizing | Exited -> Cancel_already_exiting
 ;;
 
-let fork ~sw t ~run ~cleanup =
+let fork ~sw t ~with_run_scope ~run ~cleanup =
   match claim_start t with
   | Error _ as error -> error
   | Ok () ->
@@ -208,15 +235,43 @@ let fork ~sw t ~run ~cleanup =
          Atomic.set started true;
          let outcome =
            try
-             Eio.Switch.run (fun lane_sw ->
-               match attach_scope t lane_sw with
-               | Scope_attached -> run lane_sw
-               | Cancel_before_attach ->
-                 Eio.Switch.fail lane_sw Shutdown_cancel;
-                 Eio.Switch.check lane_sw);
+             (* Attach a cancellation scope before [with_run_scope] can wait
+                for an external readiness promise. The actual lane switch is
+                nested inside the run scope so every lane child still joins
+                before that scope releases its resources. *)
+             Eio.Cancel.sub (fun control ->
+               try
+                 match attach_control t control with
+                 | Cancel_before_attach ->
+                   Eio.Cancel.cancel control Shutdown_cancel;
+                   Eio.Cancel.check control
+                 | Scope_attached ->
+                   Eio.Cancel.check control;
+                   with_run_scope (fun () ->
+                     Eio.Switch.run (fun lane_sw -> run lane_sw));
+                   Eio.Cancel.check control
+               with
+               | exn ->
+                 let backtrace = Printexc.get_raw_backtrace () in
+                 (match Eio.Cancel.get_error control, exn with
+                  | ( Some (Eio.Cancel.Cancelled Shutdown_cancel)
+                    , Eio.Cancel.Cancelled Shutdown_cancel ) ->
+                    Printexc.raise_with_backtrace exn backtrace
+                  | Some (Eio.Cancel.Cancelled Shutdown_cancel), exn ->
+                    let cause =
+                      match exn with
+                      | Eio.Cancel.Cancelled cause -> cause
+                      | exn -> exn
+                    in
+                    Printexc.raise_with_backtrace
+                      (Shutdown_cancel_failure { cause; backtrace })
+                      backtrace
+                  | (Some _ | None), exn ->
+                    Printexc.raise_with_backtrace exn backtrace));
              Completed
            with
-           | Shutdown_cancel -> Shutdown_requested
+           | Shutdown_cancel_failure failure -> Shutdown_cancel_failed failure
+           | Eio.Cancel.Cancelled Shutdown_cancel -> Shutdown_requested
            | Eio.Cancel.Cancelled cause -> Cancelled_by_parent cause
            | exn -> Failed exn
          in

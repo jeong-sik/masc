@@ -55,9 +55,8 @@ scan 'Tool_dispatch\.dispatch(?=[\s\(])' 'Tool_dispatch.dispatch'
 scan 'Tool_dispatch\.dispatch_structured' 'Tool_dispatch.dispatch_structured'
 
 # `Tool_dispatch.run_pre_hooks` — PR-8 intentionally retained the manual
-# call inside dispatch_by_tag + dispatch_internal_keeper_runtime_tool
-# (mcp_server_eio_execute.ml:817, 999) because those helpers do
-# tag-based dispatch (not handler-registry) and re-route pre-hook
+# call inside dispatch_by_tag because it does tag-based dispatch (not
+# handler-registry) and re-routes pre-hook
 # semantics inside the Tool_telemetry.with_span wrap (PR-8 PR body
 # §"What this PR does NOT do"). Excluded from this lint by design;
 # follow-up cleanup PR may inline pre-hook chain into guarded_dispatch.

@@ -61,17 +61,20 @@ let make_meta name =
 let with_eio_fs f =
   Eio_main.run
   @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  Fs_compat.set_fs fs;
   Process_eio.init
     ~cwd_default:(Eio.Stdenv.cwd env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  f ()
+  f ~fs ~sw ()
 ;;
 
 let setup f =
   with_eio_fs
-  @@ fun () ->
+  @@ fun ~fs ~sw () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
   Fun.protect
@@ -85,7 +88,28 @@ let setup f =
        let (_registered : Keeper_registry.registry_entry) =
          Keeper_registry.register ~base_path:base meta.name meta
        in
-       f ~config ~meta ~playground)
+       let registry =
+         match
+           Fs_compat.open_publication_recovery_registry
+             ~sw
+             ~registry_root:Eio.Path.(fs / Workspace.masc_root_dir config)
+         with
+         | Ok registry -> registry
+         | Error error ->
+           Alcotest.fail
+             (Fs_compat.publication_recovery_registry_error_to_string error)
+       in
+       match
+         Fs_compat.with_publication_recovery_lane
+           ~registry
+           ~owner:meta.name
+           (fun publication_recovery_access ->
+              f ~config ~meta ~playground ~publication_recovery_access)
+       with
+       | Ok value -> value
+       | Error error ->
+         Alcotest.fail
+           (Fs_compat.publication_recovery_lane_open_error_to_string error))
 ;;
 
 let parse raw = Yojson.Safe.from_string raw
@@ -96,7 +120,7 @@ let parse_ok raw =
 
 let test_docker_write_allows_explicit_root () =
   setup
-  @@ fun ~config ~meta ~playground:_ ->
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery_access ->
   let meta = { meta with allowed_paths = [ config.base_path ] } in
   Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
@@ -104,7 +128,8 @@ let test_docker_write_allows_explicit_root () =
     Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
+      ~publication_recovery_access
       ~args:
         (`Assoc
             [ "path", `String path
@@ -119,14 +144,15 @@ let test_docker_write_allows_explicit_root () =
 
 let test_docker_write_allows_playground () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery_access ->
   let path = Filename.concat playground "mind/allowed.txt" in
   ensure_dir (Filename.dirname path);
   let raw =
     Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
+      ~publication_recovery_access
       ~args:
         (`Assoc
             [ "path", `String path

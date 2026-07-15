@@ -138,6 +138,7 @@ let request_elapsed_ms request_started =
 let handle_gate_message ~sw ~clock ~submitted_by state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let request_started = Unix.gettimeofday () in
+    let workspace_scope = Mcp_server.workspace_scope state in
     let dispatch =
       (* RFC-connector-deferred-reply-via-chat-queue: the HTTP gate route is the convergence point for sidecar
          connectors (imessage-bot, cli-connector) that POST and await the reply
@@ -150,7 +151,9 @@ let handle_gate_message ~sw ~clock ~submitted_by state request reqd =
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net
-        ~config:(Mcp_server.workspace_config state)
+        ~publication_recovery_registry:
+          (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+        ~config:workspace_scope.config
     in
     let result =
       try
@@ -283,13 +286,15 @@ let handle_gate_connector_status _state request reqd =
             (C.status_json ~audit_limit ()))
 
 let gate_keeper_ctx ~sw ~clock state =
+  let workspace_scope = Mcp_server.workspace_scope state in
   {
-    Keeper_tool_surface.config = (Mcp_server.workspace_config state);
+    Keeper_tool_surface.config = workspace_scope.config;
     agent_name = "gate:connector";
     sw;
     clock;
     proc_mgr = state.Mcp_server.proc_mgr;
     net = state.Mcp_server.net;
+    publication_recovery_registry = (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
   }
 
 let keeper_exists ~sw ~clock state keeper_name =

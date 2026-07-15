@@ -110,14 +110,9 @@ type read_file_attempt =
 let handle_read_file_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
-      ~(keeper_name : string)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(args : Yojson.Safe.t)
   =
-  match find_registry_meta ~keeper_name ~source_layer:"fs_resolver" with
-  | None ->
-    Keeper_tool_execution.failure
-      (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
-  | Some meta ->
   let path = Safe_ops.json_string ~default:"" "path" args in
   let max_bytes =
     Safe_ops.json_int ~default:read_file_default_max_bytes "max_bytes" args
@@ -204,11 +199,11 @@ let handle_read_file_with_outcome
          (error_json ~fields:[ "path", `String target ] msg))
 ;;
 
-let handle_read_file ~turn_sandbox_factory ~config ~keeper_name ~args =
+let handle_read_file ~turn_sandbox_factory ~config ~meta ~args =
   (handle_read_file_with_outcome
      ~turn_sandbox_factory
      ~config
-     ~keeper_name
+     ~meta
      ~args).raw_output
 ;;
 
@@ -428,20 +423,24 @@ let same_file_resource (left : Eio.File.Stat.t) (right : Eio.File.Stat.t) =
 
 let replacement_file_permissions ~parent_dir ~leaf =
   let target = Eio.Path.(parent_dir / leaf) in
-  match Eio.Path.kind ~follow:false target with
-  | `Not_found | `Symbolic_link -> Ok created_file_permissions
-  | `Regular_file -> Ok (Eio.Path.stat ~follow:false target).perm
-  | (`Block_device
-    | `Character_special
-    | `Directory
-    | `Fifo
-    | `Socket
-    | `Unknown) as kind ->
-    Error
-      (Fmt.str
-         "filesystem atomic replacement target must be a regular file, symbolic link, or missing entry; found %a"
-         Eio.File.Stat.pp_kind
-         kind)
+  try
+    let resource = Eio.Path.stat ~follow:false target in
+    match resource.kind with
+    | `Symbolic_link -> Ok created_file_permissions
+    | `Regular_file -> Ok resource.perm
+    | (`Block_device
+      | `Character_special
+      | `Directory
+      | `Fifo
+      | `Socket
+      | `Unknown) as kind ->
+      Error
+        (Fmt.str
+           "filesystem atomic replacement target must be a regular file, symbolic link, or missing entry; found %a"
+           Eio.File.Stat.pp_kind
+           kind)
+  with
+  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Ok created_file_permissions
 ;;
 
 let load_open_file file =
@@ -507,8 +506,14 @@ type append_write_outcome = Fs_compat.capability_append_outcome =
 
 type content_write_error =
   | Content_write_message of string
-  | Content_write_capability of Fs_compat.capability_write_error
-  | Content_write_directory of created_directory_commit
+  | Content_write_capability of
+      { error : Fs_compat.capability_write_error
+      ; created_parents : created_directory_commit list
+      }
+  | Content_write_directory of
+      { failed_commit : created_directory_commit
+      ; created_parents : created_directory_commit list
+      }
   | Content_write_append of append_write_outcome
 
 let append_capability ~on_cancelled file content =
@@ -704,64 +709,99 @@ let create_and_commit_directory_component
                } ))))
 ;;
 
-let rec with_created_parent_directories
-          ~on_cancelled
-          ~permissions
-          parent_dir
-          missing_parents
-          f
+let with_created_parent_directories
+      ~on_interrupted
+      ~permissions
+      parent_dir
+      missing_parents
+      f
   =
-  match missing_parents with
-  | [] -> f parent_dir
-  | component :: rest ->
-    Eio.Switch.run @@ fun sw ->
-    let child_dir, commit =
-      Eio.Cancel.protect (fun () ->
-        create_and_commit_directory_component
-          ~sw
-          ~permissions
-          ~parent_dir
-          ~component)
-    in
-    (try Eio.Fiber.check () with
-     | Eio.Cancel.Cancelled _ as cancellation ->
-       on_cancelled commit;
-       raise cancellation);
-    (match child_dir with
-     | None -> Error (Content_write_directory commit)
-     | Some child_dir ->
-       with_created_parent_directories
-         ~on_cancelled
-         ~permissions
-         child_dir
-         rest
-         f)
+  let rec loop created_parents_rev parent_dir missing_parents =
+    match missing_parents with
+    | [] -> f ~created_parents:(List.rev created_parents_rev) parent_dir
+    | component :: rest ->
+      Eio.Switch.run @@ fun sw ->
+      let child_dir, commit =
+        Eio.Cancel.protect (fun () ->
+          create_and_commit_directory_component
+            ~sw
+            ~permissions
+            ~parent_dir
+            ~component)
+      in
+      (try Eio.Fiber.check () with
+       | Eio.Cancel.Cancelled _ as cancellation ->
+         on_interrupted commit;
+         raise cancellation);
+      (match child_dir with
+       | None ->
+         Error
+           (Content_write_directory
+              { failed_commit = commit
+              ; created_parents = List.rev created_parents_rev
+              })
+       | Some child_dir ->
+         (try loop (commit :: created_parents_rev) child_dir rest with
+          | exception_ ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            on_interrupted commit;
+            Printexc.raise_with_backtrace exception_ backtrace))
+  in
+  loop [] parent_dir missing_parents
 ;;
 
 let rec with_deepest_existing_parent
-          parent
-          parent_relative_path
-          missing_parents
+          parent_dir
+          traversed_components_rev
+          remaining_components
           f
   =
-  Eio.Switch.run @@ fun sw ->
-  match
-    try Ok (Eio.Path.open_dir ~sw parent) with
-    | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Error `Missing
-  with
-  | Ok parent_dir ->
-    f ~parent_dir ~parent_relative_path ~missing_parents
-  | Error `Missing ->
-    (match Eio.Path.split parent with
-     | None ->
-       Error
-         "filesystem capability acquisition failed: no existing parent directory"
-     | Some (ancestor, missing_component) ->
+  match remaining_components with
+  | [] ->
+    f
+      ~parent_dir
+      ~parent_components:(List.rev traversed_components_rev)
+      ~missing_parents:[]
+  | component :: rest ->
+    Eio.Switch.run @@ fun sw ->
+    (match
+       try Ok (Eio.Path.open_dir ~sw Eio.Path.(parent_dir / component)) with
+       | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Error `Missing
+     with
+     | Ok child_dir ->
        with_deepest_existing_parent
-         ancestor
-         (Filename.dirname parent_relative_path)
-         (missing_component :: missing_parents)
-         f)
+         child_dir
+         (component :: traversed_components_rev)
+         rest
+         f
+     | Error `Missing ->
+       f
+         ~parent_dir
+         ~parent_components:(List.rev traversed_components_rev)
+         ~missing_parents:remaining_components)
+;;
+
+let rec with_open_directory_components ~on_missing parent_dir components f =
+  match components with
+  | [] -> f parent_dir
+  | component :: rest ->
+    Eio.Switch.run @@ fun sw ->
+    (match
+       try Ok (Eio.Path.open_dir ~sw Eio.Path.(parent_dir / component)) with
+       | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Error `Missing
+     with
+     | Error `Missing -> on_missing ()
+     | Ok child_dir ->
+       with_open_directory_components ~on_missing child_dir rest f)
+;;
+
+let rec split_leaf_components = function
+  | [] -> None
+  | [ leaf ] -> Some ([], leaf)
+  | component :: rest ->
+    Option.map
+      (fun (parent, leaf) -> component :: parent, leaf)
+      (split_leaf_components rest)
 ;;
 
 let with_confined_write_parent confined f =
@@ -775,25 +815,25 @@ let with_confined_write_parent confined f =
        let root_relative_path =
          Keeper_alerting_path.confined_root_relative_path confined
        in
-       let relative_path =
-         Keeper_alerting_path.confined_relative_path confined
+       let target_components =
+         Keeper_alerting_path.confined_relative_components confined
        in
        let with_root root_dir =
          let* () =
            Keeper_alerting_path.verify_confined_root_capability confined root_dir
          in
-         match Eio.Path.split Eio.Path.(root_dir / relative_path) with
+         match split_leaf_components target_components with
          | None -> Error "filesystem target has no writable leaf"
-         | Some (parent, leaf) ->
+         | Some (parent_components, leaf) ->
            with_deepest_existing_parent
-             parent
-             (Filename.dirname relative_path)
+             root_dir
              []
-             (fun ~parent_dir ~parent_relative_path ~missing_parents ->
+             parent_components
+             (fun ~parent_dir ~parent_components ~missing_parents ->
                 f
                   ~root_dir
                   ~parent_dir
-                  ~parent_relative_path
+                  ~parent_components
                   ~missing_parents
                   ~leaf)
        in
@@ -905,6 +945,7 @@ let capability_write_failure_json
     | Fs_compat.Payload_write_failed { bytes_written; _ } ->
       [ "bytes_written", `Int bytes_written ]
     | ( Fs_compat.Invalid_leaf _
+      | Fs_compat.Invalid_recovery_target _
       | Fs_compat.Mutation_contended
       | Fs_compat.Posix_descriptor_unavailable
       | Fs_compat.Unexpected_resource_kind _
@@ -921,24 +962,50 @@ let capability_write_failure_json
      @ cause_fields)
 ;;
 
-let capability_write_error_payload
-      ~target
-      (error : Fs_compat.capability_write_error)
-  =
-  error_json
-    ~fields:
-      [ "path", `String target
-      ; ( "filesystem_write_intent"
-        , `String (Fs_compat.capability_write_intent_to_string error.intent) )
-      ; ( "filesystem_target_effect"
-        , `String
-            (Fs_compat.capability_write_target_effect_to_string
-               error.target_effect) )
-      ; "filesystem_failure", capability_write_failure_json error.failure
-      ; ( "filesystem_cleanup_failures"
-        , `List (List.map capability_write_failure_json error.cleanup_failures) )
+let capability_recovery_failure_json failure =
+  `Assoc
+    [ ( "phase"
+      , `String
+          (Fs_compat.capability_recovery_phase_to_string
+             (Fs_compat.capability_recovery_failure_phase failure)) )
+    ; ( "effect"
+      , `String
+          (Fs_compat.capability_recovery_effect_to_string
+             (Fs_compat.capability_recovery_failure_effect failure)) )
+    ; "detail", `String (Fs_compat.capability_recovery_failure_to_string failure)
+    ]
+;;
+
+let capability_write_primary_failure_json = function
+  | Fs_compat.Write_primary_failure failure ->
+    `Assoc
+      [ "kind", `String "write"
+      ; "failure", capability_write_failure_json failure
       ]
-    "Filesystem publication failed; target effect and cleanup outcome are reported explicitly."
+  | Fs_compat.Recovery_primary_failure failure ->
+    `Assoc
+      [ "kind", `String "recovery"
+      ; "failure", capability_recovery_failure_json failure
+      ]
+  | Fs_compat.Recovery_access_primary_failure
+      Fs_compat.Recovery_access_not_available ->
+    `Assoc
+      [ "kind", `String "recovery_access"
+      ; "failure", `String "recovery_access_not_available"
+      ]
+;;
+
+let capability_write_cleanup_failure_json = function
+  | Fs_compat.Write_cleanup_failure failure ->
+    `Assoc
+      [ "kind", `String "write"
+      ; "failure", capability_write_failure_json failure
+      ]
+  | Fs_compat.Recovery_cleanup_failure failure ->
+    `Assoc
+      [ "kind", `String "recovery"
+      ; "failure", capability_recovery_failure_json failure
+      ]
 ;;
 
 let observe_capability_write_failure_backtrace
@@ -965,6 +1032,7 @@ let observe_capability_write_failure_backtrace
       (Printexc.to_string exception_)
       (Printexc.raw_backtrace_to_string backtrace)
   | ( Fs_compat.Invalid_leaf _
+    | Fs_compat.Invalid_recovery_target _
     | Fs_compat.Mutation_contended
     | Fs_compat.Posix_descriptor_unavailable
     | Fs_compat.Unexpected_resource_kind _
@@ -972,17 +1040,49 @@ let observe_capability_write_failure_backtrace
     | Fs_compat.Resource_identity_changed ) -> ()
 ;;
 
+let observe_capability_recovery_failure ~keeper_name ~target failure =
+  Log.Keeper.error
+    ~keeper_name
+    "WRITE_AUDIT: filesystem recovery transition failed path=%s phase=%s effect=%s failure=%s"
+    target
+    (Fs_compat.capability_recovery_phase_to_string
+       (Fs_compat.capability_recovery_failure_phase failure))
+    (Fs_compat.capability_recovery_effect_to_string
+       (Fs_compat.capability_recovery_failure_effect failure))
+    (Fs_compat.capability_recovery_failure_to_string failure)
+;;
+
+let observe_capability_write_primary_failure ~keeper_name ~target = function
+  | Fs_compat.Write_primary_failure failure ->
+    observe_capability_write_failure_backtrace ~keeper_name ~target failure
+  | Fs_compat.Recovery_primary_failure failure ->
+    observe_capability_recovery_failure ~keeper_name ~target failure
+  | Fs_compat.Recovery_access_primary_failure
+      Fs_compat.Recovery_access_not_available ->
+    Log.Keeper.error
+      ~keeper_name
+      "WRITE_AUDIT: filesystem recovery access unavailable path=%s"
+      target
+;;
+
+let observe_capability_write_cleanup_failure ~keeper_name ~target = function
+  | Fs_compat.Write_cleanup_failure failure ->
+    observe_capability_write_failure_backtrace ~keeper_name ~target failure
+  | Fs_compat.Recovery_cleanup_failure failure ->
+    observe_capability_recovery_failure ~keeper_name ~target failure
+;;
+
 let observe_capability_write_error
       ~keeper_name
       ~target
       (error : Fs_compat.capability_write_error)
   =
-  observe_capability_write_failure_backtrace
+  observe_capability_write_primary_failure
     ~keeper_name
     ~target
-    error.Fs_compat.failure;
+    error.Fs_compat.primary_failure;
   List.iter
-    (observe_capability_write_failure_backtrace ~keeper_name ~target)
+    (observe_capability_write_cleanup_failure ~keeper_name ~target)
     error.cleanup_failures
 ;;
 
@@ -1042,10 +1142,58 @@ let created_directory_sync_outcome_json = function
       ]
 ;;
 
-let created_directory_commit_payload ~target commit =
+let created_directory_commit_json commit =
+  `Assoc
+    [ "component", `String commit.component
+    ; ( "target_effect"
+      , `String (created_directory_target_effect_to_string commit.target_effect) )
+    ; ( "primary_failure"
+      , match commit.primary_failure with
+        | None -> `Null
+        | Some failure -> created_directory_failure_json failure )
+    ; "child_sync", created_directory_sync_outcome_json commit.child_sync
+    ; "parent_sync", created_directory_sync_outcome_json commit.parent_sync
+    ]
+;;
+
+let created_parent_effects_json created_parents =
+  `List (List.map created_directory_commit_json created_parents)
+;;
+
+let capability_write_error_payload
+      ~target
+      ~created_parents
+      (error : Fs_compat.capability_write_error)
+  =
   error_json
     ~fields:
       [ "path", `String target
+      ; ( "filesystem_write_operation"
+        , `String
+            (Fs_compat.capability_write_operation_to_string error.operation) )
+      ; ( "filesystem_target_effect"
+        , `String
+            (Fs_compat.capability_write_target_effect_to_string
+               error.target_effect) )
+      ; ( "filesystem_created_parent_effects"
+        , created_parent_effects_json created_parents )
+      ; ( "filesystem_primary_failure"
+        , capability_write_primary_failure_json error.primary_failure )
+      ; ( "filesystem_cleanup_failures"
+        , `List
+            (List.map
+               capability_write_cleanup_failure_json
+               error.cleanup_failures) )
+      ]
+    "Filesystem publication failed; target effect and cleanup outcome are reported explicitly."
+;;
+
+let created_directory_commit_payload ~target ~created_parents commit =
+  error_json
+    ~fields:
+      [ "path", `String target
+      ; ( "filesystem_created_parent_effects"
+        , created_parent_effects_json created_parents )
       ; "filesystem_directory_component", `String commit.component
       ; ( "filesystem_directory_target_effect"
         , `String
@@ -1241,7 +1389,6 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
        (Printexc.raw_backtrace_to_string backtrace)
    | ( None
      | Some Fs_compat.Capability_append_posix_descriptor_unavailable
-     | Some Fs_compat.Capability_append_inode_contended
      | Some Fs_compat.Capability_append_mutation_contended ) -> ());
   let observe_operation_failure
         label
@@ -1272,18 +1419,14 @@ let file_write_attempt_to_execution = function
 let handle_file_write_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
-      ~(keeper_name : string)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
       ?continuation_channel
       ?gate_context
       ?gate_grant
       ~(args : Yojson.Safe.t)
       ()
   =
-  match find_registry_meta ~keeper_name ~source_layer:"fs_resolver" with
-  | None ->
-    Keeper_tool_execution.failure
-      (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
-  | Some meta ->
   let via_field =
     match turn_sandbox_factory with
     | Some _ ->
@@ -1340,17 +1483,43 @@ let handle_file_write_with_outcome
     try f () with
     | Eio.Cancel.Cancelled
         (Fs_compat.Capability_write_cancelled (reason, cancellation)) as e ->
+      let interrupted_primary =
+        match cancellation.interrupted_primary_failure with
+        | None -> `Null
+        | Some failure -> capability_write_primary_failure_json failure
+      in
+      let interrupted_recovery =
+        match cancellation.interrupted_recovery with
+        | None -> `Null
+        | Some failure -> capability_recovery_failure_json failure
+      in
       Log.Keeper.error
         ~keeper_name:meta.name
-        "WRITE_AUDIT: filesystem publication cancelled after observable state transition path=%s intent=%s target_effect=%s cleanup_failures=%d reason=%s"
+        "WRITE_AUDIT: filesystem publication cancelled after observable state transition path=%s operation=%s target_effect=%s interrupted_primary=%s interrupted_recovery=%s cleanup_failures=%s reason=%s"
         target
-        (Fs_compat.capability_write_intent_to_string cancellation.intent)
+        (Fs_compat.capability_write_operation_to_string cancellation.operation)
         (Fs_compat.capability_write_target_effect_to_string
            cancellation.target_effect)
-        (List.length cancellation.cleanup_failures)
+        (Yojson.Safe.to_string interrupted_primary)
+        (Yojson.Safe.to_string interrupted_recovery)
+        (Yojson.Safe.to_string
+           (`List
+               (List.map
+                  capability_write_cleanup_failure_json
+                  cancellation.cleanup_failures)))
         (Printexc.to_string reason);
+      Option.iter
+        (observe_capability_write_primary_failure
+           ~keeper_name:meta.name
+           ~target)
+        cancellation.interrupted_primary_failure;
+      Option.iter
+        (observe_capability_recovery_failure
+           ~keeper_name:meta.name
+           ~target)
+        cancellation.interrupted_recovery;
       List.iter
-        (observe_capability_write_failure_backtrace
+        (observe_capability_write_cleanup_failure
            ~keeper_name:meta.name
            ~target)
         cancellation.cleanup_failures;
@@ -1393,21 +1562,35 @@ let handle_file_write_with_outcome
     @@ fun () ->
     match write () with
     | Error (Content_write_message message) -> Error message
-    | Error (Content_write_capability error) ->
+    | Error (Content_write_capability { error; created_parents }) ->
+      List.iter
+        (observe_created_directory_commit
+           ~keeper_name:meta.name
+           ~target)
+        created_parents;
       observe_capability_write_error ~keeper_name:meta.name ~target error;
       Ok
         (Write_failed
-           { payload = capability_write_error_payload ~target error
+           { payload = capability_write_error_payload ~target ~created_parents error
            ; class_ = Tool_result.Runtime_failure
            })
-    | Error (Content_write_directory commit) ->
+    | Error (Content_write_directory { failed_commit; created_parents }) ->
+      List.iter
+        (observe_created_directory_commit
+           ~keeper_name:meta.name
+           ~target)
+        created_parents;
       observe_created_directory_commit
         ~keeper_name:meta.name
         ~target
-        commit;
+        failed_commit;
       Ok
         (Write_failed
-           { payload = created_directory_commit_payload ~target commit
+           { payload =
+               created_directory_commit_payload
+                 ~target
+                 ~created_parents
+                 failed_commit
            ; class_ = Tool_result.Runtime_failure
            })
     | Error (Content_write_append outcome) ->
@@ -1450,12 +1633,13 @@ let handle_file_write_with_outcome
                    @ ide_observation_failure_fields ide_observation_error
                    @ via_field))))
   in
-  let parent_effect_scope ~parent_dir ~parent_relative_path ~missing_parents =
+  let parent_effect_scope ~parent_dir ~parent_components ~missing_parents =
     Keeper_alerting_path.path_effect_parent_scope
-      ~relative_path:parent_relative_path
+      ~parent_components
       ~resource:(Eio.Path.stat ~follow:true parent_dir)
       ~create_missing_parents:missing_parents
       ~created_directory_permissions
+    |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
   in
   let handle_atomic_content_write ~mode_label ~make_effect =
     match
@@ -1473,35 +1657,42 @@ let handle_file_write_with_outcome
           check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
         in
         with_confined_write_parent confined
-        @@ fun ~root_dir:_ ~parent_dir ~parent_relative_path ~missing_parents ~leaf ->
+        @@ fun ~root_dir:_ ~parent_dir ~parent_components ~missing_parents ~leaf ->
         let* parent =
-          parent_effect_scope ~parent_dir ~parent_relative_path ~missing_parents
+          parent_effect_scope ~parent_dir ~parent_components ~missing_parents
         in
         let* result_file_permissions =
           if missing_parents = []
           then replacement_file_permissions ~parent_dir ~leaf
           else Ok created_file_permissions
         in
-        let* gate_effect =
+        let* projection =
           make_effect ~parent ~result_file_permissions confined
+          |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
+        in
+        let gate_effect =
+          Keeper_alerting_path.atomic_replace_gate_effect projection
+        in
+        let recovery_target =
+          Keeper_alerting_path.atomic_replace_recovery_target projection
         in
         finish_content_write ~target ~mode_label ~gate_effect (fun () ->
           with_created_parent_directories
-            ~on_cancelled:
+            ~on_interrupted:
               (observe_created_directory_commit
                  ~keeper_name:meta.name
                  ~target)
             ~permissions:created_directory_permissions
             parent_dir
             missing_parents
-          @@ fun final_parent ->
-          Fs_compat.publish_capability_file
+          @@ fun ~created_parents final_parent ->
+          Fs_compat.replace_capability_file
+            ~recovery:publication_recovery_access
             ~parent:final_parent
-            ~leaf
-            ~intent:Fs_compat.Atomic_replace
-            ~permissions:result_file_permissions
+            ~target:recovery_target
             content
-          |> Result.map_error (fun error -> Content_write_capability error))
+          |> Result.map_error (fun error ->
+            Content_write_capability { error; created_parents }))
       in
       (match run () with
        | Ok attempt -> file_write_attempt_to_execution attempt
@@ -1526,46 +1717,52 @@ let handle_file_write_with_outcome
           check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
         in
         with_confined_write_parent confined
-        @@ fun ~root_dir ~parent_dir ~parent_relative_path ~missing_parents ~leaf ->
+        @@ fun ~root_dir ~parent_dir ~parent_components ~missing_parents ~leaf ->
         let create_missing_entry () =
           let* parent =
-            parent_effect_scope ~parent_dir ~parent_relative_path ~missing_parents
+            parent_effect_scope ~parent_dir ~parent_components ~missing_parents
           in
           let* gate_effect =
             Keeper_alerting_path.create_entry_exclusive_effect
               ~parent
               ~result_file_permissions:created_file_permissions
               confined
+            |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
           in
           finish_content_write ~target ~mode_label ~gate_effect (fun () ->
             with_created_parent_directories
-              ~on_cancelled:
+              ~on_interrupted:
                 (observe_created_directory_commit
                    ~keeper_name:meta.name
                    ~target)
               ~permissions:created_directory_permissions
               parent_dir
               missing_parents
-            @@ fun final_parent ->
-            Fs_compat.publish_capability_file
+            @@ fun ~created_parents final_parent ->
+            Fs_compat.create_capability_file_exclusive
               ~parent:final_parent
               ~leaf
-              ~intent:Fs_compat.Create_exclusive
               ~permissions:created_file_permissions
               content
-            |> Result.map_error (fun error -> Content_write_capability error))
+            |> Result.map_error (fun error ->
+              Content_write_capability { error; created_parents }))
         in
         if missing_parents <> []
         then create_missing_entry ()
         else
-          let endpoint_relative_path =
-            Keeper_alerting_path.confined_endpoint_relative_path confined
+          let endpoint_components =
+            Keeper_alerting_path.confined_endpoint_components confined
           in
-          Eio.Switch.run @@ fun sw ->
-          (match Eio.Path.split Eio.Path.(root_dir / endpoint_relative_path) with
+          (match split_leaf_components endpoint_components with
            | None -> Error "filesystem append endpoint has no writable leaf"
-           | Some (endpoint_parent, endpoint_leaf) ->
-             let endpoint_parent_dir = Eio.Path.open_dir ~sw endpoint_parent in
+           | Some (endpoint_parent_components, endpoint_leaf) ->
+             with_open_directory_components
+               ~on_missing:(fun () ->
+                 Error "filesystem append endpoint parent does not exist")
+               root_dir
+               endpoint_parent_components
+             @@ fun endpoint_parent_dir ->
+             Eio.Switch.run @@ fun sw ->
              (match
                 Fs_compat.open_capability_append_file
                   ~sw
@@ -1596,6 +1793,8 @@ let handle_file_write_with_outcome
                     Keeper_alerting_path.append_pinned_resource_effect
                       confined
                       stat
+                    |> Result.map_error
+                         Keeper_alerting_path.path_effect_projection_error_to_string
                   in
                   finish_content_write ~target ~mode_label ~gate_effect (fun () ->
                     append_capability
@@ -1665,24 +1864,43 @@ let handle_file_write_with_outcome
                 @@ fun () ->
                 match write updated with
                 | Error (Content_write_message message) -> Error message
-                | Error (Content_write_capability error) ->
+                | Error (Content_write_capability { error; created_parents }) ->
+                  List.iter
+                    (observe_created_directory_commit
+                       ~keeper_name:meta.name
+                       ~target)
+                    created_parents;
                   observe_capability_write_error
                     ~keeper_name:meta.name
                     ~target
                     error;
                   Ok
                     (Write_failed
-                       { payload = capability_write_error_payload ~target error
+                       { payload =
+                           capability_write_error_payload
+                             ~target
+                             ~created_parents
+                             error
                        ; class_ = Tool_result.Runtime_failure
                        })
-                | Error (Content_write_directory commit) ->
+                | Error
+                    (Content_write_directory { failed_commit; created_parents }) ->
+                  List.iter
+                    (observe_created_directory_commit
+                       ~keeper_name:meta.name
+                       ~target)
+                    created_parents;
                   observe_created_directory_commit
                     ~keeper_name:meta.name
                     ~target
-                    commit;
+                    failed_commit;
                   Ok
                     (Write_failed
-                       { payload = created_directory_commit_payload ~target commit
+                       { payload =
+                           created_directory_commit_payload
+                             ~target
+                             ~created_parents
+                             failed_commit
                        ; class_ = Tool_result.Runtime_failure
                        })
                 | Error (Content_write_append outcome) ->
@@ -1731,7 +1949,6 @@ let handle_file_write_with_outcome
               in
               let patch_current
                     ~parent
-                    ~source_relative_path
                     ~source_resource
                     ~result_file_permissions
                     current
@@ -1740,15 +1957,26 @@ let handle_file_write_with_outcome
                 let* updated, occurrences =
                   apply_patch ~old_string ~new_string ~replace_all current
                 in
-                let* gate_effect =
+                let* projection =
                   Keeper_alerting_path.patch_then_atomic_replace_effect
                     ~parent
-                    ~source_relative_path
                     ~source_resource
                     ~result_file_permissions
                     confined
+                  |> Result.map_error
+                       Keeper_alerting_path.path_effect_projection_error_to_string
                 in
-                finish_write ~gate_effect ~updated ~occurrences write
+                let gate_effect =
+                  Keeper_alerting_path.atomic_replace_gate_effect projection
+                in
+                let recovery_target =
+                  Keeper_alerting_path.atomic_replace_recovery_target projection
+                in
+                finish_write
+                  ~gate_effect
+                  ~updated
+                  ~occurrences
+                  (write ~recovery_target)
               in
               let missing_target () =
                 Ok
@@ -1765,59 +1993,67 @@ let handle_file_write_with_outcome
                   check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
                 in
                 with_confined_write_parent confined
-                @@ fun ~root_dir ~parent_dir ~parent_relative_path ~missing_parents ~leaf ->
+                @@ fun ~root_dir ~parent_dir ~parent_components ~missing_parents ~leaf ->
                 if missing_parents <> []
                 then missing_target ()
                 else
-                  let source_relative_path =
-                    Keeper_alerting_path.confined_endpoint_relative_path confined
+                  let endpoint_components =
+                    Keeper_alerting_path.confined_endpoint_components confined
                   in
-                  let confined_source = Eio.Path.(root_dir / source_relative_path) in
-                  (match Eio.Path.kind ~follow:true confined_source with
-                   | `Not_found -> missing_target ()
-                   | `Regular_file ->
-                     Eio.Path.with_open_in confined_source @@ fun source_file ->
-                     let source_resource = Eio.File.stat source_file in
-                     if source_resource.kind <> `Regular_file
-                     then Error "filesystem patch source changed before capability acquisition"
-                     else
-                       let current = load_open_file source_file in
-                       let* result_file_permissions =
-                         replacement_file_permissions ~parent_dir ~leaf
-                       in
-                       let* parent =
-                         parent_effect_scope
-                           ~parent_dir
-                           ~parent_relative_path
-                           ~missing_parents:[]
-                       in
-                       patch_current
-                         ~parent
-                         ~source_relative_path
-                         ~source_resource
-                         ~result_file_permissions
-                         current
-                         (fun updated ->
-                            Fs_compat.publish_capability_file
-                              ~parent:parent_dir
-                              ~leaf
-                              ~intent:Fs_compat.Atomic_replace
-                              ~permissions:result_file_permissions
-                              updated
-                            |> Result.map_error (fun error ->
-                              Content_write_capability error))
-                   | (`Block_device
-                     | `Character_special
-                     | `Directory
-                     | `Fifo
-                     | `Socket
-                     | `Symbolic_link
-                     | `Unknown) as kind ->
-                     Error
-                       (Fmt.str
-                          "filesystem patch target must resolve to a regular file; found %a"
-                          Eio.File.Stat.pp_kind
-                          kind))
+                  (match split_leaf_components endpoint_components with
+                   | None -> Error "filesystem patch source has no readable leaf"
+                   | Some (source_parent_components, source_leaf) ->
+                     with_open_directory_components
+                       ~on_missing:missing_target
+                       root_dir
+                       source_parent_components
+                     @@ fun source_parent_dir ->
+                     Eio.Switch.run @@ fun sw ->
+                     (match
+                        try
+                          Ok
+                            (Eio.Path.open_in
+                               ~sw
+                               Eio.Path.(source_parent_dir / source_leaf))
+                        with
+                        | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+                          Error `Missing
+                      with
+                      | Error `Missing -> missing_target ()
+                      | Ok source_file ->
+                        let source_resource = Eio.File.stat source_file in
+                        if source_resource.kind <> `Regular_file
+                        then
+                          Error
+                            (Fmt.str
+                               "filesystem patch target must resolve to a regular file; found %a"
+                               Eio.File.Stat.pp_kind
+                               source_resource.kind)
+                        else
+                          let current = load_open_file source_file in
+                          let* result_file_permissions =
+                            replacement_file_permissions ~parent_dir ~leaf
+                          in
+                          let* parent =
+                            parent_effect_scope
+                              ~parent_dir
+                              ~parent_components
+                              ~missing_parents:[]
+                          in
+                          patch_current
+                            ~parent
+                            ~source_resource
+                            ~result_file_permissions
+                            current
+                            (fun ~recovery_target updated ->
+                               Fs_compat.replace_capability_file
+                                 ~recovery:publication_recovery_access
+                                 ~parent:parent_dir
+                                 ~target:recovery_target
+                                 updated
+                               |> Result.map_error (fun error ->
+                                 Content_write_capability
+                                   { error; created_parents = [] }))))
               in
               (match run () with
                | Ok attempt -> file_write_attempt_to_execution attempt
@@ -1835,7 +2071,8 @@ let handle_file_write_with_outcome
 let handle_file_write
       ~turn_sandbox_factory
       ~config
-      ~keeper_name
+      ~meta
+      ~publication_recovery_access
       ?continuation_channel
       ?gate_context
       ?gate_grant
@@ -1845,7 +2082,8 @@ let handle_file_write
   (handle_file_write_with_outcome
      ~turn_sandbox_factory
      ~config
-     ~keeper_name
+     ~meta
+     ~publication_recovery_access
      ?continuation_channel
      ?gate_context
      ?gate_grant

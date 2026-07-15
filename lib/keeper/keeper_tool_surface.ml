@@ -816,7 +816,7 @@ let eio_context_missing tool_name =
 
 let () =
   Keeper_dispatch_ref.dispatch
-  := fun ~config ~agent_name ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ?authorize_external_effect ~name ~args () ->
+  := fun ~config ~agent_name ~publication_recovery_registry ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ?authorize_external_effect ~name ~args () ->
     let run_external_effect continue =
       match authorize_external_effect with
       | None -> continue ()
@@ -870,7 +870,14 @@ let () =
       (match sw, clock with
        | Some sw, Some clock ->
          let ctx : _ Keeper_types_profile.context =
-           { config; agent_name; sw; clock; proc_mgr; net }
+           { config
+           ; agent_name
+           ; sw
+           ; clock
+           ; proc_mgr
+           ; net
+           ; publication_recovery_registry
+           }
          in
          Some
            (tool_result_with_tool_name
@@ -893,7 +900,14 @@ let () =
       (match sw, clock with
        | Some sw, Some clock ->
          let ctx : _ Keeper_types_profile.context =
-           { config; agent_name; sw; clock; proc_mgr; net }
+           { config
+           ; agent_name
+           ; sw
+           ; clock
+           ; proc_mgr
+           ; net
+           ; publication_recovery_registry
+           }
          in
          run_external_effect (fun () ->
            Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
@@ -916,6 +930,7 @@ let () =
               ~agent_name
               ~sw
               ~clock
+              ~publication_recovery_registry
               ?proc_mgr
               ?net
               args)
@@ -929,6 +944,7 @@ let () =
               ~agent_name
               ~sw
               ~clock
+              ~publication_recovery_registry
               ?proc_mgr
               ?net
               args)

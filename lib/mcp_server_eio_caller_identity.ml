@@ -17,7 +17,6 @@ type t = {
   token : string option;
   has_explicit_agent_name : bool;
   verified_internal_keeper_runtime : bool;
-  internal_keeper_runtime_tool : bool;
   owner_keeper_identity : owner_keeper_identity option;
   mode_gate_error : string option;
 }
@@ -250,11 +249,6 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
     | Some raw -> Auth.verify_internal_keeper_token config.base_path ~token:raw
     | None -> false
   in
-  (* The Agent_internal surface was empty (agent_internal_surface_tools = []),
-     so this flag was already always [false].  Surface deleted in the
-     surface-cut refactor; flag retained because [mcp_server_eio_execute]
-     reads it to skip the direct-call block for internal keeper runtimes. *)
-  let internal_keeper_runtime_tool = false in
   let owner_keeper_identity =
     match token with
     | None -> None
@@ -269,8 +263,6 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
   in
   let mode_gate_error =
     if
-      (not internal_keeper_runtime_tool)
-      &&
       match direct_call_authority with
       | Restricted_profile -> false
       | Catalog_policy -> not (Tool_catalog.allow_direct_call tool_name)
@@ -300,7 +292,6 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
     token;
     has_explicit_agent_name;
     verified_internal_keeper_runtime;
-    internal_keeper_runtime_tool;
     owner_keeper_identity;
     mode_gate_error;
   }

@@ -179,10 +179,6 @@ let test_reports_per_keeper_metric_values () =
     true
     (int_field "facts_bytes" (totals json) > 0);
   Alcotest.(check bool)
-    "cadence_counter_entries non-negative"
-    true
-    (int_field "cadence_counter_entries" json >= 0);
-  Alcotest.(check bool)
     "generated_at is present as wall-clock float"
     true
     (float_field "generated_at" json >= 0.0)

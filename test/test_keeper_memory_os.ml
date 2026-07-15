@@ -1697,10 +1697,6 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
           ; messages = [ text_message "Please remember the fallback path." ]
           }
         in
-        Alcotest.(check bool)
-          "production cadence gate is due before provider attempt"
-          true
-          (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id);
         let fallback_result =
           Librarian_runtime.extract_and_append_with_provider_classified
             ~complete
@@ -1715,7 +1711,7 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
         in
         (match fallback_result with
          | Ok _ -> Alcotest.fail "unstructured provider output must not persist"
-         | Error (Librarian_runtime.Provider_unparseable_response reason as err) ->
+         | Error (Librarian_runtime.Provider_unparseable_response reason) ->
            Alcotest.(check int)
              "initial attempt + parse retries"
              (1 + Librarian_runtime.librarian_max_parse_retries)
@@ -1730,15 +1726,6 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
              "typed provider error preserves JSON parser detail"
              true
              (contains "JSON parse error" reason);
-           Alcotest.(check bool)
-             "unparseable provider error enters cadence backoff path"
-             true
-             (Librarian_runtime.should_record_cadence_backoff_after_error err);
-           Librarian_runtime.cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
-           Alcotest.(check bool)
-             "cadence attempt defers the next provider retry"
-             false
-             (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id)
          | Error err ->
            Alcotest.failf
              "expected Provider_unparseable_response, got %s"

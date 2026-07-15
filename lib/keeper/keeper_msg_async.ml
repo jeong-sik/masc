@@ -38,6 +38,10 @@ type request_status =
       ; data : Yojson.Safe.t option
       }
 
+type completion_delivery =
+  | Delivery_pending
+  | Delivery_delivered
+
 type entry =
   { request_id : string
   ; request : Keeper_invocation_types.request
@@ -46,6 +50,7 @@ type entry =
   ; status : request_status
   ; submitted_at : float
   ; completed_at : float option
+  ; completion_delivery : completion_delivery option
   }
 
 type access_rejection =
@@ -628,6 +633,12 @@ let is_terminal_status = function
   | Queued | Running | Cancelling _ -> false
 ;;
 
+let completion_delivery_for_status request status current =
+  match is_terminal_status status, Keeper_invocation_types.request_reply_to request with
+  | true, Some _ -> Some (Option.value current ~default:Delivery_pending)
+  | (false, _ | true, None) -> None
+;;
+
 let access_rejection_to_json = function
   | Invalid_base_path { reason } ->
     `Assoc
@@ -813,6 +824,13 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
     | None -> fields
   in
   let fields =
+    match e.completion_delivery with
+    | None -> fields
+    | Some Delivery_pending -> fields @ [ "completion_delivery", `String "pending" ]
+    | Some Delivery_delivered ->
+      fields @ [ "completion_delivery", `String "delivered" ]
+  in
+  let fields =
     match e.status with
     | Done { ok; body; data } ->
       fields
@@ -837,6 +855,12 @@ let same_request_identity (left : entry) (right : entry) =
   && String.equal left.base_path right.base_path
   && String.equal left.submitted_by right.submitted_by
   && Float.equal left.submitted_at right.submitted_at
+;;
+
+let same_terminal_result left right =
+  same_request_identity left right
+  && left.status = right.status
+  && left.completed_at = right.completed_at
 ;;
 
 let string_member name json =
@@ -1003,6 +1027,19 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
   let* status_tag = required_string "status" json in
   let* submitted_at = required_float "submitted_at" json in
   let* status, completed_at = decode_status ~tag:status_tag json in
+  let routed_terminal =
+    is_terminal_status status
+    && Option.is_some (Keeper_invocation_types.request_reply_to request)
+  in
+  let* completion_delivery =
+    match routed_terminal, Json_util.assoc_member_opt "completion_delivery" json with
+    | true, None -> Ok (Some Delivery_pending)
+    | true, Some (`String "pending") -> Ok (Some Delivery_pending)
+    | true, Some (`String "delivered") -> Ok (Some Delivery_delivered)
+    | true, Some _ -> Error "terminal completion_delivery must be pending or delivered"
+    | false, None -> Ok None
+    | false, Some _ -> Error "non-routed request must not contain completion_delivery"
+  in
   let status_fields =
     match status with
     | Queued | Running -> []
@@ -1011,6 +1048,9 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     | Cancelled _ -> [ "completed_at"; "reason"; "cancelled_by" ]
     | Persistence_failed _ -> [ "completed_at"; "attempted_status"; "reason" ]
     | Done _ -> [ "completed_at"; "ok"; "body"; "data" ]
+  in
+  let status_fields =
+    if routed_terminal then "completion_delivery" :: status_fields else status_fields
   in
   let* () = validate_record_fields ~status_fields json in
   Ok
@@ -1021,6 +1061,7 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     ; status
     ; submitted_at
     ; completed_at
+    ; completion_delivery
     }
 ;;
 
@@ -1161,7 +1202,7 @@ let persist_terminal_from_source ~ops ~(entry : entry) ~source_path =
       | Found terminal_entry when not (is_terminal_status terminal_entry.status) ->
         Error (Integrity_failed Terminal_partition_nonterminal)
       | Found terminal_entry ->
-        if entry_record_to_json terminal_entry = entry_record_to_json entry
+        if same_terminal_result terminal_entry entry
         then (
           (* See lossless namespace protocol: observed cleanup failure is retried. *)
           ignore (remove_duplicate_source_unlocked ~ops ~entry source_path : bool);
@@ -1234,8 +1275,7 @@ let load_record_canonical_located ~base_path ~request_id : located_load_result =
             "conflicting request identities coexist across persistence partitions"
         | Found active_entry
           when is_terminal_status active_entry.status
-               && entry_record_to_json active_entry
-                  <> entry_record_to_json terminal_entry ->
+               && not (same_terminal_result active_entry terminal_entry) ->
           Located_unreadable
             "conflicting terminal request records coexist across persistence partitions"
         | Found _ | Absent -> Located (terminal_entry, Terminal_location)
@@ -1340,7 +1380,7 @@ let terminal_destination_state (entry : entry) =
         then Invalid_terminal_destination Terminal_conflict
         else if
           (not (is_terminal_status entry.status))
-          || entry_record_to_json terminal_entry = entry_record_to_json entry
+          || same_terminal_result terminal_entry entry
         then Cleanup_source
         else
           Invalid_terminal_destination Terminal_conflict
@@ -1776,6 +1816,7 @@ let reserve_new_request ~ops ~base_path ~submitted_by ~request =
                   ; status = Queued
                   ; submitted_at = Time_compat.now ()
                   ; completed_at = None
+                  ; completion_delivery = None
                   }
                 in
                 let key = request_key ~base_path ~submitted_by ~request_id in
@@ -1934,7 +1975,14 @@ let set_status ~ops ?(preserve_terminal = false) key status =
             Some (Time_compat.now ())
           | Queued | Running | Cancelling _ -> None
         in
-        let updated = { entry with status; completed_at } in
+        let updated =
+          { entry with
+            status
+          ; completed_at
+          ; completion_delivery =
+              completion_delivery_for_status entry.request status entry.completion_delivery
+          }
+        in
         (match
            persist_entry ~ops updated
            |> observe_persist_error ~operation:"status_update" updated
@@ -2404,6 +2452,45 @@ let load_canonical_durable_terminal ~base_path ~caller request_id =
                   | Active_location ->
                     Error
                       (Canonical_terminal_noncanonical_location entry.status))))
+;;
+
+let mark_completion_delivered proof =
+  let expected = proof.terminal_entry in
+  with_store_transition_lock
+    ~base_path:expected.base_path
+    ~request_id:expected.request_id
+    (fun () ->
+       with_entry_persistence_transaction expected (fun () ->
+         match
+           terminal_record_path
+             ~base_path:expected.base_path
+             ~request_id:expected.request_id
+         with
+         | None -> Error "Keeper completion terminal path is invalid"
+         | Some path ->
+           (match
+              load_record_at_path
+                ~base_path:expected.base_path
+                ~request_id:expected.request_id
+                path
+            with
+            | Found current when not (same_terminal_result expected current) ->
+              Error "Keeper completion terminal source changed during projection"
+            | Found { completion_delivery = Some Delivery_delivered; _ } ->
+              Ok ()
+            | Found ({ completion_delivery = Some Delivery_pending; _ } as current) ->
+              save_entry_durable
+                ~ops:production_request_ops
+                path
+                { current with completion_delivery = Some Delivery_delivered }
+              |> Result.map_error persist_error_to_string
+            | Found _ -> Error "Keeper completion terminal source is not routed"
+            | Unreadable reason -> Error ("Keeper completion terminal unreadable: " ^ reason)
+            | Absent -> Error "Keeper completion terminal source is absent"
+            | Rejected rejection ->
+              Error
+                ("Keeper completion terminal access rejected: "
+                 ^ (access_rejection_to_json rejection |> Yojson.Safe.to_string)))))
 ;;
 
 (** List only this caller lane; cross-lane rows are intentionally omitted. *)

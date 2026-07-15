@@ -358,6 +358,7 @@ let test_keeper_invocation_result_contracts () =
     ; status = Kmsg.Running
     ; submitted_at = 0.0
     ; completed_at = None
+    ; completion_delivery = None
     }
   in
   check bool "running contract is typed" true
@@ -454,6 +455,7 @@ let test_typed_keeper_invocation_wire_contract () =
     ; status = Kmsg.Running
     ; submitted_at = 0.0
     ; completed_at = None
+    ; completion_delivery = None
     }
   in
   check bool "run ref binds exact durable entry" true
@@ -580,6 +582,50 @@ let test_keeper_completion_wake_is_typed_and_idempotent () =
   | _ -> Alcotest.fail "expected one typed Keeper completion stimulus"
 ;;
 
+let test_keeper_completion_delivery_store_transition () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  with_temp_dir "keeper-completion-delivery" @@ fun base_path ->
+  Keeper_event_bus.set (Agent_sdk.Event_bus.create ());
+  let request =
+    durable_request "callee"
+    |> Keeper_invocation_types.with_reply_to ~keeper_name:"caller"
+    |> Result.get_ok
+  in
+  Fun.protect ~finally:Kmsg.For_testing.clear @@ fun () ->
+  let request_id =
+    Ops.For_testing.submit_keeper_msg_with_captured_event_bus
+      ~background_sw:sw
+      ~base_path
+      ~caller:keeper_msg_caller
+      ~request
+      ~f:(fun ?event_bus:_ _ _ ->
+        Tool_result.ok ~tool_name:"completion-delivery" ~start_time:0.0 "finished")
+      ()
+    |> function
+    | Ok { Kmsg.request_id; acceptance = Kmsg.Durably_accepted } -> request_id
+    | Ok _ | Error _ -> Alcotest.fail "Keeper completion fixture was not accepted"
+  in
+  wait_for_done ~clock:env#clock ~base_path request_id;
+  let load () =
+    Kmsg.load_canonical_durable_terminal
+      ~base_path
+      ~caller:keeper_msg_caller
+      request_id
+    |> Result.get_ok
+  in
+  let pending = load () in
+  check bool "routed terminal starts pending" true
+    ((Kmsg.durable_terminal_entry pending).completion_delivery
+     = Some Kmsg.Delivery_pending);
+  Kmsg.mark_completion_delivered pending |> Result.get_ok;
+  check bool "delivery transition is durable" true
+    ((Kmsg.durable_terminal_entry (load ())).completion_delivery
+     = Some Kmsg.Delivery_delivered);
+  check bool "stale pending proof replays idempotently" true
+    (Result.is_ok (Kmsg.mark_completion_delivered pending))
+;;
+
 let test_take_drain_cancel_clears_active_without_spin () =
   let open EB.For_testing in
   let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
@@ -667,6 +713,8 @@ let () =
             test_typed_keeper_invocation_wire_contract
         ; test_case "Keeper completion wake is typed and idempotent" `Quick
             test_keeper_completion_wake_is_typed_and_idempotent
+        ; test_case "Keeper completion delivery store transition" `Quick
+            test_keeper_completion_delivery_store_transition
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

@@ -32,6 +32,10 @@ type request_status =
       ; data : Yojson.Safe.t option
       }
 
+type completion_delivery =
+  | Delivery_pending
+  | Delivery_delivered
+
 type entry =
   { request_id : string
   ; request : Keeper_invocation_types.request
@@ -40,6 +44,7 @@ type entry =
   ; status : request_status
   ; submitted_at : float
   ; completed_at : float option
+  ; completion_delivery : completion_delivery option
   }
 
 (** A request exists, but the supplied access identity does not own it (or
@@ -313,6 +318,9 @@ val load_canonical_durable_terminal :
   caller:string ->
   string ->
   (durable_terminal_proof, canonical_terminal_error) result
+
+val mark_completion_delivered :
+  durable_terminal_proof -> (unit, string) result
 
 (** Inventory persisted non-terminal request records that have no live
     in-memory worker. This is intended for server startup recovery. It does not

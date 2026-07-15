@@ -183,60 +183,155 @@ let signal_completion_caller ~base_path caller_keeper =
       caller_keeper
       (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
 
-let project_keeper_completion ~base_path ~request ~request_id settlement =
-  match Keeper_invocation_contract.reply_to_keeper_name request with
-  | None -> Completion_not_routed
-  | Some caller_keeper ->
-    (match settlement with
-     | Keeper_msg_async.Settlement_projection_error _ -> Completion_not_durable
-     | Keeper_msg_async.Status_settlement
-         { durability = Keeper_msg_async.Volatile_persistence_failure; _ } ->
-       Completion_not_durable
-     | Keeper_msg_async.Status_settlement
-         { durability = Keeper_msg_async.Durable; status; _ } ->
-       (match terminal_completion_outcome status with
-        | None -> Completion_not_durable
-        | Some bg_outcome ->
-          let completion : Keeper_event_queue.bg_job_completion =
-            { bg_run_id = request_id
-            ; bg_kind = Keeper_event_queue.Keeper_invocation
-            ; bg_outcome
-            ; bg_board_post_id = ""
-            }
+let completion_stimulus (entry : Keeper_msg_async.entry) =
+  match terminal_completion_outcome entry.status, entry.completed_at with
+  | Some bg_outcome, Some arrived_at ->
+    let completion : Keeper_event_queue.bg_job_completion =
+      { bg_run_id = entry.request_id
+      ; bg_kind = Keeper_event_queue.Keeper_invocation
+      ; bg_outcome
+      ; bg_board_post_id = ""
+      }
+    in
+    Ok
+      { Keeper_event_queue.post_id =
+          Keeper_event_queue.bg_job_completion_post_id completion
+      ; urgency = Keeper_event_queue.Immediate
+      ; arrived_at
+      ; payload = Keeper_event_queue.Bg_completed completion
+      }
+  | Some _, None -> Error "Keeper completion terminal source lacks completed_at"
+  | None, _ -> Error "Keeper completion source is not terminal"
+
+let completion_storage_failure ~request_id ~caller ~operation detail =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string FsFailures)
+    ~labels:[ "subsystem", "keeper_invocation_completion"; "operation", operation ]
+    ();
+  Log.Keeper.error
+    "keeper invocation completion projection failed run_id=%s caller=%s operation=%s: %s"
+    request_id caller operation detail;
+  Completion_storage_failed detail
+
+let project_durable_keeper_completion ~base_path proof =
+  let observed = Keeper_msg_async.durable_terminal_entry proof in
+  match
+    Keeper_msg_async.load_canonical_durable_terminal
+      ~base_path
+      ~caller:observed.submitted_by
+      observed.request_id
+  with
+  | Error error ->
+    completion_storage_failure
+      ~request_id:observed.request_id
+      ~caller:observed.submitted_by
+      ~operation:"reload_terminal"
+      (Keeper_msg_async.canonical_terminal_error_to_string error)
+  | Ok current_proof ->
+    let entry = Keeper_msg_async.durable_terminal_entry current_proof in
+    (match Keeper_invocation_contract.reply_to_keeper_name entry.request with
+     | None -> Completion_not_routed
+     | Some caller_keeper ->
+       (match completion_stimulus entry with
+        | Error detail ->
+          completion_storage_failure
+            ~request_id:entry.request_id
+            ~caller:caller_keeper
+            ~operation:"build_stimulus"
+            detail
+        | Ok stimulus ->
+          let retire_and_wake result =
+            match
+              Keeper_event_queue_persistence.load_state_result
+                ~base_path
+                ~keeper_name:caller_keeper
+            with
+            | Error detail ->
+              completion_storage_failure
+                ~request_id:entry.request_id
+                ~caller:caller_keeper
+                ~operation:"load_receipt"
+                detail
+            | Ok state
+              when not
+                     (List.exists
+                        (String.equal entry.request_id)
+                        (Keeper_event_queue_state.keeper_invocation_receipts state)) ->
+              Completion_already_present
+            | Ok _ ->
+              (match
+                 Keeper_registry_event_queue.forget_keeper_invocation_receipt_result
+                   ~base_path
+                   ~keeper_name:caller_keeper
+                   ~request_id:entry.request_id
+                   ~stimulus
+               with
+               | Error detail ->
+                 completion_storage_failure
+                   ~request_id:entry.request_id
+                   ~caller:caller_keeper
+                   ~operation:"retire_receipt"
+                   detail
+               | Ok () ->
+                 signal_completion_caller ~base_path caller_keeper;
+                 result)
           in
-          let stimulus : Keeper_event_queue.stimulus =
-            { post_id = Keeper_event_queue.bg_job_completion_post_id completion
-            ; urgency = Keeper_event_queue.Immediate
-            ; arrived_at = Time_compat.now ()
-            ; payload = Keeper_event_queue.Bg_completed completion
-            }
-          in
-          (match
-             Keeper_registry_event_queue.enqueue_stimulus_durable_result
-               ~base_path
-               caller_keeper
-               stimulus
-           with
-           | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string FsFailures)
-               ~labels:
-                 [ "subsystem", "keeper_invocation_completion"
-                 ; "operation", "enqueue_caller_wake"
-                 ]
-               ();
-             Log.Keeper.error
-               "keeper invocation completion enqueue failed run_id=%s caller=%s: %s"
-               request_id
-               caller_keeper
-               detail;
-             Completion_storage_failed detail
-           | Keeper_registry_event_queue.Stimulus_enqueued ->
-             signal_completion_caller ~base_path caller_keeper;
-             Completion_enqueued
-           | Keeper_registry_event_queue.Stimulus_already_present ->
-             signal_completion_caller ~base_path caller_keeper;
-             Completion_already_present)))
+          (match entry.completion_delivery with
+           | None -> Completion_not_routed
+           | Some Keeper_msg_async.Delivery_delivered ->
+             retire_and_wake Completion_already_present
+           | Some Keeper_msg_async.Delivery_pending ->
+             (match
+                Keeper_registry_event_queue.enqueue_keeper_invocation_completion_result
+                  ~base_path
+                  ~keeper_name:caller_keeper
+                  ~request_id:entry.request_id
+                  stimulus
+              with
+              | Keeper_registry_event_queue.Keeper_invocation_storage_error detail ->
+                completion_storage_failure
+                  ~request_id:entry.request_id
+                  ~caller:caller_keeper
+                  ~operation:"accept_caller_completion"
+                  detail
+              | (Keeper_registry_event_queue.Keeper_invocation_enqueued
+                | Keeper_registry_event_queue.Keeper_invocation_already_accepted) as
+                acceptance ->
+                (match Keeper_msg_async.mark_completion_delivered current_proof with
+                 | Error detail ->
+                   completion_storage_failure
+                     ~request_id:entry.request_id
+                     ~caller:caller_keeper
+                     ~operation:"mark_source_delivered"
+                     detail
+                 | Ok _ ->
+                   retire_and_wake
+                     (match acceptance with
+                      | Keeper_registry_event_queue.Keeper_invocation_enqueued ->
+                        Completion_enqueued
+                      | Keeper_registry_event_queue.Keeper_invocation_already_accepted ->
+                        Completion_already_present))))))
+
+let project_keeper_completion ~base_path ~submitted_by ~request_id settlement =
+  match settlement with
+  | Keeper_msg_async.Settlement_projection_error _ -> Completion_not_durable
+  | Keeper_msg_async.Status_settlement
+      { durability = Keeper_msg_async.Volatile_persistence_failure; _ } ->
+    Completion_not_durable
+  | Keeper_msg_async.Status_settlement { durability = Keeper_msg_async.Durable; _ } ->
+    (match
+       Keeper_msg_async.load_canonical_durable_terminal
+         ~base_path
+         ~caller:submitted_by
+         request_id
+     with
+     | Ok proof -> project_durable_keeper_completion ~base_path proof
+     | Error error ->
+       completion_storage_failure
+         ~request_id
+         ~caller:submitted_by
+         ~operation:"load_terminal"
+         (Keeper_msg_async.canonical_terminal_error_to_string error))
 
 type registered_caller =
   | No_registered_caller
@@ -271,8 +366,6 @@ module For_testing = struct
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
   let submit_keeper_msg_with_captured_event_bus =
     submit_keeper_msg_with_captured_event_bus
-  let terminal_completion_outcome = terminal_completion_outcome
-  let project_keeper_completion = project_keeper_completion
   let request_with_registered_reply_to = request_with_registered_reply_to
 end
 let annotate_keeper_json ~runtime_class json =
@@ -771,7 +864,7 @@ let submit_keeper_invocation
           ignore
             (project_keeper_completion
                ~base_path:ctx.config.base_path
-               ~request
+               ~submitted_by
                ~request_id
                settlement
              : keeper_completion_projection))

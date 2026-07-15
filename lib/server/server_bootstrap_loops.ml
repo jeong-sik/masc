@@ -552,11 +552,13 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     Keeper_msg_async.recover_request_records ~base_path ()
   in
   let candidates = keeper_msg_recovery.candidates in
+  let completion_deliveries = keeper_msg_recovery.completion_deliveries in
   observe_preparation_stage
     ~stage:"request"
     ~started:request_started
     ~examined:
       (List.length candidates
+       + List.length completion_deliveries
        + keeper_msg_recovery.finalized
        + keeper_msg_recovery.cleaned
        + keeper_msg_recovery.staging_files_inspected
@@ -568,6 +570,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
        + List.length keeper_msg_recovery.store_errors);
   if
     candidates <> []
+    || completion_deliveries <> []
     || keeper_msg_recovery.finalized > 0
     || keeper_msg_recovery.cleaned > 0
     || keeper_msg_recovery.staging_files_inspected > 0
@@ -575,8 +578,9 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     || keeper_msg_recovery.failed > 0
   then
     Log.Keeper.warn
-      "keeper_msg_async: recovery pending=%d finalized=%d cleaned=%d staging_files_inspected=%d staging_files_deleted=%d staging_files_preserved=%d unreadable=%d failed=%d"
+      "keeper_msg_async: recovery pending=%d completion_deliveries=%d finalized=%d cleaned=%d staging_files_inspected=%d staging_files_deleted=%d staging_files_preserved=%d unreadable=%d failed=%d"
       (List.length candidates)
+      (List.length completion_deliveries)
       keeper_msg_recovery.finalized
       keeper_msg_recovery.cleaned
       keeper_msg_recovery.staging_files_inspected
@@ -595,6 +599,12 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
           | Keeper_msg_async.Running_before_restart -> "running"
           | Keeper_msg_async.Cancelling_before_restart _ -> "cancelling"))
     candidates;
+  List.iter
+    (fun proof ->
+       ignore
+         (Keeper_tool_surface_ops.project_durable_keeper_completion ~base_path proof
+           : Keeper_tool_surface_ops.keeper_completion_projection))
+    completion_deliveries;
   let prepared =
     { base_path = base_path_identity
     ; config

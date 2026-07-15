@@ -7,8 +7,7 @@
     Process memory owns active request workers only. Terminal entries leave the
     active index after a durable namespace move into the terminal partition and
     remain queryable by exact request id until an explicit cleanup policy
-    removes them. Startup recovery scans only the active partition; historical
-    terminal volume is not on the synchronous recovery path. *)
+    removes them. Startup recovery also resumes incomplete caller deliveries. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -96,6 +95,7 @@ type recovery_candidate =
 
 type recovery_report =
   { candidates : recovery_candidate list
+  ; completion_deliveries : durable_terminal_proof list
   ; finalized : int
   ; cleaned : int
   ; staging_files_inspected : int
@@ -109,6 +109,7 @@ type recovery_report =
 
 and recovery_store =
   | Active_store
+  | Terminal_store
   | Atomic_staging_store
 
 and recovery_store_error =
@@ -1408,6 +1409,7 @@ let finalize_existing_terminal_source ~(entry : entry) source_path =
 
 let empty_recovery_report =
   { candidates = []
+  ; completion_deliveries = []
   ; finalized = 0
   ; cleaned = 0
   ; staging_files_inspected = 0
@@ -1444,6 +1446,7 @@ let record_error ~store ~path ~request_id ?keeper_name kind report =
     "keeper_msg_async: recovery record failed store=%s request_id=%s keeper=%s path=%s error=%s"
     (match store with
      | Active_store -> "active"
+     | Terminal_store -> "terminal"
      | Atomic_staging_store -> "atomic_staging")
     request_id
     keeper_label
@@ -1751,6 +1754,55 @@ let recover_active_record_directory ~base_path dir report =
     store_error ~store:Active_store ~path:dir (Printexc.to_string exn) report
 ;;
 
+let recover_completion_delivery_directory ~base_path report =
+  let dir = terminal_request_dir ~base_path in
+  let failed path reason report =
+    Log.Keeper.error "keeper completion recovery failed path=%s error=%s" path reason;
+    store_error ~store:Terminal_store ~path reason report
+  in
+  try
+    match Fs_compat.inspect_owned_directory_chain ~ownership_root:base_path dir with
+    | Ok Fs_compat.Owned_directory_missing -> report
+    | Error rejection ->
+      failed dir (Fs_compat.owned_directory_chain_rejection_to_string rejection) report
+    | Ok (Fs_compat.Owned_directory _) ->
+      Fs_compat.read_dir dir
+      |> List.fold_left
+           (fun report name ->
+              Eio_guard.fair_yield ();
+              match request_id_of_record_filename name with
+              | None -> report
+              | Some request_id ->
+                let path = Filename.concat dir name in
+                (try
+                   with_store_transition_lock ~base_path ~request_id (fun () ->
+                     match load_record_at_path ~base_path ~request_id path with
+                     | Found ({ status; completion_delivery = Some _; _ } as entry)
+                       when is_terminal_status status ->
+                       { report with
+                         completion_deliveries =
+                           { terminal_entry = entry } :: report.completion_deliveries
+                       }
+                     | Found { status; _ } when is_terminal_status status -> report
+                     | Found _ -> failed path "non-terminal record in terminal store" report
+                     | Unreadable reason ->
+                       let report = failed path reason report in
+                       { report with unreadable = report.unreadable + 1 }
+                     | Absent -> failed path "record disappeared during recovery" report
+                     | Rejected rejection ->
+                       failed
+                         path
+                         (access_rejection_to_json rejection |> Yojson.Safe.to_string)
+                         report)
+                 with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn -> failed path (Printexc.to_string exn) report))
+           report
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> failed dir (Printexc.to_string exn) report
+;;
+
 let compare_recovery_candidate left right =
   let by_keeper =
     String.compare
@@ -1771,9 +1823,11 @@ let recover_request_records_canonical ~base_path =
   let report =
     sweep_request_staging_files ~base_path empty_recovery_report
     |> recover_active_record_directory ~base_path active_dir
+    |> recover_completion_delivery_directory ~base_path
   in
   { report with
     candidates = List.sort compare_recovery_candidate report.candidates
+  ; completion_deliveries = List.rev report.completion_deliveries
   ; store_errors = List.rev report.store_errors
   ; record_errors = List.rev report.record_errors
   }

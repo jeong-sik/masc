@@ -6,7 +6,7 @@
     [Queued]/[Running]/[Cancelling] workers. Terminal state is removed from memory after its
     durable record moves into the terminal partition and remains queryable by
     exact request id; no hidden age-based cleanup can erase an unobserved
-    result, and startup recovery does not scan historical terminal records. *)
+    result, while startup recovery resumes incomplete caller deliveries. *)
 
 (** {1 Types} *)
 
@@ -118,6 +118,7 @@ type recovery_candidate =
     staging directory. *)
 type recovery_report =
   { candidates : recovery_candidate list
+  ; completion_deliveries : durable_terminal_proof list
   ; finalized : int
   ; cleaned : int
   ; staging_files_inspected : int
@@ -131,6 +132,7 @@ type recovery_report =
 
 and recovery_store =
   | Active_store
+  | Terminal_store
   | Atomic_staging_store
 
 and recovery_store_error =
@@ -324,9 +326,9 @@ val mark_completion_delivered :
 
 (** Inventory persisted non-terminal request records that have no live
     in-memory worker. This is intended for server startup recovery. It does not
-    execute, reclassify, or rewrite those records. Only the canonical active
-    partition and its dedicated atomic staging directory are scanned; the
-    terminal partition is excluded. Current-process workers remain protected
+    execute or reclassify those records. The active partition yields execution
+    candidates; routed terminal records yield caller-delivery proofs.
+    Current-process workers remain protected
     by the in-memory active table; disk-only [Queued]/[Running]/[Cancelling]
     records are returned as typed candidates for the later executor boundary. *)
 val recover_request_records :

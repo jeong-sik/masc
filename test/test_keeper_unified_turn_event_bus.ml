@@ -504,7 +504,7 @@ let test_typed_keeper_invocation_wire_contract () =
     (List.mem_assoc "request_id" rejection_fields)
 ;;
 
-let test_keeper_completion_wake_is_typed_and_idempotent () =
+let test_keeper_completion_route_is_typed () =
   with_temp_dir "keeper-completion-wake" @@ fun base_path ->
   Masc.Keeper_registry.clear ();
   let caller_meta =
@@ -530,6 +530,10 @@ let test_keeper_completion_wake_is_typed_and_idempotent () =
     | Ok request -> request
     | Error _ -> Alcotest.fail "registered caller route rejected"
   in
+  check (option string) "registered caller becomes reply-to" (Some "caller")
+    (request
+     |> Keeper_invocation_types.request_reply_to
+     |> Option.map Keeper_invocation_types.reply_to_keeper_name);
   ignore (Masc.Keeper_registry.register ~base_path "caller-shadow" caller_meta);
   (match
      Ops.For_testing.request_with_registered_reply_to
@@ -552,34 +556,6 @@ let test_keeper_completion_wake_is_typed_and_idempotent () =
     (durable_request
      |> Keeper_invocation_types.request_reply_to
      |> Option.map Keeper_invocation_types.reply_to_keeper_name);
-  let success =
-    Kmsg.Status_settlement
-      { status = Kmsg.Done { ok = true; body = "finished"; data = None }
-      ; durability = Kmsg.Durable
-      ; origin = Kmsg.Transition_commit
-      }
-  in
-  let project =
-    Ops.For_testing.project_keeper_completion
-      ~base_path
-      ~request
-      ~request_id:"run-success"
-  in
-  ignore (project success : Ops.keeper_completion_projection);
-  check bool "terminal replay reuses identity" true
-    (project success = Ops.Completion_already_present);
-  check bool "failure remains typed" true
-    (Ops.For_testing.terminal_completion_outcome (Kmsg.Lost { reason = "lost" })
-     = Some (Event_queue.Bg_failed "lost"));
-  let pending = Registry_queue.snapshot ~base_path "caller" |> Event_queue.to_list in
-  check int "one completion stimulus after replay" 1 (List.length pending);
-  match pending with
-  | [ { Event_queue.payload = Event_queue.Bg_completed completion; _ } ] ->
-    check bool "typed Keeper invocation kind" true
-      (completion.bg_kind = Event_queue.Keeper_invocation);
-    check bool "typed success outcome" true
-      (completion.bg_outcome = Event_queue.Bg_ok "finished");
-  | _ -> Alcotest.fail "expected one typed Keeper completion stimulus"
 ;;
 
 let test_keeper_completion_delivery_store_transition () =
@@ -624,6 +600,76 @@ let test_keeper_completion_delivery_store_transition () =
      = Some Kmsg.Delivery_delivered);
   check bool "stale pending proof replays idempotently" true
     (Result.is_ok (Kmsg.mark_completion_delivered pending))
+;;
+
+let test_keeper_completion_restart_handshake () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  with_temp_dir "keeper-completion-handshake" @@ fun base_path ->
+  Keeper_event_bus.set (Agent_sdk.Event_bus.create ());
+  let request =
+    durable_request "callee"
+    |> Keeper_invocation_types.with_reply_to ~keeper_name:"caller"
+    |> Result.get_ok
+  in
+  Fun.protect ~finally:Kmsg.For_testing.clear @@ fun () ->
+  let request_id =
+    Ops.For_testing.submit_keeper_msg_with_captured_event_bus
+      ~background_sw:sw ~base_path ~caller:keeper_msg_caller ~request
+      ~f:(fun ?event_bus:_ _ _ ->
+        Tool_result.ok ~tool_name:"completion-handshake" ~start_time:0.0 "finished")
+      ()
+    |> function
+    | Ok { Kmsg.request_id; acceptance = Kmsg.Durably_accepted } -> request_id
+    | Ok _ | Error _ -> Alcotest.fail "Keeper completion fixture was not accepted"
+  in
+  wait_for_done ~clock:env#clock ~base_path request_id;
+  let proof =
+    match (Kmsg.recover_request_records ~base_path ()).completion_deliveries with
+    | [ proof ] -> proof
+    | _ -> Alcotest.fail "restart scanner did not recover one completion"
+  in
+  let entry = Kmsg.durable_terminal_entry proof in
+  check bool "terminal source starts pending" true
+    (entry.completion_delivery = Some Kmsg.Delivery_pending);
+  let stimulus = Ops.completion_stimulus entry |> Result.get_ok in
+  let accept () =
+    match
+      Registry_queue.enqueue_keeper_invocation_completion_result
+        ~base_path ~keeper_name:"caller" ~request_id stimulus
+    with
+    | Registry_queue.Keeper_invocation_storage_error error -> Alcotest.fail error
+    | Registry_queue.Keeper_invocation_enqueued
+    | Registry_queue.Keeper_invocation_already_accepted -> ()
+  in
+  accept ();
+  ignore
+    (Ops.project_durable_keeper_completion ~base_path proof
+      : Ops.keeper_completion_projection);
+  let fresh =
+    match (Kmsg.recover_request_records ~base_path ()).completion_deliveries with
+    | [ proof ] -> proof
+    | _ -> Alcotest.fail "restart scanner lost delivered receipt cleanup"
+  in
+  check bool "source commits delivered" true
+    ((Kmsg.durable_terminal_entry fresh).completion_delivery
+     = Some Kmsg.Delivery_delivered);
+  accept ();
+  ignore
+    (Ops.project_durable_keeper_completion ~base_path fresh
+      : Ops.keeper_completion_projection);
+  ignore
+    (Ops.project_durable_keeper_completion ~base_path proof
+      : Ops.keeper_completion_projection);
+  check int "all crash replays retain one stimulus" 1
+    (Registry_queue.snapshot ~base_path "caller" |> Event_queue.to_list |> List.length);
+  let state =
+    Masc.Keeper_event_queue_persistence.load_state_result
+      ~base_path ~keeper_name:"caller"
+    |> Result.get_ok
+  in
+  check (list string) "receipt retired after replay" []
+    (Masc.Keeper_event_queue_state.keeper_invocation_receipts state)
 ;;
 
 let test_take_drain_cancel_clears_active_without_spin () =
@@ -711,10 +757,12 @@ let () =
             test_keeper_invocation_result_contracts
         ; test_case "typed Keeper invocation wire contract" `Quick
             test_typed_keeper_invocation_wire_contract
-        ; test_case "Keeper completion wake is typed and idempotent" `Quick
-            test_keeper_completion_wake_is_typed_and_idempotent
+        ; test_case "Keeper completion route is typed" `Quick
+            test_keeper_completion_route_is_typed
         ; test_case "Keeper completion delivery store transition" `Quick
             test_keeper_completion_delivery_store_transition
+        ; test_case "Keeper completion restart handshake" `Quick
+            test_keeper_completion_restart_handshake
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

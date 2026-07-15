@@ -57,6 +57,8 @@ let test_missing_checkpoint_is_typed_tool_failure () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = None
         ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
       match

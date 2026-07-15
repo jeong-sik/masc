@@ -118,6 +118,14 @@ import { _resetKeeperStreamBuffersForTests } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperToolReply } from './api/keeper'
 import type { ToolCallEntry } from './api/dashboard'
+
+function keeperRunRef(runId: string) {
+  return {
+    runId,
+    target: { kind: 'keeper', name: 'echo' },
+    capability: 'invoke_turn',
+  } as const
+}
 import type { ChatBlock, KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 beforeEach(() => {
@@ -1207,6 +1215,12 @@ describe('sendKeeperThreadMessage stream outcome', () => {
   })
 
   it('cancels the server keeper request immediately when the operator aborts an active stream', async () => {
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      resultContract: 'cancelled',
+      status: 'cancelled',
+      result: { cancelled: true, cancelled_by: 'operator' },
+    })
+    fetchKeeperChatHistory.mockResolvedValue([])
     streamKeeperMessage.mockImplementation(async (
       _name: string,
       _message: string,
@@ -1231,11 +1245,13 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await cancelActiveKeeperThreadMessage('echo')
 
     expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
-    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_1')
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(keeperRunRef('kmsg_echo_1'))
     const err = await sendPromise
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
-    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    await vi.waitFor(() => {
+      expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    })
   })
 
   it('retains and polls a durable cancelling request until its actual terminal state', async () => {
@@ -1247,6 +1263,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       requestId: 'kmsg_echo_cancelling',
       keeperName: 'echo',
       status: 'cancelled',
+      resultContract: 'cancelled',
       ok: false,
       result: {
         cancelled: true,
@@ -1281,7 +1298,8 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
     await vi.waitFor(() => {
-      expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_cancelling')
+      expect(fetchQueuedKeeperMessageResult)
+        .toHaveBeenCalledWith(keeperRunRef('kmsg_echo_cancelling'))
       expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     })
   })
@@ -1295,6 +1313,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       requestId: 'kmsg_echo_cancel_persist_failure',
       keeperName: 'echo',
       status: 'persistence_failed',
+      resultContract: 'failed',
       ok: false,
       result: {
         error: 'request_persistence_failed',
@@ -1332,9 +1351,9 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(err.name).toBe('AbortError')
     await vi.waitFor(() => {
       expect(fetchQueuedKeeperMessageResult)
-        .toHaveBeenCalledWith('kmsg_echo_cancel_persist_failure')
+        .toHaveBeenCalledWith(keeperRunRef('kmsg_echo_cancel_persist_failure'))
       expect(queuedKeeperMessageError).toHaveBeenCalledWith(expect.objectContaining({
-        status: 'persistence_failed',
+        resultContract: 'failed',
         result: expect.objectContaining({
           attempted_status: 'cancelled',
           reason: 'terminal callback failed',
@@ -1405,7 +1424,8 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
 
-    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_hung_cancel')
+    expect(cancelQueuedKeeperMessage)
+      .toHaveBeenCalledWith(keeperRunRef('kmsg_echo_hung_cancel'))
     expect(keeperSending.value.echo).toBe(false)
     expect(activeStreamEntryId('echo')).toBeNull()
     const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
@@ -1462,7 +1482,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     controls.emitQueueRequest?.()
     await Promise.resolve()
 
-    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_late')
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(keeperRunRef('kmsg_echo_late'))
     const err = await sendPromise
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
@@ -1489,11 +1509,11 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
     expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
-    const [requestId, opts] = cancelQueuedKeeperMessage.mock.calls[0] as unknown as [
-      string,
+    const [runRef, opts] = cancelQueuedKeeperMessage.mock.calls[0] as unknown as [
+      ReturnType<typeof keeperRunRef>,
       { signal?: AbortSignal } | undefined,
     ]
-    expect(requestId).toBe('kmsg_echo_signal')
+    expect(runRef).toEqual(keeperRunRef('kmsg_echo_signal'))
     expect(opts).toBeUndefined()
   })
 
@@ -1918,6 +1938,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       requestId: 'kmsg_echo_1',
       keeperName: 'echo',
       status: 'done',
+      resultContract: 'completed',
       ok: true,
       result: { reply: 'polling으로 복구됨' },
     })
@@ -1925,7 +1946,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     await sendKeeperThreadMessage('echo', '진행 상황?')
 
-    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_1')
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith(keeperRunRef('kmsg_echo_1'))
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     const thread = keeperThreads.value.echo ?? []
     expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
@@ -2072,20 +2093,27 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       message: 'status?',
       submittedAt,
     })
-    fetchQueuedKeeperMessageResult.mockImplementation(async (requestId: string) => ({
-      requestId,
+    fetchQueuedKeeperMessageResult.mockImplementation(async (
+      reference: ReturnType<typeof keeperRunRef>,
+    ) => ({
+      requestId: reference.runId,
       keeperName: 'echo',
       status: 'done',
+      resultContract: 'completed',
       ok: true,
-      result: { reply: requestId === 'kmsg_echo_1' ? 'first reply' : 'second reply' },
+      result: {
+        reply: reference.runId === 'kmsg_echo_1' ? 'first reply' : 'second reply',
+      },
     }))
     fetchKeeperChatHistory.mockResolvedValue([])
 
     await resumePendingKeeperChatRequests('echo')
 
     expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledTimes(2)
-    expect(fetchQueuedKeeperMessageResult).toHaveBeenNthCalledWith(1, 'kmsg_echo_1')
-    expect(fetchQueuedKeeperMessageResult).toHaveBeenNthCalledWith(2, 'kmsg_echo_2')
+    expect(fetchQueuedKeeperMessageResult)
+      .toHaveBeenNthCalledWith(1, keeperRunRef('kmsg_echo_1'))
+    expect(fetchQueuedKeeperMessageResult)
+      .toHaveBeenNthCalledWith(2, keeperRunRef('kmsg_echo_2'))
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     expect((keeperThreads.value.echo ?? []).map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
       ['user', 'status?', 'delivered'],
@@ -2106,6 +2134,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       requestId: 'kmsg_echo_1',
       keeperName: 'echo',
       status: 'lost',
+      resultContract: 'failed',
       result: {
         reason: 'keeper_msg request was accepted but no live worker owns it',
       },
@@ -2121,7 +2150,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     await resumePendingKeeperChatRequests('echo')
 
-    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_1')
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith(keeperRunRef('kmsg_echo_1'))
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     const thread = keeperThreads.value.echo ?? []
     expect(thread.map(entry => [entry.role, entry.text, entry.delivery, entry.error])).toEqual([
@@ -2141,6 +2170,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       requestId: 'kmsg_echo_1',
       keeperName: 'echo',
       status: 'cancelled',
+      resultContract: 'cancelled',
       ok: false,
       result: {
         cancelled: true,
@@ -2157,7 +2187,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     await resumePendingKeeperChatRequests('echo')
 
-    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_1')
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith(keeperRunRef('kmsg_echo_1'))
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
     expect(keeperActionErrors.value.echo).toBeNull()
     const thread = keeperThreads.value.echo ?? []
@@ -2174,11 +2204,12 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       message: '어디까지 했어?',
       submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
     })
-    fetchQueuedKeeperMessageResult.mockRejectedValue(
-      new Error(
-        'GET /api/v1/gate/message/requests/kmsg_echo_1: {"error":{"message":"request_id not found"}}',
-      ),
-    )
+    fetchQueuedKeeperMessageResult.mockRejectedValue({
+      method: 'POST',
+      status: 404,
+      path: '/api/v1/gate/message/status',
+      errorCode: 'run_not_found',
+    })
     fetchKeeperChatHistory.mockResolvedValue([])
 
     await resumePendingKeeperChatRequests('echo')

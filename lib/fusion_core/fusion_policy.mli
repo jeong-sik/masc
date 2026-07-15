@@ -46,23 +46,14 @@ type preset =
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
   ; meta_timeout_s : float
-      (** meta/stage-meta/final-meta 호출 구조적 타임아웃 (초). *)
+      (** meta 호출 구조적 타임아웃 (초). *)
   ; judges : judge_spec list
-      (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
-          JOJ 위상은 런타임에 >= 2 를 요구한다. *)
+      (** JOJ 1차 심판들 (RFC-0283). 입력 순서를 보존해 전체를 실행한다.
+          simple/refine/conditional은 무시한다. *)
   ; fallback_judge_model : string option
       (** 전원 타임아웃 시 단일 fallback 심판 모델. *)
   }
 [@@deriving show, eq]
-
-(** Default staged JOJ group size. A staged judge-of-judges run groups first
-    judges into fixed-size cohorts before a final meta reduction; default 3
-    expresses the common 3x3x3 shape. *)
-val default_staged_judge_group_size : int
-
-(** Smallest useful staged JOJ group size. Size 1 degenerates into a serial
-    pass-through and is rejected. *)
-val min_staged_judge_group_size : int
 
 (** 패널/심판 타임아웃 기본값 (config 미지정 시). 운영 노브 — named SSOT. *)
 val default_timeout_s : float
@@ -102,33 +93,6 @@ val preset_duplicate_judge : preset -> string option
 (** 모든 1차 심판의 system prompt(lens)가 비어있지 않은가. judges=[]면 vacuously [true]
     (simple/refine/conditional은 judges를 안 쓴다). (RFC-0283) *)
 val preset_judge_prompts_present : preset -> bool
-
-(** Staged JOJ preset grouping validation. This is runtime topology validation
-    rather than preset validation because the same preset may be valid for flat
-    JOJ while invalid for staged JOJ. *)
-type staged_judge_group_error =
-  | Staged_group_size_below_min of int
-  | Staged_too_few_judges of
-      { group_size : int
-      ; judges : int
-      }
-  | Staged_ragged_judges of
-      { group_size : int
-      ; judges : int
-      }
-[@@deriving show, eq]
-
-(** Render a staged grouping error at operator/tool boundaries. *)
-val staged_judge_group_error_message : staged_judge_group_error -> string
-
-(** Split JOJ first judges into exact staged groups. Requirements:
-    [group_size >= min_staged_judge_group_size], at least two full groups, and
-    no ragged final group. For example, 9 judges with group size 3 returns
-    three groups of three; 8 judges with group size 3 is rejected. *)
-val staged_judge_groups
-  :  group_size:int
-  -> judge_spec list
-  -> (judge_spec list list, staged_judge_group_error) result
 
 (** 외곽 run_safe 타임아웃 = 그룹 timeout 중 max. 패널은 입력 집합 전체를 구조적으로
     fan-out하므로 별도 concurrency 설정이나 가짜 wave 계산을 두지 않는다. *)
@@ -175,7 +139,6 @@ end
 type t =
   { enabled : bool
   ; default_preset : string
-  ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }
 [@@deriving show, eq]

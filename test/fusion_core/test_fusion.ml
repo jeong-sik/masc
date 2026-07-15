@@ -34,7 +34,6 @@ let raw = Fusion_policy.Validated_preset.preset
 let base_policy : Fusion_policy.t =
   { Fusion_policy.enabled = true
   ; default_preset = "trio"
-  ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets =
       [ validated
           { Fusion_policy.name = "trio"
@@ -99,7 +98,6 @@ let valid_toml =
 [fusion]
 enabled = true
 default_preset = "trio"
-staged_judge_group_size = 3
 [fusion.presets.trio]
 web_tools = false
 panel = ["a", "b", "c"]
@@ -112,8 +110,6 @@ let test_config_valid () =
   match Fusion_config.of_toml (parse valid_toml) with
   | Ok p ->
     Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
-    Alcotest.(check int) "staged judge group size" 3
-      p.Fusion_policy.staged_judge_group_size;
     Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
      | [ vp ] ->
@@ -133,9 +129,7 @@ let test_config_valid () =
 
 (* JoJ-capable preset: [[fusion.presets.X.judges]] array-of-tables 파싱 경로 (RFC-0283).
    config/runtime.toml [fusion.presets.quorum] 의 구조를 미러한다(모델 id는 placeholder).
-   topology=judge_of_judges는 orchestrator 런타임에서 judges >= 2 를 요구하므로
-   (fusion_orchestrator.run_judge_of_judges), JoJ를 키퍼가 실제로 쓰려면 judges>=2 preset이
-   shipped config에 있어야 한다. 이 테스트는 그 preset이 의존하는 TOML array-of-tables 파싱
+   이 테스트는 typed judge 목록의 TOML array-of-tables 파싱
    (Fusion_config.parse_judge_spec)을 end-to-end로 고정한다 — 기존 Validated_preset 테스트는
    OCaml-구성 judges만 다뤄 이 파싱 경로를 덮지 않는다. *)
 let joj_preset_toml =
@@ -168,8 +162,7 @@ let test_config_joj_preset_parses () =
      | [ vp ] ->
        let preset = raw vp in
        let judges = preset.Fusion_policy.judges in
-       Alcotest.(check int) "two first judges (JoJ requires >= 2)" 2
-         (List.length judges);
+       Alcotest.(check int) "fixture judges" 2 (List.length judges);
        Alcotest.(check bool) "meta judge set" true
          (String.trim preset.Fusion_policy.judge <> "");
        Alcotest.(check (list string))
@@ -549,37 +542,13 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Missing_judge_model "p1") es)
   | Ok _ -> Alcotest.fail "expected Error Missing_judge_model"
 
-let test_config_bad_staged_judge_group_size () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p1"
-staged_judge_group_size = 1
-[fusion.presets.p1]
-panel = ["a", "b"]
-judge = "a"
-panel_system_prompt = "p"
-judge_system_prompt = "j"
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_staged_judge_group_size present" true
-      (List.mem (Fusion_config.Invalid_staged_judge_group_size 1) es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_staged_judge_group_size"
-
 (* council 프리셋 계약 (config/runtime.toml [fusion.presets.council] 미러):
-   judge 6명 = staged_judge_group_size(3)의 정확한 배수이자 >= group_size*2 —
-   staged_judge_of_judges 자격을 만족하는 최초의 shipped preset shape.
-   staged_judge_groups가 lens 입력 순서를 보존한 2 그룹을 만드는 것까지 고정해,
-   프리셋을 줄이거나(ragged) group_size를 키우는 회귀가 여기서 잡히게 한다. *)
+   typed judge 목록이 TOML 입력 순서를 그대로 보존한다. *)
 let council_shaped_toml =
   {|
 [fusion]
 enabled = true
 default_preset = "council"
-staged_judge_group_size = 3
 [fusion.presets.council]
 panel = ["pa", "pb", "pc"]
 judge = "meta-reducer"
@@ -617,7 +586,13 @@ label = "adversarial"
 system_prompt = "adversarial lens"
 |}
 
-let test_config_council_preset_is_staged_eligible () =
+let judge_labels preset =
+  List.map (fun judge -> judge.Fusion_policy.jlabel) preset.Fusion_policy.judges
+
+let council_judge_labels =
+  [ "evidence"; "coverage"; "risk"; "feasibility"; "simplicity"; "adversarial" ]
+
+let test_config_council_preserves_judge_order () =
   match Fusion_config.of_toml (parse council_shaped_toml) with
   | Error es ->
     Alcotest.failf "council fixture must parse+validate, got: %s"
@@ -626,30 +601,13 @@ let test_config_council_preset_is_staged_eligible () =
     (match p.Fusion_policy.presets with
      | [ vp ] ->
        let preset = raw vp in
-       Alcotest.(check int) "six first-round judges" 6
-         (List.length preset.Fusion_policy.judges);
-       (match
-          Fusion_policy.staged_judge_groups
-            ~group_size:p.Fusion_policy.staged_judge_group_size
-            preset.Fusion_policy.judges
-        with
-        | Error e ->
-          Alcotest.failf "council must be staged-eligible, got: %s"
-            (Fusion_policy.staged_judge_group_error_message e)
-        | Ok groups ->
-          Alcotest.(check int) "two exact stages" 2 (List.length groups);
-          Alcotest.(check (list (list string)))
-            "stage grouping preserves lens input order"
-            [ [ "evidence"; "coverage"; "risk" ]
-            ; [ "feasibility"; "simplicity"; "adversarial" ]
-            ]
-            (List.map
-               (List.map (fun j -> j.Fusion_policy.jlabel))
-               groups))
+       Alcotest.(check (list string))
+         "typed judge order"
+         council_judge_labels (judge_labels preset)
      | presets ->
        Alcotest.failf "expected exactly one preset, got %d" (List.length presets))
 
-let test_shipped_runtime_council_is_staged_eligible () =
+let test_shipped_runtime_council_preserves_judge_order () =
   let runtime_toml =
     In_channel.with_open_bin "../../config/runtime.toml" In_channel.input_all
   in
@@ -669,47 +627,9 @@ let test_shipped_runtime_council_is_staged_eligible () =
      | None -> Alcotest.fail "shipped runtime.toml has no council preset"
      | Some validated ->
        let preset = raw validated in
-       match
-         Fusion_policy.staged_judge_groups
-           ~group_size:policy.Fusion_policy.staged_judge_group_size
-           preset.Fusion_policy.judges
-       with
-       | Ok [ first_stage; second_stage ] ->
-         Alcotest.(check (list string))
-           "shipped first stage lenses"
-           [ "evidence"; "coverage"; "risk" ]
-           (List.map (fun judge -> judge.Fusion_policy.jlabel) first_stage);
-         Alcotest.(check (list string))
-           "shipped second stage lenses"
-           [ "feasibility"; "simplicity"; "adversarial" ]
-           (List.map (fun judge -> judge.Fusion_policy.jlabel) second_stage)
-       | Ok groups ->
-         Alcotest.failf "shipped council must have two stages, got %d"
-           (List.length groups)
-       | Error error ->
-         Alcotest.failf "shipped council is not staged-eligible: %s"
-           (Fusion_policy.staged_judge_group_error_message error))
-
-(* 회귀 가드: quorum 형태(2 judges)는 staged 비자격 — 이 fail-closed가 council
-   추가 전 모든 shipped preset의 상태였다. *)
-let test_config_two_judges_not_staged_eligible () =
-  let judge ~model ~label =
-    { Fusion_policy.jmodel = model
-    ; jlabel = label
-    ; jsystem_prompt = label ^ " lens"
-    ; jweb_tools = false
-    ; jtimeout_s = 300.0
-    }
-  in
-  let judges =
-    [ judge ~model:"j1" ~label:"evidence"; judge ~model:"j2" ~label:"coverage" ]
-  in
-  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
-  | Error (Fusion_policy.Staged_too_few_judges { group_size = 3; judges = 2 }) -> ()
-  | Error e ->
-    Alcotest.failf "expected Staged_too_few_judges, got: %s"
-      (Fusion_policy.staged_judge_group_error_message e)
-  | Ok _ -> Alcotest.fail "two judges must not be staged-eligible"
+       Alcotest.(check (list string))
+         "shipped typed judge order"
+         council_judge_labels (judge_labels preset))
 
 let expect_unexpected_field toml expected_location expected_field =
   match Fusion_config.of_toml (parse toml) with
@@ -783,7 +703,6 @@ let seed_disabled_toml =
 [fusion]
 enabled = false
 default_preset = "trio"
-staged_judge_group_size = 3
 [fusion.presets.trio]
 web_tools = false
 panel = [
@@ -802,8 +721,6 @@ let test_config_disabled_with_preset () =
   match Fusion_config.of_toml (parse seed_disabled_toml) with
   | Ok p ->
     Alcotest.(check bool) "seed disabled" false p.Fusion_policy.enabled;
-    Alcotest.(check int) "seed staged group size" 3
-      p.Fusion_policy.staged_judge_group_size;
     Alcotest.(check int) "trio preset present" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
      | [ vp ] ->
@@ -906,42 +823,6 @@ let test_validated_duplicate_judge () =
   with
   | Error (Fusion_policy.Validated_preset.Duplicate_judge "x") -> ()
   | _ -> Alcotest.fail "expected Duplicate_judge x for same judge identity"
-
-let judge_named model = { base_judge with Fusion_policy.jmodel = model }
-
-let test_staged_judge_groups_exact_3x3 () =
-  let judges = List.init 9 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
-  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
-  | Ok groups ->
-    Alcotest.(check int) "three groups" 3 (List.length groups);
-    Alcotest.(check (list int)) "3x3 group sizes" [ 3; 3; 3 ]
-      (List.map List.length groups);
-    (match groups with
-     | first :: _ ->
-       (match first with
-        | j :: _ -> Alcotest.(check string) "first judge preserved" "j1" j.Fusion_policy.jmodel
-        | [] -> Alcotest.fail "first group should not be empty")
-     | [] -> Alcotest.fail "expected groups")
-  | Error e ->
-    Alcotest.failf "expected 3x3 groups, got %s"
-      (Fusion_policy.show_staged_judge_group_error e)
-
-let test_staged_judge_groups_too_few () =
-  let judges = List.init 5 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
-  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
-  | Error (Fusion_policy.Staged_too_few_judges { group_size = 3; judges = 5 }) -> ()
-  | _ -> Alcotest.fail "expected Staged_too_few_judges for 5 judges at group size 3"
-
-let test_staged_judge_groups_ragged () =
-  let judges = List.init 8 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
-  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
-  | Error (Fusion_policy.Staged_ragged_judges { group_size = 3; judges = 8 }) -> ()
-  | _ -> Alcotest.fail "expected Staged_ragged_judges for 8 judges at group size 3"
-
-let test_staged_judge_groups_bad_size () =
-  match Fusion_policy.staged_judge_groups ~group_size:1 [ judge_named "j1"; judge_named "j2" ] with
-  | Error (Fusion_policy.Staged_group_size_below_min 1) -> ()
-  | _ -> Alcotest.fail "expected Staged_group_size_below_min"
 
 (* --- JOJ 1차 심판 TOML 파싱 (RFC-0283). parse_judge_spec + finish_preset의
        [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
@@ -1407,14 +1288,10 @@ let () =
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
         ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model
-        ; Alcotest.test_case "bad_staged_judge_group_size" `Quick
-            test_config_bad_staged_judge_group_size
-        ; Alcotest.test_case "council_staged_eligible" `Quick
-            test_config_council_preset_is_staged_eligible
-        ; Alcotest.test_case "shipped_runtime_council_staged_eligible" `Quick
-            test_shipped_runtime_council_is_staged_eligible
-        ; Alcotest.test_case "two_judges_not_staged_eligible" `Quick
-            test_config_two_judges_not_staged_eligible
+        ; Alcotest.test_case "council_judge_order" `Quick
+            test_config_council_preserves_judge_order
+        ; Alcotest.test_case "shipped_runtime_council_judge_order" `Quick
+            test_shipped_runtime_council_preserves_judge_order
         ; Alcotest.test_case "removed_output_budget_fields_rejected" `Quick
             test_config_rejects_removed_output_budget_fields
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
@@ -1435,12 +1312,6 @@ let () =
         ; Alcotest.test_case "judge_prompt_missing" `Quick test_validated_judge_prompt_missing
         ; Alcotest.test_case "duplicate_judge" `Quick test_validated_duplicate_judge
         ; Alcotest.test_case "bad_meta_timeout" `Quick test_validated_bad_meta_timeout
-        ] )
-    ; ( "staged_judge_groups"
-      , [ Alcotest.test_case "exact_3x3" `Quick test_staged_judge_groups_exact_3x3
-        ; Alcotest.test_case "too_few" `Quick test_staged_judge_groups_too_few
-        ; Alcotest.test_case "ragged" `Quick test_staged_judge_groups_ragged
-        ; Alcotest.test_case "bad_size" `Quick test_staged_judge_groups_bad_size
         ] )
     ; ( "judge_args"
       , [ Alcotest.test_case "single_group_identity" `Quick

@@ -54,9 +54,8 @@ val with_timeout_fallback
   :  run_fallback_judge:(unit -> judge_run option)
   -> judge_run list
   -> judge_run list
-(** Append the configured fallback judge when the whole first-judge wave failed
-    only with timeouts. Shared by JOJ and staged JOJ so both
-    topologies honor [fallback_judge_model] consistently. *)
+(** Append the configured fallback judge when the complete first-judge list
+    failed only with timeouts. *)
 
 val run_fallback_judge
   :  sw:Eio.Switch.t

@@ -88,7 +88,6 @@ let run_first_judges
       ~judge_web_tools
   in
   Eio.Fiber.List.map
-    ~max_fibers:(max 1 (List.length judges))
     (run_first_judge ~already_timed_out:false)
     judges
 ;;

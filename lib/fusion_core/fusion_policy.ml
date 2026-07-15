@@ -37,17 +37,14 @@ type preset =
   ; judge_system_prompt : string
   ; judge_timeout_s : float
   ; meta_timeout_s : float
-      (** meta/stage-meta/final-meta 호출 구조적 타임아웃 (초). *)
+      (** meta 호출 구조적 타임아웃 (초). *)
   ; judges : judge_spec list
-      (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
-          JOJ 위상은 런타임에 >= 2 를 요구한다. *)
+      (** JOJ 1차 심판들 (RFC-0283). 입력 순서를 보존해 전체를 실행한다.
+          simple/refine/conditional은 무시한다. *)
   ; fallback_judge_model : string option
       (** 전원 타임아웃 시 단일 fallback 심판 모델. *)
   }
 [@@deriving show, eq]
-
-let min_staged_judge_group_size = 2
-let default_staged_judge_group_size = 3
 
 (* 패널/심판 호출 구조적 타임아웃 기본값 (preset이 명시 안 할 때). 운영 노브 —
    행동 휴리스틱이 아니므로 named SSOT 상수로 둔다 (Magic Number 회피). *)
@@ -134,63 +131,6 @@ let preset_judge_prompts_present (p : preset) =
     (fun (j : judge_spec) -> String.length (String.trim j.jsystem_prompt) > 0)
     p.judges
 
-type staged_judge_group_error =
-  | Staged_group_size_below_min of int
-  | Staged_too_few_judges of
-      { group_size : int
-      ; judges : int
-      }
-  | Staged_ragged_judges of
-      { group_size : int
-      ; judges : int
-      }
-[@@deriving show, eq]
-
-let staged_judge_group_error_message = function
-  | Staged_group_size_below_min group_size ->
-    Printf.sprintf "staged_judge_group_size must be >= %d, got %d"
-      min_staged_judge_group_size
-      group_size
-  | Staged_too_few_judges { group_size; judges } ->
-    Printf.sprintf
-      "staged_judge_of_judges requires at least two full groups: group_size=%d \
-       requires >= %d judges, got %d"
-      group_size
-      (group_size * 2)
-      judges
-  | Staged_ragged_judges { group_size; judges } ->
-    Printf.sprintf
-      "staged_judge_of_judges requires judge count divisible by \
-       staged_judge_group_size: group_size=%d, judges=%d"
-      group_size
-      judges
-
-let staged_judge_groups ~group_size judges =
-  let judge_count = List.length judges in
-  if group_size < min_staged_judge_group_size
-  then Error (Staged_group_size_below_min group_size)
-  else if judge_count < group_size * 2
-  then Error (Staged_too_few_judges { group_size; judges = judge_count })
-  else if judge_count mod group_size <> 0
-  then Error (Staged_ragged_judges { group_size; judges = judge_count })
-  else
-    let rec take n acc rest =
-      if n = 0
-      then (List.rev acc, rest)
-      else
-        match rest with
-        | [] -> (List.rev acc, [])
-        | x :: xs -> take (n - 1) (x :: acc) xs
-    in
-    let rec loop acc rest =
-      match rest with
-      | [] -> Ok (List.rev acc)
-      | _ ->
-        let group, rest = take group_size [] rest in
-        loop (group :: acc) rest
-    in
-    loop [] judges
-
 (* 외곽 run_safe 타임아웃. 하나의 Async_agent.all은 하나의 외곽 타임아웃만
    가지므로(RFC-0252-A §4.3) 그룹별 정밀 timeout은 build_agent에 반영하고 외곽은
    입력 전체가 한 wave로 실행되는 현재 구조에 맞춰 그룹 timeout 중 max로 둔다. *)
@@ -256,7 +196,6 @@ end
 type t =
   { enabled : bool
   ; default_preset : string
-  ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }
 [@@deriving show, eq]

@@ -188,9 +188,11 @@ let run_one ~keeper_name entry sw work =
       dec_in_flight ~keeper_name ();
       finish_one ~keeper_name entry)
     (fun () ->
-      match Eio_context.with_turn_switch sw work with
-      | () -> Continue
-      | exception Eio.Cancel.Cancelled _ as exn ->
+      try
+        Eio_context.with_turn_switch sw work;
+        Continue
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
         if Eio.Fiber.is_cancelled ()
         then (
           record_counter ~keeper_name MemoryLaneCancelledUnits;
@@ -204,7 +206,7 @@ let run_one ~keeper_name entry sw work =
             "memory lane unit returned a foreign cancellation: %s"
             (Printexc.to_string exn);
           Continue)
-      | exception exn ->
+      | exn ->
         record_counter ~keeper_name MemoryLaneUnitFailures;
         Log.Keeper.warn ~keeper_name
           "memory lane unit failed: %s"
@@ -242,18 +244,19 @@ let cancel_before_first ~keeper_name entry =
 ;;
 
 let run_worker ~keeper_name entry sw first =
-  match Eio.Fiber.yield () with
-  | () -> (
-    try worker_loop ~keeper_name entry sw first with
-    | exn ->
-      let queued = cancel_queued ~keeper_name entry in
-      record_counter ~keeper_name MemoryLaneUnitFailures;
-      Log.Keeper.error ~keeper_name
-        "memory lane worker failed: queued_units_cancelled=%d error=%s"
-        queued
-        (Printexc.to_string exn))
-  | exception Eio.Cancel.Cancelled _ -> cancel_before_first ~keeper_name entry
-  | exception exn ->
+  try
+    Eio.Fiber.yield ();
+    (try worker_loop ~keeper_name entry sw first with
+     | exn ->
+       let queued = cancel_queued ~keeper_name entry in
+       record_counter ~keeper_name MemoryLaneUnitFailures;
+       Log.Keeper.error ~keeper_name
+         "memory lane worker failed: queued_units_cancelled=%d error=%s"
+         queued
+         (Printexc.to_string exn))
+  with
+  | Eio.Cancel.Cancelled _ -> cancel_before_first ~keeper_name entry
+  | exn ->
     finish_one ~keeper_name entry;
     let queued = cancel_queued ~keeper_name entry in
     record_counter ~keeper_name MemoryLaneUnitFailures;

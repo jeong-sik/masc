@@ -30,3 +30,10 @@ val resolve_board_context_inference_target :
   Board.post ->
   string option ->
   (string * board_context_inference_target_source, [ `Bad_request of string | `Internal_server_error of string ]) result
+
+val board_context_inference_submission_json :
+  post_id:string ->
+  target_keeper:string ->
+  target_source:board_context_inference_target_source ->
+  Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result

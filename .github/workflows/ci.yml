@@ -462,6 +462,7 @@ jobs:
           bash scripts/ci/check-silent-failure-patterns.sh
           bash scripts/ci/check-enum-string-safety.sh
           bash scripts/ci/check-masc-oas-boundary.sh
+          bash scripts/ci/check-publication-recovery-test-boundary.sh
           bash scripts/ci/check-tla-variant-sync.sh
           bash scripts/ci/check-tla-harness-coverage.sh
           bash scripts/ci/check-telemetry-coverage.sh

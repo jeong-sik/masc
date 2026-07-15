@@ -1,6 +1,7 @@
 open Alcotest
 
-module Scope = Fs_compat.Capability_write_for_testing
+module Scope = Fs_compat.Publication_recovery_for_testing
+module Cleanup = Scope.For_testing
 
 exception Callback_cancelled
 exception Release_failed
@@ -16,7 +17,7 @@ let check_release_failure = function
 let test_callback_cancellation_precedes_release_failure () =
   Eio_main.run @@ fun _ ->
   let outcome =
-    Scope.run_publication_recovery_resource_scope
+    Scope.run_resource_scope
       ~callback:(Scope.Cancel_callback Callback_cancelled)
       ~release_failure:(Some Release_failed)
   in
@@ -33,7 +34,7 @@ let test_callback_cancellation_precedes_release_failure () =
 let test_returned_callback_survives_release_failure () =
   Eio_main.run @@ fun _ ->
   let outcome =
-    Scope.run_publication_recovery_resource_scope
+    Scope.run_resource_scope
       ~callback:(Scope.Return_completed_rows [ "completed-row" ])
       ~release_failure:(Some Release_failed)
   in
@@ -51,53 +52,53 @@ let test_returned_callback_survives_release_failure () =
 let test_lane_cleanup_retains_cancellation_and_release_failure () =
   Eio_main.run @@ fun _ ->
   match
-    Scope.run_publication_recovery_cleanup_boundary
-      ~body:(Scope.Cancel_cleanup_body Callback_cancelled)
+    Cleanup.run_cleanup_boundary
+      ~body:(Cleanup.Cancel_cleanup_body Callback_cancelled)
       ~cleanup_failure:(Some Release_failed)
   with
-  | Scope.Cancellation_primary_with_cleanup_failure
+  | Cleanup.Cancellation_primary_with_cleanup_failure
       { body = None
       ; cancellation = { exception_ = Eio.Cancel.Cancelled Callback_cancelled; _ }
       ; cleanup = { exception_ = Release_failed; _ }
       } -> ()
-  | Scope.Cancellation_primary_with_cleanup_failure
+  | Cleanup.Cancellation_primary_with_cleanup_failure
       { body; cancellation; cleanup } ->
     failf
       "wrong typed cleanup evidence: body=%b cancellation=%s cleanup=%s"
       (Option.is_some body)
       (Printexc.to_string cancellation.exception_)
       (Printexc.to_string cleanup.exception_)
-  | Scope.Cleanup_returned _
-  | Scope.Cleanup_failed_without_cancellation _
-  | Scope.Body_failure_during_cancellation _
-  | Scope.Cancellation_primary _
-  | Scope.Cleanup_boundary_raised _ ->
+  | Cleanup.Cleanup_returned _
+  | Cleanup.Cleanup_failed_without_cancellation _
+  | Cleanup.Body_failure_during_cancellation _
+  | Cleanup.Cancellation_primary _
+  | Cleanup.Cleanup_boundary_raised _ ->
     fail "lane cleanup lost cancellation or release evidence"
 ;;
 
 let test_lane_cleanup_retains_body_and_release_failure () =
   Eio_main.run @@ fun _ ->
   match
-    Scope.run_publication_recovery_cleanup_boundary
-      ~body:(Scope.Raise_cleanup_body Body_failed)
+    Cleanup.run_cleanup_boundary
+      ~body:(Cleanup.Raise_cleanup_body Body_failed)
       ~cleanup_failure:(Some Release_failed)
   with
-  | Scope.Cleanup_failed_without_cancellation
+  | Cleanup.Cleanup_failed_without_cancellation
       { body = Some { exception_ = Body_failed; _ }
       ; cleanup = { exception_ = Release_failed; _ }
       } -> ()
-  | Scope.Cleanup_failed_without_cancellation { body; cleanup } ->
+  | Cleanup.Cleanup_failed_without_cancellation { body; cleanup } ->
     failf
       "wrong body/cleanup evidence: body=%s cleanup=%s"
       (match body with
        | None -> "none"
        | Some failure -> Printexc.to_string failure.exception_)
       (Printexc.to_string cleanup.exception_)
-  | Scope.Cleanup_returned _
-  | Scope.Cancellation_primary_with_cleanup_failure _
-  | Scope.Body_failure_during_cancellation _
-  | Scope.Cancellation_primary _
-  | Scope.Cleanup_boundary_raised _ ->
+  | Cleanup.Cleanup_returned _
+  | Cleanup.Cancellation_primary_with_cleanup_failure _
+  | Cleanup.Body_failure_during_cancellation _
+  | Cleanup.Cancellation_primary _
+  | Cleanup.Cleanup_boundary_raised _ ->
     fail "lane cleanup lost body or release evidence"
 ;;
 

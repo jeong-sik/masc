@@ -1,4 +1,10 @@
 module Cases = Test_mcp_tool_matrix_cases
+module Keeper_publication_recovery_availability =
+  Masc.Keeper_publication_recovery_availability
+
+module Mcp_eio = Masc.Mcp_server_eio
+module Mcp_server = Masc.Mcp_server
+module Recovery_test = Fs_compat.Publication_recovery_for_testing
 
 let contains_substring text fragment =
   let text_len = String.length text in
@@ -143,8 +149,8 @@ let seed_prepared_recovery ~fs ~base_path ~owner ~operation_id =
       (Fs_compat.publication_recovery_registry_error_to_string error)
   | Ok registry ->
     (match
-       Fs_compat.Capability_write_for_testing.seed_prepared_publication_recovery
-         ~registry
+       Recovery_test.seed_prepared
+         ~registry:(Recovery_test.private_registry registry)
          ~owner
          ~operation_id
          ~allowed_root_path
@@ -158,8 +164,7 @@ let seed_prepared_recovery ~fs ~base_path ~owner ~operation_id =
      with
      | Ok () -> ()
      | Error error ->
-       Alcotest.fail
-         (Fs_compat.publication_recovery_fixture_error_to_string error))
+       Alcotest.fail (Recovery_test.fixture_error_to_string error))
 ;;
 
 let create_runtime env sw ~base_path =
@@ -266,20 +271,25 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
         nested_workspace
         initialized_scope.config.workspace_path;
       let registry = require_registry state in
-      Mcp_server.For_testing.await_publication_recovery_discovery registry;
+      let private_registry =
+        Fs_compat.Publication_recovery_for_testing.private_registry registry
+      in
+      Fs_compat.Publication_recovery_for_testing.For_testing.await_discovery_settlement
+        private_registry;
       let before_demand =
-        Fs_compat.Publication_recovery.For_testing.snapshot registry
+        Fs_compat.Publication_recovery_for_testing.For_testing.snapshot
+          private_registry
       in
       Alcotest.(check int)
         "startup discovery does not prepopulate exact owners"
         0
         (List.length before_demand.owners);
       (match before_demand.discovery with
-       | Fs_compat.Publication_recovery.Snapshot_discovery_complete rows ->
+       | Fs_compat.Publication_recovery_for_testing.Snapshot_discovery_complete rows ->
          Alcotest.(check int) "both names observed" 2 (List.length rows)
-       | Fs_compat.Publication_recovery.Snapshot_discovery_required
-       | Fs_compat.Publication_recovery.Snapshot_discovery_running
-       | Fs_compat.Publication_recovery.Snapshot_discovery_failed _ ->
+       | Fs_compat.Publication_recovery_for_testing.Snapshot_discovery_required
+       | Fs_compat.Publication_recovery_for_testing.Snapshot_discovery_running
+       | Fs_compat.Publication_recovery_for_testing.Snapshot_discovery_failed _ ->
          Alcotest.fail "discovery settlement did not publish success");
       let settled_health = health state in
       Alcotest.(check bool)
@@ -308,7 +318,8 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
          Alcotest.fail
            (Fs_compat.publication_recovery_lane_open_error_to_string error));
       let after_demand =
-        Fs_compat.Publication_recovery.For_testing.snapshot registry
+        Fs_compat.Publication_recovery_for_testing.For_testing.snapshot
+          private_registry
       in
       Alcotest.(check int)
         "one exact demand creates one owner state"
@@ -390,7 +401,7 @@ let test_registry_unavailable_keeps_server_state_live () =
       let nested_workspace = Filename.concat base_path "still-live" in
       Unix.mkdir nested_workspace 0o700;
       let updated_config =
-        { Mcp_server.workspace_config state with
+        { (Mcp_server.workspace_config state) with
           workspace_path = nested_workspace
         }
       in
@@ -417,7 +428,11 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
       let state = create_runtime env sw ~base_path in
       Mcp_server.For_testing.await_publication_recovery_initialization state;
       let registry = require_registry state in
-      Mcp_server.For_testing.await_publication_recovery_discovery registry;
+      let private_registry =
+        Fs_compat.Publication_recovery_for_testing.private_registry registry
+      in
+      Fs_compat.Publication_recovery_for_testing.For_testing.await_discovery_settlement
+        private_registry;
       let owner = "lane-store-health" in
       let exception_ = Failure "deterministic lane store open failure" in
       let backtrace =
@@ -430,9 +445,9 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
           Printexc.get_raw_backtrace ()
       in
       (match
-         Fs_compat.Publication_recovery.For_testing
+         Fs_compat.Publication_recovery_for_testing.For_testing
          .record_lane_store_open_failure
-           ~registry
+           ~registry:private_registry
            ~owner
            ~exception_
            ~backtrace
@@ -440,7 +455,7 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
        | Ok () -> ()
        | Error error ->
          Alcotest.fail
-           (Fs_compat.Publication_recovery.validation_error_to_string
+           (Fs_compat.Publication_recovery_for_testing.validation_error_to_string
               error));
       let failed = health state in
       Alcotest.(check string)
@@ -464,15 +479,15 @@ let test_lane_store_failure_degrades_and_success_recovers_health () =
            |> to_list
            |> List.map to_string);
       (match
-         Fs_compat.Publication_recovery.For_testing
+         Fs_compat.Publication_recovery_for_testing.For_testing
          .record_lane_store_open_success
-           ~registry
+           ~registry:private_registry
            ~owner
        with
        | Ok () -> ()
        | Error error ->
          Alcotest.fail
-           (Fs_compat.Publication_recovery.validation_error_to_string
+           (Fs_compat.Publication_recovery_for_testing.validation_error_to_string
               error));
       let recovered = health state in
       Alcotest.(check string)

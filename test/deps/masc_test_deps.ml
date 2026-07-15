@@ -261,12 +261,12 @@ let with_publication_recovery_registry ~sw ~fs ~registry_root f =
 ;;
 
 let publication_recovery_provider registry =
-  Keeper_publication_recovery_availability.constant
-    (Keeper_publication_recovery_availability.Available registry)
+  Masc.Keeper_publication_recovery_availability.constant
+    (Masc.Keeper_publication_recovery_availability.Available registry)
 ;;
 
 let non_runtime_publication_recovery_provider =
-  Keeper_publication_recovery_availability.non_runtime_provider
+  Masc.Keeper_publication_recovery_availability.non_runtime_provider
 ;;
 
 let rng_initialized = Atomic.make false

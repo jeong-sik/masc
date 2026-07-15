@@ -8,6 +8,7 @@
 type registry
 type t
 type owner
+type registry_error = Capability_recovery_obligation.transition_error
 
 type owner_discovery_row =
   | Discovered_owner of owner
@@ -278,13 +279,6 @@ val report_owner : Capability_recovery_reconciler.report -> string
 val report_is_ready : Capability_recovery_reconciler.report -> bool
 val report_to_yojson : Capability_recovery_reconciler.report -> Yojson.Safe.t
 
-(** Internal fixture boundary. Production callers must use [with_lane]. *)
-val with_core_store_for_testing
-  :  registry:registry
-  -> owner:string
-  -> (Capability_recovery_obligation.store -> 'a)
-  -> ('a, lane_open_error) result
-
 type lane_release_failure =
   Capability_recovery_obligation.resource_release_failure
 
@@ -317,6 +311,7 @@ val with_store
   -> ('a, access_error) result
 
 val access_error_to_string : access_error -> string
+val registry_error_to_string : registry_error -> string
 val lane_open_error_to_string : lane_open_error -> string
 val lane_release_failure_to_string : lane_release_failure -> string
 
@@ -369,6 +364,13 @@ module For_testing : sig
         }
     | Cancellation_primary of observed_failure
     | Cleanup_boundary_raised of observed_failure
+
+  val with_core_store
+    :  registry:registry
+    -> owner:string
+    -> (Capability_recovery_obligation.store -> 'a)
+    -> ('a, lane_open_error) result
+  (** Internal fixture boundary. Production callers must use [with_lane]. *)
 
   val lane_release_failure
     :  owner:string

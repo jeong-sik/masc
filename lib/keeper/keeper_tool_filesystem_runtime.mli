@@ -101,4 +101,13 @@ module For_testing : sig
     -> Keeper_tool_execution.t
   (** Inject a post-callback lane release failure through the same public tool
       result projection used after a committed production publication. *)
+
+  val failed_publication_release_failure
+    :  keeper_name:string
+    -> target_effect:Fs_compat.capability_write_target_effect
+    -> release_failure:Fs_compat.Publication_recovery.lane_release_failure
+    -> Keeper_tool_execution.t
+  (** Project a typed atomic-publication failure together with a subsequent
+      lane release failure. This exercises preservation of the target effect
+      already observed by the capability writer. *)
 end

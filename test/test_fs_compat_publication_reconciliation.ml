@@ -1,6 +1,6 @@
 open Alcotest
 
-module Recovery = Fs_compat.Publication_recovery
+module Recovery = Fs_compat.Publication_recovery_for_testing
 
 let with_tmp_dir f =
   let path = Filename.temp_file "masc_publication_reconcile_" ".tmp" in
@@ -30,7 +30,7 @@ let with_registry ~fs ~registry_root f =
 let require_fixture = function
   | Ok () -> ()
   | Error error ->
-    fail (Fs_compat.publication_recovery_fixture_error_to_string error)
+    fail (Recovery.fixture_error_to_string error)
 ;;
 
 let seed_prepared
@@ -41,7 +41,7 @@ let seed_prepared
       ~allowed_root_device
       ~allowed_root_inode
   =
-  Fs_compat.Capability_write_for_testing.seed_prepared_publication_recovery
+  Recovery.seed_prepared
     ~registry
     ~owner
     ~operation_id
@@ -126,15 +126,11 @@ let reconcile ~fs:_ registry owner =
   | Error error -> fail (Recovery.reconciliation_error_to_string error)
 ;;
 
-let report_kinds =
-  Fs_compat.publication_recovery_reconciliation_report_row_kinds
-;;
+let report_kinds = Recovery.report_row_kinds
 
 let report_ready = Recovery.report_is_ready
 
-let report_text =
-  Fs_compat.publication_recovery_reconciliation_report_to_string
-;;
+let report_text = Recovery.report_to_string
 
 (* Tests pin the durable layout for fault injection only. Production traversal
    remains capability-relative and never reconstructs these paths. *)
@@ -174,8 +170,8 @@ let test_prepared_absent_becomes_forensic () =
   let report = reconcile ~fs registry owner in
   check bool "ready" true (report_ready report);
   (match report_kinds report with
-   | [ Fs_compat.Publication_recovery_prepared_reconciled
-         Fs_compat.Publication_recovery_prepared_unmaterialized ] -> ()
+   | [ Recovery.Publication_recovery_prepared_reconciled
+         Recovery.Publication_recovery_prepared_unmaterialized ] -> ()
    | _ -> fail (report_text report));
   with_lane_ok registry owner_name
 ;;
@@ -191,10 +187,7 @@ let test_bound_stage_is_preserved () =
   Unix.mkdir registry_root 0o700;
   let owner_name = "bound-stage" in
   let operation_id = operation_id "22222222-2222-4222-8222-222222222222" in
-  let stage_name =
-    Fs_compat.Capability_write_for_testing.publication_recovery_stage_name
-      operation_id
-  in
+  let stage_name = Recovery.stage_name operation_id in
   let stage_path = Eio.Path.(root_path / stage_name) in
   Eio.Path.mkdir ~perm:0o700 stage_path;
   let stage = Eio.Path.stat ~follow:false stage_path in
@@ -205,7 +198,7 @@ let test_bound_stage_is_preserved () =
   let target_path = Eio.Path.(root_path / "target.json") in
   let target_before = Eio.Path.stat ~follow:false target_path in
   with_registry ~fs ~registry_root @@ fun registry ->
-  Fs_compat.Capability_write_for_testing.seed_bound_publication_recovery
+  Recovery.seed_bound
     ~registry
     ~owner:owner_name
     ~operation_id
@@ -224,8 +217,8 @@ let test_bound_stage_is_preserved () =
   let report = reconcile ~fs registry owner in
   check bool "ready" true (report_ready report);
   (match report_kinds report with
-   | [ Fs_compat.Publication_recovery_bound_reconciled
-         Fs_compat.Publication_recovery_bound_stage_preserved ] -> ()
+   | [ Recovery.Publication_recovery_bound_reconciled
+         Recovery.Publication_recovery_bound_stage_preserved ] -> ()
    | _ -> fail (report_text report));
   check bool "stage remains in target parent" true (Eio.Path.is_directory stage_path);
   let target_after = Eio.Path.stat ~follow:false target_path in
@@ -258,13 +251,13 @@ let test_allowed_root_identity_mismatch_is_forensic () =
   let report = reconcile ~fs registry owner in
   check bool "mismatch source resolved" true (report_ready report);
   match report_kinds report with
-  | [ Fs_compat.Publication_recovery_prepared_reconciled
-        Fs_compat.Publication_recovery_prepared_allowed_root_mismatch ] -> ()
+  | [ Recovery.Publication_recovery_prepared_reconciled
+        Recovery.Publication_recovery_prepared_allowed_root_mismatch ] -> ()
   | _ -> fail (report_text report)
 ;;
 
 let write_raw ~registry ~owner ~area ~record_name raw =
-  Fs_compat.Capability_write_for_testing.write_raw_publication_recovery_record
+  Recovery.write_raw_record
     ~registry
     ~owner
     ~area
@@ -284,13 +277,13 @@ let test_corrupt_and_invalid_rows_block_only_owner () =
   write_raw
     ~registry
     ~owner:owner_name
-    ~area:Fs_compat.Publication_recovery_active
+    ~area:Recovery.Active
     ~record_name:"44444444-4444-4444-8444-444444444444"
     "{not-json";
   write_raw
     ~registry
     ~owner:owner_name
-    ~area:Fs_compat.Publication_recovery_active
+    ~area:Recovery.Active
     ~record_name:"not-a-canonical-uuid"
     "foreign";
   let owner = inventory_owner registry owner_name in
@@ -300,12 +293,12 @@ let test_corrupt_and_invalid_rows_block_only_owner () =
     "corrupt row explicit"
     true
     (report_has_kind
-       Fs_compat.Publication_recovery_corrupt_record_preserved
+       Recovery.Publication_recovery_corrupt_record_preserved
        report);
   check bool
     "invalid row explicit"
     true
-    (report_has_kind Fs_compat.Publication_recovery_invalid_record_name report);
+    (report_has_kind Recovery.Publication_recovery_invalid_record_name report);
   (match Recovery.with_lane ~registry ~owner:owner_name (fun _ -> ()) with
    | Error (Recovery.Reconciliation_blocked _) -> ()
    | Error error -> fail (Recovery.lane_open_error_to_string error)
@@ -334,7 +327,7 @@ let test_transition_failure_is_explicit () =
   write_raw
     ~registry
     ~owner:owner_name
-    ~area:Fs_compat.Publication_recovery_forensic
+    ~area:Recovery.Forensic
     ~record_name:(Uuidm.to_string operation_id)
     "{not-the-derived-forensic-record";
   let owner = inventory_owner registry owner_name in
@@ -344,7 +337,7 @@ let test_transition_failure_is_explicit () =
     "transition failure explicit"
     true
     (report_has_kind
-       Fs_compat.Publication_recovery_record_transition_failed
+       Recovery.Publication_recovery_record_transition_failed
        report)
 ;;
 
@@ -369,7 +362,7 @@ let test_missing_area_preserves_sources_and_continues_inventory () =
   write_raw
     ~registry
     ~owner:owner_name
-    ~area:Fs_compat.Publication_recovery_owned
+    ~area:Recovery.Owned
     ~record_name:"77777777-7777-4777-8777-777777777777"
     "{corrupt-owned";
   let forensic_path = owner_area_path ~registry_root ~owner:owner_name "forensic" in
@@ -386,19 +379,19 @@ let test_missing_area_preserves_sources_and_continues_inventory () =
     "missing forensic area is explicit"
     true
     (report_has_kind
-       Fs_compat.Publication_recovery_area_inventory_unavailable
+       Recovery.Publication_recovery_area_inventory_unavailable
        report);
   check bool
     "prepared source retains unavailable transition evidence"
     true
     (report_has_kind
-       Fs_compat.Publication_recovery_source_transition_capabilities_unavailable
+       Recovery.Publication_recovery_source_transition_capabilities_unavailable
        report);
   check bool
     "owned area continued to corrupt record"
     true
     (report_has_kind
-       Fs_compat.Publication_recovery_corrupt_record_preserved
+       Recovery.Publication_recovery_corrupt_record_preserved
        report);
   check bool "prepared source remains" true (Sys.file_exists active_record);
   check bool "missing area was not recreated" false (Sys.file_exists forensic_path)
@@ -441,13 +434,13 @@ let test_counterpart_area_unavailable_preserves_prepared_source () =
     "counterpart area failure is explicit"
     true
     (report_has_kind
-       Fs_compat.Publication_recovery_area_inventory_unavailable
+       Recovery.Publication_recovery_area_inventory_unavailable
        report);
   check bool
     "source transition is fenced"
     true
     (report_has_kind
-       Fs_compat.Publication_recovery_source_transition_capabilities_unavailable
+       Recovery.Publication_recovery_source_transition_capabilities_unavailable
        report);
   check bool "prepared source remains" true (Sys.file_exists active_record);
   check bool "forensic record was not created" false (Sys.file_exists forensic_record);
@@ -465,7 +458,7 @@ let test_unexpected_lane_entry_is_preserved_and_blocks_owner () =
   write_raw
     ~registry
     ~owner:owner_name
-    ~area:Fs_compat.Publication_recovery_active
+    ~area:Recovery.Active
     ~record_name:"not-a-record"
     "source-sentinel";
   let residue_path =
@@ -483,7 +476,7 @@ let test_unexpected_lane_entry_is_preserved_and_blocks_owner () =
   check bool
     "lane residue is explicit"
     true
-    (report_has_kind Fs_compat.Publication_recovery_unexpected_lane_entry report);
+    (report_has_kind Recovery.Publication_recovery_unexpected_lane_entry report);
   let residue_after = Unix.lstat residue_path in
   check int "residue inode unchanged" residue_before.st_ino residue_after.st_ino;
   check string
@@ -503,7 +496,7 @@ let test_wrong_area_permissions_are_not_repaired () =
   write_raw
     ~registry
     ~owner:owner_name
-    ~area:Fs_compat.Publication_recovery_active
+    ~area:Recovery.Active
     ~record_name:"not-a-record"
     "source-sentinel";
   let owned_path = owner_area_path ~registry_root ~owner:owner_name "owned" in
@@ -515,12 +508,12 @@ let test_wrong_area_permissions_are_not_repaired () =
     "wrong permission area is explicit"
     true
     (report_has_kind
-       Fs_compat.Publication_recovery_area_inventory_unavailable
+       Recovery.Publication_recovery_area_inventory_unavailable
        report);
   check bool
     "active area still inventoried"
     true
-    (report_has_kind Fs_compat.Publication_recovery_invalid_record_name report);
+    (report_has_kind Recovery.Publication_recovery_invalid_record_name report);
   check int
     "startup reconciliation did not chmod"
     0o750
@@ -563,16 +556,16 @@ let test_existing_lane_permissions_are_not_repaired () =
   write_raw
     ~registry
     ~owner:owner_name
-    ~area:Fs_compat.Publication_recovery_active
+    ~area:Recovery.Active
     ~record_name:"not-a-record"
     "source-sentinel";
   let lane = owner_lane_path ~registry_root ~owner:owner_name in
   Unix.chmod lane 0o750;
   let result =
-    Fs_compat.Capability_write_for_testing.write_raw_publication_recovery_record
+    Recovery.write_raw_record
       ~registry
       ~owner:owner_name
-      ~area:Fs_compat.Publication_recovery_active
+      ~area:Recovery.Active
       ~record_name:"second-record"
       ~raw:"must-not-be-written"
   in
@@ -1424,13 +1417,13 @@ let test_structured_report_preserves_corrupt_evidence () =
   write_raw
     ~registry
     ~owner:owner_name
-    ~area:Fs_compat.Publication_recovery_active
+    ~area:Recovery.Active
     ~record_name
     raw;
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   let json =
-    Fs_compat.publication_recovery_reconciliation_report_to_yojson report
+    Recovery.report_to_yojson report
   in
   let json_text = Yojson.Safe.to_string json in
   check bool

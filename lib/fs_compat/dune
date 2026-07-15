@@ -14,6 +14,7 @@
   capability_recovery_obligation
   capability_recovery_reconciler
   publication_recovery_access
+  publication_recovery_for_testing
   atomic_write
   blocking_write
   fd_write_all

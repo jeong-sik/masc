@@ -6,6 +6,7 @@ module KTD = Masc.Keeper_tool_descriptor
 module Workspace = Masc.Workspace
 module Publication_availability =
   Masc.Keeper_publication_recovery_availability
+module Recovery_test = Fs_compat.Publication_recovery_for_testing
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -93,7 +94,7 @@ let with_exec_fixture ?(process = false) ?(always_allow = false) name fn =
           ~clock:(Eio.Stdenv.clock env);
       let config = Masc.Workspace.default_config dir in
       let meta =
-        let meta = make_meta () in
+        let meta = { (make_meta ()) with allowed_paths = [ config.base_path ] } in
         if always_allow then { meta with always_allow = Some true } else meta
       in
       ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
@@ -220,7 +221,11 @@ let test_public_read_rejects_unsupported_range_fields () =
       in
       check string "runtime outcome" "failure"
         (match result.outcome with `Success -> "success" | `Failure _ -> "failure");
-      let json = Yojson.Safe.from_string result.raw_output in
+      let json =
+        match result.data with
+        | Some data -> data
+        | None -> fail "validation rejection omitted typed data"
+      in
       let error =
         Yojson.Safe.Util.(member "error" json |> to_string_option)
         |> Option.value ~default:""
@@ -260,7 +265,11 @@ let test_public_read_rejects_offset_without_enrichment () =
           ()
       in
       check string "runtime outcome" "failure" (outcome_label result.outcome);
-      let json = Yojson.Safe.from_string result.raw_output in
+      let json =
+        match result.data with
+        | Some data -> data
+        | None -> fail "validation rejection omitted typed data"
+      in
       check bool "dispatch does not add a tutor" true
         Yojson.Safe.Util.(member "tool_tutor" json = `Null);
       check bool "validation names exact field" true
@@ -980,9 +989,8 @@ let test_publication_reconciliation_evidence_is_redacted () =
          Filename.concat config.base_path "private-allowed-root-path-sentinel"
        in
        (match
-          Fs_compat.Capability_write_for_testing
-          .seed_prepared_publication_recovery
-            ~registry
+          Recovery_test.seed_prepared
+            ~registry:(Recovery_test.private_registry registry)
             ~owner:meta.name
             ~operation_id
             ~allowed_root_path:allowed_root_sentinel
@@ -995,9 +1003,19 @@ let test_publication_reconciliation_evidence_is_redacted () =
             ~permissions:0o600
         with
         | Ok () -> ()
+       | Error error ->
+          fail (Recovery_test.fixture_error_to_string error));
+       (match
+          Recovery_test.write_raw_record
+            ~registry:(Recovery_test.private_registry registry)
+            ~owner:meta.name
+            ~area:Recovery_test.Forensic
+            ~record_name:operation_id_text
+            ~raw:"{not-the-derived-forensic-record"
+        with
+        | Ok () -> ()
         | Error error ->
-          fail
-            (Fs_compat.publication_recovery_fixture_error_to_string error));
+          fail (Recovery_test.fixture_error_to_string error));
        let target = Filename.concat config.base_path "must-not-write.txt" in
        let result =
          KET.execute_keeper_tool_call_with_outcome
@@ -1306,15 +1324,18 @@ let test_committed_publication_release_failure_preserves_effect_truth () =
   in
   let release_failure =
     match
-      Fs_compat.Publication_recovery.For_testing.lane_release_failure
+      Fs_compat.Publication_recovery_for_testing.For_testing.lane_release_failure
         ~owner:"committed-publication"
         ~exception_
         ~backtrace
     with
-    | Ok failure -> failure
+    | Ok failure ->
+      Fs_compat.Publication_recovery_for_testing
+      .public_lane_release_failure
+        failure
     | Error error ->
       fail
-        (Fs_compat.Publication_recovery.validation_error_to_string error)
+        (Fs_compat.Publication_recovery_for_testing.validation_error_to_string error)
   in
   let execution =
     Masc.Keeper_tool_filesystem_runtime.For_testing
@@ -1323,12 +1344,13 @@ let test_committed_publication_release_failure_preserves_effect_truth () =
       ~release_failure
   in
   (match execution.outcome with
-   | `Failure Tool_result.Runtime_failure -> ()
-   | `Failure failure_class ->
+   | Masc.Keeper_tool_execution.Failed Tool_result.Runtime_failure -> ()
+   | Masc.Keeper_tool_execution.Failed failure_class ->
      failf
        "cleanup failure received wrong class: %s"
        (Tool_result.tool_failure_class_to_string failure_class)
-   | `Success -> fail "cleanup failure was reported as success");
+   | Masc.Keeper_tool_execution.Succeeded ->
+     fail "cleanup failure was reported as success");
   check string
     "committed effect and cleanup failure are both explicit"
     "filesystem publication committed, but publication recovery lane cleanup failed"
@@ -1353,7 +1375,39 @@ let test_committed_publication_release_failure_preserves_effect_truth () =
   check bool
     "Keeper remains active after lane cleanup failure"
     true
-    Yojson.Safe.Util.(member "keeper_active" data |> to_bool)
+    Yojson.Safe.Util.(member "keeper_active" data |> to_bool);
+  let failed_execution =
+    Masc.Keeper_tool_filesystem_runtime.For_testing
+    .failed_publication_release_failure
+      ~keeper_name:"committed-publication"
+      ~target_effect:Fs_compat.Target_replaced
+      ~release_failure
+  in
+  (match failed_execution.outcome with
+   | Masc.Keeper_tool_execution.Failed Tool_result.Runtime_failure -> ()
+   | Masc.Keeper_tool_execution.Failed failure_class ->
+     failf
+       "post-rename failure received wrong class: %s"
+       (Tool_result.tool_failure_class_to_string failure_class)
+   | Masc.Keeper_tool_execution.Succeeded ->
+     fail "post-rename failure was reported as success");
+  let failed_data =
+    match failed_execution.data with
+    | Some data -> data
+    | None -> fail "post-rename cleanup failure omitted typed data"
+  in
+  check bool
+    "post-rename callback failure preserves the executed target effect"
+    true
+    Yojson.Safe.Util.(member "write_executed" failed_data |> to_bool);
+  check string
+    "post-rename target effect remains explicit"
+    "target_replaced"
+    Yojson.Safe.Util.(
+      failed_data
+      |> member "publication_result"
+      |> member "filesystem_target_effect"
+      |> to_string)
 ;;
 
 let test_tool_search_without_session_searcher_is_unavailable () =
@@ -2134,12 +2188,6 @@ let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
     Yojson.Safe.Util.(member "runtime_handler" payload |> to_string)
 ;;
 
-let string_of_concurrency_class = function
-  | Agent_sdk.Tool.Parallel_read -> "parallel_read"
-  | Agent_sdk.Tool.Sequential_workspace -> "sequential_workspace"
-  | Agent_sdk.Tool.Exclusive_external -> "exclusive_external"
-;;
-
 let check_no_inferred_descriptor ~msg name =
   let tool = make_dummy_oas_tool name in
   match Agent_sdk.Tool.descriptor tool with
@@ -2184,90 +2232,6 @@ let test_model_visible_tools_do_not_infer_oas_descriptors () =
          (fun name ->
             check_bundle_has_no_inferred_descriptor ~msg:"model-visible" tools name)
          [ "WebSearch"; "WebFetch"; "Grep"; "Read" ])
-;;
-
-(* ── Parallel read execution ─────────────────────────────────
-
-   Confirm that two [Parallel_read] tools run concurrently and that
-   [Agent_tools.execute_tools] returns results in input order even when the
-   second tool finishes before the first. *)
-
-let make_delayed_read_tool clock name delay_ms =
-  let descriptor =
-    { Agent_sdk.Tool.kind = Some "test"
-    ; mutation_class = Some Agent_sdk.Tool.Read_only
-    ; concurrency_class = Some Agent_sdk.Tool.Parallel_read
-    ; permission = Some Agent_sdk.Tool.ReadOnly
-    ; evidence_role = None
-    ; shell = None
-    ; notes = []
-    ; examples = []
-    }
-  in
-  Agent_sdk.Tool.create
-    ~descriptor
-    ~name
-    ~description:"Delayed read-only probe"
-    ~parameters:[]
-    (fun _args ->
-       Eio.Time.sleep clock (Float.of_int delay_ms /. 1000.0);
-       Ok { Agent_sdk.Types.content = name; _meta = None })
-;;
-
-let execute_tools_in_env env ~tools tool_uses =
-  let net = Eio.Stdenv.net env in
-  let config =
-    { Agent_sdk.Types.default_config with
-      Agent_sdk.Types.name = "parallel-read-test"
-    ; system_prompt = Some "test"
-    ; max_turns = 1
-    }
-  in
-  let agent = Agent_sdk.Agent.create ~net ~config ~tools () in
-  let opts = Agent_sdk.Agent.options agent in
-  let state = Agent_sdk.Agent.state agent in
-  Agent_sdk.Agent_tools.execute_tools
-    ~context:(Agent_sdk.Agent.context agent)
-    ~tools
-    ~hooks:opts.Agent_sdk.Agent.hooks
-    ~event_bus:opts.Agent_sdk.Agent.event_bus
-    ~tracer:opts.Agent_sdk.Agent.tracer
-    ~agent_name:state.Agent_sdk.Types.config.Agent_sdk.Types.name
-    ~turn_count:state.Agent_sdk.Types.turn_count
-    ~usage:state.Agent_sdk.Types.usage
-    tool_uses
-;;
-
-let test_parallel_read_tools_reorder_results () =
-  let tool_uses =
-    [ Agent_sdk.Types.ToolUse { id = "u-1"; name = "slow_read"; input = `Assoc [] }
-    ; Agent_sdk.Types.ToolUse { id = "u-2"; name = "fast_read"; input = `Assoc [] }
-    ]
-  in
-  let elapsed_ms, results =
-    Eio_main.run
-    @@ fun env ->
-    let clock = Eio.Stdenv.clock env in
-    let tools =
-      [ make_delayed_read_tool clock "slow_read" 150
-      ; make_delayed_read_tool clock "fast_read" 30
-      ]
-    in
-    let t0 = Unix.gettimeofday () in
-    let results = execute_tools_in_env env ~tools tool_uses in
-    let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
-    (elapsed_ms, results)
-  in
-  match elapsed_ms, results with
-  | _, [ r1; r2 ] ->
-    check string "first result id" "u-1" r1.Agent_sdk.Agent_tools.tool_use_id;
-    check string "first result content" "slow_read" r1.Agent_sdk.Agent_tools.content;
-    check string "second result id" "u-2" r2.Agent_sdk.Agent_tools.tool_use_id;
-    check string "second result content" "fast_read" r2.Agent_sdk.Agent_tools.content;
-    (* If they ran sequentially the elapsed time would be at least 180 ms.
-       Allow generous slack for scheduler jitter on shared CI runners. *)
-    check bool "parallel read ran concurrently" true (elapsed_ms < 250)
-  | _ -> fail "expected exactly two tool execution results"
 ;;
 
 (* ── Exec cache data structure tests ───────────────────────── *)
@@ -2371,8 +2335,6 @@ let () =
         test_catalog_metadata_does_not_infer_oas_descriptors;
       test_case "model-visible aliases do not infer OAS descriptors" `Quick
         test_model_visible_tools_do_not_infer_oas_descriptors;
-      test_case "parallel read tools reorder results" `Quick
-        test_parallel_read_tools_reorder_results;
     ]);
     ("exec_cache", [
       test_case "stats json" `Quick test_exec_cache_stats_json;

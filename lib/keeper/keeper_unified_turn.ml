@@ -145,6 +145,24 @@ let run_keeper_cycle
       ~base_path:config.base_path
       ~keeper_name:meta.name
   with
+  | Error failure ->
+    let error =
+      Agent_sdk.Error.Config
+        (Agent_sdk.Error.InvalidConfig
+           { field = "keeper.publication_recovery_scope"
+           ; detail =
+               Keeper_publication_recovery_scope.failure_to_string failure
+           })
+    in
+    Error
+      { error
+      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
+      ; route =
+          Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Masc_execution
+            error
+      ; source_lease_disposition = Follow_failure_route
+      }
   | Ok { entry; publication_recovery } ->
   let meta = entry.meta in
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
@@ -958,22 +976,4 @@ dominant source of the observed CAS race exhaustion after
     result
     |> Result.map (fun meta -> Turn_completed meta)
     |> Result.map_error failure_of_error
-  | Error failure ->
-    let error =
-      Agent_sdk.Error.Config
-        (Agent_sdk.Error.InvalidConfig
-           { field = "keeper.publication_recovery_scope"
-           ; detail =
-               Keeper_publication_recovery_scope.failure_to_string failure
-           })
-    in
-    Error
-      { error
-      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
-      ; route =
-          Keeper_runtime_failure_route.route_of_error
-            ~boundary:Keeper_runtime_failure_route.Masc_execution
-            error
-      ; source_lease_disposition = Follow_failure_route
-      }
 ;;

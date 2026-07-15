@@ -1,6 +1,7 @@
 module Core = Capability_recovery_obligation
 module Reconciler = Capability_recovery_reconciler
 
+type registry_error = Core.transition_error
 type owner = Core.owner
 
 type owner_discovery_row =
@@ -415,10 +416,16 @@ let lane_open_error_to_string = function
   | Store_failed error -> Core.transition_error_to_string error
 ;;
 
+let registry_error_to_string = Core.transition_error_to_string
+;;
+
 let lane_release_failure_to_string
       (failure : lane_release_failure)
   =
-  Core.failure_to_string failure.failure
+  Printf.sprintf
+    "%s backtrace=%s"
+    (Core.failure_to_string failure.failure)
+    (Printexc.raw_backtrace_to_string failure.backtrace)
 ;;
 
 let empty_owner_health_counts =
@@ -1345,28 +1352,6 @@ let ensure_owner_ready =
     ~after_owner_settlement:(fun _ -> ())
 ;;
 
-let with_core_store_for_testing ~registry ~owner f =
-  match Core.owner_of_string owner with
-  | Error error -> Error (Invalid_owner error)
-  | Ok owner ->
-    (match
-       Core.with_store
-         ~registry:registry.core
-         ~owner
-         ~on_release_failure:(fun _ -> ())
-         f
-     with
-     | Ok (Core.Store_scope_released value) -> Ok value
-     | Ok (Core.Store_scope_release_failed { release_failure; _ }) ->
-       Error
-         (Store_failed
-            { Core.store_effect = Core.No_record_change
-            ; failure = release_failure.failure
-            ; cleanup_failures = []
-            })
-     | Error error -> Error (Store_failed error))
-;;
-
 let create store =
   let drained, resolve_drained = Eio.Promise.create () in
   { store
@@ -1599,6 +1584,28 @@ module For_testing = struct
     | Cancellation_primary of observed_failure
     | Cleanup_boundary_raised of observed_failure
 
+  let with_core_store ~registry ~owner f =
+    match Core.owner_of_string owner with
+    | Error error -> Error (Invalid_owner error)
+    | Ok owner ->
+      (match
+         Core.with_store
+           ~registry:registry.core
+           ~owner
+           ~on_release_failure:(fun _ -> ())
+           f
+       with
+       | Ok (Core.Store_scope_released value) -> Ok value
+       | Ok (Core.Store_scope_release_failed { release_failure; _ }) ->
+         Error
+           (Store_failed
+              { Core.store_effect = Core.No_record_change
+              ; failure = release_failure.failure
+              ; cleanup_failures = []
+              })
+       | Error error -> Error (Store_failed error))
+  ;;
+
   let lane_release_failure ~owner ~exception_ ~backtrace =
     match Core.owner_of_string owner with
     | Error _ as error -> error
@@ -1809,7 +1816,7 @@ module For_testing = struct
   ;;
 
   let single_borrow_balance ~registry ~owner =
-    with_core_store_for_testing ~registry ~owner @@ fun store ->
+    with_core_store ~registry ~owner @@ fun store ->
     let access = create store in
     match borrow access with
     | Borrow_rejected -> Single_borrow_rejected

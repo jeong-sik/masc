@@ -284,11 +284,6 @@ module For_testing : sig
       typed [Non_runtime] state. This constructor is isolated from the
       production bootstrap surface. *)
 
-  val await_publication_recovery_discovery :
-    Fs_compat.publication_recovery_registry -> unit
-  (** Await the one discovery settlement promise. This test-only boundary does
-      not inspect, reconcile, or wait for any exact owner. *)
-
   type publication_recovery_runtime_observation =
     | Runtime_initializing
     | Runtime_available

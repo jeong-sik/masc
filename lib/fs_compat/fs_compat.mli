@@ -232,65 +232,104 @@ end
 type atomic_replace_recovery_target
 type atomic_replace_recovery_target_error
 
-module Publication_recovery : module type of Publication_recovery_access
+module Publication_recovery : sig
+  type registry
+  type t
+  type owner
+  type registry_error
+  type lane_open_error
+  type lane_release_failure
+
+  type owner_discovery_row =
+    | Discovered_owner of owner
+    | Invalid_owner_name of string
+
+  type discovery_failure
+
+  type discovery_error =
+    | Registry_discovery_in_progress
+    | Registry_discovery_terminal of discovery_failure
+
+  type discovery_health_phase =
+    | Health_discovery_required
+    | Health_discovery_running
+    | Health_discovery_failed
+    | Health_discovery_complete
+
+  type owner_health_counts =
+    { inspection_pending : int
+    ; inspection_running : int
+    ; reconciliation_pending : int
+    ; reconciliation_running : int
+    ; ready_without_obligation : int
+    ; ready : int
+    ; blocked : int
+    }
+
+  type health_snapshot =
+    { discovery_phase : discovery_health_phase
+    ; discovery_row_count : int
+    ; discovered_owner_count : int
+    ; invalid_owner_name_count : int
+    ; retryable_lane_failure_count : int
+    ; owners : owner_health_counts
+    }
+
+  type 'a lane_outcome =
+    | Lane_released of 'a
+    | Lane_release_failed of
+        { value : 'a
+        ; release_failure : lane_release_failure
+        }
+
+  val open_registry
+    :  sw:Eio.Switch.t
+    -> fs:Eio.Fs.dir_ty Eio.Path.t
+    -> registry_root:Eio.Fs.dir_ty Eio.Path.t
+    -> (registry, registry_error) result
+
+  val discover_owners
+    :  registry
+    -> (owner_discovery_row list, discovery_error) result
+
+  val health_snapshot : registry -> health_snapshot
+  val owner_to_string : owner -> string
+  val owner_discovery_row_to_string : owner_discovery_row -> string
+  val registry_error_to_string : registry_error -> string
+  val discovery_failure_to_string : discovery_failure -> string
+  val discovery_error_to_string : discovery_error -> string
+
+  val with_lane
+    :  registry:registry
+    -> owner:string
+    -> (t -> 'a)
+    -> ('a lane_outcome, lane_open_error) result
+
+  val lane_open_error_to_string : lane_open_error -> string
+  val lane_release_failure_to_string : lane_release_failure -> string
+end
+
+(** Repository-test access to the private recovery state machine. Production
+    code must use the narrow [Publication_recovery] facade above. *)
+module Publication_recovery_for_testing :
+  sig
+    include module type of Publication_recovery_for_testing
+
+    val private_registry : Publication_recovery.registry -> registry
+    val public_lane_release_failure
+      :  lane_release_failure
+      -> Publication_recovery.lane_release_failure
+  end
+
 type publication_recovery_access = Publication_recovery.t
 type publication_recovery_registry = Publication_recovery.registry
-type publication_recovery_registry_error = Capability_recovery_obligation.transition_error
+type publication_recovery_registry_error = Publication_recovery.registry_error
 type publication_recovery_lane_open_error = Publication_recovery.lane_open_error
-type publication_recovery_reconciliation_report = Capability_recovery_reconciler.report
-type publication_recovery_owner = Publication_recovery.owner
 
 type publication_recovery_lane_open_error_kind =
   | Publication_recovery_invalid_owner
   | Publication_recovery_reconciliation_blocked
   | Publication_recovery_store_failed
-
-type publication_recovery_record_area =
-  | Publication_recovery_active
-  | Publication_recovery_owned
-  | Publication_recovery_forensic
-
-type publication_recovery_source_state =
-  | Publication_recovery_prepared_source
-  | Publication_recovery_bound_source
-
-type publication_recovery_prepared_outcome_kind =
-  | Publication_recovery_prepared_unmaterialized
-  | Publication_recovery_prepared_allowed_root_mismatch
-  | Publication_recovery_prepared_parent_mismatch
-  | Publication_recovery_prepared_unbound_stage_preserved
-
-type publication_recovery_bound_outcome_kind =
-  | Publication_recovery_bound_stage_absent
-  | Publication_recovery_bound_allowed_root_mismatch
-  | Publication_recovery_bound_parent_mismatch
-  | Publication_recovery_bound_stage_mismatch
-  | Publication_recovery_bound_stage_preserved
-
-type publication_recovery_reconciliation_row_kind =
-  | Publication_recovery_unexpected_lane_entry
-  | Publication_recovery_missing_lane_entry
-  | Publication_recovery_lane_entry_unavailable
-  | Publication_recovery_area_inventory_unavailable
-  | Publication_recovery_source_transition_capabilities_unavailable
-  | Publication_recovery_prepared_reconciled of
-      publication_recovery_prepared_outcome_kind
-  | Publication_recovery_bound_reconciled of
-      publication_recovery_bound_outcome_kind
-  | Publication_recovery_existing_forensic_record of
-      publication_recovery_source_state
-  | Publication_recovery_conflicting_source_records
-  | Publication_recovery_invalid_record_name
-  | Publication_recovery_unexpected_record_kind
-  | Publication_recovery_missing_record_entry
-  | Publication_recovery_record_entry_unavailable
-  | Publication_recovery_corrupt_record_preserved
-  | Publication_recovery_record_observation_failed
-  | Publication_recovery_record_transition_failed
-  | Publication_recovery_record_scope_release_failed
-  | Publication_recovery_owner_store_release_failed
-  | Publication_recovery_owner_store_unavailable
-  | Publication_recovery_owner_inventory_unavailable
 
 (** Open the process-lifetime publication recovery registry below a
     caller-owned MASC root capability. The registry remains valid for exactly
@@ -304,28 +343,6 @@ val open_publication_recovery_registry
 val publication_recovery_registry_error_to_string
   :  publication_recovery_registry_error
   -> string
-
-val publication_recovery_reconciliation_report_owner
-  :  publication_recovery_reconciliation_report
-  -> string
-
-val publication_recovery_reconciliation_report_is_ready
-  :  publication_recovery_reconciliation_report
-  -> bool
-
-val publication_recovery_reconciliation_report_row_kinds
-  :  publication_recovery_reconciliation_report
-  -> publication_recovery_reconciliation_row_kind list
-
-val publication_recovery_reconciliation_report_to_string
-  :  publication_recovery_reconciliation_report
-  -> string
-
-(** Constructor-directed structured report projection. Callers can observe row
-    identity and nested evidence without parsing diagnostic strings. *)
-val publication_recovery_reconciliation_report_to_yojson
-  :  publication_recovery_reconciliation_report
-  -> Yojson.Safe.t
 
 (** Pin one Keeper-owned publication recovery lane for the whole callback.
     Publications borrow its store through the opaque access value. Closing
@@ -514,12 +531,6 @@ type capability_directory_sync_error =
   ; cleanup_failures : capability_write_failure list
   }
 
-type publication_recovery_fixture_error
-
-val publication_recovery_fixture_error_to_string
-  :  publication_recovery_fixture_error
-  -> string
-
 type capability_write_cancellation =
   { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
@@ -569,96 +580,6 @@ val capability_directory_sync_error_to_string
   -> string
 
 module Capability_write_for_testing : sig
-  type resource_scope_callback =
-    | Return_completed_rows of string list
-    | Cancel_callback of exn
-
-  type resource_scope_evidence =
-    | Returned_rows of
-        { completed_rows : string list
-        ; release_failure : exn option
-        }
-    | Cancelled_callback of
-        { reason : exn
-        ; release_failure : exn option
-        }
-    | Raised_callback of
-        { exception_ : exn
-        ; release_failure : exn option
-        }
-
-  type cleanup_body =
-    | Return_cleanup_value of string
-    | Raise_cleanup_body of exn
-    | Cancel_cleanup_body of exn
-
-  type observed_cleanup_failure =
-    { exception_ : exn
-    ; backtrace : Printexc.raw_backtrace
-    }
-
-  type cleanup_evidence =
-    | Cleanup_returned of string
-    | Cleanup_failed_without_cancellation of
-        { body : observed_cleanup_failure option
-        ; cleanup : observed_cleanup_failure
-        }
-    | Cancellation_primary_with_cleanup_failure of
-        { body : observed_cleanup_failure option
-        ; cancellation : observed_cleanup_failure
-        ; cleanup : observed_cleanup_failure
-        }
-    | Body_failure_during_cancellation of
-        { body : observed_cleanup_failure
-        ; cancellation : observed_cleanup_failure
-        }
-    | Cancellation_primary of observed_cleanup_failure
-    | Cleanup_boundary_raised of observed_cleanup_failure
-
-  type single_borrow_evidence =
-    | Single_borrow_balance of
-        { during_borrow : int
-        ; after_release : int
-        ; close_completed : bool
-        }
-    | Single_borrow_rejected
-    | Single_borrow_invariant of invariant_violation
-    | Single_borrow_raised of observed_cleanup_failure
-
-  and invariant_violation =
-    | Borrow_count_underflow
-    | Borrow_count_overflow
-    | Closing_without_active_borrows
-    | Closed_with_active_borrows of int
-    | Closed_without_drain_signal
-    | Drain_signal_already_resolved
-    | Discovery_settled_twice
-    | Discovery_finished_outside_running
-    | Owner_inventory_owner_not_running of string
-    | Reconciliation_owner_not_running of string
-    | Owner_generation_settled_twice of string
-    | Owner_generation_settled_before_terminal of string
-    | Health_counter_underflow
-    | Health_counter_overflow
-    | Cleanup_body_outcome_lost
-
-  val run_publication_recovery_resource_scope
-    :  callback:resource_scope_callback
-    -> release_failure:exn option
-    -> resource_scope_evidence
-
-  val run_publication_recovery_cleanup_boundary
-    :  body:cleanup_body
-    -> cleanup_failure:exn option
-    -> cleanup_evidence
-
-  val single_publication_recovery_borrow_balance
-    :  registry:publication_recovery_registry
-    -> owner:string
-    -> (single_borrow_evidence, publication_recovery_lane_open_error) result
-
-  val publication_recovery_stage_name : Uuidm.t -> string
-
   val replace_capability_file
     :  before_stage:(capability_write_stage -> unit)
     -> recovery:publication_recovery_access
@@ -674,44 +595,6 @@ module Capability_write_for_testing : sig
     -> permissions:int
     -> string
     -> (unit, capability_write_error) result
-
-  val seed_prepared_publication_recovery
-    :  registry:publication_recovery_registry
-    -> owner:string
-    -> operation_id:Uuidm.t
-    -> allowed_root_path:string
-    -> allowed_root_device:int64
-    -> allowed_root_inode:int64
-    -> parent_components:string list
-    -> parent_device:int64
-    -> parent_inode:int64
-    -> target_leaf:string
-    -> permissions:int
-    -> (unit, publication_recovery_fixture_error) result
-
-  val seed_bound_publication_recovery
-    :  registry:publication_recovery_registry
-    -> owner:string
-    -> operation_id:Uuidm.t
-    -> allowed_root_path:string
-    -> allowed_root_device:int64
-    -> allowed_root_inode:int64
-    -> parent_components:string list
-    -> parent_device:int64
-    -> parent_inode:int64
-    -> target_leaf:string
-    -> permissions:int
-    -> stage_device:int64
-    -> stage_inode:int64
-    -> (unit, publication_recovery_fixture_error) result
-
-  val write_raw_publication_recovery_record
-    :  registry:publication_recovery_registry
-    -> owner:string
-    -> area:publication_recovery_record_area
-    -> record_name:string
-    -> raw:string
-    -> (unit, publication_recovery_fixture_error) result
 
   val sync_directory_capability
     :  before_stage:(capability_write_stage -> unit)

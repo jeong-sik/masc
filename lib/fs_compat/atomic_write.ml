@@ -2361,7 +2361,7 @@ module Capability_write_for_testing = struct
   ;;
 
   let with_fixture_store ~registry ~owner f =
-    match Recovery_access.with_core_store_for_testing ~registry ~owner f with
+    match Recovery_access.For_testing.with_core_store ~registry ~owner f with
     | Ok result -> result
     | Error error -> Error (Fixture_lane_open_failed error)
   ;;

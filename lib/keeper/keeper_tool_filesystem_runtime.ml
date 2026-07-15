@@ -924,16 +924,18 @@ let decide_file_write
 ;;
 
 let file_write_deferred_json ~target ~approval_id ~reason =
-  error_json
-    ~fields:
-      [ "path", `String target
-      ; "error", `String "gate_deferred"
-      ; "gate_request_id", `String approval_id
-      ; "gate_status", `String "pending"
-      ; "gate_nonblocking", `Bool true
-      ; "gate_reason", `String (Keeper_gate.deferred_reason_to_string reason)
-      ]
-    "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper lane will wake after resolution."
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "error", `String "gate_deferred"
+       ; ( "message"
+         , `String
+             "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper lane will wake after resolution." )
+       ; "path", `String target
+       ; "gate_request_id", `String approval_id
+       ; "gate_status", `String "pending"
+       ; "gate_nonblocking", `Bool true
+       ; "gate_reason", `String (Keeper_gate.deferred_reason_to_string reason)
+       ])
 ;;
 
 type file_write_attempt =
@@ -1440,19 +1442,15 @@ let publication_recovery_unavailable_attempt unavailable =
 ;;
 
 type publication_write_execution =
-  | Publication_write_committed
+  | Publication_write_completed
+  | Publication_write_effect_observed
+  | Publication_write_not_executed
   | Publication_write_indeterminate
 
-let file_write_attempt_to_yojson = function
-  | Write_succeeded _ -> `Assoc [ "outcome", `String "success" ]
-  | Write_failed { class_; _ }
-  | Write_failed_data { class_; _ } ->
-    `Assoc
-      [ "outcome", `String "failure"
-      ; "failure_class"
-      , `String (Tool_result.tool_failure_class_to_string class_)
-      ]
-;;
+type publication_callback_observation =
+  { execution : publication_write_execution
+  ; publication_result : Yojson.Safe.t
+  }
 
 let publication_recovery_cleanup_failed_attempt
       ~keeper_name
@@ -1463,20 +1461,26 @@ let publication_recovery_cleanup_failed_attempt
   =
   Log.Keeper.error
     ~keeper_name
-    "WRITE_AUDIT: publication recovery lane release failed after callback path=%s write_execution=%s failure=%s error=%s backtrace=%s"
+    "WRITE_AUDIT: publication recovery lane release failed after callback path=%s write_execution=%s evidence=%s"
     target
     (match execution with
-     | Publication_write_committed -> "committed"
+     | Publication_write_completed -> "completed"
+     | Publication_write_effect_observed -> "effect_observed"
+     | Publication_write_not_executed -> "not_executed"
      | Publication_write_indeterminate -> "indeterminate")
     (Fs_compat.Publication_recovery.lane_release_failure_to_string
-       release_failure)
-    (Printexc.to_string release_failure.exception_)
-    (Printexc.raw_backtrace_to_string release_failure.backtrace);
+       release_failure);
   let message, write_executed =
     match execution with
-    | Publication_write_committed ->
+    | Publication_write_completed ->
       ( "filesystem publication committed, but publication recovery lane cleanup failed"
       , `Bool true )
+    | Publication_write_effect_observed ->
+      ( "filesystem publication changed the target before the publication callback and recovery lane cleanup both failed"
+      , `Bool true )
+    | Publication_write_not_executed ->
+      ( "filesystem publication left the target unchanged, but publication recovery lane cleanup failed"
+      , `Bool false )
     | Publication_write_indeterminate ->
       ( "filesystem publication callback and publication recovery lane cleanup both failed"
       , `Null )
@@ -1501,7 +1505,7 @@ let publication_recovery_cleanup_failed_attempt
 let finish_recovery_guarded_write
       ~keeper_name
       ~target
-      ~execution_of_result
+      ~observe_result
       ~finish
       outcome
   =
@@ -1509,30 +1513,97 @@ let finish_recovery_guarded_write
   | Fs_compat.Publication_recovery.Lane_released result -> finish result
   | Fs_compat.Publication_recovery.Lane_release_failed
       { value; release_failure } ->
-    let execution = execution_of_result value in
+    let observation = observe_result value in
     let publication_result =
       match finish value with
-      | Ok attempt -> file_write_attempt_to_yojson attempt
+      | Ok _ -> observation.publication_result
       | Error message ->
         Log.Keeper.error
           ~keeper_name
           "WRITE_AUDIT: publication callback result projection failed before lane release evidence path=%s error=%s"
           target
           message;
-        `Assoc [ "outcome", `String "projection_failure" ]
+        `Assoc
+          [ "outcome", `String "projection_failure"
+          ; "callback_result", observation.publication_result
+          ]
     in
     Ok
       (publication_recovery_cleanup_failed_attempt
          ~keeper_name
          ~target
-         ~execution
+         ~execution:observation.execution
          ~publication_result
          release_failure)
 ;;
 
-let content_write_execution = function
-  | Ok () -> Publication_write_committed
-  | Error _ -> Publication_write_indeterminate
+let publication_execution_of_target_effect = function
+  | Fs_compat.Target_unchanged -> Publication_write_not_executed
+  | ( Fs_compat.Target_created
+    | Fs_compat.Target_created_incomplete
+    | Fs_compat.Target_replaced ) ->
+    Publication_write_effect_observed
+  | Fs_compat.Target_state_unknown -> Publication_write_indeterminate
+;;
+
+let content_write_observation = function
+  | Ok () ->
+    { execution = Publication_write_completed
+    ; publication_result = `Assoc [ "outcome", `String "success" ]
+    }
+  | Error (Content_write_capability { error; _ }) ->
+    { execution = publication_execution_of_target_effect error.target_effect
+    ; publication_result =
+        `Assoc
+          [ "outcome", `String "failure"
+          ; "failure_class", `String "runtime_failure"
+          ; ( "filesystem_target_effect"
+            , `String
+                (Fs_compat.capability_write_target_effect_to_string
+                   error.target_effect) )
+          ]
+    }
+  | Error (Content_write_directory { failed_commit; _ }) ->
+    { execution = Publication_write_not_executed
+    ; publication_result =
+        `Assoc
+          [ "outcome", `String "failure"
+          ; "failure_class", `String "runtime_failure"
+          ; ( "filesystem_directory_target_effect"
+            , `String
+                (created_directory_target_effect_to_string
+                   failed_commit.target_effect) )
+          ]
+    }
+  | Error (Content_write_append outcome) ->
+    let target_effect = append_target_effect outcome in
+    let execution =
+      match target_effect with
+      | Append_target_unchanged -> Publication_write_not_executed
+      | ( Append_target_extended_complete
+        | Append_target_extended_partial
+        | Append_target_extended_detached ) ->
+        Publication_write_effect_observed
+      | Append_target_state_unknown -> Publication_write_indeterminate
+    in
+    { execution
+    ; publication_result =
+        `Assoc
+          [ "outcome", `String "failure"
+          ; "failure_class", `String "runtime_failure"
+          ; ( "filesystem_append_target_effect"
+            , `String (append_target_effect_to_string target_effect) )
+          ]
+    }
+  | Error (Content_write_message _) ->
+    { execution = Publication_write_indeterminate
+    ; publication_result =
+        `Assoc
+          [ "outcome", `String "failure"
+          ; "failure_class", `String "runtime_failure"
+          ; "filesystem_target_effect", `String "not_observed"
+          ]
+    }
 ;;
 
 let handle_file_write_with_outcome
@@ -1766,7 +1837,7 @@ let handle_file_write_with_outcome
          finish_recovery_guarded_write
            ~keeper_name:meta.name
            ~target
-           ~execution_of_result:content_write_execution
+           ~observe_result:content_write_observation
            ~finish:finish_write_result
            outcome
        | Error unavailable ->
@@ -2112,7 +2183,7 @@ let handle_file_write_with_outcome
                   finish_recovery_guarded_write
                     ~keeper_name:meta.name
                     ~target
-                    ~execution_of_result:content_write_execution
+                    ~observe_result:content_write_observation
                     ~finish:finish_write_result
                     outcome
                 | Error unavailable ->
@@ -2281,11 +2352,69 @@ module For_testing = struct
       finish_recovery_guarded_write
         ~keeper_name
         ~target:"product-contract-fixture"
-        ~execution_of_result:(fun () -> Publication_write_committed)
+        ~observe_result:(fun () ->
+          { execution = Publication_write_completed
+          ; publication_result = `Assoc [ "outcome", `String "success" ]
+          })
         ~finish:(fun () ->
           Ok
             (Write_succeeded
                (Yojson.Safe.to_string (`Assoc [ "ok", `Bool true ]))))
+        outcome
+    with
+    | Ok attempt -> file_write_attempt_to_execution attempt
+    | Error message -> Keeper_tool_execution.failure (error_json message)
+  ;;
+
+  let failed_publication_release_failure
+        ~keeper_name
+        ~target_effect
+        ~release_failure
+    =
+    let error =
+      { Fs_compat.operation = Fs_compat.Atomic_replace_operation
+      ; target_effect
+      ; primary_failure =
+          Fs_compat.Write_primary_failure
+            { stage = Fs_compat.Sync_parent
+            ; cause = Fs_compat.Resource_identity_changed
+            }
+      ; cleanup_failures = []
+      }
+    in
+    let result =
+      Error (Content_write_capability { error; created_parents = [] })
+    in
+    let outcome =
+      Fs_compat.Publication_recovery.Lane_release_failed
+        { value = result; release_failure }
+    in
+    match
+      finish_recovery_guarded_write
+        ~keeper_name
+        ~target:"product-contract-fixture"
+        ~observe_result:content_write_observation
+        ~finish:(fun result ->
+          match result with
+          | Error (Content_write_capability { error; created_parents }) ->
+            Ok
+              (Write_failed
+                 { payload =
+                     capability_write_error_payload
+                       ~target:"product-contract-fixture"
+                       ~created_parents
+                       error
+                 ; class_ = Tool_result.Runtime_failure
+                 })
+          | Ok () ->
+            Ok
+              (Write_succeeded
+                 (Yojson.Safe.to_string (`Assoc [ "ok", `Bool true ])))
+          | Error
+              ( Content_write_message _
+              | Content_write_directory _
+              | Content_write_append _ ) ->
+            Error "unexpected product-contract fixture result")
         outcome
     with
     | Ok attempt -> file_write_attempt_to_execution attempt

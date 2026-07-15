@@ -716,7 +716,7 @@ let start ~sw ~env ~clock ~state =
   | Some token ->
     let policy = resolved_trigger_policy () in
     State.set_trigger_policy policy;
-    let dispatch_for_scope workspace_scope =
+    let dispatch_for_config config =
       (* RFC-connector-deferred-reply-via-chat-queue: tag this dispatch as the Discord connector so a message that
          arrives while the keeper is in flight is enqueued onto
          [Keeper_chat_queue] (drained by the serial consumer, delivered back to
@@ -730,7 +730,7 @@ let start ~sw ~env ~clock ~state =
         ~net:state.Mcp_server.net
         ~publication_recovery_provider:
           (Mcp_server.publication_recovery_availability_provider state)
-        ~config:workspace_scope.config
+        ~config
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
@@ -744,15 +744,15 @@ let start ~sw ~env ~clock ~state =
           ~intents:default_intents
           ~trigger_policy:policy
           ~on_event:(fun ev ->
-            let workspace_scope = Mcp_server.workspace_scope state in
+            let config = Mcp_server.workspace_config state in
             on_event
-              ~dispatch:(dispatch_for_scope workspace_scope)
+              ~dispatch:(dispatch_for_config config)
               ~clock
-              ~base_dir:workspace_scope.config.base_path
+              ~base_dir:config.base_path
               ev)
           ~on_ambient:(fun ev ->
-            let workspace_scope = Mcp_server.workspace_scope state in
-            on_ambient ~base_dir:workspace_scope.config.base_path ev)
+            let config = Mcp_server.workspace_config state in
+            on_ambient ~base_dir:config.base_path ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

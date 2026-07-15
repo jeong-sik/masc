@@ -162,7 +162,7 @@ let make_fixture
       ~mono_clock
       clock
       ~base_path
-      ~meta
+      ~(meta : Masc.Keeper_meta_contract.keeper_meta)
       ~publication_recovery
       init_mode
   =

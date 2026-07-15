@@ -1148,11 +1148,6 @@ module For_testing = struct
     state
   ;;
 
-  let await_publication_recovery_discovery registry =
-    Fs_compat.Publication_recovery.For_testing.await_discovery_settlement
-      registry
-  ;;
-
   type publication_recovery_runtime_observation =
     | Runtime_initializing
     | Runtime_available

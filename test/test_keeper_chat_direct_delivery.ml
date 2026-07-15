@@ -226,6 +226,30 @@ let test_direct_flow_is_active_only _env =
     check int "one user and one assistant row" 2 (List.length history))
 ;;
 
+let test_canonical_request_drives_user_projection _env =
+  with_temp_dir (fun base_path background_sw ->
+    let request_id = request_id "direct-canonical-projection" in
+    submit_canonical_request ~background_sw ~base_path request_id;
+    let checkpoint_payload =
+      { (payload ()) with user_content = "stale checkpoint projection" }
+    in
+    let prepared =
+      Direct.prepare ~base_path ~request_id ~payload:checkpoint_payload ~now:1.0
+      |> expect_ok
+    in
+    ignore
+      (Direct.commit_user_row ~base_path ~identity:prepared ~now:2.0
+       |> expect_ok
+        : Direct.t);
+    match Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu" with
+    | [ message ] ->
+      check string
+        "canonical typed request owns the user projection"
+        "소스코드를 확인해"
+        message.content
+    | history -> failf "expected one canonical user row, got %d" (List.length history))
+;;
+
 let fail_after_rename_io () =
   Direct.For_testing.make_io
     ~before_durable_write:(function
@@ -762,6 +786,10 @@ let () =
     "keeper_chat_direct_delivery"
     [ ( "direct checkpoint"
       , [ eio_test_case "direct flow remains active-only" `Quick test_direct_flow_is_active_only
+        ; eio_test_case
+            "canonical request drives the user projection"
+            `Quick
+            test_canonical_request_drives_user_projection
         ; eio_test_case
             "post-rename ambiguity is explicit and reconcilable"
             `Quick

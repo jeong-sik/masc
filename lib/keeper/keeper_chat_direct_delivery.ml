@@ -119,6 +119,10 @@ type error =
       ; detail : string
       }
   | Persistence_failed of persistence_failure
+  | Async_request_absent
+  | Async_request_unreadable of string
+  | Async_request_rejected of Keeper_msg_async.access_rejection
+  | Async_request_identity_mismatch
   | Async_terminal_rejected of Keeper_msg_async.canonical_terminal_error
   | Async_terminal_identity_mismatch
   | Removal_requires_transcript_commit of phase_kind
@@ -136,7 +140,7 @@ type quarantine_reason =
   | Active_entry_not_regular
   | Active_entry_unreadable of error
   | Filename_request_mismatch
-  | Keeper_payload_mismatch
+  | Keeper_request_mismatch
 
 type quarantine_artifact =
   { area : lane_area
@@ -235,6 +239,14 @@ let error_to_string = function
       failure.target_revision
       publication
       failure.detail
+  | Async_request_absent -> "direct delivery canonical async request is absent"
+  | Async_request_unreadable detail ->
+    "direct delivery canonical async request is unreadable: " ^ detail
+  | Async_request_rejected rejection ->
+    "direct delivery canonical async request rejected: "
+    ^ Yojson.Safe.to_string (Keeper_msg_async.access_rejection_to_json rejection)
+  | Async_request_identity_mismatch ->
+    "direct delivery canonical async request identity mismatch"
   | Async_terminal_rejected error ->
     "direct delivery canonical async lookup failed: "
     ^ Keeper_msg_async.canonical_terminal_error_to_string error
@@ -457,6 +469,49 @@ let resolve_paths ~base_path ~keeper_name request_id =
     , keeper_name
     , active_path_resolved ~base_path keeper_name request_id
     , staging_dir_resolved ~base_path keeper_name )
+;;
+
+let canonical_direct_entry ~base_path record =
+  let request_id = Request_id.to_string record.request_id in
+  match
+    Keeper_msg_async.load_canonical_durable_entry
+      ~base_path
+      ~caller:record.payload.submitted_by
+      request_id
+  with
+  | Keeper_msg_async.Absent -> Error Async_request_absent
+  | Keeper_msg_async.Unreadable detail -> Error (Async_request_unreadable detail)
+  | Keeper_msg_async.Rejected rejection -> Error (Async_request_rejected rejection)
+  | Keeper_msg_async.Found entry ->
+    if
+      (not (String.equal entry.request_id request_id))
+      || not (String.equal entry.submitted_by record.payload.submitted_by)
+    then Error Async_request_identity_mismatch
+    else
+      match Keeper_invocation_types.request_direct_delivery entry.request with
+      | None -> Error Async_request_identity_mismatch
+      | Some direct -> Ok (entry, direct)
+;;
+
+let chat_attachment (attachment : Keeper_direct_invocation.attachment) :
+    Keeper_chat_store.attachment =
+  { id = attachment.id
+  ; att_type = attachment.attachment_type
+  ; name = attachment.name
+  ; size = attachment.size
+  ; mime_type = attachment.mime_type
+  ; data = attachment.data
+  }
+;;
+
+let chat_speaker (speaker : Keeper_direct_invocation.speaker) : Keeper_chat_store.speaker =
+  { speaker_id = speaker.speaker_id
+  ; speaker_name = speaker.speaker_name
+  ; speaker_authority =
+      (match speaker.speaker_authority with
+       | Keeper_direct_invocation.Owner -> Keeper_chat_store.Owner
+       | Keeper_direct_invocation.External -> Keeper_chat_store.External)
+  }
 ;;
 
 let string_option_to_yojson = function
@@ -1321,17 +1376,16 @@ let replace_with_io
       next_phase
   =
   let* () = validate_now now in
+  let* entry, direct = canonical_direct_entry ~base_path identity in
+  let keeper_name = Keeper_invocation_types.request_target_name entry.request in
   let* base_path, _keeper_name, record_path, staging_dir =
-    resolve_paths
-      ~base_path
-      ~keeper_name:identity.payload.keeper_name
-      identity.request_id
+    resolve_paths ~base_path ~keeper_name identity.request_id
   in
   with_operation_lock record_path (fun () ->
     let* existing = load_path_unlocked record_path in
     let* existing =
       ensure_exact_record
-        ~keeper_name:identity.payload.keeper_name
+        ~keeper_name
         ~request_id:identity.request_id
         existing
     in
@@ -1350,7 +1404,9 @@ let replace_with_io
         (Invalid_transition
            { expected = expected_phase; actual = phase_kind existing.phase })
     else
-      let* phase = next_phase ~canonical_base_path:base_path existing in
+      let* phase =
+        next_phase ~canonical_base_path:base_path ~keeper_name ~direct existing
+      in
       let* revision = next_revision existing.revision in
       let updated = { existing with revision; phase; updated_at = now } in
       let* () = validate_record updated in
@@ -1383,18 +1439,19 @@ let commit_user_row_with_io io ~base_path ~identity ~now =
     ~base_path
     ~identity
     ~now
-    (fun ~canonical_base_path existing ->
+    (fun ~canonical_base_path ~keeper_name ~direct existing ->
+       let projection = direct.Keeper_direct_invocation.projection in
        let result =
          Keeper_chat_store.append_user_message_once
            ~base_dir:canonical_base_path
-           ~keeper_name:existing.payload.keeper_name
+           ~keeper_name
            ~delivery_key:(direct_delivery_key existing.request_id)
-           ~content:existing.payload.user_content
-           ~attachments:existing.payload.user_attachments
-           ~surface:existing.payload.surface
-           ?conversation_id:existing.payload.conversation_id
-           ?external_message_id:existing.payload.external_message_id
-           ~speaker:existing.payload.speaker
+           ~content:projection.user_content
+           ~attachments:(List.map chat_attachment direct.attachments)
+           ~surface:projection.surface
+           ?conversation_id:projection.conversation_id
+           ?external_message_id:projection.external_message_id
+           ~speaker:(chat_speaker projection.speaker)
            ()
        in
        let* appended =
@@ -1417,7 +1474,7 @@ let mark_running_with_io io ~base_path ~identity ~now =
     ~base_path
     ~identity
     ~now
-    (fun ~canonical_base_path:_ existing ->
+    (fun ~canonical_base_path:_ ~keeper_name:_ ~direct:_ existing ->
        match existing.phase with
        | User_row_committed { user_row_id } -> Ok (Running { user_row_id })
        | phase ->
@@ -1437,13 +1494,13 @@ let stage_effect_with_io io ~base_path ~identity ~staged ~now =
     ~base_path
     ~identity
     ~now
-    (fun ~canonical_base_path existing ->
+    (fun ~canonical_base_path ~keeper_name ~direct:_ existing ->
        match existing.phase with
        | Running { user_row_id } ->
          let redaction =
            Keeper_secret_redaction.snapshot
              ~base_path:canonical_base_path
-             ~keeper_name:existing.payload.keeper_name
+             ~keeper_name
          in
          let* staged = redact_effect redaction staged in
          let* () = validate_effect staged in
@@ -1456,16 +1513,17 @@ let stage_effect_with_io io ~base_path ~identity ~staged ~now =
 
 let stage_effect = stage_effect_with_io production_io
 
-let append_staged_transcript ~base_path existing ~user_row_id staged =
+let append_staged_transcript ~base_path ~keeper_name ~direct existing ~user_row_id staged =
+  let projection = direct.Keeper_direct_invocation.projection in
   match staged.transcript_effect with
   | Assistant_reply { content; blocks; turn_ref } ->
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
-      ~keeper_name:existing.payload.keeper_name
+      ~keeper_name
       ~delivery_key:(direct_delivery_key existing.request_id)
       ~content
-      ~surface:existing.payload.surface
-      ?conversation_id:existing.payload.conversation_id
+      ~surface:projection.surface
+      ?conversation_id:projection.conversation_id
       ?blocks
       ?turn_ref
       ~stream_lifecycle:
@@ -1481,11 +1539,11 @@ let append_staged_transcript ~base_path existing ~user_row_id staged =
   | Transport_failure { content } ->
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
-      ~keeper_name:existing.payload.keeper_name
+      ~keeper_name
       ~delivery_key:(direct_delivery_key existing.request_id)
       ~content
-      ~surface:existing.payload.surface
-      ?conversation_id:existing.payload.conversation_id
+      ~surface:projection.surface
+      ?conversation_id:projection.conversation_id
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
       ~stream_lifecycle:
         [ Keeper_chat_store.Run_started
@@ -1508,12 +1566,14 @@ let commit_transcript_with_io io ~base_path ~identity ~now =
     ~base_path
     ~identity
     ~now
-    (fun ~canonical_base_path existing ->
+    (fun ~canonical_base_path ~keeper_name ~direct existing ->
        match existing.phase with
        | Effect_staged { user_row_id; staged } ->
          let* transcript_row_id =
            append_staged_transcript
              ~base_path:canonical_base_path
+             ~keeper_name
+             ~direct
              existing
              ~user_row_id
              staged
@@ -1528,16 +1588,6 @@ let commit_transcript_with_io io ~base_path ~identity ~now =
 
 let commit_transcript = commit_transcript_with_io production_io
 
-let request_matches_payload request payload =
-  String.equal
-    (Keeper_invocation_types.request_target_name request)
-    payload.keeper_name
-  &&
-  match Keeper_invocation_types.request_direct_delivery request with
-  | Some direct -> String.equal direct.projection.user_content payload.user_content
-  | None -> String.equal (Keeper_invocation_types.request_prompt request) payload.user_content
-;;
-
 let observe_async_terminal ~base_path ~(identity : t) =
   let* base_path = canonical_base_path base_path in
   let request_id_wire = Request_id.to_string identity.request_id in
@@ -1551,9 +1601,9 @@ let observe_async_terminal ~base_path ~(identity : t) =
   let entry = Keeper_msg_async.durable_terminal_entry proof in
   if
     String.equal entry.request_id request_id_wire
-    && request_matches_payload entry.request identity.payload
     && String.equal entry.base_path base_path
     && String.equal entry.submitted_by identity.payload.submitted_by
+    && Option.is_some (Keeper_invocation_types.request_direct_delivery entry.request)
   then Ok { canonical_terminal = proof; checkpoint = identity }
   else Error Async_terminal_identity_mismatch
 ;;
@@ -1565,8 +1615,8 @@ let proof_matches ~base_path (identity : t) proof =
   to_yojson proof.checkpoint = to_yojson identity
   && String.equal entry.base_path base_path
   && String.equal entry.request_id (Request_id.to_string identity.request_id)
-  && request_matches_payload entry.request identity.payload
   && String.equal entry.submitted_by identity.payload.submitted_by
+  && Option.is_some (Keeper_invocation_types.request_direct_delivery entry.request)
 ;;
 
 let remove_after_async_terminal_with_io
@@ -1575,17 +1625,16 @@ let remove_after_async_terminal_with_io
       ~(identity : t)
       ~proof
   =
+  let proof_entry = Keeper_msg_async.durable_terminal_entry proof.canonical_terminal in
+  let keeper_name = Keeper_invocation_types.request_target_name proof_entry.request in
   let* base_path, _keeper_name, record_path, _staging_dir =
-    resolve_paths
-      ~base_path
-      ~keeper_name:identity.payload.keeper_name
-      identity.request_id
+    resolve_paths ~base_path ~keeper_name identity.request_id
   in
   with_operation_lock record_path (fun () ->
     let* existing = load_path_unlocked record_path in
     let* existing =
       ensure_exact_record
-        ~keeper_name:identity.payload.keeper_name
+        ~keeper_name
         ~request_id:identity.request_id
         existing
     in
@@ -1682,7 +1731,7 @@ let artifact_of_load_error path error =
   { area = Active_records; path; reason }
 ;;
 
-let inspect_active_entry ~keeper_name active_dir filename =
+let inspect_active_entry ~base_path ~keeper_name active_dir filename =
   let path = Filename.concat active_dir filename in
   match Request_id.of_string filename with
   | Error detail ->
@@ -1702,14 +1751,21 @@ let inspect_active_entry ~keeper_name active_dir filename =
            ; path
            ; reason = Filename_request_mismatch
            }
-       else if not (String.equal keeper_name record.payload.keeper_name)
-       then
-         Error
-           { area = Active_records
-           ; path
-           ; reason = Keeper_payload_mismatch
-           }
-       else Ok record)
+       else
+         match canonical_direct_entry ~base_path record with
+         | Error error -> Error (artifact_of_load_error path error)
+         | Ok (entry, _direct) ->
+           if
+             String.equal
+               keeper_name
+               (Keeper_invocation_types.request_target_name entry.request)
+           then Ok record
+           else
+             Error
+               { area = Active_records
+               ; path
+               ; reason = Keeper_request_mismatch
+               })
 ;;
 
 let inspect_active ~base_path ~keeper_name active_dir =
@@ -1729,7 +1785,7 @@ let inspect_active ~base_path ~keeper_name active_dir =
        List.fold_left
          (fun (records, artifacts) filename ->
             Eio_guard.fair_yield ();
-            match inspect_active_entry ~keeper_name active_dir filename with
+            match inspect_active_entry ~base_path ~keeper_name active_dir filename with
             | Ok record -> record :: records, artifacts
             | Error artifact -> records, artifact :: artifacts)
          ([], [])

@@ -135,6 +135,10 @@ type error =
       ; detail : string
       }
   | Persistence_failed of persistence_failure
+  | Async_request_absent
+  | Async_request_unreadable of string
+  | Async_request_rejected of Keeper_msg_async.access_rejection
+  | Async_request_identity_mismatch
   | Async_terminal_rejected of Keeper_msg_async.canonical_terminal_error
   | Async_terminal_identity_mismatch
   | Removal_requires_transcript_commit of phase_kind
@@ -215,7 +219,7 @@ type quarantine_reason =
   | Active_entry_not_regular
   | Active_entry_unreadable of error
   | Filename_request_mismatch
-  | Keeper_payload_mismatch
+  | Keeper_request_mismatch
 
 type quarantine_artifact =
   { area : lane_area

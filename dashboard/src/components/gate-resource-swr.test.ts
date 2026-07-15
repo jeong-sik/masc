@@ -34,7 +34,6 @@ function response(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     generated_at: '2026-06-24T00:00:00Z',
     approval_queue: queue,
     recent_resolved: [],
-    approval_rules: [],
   } as DashboardGateResponse
 }
 
@@ -44,13 +43,11 @@ async function loadGate() {
   vi.doMock('../api', () => ({
     fetchDashboardGate,
     resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
-    deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
     setGateMode: vi.fn().mockResolvedValue({ ok: true }),
   }))
   vi.doMock('../api/dashboard-gate', () => ({
     fetchDashboardGate,
     resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
-    deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
     setGateMode: vi.fn().mockResolvedValue({ ok: true }),
   }))
   vi.doMock('../sse-store', () => ({ registerGateRefresh: vi.fn() }))

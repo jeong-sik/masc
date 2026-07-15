@@ -91,19 +91,6 @@ export interface KeeperResolvedApprovalItem {
   goal_id?: string | null
   goal_ids?: string[]
   decision_source?: GateDecisionSource | null
-  rule_match?: {
-    rule_id?: string | null
-  } | null
-}
-
-export interface KeeperApprovalRule {
-  id: string
-  keeper_name: string
-  tool_name: string
-  request_fingerprint?: string
-  created_at?: string | null
-  created_by?: string | null
-  source_approval_id?: string | null
 }
 
 export type GateMode = 'manual' | 'auto_judge' | 'always_allow'
@@ -120,7 +107,6 @@ export interface DashboardGateResponse {
   note?: string
   approval_queue?: KeeperApprovalQueueItem[]
   recent_resolved?: KeeperResolvedApprovalItem[]
-  approval_rules?: KeeperApprovalRule[]
   hitl?: {
     gate_mode?: GateModeStatus
   }

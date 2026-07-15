@@ -16,7 +16,6 @@ type request =
 
 type authorization_source =
   | One_shot_resolution of string
-  | Exact_always_rule of string
   | Keeper_always_allow
   | Workspace_always_allow
 
@@ -115,7 +114,6 @@ let rec take_matching_cycle_grant grant request =
 
 let authorization_source_to_string = function
   | One_shot_resolution _ -> "one_shot_resolution"
-  | Exact_always_rule _ -> "exact_always_rule"
   | Keeper_always_allow -> "keeper_always_allow"
   | Workspace_always_allow -> "workspace_always_allow"
 ;;
@@ -140,10 +138,6 @@ let source_fields = function
   | One_shot_resolution approval_id ->
     [ "authorization_source", `String "one_shot_resolution"
     ; "approval_id", `String approval_id
-    ]
-  | Exact_always_rule rule_id ->
-    [ "authorization_source", `String "exact_always_rule"
-    ; "rule_id", `String rule_id
     ]
   | Keeper_always_allow ->
     [ "authorization_source", `String "keeper_always_allow" ]
@@ -179,14 +173,13 @@ let decision_to_yojson = function
       ]
 ;;
 
-let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
+let audit_allow request ?source_approval_id ?decision_source source =
   Keeper_approval_queue.audit_approval_event
     ~base_path:request.base_path
     ~event_type:"gate_allowed"
     ~id:
       (match source with
        | One_shot_resolution approval_id -> approval_id
-       | Exact_always_rule rule_id -> rule_id
        | Keeper_always_allow | Workspace_always_allow ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
@@ -194,7 +187,6 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids
-    ?rule_match
     ?source_approval_id
     ?decision_source
     ()
@@ -260,7 +252,6 @@ let resolve_judgment (entry : Keeper_approval_queue.pending_approval) ~approval_
          ~id:approval_id
          ~decision
          ~source:Keeper_approval_queue.Auto_judge
-         ~created_by:("auto_judge:" ^ summary.model_run_id)
          ()
      with
      | Ok _ -> Ok Judgment_finalized
@@ -572,29 +563,6 @@ let defer request reason =
     Deferred { approval_id; reason }
 ;;
 
-let observe_exact_rule_store_degraded request error =
-  let detail = Keeper_approval_queue.rule_store_error_to_string error in
-  Log.Keeper.error
-    ~keeper_name:request.keeper_name
-    "exact Always Allowed rule lookup unavailable operation=%s: %s; continuing configured Gate mode"
-    request.operation
-    detail;
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ApprovalQueueFailures)
-    ~labels:[ "keeper", request.keeper_name; "site", "exact_rule_lookup" ]
-    ();
-  Keeper_approval_queue.audit_approval_event
-    ~base_path:request.base_path
-    ~event_type:"gate_exact_rule_store_degraded"
-    ~id:(Keeper_approval_queue.generate_id ())
-    ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
-    ?turn_id:(request_turn_id request)
-    ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
-    ()
-;;
-
 let decide_from_selected_mode request = function
   | Error detail -> defer request (Mode_state_invalid detail)
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
@@ -619,35 +587,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
     Allow { source })
   else
     let mode = Keeper_gate_mode.read ~base_path:request.base_path in
-    (match mode with
-     | Ok Keeper_gate_mode.Always_allow ->
-       let source = Workspace_always_allow in
-       audit_allow
-         request
-         ~decision_source:Keeper_approval_queue.Always_allowed
-         source;
-       Allow { source }
-     | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
-       (match
-          Keeper_approval_queue.find_matching_rule
-            ~base_path:request.base_path
-            ~keeper_name:request.keeper_name
-            ~tool_name:request.operation
-            ~input:request.input
-            ()
-        with
-        | Error error ->
-          observe_exact_rule_store_degraded request error;
-          decide_from_selected_mode request mode
-        | Ok (Some rule_match) ->
-          let source = Exact_always_rule rule_match.rule_id in
-          audit_allow
-            request
-            ~rule_match
-            ~decision_source:Keeper_approval_queue.Always_allowed
-            source;
-          Allow { source }
-        | Ok None -> decide_from_selected_mode request mode))
+    decide_from_selected_mode request mode
 ;;
 
 let decide ?cycle_grant ~keeper_always_allow request =

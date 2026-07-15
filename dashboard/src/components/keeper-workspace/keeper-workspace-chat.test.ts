@@ -34,7 +34,6 @@ function gateResponse(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     generated_at: '2026-07-08T00:00:00Z',
     approval_queue: queue,
     recent_resolved: [],
-    approval_rules: [],
   } as DashboardGateResponse
 }
 

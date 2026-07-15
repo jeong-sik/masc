@@ -50,8 +50,6 @@ type persisted_delivery =
   { entry : pending_approval
   ; decision : decision
   ; source : decision_source
-  ; remember_rule : bool
-  ; created_by : string option
   ; grant_consumed : bool
   }
 
@@ -80,7 +78,7 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 2
+let pending_store_version = 3
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_eio_gate = Eio.Mutex.create ()
 let pending_store_cross_context_mu = Stdlib.Mutex.create ()
@@ -183,8 +181,6 @@ let persisted_delivery_to_yojson delivery =
     [ "entry", pending_entry_to_yojson delivery.entry
     ; "decision", approval_decision_to_yojson delivery.decision
     ; "source", `String (decision_source_to_string delivery.source)
-    ; "remember_rule", `Bool delivery.remember_rule
-    ; "created_by", Json_util.string_opt_to_json delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
     ]
 ;;
@@ -414,8 +410,6 @@ let persisted_delivery_of_yojson ~base_path json =
           [ "entry"
           ; "decision"
           ; "source"
-          ; "remember_rule"
-          ; "created_by"
           ; "grant_consumed"
           ]
         fields
@@ -430,13 +424,6 @@ let persisted_delivery_of_yojson ~base_path json =
       | Some source -> Ok source
       | None -> Error (Printf.sprintf "%s.source %S is unknown" surface source_raw)
     in
-    let* remember_rule =
-      match List.assoc_opt "remember_rule" fields with
-      | Some (`Bool value) -> Ok value
-      | Some _ -> Error (surface ^ ".remember_rule must be a boolean")
-      | None -> Error (surface ^ ".remember_rule is required")
-    in
-    let* created_by = optional_string ~surface "created_by" fields in
     let* grant_consumed =
       match List.assoc_opt "grant_consumed" fields with
       | Some (`Bool value) -> Ok value
@@ -450,7 +437,7 @@ let persisted_delivery_of_yojson ~base_path json =
       | (Decision.Reject _ | Decision.Edit _), true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
     in
-    Ok { entry; decision; source; remember_rule; created_by; grant_consumed }
+    Ok { entry; decision; source; grant_consumed }
   | _ -> Error "gate_pending.delivery must be a JSON object"
 ;;
 
@@ -747,7 +734,6 @@ let audit_approval_event
       ?task_id
       ?goal_id
       ?(goal_ids = [])
-      ?rule_match
       ?source_approval_id
       ?actor
       ?decision_source
@@ -782,9 +768,6 @@ let audit_approval_event
              | Some source -> `String (decision_source_to_string source)
              | None -> `Null )
          ]
-         @ (match rule_match with
-            | Some matched -> [ "rule_match", rule_match_to_yojson matched ]
-            | None -> [])
          @ (match source_approval_id with
             | Some approval_id -> [ "source_approval_id", `String approval_id ]
             | None -> [])
@@ -803,17 +786,6 @@ let audit_approval_event
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
-;;
-
-let audit_rule_event ~base_path ~event_type (rule : approval_rule) =
-  audit_approval_event
-    ~base_path
-    ~event_type
-    ~id:rule.id
-    ~keeper_name:rule.keeper_name
-    ~tool_name:rule.tool_name
-    ?source_approval_id:rule.source_approval_id
-    ()
 ;;
 
 let audit_scan_window ?keeper_name n =
@@ -909,7 +881,6 @@ let resolved_approval_json_of_audit_event json =
     ; "goal_ids", json_member_or_null "goal_ids" json
     ; "actor", json_member_or_null "actor" json
     ; "decision_source", json_member_or_null "decision_source" json
-    ; "rule_match", json_member_or_null "rule_match" json
     ]
 ;;
 
@@ -1721,7 +1692,7 @@ type journal_error =
   | Journal_not_found
   | Journal_storage of storage_error
 
-let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
+let journal_resolution ~id ~decision ~source =
   with_pending_store_lock (fun () ->
     let pending_map = Atomic.get pending in
     match SMap.find_opt id pending_map with
@@ -1731,8 +1702,6 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
         { entry
         ; decision
         ; source
-        ; remember_rule
-        ; created_by
         ; grant_consumed = false
         }
       in
@@ -1811,101 +1780,38 @@ let approval_decision_equal left right =
     false
 ;;
 
-let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
-  try
-    match
-      upsert_rule
-        ~base_path
-        ~keeper_name:entry.keeper_name
-        ~tool_name:entry.tool_name
-        ~input:entry.input
-        ?created_by
-        ~source_approval_id:entry.id
-        ()
-    with
-    | Ok (rule, created) ->
-      if created then audit_rule_event ~base_path ~event_type:"rule_created" rule;
-      Ok rule
-    | Error reason -> Error reason
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    let reason = Printexc.to_string exn in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ApprovalQueueFailures)
-      ~labels:
-        [ "keeper", entry.keeper_name
-        ; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule)
-        ]
-      ();
-    Log.Keeper.warn
-      "approval_queue: remember rule failed id=%s err=%s"
-      entry.id
-      reason;
-    Error
-      ({ path = rules_path ~base_path ()
-       ; reason
-       }
-       : rule_store_error)
-;;
-
-let remember_rule_for_delivery delivery =
-  match delivery.decision, delivery.remember_rule with
-  | Decision.Approve, true ->
-    (match
-       remember_rule_for_entry
-         ~base_path:delivery.entry.audit_base_path
-         ?created_by:delivery.created_by
-         delivery.entry
-     with
-     | Ok rule -> Ok (Some rule)
-     | Error rule_error ->
-       Error
-         { path = rule_error.path
-         ; reason = rule_error.reason
-         })
-  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
-    false ->
-    Ok None
-  | (Decision.Reject _ | Decision.Edit _), true -> Ok None
-;;
-
 let complete_delivery delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
   if delivery.grant_consumed
-  then Ok { remembered_rule = None }
+  then Ok ()
   else
   match deliver_resolution ~base_path delivery.entry delivery.decision with
   | Error reason -> Error (Delivery_failed { approval_id = id; reason })
   | Ok () ->
-    (match remember_rule_for_delivery delivery with
-     | Error storage_error ->
-       Error (Persistence_failed { approval_id = id; storage_error })
-     | Ok remembered_rule ->
-       let finish () =
-         resolve_entry
-           ~base_path
-           delivery.entry
-           ~source:delivery.source
-           delivery.decision;
-         signal_resolution_after_commit
-           ~base_path
-           ~keeper_name:delivery.entry.keeper_name
-           ~approval_id:id;
-         Ok { remembered_rule }
-       in
-       (match delivery.decision with
-        | Decision.Approve ->
-          (* Keep the resolved journal entry until the exact Gate request
-             consumes it. The wake event is only a correlation message and
-             cannot become a second authorization SSOT. *)
-          finish ()
-        | Decision.Reject _ | Decision.Edit _ ->
-          (match remove_delivery_from_store delivery with
-           | Error storage_error ->
-             Error (Persistence_failed { approval_id = id; storage_error })
-           | Ok () -> finish ())))
+    let finish () =
+      resolve_entry
+        ~base_path
+        delivery.entry
+        ~source:delivery.source
+        delivery.decision;
+      signal_resolution_after_commit
+        ~base_path
+        ~keeper_name:delivery.entry.keeper_name
+        ~approval_id:id;
+      Ok ()
+    in
+    (match delivery.decision with
+     | Decision.Approve ->
+       (* Keep the resolved journal entry until the exact Gate request
+          consumes it. The wake event is only a correlation message and
+          cannot become a second authorization SSOT. *)
+       finish ()
+     | Decision.Reject _ | Decision.Edit _ ->
+       (match remove_delivery_from_store delivery with
+        | Error storage_error ->
+          Error (Persistence_failed { approval_id = id; storage_error })
+        | Ok () -> finish ()))
 ;;
 
 let install_persistence_internal ~after_load ~base_path =
@@ -2028,17 +1934,14 @@ module For_testing = struct
   ;;
 
   let pending_store_path = pending_store_path
-  let always_allowed_store_path ~base_path = rules_path ~base_path ()
 end
 
 let resolve_with_policy
       ~id
       ~(decision : decision)
       ?(source = Human_operator)
-      ?(remember_rule = false)
-      ?created_by
       ()
-  : (resolution_result, resolve_error) result
+  : (unit, resolve_error) result
   =
   if not (claim_resolution id)
   then Error (Already_resolved id)
@@ -2048,18 +1951,11 @@ let resolve_with_policy
       (fun () ->
          match SMap.find_opt id (Atomic.get pending) with
          | Some _ ->
-           let remember_rule =
-             match decision with
-             | Decision.Approve -> remember_rule
-             | Decision.Reject _ | Decision.Edit _ -> false
-           in
            (match
               journal_resolution
                 ~id
                 ~decision
                 ~source
-                ~remember_rule
-                ~created_by
             with
             | Error Journal_not_found -> Error (Not_found id)
             | Error (Journal_storage storage_error) ->
@@ -2072,8 +1968,6 @@ let resolve_with_policy
               let same_request =
                 approval_decision_equal decision delivery.decision
                 && source = delivery.source
-                && remember_rule = delivery.remember_rule
-                && created_by = delivery.created_by
               in
               if same_request
               then complete_delivery delivery

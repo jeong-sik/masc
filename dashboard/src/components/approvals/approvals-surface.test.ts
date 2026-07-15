@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import * as Vitest from 'vitest'
-import type { DashboardGateResponse, KeeperApprovalQueueItem, KeeperApprovalRule, KeeperResolvedApprovalItem } from '../../types'
+import type { DashboardGateResponse, KeeperApprovalQueueItem, KeeperResolvedApprovalItem } from '../../types'
 
 const { afterEach, beforeEach, describe, expect, it, vi } = Vitest
 
@@ -28,7 +28,6 @@ function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string })
 function responseWithQueue(
   approval_queue: KeeperApprovalQueueItem[],
   recent_resolved: KeeperResolvedApprovalItem[] = [],
-  approval_rules: KeeperApprovalRule[] = [],
   hitl: DashboardGateResponse['hitl'] = {
     gate_mode: { mode: 'manual', configured: true, state: 'ready' },
   },
@@ -37,7 +36,6 @@ function responseWithQueue(
     generated_at: '2026-06-19T00:00:00Z',
     approval_queue,
     recent_resolved,
-    approval_rules,
     hitl,
   } as DashboardGateResponse
 }
@@ -47,7 +45,6 @@ function responseWithQueue(
 async function loadSurface(
   approval_queue: KeeperApprovalQueueItem[],
   recent_resolved: KeeperResolvedApprovalItem[] = [],
-  approval_rules: KeeperApprovalRule[] = [],
   hitl?: DashboardGateResponse['hitl'],
 ) {
   vi.resetModules()
@@ -58,12 +55,11 @@ async function loadSurface(
     .fn()
     .mockResolvedValue({ ok: true, mode: 'auto_judge', previous_mode: 'manual', actor: 'op', changed_at: '2026-06-19T00:00:00Z' })
   const response = hitl
-    ? responseWithQueue(approval_queue, recent_resolved, approval_rules, hitl)
-    : responseWithQueue(approval_queue, recent_resolved, approval_rules)
+    ? responseWithQueue(approval_queue, recent_resolved, hitl)
+    : responseWithQueue(approval_queue, recent_resolved)
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),
     resolveGateApproval,
-    deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
     setGateMode,
   })
   vi.doMock('../../api', apiMock)
@@ -124,9 +120,9 @@ describe('ApprovalsSurface', () => {
     expect(container.querySelector('[data-approval-id="appr-3"]')?.className).toContain('sev-info')
     expect(container.querySelector('[data-approval-id="appr-4"]')?.className).toContain('sev-info')
     expect(container.querySelector('[data-approval-id="appr-2"]')?.className).toContain('sev-info')
-    // the three live decisions are exposed; the prototype's defer/undo are not
+    // request-local approve/reject are exposed; standing promotion is not
     expect(container.textContent).toContain('승인')
-    expect(container.textContent).toContain('항상 승인')
+    expect(container.textContent).not.toContain('항상 승인')
     expect(container.textContent).toContain('거부')
     expect(container.textContent).not.toContain('보류')
     expect(container.textContent).not.toContain('되돌리기')
@@ -367,98 +363,6 @@ describe('ApprovalsSurface', () => {
     expect(history?.querySelector('.ap-history-at')?.textContent).toContain('2026')
   }, 20000)
 
-  it('filters resolved approval history and surfaces Always-rule evidence', async () => {
-    const { ApprovalsSurface } = await loadSurface(
-      [],
-      [
-        {
-          id: 'appr-approved',
-          keeper_name: 'keeper-a',
-          tool_name: 'fs_write',
-          decision: 'approve',
-          decision_source: 'always_allowed',
-          resolved_at: '2026-06-27T02:02:03Z',
-          rule_match: { rule_id: 'rule-1' },
-        },
-        {
-          id: 'appr-rejected',
-          keeper_name: 'keeper-b',
-          tool_name: 'shell',
-          decision: 'reject',
-          decision_source: 'auto_judge',
-          resolved_at: '2026-06-27T01:02:03Z',
-        },
-      ],
-      [
-        {
-          id: 'rule-1',
-          keeper_name: 'keeper-a',
-          tool_name: 'fs_write',
-          request_fingerprint: 'abcdef1234567890',
-        },
-      ],
-    )
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    const aside = container.querySelector('[data-testid="approvals-aside"]')
-    expect(aside?.textContent).toContain('Always Rules')
-    expect(aside?.textContent).toContain('keeper-a')
-    expect(aside?.textContent).toContain('fs_write')
-    expect(aside?.textContent).toContain('abcdef123456')
-    expect(aside?.textContent).not.toContain('abcdef1234567890')
-
-    container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
-    await flushUi()
-
-    expect(container.querySelector('[data-testid="approvals-history-view"]')?.textContent)
-      .toContain('rule rule-1')
-
-    const rejectFilter = Array.from(container.querySelectorAll<HTMLButtonElement>('.ap-hist-f'))
-      .find(button => button.textContent === '거부')
-    rejectFilter?.click()
-    await flushUi()
-
-    const history = container.querySelector('[data-testid="approvals-history-view"]')
-    expect(history?.textContent).toContain('appr-rejected')
-    expect(history?.textContent).not.toContain('appr-approved')
-  }, 20000)
-
-  it('makes hidden Always rules explicit when the aside list overflows its cap', async () => {
-    const rules = Array.from({ length: 8 }, (_, i) => ({
-      id: `rule-${i}`,
-      keeper_name: 'keeper-a',
-      tool_name: 'fs_write',
-      request_fingerprint: `fp-${i}`,
-    })) as KeeperApprovalRule[]
-    const { ApprovalsSurface } = await loadSurface([], [], rules)
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    // Only the first 6 rows render, and the remaining 2 are surfaced explicitly
-    // rather than silently dropped (Always rules have no other view).
-    expect(container.querySelectorAll('[data-testid="approval-rule-row"]').length).toBe(6)
-    expect(container.querySelector('[data-testid="approvals-rules-overflow"]')?.textContent)
-      .toContain('외 2건')
-  }, 20000)
-
-  it('omits the rules overflow note when the list fits the cap', async () => {
-    const rules = Array.from({ length: 6 }, (_, i) => ({
-      id: `rule-${i}`,
-      keeper_name: 'k',
-      tool_name: 't',
-      request_fingerprint: `fp-${i}`,
-    })) as KeeperApprovalRule[]
-    const { ApprovalsSurface } = await loadSurface([], [], rules)
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    expect(container.querySelector('[data-testid="approvals-rules-overflow"]')).toBeNull()
-  }, 20000)
-
   it('shows the empty state when no approvals are pending', async () => {
     const { ApprovalsSurface } = await loadSurface([])
 
@@ -483,13 +387,11 @@ describe('ApprovalsSurface', () => {
     vi.doMock('../../api', () => ({
       fetchDashboardGate,
       resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
-      deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../api/dashboard-gate', () => ({
       fetchDashboardGate,
       resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
-      deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../sse-store', () => ({ registerGateRefresh: vi.fn() }))
@@ -521,13 +423,11 @@ describe('ApprovalsSurface', () => {
     vi.doMock('../../api', () => ({
       fetchDashboardGate,
       resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
-      deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../api/dashboard-gate', () => ({
       fetchDashboardGate,
       resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
-      deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../sse-store', () => ({ registerGateRefresh: vi.fn() }))
@@ -571,7 +471,7 @@ describe('ApprovalsSurface', () => {
     approveBtn?.click()
     await flushUi()
 
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-9', 'approve', false)
+    expect(resolveGateApproval).toHaveBeenCalledWith('appr-9', 'approve')
   })
 
   it('routes the 거부 action through resolveGateApproval with the reject decision', async () => {
@@ -585,25 +485,11 @@ describe('ApprovalsSurface', () => {
     container.querySelector<HTMLButtonElement>('.ap-card .ap-act.deny')?.click()
     await flushUi()
 
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-r', 'reject', false)
-  })
-
-  it('routes the 항상 승인 action through resolveGateApproval with rememberRule=true', async () => {
-    const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
-      queueItem({ id: 'appr-a', keeper_name: 'masc-improver' }),
-    ])
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    container.querySelector<HTMLButtonElement>('.ap-card .ap-act.always')?.click()
-    await flushUi()
-
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-a', 'approve', true)
+    expect(resolveGateApproval).toHaveBeenCalledWith('appr-r', 'reject')
   })
 
   it('binds the three non-hierarchical choices to hitl.gate_mode', async () => {
-    const { ApprovalsSurface } = await loadSurface([], [], [], {
+    const { ApprovalsSurface } = await loadSurface([], [], {
       gate_mode: { mode: 'auto_judge', configured: true, state: 'ready' },
     })
 
@@ -621,7 +507,7 @@ describe('ApprovalsSurface', () => {
   }, 20000)
 
   it('shows Human as the selected Gate mode when configured', async () => {
-    const { ApprovalsSurface } = await loadSurface([], [], [], {
+    const { ApprovalsSurface } = await loadSurface([], [], {
       gate_mode: { mode: 'manual', configured: true, state: 'ready' },
     })
 
@@ -634,7 +520,7 @@ describe('ApprovalsSurface', () => {
   }, 20000)
 
   it('routes a Gate mode choice through setGateMode', async () => {
-    const { ApprovalsSurface, setGateMode } = await loadSurface([], [], [], {
+    const { ApprovalsSurface, setGateMode } = await loadSurface([], [], {
       gate_mode: { mode: 'manual', configured: true, state: 'ready' },
     })
 

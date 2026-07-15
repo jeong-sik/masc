@@ -234,17 +234,6 @@ let write_pending_snapshot ~base_path json =
     output_string channel (Yojson.Safe.pretty_to_string json))
 ;;
 
-let delivery_json ~entry ~remember_rule =
-  `Assoc
-    [ "entry", entry
-    ; "decision", `Assoc [ "kind", `String "approve" ]
-    ; "source", `String "human_operator"
-    ; "remember_rule", `Bool remember_rule
-    ; "created_by", `Null
-    ; "grant_consumed", `Bool false
-    ]
-;;
-
 let install_exn ~base_path =
   match AQ.install_persistence ~base_path with
   | Ok report -> report
@@ -262,7 +251,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -409,21 +398,10 @@ let test_resolution_is_durable_and_origin_scoped () =
     (fun () ->
        let input = `Assoc [ "target", `String "document"; "body", `String "hello" ] in
        let id = submit ~base_path ~keeper_name ~input in
-       let result =
-         AQ.resolve_with_policy
-           ~id
-           ~decision:AQ.Decision.Approve
-           ~remember_rule:true
-           ~created_by:"operator"
-           ()
-       in
-       let resolution_result =
-         match result with
-         | Ok result -> result
+       (match AQ.resolve_with_policy ~id ~decision:AQ.Decision.Approve () with
+        | Ok () -> ()
          | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
-       in
-       Alcotest.(check bool) "exact rule persisted" true
-         (Option.is_some resolution_result.remembered_rule);
+       );
        Alcotest.(check bool) "pending removed" false
          (Option.is_some (AQ.get_pending_entry ~id));
        let resolution =
@@ -449,17 +427,6 @@ let test_resolution_is_durable_and_origin_scoped () =
                ~base_path
                ~keeper_name:unrelated_keeper
                ~approval_id:id));
-       Alcotest.(check bool) "exact remembered request matches" true
-         (match
-            AQ.find_matching_rule
-              ~base_path
-              ~keeper_name
-              ~tool_name:"external-effect"
-              ~input
-              ()
-          with
-          | Ok matched -> Option.is_some matched
-          | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error));
        (match
           AQ.consume_approved_resolution
             ~base_path
@@ -976,7 +943,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
             ]);
@@ -1006,7 +973,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 2
+               [ "version", `Int 3
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
                ]));
@@ -1045,7 +1012,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
             ; "pending", `List []
             ; ( "deliveries"
               , `List
@@ -1053,8 +1020,6 @@ let test_persisted_delivery_replays_before_origin_wake () =
                       [ "entry", pending_entry
                       ; "decision", `Assoc [ "kind", `String "approve" ]
                       ; "source", `String "human_operator"
-                      ; "remember_rule", `Bool false
-                      ; "created_by", `Null
                       ; "grant_consumed", `Bool false
                       ]
                   ] )
@@ -1095,84 +1060,6 @@ let test_persisted_delivery_replays_before_origin_wake () =
           |> member "grant_consumed"
           |> to_bool);
        drop_resolution ~base_path ~keeper_name resolution)
-;;
-
-let test_one_delivery_replay_failure_does_not_stop_others () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-independent-replay" in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       let failing_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "remember-fails" ])
-       in
-       let successful_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "independent-success" ])
-       in
-       let pending_entries =
-         let open Yojson.Safe.Util in
-         read_pending_snapshot ~base_path |> member "pending" |> to_list
-       in
-       let entry_for id =
-         let open Yojson.Safe.Util in
-         match
-           List.find_opt
-             (fun json -> String.equal (json |> member "id" |> to_string) id)
-             pending_entries
-         with
-         | Some entry -> entry
-         | None -> Alcotest.fail ("missing persisted entry " ^ id)
-       in
-       write_pending_snapshot
-         ~base_path
-         (`Assoc
-            [ "version", `Int 2
-            ; "pending", `List []
-            ; ( "deliveries"
-              , `List
-                  [ delivery_json
-                      ~entry:(entry_for failing_id)
-                      ~remember_rule:true
-                  ; delivery_json
-                      ~entry:(entry_for successful_id)
-                      ~remember_rule:false
-                  ] )
-            ]);
-       let rules_path = AQ.For_testing.always_allowed_store_path ~base_path in
-       ensure_dir (Filename.dirname rules_path);
-       Unix.mkdir rules_path 0o755;
-       AQ.For_testing.reset_runtime_state ();
-       let report = install_exn ~base_path in
-       Alcotest.(check int) "independent delivery replayed" 1 report.replayed_deliveries;
-       Alcotest.(check int)
-         "one replay failure reported"
-         1
-         (List.length report.delivery_replay_failures);
-       Alcotest.(check string)
-         "failing approval identified"
-         failing_id
-         (List.hd report.delivery_replay_failures).approval_id;
-       Alcotest.(check bool) "later delivery reached origin" true
-         (Option.is_some
-            (durable_resolution_opt
-               ~base_path
-               ~keeper_name
-               ~approval_id:successful_id));
-       List.iter
-         (fun approval_id ->
-            match durable_resolution_opt ~base_path ~keeper_name ~approval_id with
-            | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
-            | None -> ())
-         [ failing_id; successful_id ])
 ;;
 
 let test_submit_surfaces_storage_failure () =
@@ -1416,10 +1303,6 @@ let () =
             "delivery journal replays"
             `Quick
             test_persisted_delivery_replays_before_origin_wake
-        ; Alcotest.test_case
-            "one replay failure does not stop others"
-            `Quick
-            test_one_delivery_replay_failure_does_not_stop_others
         ; Alcotest.test_case
             "storage failure is returned"
             `Quick

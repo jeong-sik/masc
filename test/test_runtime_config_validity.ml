@@ -1312,6 +1312,7 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"ollama_cloud/shared-thinking\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 1024\n\
      supports_tools = true\n\
@@ -2131,6 +2132,7 @@ let test_runtime_max_context_capability_only_uses_catalog_cap () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"ollama_cloud/cap-only-model\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 4096\n"
   in
@@ -2169,6 +2171,7 @@ let test_runtime_max_context_override_below_cap_wins_as_override () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"ollama_cloud/override-under-cap\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"
   in
@@ -2208,6 +2211,7 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"ollama_cloud/override-over-cap\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"
   in

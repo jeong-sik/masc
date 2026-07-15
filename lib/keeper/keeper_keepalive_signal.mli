@@ -137,7 +137,6 @@ type stage_timing = {
   snapshot_ms : float;
   board_ms : float;
   turn_ms : float;
-  recurring_ms : float;
 }
 
 val stage_timing_ring_size : unit -> int

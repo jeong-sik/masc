@@ -176,12 +176,6 @@ val refresh_work_as_heartbeat :
   consecutive_failures:int ref ->
   unit
 
-val dispatch_recurring_keepalive :
-  ctx:'a context ->
-  meta_after_proactive:keeper_meta ->
-  now_ts:float ->
-  int
-
 val maybe_write_heartbeat_snapshot :
   ctx:'a context ->
   meta_current:keeper_meta ->
@@ -205,8 +199,6 @@ val record_keepalive_stage_timing :
   t_board_end:float ->
   t_turn_start:float ->
   t_turn_end:float ->
-  t_recurring_start:float ->
-  t_recurring_end:float ->
   unit
 
 (** The heartbeat loop body, extracted for reuse by the supervisor.

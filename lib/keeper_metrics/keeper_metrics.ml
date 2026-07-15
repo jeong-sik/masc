@@ -194,7 +194,6 @@ type t =
   | UsageAnomalyReason
   | ConfigEnvParseFailures
   | PostTurnWireinFailures
-  | RecurringFailures
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
@@ -423,7 +422,6 @@ let to_string = function
   | UsageAnomalyReason -> "masc_keeper_usage_anomaly_reason_total"
   | ConfigEnvParseFailures -> "masc_keeper_config_env_parse_failures_total"
   | PostTurnWireinFailures -> "masc_keeper_post_turn_wirein_failures_total"
-  | RecurringFailures -> "masc_keeper_recurring_failures_total"
   | TurnCleanupFailures -> "masc_keeper_turn_cleanup_failures_total"
   | MemoryBankLoadHistorySwallowedExceptions ->
       "masc_keeper_memory_bank_load_history_swallowed_exceptions_total"

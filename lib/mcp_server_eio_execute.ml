@@ -239,8 +239,8 @@ let execute_tool_eio
                 ~clock
                 ~proc_mgr:state.Mcp_server.proc_mgr
                 ~net:state.Mcp_server.net
-                ~publication_recovery_registry:
-                  (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+                ~publication_recovery_provider:
+                  (Mcp_server.publication_recovery_availability_provider state)
             in
             (* Dispatch a single module by tag — creates only that module's context.
      Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
@@ -260,8 +260,8 @@ let execute_tool_eio
                      ; clock
                      ; proc_mgr = state.Mcp_server.proc_mgr
                      ; net = state.Mcp_server.net
-                     ; publication_recovery_registry =
-                         (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+                     ; publication_recovery_provider =
+                         Mcp_server.publication_recovery_availability_provider state
                      ; mcp_session_id
                      }
                    in

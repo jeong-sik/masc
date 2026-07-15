@@ -157,7 +157,6 @@ let test_lane_fork_rejects_cancelling_switch () =
           (Lane.fork
              ~sw
              lane
-             ~with_run_scope:(fun run -> run ())
              ~run:(fun _ -> Atomic.set run_called true)
              ~cleanup:(fun _ ->
                Atomic.incr cleanup_calls;
@@ -311,7 +310,6 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
     (fun () ->
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Eio.Switch.run @@ fun sw ->
        let config = Masc.Workspace.default_config dir in
        let meta =
          { (make_meta "fallback-keeper") with
@@ -332,32 +330,15 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
        Fun.protect
          ~finally:(fun () -> KR.unregister ~base_path:config.base_path meta.name)
          (fun () ->
-            Masc_test_deps.with_publication_recovery_lane
-              ~sw
-              ~fs:(Eio.Stdenv.fs env)
-              ~registry_root:dir
-              ~owner:meta.name
-              (fun ~publication_recovery_registry
-                   ~publication_recovery_access ->
-            (match
-               KR.attach_publication_recovery_access
-                 original_entry
-                 publication_recovery_access
-             with
-             | Ok () -> ()
-             | Error KR.Publication_recovery_already_attached ->
-               fail "original entry recovery access was already attached");
-            Fun.protect
-              ~finally:(fun () ->
-                match KR.detach_publication_recovery_access original_entry with
-                | Ok () -> ()
-                | Error KR.Publication_recovery_not_attached ->
-                  fail "original entry recovery access detached unexpectedly")
-              (fun () ->
+            let provider_reads = Atomic.make 0 in
+            let provider () =
+              Atomic.incr provider_reads;
+              Masc.Keeper_publication_recovery_availability.Non_runtime
+            in
             let exact_resources =
               match
                 Masc.Keeper_publication_recovery_scope.resolve_turn_resources
-                  ~registry:(Some publication_recovery_registry)
+                  ~provider
                   ~base_path:config.base_path
                   ~keeper_name:meta.name
               with
@@ -390,8 +371,7 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
               KET.execute_keeper_tool_call_with_outcome
                 ~config
                 ~meta:exact_resources.entry.meta
-                ~publication_recovery_registry:exact_resources.registry
-                ~publication_recovery_access:exact_resources.access
+                ~publication_recovery:exact_resources.publication_recovery
                 ~ctx_work
                 ~exec_cache:None
                 ~name:"Read"
@@ -407,7 +387,9 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
               string
               "dispatch uses exact admitted meta, not same-name replacement meta"
               evidence
-              content))))
+              content;
+            check int "read path never reads recovery provider" 0
+              (Atomic.get provider_reads)))
 ;;
 
 let () =

@@ -726,8 +726,9 @@ instructions = "missing sandbox profile"
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
-          publication_recovery_registry =
-            Some publication_recovery_registry;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              publication_recovery_registry;
         }
       in
       match

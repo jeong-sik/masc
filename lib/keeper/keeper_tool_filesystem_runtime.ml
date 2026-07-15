@@ -516,6 +516,12 @@ type content_write_error =
       }
   | Content_write_append of append_write_outcome
 
+type content_publication =
+  | Recovery_independent of (unit -> (unit, content_write_error) result)
+  | Recovery_guarded of
+      (Fs_compat.publication_recovery_access
+       -> (unit, content_write_error) result)
+
 let append_capability ~on_cancelled file content =
   let outcome =
     Eio.Cancel.protect (fun () ->
@@ -934,6 +940,11 @@ type file_write_attempt =
   | Write_succeeded of string
   | Write_failed of
       { payload : string
+      ; class_ : Tool_result.tool_failure_class
+      }
+  | Write_failed_data of
+      { message : string
+      ; data : Yojson.Safe.t
       ; class_ : Tool_result.tool_failure_class
       }
 
@@ -1414,13 +1425,26 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
 let file_write_attempt_to_execution = function
   | Write_succeeded payload -> Keeper_tool_execution.success payload
   | Write_failed { payload; class_ } -> Keeper_tool_execution.failure ~class_ payload
+  | Write_failed_data { message; data; class_ } ->
+    Keeper_tool_execution.failure_data ~class_ ~message data
+;;
+
+let publication_recovery_unavailable_attempt unavailable =
+  Write_failed_data
+    { message =
+        Keeper_publication_recovery_availability.unavailable_to_string unavailable
+    ; data =
+        Keeper_publication_recovery_availability.unavailable_to_yojson unavailable
+    ; class_ = Tool_result.Runtime_failure
+    }
 ;;
 
 let handle_file_write_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
       ?continuation_channel
       ?gate_context
       ?gate_grant
@@ -1560,7 +1584,8 @@ let handle_file_write_with_outcome
     @@ fun () ->
     protect_write ~target
     @@ fun () ->
-    match write () with
+    let finish_write_result result =
+      match result with
     | Error (Content_write_message message) -> Error message
     | Error (Content_write_capability { error; created_parents }) ->
       List.iter
@@ -1632,6 +1657,18 @@ let handle_file_write_with_outcome
                    ]
                    @ ide_observation_failure_fields ide_observation_error
                    @ via_field))))
+    in
+    match write with
+    | Recovery_independent operation -> finish_write_result (operation ())
+    | Recovery_guarded operation ->
+      (match
+         Keeper_publication_recovery_availability.with_access
+           publication_recovery
+           operation
+       with
+       | Ok result -> finish_write_result result
+       | Error unavailable ->
+         Ok (publication_recovery_unavailable_attempt unavailable))
   in
   let parent_effect_scope ~parent_dir ~parent_components ~missing_parents =
     Keeper_alerting_path.path_effect_parent_scope
@@ -1676,23 +1713,28 @@ let handle_file_write_with_outcome
         let recovery_target =
           Keeper_alerting_path.atomic_replace_recovery_target projection
         in
-        finish_content_write ~target ~mode_label ~gate_effect (fun () ->
-          with_created_parent_directories
-            ~on_interrupted:
-              (observe_created_directory_commit
-                 ~keeper_name:meta.name
-                 ~target)
-            ~permissions:created_directory_permissions
-            parent_dir
-            missing_parents
-          @@ fun ~created_parents final_parent ->
-          Fs_compat.replace_capability_file
-            ~recovery:publication_recovery_access
-            ~parent:final_parent
-            ~target:recovery_target
-            content
-          |> Result.map_error (fun error ->
-            Content_write_capability { error; created_parents }))
+        finish_content_write
+          ~target
+          ~mode_label
+          ~gate_effect
+          (Recovery_guarded
+             (fun publication_recovery_access ->
+                with_created_parent_directories
+                  ~on_interrupted:
+                    (observe_created_directory_commit
+                       ~keeper_name:meta.name
+                       ~target)
+                  ~permissions:created_directory_permissions
+                  parent_dir
+                  missing_parents
+                @@ fun ~created_parents final_parent ->
+                Fs_compat.replace_capability_file
+                  ~recovery:publication_recovery_access
+                  ~parent:final_parent
+                  ~target:recovery_target
+                  content
+                |> Result.map_error (fun error ->
+                  Content_write_capability { error; created_parents })))
       in
       (match run () with
        | Ok attempt -> file_write_attempt_to_execution attempt
@@ -1729,23 +1771,28 @@ let handle_file_write_with_outcome
               confined
             |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
           in
-          finish_content_write ~target ~mode_label ~gate_effect (fun () ->
-            with_created_parent_directories
-              ~on_interrupted:
-                (observe_created_directory_commit
-                   ~keeper_name:meta.name
-                   ~target)
-              ~permissions:created_directory_permissions
-              parent_dir
-              missing_parents
-            @@ fun ~created_parents final_parent ->
-            Fs_compat.create_capability_file_exclusive
-              ~parent:final_parent
-              ~leaf
-              ~permissions:created_file_permissions
-              content
-            |> Result.map_error (fun error ->
-              Content_write_capability { error; created_parents }))
+          finish_content_write
+            ~target
+            ~mode_label
+            ~gate_effect
+            (Recovery_independent
+               (fun () ->
+                  with_created_parent_directories
+                    ~on_interrupted:
+                      (observe_created_directory_commit
+                         ~keeper_name:meta.name
+                         ~target)
+                    ~permissions:created_directory_permissions
+                    parent_dir
+                    missing_parents
+                  @@ fun ~created_parents final_parent ->
+                  Fs_compat.create_capability_file_exclusive
+                    ~parent:final_parent
+                    ~leaf
+                    ~permissions:created_file_permissions
+                    content
+                  |> Result.map_error (fun error ->
+                    Content_write_capability { error; created_parents })))
         in
         if missing_parents <> []
         then create_missing_entry ()
@@ -1796,14 +1843,19 @@ let handle_file_write_with_outcome
                     |> Result.map_error
                          Keeper_alerting_path.path_effect_projection_error_to_string
                   in
-                  finish_content_write ~target ~mode_label ~gate_effect (fun () ->
-                    append_capability
-                      ~on_cancelled:
-                        (observe_append_write_outcome
-                           ~keeper_name:meta.name
-                           ~target)
-                      file
-                      content)))
+                  finish_content_write
+                    ~target
+                    ~mode_label
+                    ~gate_effect
+                    (Recovery_independent
+                       (fun () ->
+                          append_capability
+                            ~on_cancelled:
+                              (observe_append_write_outcome
+                                 ~keeper_name:meta.name
+                                 ~target)
+                            file
+                            content))))
       in
       (match run () with
        | Ok attempt -> file_write_attempt_to_execution attempt
@@ -1862,7 +1914,8 @@ let handle_file_write_with_outcome
                 @@ fun () ->
                 protect_write ~target
                 @@ fun () ->
-                match write updated with
+                let finish_write_result result =
+                  match result with
                 | Error (Content_write_message message) -> Error message
                 | Error (Content_write_capability { error; created_parents }) ->
                   List.iter
@@ -1946,6 +1999,16 @@ let handle_file_write_with_outcome
                                ]
                                @ ide_observation_failure_fields ide_observation_error
                                @ via_field))))
+                in
+                match
+                  Keeper_publication_recovery_availability.with_access
+                    publication_recovery
+                    (fun publication_recovery_access ->
+                       write publication_recovery_access updated)
+                with
+                | Ok result -> finish_write_result result
+                | Error unavailable ->
+                  Ok (publication_recovery_unavailable_attempt unavailable)
               in
               let patch_current
                     ~parent
@@ -1976,7 +2039,11 @@ let handle_file_write_with_outcome
                   ~gate_effect
                   ~updated
                   ~occurrences
-                  (write ~recovery_target)
+                  (fun publication_recovery_access updated ->
+                     write
+                       ~recovery_target
+                       publication_recovery_access
+                       updated)
               in
               let missing_target () =
                 Ok
@@ -2045,7 +2112,7 @@ let handle_file_write_with_outcome
                             ~source_resource
                             ~result_file_permissions
                             current
-                            (fun ~recovery_target updated ->
+                            (fun ~recovery_target publication_recovery_access updated ->
                                Fs_compat.replace_capability_file
                                  ~recovery:publication_recovery_access
                                  ~parent:parent_dir
@@ -2072,7 +2139,7 @@ let handle_file_write
       ~turn_sandbox_factory
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ?continuation_channel
       ?gate_context
       ?gate_grant
@@ -2083,7 +2150,7 @@ let handle_file_write
      ~turn_sandbox_factory
      ~config
      ~meta
-     ~publication_recovery_access
+     ~publication_recovery
      ?continuation_channel
      ?gate_context
      ?gate_grant

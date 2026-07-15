@@ -479,8 +479,8 @@ let start ~sw ~env ~state =
            ~submission_owner:Gate_keeper_backend.Channel_actor
            ~sw ~clock
            ~proc_mgr:state.Mcp_server.proc_mgr ~net:state.Mcp_server.net
-           ~publication_recovery_registry:
-             (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+           ~publication_recovery_provider:
+             (Mcp_server.publication_recovery_availability_provider state)
            ~config:workspace_scope.config
        in
        let policy_label = Gw.trigger_policy_to_string policy in

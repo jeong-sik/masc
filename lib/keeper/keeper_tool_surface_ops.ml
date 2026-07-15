@@ -24,7 +24,8 @@ type 'a context = 'a Keeper_types_profile.context = {
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
-  publication_recovery_registry : Fs_compat.publication_recovery_registry option;
+  publication_recovery_provider :
+    Keeper_publication_recovery_availability.provider;
 }
 type tool_result = Keeper_types_profile.tool_result
 let schemas = Keeper_types_profile.schemas
@@ -467,8 +468,8 @@ let keeper_up_body
       ~(agent_name : string)
       ~(sw : Eio.Switch.t)
       ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry option)
+      ~(publication_recovery_provider :
+          Keeper_publication_recovery_availability.provider)
       ?proc_mgr
       ?net
       args : tool_result =
@@ -479,7 +480,7 @@ let keeper_up_body
     ; clock
     ; proc_mgr
     ; net
-    ; publication_recovery_registry
+    ; publication_recovery_provider
     }
   in
   with_keeper_startup_gate (fun () -> execute_keeper_up keeper_ctx args)
@@ -614,8 +615,8 @@ let keeper_msg_body
       ~(agent_name : string)
       ~(sw : Eio.Switch.t)
       ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry option)
+      ~(publication_recovery_provider :
+          Keeper_publication_recovery_availability.provider)
       ?proc_mgr
       ?net
       ?continuation_channel
@@ -627,7 +628,7 @@ let keeper_msg_body
     ; clock
     ; proc_mgr
     ; net
-    ; publication_recovery_registry
+    ; publication_recovery_provider
     }
   in
   match

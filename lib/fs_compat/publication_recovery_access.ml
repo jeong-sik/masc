@@ -751,15 +751,25 @@ let begin_owner_inspection registry owner =
            (Inspection_owner_already_terminal block)))
 ;;
 
-let finish_owner_inspection registry owner ~replacement ~settle =
+let finish_owner_inspection
+    registry
+    owner
+    ~replacement
+    ~start_new_generation
+  =
   let key = owner_to_string owner in
   Eio.Cancel.protect (fun () ->
     let resolve_settled =
       Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
         match Owner_map.find_opt key registry.readiness with
         | Some ({ readiness = Owner_inventory_running_state; _ } as entry) ->
-          set_readiness_entry registry key { entry with readiness = replacement };
-          Some entry.resolve_settled
+          let replacement_entry =
+            if start_new_generation
+            then make_readiness_entry owner replacement
+            else { entry with readiness = replacement }
+          in
+          set_readiness_entry registry key replacement_entry;
+          entry.resolve_settled
         | None
         | Some
             { readiness =
@@ -775,11 +785,7 @@ let finish_owner_inspection registry owner ~replacement ~settle =
             (Invariant_violation
                (Owner_inventory_owner_not_running key)))
     in
-    match settle, resolve_settled with
-    | true, Some resolver -> settle_owner key resolver
-    | false, Some _ -> ()
-    | _, None ->
-      raise (Invariant_violation (Owner_inventory_owner_not_running key)))
+    settle_owner key resolve_settled)
 ;;
 
 let finish_owner_inspection_row registry owner row =
@@ -789,13 +795,13 @@ let finish_owner_inspection_row registry owner row =
       registry
       owner
       ~replacement:Reconciliation_pending
-      ~settle:false
+      ~start_new_generation:true
   | Missing_owner_entry _ ->
     finish_owner_inspection
       registry
       owner
       ~replacement:(No_recovery_obligation row)
-      ~settle:true
+      ~start_new_generation:false
   | Unexpected_owner_kind _
   | Owner_entry_unavailable _
   | Owner_inventory_cancelled _
@@ -805,7 +811,7 @@ let finish_owner_inspection_row registry owner row =
       owner
       ~replacement:
         (Reconciliation_blocked_state (Owner_inventory_block row))
-      ~settle:true
+      ~start_new_generation:false
 ;;
 
 let reset_interrupted_owner_inspection registry owner =

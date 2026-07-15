@@ -1389,8 +1389,8 @@ let start_keeper_loops_owned
       ; clock
       ; proc_mgr = Some proc_mgr
       ; net = state.net
-      ; publication_recovery_registry =
-          (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+      ; publication_recovery_provider =
+          Mcp_server.publication_recovery_availability_provider state
       ; mcp_session_id = None
       }
     in
@@ -1452,8 +1452,8 @@ let start_keeper_loops_owned
         ; clock
         ; proc_mgr = Some proc_mgr
         ; net = state.net
-        ; publication_recovery_registry =
-            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+        ; publication_recovery_provider =
+            Mcp_server.publication_recovery_availability_provider state
         }
       in
       Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
@@ -1511,8 +1511,8 @@ let start_keeper_loops_owned
                 ; clock
                 ; proc_mgr = Some proc_mgr
                 ; net = state.net
-                ; publication_recovery_registry =
-                    (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+                ; publication_recovery_provider =
+                    Mcp_server.publication_recovery_availability_provider state
                 }
               in
               let launch_outcome =

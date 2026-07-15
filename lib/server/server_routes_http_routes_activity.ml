@@ -362,7 +362,8 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
       clock;
       proc_mgr = state.Mcp_server.proc_mgr;
       net = state.Mcp_server.net;
-      publication_recovery_registry = (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
+      publication_recovery_provider =
+        Mcp_server.publication_recovery_availability_provider state;
     }
   in
   let post_id = Board.Post_id.to_string post.id in

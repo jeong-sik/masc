@@ -112,7 +112,7 @@ let publication_recovery_registry env sw config =
       ~fs:(Eio.Stdenv.fs env)
       ~registry_root
   with
-  | Ok registry -> Some registry
+  | Ok registry -> registry
   | Error error ->
     fail
       (Fs_compat.publication_recovery_registry_error_to_string error)
@@ -567,7 +567,8 @@ let test_fresh_presence_preserves_turn_failures () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
-          publication_recovery_registry = None;
+          publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider;
         }
       in
       let meta = make_meta "fresh-presence-turn-failure" in
@@ -669,8 +670,9 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -710,7 +712,6 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
      Lane.fork
        ~sw:parent_sw
        lane
-       ~with_run_scope:(fun run -> run ())
        ~run:(fun lane_sw ->
          Eio.Fiber.fork ~sw:lane_sw (fun () ->
            Eio.Promise.await release_p;
@@ -746,101 +747,6 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
     (Atomic.get cleanup_observed_child);
   check (option string) "cleanup succeeded" None exit.cleanup_error
 
-let test_keeper_lane_cancel_interrupts_blocked_run_scope () =
-  Eio_main.run
-  @@ fun _env ->
-  Eio.Switch.run
-  @@ fun parent_sw ->
-  let lane = Lane.create () in
-  let scope_entered, resolve_scope_entered = Eio.Promise.create () in
-  let never_resolved, _ = Eio.Promise.create () in
-  let run_called = Atomic.make false in
-  (match
-     Lane.fork
-       ~sw:parent_sw
-       lane
-       ~with_run_scope:(fun _run ->
-         Eio.Promise.resolve resolve_scope_entered ();
-         Eio.Promise.await never_resolved)
-       ~run:(fun _lane_sw -> Atomic.set run_called true)
-       ~cleanup:(fun _ -> Ok ())
-   with
-   | Ok () -> ()
-   | Error error -> fail (Lane.start_error_to_string error));
-  Eio.Promise.await scope_entered;
-  (match Lane.request_cancel lane with
-   | Lane.Cancel_requested -> ()
-   | Lane.Cancel_already_requested ->
-     fail "lane cancellation was already requested"
-   | Lane.Cancel_already_exiting -> fail "lane exited before cancellation"
-   | Lane.Cancel_wrong_domain -> fail "lane cancellation crossed domains"
-   | Lane.Cancel_not_committed exn
-   | Lane.Cancel_committed_with_failure exn ->
-     fail ("lane cancellation failed: " ^ Printexc.to_string exn));
-  let exit = Lane.await_exit lane in
-  (match exit.outcome with
-   | Lane.Shutdown_requested -> ()
-   | Lane.Completed -> fail "blocked run scope completed after cancellation"
-   | Lane.Shutdown_before_start ->
-     fail "lane was cancelled before its scope started"
-   | Lane.Shutdown_cancel_failed failure ->
-     fail
-       ("operator cancellation cleanup failed: "
-        ^ Printexc.to_string failure.cause)
-   | Lane.Cancelled_by_parent cause ->
-     fail
-       ("operator cancellation was classified as parent cancellation: "
-        ^ Printexc.to_string cause)
-   | Lane.Failed exn ->
-     fail
-       ("blocked run scope failed instead of cancelling: "
-        ^ Printexc.to_string exn));
-  check bool "run body was never admitted" false (Atomic.get run_called)
-
-let test_keeper_lane_preserves_enriched_shutdown_cancellation () =
-  let exception Detach_failed in
-  Eio_main.run
-  @@ fun _env ->
-  Eio.Switch.run
-  @@ fun parent_sw ->
-  let lane = Lane.create () in
-  let scope_entered, resolve_scope_entered = Eio.Promise.create () in
-  let never_resolved, _ = Eio.Promise.create () in
-  (match
-     Lane.fork
-       ~sw:parent_sw
-       lane
-       ~with_run_scope:(fun _run ->
-         Eio.Promise.resolve resolve_scope_entered ();
-         try Eio.Promise.await never_resolved with
-         | Eio.Cancel.Cancelled _ -> raise (Eio.Cancel.Cancelled Detach_failed))
-       ~run:(fun _lane_sw -> fail "run body crossed blocked admission")
-       ~cleanup:(fun _ -> Ok ())
-   with
-   | Ok () -> ()
-   | Error error -> fail (Lane.start_error_to_string error));
-  Eio.Promise.await scope_entered;
-  (match Lane.request_cancel lane with
-   | Lane.Cancel_requested -> ()
-   | Lane.Cancel_already_requested -> fail "cancellation was already requested"
-   | Lane.Cancel_already_exiting -> fail "lane exited before cancellation"
-   | Lane.Cancel_wrong_domain -> fail "lane cancellation crossed domains"
-   | Lane.Cancel_not_committed exn
-   | Lane.Cancel_committed_with_failure exn ->
-     fail ("lane cancellation signal failed: " ^ Printexc.to_string exn));
-  match (Lane.await_exit lane).outcome with
-  | Lane.Shutdown_cancel_failed { cause = Detach_failed; _ } -> ()
-  | Lane.Shutdown_cancel_failed failure ->
-    fail
-      ("wrong enriched cancellation cause: " ^ Printexc.to_string failure.cause)
-  | Lane.Completed -> fail "enriched cancellation completed normally"
-  | Lane.Shutdown_before_start -> fail "enriched cancellation happened before start"
-  | Lane.Shutdown_requested -> fail "enriched cancellation evidence was erased"
-  | Lane.Cancelled_by_parent cause ->
-    fail ("enriched cancellation became parent cancellation: " ^ Printexc.to_string cause)
-  | Lane.Failed exn ->
-    fail ("enriched cancellation became a generic failure: " ^ Printexc.to_string exn)
-
 let test_keeper_lane_surfaces_cleanup_failure () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun parent_sw ->
@@ -849,7 +755,6 @@ let test_keeper_lane_surfaces_cleanup_failure () =
      Lane.fork
        ~sw:parent_sw
        lane
-       ~with_run_scope:(fun run -> run ())
        ~run:(fun _lane_sw -> ())
        ~cleanup:(fun _outcome -> Error "cleanup evidence")
    with
@@ -901,7 +806,6 @@ let test_keeper_lane_cancel_is_lane_local_and_joinable () =
      Lane.fork
        ~sw:parent_sw
        lane
-       ~with_run_scope:(fun run -> run ())
        ~run:(fun _lane_sw ->
          try Eio.Promise.await never_p with
          | Eio.Cancel.Cancelled cause ->
@@ -1577,7 +1481,6 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
          Lane.fork
            ~sw:parent_sw
            entry.lane
-           ~with_run_scope:(fun run -> run ())
            ~run:(fun _lane_sw -> Eio.Promise.await never_p)
            ~cleanup:(fun _outcome ->
              (match R.dispatch_event_exact entry KSM.Stop_requested with
@@ -2558,7 +2461,8 @@ let test_start_keepalive_denies_dead_tombstone_before_registration () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = None
-        ; publication_recovery_registry = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
       (match Masc.Keeper_keepalive.start_keepalive ctx meta with
@@ -2600,8 +2504,9 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -2648,8 +2553,9 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -2964,10 +2870,6 @@ let () =
         test_direct_start_keepalive_resolves_done_on_stop;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
-      test_case "lane cancellation interrupts blocked run scope" `Quick
-        test_keeper_lane_cancel_interrupts_blocked_run_scope;
-      test_case "lane preserves enriched shutdown cancellation" `Quick
-        test_keeper_lane_preserves_enriched_shutdown_cancellation;
       test_case "lane join surfaces cleanup failure" `Quick
         test_keeper_lane_surfaces_cleanup_failure;
       test_case "lane identity is typed and unique" `Quick

@@ -1296,6 +1296,76 @@ let test_reconciliation_generation_reset_race =
   run_generation_reset_race Reconciliation_generation_reset
 ;;
 
+let test_waiter_progresses_when_inspection_winner_cancels_after_transition () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let allowed_root_path = Unix.realpath temp_root in
+  let root = Eio.Path.stat ~follow:false Eio.Path.(fs / allowed_root_path) in
+  let registry_root = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_root 0o700;
+  let owner_name = "inspection-transition-cancelled-winner" in
+  with_registry ~fs ~registry_root @@ fun registry ->
+  seed_prepared
+    ~registry
+    ~owner:owner_name
+    ~operation_id:(operation_id "78787878-7878-4878-8878-787878787878")
+    ~allowed_root_path
+    ~allowed_root_device:root.dev
+    ~allowed_root_inode:root.ino;
+  let owner = discover_owner registry owner_name in
+  let context_ready, resolve_context_ready = Eio.Promise.create () in
+  let terminalization_ready, resolve_terminalization_ready =
+    Eio.Promise.create ()
+  in
+  let cancellation_sent, resolve_cancellation_sent = Eio.Promise.create () in
+  let waiter_waiting, resolve_waiter_waiting = Eio.Promise.create () in
+  let cancellation_reason = Failure "inspection winner cancelled after transition" in
+  Eio.Switch.run @@ fun sw ->
+  let winner =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      try
+        Eio.Cancel.sub @@ fun context ->
+        Eio.Promise.resolve resolve_context_ready context;
+        Recovery.For_testing.inspect_owner_terminalization
+          ~before_terminalization:(fun () ->
+            Eio.Promise.resolve resolve_terminalization_ready ();
+            Eio.Cancel.protect (fun () -> Eio.Promise.await cancellation_sent))
+          ~registry
+          ~owner
+        |> ignore;
+        `Returned
+      with
+      | Eio.Cancel.Cancelled observed -> `Cancelled observed)
+  in
+  let context = Eio.Promise.await context_ready in
+  Eio.Promise.await terminalization_ready;
+  let waiter =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Recovery.For_testing.ensure_owner_ready
+        ~before_owner_settlement_wait:(fun _ ->
+          ignore (Eio.Promise.try_resolve resolve_waiter_waiting ()))
+        ~after_owner_settlement:(fun _ -> ())
+        ~registry
+        ~owner:owner_name)
+  in
+  Eio.Promise.await waiter_waiting;
+  Eio.Cancel.cancel context cancellation_reason;
+  Eio.Promise.resolve resolve_cancellation_sent ();
+  (match Eio.Promise.await_exn winner with
+   | `Cancelled observed ->
+     check bool "inspection winner retains cancellation" true
+       (observed == cancellation_reason)
+   | `Returned -> fail "inspection winner swallowed cancellation");
+  (match Eio.Promise.await_exn waiter with
+   | Ok () -> ()
+   | Error error -> fail (Recovery.lane_open_error_to_string error));
+  match find_owner_snapshot registry owner_name with
+  | Some (Recovery.Snapshot_owner_ready _) -> ()
+  | Some _ -> fail "waiting demander did not finish reconciliation"
+  | None -> fail "inspection transition lost exact owner state"
+;;
+
 let require_json_field name = function
   | `Assoc fields ->
     (match List.assoc_opt name fields with
@@ -1634,6 +1704,10 @@ let () =
             "reconciliation generation reset race"
             `Quick
             test_reconciliation_generation_reset_race
+        ; test_case
+            "inspection winner cancellation does not strand waiters"
+            `Quick
+            test_waiter_progresses_when_inspection_winner_cancels_after_transition
         ; test_case
             "health aggregate counter transitions are checked"
             `Quick

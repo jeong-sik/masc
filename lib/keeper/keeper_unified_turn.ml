@@ -125,8 +125,8 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
 let run_keeper_cycle
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry option)
+      ~(publication_recovery_provider :
+          Keeper_publication_recovery_availability.provider)
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
       ~(wake : Keeper_registry.wake_reason)
@@ -141,32 +141,11 @@ let run_keeper_cycle
   =
   match
     Keeper_publication_recovery_scope.resolve_turn_resources
-      ~registry:publication_recovery_registry
+      ~provider:publication_recovery_provider
       ~base_path:config.base_path
       ~keeper_name:meta.name
   with
-  | Error failure ->
-    let error =
-      Agent_sdk.Error.Config
-        (Agent_sdk.Error.InvalidConfig
-           { field = "keeper.publication_recovery_access"
-           ; detail =
-               Keeper_publication_recovery_scope.failure_to_string failure
-           })
-    in
-    Error
-      { error
-      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
-      ; route =
-          Keeper_runtime_failure_route.route_of_error
-            ~boundary:Keeper_runtime_failure_route.Masc_execution
-            error
-      ; source_lease_disposition = Follow_failure_route
-      }
-  | Ok { entry
-       ; registry = publication_recovery_registry
-       ; access = publication_recovery_access
-       } ->
+  | Ok { entry; publication_recovery } ->
   let meta = entry.meta in
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
      (Cycle 8/Tier B2, PR #11412).  Action mapping:
@@ -598,8 +577,7 @@ let run_keeper_cycle
                            ; turn_ctx_cell
                            ; observation
                            ; profile_defaults
-                           ; publication_recovery_registry
-                           ; publication_recovery_access
+                           ; publication_recovery
                            ; shared_context
                            ; trajectory_acc
                            ; turn_id = keeper_turn_id
@@ -980,4 +958,22 @@ dominant source of the observed CAS race exhaustion after
     result
     |> Result.map (fun meta -> Turn_completed meta)
     |> Result.map_error failure_of_error
+  | Error failure ->
+    let error =
+      Agent_sdk.Error.Config
+        (Agent_sdk.Error.InvalidConfig
+           { field = "keeper.publication_recovery_scope"
+           ; detail =
+               Keeper_publication_recovery_scope.failure_to_string failure
+           })
+    in
+    Error
+      { error
+      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
+      ; route =
+          Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Masc_execution
+            error
+      ; source_lease_disposition = Follow_failure_route
+      }
 ;;

@@ -269,7 +269,8 @@ val handle_analyze_image_with_outcome
     module load.  Receives [meta] so callers like [masc_keeper_status]
     can resolve the "self" target when the [name] argument is empty. *)
 val handle_masc_keeper
-  :  publication_recovery_registry:Fs_compat.publication_recovery_registry
+  :  publication_recovery_provider:
+       Keeper_publication_recovery_availability.provider
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -286,7 +287,8 @@ val handle_masc_keeper
   -> string
 
 val handle_masc_keeper_with_outcome
-  :  publication_recovery_registry:Fs_compat.publication_recovery_registry
+  :  publication_recovery_provider:
+       Keeper_publication_recovery_availability.provider
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t

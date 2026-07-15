@@ -14,7 +14,7 @@ let tool_keeper_ctx (ctx : 'a context) : _ Keeper_tool_surface.context =
     clock = ctx.clock;
     proc_mgr = ctx.proc_mgr;
     net = ctx.net;
-    publication_recovery_registry = ctx.publication_recovery_registry;
+    publication_recovery_provider = ctx.publication_recovery_provider;
   }
 
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
@@ -259,7 +259,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
           clock = ctx.clock;
           proc_mgr = ctx.proc_mgr;
           net = ctx.net;
-          publication_recovery_registry = ctx.publication_recovery_registry;
+          publication_recovery_provider = ctx.publication_recovery_provider;
         }
       in
       let* body =

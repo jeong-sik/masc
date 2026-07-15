@@ -230,8 +230,10 @@ val discover_owners
   :  registry
   -> (owner_discovery_row list, discovery_error) result
 
-(** Inspect exactly one demanded owner. A valid directory advances the same
-    owner entry to reconciliation-pending without resolving its promise.
+(** Inspect exactly one demanded owner. A valid directory installs a fresh
+    reconciliation-pending generation and settles the retired inspection
+    promise, so every concurrent demander can continue even if the inspection
+    winner is cancelled before it claims reconciliation.
     Missing means that this exact owner has no recovery obligation. Wrong-kind,
     I/O, non-current cancellation, and crash evidence terminalize and resolve
     this owner only. Current-context cancellation retires the running promise,

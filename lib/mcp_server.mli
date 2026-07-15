@@ -214,8 +214,11 @@ val workspace_scope : server_state -> workspace_scope
 val workspace_config : server_state -> Workspace.config
 (** Current workspace configuration. *)
 
-val workspace_scope_publication_recovery_registry :
-  workspace_scope -> Fs_compat.publication_recovery_registry option
+val publication_recovery_availability_provider :
+  server_state -> Keeper_publication_recovery_availability.provider
+(** Return a stable live provider that reads the opaque process runtime state
+    immediately before each publication Edit/Write effect. The five runtime
+    states remain distinct; no unavailable state is collapsed to [Non_runtime]. *)
 
 val workspace_scope_publication_recovery_snapshot :
   workspace_scope -> publication_recovery_runtime_snapshot
@@ -267,6 +270,12 @@ module For_testing : sig
     -> Yojson.Safe.t
   (** Drive the production owner-identity projection settlement through an
       injected failure and return its public health projection. *)
+
+  val publication_recovery_registry
+    :  server_state
+    -> Fs_compat.publication_recovery_registry option
+  (** Test-only exact registry access. Production Keeper callers must carry the
+      live provider and may not snapshot the registry. *)
 
   val create_state : base_path:string -> server_state
   (** Non-runtime state. Every Eio handle and the publication registry are

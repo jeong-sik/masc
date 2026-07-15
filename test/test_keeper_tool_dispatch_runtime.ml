@@ -4,6 +4,8 @@ module KET = Masc.Keeper_tool_dispatch_runtime
 module KES = Masc.Keeper_tool_shared_runtime
 module KTD = Masc.Keeper_tool_descriptor
 module Workspace = Masc.Workspace
+module Publication_availability =
+  Masc.Keeper_publication_recovery_availability
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -99,17 +101,23 @@ let with_exec_fixture ?(process = false) ?(always_allow = false) name fn =
         ~finally:(fun () ->
           Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
         (fun () ->
-          Masc_test_deps.with_publication_recovery_lane
+          Masc_test_deps.with_publication_recovery_registry
             ~sw
             ~fs:(Eio.Stdenv.fs env)
             ~registry_root:dir
-            ~owner:meta.name
-            (fun ~publication_recovery_registry ~publication_recovery_access ->
+            (fun publication_recovery_registry ->
+               let publication_recovery =
+                 { Publication_availability.provider =
+                     Publication_availability.constant
+                       (Publication_availability.Available
+                          publication_recovery_registry)
+                 ; keeper_name = meta.name
+                 }
+               in
                fn
                  ~config
                  ~meta
-                 ~publication_recovery_registry
-                 ~publication_recovery_access
+                 ~publication_recovery
                  ~ctx_work:(make_ctx ()))))
 
 let contains_substring text needle =
@@ -194,14 +202,12 @@ let check_success_result label result =
 let test_public_read_rejects_unsupported_range_fields () =
   with_exec_fixture
     "keeper_tool_dispatch_runtime_read_rejects_range_fields"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-          ~publication_recovery_registry
-          ~publication_recovery_access
+          ~publication_recovery
           ~ctx_work
           ~exec_cache:None
           ~name:"Read"
@@ -237,14 +243,12 @@ let test_public_read_rejects_unsupported_range_fields () =
 let test_public_read_rejects_offset_without_enrichment () =
   with_exec_fixture
     "keeper_tool_dispatch_runtime_read_rejects_offset"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-          ~publication_recovery_registry
-          ~publication_recovery_access
+          ~publication_recovery
           ~ctx_work
           ~exec_cache:None
           ~name:"Read"
@@ -525,8 +529,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
 
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let repo_dir =
         Filename.concat
           (Filename.concat (KES.keeper_playground_root ~config ~meta) "repos")
@@ -535,8 +538,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
       mkdir_p (Filename.concat repo_dir ".git");
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
           ~name:"Read"
           ~input:(`Assoc [ ("file_path", `String "config/runtime.toml") ])
           ()
@@ -553,14 +555,536 @@ let test_execute_with_outcome_missing_file_is_failure () =
       check bool "no inferred repository list" true
         Yojson.Safe.Util.(member "available_repos" json = `Null))
 
+let check_publication_write_rejected label result =
+  check string (label ^ " outcome") "failure" (outcome_label result.KET.outcome);
+  (match result.outcome with
+   | `Failure Tool_result.Runtime_failure -> ()
+   | `Failure failure_class ->
+     failf
+       "%s wrong failure class: %s"
+       label
+       (Tool_result.tool_failure_class_to_string failure_class)
+   | `Success -> fail (label ^ " unexpectedly succeeded"));
+  check string
+    (label ^ " concise message")
+    "publication recovery registry is still initializing"
+    result.raw_output;
+  let json =
+    match result.data with
+    | Some data -> data
+    | None -> fail (label ^ " omitted typed failure data")
+  in
+  check string
+    (label ^ " typed error")
+    "publication_recovery_unavailable"
+    Yojson.Safe.Util.(member "error" json |> to_string);
+  check string
+    (label ^ " exact state")
+    "initializing"
+    Yojson.Safe.Util.(member "state" json |> to_string);
+  check bool
+    (label ^ " write not executed")
+    false
+    Yojson.Safe.Util.(member "write_executed" json |> to_bool);
+  check bool
+    (label ^ " keeper remains active")
+    true
+    Yojson.Safe.Util.(member "keeper_active" json |> to_bool)
+;;
+
+let test_initializing_recovery_isolates_only_publication_writes () =
+  with_exec_fixture
+    ~always_allow:true
+    "keeper_tool_dispatch_recovery_initializing"
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work ->
+       let provider_reads = Atomic.make 0 in
+       let publication_recovery =
+         { Publication_availability.provider =
+             (fun () ->
+                Atomic.incr provider_reads;
+                Publication_availability.Initializing)
+         ; keeper_name = meta.name
+         }
+       in
+       let existing_path = Filename.concat config.base_path "existing.txt" in
+       let untouched = "original bytes" in
+       write_file existing_path untouched;
+       let execute ~name ~input =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name
+           ~input
+           ()
+       in
+       let time_result = execute ~name:"keeper_time_now" ~input:(`Assoc []) in
+       check string
+         "non-file tool continues"
+         "success"
+         (outcome_label time_result.outcome);
+       let read_result =
+         execute
+           ~name:"Read"
+           ~input:(`Assoc [ "file_path", `String existing_path ])
+       in
+       check string
+         "read continues"
+         "success"
+         (outcome_label read_result.outcome);
+       check int
+         "non-file and read-only tools perform no recovery acquisition"
+         0
+         (Atomic.get provider_reads);
+       let append_existing =
+         execute
+           ~name:"tool_write_file"
+           ~input:
+             (`Assoc
+                [ "path", `String existing_path
+                ; "mode", `String "append"
+                ; "content", `String " + appended"
+                ])
+       in
+       check string
+         "append to an existing file remains recovery-independent"
+         "success"
+         (outcome_label append_existing.outcome);
+       check string
+         "append publishes exact bytes while recovery initializes"
+         (untouched ^ " + appended")
+         (read_file existing_path);
+       let append_created_path =
+         Filename.concat config.base_path "append-created.txt"
+       in
+       let append_created =
+         execute
+           ~name:"tool_write_file"
+           ~input:
+             (`Assoc
+                [ "path", `String append_created_path
+                ; "mode", `String "append"
+                ; "content", `String "created by append"
+                ])
+       in
+       check string
+         "append-create remains recovery-independent"
+         "success"
+         (outcome_label append_created.outcome);
+       check string
+         "append-create publishes exact bytes while recovery initializes"
+         "created by append"
+         (read_file append_created_path);
+       check int
+         "append and append-create do not read the recovery provider"
+         0
+         (Atomic.get provider_reads);
+       let invalid_write =
+         execute
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String ""
+                ; "content", `String "must not be published"
+                ])
+       in
+       check string
+         "invalid Write is rejected"
+         "failure"
+         (outcome_label invalid_write.outcome);
+       check int "invalid Write performs no recovery acquisition" 0
+         (Atomic.get provider_reads);
+       let write_path = Filename.concat config.base_path "must-not-exist.txt" in
+       let write_result =
+         execute
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String write_path
+                ; "content", `String "must not be published"
+                ])
+       in
+       check_publication_write_rejected "Write" write_result;
+       check int "Write reads provider exactly once" 1 (Atomic.get provider_reads);
+       check bool "Write created no file" false (Sys.file_exists write_path);
+       let edit_result =
+         execute
+           ~name:"Edit"
+           ~input:
+             (`Assoc
+                [ "file_path", `String existing_path
+                ; "old_string", `String (untouched ^ " + appended")
+                ; "new_string", `String "mutated"
+                ])
+       in
+       check_publication_write_rejected "Edit" edit_result;
+       check int "Edit reads provider exactly once" 2 (Atomic.get provider_reads);
+       check string "Edit preserved exact bytes" (untouched ^ " + appended")
+         (read_file existing_path))
+;;
+
+let test_manual_gate_defers_publication_writes_before_recovery () =
+  with_exec_fixture
+    "keeper_tool_dispatch_manual_publication_gate"
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+       let provider_reads = Atomic.make 0 in
+       let publication_recovery =
+         { Publication_availability.provider =
+             (fun () ->
+                Atomic.incr provider_reads;
+                Publication_availability.Initializing)
+         ; keeper_name = meta.name
+         }
+       in
+       let path = Filename.concat config.base_path "manual-gate.txt" in
+       let original = "manual gate original" in
+       write_file path original;
+       let execute ~name ~input =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name
+           ~input
+           ()
+       in
+       let overwrite =
+         execute
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String path
+                ; "content", `String "must not overwrite"
+                ])
+       in
+       let edit =
+         execute
+           ~name:"Edit"
+           ~input:
+             (`Assoc
+                [ "file_path", `String path
+                ; "old_string", `String original
+                ; "new_string", `String "must not edit"
+                ])
+       in
+       List.iter
+         (fun result ->
+            check string "Manual Gate outcome" "failure"
+              (outcome_label result.KET.outcome);
+            check string
+              "Manual Gate returns typed defer"
+              "gate_deferred"
+              Yojson.Safe.Util.
+                (member "error" (parse_json result.raw_output) |> to_string))
+         [ overwrite; edit ];
+       check int
+         "Manual Gate defers publication writes before provider acquisition"
+         0
+         (Atomic.get provider_reads);
+       check string "Manual Gate preserves exact target bytes" original
+         (read_file path))
+;;
+
+let test_publication_initialization_crash_is_redacted () =
+  let exception Sensitive_initialization_crash of string in
+  with_exec_fixture
+    ~always_allow:true
+    "keeper_tool_dispatch_recovery_crash_redaction"
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work ->
+       let sensitive = "private-publication-bootstrap-cause" in
+       let exception_ = Sensitive_initialization_crash sensitive in
+       let backtrace = Printexc.get_callstack 32 in
+       let publication_recovery =
+         { Publication_availability.provider =
+             Publication_availability.constant
+               (Publication_availability.Initialization_crashed
+                  (exception_, backtrace))
+         ; keeper_name = meta.name
+         }
+       in
+       let path = Filename.concat config.base_path "crash-must-not-write.txt" in
+       let result =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String path
+                ; "content", `String "must not be published"
+                ])
+           ()
+       in
+       (match result.outcome with
+        | `Failure Tool_result.Runtime_failure -> ()
+        | `Failure failure_class ->
+          failf
+            "crashed initialization returned wrong failure class: %s"
+            (Tool_result.tool_failure_class_to_string failure_class)
+        | `Success -> fail "crashed initialization unexpectedly wrote a file");
+       check string
+         "crash message is concise and redacted"
+         "publication recovery registry initialization crashed"
+         result.raw_output;
+       let data =
+         match result.data with
+         | Some data -> data
+         | None -> fail "crashed initialization omitted typed failure data"
+       in
+       check
+         (testable Yojson.Safe.pp Yojson.Safe.equal)
+         "crash data contains only the public typed projection"
+         (`Assoc
+            [ "error", `String "publication_recovery_unavailable"
+            ; "failure_class", `String "runtime_failure"
+            ; "state", `String "initialization_crashed"
+            ; ( "detail"
+              , `String "publication recovery registry initialization crashed" )
+            ; "write_executed", `Bool false
+            ; "keeper_active", `Bool true
+            ])
+         data;
+       let rendered_data = Yojson.Safe.to_string data in
+       let exception_text = Printexc.to_string exception_ in
+       let backtrace_text = Printexc.raw_backtrace_to_string backtrace in
+       check bool
+         "exception payload is absent from message"
+         false
+         (contains_substring result.raw_output exception_text);
+       check bool
+         "exception payload is absent from data"
+         false
+         (contains_substring rendered_data exception_text);
+       if backtrace_text <> ""
+       then (
+         check bool
+           "backtrace is absent from message"
+           false
+           (contains_substring result.raw_output backtrace_text);
+         check bool
+           "backtrace is absent from data"
+           false
+           (contains_substring rendered_data backtrace_text));
+       check bool "crashed initialization created no file" false
+         (Sys.file_exists path))
+;;
+
+let test_publication_write_rereads_live_provider_after_initialization () =
+  with_exec_fixture
+    ~always_allow:true
+    "keeper_tool_dispatch_recovery_transition"
+    (fun ~config ~meta ~publication_recovery:fixture_recovery ~ctx_work ->
+       let registry =
+         match fixture_recovery.provider () with
+         | Publication_availability.Available registry -> registry
+         | Publication_availability.Initializing
+         | Publication_availability.Registry_unavailable _
+         | Publication_availability.Initialization_crashed _
+         | Publication_availability.Non_runtime ->
+           fail "fixture did not provide its exact recovery registry"
+       in
+       let state = Atomic.make Publication_availability.Initializing in
+       let provider_reads = Atomic.make 0 in
+       let publication_recovery =
+         { Publication_availability.provider =
+             (fun () ->
+                Atomic.incr provider_reads;
+                Atomic.get state)
+         ; keeper_name = meta.name
+         }
+       in
+       let path = Filename.concat config.base_path "after-initialization.txt" in
+       let execute () =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String path
+                ; "content", `String "available"
+                ])
+           ()
+       in
+       let initializing = execute () in
+       check_publication_write_rejected "initializing Write" initializing;
+       check bool "initializing Write created no file" false (Sys.file_exists path);
+       Atomic.set state (Publication_availability.Available registry);
+       let available = execute () in
+       check string
+         "next Write uses available provider"
+         "success"
+         (outcome_label available.outcome);
+       check string "next Write published exact bytes" "available" (read_file path);
+       check int "provider was reread once for each Write" 2
+         (Atomic.get provider_reads);
+       let edit =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name:"Edit"
+           ~input:
+             (`Assoc
+                [ "file_path", `String path
+                ; "old_string", `String "available"
+                ; "new_string", `String "edited"
+                ])
+           ()
+       in
+       check string
+         "next Edit uses available provider"
+         "success"
+         (outcome_label edit.outcome);
+       check string "next Edit published exact bytes" "edited" (read_file path);
+       check int "Edit performs exactly one additional provider read" 3
+         (Atomic.get provider_reads))
+;;
+
+let test_publication_write_cancellation_releases_exact_lane () =
+  let exception Cancel_write in
+  let dir = temp_dir "keeper_tool_dispatch_recovery_cancel" in
+  let registry_dir = Filename.concat dir "recovery" in
+  let workspace_dir = Filename.concat dir "workspace" in
+  Unix.mkdir registry_dir 0o755;
+  Unix.mkdir workspace_dir 0o755;
+  let target_path = Filename.concat workspace_dir "target.txt" in
+  write_file target_path "old";
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Eio.Switch.run @@ fun sw ->
+       let fs = Eio.Stdenv.fs env in
+       let registry_root = Eio.Path.(fs / registry_dir) in
+       let registry =
+         match
+           Fs_compat.open_publication_recovery_registry
+             ~sw
+             ~fs
+             ~registry_root
+         with
+         | Ok registry -> registry
+         | Error error ->
+           fail
+             (Fs_compat.publication_recovery_registry_error_to_string error)
+       in
+       (match Fs_compat.discover_publication_recovery_owners registry with
+        | Ok [] -> ()
+        | Ok _ -> fail "fresh recovery registry contained an owner"
+        | Error error ->
+          fail
+            (Fs_compat.publication_recovery_discovery_error_to_string
+               error));
+       let keeper_name = "publication-write-cancel" in
+       let provider_reads = Atomic.make 0 in
+       let publication_recovery =
+         { Publication_availability.provider =
+             (fun () ->
+                Atomic.incr provider_reads;
+                Publication_availability.Available registry)
+         ; keeper_name
+         }
+       in
+       let parent = Eio.Path.(fs / workspace_dir) in
+       let parent_stat = Eio.Path.stat ~follow:true parent in
+       let recovery_target =
+         match
+           Fs_compat.atomic_replace_recovery_target
+             ~allowed_root_path:workspace_dir
+             ~allowed_root_device:parent_stat.dev
+             ~allowed_root_inode:parent_stat.ino
+             ~parent_components:[]
+             ~target_leaf:"target.txt"
+             ~permissions:0o644
+         with
+         | Ok target -> target
+         | Error error ->
+           fail
+             (Fs_compat.atomic_replace_recovery_target_error_to_string error)
+       in
+       let cancellation_hook_observed = Atomic.make false in
+       (match
+          Publication_availability.with_access
+            publication_recovery
+            (fun publication_recovery_access ->
+               Eio.Cancel.sub (fun cancellation_context ->
+                 Fs_compat.Capability_write_for_testing.replace_capability_file
+                   ~before_stage:(function
+                     | Fs_compat.Acquire_mutation_lease ->
+                       Atomic.set cancellation_hook_observed true;
+                       Eio.Cancel.cancel cancellation_context Cancel_write;
+                       Eio.Fiber.check ()
+                     | _ -> ())
+                   ~recovery:publication_recovery_access
+                   ~parent
+                   ~target:recovery_target
+                   "cancelled"))
+        with
+        | exception Eio.Cancel.Cancelled Cancel_write ->
+          ()
+        | exception exn ->
+          fail ("wrong cancellation evidence: " ^ Printexc.to_string exn)
+        | Error unavailable ->
+          fail
+            (Publication_availability.unavailable_to_string unavailable)
+        | Ok (Error error) ->
+          fail (Fs_compat.capability_write_error_to_string error)
+        | Ok (Ok ()) -> fail "cancelled publication write returned normally");
+       check bool "cancellation occurred inside the real store borrow" true
+         (Atomic.get cancellation_hook_observed);
+       check int "cancelled write reads provider exactly once" 1
+         (Atomic.get provider_reads);
+       check string "cancelled write preserves target" "old" (read_file target_path);
+       (match
+          Publication_availability.with_access
+            publication_recovery
+            (fun publication_recovery_access ->
+               Fs_compat.replace_capability_file
+                 ~recovery:publication_recovery_access
+                 ~parent
+                 ~target:recovery_target
+                 "recovered")
+        with
+        | Ok (Ok ()) -> ()
+        | Ok (Error error) ->
+          fail (Fs_compat.capability_write_error_to_string error)
+        | Error unavailable ->
+          fail
+            (Publication_availability.unavailable_to_string unavailable));
+       check int "next write reacquires the same owner exactly once" 2
+         (Atomic.get provider_reads);
+       check string "next write succeeds after cancellation cleanup" "recovered"
+         (read_file target_path))
+;;
+
 let test_tool_search_without_session_searcher_is_unavailable () =
   with_exec_fixture "keeper_tool_dispatch_runtime_search_unavailable"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
           ~name:"keeper_tool_search"
           ~input:(`Assoc [])
           ()
@@ -576,8 +1100,7 @@ let test_tool_search_without_session_searcher_is_unavailable () =
 
 let test_tool_search_uses_exact_injected_searcher () =
   with_exec_fixture "keeper_tool_dispatch_runtime_injected_search"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let observed = ref false in
       let search_fn () =
         observed := true;
@@ -590,8 +1113,7 @@ let test_tool_search_uses_exact_injected_searcher () =
       in
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_work ~exec_cache:None ~search_fn
+          ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None ~search_fn
           ~name:"keeper_tool_search"
           ~input:(`Assoc [])
           ()
@@ -608,8 +1130,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
     ~process:true
     ~always_allow:true
     "keeper_tool_dispatch_runtime_model_tools"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let playground = KES.keeper_default_write_root ~config ~meta in
       let visible_file_path = "model-visible.txt" in
       let file_path = Filename.concat playground visible_file_path in
@@ -617,8 +1138,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-          ~publication_recovery_registry
-          ~publication_recovery_access
+          ~publication_recovery
           ~ctx_work
           ~exec_cache:None
           ~name
@@ -685,8 +1205,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
 
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
       ignore
         (Workspace.add_task config ~title:"higher priority task" ~priority:1
@@ -698,8 +1217,7 @@ let test_keeper_task_claim_accepts_specific_task_id () =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-          ~publication_recovery_registry
-          ~publication_recovery_access
+          ~publication_recovery
           ~ctx_work
           ~exec_cache:None
           ~name:"keeper_task_claim"
@@ -732,14 +1250,12 @@ let test_keeper_task_claim_accepts_specific_task_id () =
 
 let test_unknown_tool_returns_exact_error () =
   with_exec_fixture "keeper_tool_dispatch_runtime_unknown_tool"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-          ~publication_recovery_registry
-          ~publication_recovery_access
+          ~publication_recovery
           ~ctx_work
           ~exec_cache:None
           ~name:"Glob"
@@ -759,8 +1275,7 @@ let test_unknown_tool_returns_exact_error () =
 
 let test_model_visible_web_search_dispatches_to_misc_runtime () =
   with_exec_fixture ~always_allow:true "keeper_tool_dispatch_web_search"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
           [
@@ -778,8 +1293,7 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
             KET.execute_keeper_tool_call_with_outcome
               ~config
               ~meta
-              ~publication_recovery_registry
-              ~publication_recovery_access
+              ~publication_recovery
               ~ctx_work
               ~exec_cache:None
               ~name:"WebSearch"
@@ -815,8 +1329,7 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
 
 let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
   with_exec_fixture ~always_allow:true "keeper_tool_dispatch_web_fetch"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let requested_url = "https://example.com/model-web-fetch" in
       let html =
         {|
@@ -849,8 +1362,7 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
             KET.execute_keeper_tool_call_with_outcome
               ~config
               ~meta
-              ~publication_recovery_registry
-              ~publication_recovery_access
+              ~publication_recovery
               ~ctx_work
               ~exec_cache:None
               ~name:"WebFetch"
@@ -894,8 +1406,7 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
   with_exec_fixture
     ~always_allow:true
     "keeper_tool_dispatch_web_fetch_reaches_localhost"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       Masc.Tool_misc.with_web_fetch_http_get_for_test
         (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
           check string "local url forwarded" "http://127.0.0.1:8935/health" url;
@@ -905,8 +1416,7 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
             KET.execute_keeper_tool_call_with_outcome
               ~config
               ~meta
-              ~publication_recovery_registry
-              ~publication_recovery_access
+              ~publication_recovery
               ~ctx_work
               ~exec_cache:None
               ~name:"WebFetch"
@@ -919,8 +1429,7 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
 
 let test_manual_gate_defers_web_tools_before_network () =
   with_exec_fixture "keeper_tool_dispatch_manual_web_gate"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       (match
          Masc.Keeper_gate_mode.set
            config
@@ -945,8 +1454,7 @@ let test_manual_gate_defers_web_tools_before_network () =
                 KET.execute_keeper_tool_call_with_outcome
                   ~config
                   ~meta
-                  ~publication_recovery_registry
-                  ~publication_recovery_access
+                  ~publication_recovery
                   ~ctx_work
                   ~exec_cache:None
                   ~name:"WebSearch"
@@ -957,8 +1465,7 @@ let test_manual_gate_defers_web_tools_before_network () =
                 KET.execute_keeper_tool_call_with_outcome
                   ~config
                   ~meta
-                  ~publication_recovery_registry
-                  ~publication_recovery_access
+                  ~publication_recovery
                   ~ctx_work
                   ~exec_cache:None
                   ~name:"WebFetch"
@@ -1010,8 +1517,7 @@ let test_tool_result_or_error_preserves_failure_class () =
 
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let input =
         `Assoc
           [ ( "cmd"
@@ -1020,8 +1526,7 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       in
       let run () =
         KET.execute_keeper_tool_call
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
           ~name:"tool_execute" ~input ()
       in
       let outputs = List.init 4 (fun _ -> run ()) in
@@ -1066,16 +1571,23 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
       let config = Workspace.default_config dir in
       let meta = make_meta () in
       ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
-      Masc_test_deps.with_publication_recovery_lane
+      Masc_test_deps.with_publication_recovery_registry
         ~sw:root_sw
         ~fs:(Eio.Stdenv.fs env)
         ~registry_root:dir
-        ~owner:meta.name
-        (fun ~publication_recovery_registry ~publication_recovery_access ->
+        (fun publication_recovery_registry ->
+      let publication_recovery =
+        { Publication_availability.provider =
+            Publication_availability.constant
+              (Publication_availability.Available
+                 publication_recovery_registry)
+        ; keeper_name = meta.name
+        }
+      in
       let previous_dispatch = !(Masc.Keeper_dispatch_ref.dispatch) in
       let saw_turn_sw = Atomic.make false in
       let saw_clock = Atomic.make false in
-      let saw_registry = Atomic.make false in
+      let saw_provider = Atomic.make false in
       Fun.protect
         ~finally:(fun () ->
           Masc.Keeper_dispatch_ref.dispatch := previous_dispatch;
@@ -1083,7 +1595,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
         (fun () ->
           Masc.Keeper_dispatch_ref.dispatch :=
             (fun ~config:_ ~agent_name:_
-                 ~publication_recovery_registry:observed_registry
+                 ~publication_recovery_provider:observed_provider
                  ?sw ?clock ?proc_mgr:_ ?net:_ ?mcp_session_id:_
                  ?authorize_external_effect:_
                  ~name ~args:_ () ->
@@ -1091,10 +1603,8 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
               Atomic.set saw_turn_sw
                 (match sw with Some sw -> sw == turn_sw | None -> false);
               Atomic.set saw_clock (Option.is_some clock);
-              Atomic.set saw_registry
-                (match observed_registry with
-                 | Some registry -> registry == publication_recovery_registry
-                 | None -> false);
+              Atomic.set saw_provider
+                (observed_provider == publication_recovery.provider);
               Some
                 (Tool_result.ok ~tool_name:name ~start_time:0.0
                    "{\"ok\":true,\"request_id\":\"test-request\"}"));
@@ -1104,8 +1614,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
               ~input_schema:(keeper_msg_input_schema ())
               ~config
               ~meta
-              ~publication_recovery_registry
-              ~publication_recovery_access
+              ~publication_recovery
               ~ctx_snapshot:(make_ctx ())
               ~exec_cache:None
               ()
@@ -1121,7 +1630,8 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
           check bool "handler succeeds" true (Tool_result.is_success result);
           check bool "turn switch reaches keeper dispatch" true (Atomic.get saw_turn_sw);
           check bool "clock reaches keeper dispatch" true (Atomic.get saw_clock);
-          check bool "registry reaches keeper dispatch" true (Atomic.get saw_registry))))
+          check bool "live provider reaches keeper dispatch" true
+            (Atomic.get saw_provider))))
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
@@ -1177,13 +1687,11 @@ let register_typed_outcome_probe name make_result =
 let execute_registered_probe ~fixture ~name ~make_result =
   register_typed_outcome_probe name make_result;
   with_exec_fixture fixture
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
     KET.execute_keeper_tool_call_with_outcome
       ~config
       ~meta
-      ~publication_recovery_registry
-      ~publication_recovery_access
+      ~publication_recovery
       ~ctx_work
       ~exec_cache:None
       ~name
@@ -1256,8 +1764,7 @@ let test_registered_tool_dispatch_without_masc_prefix () =
   check bool "probe has no masc_ prefix" false
     (String.starts_with ~prefix:"masc_" registered_dispatch_probe_tool);
   with_exec_fixture "keeper_tool_dispatch_registered_dispatch"
-    (fun ~config ~meta ~publication_recovery_registry:_
-         ~publication_recovery_access:_ ~ctx_work:_ ->
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
       match
         Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
           ~config
@@ -1276,8 +1783,7 @@ let test_registered_tool_dispatch_without_masc_prefix () =
 let test_registered_dispatch_preserves_workflow_failure_class () =
   register_workflow_rejection_probe ();
   with_exec_fixture "keeper_tool_dispatch_registered_workflow_rejection"
-    (fun ~config ~meta ~publication_recovery_registry:_
-         ~publication_recovery_access:_ ~ctx_work:_ ->
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
       match
         Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
           ~config
@@ -1388,14 +1894,12 @@ let check_bundle_has_no_inferred_descriptor ~msg tools name =
 let test_model_visible_tools_do_not_infer_oas_descriptors () =
   with_exec_fixture
     "model_visible_oas_descriptors"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work:_ ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
        let tools =
          Masc.Keeper_tools_oas_bundle.make_tools
            ~config
            ~meta
-           ~publication_recovery_registry
-           ~publication_recovery_access
+           ~publication_recovery
            ~ctx_snapshot:(make_ctx ())
            ()
        in
@@ -1522,6 +2026,16 @@ let () =
         test_public_read_rejects_offset_without_enrichment;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
+      test_case "initializing recovery isolates only publication writes" `Quick
+        test_initializing_recovery_isolates_only_publication_writes;
+      test_case "Manual Gate defers writes before recovery acquisition" `Quick
+        test_manual_gate_defers_publication_writes_before_recovery;
+      test_case "initialization crash is redacted from tool output" `Quick
+        test_publication_initialization_crash_is_redacted;
+      test_case "publication Write rereads provider after initialization" `Quick
+        test_publication_write_rereads_live_provider_after_initialization;
+      test_case "publication Write cancellation releases exact lane" `Quick
+        test_publication_write_cancellation_releases_exact_lane;
       test_case "tool search without session searcher is unavailable" `Quick
         test_tool_search_without_session_searcher_is_unavailable;
       test_case "tool search uses injected session searcher" `Quick

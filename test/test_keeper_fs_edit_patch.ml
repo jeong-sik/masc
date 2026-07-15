@@ -80,29 +80,18 @@ let setup ?(sandbox = Keeper_types_profile_sandbox.Local) f =
   let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   ignore (Keeper_registry.register ~base_path:base meta.name meta);
-  let registry =
-    match
-      Fs_compat.open_publication_recovery_registry
-        ~sw
-        ~fs
-        ~registry_root:Eio.Path.(fs / Workspace.masc_root_dir config)
-    with
-    | Ok registry -> registry
-    | Error error ->
-      Alcotest.fail
-        (Fs_compat.publication_recovery_registry_error_to_string error)
+  Masc_test_deps.with_publication_recovery_registry
+    ~sw
+    ~fs
+    ~registry_root:(Workspace.masc_root_dir config)
+  @@ fun registry ->
+  let publication_recovery =
+    { Masc.Keeper_publication_recovery_availability.provider =
+        Masc_test_deps.publication_recovery_provider registry
+    ; keeper_name = meta.name
+    }
   in
-  match
-    Fs_compat.with_publication_recovery_lane
-      ~registry
-      ~owner:meta.name
-      (fun publication_recovery_access ->
-         f ~config ~meta ~playground ~publication_recovery_access)
-  with
-  | Ok value -> value
-  | Error error ->
-    Alcotest.fail
-      (Fs_compat.publication_recovery_lane_open_error_to_string error)
+  f ~config ~meta ~playground ~publication_recovery
 
 let parse raw = Yojson.Safe.from_string raw
 
@@ -132,7 +121,7 @@ let public_fs_edit_call
       ~public
       ~config
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~publication_recovery_access
+      ~publication_recovery
       args
   =
   let args = Keeper_tool_alias.translate_input ~public args in
@@ -140,7 +129,7 @@ let public_fs_edit_call
     ~turn_sandbox_factory:None
     ~config
     ~meta
-    ~publication_recovery_access
+    ~publication_recovery
     ~args
     ()
 
@@ -188,7 +177,7 @@ let with_turn_sandbox_factory ~enabled ~config ~meta f =
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
 let test_patch_unique_match () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\nlet y = 2\n";
   let raw =
@@ -196,7 +185,7 @@ let test_patch_unique_match () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -215,7 +204,7 @@ let test_patch_unique_match () =
     "let x = 42\nlet y = 2\n" after
 
 let test_patch_no_match_errors () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
   let raw =
@@ -223,7 +212,7 @@ let test_patch_no_match_errors () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -250,7 +239,7 @@ let test_patch_no_match_errors () =
          loop 0)
 
 let test_patch_multiple_matches_without_replace_all_errors () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "x = 1\nx = 1\nx = 1\n";
   let raw =
@@ -258,7 +247,7 @@ let test_patch_multiple_matches_without_replace_all_errors () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -275,7 +264,7 @@ let test_patch_multiple_matches_without_replace_all_errors () =
     "x = 1\nx = 1\nx = 1\n" after
 
 let test_patch_replace_all () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "x = 1\nx = 1\nx = 1\n";
   let raw =
@@ -283,7 +272,7 @@ let test_patch_replace_all () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -302,7 +291,7 @@ let test_patch_replace_all () =
     "x = 2\nx = 2\nx = 2\n" (Fs_compat.load_file path)
 
 let test_patch_empty_old_string_errors () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
   let raw =
@@ -310,7 +299,7 @@ let test_patch_empty_old_string_errors () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -326,14 +315,14 @@ let test_patch_empty_old_string_errors () =
     (Option.is_some (parse_error raw))
 
 let test_patch_missing_file_errors () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "ghost.ml" in
   let raw =
     Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -347,7 +336,7 @@ let test_patch_missing_file_errors () =
   Alcotest.(check bool) "ok=false" false (parse_ok raw)
 
 let test_patch_delete_via_empty_new_string () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "keep me\nDELETE_ME\nkeep me too\n";
   let raw =
@@ -355,7 +344,7 @@ let test_patch_delete_via_empty_new_string () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -372,14 +361,14 @@ let test_patch_delete_via_empty_new_string () =
 
 let test_overwrite_unchanged_by_patch_addition () =
   (* Regression: introducing Patch must not break existing overwrite. *)
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "new.txt" in
   let raw =
     Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -394,7 +383,7 @@ let test_overwrite_unchanged_by_patch_addition () =
     "fresh" (Fs_compat.load_file path)
 
 let test_atomic_writes_preserve_existing_executable_permissions () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let run ~label ~initial ~args ~expected =
     let path = Filename.concat playground (label ^ ".sh") in
     Fs_compat.save_file path initial;
@@ -404,7 +393,7 @@ let test_atomic_writes_preserve_existing_executable_permissions () =
         ~turn_sandbox_factory:None
         ~config
         ~meta
-        ~publication_recovery_access
+        ~publication_recovery
         ~args:(`Assoc (("path", `String path) :: args))
         ()
     in
@@ -435,7 +424,7 @@ let test_atomic_writes_preserve_existing_executable_permissions () =
     ~expected:"#!/bin/sh\nexit 0\n"
 
 let test_created_entries_have_exact_authorized_permissions () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let parent = Filename.concat playground "created-parent" in
   let nested = Filename.concat parent "nested" in
   let path = Filename.concat nested "created.txt" in
@@ -450,7 +439,7 @@ let test_created_entries_have_exact_authorized_permissions () =
            ~turn_sandbox_factory:None
            ~config
            ~meta
-           ~publication_recovery_access
+           ~publication_recovery
            ~args:
              (`Assoc
                 [ "path", `String path
@@ -466,7 +455,7 @@ let test_created_entries_have_exact_authorized_permissions () =
   Alcotest.(check int) "created file mode is exact" 0o644 (permissions path)
 
 let test_patch_symlink_result_is_regular_0644 () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let referent = Filename.concat playground "patch-referent.txt" in
   let leaf = Filename.concat playground "patch-link.txt" in
   Fs_compat.save_file referent "value=before\n";
@@ -477,7 +466,7 @@ let test_patch_symlink_result_is_regular_0644 () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
            [ "path", `String leaf
@@ -503,7 +492,7 @@ let test_patch_symlink_result_is_regular_0644 () =
 
 let test_outside_referent_endpoint_semantics ~sandbox ~with_runtime () =
   setup ~sandbox
-  @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
   with_turn_sandbox_factory ~enabled:with_runtime ~config ~meta
   @@ fun turn_sandbox_factory ->
   let outside_dir = Filename.concat config.Workspace.base_path "outside-referents" in
@@ -518,7 +507,7 @@ let test_outside_referent_endpoint_semantics ~sandbox ~with_runtime () =
         ~turn_sandbox_factory
         ~config
         ~meta
-        ~publication_recovery_access
+        ~publication_recovery
         ~args:(`Assoc (("path", `String leaf) :: args))
         ()
     in
@@ -558,7 +547,7 @@ let test_outside_referent_endpoint_semantics ~sandbox ~with_runtime () =
     ~expected_leaf_content:"outside-append-outside-symlink"
 
 let test_append_inside_symlink_uses_canonical_referent_capability () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let referent_dir = Filename.concat playground "append-referent" in
   let lexical_dir = Filename.concat playground "append-link" in
   ensure_dir referent_dir;
@@ -572,7 +561,7 @@ let test_append_inside_symlink_uses_canonical_referent_capability () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
            [ "path", `String lexical
@@ -595,7 +584,7 @@ let test_symlink_component_swap_cannot_escape_allowed_root
       ()
   =
   setup ~sandbox
-  @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
   with_turn_sandbox_factory ~enabled:with_runtime ~config ~meta
   @@ fun turn_sandbox_factory ->
   let outside = Filename.concat config.Workspace.base_path "outside-write-targets" in
@@ -629,7 +618,7 @@ let test_symlink_component_swap_cannot_escape_allowed_root
         ~turn_sandbox_factory
         ~config
         ~meta
-        ~publication_recovery_access
+        ~publication_recovery
         ~gate_context
         ~args:(`Assoc (args_for target))
         ()
@@ -690,7 +679,7 @@ let test_sandbox_root_swap_after_open_keeps_pinned_capability
       ()
   =
   setup ~sandbox
-  @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
   with_turn_sandbox_factory ~enabled:with_runtime ~config ~meta
   @@ fun turn_sandbox_factory ->
   let playground = Keeper_alerting_path.strip_trailing_slashes playground in
@@ -711,7 +700,7 @@ let test_sandbox_root_swap_after_open_keeps_pinned_capability
       ~turn_sandbox_factory
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~gate_context
       ~args:
         (`Assoc
@@ -735,7 +724,7 @@ let test_sandbox_root_swap_after_open_keeps_pinned_capability
 
 let test_docker_runtime_leaf_swap_preserves_exact_effect () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
   with_turn_sandbox_factory ~enabled:true ~config ~meta
   @@ fun turn_sandbox_factory ->
   let outside = Filename.concat config.Workspace.base_path "leaf-swap-outside" in
@@ -767,7 +756,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
         ~turn_sandbox_factory
         ~config
         ~meta
-        ~publication_recovery_access
+        ~publication_recovery
         ~gate_context
         ~args:(`Assoc (("path", `String target) :: args))
         ()
@@ -831,7 +820,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
       ~turn_sandbox_factory
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~gate_context
       ~args:
         (`Assoc
@@ -849,12 +838,12 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
     (Fs_compat.load_file outside_target)
 
 let check_invalid_mode_is_rejected ~label ~mode ~expected_error =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground (label ^ ".txt") in
   let raw =
     Keeper_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [
@@ -883,7 +872,7 @@ let test_tab_only_mode_is_rejected () =
     ~expected_error:"mode must be one of [overwrite, append, patch], got \"\\t\"."
 
 let test_public_edit_file_uses_explicit_repo_path () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let repo = seed_single_playground_repo ~config ~meta playground in
   let path = Filename.concat repo "lib/src.ml" in
   ensure_dir (Filename.dirname path);
@@ -893,7 +882,7 @@ let test_public_edit_file_uses_explicit_repo_path () =
       ~public:"Edit"
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       (`Assoc
         [
           ("file_path", `String "repos/masc/lib/src.ml");
@@ -906,7 +895,7 @@ let test_public_edit_file_uses_explicit_repo_path () =
     "let x = 2\n" (Fs_compat.load_file path)
 
 let test_public_write_file_uses_explicit_repo_path () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let repo = seed_single_playground_repo ~config ~meta playground in
   let path = Filename.concat repo "lib/generated.ml" in
   let raw =
@@ -914,7 +903,7 @@ let test_public_write_file_uses_explicit_repo_path () =
       ~public:"Write"
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       (`Assoc
         [
           ("file_path", `String "repos/masc/lib/generated.ml");
@@ -926,7 +915,7 @@ let test_public_write_file_uses_explicit_repo_path () =
     "let generated = true\n" (Fs_compat.load_file path)
 
 let test_write_file_surfaces_missing_ide_observation_sink () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   Agent_observation.reset_for_testing ();
   let path = Filename.concat playground "observed.ml" in
   let raw =
@@ -934,7 +923,7 @@ let test_write_file_surfaces_missing_ide_observation_sink () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
           [ "path", `String path
@@ -952,7 +941,7 @@ let test_write_file_surfaces_missing_ide_observation_sink () =
     (parse_write_region_observation_error raw)
 
 let test_write_file_sanitizes_ide_observation_sink_failure () =
-  setup @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   Agent_observation.reset_for_testing ();
   Agent_observation.register_write_region_sink (fun _ ->
     Error Agent_observation.Write_region_sink_failed);
@@ -965,7 +954,7 @@ let test_write_file_sanitizes_ide_observation_sink_failure () =
            ~turn_sandbox_factory:None
            ~config
            ~meta
-           ~publication_recovery_access
+           ~publication_recovery
            ~args:
              (`Assoc
                [ "path", `String path

@@ -13,8 +13,8 @@ type external_effect_authorizer =
 let dispatch
   : (config:Workspace.config
      -> agent_name:string
-     -> publication_recovery_registry:
-          Fs_compat.publication_recovery_registry option
+     -> publication_recovery_provider:
+          Keeper_publication_recovery_availability.provider
      -> ?sw:Eio.Switch.t
      -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
      -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -27,7 +27,7 @@ let dispatch
      -> Tool_result.result option)
       ref
   =
-  ref (fun ~config:_ ~agent_name:_ ~publication_recovery_registry:_ ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ?authorize_external_effect:_ ~name ~args:_ () ->
+  ref (fun ~config:_ ~agent_name:_ ~publication_recovery_provider:_ ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ?authorize_external_effect:_ ~name ~args:_ () ->
     failwith
       (Printf.sprintf
          "keeper_dispatch_ref: dispatch called for tool %S before boot registration — \

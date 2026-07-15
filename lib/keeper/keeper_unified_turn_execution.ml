@@ -79,8 +79,8 @@ type ctx =
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
   ; observation : Keeper_world_observation.world_observation
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
-  ; publication_recovery_registry : Fs_compat.publication_recovery_registry
-  ; publication_recovery_access : Fs_compat.publication_recovery_access
+  ; publication_recovery :
+      Keeper_publication_recovery_availability.turn_context
   ; shared_context : Agent_sdk.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
@@ -112,8 +112,7 @@ let run (ctx : ctx)
       ; build_turn_prompt
       ; trajectory_acc
       ; profile_defaults
-      ; publication_recovery_registry
-      ; publication_recovery_access
+      ; publication_recovery
       ; cleanup
       ; drain_turn_event_bus
       ; event_bus
@@ -179,8 +178,7 @@ let run (ctx : ctx)
                Keeper_agent_run.run_turn
                  ~config
                  ~meta:run_meta
-                 ~publication_recovery_registry
-                 ~publication_recovery_access
+                 ~publication_recovery
                  ~profile_defaults
                  ?continuation_delivery_channel
                  ?hitl_resolution

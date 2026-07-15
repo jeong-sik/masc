@@ -30,9 +30,8 @@ let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.k
 let make_tool_bundle
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry)
-      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?clock
@@ -90,8 +89,7 @@ let make_tool_bundle
                  ~input_schema:descriptor.input_schema
                  ~config
                  ~meta
-                 ~publication_recovery_registry
-                 ~publication_recovery_access
+                 ~publication_recovery
                  ~ctx_snapshot
                    ?turn_sandbox_factory
                  ~exec_cache
@@ -142,9 +140,8 @@ let make_tool_bundle
 let make_tools
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry)
-      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?clock
@@ -154,8 +151,7 @@ let make_tools
   (make_tool_bundle
      ~config
      ~meta
-     ~publication_recovery_registry
-     ~publication_recovery_access
+     ~publication_recovery
      ~ctx_snapshot
      ?search_fn
      ?clock

@@ -105,11 +105,7 @@ let test_identity_projection_failure_is_terminal_degraded_health () =
 ;;
 
 let require_registry state =
-  match
-    state
-    |> Mcp_server.workspace_scope
-    |> Mcp_server.workspace_scope_publication_recovery_registry
-  with
+  match Mcp_server.For_testing.publication_recovery_registry state with
   | Some registry -> registry
   | None -> Alcotest.fail "initialized runtime omitted its recovery registry"
 ;;
@@ -349,8 +345,8 @@ let test_registry_unavailable_keeps_server_state_live () =
       Alcotest.(check bool)
         "publication registry is fail-closed"
         true
-        (Mcp_server.workspace_scope state
-         |> Mcp_server.workspace_scope_publication_recovery_registry
+        (state
+         |> Mcp_server.For_testing.publication_recovery_registry
          |> Option.is_none);
       let unavailable_health = health state in
       Alcotest.(check string)

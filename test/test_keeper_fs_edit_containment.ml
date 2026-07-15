@@ -88,29 +88,18 @@ let setup f =
        let (_registered : Keeper_registry.registry_entry) =
          Keeper_registry.register ~base_path:base meta.name meta
        in
-       let registry =
-         match
-           Fs_compat.open_publication_recovery_registry
-             ~sw
-             ~fs
-             ~registry_root:Eio.Path.(fs / Workspace.masc_root_dir config)
-         with
-         | Ok registry -> registry
-         | Error error ->
-           Alcotest.fail
-             (Fs_compat.publication_recovery_registry_error_to_string error)
+       Masc_test_deps.with_publication_recovery_registry
+         ~sw
+         ~fs
+         ~registry_root:(Workspace.masc_root_dir config)
+       @@ fun registry ->
+       let publication_recovery =
+         { Masc.Keeper_publication_recovery_availability.provider =
+             Masc_test_deps.publication_recovery_provider registry
+         ; keeper_name = meta.name
+         }
        in
-       match
-         Fs_compat.with_publication_recovery_lane
-           ~registry
-           ~owner:meta.name
-           (fun publication_recovery_access ->
-              f ~config ~meta ~playground ~publication_recovery_access)
-       with
-       | Ok value -> value
-       | Error error ->
-         Alcotest.fail
-           (Fs_compat.publication_recovery_lane_open_error_to_string error))
+       f ~config ~meta ~playground ~publication_recovery)
 ;;
 
 let parse raw = Yojson.Safe.from_string raw
@@ -121,7 +110,7 @@ let parse_ok raw =
 
 let test_docker_write_allows_explicit_root () =
   setup
-  @@ fun ~config ~meta ~playground:_ ~publication_recovery_access ->
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery ->
   let meta = { meta with allowed_paths = [ config.base_path ] } in
   Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
@@ -130,7 +119,7 @@ let test_docker_write_allows_explicit_root () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
             [ "path", `String path
@@ -145,7 +134,7 @@ let test_docker_write_allows_explicit_root () =
 
 let test_docker_write_allows_playground () =
   setup
-  @@ fun ~config ~meta ~playground ~publication_recovery_access ->
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "mind/allowed.txt" in
   ensure_dir (Filename.dirname path);
   let raw =
@@ -153,7 +142,7 @@ let test_docker_write_allows_playground () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~publication_recovery_access
+      ~publication_recovery
       ~args:
         (`Assoc
             [ "path", `String path

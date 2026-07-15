@@ -225,18 +225,12 @@ let cleanup_test_workspace dir =
   in
   try rm_rf dir with _ -> ()
 
-(** Run a test callback with a fresh publication-recovery registry and the same
-    capability lifetime shape as a live Keeper lane. Existing startup state is
-    rejected instead of duplicating the production reconciliation policy in a
-    test helper; startup reconciliation has its own integration tests.
-    [registry_root] is owned by the caller and must outlive [sw]. *)
-let with_publication_recovery_lane
-      ~sw
-      ~fs
-      ~registry_root
-      ~owner
-      f
-  =
+(** Run a test callback with a fresh, inventoried publication-recovery registry.
+    Existing startup state is rejected instead of duplicating the production
+    reconciliation policy in a test helper; startup reconciliation has its own
+    integration tests. [registry_root] is owned by the caller and must outlive
+    [sw]. *)
+let with_publication_recovery_registry ~sw ~fs ~registry_root f =
   let registry_root = Eio.Path.(fs / registry_root) in
   match
     Fs_compat.open_publication_recovery_registry ~sw ~fs ~registry_root
@@ -255,20 +249,7 @@ let with_publication_recovery_lane
          ("test publication recovery discovery failed: "
           ^ Fs_compat.publication_recovery_discovery_error_to_string
               error)
-     | Ok [] ->
-       (match
-          Fs_compat.with_publication_recovery_lane
-            ~registry:publication_recovery_registry
-            ~owner
-            (fun publication_recovery_access ->
-               f ~publication_recovery_registry ~publication_recovery_access)
-        with
-        | Ok value -> value
-        | Error error ->
-          failwith
-            ("test publication recovery lane open failed: "
-             ^ Fs_compat.publication_recovery_lane_open_error_to_string
-                 error))
+     | Ok [] -> f publication_recovery_registry
      | Ok rows ->
        failwith
          ("fresh test publication recovery registry contains owners: "
@@ -277,6 +258,16 @@ let with_publication_recovery_lane
               (List.map
                  Fs_compat.publication_recovery_owner_discovery_row_to_string
                  rows)))
+;;
+
+let publication_recovery_provider registry =
+  Keeper_publication_recovery_availability.constant
+    (Keeper_publication_recovery_availability.Available registry)
+;;
+
+let non_runtime_publication_recovery_provider =
+  Keeper_publication_recovery_availability.non_runtime_provider
+;;
 
 let rng_initialized = Atomic.make false
 

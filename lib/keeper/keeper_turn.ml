@@ -219,14 +219,14 @@ let user_oas_blocks_of_args args =
       | Ok [] -> Ok None
       | Ok blocks -> Ok (Some blocks)
 
-let publication_recovery_turn_error failure =
+let turn_resources_error failure =
   let detail =
     Keeper_publication_recovery_scope.failure_to_string failure
   in
   tool_result_error_data
     ~tool_name:"masc_keeper_msg"
     (`Assoc
-       [ "error", `String "keeper_publication_recovery_access_unavailable"
+       [ "error", `String "keeper_turn_resources_unavailable"
        ; "failure_class", `String "runtime_failure"
        ; "detail", `String detail
        ])
@@ -437,15 +437,12 @@ let run_keeper_msg_turn_admitted
     | Ok meta0 ->
       (match
          Keeper_publication_recovery_scope.resolve_turn_resources
-           ~registry:ctx.publication_recovery_registry
+           ~provider:ctx.publication_recovery_provider
            ~base_path:ctx.config.base_path
            ~keeper_name:meta0.name
        with
-       | Error failure -> publication_recovery_turn_error failure
-       | Ok { entry
-            ; registry = publication_recovery_registry
-            ; access = publication_recovery_access
-            } ->
+       | Error failure -> turn_resources_error failure
+       | Ok { entry; publication_recovery } ->
       let meta = entry.meta in
       (match
          Keeper_unified_turn_pre_dispatch.load_profile_defaults
@@ -795,8 +792,7 @@ let run_keeper_msg_turn_admitted
 			                              Keeper_agent_run.run_turn
 			                                ~config:ctx.config
 			                                ~meta
-			                                ~publication_recovery_registry
-			                                ~publication_recovery_access
+			                                ~publication_recovery
 			                                ~profile_defaults
 			                                ~turn_ctx_cell
 		                                ~base_dir

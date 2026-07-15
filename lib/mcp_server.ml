@@ -560,6 +560,20 @@ let workspace_scope_publication_recovery_registry scope =
   | Publication_recovery_non_runtime -> None
 ;;
 
+let publication_recovery_availability_provider state () =
+  match Atomic.get (workspace_scope state).publication_recovery.state with
+  | Publication_recovery_initializing ->
+    Keeper_publication_recovery_availability.Initializing
+  | Publication_recovery_available available ->
+    Keeper_publication_recovery_availability.Available available.registry
+  | Publication_recovery_unavailable error ->
+    Keeper_publication_recovery_availability.Registry_unavailable error
+  | Publication_recovery_initialization_crashed failure ->
+    Keeper_publication_recovery_availability.Initialization_crashed failure
+  | Publication_recovery_non_runtime ->
+    Keeper_publication_recovery_availability.Non_runtime
+;;
+
 let workspace_scope_publication_recovery_snapshot scope =
   match Atomic.get scope.publication_recovery.state with
   | Publication_recovery_initializing ->
@@ -1088,6 +1102,10 @@ module For_testing = struct
           ; blocked = 0
           }
       }
+  ;;
+
+  let publication_recovery_registry state =
+    workspace_scope_publication_recovery_registry (workspace_scope state)
   ;;
 
   let create_state ~base_path =

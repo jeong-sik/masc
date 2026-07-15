@@ -899,7 +899,7 @@ let eio_context_missing tool_name =
 
 let () =
   Keeper_dispatch_ref.dispatch
-  := fun ~config ~agent_name ~publication_recovery_registry ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ?authorize_external_effect ~name ~args () ->
+  := fun ~config ~agent_name ~publication_recovery_provider ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ?authorize_external_effect ~name ~args () ->
     let run_external_effect continue =
       match authorize_external_effect with
       | None -> continue ()
@@ -959,7 +959,7 @@ let () =
            ; clock
            ; proc_mgr
            ; net
-           ; publication_recovery_registry
+           ; publication_recovery_provider
            }
          in
          Some
@@ -989,7 +989,7 @@ let () =
            ; clock
            ; proc_mgr
            ; net
-           ; publication_recovery_registry
+           ; publication_recovery_provider
            }
          in
          run_external_effect (fun () ->
@@ -1013,7 +1013,7 @@ let () =
               ~agent_name
               ~sw
               ~clock
-              ~publication_recovery_registry
+              ~publication_recovery_provider
               ?proc_mgr
               ?net
               args)
@@ -1027,7 +1027,7 @@ let () =
               ~agent_name
               ~sw
               ~clock
-              ~publication_recovery_registry
+              ~publication_recovery_provider
               ?proc_mgr
               ?net
               args)

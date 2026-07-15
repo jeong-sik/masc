@@ -511,9 +511,12 @@ let publication_recovery_registry env sw config =
     Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_root_dir config)
   in
   match
-    Fs_compat.open_publication_recovery_registry ~sw ~registry_root
+    Fs_compat.open_publication_recovery_registry
+      ~sw
+      ~fs:(Eio.Stdenv.fs env)
+      ~registry_root
   with
-  | Ok registry -> Some registry
+  | Ok registry -> registry
   | Error error ->
     fail
       (Fs_compat.publication_recovery_registry_error_to_string error)
@@ -525,8 +528,9 @@ let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
   ; clock = Eio.Stdenv.clock env
   ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
   ; net = Some (Eio.Stdenv.net env)
-  ; publication_recovery_registry =
-      publication_recovery_registry env sw config
+  ; publication_recovery_provider =
+      Masc_test_deps.publication_recovery_provider
+        (publication_recovery_registry env sw config)
   }
 
 let latest_log_seq () =
@@ -982,8 +986,9 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       let pending_before = AQ.pending_count () in
@@ -1114,8 +1119,9 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       sweep_and_recover_no_materialize ctx;
@@ -1175,8 +1181,9 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       sweep_and_recover_no_materialize ctx;
@@ -1250,8 +1257,9 @@ let test_restart_denies_persisted_dead_tombstone () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_registry =
-            publication_recovery_registry env sw config
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
         }
       in
       sweep_and_recover_no_materialize ctx;
@@ -1319,8 +1327,9 @@ let with_reap_ready_dead_keeper name f =
           ; clock = Eio.Stdenv.clock env
           ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
           ; net = Some (Eio.Stdenv.net env)
-          ; publication_recovery_registry =
-              publication_recovery_registry env sw config
+          ; publication_recovery_provider =
+              Masc_test_deps.publication_recovery_provider
+                (publication_recovery_registry env sw config)
           }
         in
         sweep_and_recover_no_materialize ctx
@@ -1403,8 +1412,9 @@ let test_legacy_stale_fleet_batch_routes_to_restart () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       sweep_and_recover_no_materialize ctx;
@@ -1522,8 +1532,9 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       Sup.with_restart_launch_noop_for_test (fun () ->
@@ -1588,8 +1599,9 @@ let test_launch_fork_rejection_does_not_announce_running () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       (match
@@ -1638,8 +1650,9 @@ let test_fork_rejection_preserves_replacement_lane () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_registry =
-            publication_recovery_registry env sw config
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
         }
       in
       (match
@@ -1690,8 +1703,9 @@ let test_fork_rejection_unregisters_non_terminalizable_owner () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_registry =
-            publication_recovery_registry env sw config
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
         }
       in
       (match
@@ -1731,8 +1745,9 @@ let test_sweep_waits_for_lane_join_before_unregister () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_registry =
-            publication_recovery_registry env sw config
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
         }
       in
       sweep_and_recover_no_materialize ctx;
@@ -1807,8 +1822,9 @@ let test_idle_duration_never_stops_keeper () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       sweep_and_recover_no_materialize ctx;
@@ -1864,8 +1880,9 @@ let test_non_storm_crashed_restarts_normally () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
-          publication_recovery_registry =
-            publication_recovery_registry env sw config;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       sweep_and_recover_no_materialize ctx;
@@ -1929,8 +1946,9 @@ let test_persisted_blocker_survives_unregister () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_registry =
-            publication_recovery_registry env sw config
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
         }
       in
       sweep_and_recover_no_materialize ctx;

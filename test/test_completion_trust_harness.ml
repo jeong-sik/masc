@@ -10,6 +10,8 @@ open Alcotest
 module KET = Masc.Keeper_tool_dispatch_runtime
 module Workspace = Masc.Workspace
 module AR = Masc.Task.Anti_rationalization
+module Publication_availability =
+  Masc.Keeper_publication_recovery_availability
 
 type reviewer_response =
   | Reviewer_verdict of AR.verdict
@@ -90,17 +92,22 @@ let with_ws name fn =
         ~finally:(fun () ->
           Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
         (fun () ->
-          Masc_test_deps.with_publication_recovery_lane
+          Masc_test_deps.with_publication_recovery_registry
             ~sw
             ~fs:(Eio.Stdenv.fs env)
             ~registry_root:dir
-            ~owner:meta.name
-            (fun ~publication_recovery_registry ~publication_recovery_access ->
+            (fun publication_recovery_registry ->
+               let publication_recovery =
+                 { Publication_availability.provider =
+                     Masc_test_deps.publication_recovery_provider
+                       publication_recovery_registry
+                 ; keeper_name = meta.name
+                 }
+               in
                fn
                  ~config
                  ~meta
-                 ~publication_recovery_registry
-                 ~publication_recovery_access
+                 ~publication_recovery
                  ~ctx_work:(make_ctx ()))))
 
 let outcome_label = function
@@ -140,8 +147,7 @@ let attempt_done
       ?(evidence_refs = [ "trace:completion-trust-harness" ])
       ~config
       ~meta
-      ~publication_recovery_registry
-      ~publication_recovery_access
+      ~publication_recovery
       ~ctx_work
       ~task_id
       ~result
@@ -150,8 +156,7 @@ let attempt_done
   KET.execute_keeper_tool_call_with_outcome
     ~config
     ~meta
-    ~publication_recovery_registry
-    ~publication_recovery_access
+    ~publication_recovery
     ~ctx_work
     ~exec_cache:None
     ~name:"keeper_task_done"
@@ -178,16 +183,14 @@ let seed_trace_evidence ~config trace_id =
 let claim_via_dispatch
       ~config
       ~meta
-      ~publication_recovery_registry
-      ~publication_recovery_access
+      ~publication_recovery
       ~ctx_work
       ~task_id
   =
   KET.execute_keeper_tool_call_with_outcome
     ~config
     ~meta
-    ~publication_recovery_registry
-    ~publication_recovery_access
+    ~publication_recovery
     ~ctx_work
     ~exec_cache:None
     ~name:"keeper_task_claim"
@@ -197,8 +200,7 @@ let claim_via_dispatch
 (* Test A — non-owner completion is denied (RFC-0262 axis-2 ownership gate). *)
 let test_completion_denied_for_non_owner () =
   with_ws "completion_trust_non_owner"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"foreign-owned task" ~priority:1
@@ -219,8 +221,8 @@ let test_completion_denied_for_non_owner () =
     (* attack: caller (non-owner) tries to complete it, with substantive notes so
        the reject is unambiguously about ownership, not note length. *)
     let result =
-      attempt_done ~config ~meta ~publication_recovery_registry
-        ~publication_recovery_access ~ctx_work ~task_id:"task-001"
+      attempt_done ~config ~meta ~publication_recovery ~ctx_work
+        ~task_id:"task-001"
         ~result:"I finished another agent's task on their behalf"
         ()
     in
@@ -241,16 +243,15 @@ let test_completion_denied_for_non_owner () =
 (* Test B — completion of an unclaimed (Todo) task is denied. *)
 let test_completion_denied_when_unclaimed () =
   with_ws "completion_trust_unclaimed"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"never claimed" ~priority:1
          ~description:"still in the backlog");
     (* task-001 is Todo; nobody claimed it. *)
     let result =
-      attempt_done ~config ~meta ~publication_recovery_registry
-        ~publication_recovery_access ~ctx_work ~task_id:"task-001"
+      attempt_done ~config ~meta ~publication_recovery ~ctx_work
+        ~task_id:"task-001"
         ~result:"pretending an unclaimed backlog item is finished"
         ()
     in
@@ -272,24 +273,22 @@ let test_completion_denied_when_unclaimed () =
 (* Local note length and evidence shape never decide completion. *)
 let test_short_notes_without_evidence_follow_llm_approval () =
   with_ws "completion_llm_short_notes"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
     reviewer_response := Reviewer_verdict AR.Approve;
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"caller's own task" ~priority:1
          ~description:"the LLM reviews even a short completion claim");
     let claim =
-      claim_via_dispatch ~config ~meta ~publication_recovery_registry
-        ~publication_recovery_access ~ctx_work ~task_id:"task-001"
+      claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
+        ~task_id:"task-001"
     in
     check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
     let result =
       attempt_done
         ~config
         ~meta
-        ~publication_recovery_registry
-        ~publication_recovery_access
+        ~publication_recovery
         ~ctx_work
         ~task_id:"task-001"
         ~result:"done"
@@ -313,16 +312,15 @@ let test_short_notes_without_evidence_follow_llm_approval () =
 
 let test_completion_with_evidence_refs_succeeds () =
   with_ws "completion_trust_evidence_refs"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
     reviewer_response := Reviewer_verdict AR.Approve;
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"complete with evidence refs" ~priority:1
          ~description:"claimed by the caller and completed with trusted proof");
     let claim =
-      claim_via_dispatch ~config ~meta ~publication_recovery_registry
-        ~publication_recovery_access ~ctx_work ~task_id:"task-001"
+      claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
+        ~task_id:"task-001"
     in
     check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
     seed_trace_evidence ~config "completion-trust-harness";
@@ -330,8 +328,7 @@ let test_completion_with_evidence_refs_succeeds () =
       attempt_done
         ~config
         ~meta
-        ~publication_recovery_registry
-        ~publication_recovery_access
+        ~publication_recovery
         ~ctx_work
         ~task_id:"task-001"
         ~result:"Implemented the deliverable and saved trace:completion-trust-harness evidence."
@@ -361,15 +358,14 @@ let test_completion_with_evidence_refs_succeeds () =
    complete it without changing evidence shape. *)
 let test_llm_rejection_keeps_task_active_then_approval_completes () =
   with_ws "completion_llm_reject_then_approve"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"LLM reviewed completion" ~priority:1
          ~description:"completion follows the evaluator verdict");
     let claim =
-      claim_via_dispatch ~config ~meta ~publication_recovery_registry
-        ~publication_recovery_access ~ctx_work ~task_id:"task-001"
+      claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
+        ~task_id:"task-001"
     in
     check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
     reviewer_response := Reviewer_verdict (AR.Reject "deliverable is not complete");
@@ -377,8 +373,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
       attempt_done
         ~config
         ~meta
-        ~publication_recovery_registry
-        ~publication_recovery_access
+        ~publication_recovery
         ~ctx_work
         ~task_id:"task-001"
         ~result:"Completed the deliverable."
@@ -399,8 +394,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
       attempt_done
         ~config
         ~meta
-        ~publication_recovery_registry
-        ~publication_recovery_access
+        ~publication_recovery
         ~ctx_work
         ~task_id:"task-001"
         ~result:"Completed the deliverable."
@@ -423,15 +417,14 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
 
 let test_unavailable_evaluator_keeps_task_active () =
   with_ws "completion_llm_unavailable"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"unavailable evaluator" ~priority:1
          ~description:"must stay active without an LLM verdict");
     let claim =
-      claim_via_dispatch ~config ~meta ~publication_recovery_registry
-        ~publication_recovery_access ~ctx_work ~task_id:"task-001"
+      claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
+        ~task_id:"task-001"
     in
     check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
     reviewer_response := Reviewer_unavailable;
@@ -439,8 +432,7 @@ let test_unavailable_evaluator_keeps_task_active () =
       attempt_done
         ~config
         ~meta
-        ~publication_recovery_registry
-        ~publication_recovery_access
+        ~publication_recovery
         ~ctx_work
         ~task_id:"task-001"
         ~result:"Completed the deliverable."
@@ -461,15 +453,14 @@ let test_unavailable_evaluator_keeps_task_active () =
    accepted on the same dispatch path. *)
 let test_legitimate_claim_succeeds () =
   with_ws "completion_trust_positive_claim"
-    (fun ~config ~meta ~publication_recovery_registry
-         ~publication_recovery_access ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
     ignore
       (Workspace.add_task config ~title:"claimable task" ~priority:1
          ~description:"unowned backlog work");
     let result =
-      claim_via_dispatch ~config ~meta ~publication_recovery_registry
-        ~publication_recovery_access ~ctx_work ~task_id:"task-001"
+      claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
+        ~task_id:"task-001"
     in
     check string "legitimate claim outcome" "success" (outcome_label result.KET.outcome);
     match assignee_of config "task-001" with

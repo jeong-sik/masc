@@ -374,16 +374,22 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
           ~system_prompt:"keeper fusion schema regression"
           ~max_tokens:4000
       in
-      Masc_test_deps.with_publication_recovery_lane
+      Masc_test_deps.with_publication_recovery_registry
         ~sw
         ~fs:(Eio.Stdenv.fs env)
         ~registry_root:marker
-        ~owner:meta.name
-      @@ fun ~publication_recovery_registry ~publication_recovery_access ->
+      @@ fun publication_recovery_registry ->
+      let publication_recovery =
+        Keeper_publication_recovery_availability.
+          { provider =
+              Masc_test_deps.publication_recovery_provider
+                publication_recovery_registry
+          ; keeper_name = meta.name
+          }
+      in
       let tools =
         Masc.Keeper_tools_oas_bundle.make_tools
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_snapshot ()
+          ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       let names =
         List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools

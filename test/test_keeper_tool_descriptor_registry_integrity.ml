@@ -1310,12 +1310,19 @@ let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
     Eio.Switch.run @@ fun sw ->
     let config = Workspace.default_config dir in
     let agent_name = "test-agent" in
-    Masc_test_deps.with_publication_recovery_lane
+    Masc_test_deps.with_publication_recovery_registry
       ~sw
       ~fs:(Eio.Stdenv.fs env)
       ~registry_root:dir
-      ~owner:agent_name
-    @@ fun ~publication_recovery_registry ~publication_recovery_access:_ ->
+    @@ fun publication_recovery_registry ->
+    let publication_recovery =
+      Masc.Keeper_publication_recovery_availability.
+        { provider =
+            Masc_test_deps.publication_recovery_provider
+              publication_recovery_registry
+        ; keeper_name = agent_name
+        }
+    in
     let keeper_descriptors =
       Descriptor.all_descriptors ()
       |> List.filter (fun d ->
@@ -1331,7 +1338,7 @@ let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
              !Keeper_dispatch_ref.dispatch
                ~config
                ~agent_name
-               ~publication_recovery_registry:(Some publication_recovery_registry)
+               ~publication_recovery_provider:publication_recovery.provider
                ~name
                ~args:(`Assoc [])
                ()

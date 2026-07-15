@@ -558,8 +558,8 @@ let execute_keeper_stream_tool
           clock;
           proc_mgr = state.Mcp_server.proc_mgr;
           net = state.Mcp_server.net;
-          publication_recovery_registry =
-            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
+          publication_recovery_provider =
+            Mcp_server.publication_recovery_availability_provider state;
         }
       in
       match
@@ -843,8 +843,8 @@ let execute_keeper_stream_tool_streaming
           clock;
           proc_mgr = state.Mcp_server.proc_mgr;
           net = state.Mcp_server.net;
-          publication_recovery_registry =
-            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
+          publication_recovery_provider =
+            Mcp_server.publication_recovery_availability_provider state;
         }
       in
       match
@@ -949,8 +949,8 @@ let execute_keeper_stream_tool_streaming_if_free
           clock;
           proc_mgr = state.Mcp_server.proc_mgr;
           net = state.Mcp_server.net;
-          publication_recovery_registry =
-            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
+          publication_recovery_provider =
+            Mcp_server.publication_recovery_availability_provider state;
         }
       in
       match

@@ -59,7 +59,8 @@ val handle_file_write :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  publication_recovery_access:Fs_compat.publication_recovery_access ->
+  publication_recovery:
+    Keeper_publication_recovery_availability.turn_context ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
@@ -71,7 +72,8 @@ val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  publication_recovery_access:Fs_compat.publication_recovery_access ->
+  publication_recovery:
+    Keeper_publication_recovery_availability.turn_context ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
@@ -80,8 +82,12 @@ val handle_file_write_with_outcome :
   Keeper_tool_execution.t
 (** Local writes acquire the project-root anchor and selected allowed root with
     [Eio.Path.open_dir] before Gate evaluation, then keep those directory
-    capabilities through read, append, temp-file creation, and atomic rename.
-    No local write is performed through a validated native path string.
+    capabilities through Gate evaluation and the selected effect. Atomic
+    replace/patch reads the live publication-recovery provider only after Gate
+    authorization and keeps the resulting lane access through recovery record,
+    temp-file, and rename work. Append and exclusive create are recovery-store
+    independent and therefore never read that provider. No local write is
+    performed through a validated native path string.
 
     The project root's parent is the operator-owned capability-acquisition
     boundary. An explicit allowed root outside the project likewise requires

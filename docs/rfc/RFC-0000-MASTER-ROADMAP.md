@@ -1,9 +1,9 @@
 # RFC-0000 — MASC × OAS Consolidated Master Design (SSOT)
 
-> Status: **Active / SSOT**
-> Supersedes: ~65 scattered design docs (see §10 Source Index)
+> Status: **Draft / Candidate SSOT** — `main` 병합 전에는 정본이 아님
+> Consolidates: ~65 design/audit sources (see §10 Evidence Source Index); 이 PR은 원문을 archive하지 않음
 > Last-updated: **2026-07-15**
-> OAS pin: **agent_sdk 0.212.0** (masc `dune-project:62` `>= 0.212.0`; `masc.opam:33`; exact lock `masc.opam.locked:14` `= 0.212.0` @ git SHA `b02bc16f`; pin SSOT `scripts/oas-agent-sdk-pin.sh`). See §2.6.
+> OAS pin snapshot: **agent_sdk 0.212.0**. 값의 정본은 `scripts/oas-agent-sdk-pin.sh`와 lockfile이며 이 문서가 아님. See §2.6.
 > Scope: MASC (Multi-Agent Streaming Coordination) + OAS (OCaml Agent SDK) product line.
 
 ---
@@ -12,20 +12,20 @@
 
 - [0. Meta — how agents use this doc](#0-meta)
 - [1. North Star & Non-Goals](#1-north-star--non-goals)
-- [2. The Boundary Law (+ 0.212 Migration Debt)](#2-the-boundary-law)
+- [2. The Boundary Law (+ crossover findings)](#2-the-boundary-law)
 - [2.6 OAS Version Pin & Pending 0.213 Contract](#26-oas-version-pin)
-- [3. Subsystem SSOT](#3-subsystem-ssot)
-  - [3.1 Board](#31-board) · [3.2 Goal](#32-goal) · [3.3 Task](#33-task) · [3.4 HITL/Gate](#34-hitlgate) · [3.5 Scheduler](#35-scheduler) · [3.6 Connector](#36-connector) · [3.7 Fusion](#37-fusion) · [3.8 Keeper (Lane-Per-Keeper)](#38-keeper-lane-per-keeper) · [3.9 Memory](#39-memory) · [3.10 Runtime (Provider/Model catalog)](#310-runtime-providermodel-catalog) · [3.11 Dashboard-Chat](#311-dashboard-chat)
+- [3. Subsystem cards (direction + audited snapshot)](#3-subsystem-ssot)
+  - [3.1 Board](#31-board) · [3.2 Legacy Goal (retired)](#32-goal) · [3.3 Task](#33-task) · [3.4 Effect Permission Boundary](#34-hitlgate) · [3.5 Scheduler](#35-scheduler) · [3.6 Connector](#36-connector) · [3.7 Fusion](#37-fusion) · [3.8 Keeper (Lane-Per-Keeper)](#38-keeper-lane-per-keeper) · [3.9 Memory](#39-memory) · [3.10 Runtime (Provider/Model catalog)](#310-runtime-providermodel-catalog) · [3.11 Dashboard-Chat](#311-dashboard-chat)
   - [3.12 OAS Internals (pure library)](#312-oas-internals) · [3.13 Keeper-as-a-Tool (cross-model invocation)](#313-keeper-as-a-tool) · [3.14 IDE Observation Plane v2](#314-ide-observation-plane-v2)
-- [4. Execution Roadmap (12 goals)](#4-execution-roadmap)
-  - [4.13 Migration-Debt Goals (MD-1..MD-6, 감사 파생)](#413-migration-debt-goals)
-  - [4.14 Deferred-Subsystem & Hygiene Goals (DS-1..DS-8)](#414-deferred-subsystem-goals)
+- [4. Candidate Execution Roadmap (12 goals)](#4-execution-roadmap)
+  - [4.13 Crossover finding details (CF-1..CF-6)](#413-migration-debt-goals)
+  - [4.14 Deferred candidate specs (DS-1..DS-8)](#414-deferred-subsystem-goals)
 - [5. Orthogonality Matrix](#5-orthogonality-matrix)
 - [6. Blast Radius Matrix](#6-blast-radius-matrix)
 - [7. Benchmark Lens](#7-benchmark-lens)
-- [8. Recovered / Deferred Ideas](#8-recovered--deferred-ideas)
+- [8. Recovered / Deferred Idea Inventory](#8-recovered--deferred-ideas)
 - [9. Anti-patterns to Refuse](#9-anti-patterns-to-refuse)
-- [10. Source Index](#10-source-index)
+- [10. Evidence Source Index](#10-source-index)
 - [11. Open Decisions Ledger (NEEDS_DECISION)](#11-open-decisions-ledger)
 
 ---
@@ -33,23 +33,34 @@
 <a name="0-meta"></a>
 ## 0. Meta — how agents use this doc
 
-이 문서는 MASC/OAS 제품의 **단일 설계 진실원(SSOT)**이다. 흩어진 ~65개 설계 문서(§10)를 대체하며, 이 문서 밖의 설계는 **stale로 간주**한다.
+이 문서는 MASC/OAS 제품 방향의 **candidate SSOT**다. 병합 뒤에도 소유 범위는 장기 경계와 불변식이다. OAS public API, 현재 코드, pin, PR/CI/live 상태는 각각의 정본을 따른다. 이 문서 밖의 자료를 blanket-stale로 선언하거나 OAS upstream 문서를 supersede하지 않는다.
 
 **읽는 순서 (Haiku급 에이전트 기준):**
 
 1. §1 North Star & Non-Goals — 무엇을 만들고 무엇을 안 만드는가. 스코프 크리프 방지.
 2. §2 Boundary Law — MASC↔OAS 경계. 여기 위반하면 어떤 코드도 머지 금지.
-3. §3 해당 subsystem의 SSOT 카드 — 책임/타입/불변식/결정론↔LLM 경계.
-4. §4 담당 goal의 실행 스펙 — 정확한 modules·types·acceptance test.
+3. §3 해당 subsystem 카드 — 방향은 규범적, `현재 상태`는 작성 시점 감사 snapshot.
+4. §4 candidate goal — 구현 전 GitHub live 상태와 현재 코드를 다시 검증.
 5. §9 Anti-patterns — 작성 *전* self-check (워크어라운드 시그니처).
-6. §8 Deferred Ideas — 내가 지금 하려는 게 이미 밀린 아이디어인지 확인.
+6. §8 Deferred Inventory — 과거에 이름이 있었다는 이유로 착수하지 말고 fresh evidence가 있는지 확인.
 
 **규칙:**
 
-- 이 문서와 코드가 충돌하면 코드가 최신이나, **설계 방향은 이 문서가 정본**이다. 방향을 바꾸려면 이 문서를 개정한다(밖에서 임의 결정 금지).
+- 이 문서와 코드가 충돌하면 **현재 동작의 정본은 코드**, 장기 방향의 정본은 병합된 이 RFC다. 충돌을 숨기지 말고 RFC 위반 또는 RFC 개정으로 명시한다.
+- release/pin/PR/CI/live 수치는 이 문서의 정본이 아니다. 인용할 때 commit·명령·확인 시각을 붙인다.
 - 완료 기준은 "동작 개선"이 아니라 **기계로 판정 가능한 상태**다: grep 카운트, HTTP status, 테스트 통과, 렌더 여부. 주관적 "좋아짐" 배제.
 - Draft PR가 로컬 focused check를 통과해도 그것은 production-ready의 *후보*이지 검증 자체가 아니다. **CI = typed behavior, live smoke = deployed behavior**. 보고서는 둘을 분리한다.
 - OCaml 하한은 실제로 dune-project 기준 **≥5.5** (CI가 5.5에서 authoritative). "5.4 원칙"은 lower-bound 참조일 뿐.
+
+### 0.1 Adversarial survival verdict
+
+| 판정 | 내용 |
+|---|---|
+| **KEEP** | OAS의 작은 provider/model-call SDK, Lane Per Keeper, typed yield/error/checkpoint, MASC-owned context, Board/Task/connector, durable state와 exact observability |
+| **REWRITE** | version/PR/progress snapshot, 중복 goal 상태, provider/model telemetry 표면, effect permission — 정본 링크와 기계 판정으로만 유지 |
+| **KILL** | Legacy Goal runtime, generic governance hierarchy, `Context_reducer`, implicit sampling/timeout/turn/token defaults, string/score/count가 semantic·lifecycle·effect 결정을 대신하는 heuristic, stub/synthetic ToolResult, migration/backfill/dual-read, producer·consumer 없는 타입 |
+
+`KILL` 항목은 deferred idea가 아니다. 옛 데이터를 살리기 위한 migration 없이 production path·fixture·compatibility branch를 함께 제거한다. 아래의 상세 inventory는 삭제 전 근거를 보존하기 위한 것이며, 이름이 있다는 이유로 구현 권한을 얻지 않는다.
 
 ---
 
@@ -75,7 +86,7 @@ MASC가 최적화하는 것은 단일 턴 지연이 아니라 **fleet 수준 재
 | Law | 내용 |
 |-----|------|
 | **LAW 1 ACTIVITY FIRST** | budget·cost·turn·no-progress·approval·provider-failure는 Keeper 전체를 terminal 상태로 만들지 않는다. enabled Keeper는 항상 Active·Awaiting·Recovering·(서명된 operator 명령에 의한) Stopped 중 하나. No dead-end. |
-| **LAW 2 DECISION BOUNDARY** | 의미 판단(완료·승격·관련성·위험·topology·source-needed)은 schema-valid Judge receipt를 통과한다. 문자열·점수·연속 횟수는 결정 권한이 없다. Judge unavailable → Inconclusive/PendingJudgment, 위험 effect commit 금지, **deterministic fallback approval 금지**, Keeper는 reversible work 계속. |
+| **LAW 2 DECISION BOUNDARY** | 의미 판단(완료·승격·관련성·semantic topology·source-needed)은 schema-valid Judge receipt를 통과한다. 반면 typed capability eligibility, declared candidate order, lane routing은 결정론이다. 문자열·점수·연속 횟수는 결정 권한이 없다. Judge unavailable → Inconclusive/PendingJudgment, 위험 effect commit 금지, **deterministic fallback approval 금지**, Keeper는 reversible work 계속. |
 | **LAW 3 EVERYTHING OBSERVED** | Turn·provider/model·prompt/decode/cache token·Tok/s·tool·effect·approval·memory·Judge·cost를 causal ID로 결합. **Journal ≠ Trace**: append-only lifecycle journal은 recovery-correctness SSOT, OTel/log/dashboard은 projection. exporter loss가 recovery state를 바꾸지 못한다. |
 | **LAW 4 HARD CUT** | 새 경계를 검증한 뒤 legacy를 **즉시** 삭제한다. compatibility parser·dual-write·숨은 fallback을 장기 유지하지 않는다. **Fiber ≠ Durable job**: Eio Switch는 lexical lifetime/cancellation scope. 장기 생존성은 store+dispatcher+receipt가 담당. |
 
@@ -134,31 +145,31 @@ consumer ──▶ MASC (workspace collaboration / orchestration) ──depends 
 | repo 분리 | OAS는 별도 repo; MASC는 pin된 OAS를 소비 | — |
 | **Layer 0** | SDK-independence gate — OAS 자체 스크립트에 vocab scan 위임 | OAS lib에 coordinator 어휘 등장 |
 | **Layer 1** | fingerprint gate (`oas-drift-check.sh` vs `oas-api-surface.json`) | OAS API surface drift |
-| **Layer 2** | type adapter `lib/oas_compat/` — 이 모듈만 OAS variant/field 추가에 컴파일 실패 | OAS 타입 변화가 여기 격리됨 |
-| provider/model redaction | MASC 경계에서 compatibility 필드를 `runtime`/`null`/empty로 redact; legacy `allowed_providers`/`models`는 TOML/meta parse 경계에서 reject | keeper runtime product에 구체 provider/model id 유출 (#15028) |
+| **Layer 2** | MASC가 pinned OAS public `.mli`를 직접 소비하고 컴파일 실패로 drift를 받음. `lib/oas_compat/`는 crossover 종료 뒤 삭제 대상 | OAS API를 local compatibility type/parser로 재구현 |
+| provider/model identity | exact catalog id는 operator-only receipt/diagnostic에서 관측 가능. MASC policy는 id 문자열에 branch하지 않고 metric label은 bounded projection만 사용; legacy `allowed_providers`/`models`는 TOML/meta parse 경계에서 reject | policy와 observability를 혼동하거나 unbounded identity를 public metric label로 노출 |
 
-**Regenerate-before-fix는 안티패턴이다.** drift가 감지되면 재생성이 아니라 adapter를 수정한다.
+**Regenerate-before-fix와 compatibility shim은 안티패턴이다.** drift가 감지되면 current OAS public API를 직접 소비하도록 MASC caller를 고치고 옛 adapter를 삭제한다.
 
-**의도된 boundary-allow 예외 (진단 전용):** `keeper_runtime_attempt.ml enrich_sdk_error`가 OpenAI-compat 404 메시지에 model_id/base_url/request_path/endpoint를 interpolate — error path의 진단 전용 유출(metric label·product telemetry엔 절대 안 나감). 잘못 설정된 endpoint를 운영자가 보게 하려고 의도적으로 유지.
+**진단 표면:** `keeper_runtime_attempt.ml enrich_sdk_error`가 OpenAI-compat 404에 model_id/base_url/request_path/endpoint를 포함하는 것은 operator-only 진단이다. metric label이나 외부/public telemetry로 투영하지 않는다.
 
 ### 2.4 Boundary Rule 4 (핵심)
 
 > **"runtime path가 동작해도 핵심 semantics가 여전히 drop되면 migrated라고 주장하지 않는다."** — N-of-M / silent-drop 실패 클래스를 직접 지목.
 
-### 2.5 0.212 Migration Debt — 6 silent-drops (반드시 roadmap에 박제)
+### 2.5 0.212 crossover findings — survival ruling
 
-이 6건은 "논의되고 사라지는" 클래스다. 각각 담당 goal/owner/acceptance를 고정한다. **하나도 유실 금지.**
+이 6건은 migration을 보존하라는 명령이 아니다. 현재 제품 불변식에 비춰 다시 판정한 감사 기록이다. implicit default·watchdog heuristic·옛 row migration을 복원하지 않는다.
 
-| # | 증상 (silent regression) | 위반한 원칙 | 담당 goal | Owner | Acceptance (기계 판정) |
-|---|--------------------------|-------------|-----------|-------|------------------------|
-| **#24417** | memory/compaction provider의 deterministic `temperature=0` fallback 삭제 → runtime.toml 미설정 시 ~0.7 (요약 재현성 회귀). unset-deterministic 테스트도 삭제. | 재현성/결정론 (LAW 3, thesis) | Goal 3 | MASC provider config | compaction/memory lane이 구조적으로 `temperature=0` (runtime.toml unset 시); 삭제된 unset-deterministic 회귀 테스트 복원, revert 시 red. |
-| **#24386** | stream-idle 기본 120s→None(off) + 모든 numeric cap 제거 → 기본설정 runaway deadline 없음. | 긴장: "Pause 금지"(LAW 1) ↔ "runaway 봉쇄" | Goal (신규 runtime supervision) | MASC supervisor/runtime | 해결책 = cap이 아닌 **provider/tool-local timeout + supervisor watchdog(정지 아닌 활동 전환)**. 기본설정 keeper가 hung provider에서 provider/tool-local timeout 도달→watchdog가 lane을 새 활동으로 전환(fleet pause 없음). `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` 재타이핑+안전 기본값. |
-| **#24448** | Observed stop reason(TurnLimit/ExecTimeout/ExecIdle) producer 0개 → orphan dead branch 7파일. cap도달 vs 정상완료 구별 불가. cooperative-yield producer revert→#24403 defer. | typed-FSM terminal observability (LAW 3) | Goal 12 (+Goal 5) | MASC keeper turn FSM | 각 Observed variant에 ≥1 live producer(또는 variant 제거); receipt에서 cap-reached vs normal-completion 구별; TLA+ `CancelledNeverAbsorbed` 유지; dead branch 제거/배선. |
-| **#24510** | 0.212 crossover N-of-M (exit_condition/server/dashboard/~20 테스트 미이전 자인). `block_tokens` 복구했으나 behavioral 테스트 없음, ToolResult가 0.212 content_blocks 무시→멀티모달 undercount. | N-of-M 금지 (LAW 4) | Goal 5 | MASC 0.212 crossover | ToolResult가 content_blocks 소비(멀티모달 undercount 0); block_tokens behavioral 테스트; ~20 deferred 테스트 이전; typed receipt가 멀티모달 토큰 카운트. **[2026-07-15 진행: ~20 deferred 테스트 _compilation_ 이전 착지 (#24468 벌크 + #24513 잔여, `dune build @check` green) → N-of-M compilation 채무 해소. 잔여 = content_blocks 소비 / block_tokens _behavioral_ acceptance (미검증).]** |
-| **#24442** | file-write visibility 축소 (evidence 없는 file-write-only turn이 visible→invisible). | No silent failure (LAW 3) | Goal 12 | MASC observability | file-write-only turn이 receipt/waiting surface에서 operator-visible; 회귀 테스트가 visibility assert. |
-| **#24447** | masc-domain never-drop(handoff/heartbeat/trust) → Drop_oldest (0.212가 Block 제거해 불가피, publisher가 drop을 unit으로만 받아 인지 못함). | never-drop / preserve-and-surface (KEEPER-STATE-OWNERSHIP) | Goal (신규 event drop policy) | MASC event bus adapter | handoff/heartbeat/trust는 절대 silent drop 안 됨; publisher가 branch 가능한 **typed drop signal** 수신; full queue가 unit이 아닌 typed error 표면화하는 회귀. |
+| # | 원 감사 증상 | 생존 판정 | 정정된 acceptance |
+|---|---|---|---|
+| **#24417** | compaction provider의 `temperature=0` fallback 삭제 | **KILL fallback** | sampling은 catalog/provider default 또는 명시 config만. MASC가 숨은 `0`을 재도입하지 않으며, 결정론이 필수인 별도 작업은 explicit config 부재를 typed error로 처리. |
+| **#24386** | 기본 stream-idle/숫자 cap 삭제 | **KILL implicit limit** | whole-run lifetime은 caller-owned Eio scope. 명시 timeout만 적용하고, timeout 부재는 unbounded. watchdog가 LLM으로 lane을 임의 re-task하지 않음. |
+| **#24448** | producer 0인 `TurnLimit/ExecTimeout/ExecIdle` 관측 variant | **KEEP deletion** | 실제 typed producer가 없는 variant와 consumer를 삭제. 삭제한 cap을 관측 명목으로 재도입하지 않음. cooperative yield/cancel/completion만 실제 OAS outcome에서 전달. |
+| **#24510** | 0.212 content-block crossover의 behavioral 검증 공백 | **KEEP typed contract** | compilation 이전과 behavior를 분리. `ToolResult.content_blocks` round-trip과 typed receipt를 focused test로 검증하고 duplicate adapter를 두지 않음. |
+| **#24442** | file-write-only turn visibility 축소 | **KEEP visibility** | file write의 commit/failure가 typed receipt에 남음. evidence가 없으면 성공으로 합성하지 않음. |
+| **#24447** | 중요한 event가 `Drop_oldest`, publisher는 loss를 처리 불가 | **KEEP durability, reject telemetry-only fix** | typed drop signal만으로 완료 아님. durable preservation + retry/ack 또는 enqueue 실패 반환을 갖추고 saturation에서 source event loss 0을 증명. |
 
-> **결합 주의:** #24448(observed-stop producer)과 #24386(runaway watchdog)은 "cap-reached vs complete 구별"로 결합. #24447(drop policy)과 #24442(file-write visibility)는 둘 다 "no silent drop" 위반. **6건을 하나의 일관된 슬라이스로 다루되, 각 fix는 독립 착지 가능.** 각 항목의 first-class numbered goal은 §4.13(MD-1..MD-6)에 있다 — §2.5는 증상 카탈로그, §4.13은 실행 스펙(양방향 cross-link).
+상세 근거는 §4.13에 보존한다. §4.13은 별도 first-class goal 묶음이 아니라 이 표의 설명 appendix다.
 
 <a name="26-oas-version-pin"></a>
 ### 2.6 OAS Version Pin & Pending 0.213 Contract
@@ -175,36 +186,35 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 
 - **현재 pinned = agent_sdk 0.212.0** (git SHA `b02bc16f`). 0.212.0이 최신 tagged release.
 - **Pending 0.213 계약 (미tag, OAS `CHANGELOG.md` Unreleased):** agent-as-tool input 계약이 **정확히 하나의 required object 필드 `{"prompt": "..."}`**로 축소. `Agent_tool.config.input_parameters` 및 scalar-string invocation(`Tool.execute tool (\`String prompt)`) 제거. 근거: OAS `docs/migrations/0.213-agent-tool-input.md`, `CHANGELOG.md` Unreleased §Breaking. 0.213 pin bump 시 Goal 5(Keeper-as-a-Tool·Fusion tool 조립)와 §3.13이 이 단일-`prompt`-object 계약에 맞춰 재검증 대상 — MASC가 child agent에 넘기던 다중 필드는 `prompt`로 접거나 별도 typed tool로 분리해야 한다.
-- 함께 Unreleased: 암묵적 60s/30s HTTP deadline 제거(명시 `timeout_s`만 적용, clock 없는 deadline은 typed `AcceptRejected`), hook `Skip`/`Override` 제거. 이 세 breaking은 §3.10 Runtime·§3.12 OAS internals·§3.4 Gate 경계에 영향 — 0.213 bump는 별도 slice로 다룬다.
+- 함께 Unreleased: 암묵적 60s/30s HTTP deadline 제거(명시 `timeout_s`만 적용, clock 없는 deadline은 typed `AcceptRejected`), hook `Skip`/`Override` 제거. 이 세 breaking은 §3.10 Runtime·§3.12 OAS internals·§3.4 effect permission 경계에 영향 — 0.213 bump는 별도 slice로 다룬다.
+
+> [근거] `bash scripts/check-oas-pin.sh`와 `gh release list --repo jeong-sik/oas`; 2026-07-15 확인; 신뢰도 High. 이 절은 확인 시점 snapshot이며 이후 값은 pin script/release 상태가 정본이다.
 
 ---
 
 <a name="3-subsystem-ssot"></a>
-## 3. Subsystem SSOT
+## 3. Subsystem cards (direction + audited snapshot)
 
-각 카드: 책임 / 소유 타입 / 경계 계약 / 불변식 / 결정론↔LLM 경계 / 현재 상태 / open goals.
+각 카드의 책임·경계·불변식은 방향 계약이다. `현재 상태`와 수치는 작성 시점 inventory이며 구현 전 fresh grep/CI/live evidence로 재검증한다.
 
 <a name="31-board"></a>
 ### 3.1 Board
 
 - **책임:** 다중 Keeper가 공유하는 append-only 게시판 (post/comment/reaction/attachment). 약결합 satellite — non-blocking wake/enqueue로만 개입.
 - **소유 타입:** `Board_types.post` (`meta_json:Yojson` carrier), `Board_attachment_meta` (Image|Video|Youtube|External_link, +Audio|File|Gallery 예정), reaction/mention.
-- **경계 계약:** Board는 Goal/Task/Hitl 모듈에 손대지 않는다 (오직 `Task_completion` string label). rich rendering은 MASC-owned surface projection (`Board_render` — Discord embed/Slack block/plain-text fallback을 한 소스에서). OAS는 generic transport만.
+- **경계 계약:** Board는 Task/effect-permission runtime을 import하지 않고 typed event만 소비한다. `Task_completion` 같은 domain decision을 string label로 재분류하지 않는다. rich rendering은 MASC-owned surface projection (`Board_render` — Discord embed/Slack block/plain-text fallback을 한 소스에서). OAS는 generic transport만.
 - **불변식:** post body는 **비파괴적 append**. 현재 status-rollup이 50개 하드코딩 영어 키워드로 substantive-vs-noise 판정 후 body를 `Hashtbl.replace`로 **파괴적 덮어쓰기** → LAW 2 위반, 반드시 제거.
-- **결정론↔LLM:** substantive-vs-status 판정, proactive attention wake, 완료 주장 검증 = **LLM Judge 경계**. 랭킹 구조(hot/confidence)만 결정론. attachment round-trip·id 검증(path traversal 거부)은 결정론.
+- **결정론↔LLM:** substantive-vs-status 판정, proactive attention wake, 완료 주장 검증 = **LLM Judge 경계**. 표시 순서는 declared total order(`created_at`, stable id)만 쓰며 hot/confidence/karma score가 의미·품질 판정을 대신하지 않는다. attachment round-trip·id 검증(path traversal 거부)은 결정론.
 - **현재 상태:** rich-text/multimedia meta는 저장되나 dashboard 미렌더; proactive attention candidate는 producer-only dead scaffold(`load_candidates` 외부 reader 0); claim-evidence gate가 opt-in이라 free-text "task done" 완료주장이 검증 우회.
-- **open goals:** Goal 9(substantive-vs-status를 LLM judge+비파괴 append로; proactive candidate consumer 배선 또는 ledger+metric 삭제), Goal 11(`Board_render` 공유 fragment + nested comment-tree serializer + grapheme-aware limit).
+- **candidate work:** effect permission(Goal 9)·CI breadth(Goal 11)에 얹지 않는다. Board-owned 독립 slice로 substantive-vs-status LLM judge+비파괴 append, proactive candidate consumer 배선 또는 ledger+metric 삭제를 수행한다. `Board_render` 공유 fragment+nested comment-tree serializer+grapheme-aware limit도 별도 surface slice다.
 
 <a name="32-goal"></a>
-### 3.2 Goal
+### 3.2 Legacy Goal — RETIRED / HARD DELETE
 
-- **책임:** 장기 목표의 수렴/정체 추적. 약결합 satellite.
-- **소유 타입:** goal FSM, `iterations_without_progress` counter, `StagnationDetected` arm.
-- **경계 계약:** endpoint→goal id 결합은 opaque id 값 의존만 (coordination 모듈 import 금지).
-- **불변식:** stagnation 감지는 실제 counter 기반이어야 한다. 현재 RFC-0310 convergence check의 `iterations_without_progress`가 0으로 하드코딩 → `StagnationDetected` 절대 발화 안 함(dead arm).
-- **결정론↔LLM:** 정체 여부의 신호(updated_at 불변 N episode)는 결정론 gauge, 재escalation 판단은 LLM.
-- **현재 상태:** goal-stagnation edge가 (goal_id, updated_at) episode당 1회만 발화, bounded re-escalation 없음.
-- **open goals:** Goal 11(실제 `iterations_without_progress` counter 배선 또는 arm 삭제; N episode 후 bounded re-escalation).
+- **판정:** 장기 Goal FSM, stagnation counter, goal-loop scheduler/status는 살리지 않는다.
+- **이유:** MASC는 AutoGPT식 goal-decomposition runtime이 아니다. 협업 실행 단위는 명시적 Task와 Keeper lane이다.
+- **삭제 범위:** `lib/goal` runtime, workspace/keeper legacy goal field와 decode path, goal-loop dashboard/scripts/tests, migration/backfill/compatibility row.
+- **acceptance:** production·fixture·dashboard에서 Legacy Goal dependency 0. 옛 persisted goal row를 읽기 위한 migration 없음.
 
 <a name="33-task"></a>
 ### 3.3 Task
@@ -218,14 +228,14 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 - **open goals:** Goal 11(solo-room guard 후 default_on=true; check_timeouts가 past-deadline scan+force_cancel; rework loop에 wake incentive; G-2 deterministic probe green).
 
 <a name="34-hitlgate"></a>
-### 3.4 HITL/Gate
+### 3.4 Effect Permission Boundary (generic governance 아님)
 
-- **책임:** 외부 effect의 승인 경계. 비차단 one-shot 판단.
-- **소유 타입:** 단일 non-hierarchical Gate. decision **SOURCE 3종**: Manual HITL, configured LLM Auto Judge, explicit operator-recorded Always Allowed. `continuation_channel` closed sum (RFC-0320: `Dashboard{thread_id}|Discord{ch,user}|Slack{ch,user}|Unrouted{reason}`). `EffectIntent` (sealed args_hash + precondition + ContinuationRef). effect capability floor: `Read_only|Workspace_write|External_message|Money|Destructive|Credential|Unknown`.
+- **책임:** 정확한 외부 effect request의 permission 경계. 비차단 one-shot 판단. 범용 governance/risk hierarchy를 소유하지 않는다.
+- **소유 타입:** request-local decision **SOURCE 3종**: Manual HITL, configured LLM Auto Judge, explicit operator-recorded Always Allowed. `continuation_channel` closed sum (RFC-0320: `Dashboard{thread_id}|Discord{ch,user}|Slack{ch,user}|Unrouted{reason}`). `EffectIntent` (sealed args_hash + precondition + ContinuationRef). effect capability floor: `Read_only|Workspace_write|External_message|Money|Destructive|Credential|Unknown`.
 - **경계 계약:** approval은 **정확한 effect만** 대기 (sealed args_hash). approval 요청은 durable commit + **Keeper lane 즉시 해제(lane-held time = 0)**. edited args는 approval 무효화(새 EffectIntent). `submit_and_await` production path 없음. Unrouted는 fail-closed. Tool manifest의 Missing/Unknown effect → 정확한 effect pending 유지. LLM Judge는 context/scope/intent 해석 가능하나 structural floor를 **낮출 수 없다**.
 - **불변식:** 한 Keeper의 decision state가 다른 lane을 pause 못 함. Auto Judge failure는 explicit request-local unsettled state — silent approve/reject/global-stop 금지. 모든 decision이 source/request-id/model·operator-id/result/explanation 기록. **비-재도입 규칙:** default-deny boolean, unknown-risk bucket, global pause, pre-tool string classifier로 계층 승인 재생성 금지.
 - **결정론↔LLM:** "무엇을 말할지" = LLM; "어디로 답할지" = deterministic typed channel-match. objective enforcement(typed-input/path-jail/sandbox-confinement)는 소유 execution 경계 — Gate decision 아님.
-- **현재 상태:** HITL/Approvals ~50%. read model(governance/scheduled approval count, ApprovalsSurface route) 존재하나 wake/enqueue-on-resolution outcome이 dashboard surface에서 미증명. `submit_and_await`가 아직 keeper fiber를 Critical에서 무한 block(governance_pipeline.ml:550). RFC-0305/0311/0318/0319/0337 전부 Withdrawn 2026-07-13 (non-hierarchical Gate가 정본 방향).
+- **현재 상태 snapshot:** read model과 ApprovalsSurface route는 존재하나 wake/enqueue-on-resolution outcome은 재검증 필요. synchronous `submit_and_await` production path와 `governance_*` compatibility surface는 삭제 대상. RFC-0305/0311/0318/0319/0337의 hierarchy는 부활시키지 않는다.
 - **open goals:** Goal 9(decision resolved→wake/enqueue end-to-end 증명, 비차단, audit trail; Auto Judge failure path 적대 검증).
 
 <a name="35-scheduler"></a>
@@ -237,14 +247,14 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 - **불변식:** OTel label은 bounded(kind/status/risk_class/keeper). unbounded id(schedule_id/execution_id/trace_id/payload_digest)는 span attribute/structured log — metric label 금지. occurrence identity + 저장 실패 재시도는 **동일 signal_id**. corrupt/unwritable seen-key ledger는 tick을 loud fail(silent re-fire 금지).
 - **결정론↔LLM:** scheduler decision에 heuristic 없음. cron 5-field + daily fixed-offset은 결정론 구현.
 - **현재 상태:** primary intent(time/condition→keeper wake) 경로는 코드상 배선됨(wired) — 단 **wired ≠ proven**: single-shot terminal(failed/expired) evidence만 있고 recurring operational proof는 없다(G2 live proof 48%: scheduled=0/succeeded=0/failed=2/expired=2). keeper_recurring task는 in-memory Hashtbl만 → 재시작 시 silent 소멸(RFC-0314 §3 open); `masc_recurring_add`가 typed closed action 대신 `Broadcast(label)` 하드코딩; `keeper_wake` dispatch가 target keeper 존재 미검증(typo→Succeeded 마킹); auto-disable+2×interval cooldown = cap/cooldown 증상억제. 배포 diverged runtime(source ≠ server HEAD)이 live proof 차단.
-- **open goals:** Goal 6(legacy recurring/grant 삭제, durable wake만; recurring을 `.masc/keeper/<name>/recurring.json` persist+reload; typed closed action variant; dispatch가 "keeper not registered"를 `Dispatch_failed`로; re-enable을 health signal에 gate), Goal 7(occurrence identity + 동일 signal_id 재시도), standing grant(#48: 동일 digest 재승인 0회, digest 변경 시 재승인).
+- **open goals:** Goal 6(legacy recurring 삭제, durable wake만; recurring을 `.masc/keeper/<name>/recurring.json` persist+reload; typed closed action variant; dispatch가 "keeper not registered"를 `Dispatch_failed`로; re-enable을 health signal에 gate), Goal 7(occurrence identity + 동일 signal_id 재시도). standing grant와 digest-equality 승인 우회는 삭제한다.
 
 <a name="36-connector"></a>
 ### 3.6 Connector
 
 - **책임:** 외부 채널(Discord/Slack) intake + reply. 약결합 satellite.
-- **소유 타입:** `KNOWN_CONNECTOR_IDS` (정확히 4 id, known_ids-size 불변식 테스트). typed `Surface.t` sum. speaker identity `authority=Owner|External` (구조적 파생). `continuation_channel` (RFC-0320, HITL/Gate와 공유). connector-facing turn_id = serialized `Ids.Turn_ref` (`<trace_id>#<absolute_turn>`, RFC-0233 §7).
-- **경계 계약:** config 해석 순서 env > runtime TOML > field default; dashboard는 persistent TOML(`${MASC_BASE_PATH}/.gate/runtime/<name>/config.toml`, 0600) write, `.env` 아님. Discord는 in-process(RFC-0203), sidecar 아님(#19393 삭제). rich rendering: turn lifecycle을 하나의 connector-facing event stream으로 정규화, rich block + fallback text 병행, per-connector capability manifest, visible degrade. push/pull: world prompt엔 작은 deterministic presence fact만, 대화 content는 `keeper_surface_read`(read, always-allowed)/`keeper_surface_post`(act, policy-gated)로 on-demand pull. unknown source label → `Gate{channel}` (permissive default 아님).
+- **소유 타입:** `KNOWN_CONNECTOR_IDS` (정확히 4 id, known_ids-size 불변식 테스트). typed `Surface.t` sum. speaker identity `authority=Owner|External` (구조적 파생). `continuation_channel` (RFC-0320, request-local effect permission boundary와 공유). connector-facing turn_id = serialized `Ids.Turn_ref` (`<trace_id>#<absolute_turn>`, RFC-0233 §7).
+- **경계 계약:** config 해석 순서 env > runtime TOML > field default; dashboard는 persistent TOML(`${MASC_BASE_PATH}/.gate/runtime/<name>/config.toml`, 0600) write, `.env` 아님. Discord는 in-process(RFC-0203), sidecar 아님(#19393 삭제). rich rendering: turn lifecycle을 하나의 connector-facing event stream으로 정규화, rich block + fallback text 병행, per-connector capability manifest, visible degrade. push/pull: world prompt엔 작은 deterministic presence fact만, 대화 content는 `keeper_surface_read`(read, always-allowed)/`keeper_surface_post`(act, exact effect permission)로 on-demand pull. unknown/invalid origin은 typed `Unrouted{reason}`로 보존하고 reply/effect는 fail-closed한다. string `Gate{channel}` 합성 금지.
 - **불변식:** UI = inline-action-over-menu, additive-never-destructive, DOM ID + scrollIntoView 배선(단방향 컴포넌트 그래프), single-SSOT-for-derived-state. 명시적 non-goal: Save 후 auto-restart 없음, hot-reload 없음, client-side token validation 없음, localStorage editor state 없음. channel stranger를 operator instruction으로 가중 금지.
 - **결정론↔LLM:** channel-match(어디로) = deterministic; reply content(무엇을) = LLM. busy-defer 응답 = LLM judged.
 - **현재 상태:** Slack inbound gateway(`Slack_socket_client.run`)는 caller 0 dead scaffold이면서 헤더는 Python sidecar 제거 주장(거짓); busy-defer 전무(busy keeper가 inbound silent drop); connector-attention ambient wake는 Discord-only + default-off(`MASC_CONNECTOR_AMBIENT_WAKE_ENABLED`). speaker identity가 persistence 전 소멸.
@@ -266,9 +276,9 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 
 - **책임:** 런타임의 척추. 각 Keeper는 하나의 ordered lane에서 진행. logical continuity(immortal fiber 아님).
 - **소유 타입:** typed `KeeperPresence` ADT = `Active|Awaiting|Recovering|ExplicitStopped(서명된 operator 명령)`. keeper turn FSM(`keeper_turn_fsm.mli`): `Idle→Phase_gating→Runtime_routing→Awaiting_provider→Streaming⇄Awaiting_tool_result→Completing→Done`, `Failed`(runtime_unavailable/provider_error/turn_livelock_blocked/completion_contract_violation/receipt_lost), `Cancelled`(supervisor_stop/provider_timeout/fleet_shutdown). 4-way file model: persona `profile.json`(identity, human-edited) / `keeper.toml`(deployment declaration, thin: persona_name + exceptional override) / `keeper.json`(system-owned durable snapshot) / `keeper/<name>/`(append-only artifact).
-- **경계 계약:** OAS는 transcript/provider-turn/checkpoint/context-reduction 소유; MASC는 lifecycle FSM/lane position/goal·task·board·HITL·connector·scheduler·Fusion state/long-term recall 소유. **Model-authored prose는 절대 state transport가 아니다** — parser/stripper/sidecar/dashboard-field/compat-reader가 assistant text를 runtime state로 승격 금지. 대화 history/summary는 input context only(task claim/goal 변경/HITL resolve/connector ack/schedule 불가; 소유 typed API 필요). required typed transition 실패 시 typed error 표면화+event 보존(성공처럼 보이는 assistant message로 변환 금지, silent drop 금지). runtime/model 선택은 keeper.toml 필드가 **아님**(runtime.toml `[runtime.assignments]`; per-keeper model/models/allowed_models/active_model/allowed_providers/runtime_id 전부 load 시 hard-reject). per-keeper tool 계층(tool_access/tool_denylist/shard) 제거 — immutable flat catalog + execution-time Gate만. keeper hot path는 provider fallback을 OAS internal runtime에 위임 안 함(`oas_dispatch_mode = Single_provider_agent_run`, `Keeper_runtime_engine.guard_keeper_hot_path` 강제).
+- **경계 계약:** OAS는 generic message/provider-turn/checkpoint primitive와 단일 run/tool loop를 소유한다. MASC는 active-context 선택·명시적 compaction·lifecycle FSM·lane position·task·board·effect permission·connector·scheduler·Fusion state·long-term recall을 소유한다. **Model-authored prose는 절대 state transport가 아니다** — parser/stripper/sidecar/dashboard-field/compat-reader가 assistant text를 runtime state로 승격 금지. 대화 history/summary는 input context only(task claim/effect resolve/connector ack/schedule 불가; 소유 typed API 필요). required typed transition 실패 시 typed error 표면화+event 보존(성공처럼 보이는 assistant message로 변환 금지, silent drop 금지). runtime/model 선택은 keeper.toml 필드가 **아님**(runtime.toml `[runtime.assignments]`; per-keeper model/models/allowed_models/active_model/allowed_providers/runtime_id 전부 load 시 hard-reject). per-keeper tool 계층(tool_access/tool_denylist/shard) 제거 — immutable flat catalog + execution-time exact EffectIntent permission만. keeper hot path는 provider fallback을 OAS internal runtime에 위임 안 함(`oas_dispatch_mode = Single_provider_agent_run`, `Keeper_runtime_engine.guard_keeper_hot_path` 강제).
 - **불변식:** 한 lane 실패가 fleet를 pause 못 함(failed event 보존+error 표면화+무관 lane 계속). async work 완료는 **소유 lane만** wake. busy keeper는 현재 작업 유지, 새 event는 queued 또는 own domain path로 explicit ack. removed/unknown 필드는 hard-reject(fail loud). Pause는 실제 breakage에만.
-- **결정론↔LLM:** turn-accept 판정은 typed `Keeper_contract_classifier.classify_actionable_signal`(현재 `String_util.contains_substring_ci` heuristic → 교체 대상, dual-emit window 필요).
+- **결정론↔LLM:** turn admission은 source domain이 emit한 closed typed actionable signal만 소비한다. 자유문 prose를 다시 분류하지 않으며 `String_util.contains_substring_ci`와 `Keeper_contract_classifier` semantic classifier는 삭제한다. parallel old/new 판정이나 dual-emit 없음.
 - **현재 상태:** turn FSM ADT 존재하나 `Awaiting_provider→Streaming`·`Streaming⇄Awaiting_tool_result` emit_transition 미배선; `safe_emit_turn_end` catch-all이 `Cancelled_*`를 FSM에서 삼킴(#24448 orphan과 연결); Pause 원칙 3중 위반(restart budget→Dead, auto-compact retry→Paused, overflow-pause shadow); state 어휘 중첩(#40-42, `Stopped`=`Operator_pause` #24034-37).
 - **open goals:** Goal 4(Lane Per Keeper drain + partial/question/final wake 비차단 완성; typed KeeperPresence exhaustive match, 중첩 label 0; FSM streaming/tool-result emit 배선; `Switch.on_release`로 Cancelled_* FSM 도달, TLA+ CancelledNeverAbsorbed; backpressure/yield replacement RFC가 3 count-budget→Paused/Dead path purge 선행 #24059).
 
@@ -277,11 +287,11 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 
 - **책임:** store/retain/forget 3축. raw episode vs derived claim은 **DISTINCT type**.
 - **소유 타입:** closed-sum category/relation/lifecycle (no `_` catch-all). `Ephemeral` category arm(구조적 non-promotable). typed slot `(entity, attribute)` (supersession key). claim_kind. protected never-decay class(Constraint/Lesson).
-- **경계 계약:** **"Determinism = structure + cheap candidate generation. Judgment = the actual decision."**(RFC-0247 §-1). Scoring/graph/count은 decider→candidate-generator로 강등, LLM judgment에 feed. count-promotion/TTL-decay/spreading-activation-as-ranker는 decision mechanism으로 reject. consolidation trigger는 semantic event(Goal completion, user correction, capability-based context pressure), 임의 N turn 아님. Supabase pgvector only(Qdrant 재도입 금지, no embeddings — deterministic graph hop). PII 삭제는 blob/vector/OTel/cache/backup + crypto-shredding에 propagation receipt. forget은 need-probability + supersession 기반(clock 아님); blind TTL은 disuse-decay backstop으로 강등. Judge/reflection은 self-observation에 contraindicated(external oracle 없음, retrieval이 읽는 것을 강화). asymmetric fail-safe toward retain. absent/invalid claim_kind → `self_observation_ttl` + eligible None→false로 clamp(permissive durable default 금지).
+- **경계 계약:** **"Determinism = structure + cheap candidate generation. Judgment = the actual decision."**(RFC-0247 §-1). Scoring/graph/count은 decision authority가 아니며, typed evidence reference를 구성하는 데만 쓸 수 있다. count-promotion/TTL-decay/spreading-activation-as-ranker는 decision mechanism으로 reject. consolidation trigger는 explicit operator request, typed Task completion, user correction, typed provider overflow뿐이며 임의 N turn/token estimate가 아니다. Supabase pgvector only(Qdrant 재도입 금지, no embeddings — deterministic graph hop). PII 삭제는 blob/vector/OTel/cache/backup + crypto-shredding에 propagation receipt. forget은 typed supersession evidence+명시적 librarian verdict 기반이며 score/cutoff/clock으로 결정하지 않는다. blind TTL 금지. Judge/reflection은 self-observation에 contraindicated(external oracle 없음, retrieval이 읽는 것을 강화). asymmetric fail-safe toward retain. absent/invalid claim_kind → `self_observation_ttl` + eligible None→false로 clamp(permissive durable default 금지).
 - **불변식:** ingest silent-zero 불가(typed Result). contradiction은 store 덮어쓰기 아닌 Board 표면화(TLA+ `ContradictionNeverSilentlyOverwrites`).
 - **결정론↔LLM:** structure/candidate = 결정론; forget/promote 결정 = LLM librarian 경계.
 - **현재 상태:** FORGET/decay 축 전무(rg로 no decay/prune/FORGET 확인) → 무한 축적, 3축 중 1 부재; `auto_recall.ml`/`chronicle_librarian.ml`/`procedural_memory`는 dead scaffold(production writer 0, always-empty store, per-turn lock+I/O 낭비); sleep/consolidation cycle이 gated off(#21244); stale_factor는 dead field(6462 fact 전부 0.0).
-- **open goals:** Goal 3(Librarian LLM-boundary explicit forget/decay pipe; claim_kind clamp; 3 dead scaffold 삭제 또는 RFC-respec), sleep cycle 재활성(P0a typed category + Ephemeral non-promotable arm), Harness-First memory-quality eval(P-1, LLM-as-judge + hand-labeled calibration), action-stream self-reconciler.
+- **candidate work:** compaction/failover Goal 3에 얹지 않는다. Memory-owned 독립 slice에서 Librarian LLM-boundary explicit forget pipe, claim_kind clamp, 3 dead scaffold 삭제 또는 RFC-respec을 수행한다. sleep cycle 재활성(P0a typed category + Ephemeral non-promotable arm), Harness-First memory-quality eval(P-1, LLM-as-judge + hand-labeled calibration), action-stream self-reconciler도 같은 boundary에서만 승격한다.
 
 <a name="310-runtime-providermodel-catalog"></a>
 ### 3.10 Runtime (Provider/Model catalog)
@@ -290,9 +300,9 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 - **소유 타입:** runtime.toml `[runtime.assignments]`(keeper-name keyed) + `[runtime].default`; `[runtime.lanes.<id>]`(candidates + strategy). `Runtime_attempt_fsm.decide` SSOT. OAS: immutable `agent_config`(`lib/base/types.mli`: provider/model/system/sampling/tools/schema/thinking/context/cache/seed serializable 필드), OAS `Contract`(`lib/contract.mli`)가 typed tool set 등을 first-class로 패키징. `Provider_config.provider_id`. `estimate_cost → Estimated|Incomplete`. embedded catalog.
 - **경계 계약:** MASC policy code는 logical use/declared capability/profile order/health/capacity/receipt state로 라우팅 — vendor/model 리터럴에 branch 안 함. `max_tokens` synthesis 금지(oas 0.211.0 + #24098): override 없으면 omit, provider default 사용. capability = serving-runtime × model(WHAT), NOT host/URL(WHERE). unknown host/provider/model/label → Unknown/None/fail-closed. path→wire-protocol(Responses vs Chat)은 exact-string exhaustive match만. cache key는 FULL contract에서 재구성. 각 streaming retry attempt buffered, 정확히 하나의 committed attempt만 consumer에 visible. OAS pricing은 telemetry-only, execution gate 아님.
 - **불변식:** provider failover는 ordered candidate lane. 첫 provider 500 → 두 번째 성공; 전부 소진 → typed "runtime lane exhausted" error; attempt당 manifest row 1개. unknown model pricing → typed Unknown/option(silent $0 금지).
-- **결정론↔LLM:** 라우팅/failover는 전부 결정론(라우팅에 판단 없음). **단 하나의 예외 = runaway watchdog(#24386, §4.13 MD-2):** provider/tool-local timeout 도달은 결정론 gauge(트리거)이나, saturated lane을 **새 활동으로 re-task할지**의 판정은 system/LLM 경계다("Pause 금지 ↔ runaway 봉쇄"의 경계 ruling — watchdog는 정지가 아니라 활동 전환만).
+- **결정론↔LLM:** 라우팅/failover는 전부 결정론(라우팅에 의미 판단 없음). whole-run lifetime은 caller-owned Eio scope이며 implicit watchdog·timeout·LLM re-task 예외를 만들지 않는다(§4.13 CF-2).
 - **현재 상태:** provider failover 회귀 — `keeper_turn_driver` multi-candidate machinery 삭제 → 단일 provider hiccup이 Keeper turn 종료(fallback 없음, README ❌). RFC-0153 saturation signal은 dead scaffold(producer 0); `Runtime_attempt_fsm.decide`를 4 keeper driver의 inline try-next가 우회; voice_bridge가 model/voice ID 하드코딩(scribe_v2/Sarah/eleven_multilingual_v2, silent Error-swallow); OAS `pricing_for_model`이 unknown model→$0(RFC-OAS-018 Phase 2 deferred).
-- **open goals:** Goal 2(saturation emit 구현 또는 flag+variant+docs 삭제; driver를 Runtime_attempt_fsm.decide 경유; voice fallback single named constant + Result; unknown model pricing typed Unknown), Goal 3(failover: `[runtime.lanes.<id>]` candidates + strategy='ordered'), 0.212 debt #24417/#24386/#24448/#24510(§2.5).
+- **open goals:** Goal 2(saturation emit 구현 또는 flag+variant+docs 삭제; driver를 Runtime_attempt_fsm.decide 경유; voice choice를 catalog/config declaration+Result로 전환; unknown model pricing typed Unknown), Goal 3(failover: `[runtime.lanes.<id>]` candidates + strategy='ordered'). Crossover는 §2.5 판정대로 CF-1/2를 폐기하고 CF-3 orphan을 삭제하며 CF-4 typed behavior만 검증한다.
 
 <a name="311-dashboard-chat"></a>
 ### 3.11 Dashboard-Chat
@@ -300,15 +310,15 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 - **책임:** operator↔keeper 직접 대화 surface. read model(canonical write path 아님).
 - **소유 타입:** typed failure card, retry queue state, agent_timeline (tools_used/model/tool.called stream).
 - **경계 계약:** dashboard surface는 read model. auth: `GET /dashboard/dev-token`은 loopback에서 unauthenticated Admin token mint 금지(RFC-0340 #69). judgement/wake decision/relevance/memory-value = explicit LLM/system 경계(UI math/heuristic 아님). No silent failure — unsupported/unavailable/auth-missing/stale/failed/unknown은 visible+typed.
-- **불변식:** failed turn은 typed failure card + auto-retry, raw internal error는 retry 소진 후에만; request는 answer/cancel receipt 전까지 queued/degraded(terminal 아님). keeper-internal OAS tool 실행이 unified tool.called stream에 나타나야 함.
+- **불변식:** failed turn은 typed failure card + 명시적 retry transition으로 다루며 hidden auto-retry 금지. raw internal error는 typed attempt history와 함께 노출; request는 answer/cancel receipt 전까지 queued/degraded(terminal 아님). keeper-internal OAS tool 실행이 unified tool.called stream에 나타나야 함.
 - **결정론↔LLM:** rendering/formatting은 결정론; substantive 판정은 LLM.
-- **현재 상태:** "Keeper request failed: <raw internal error>"가 answer slot 대체(24h 중 39/140 assistant row); agent_timeline false observation(`tools_used=[]`, `model=unknown` 실제 tool 실행에도 #23540 root-caused only); keeper-internal OAS tool 실행이 stream 부재(external-MCP만); `deliverable_claims_completion`이 영어-only string classifier 2모듈 byte-identical 중복(SSOT fix authored but unmerged); telemetry_unified shadow-tool dedup이 magic 5.0s window. auth bypass(#69) 3-step curl 확인. dashboard subsystem %: Board 68/Goal·Task 67/Connectors 52/Memory 50/Runtime 52/Fusion 60/HITL 50/Lane 43/Settings 40/Visual 18.
-- **open goals:** Goal 11(typed failure card + auto-retry; auth: `server_routes_http_dashboard_dev_token.ml` dev-token mint grep 0, unauth GET→404, unauth mutation 100%→401, dashboard.token role ≠ Admin; PR-KC1d server-side field verification), Goal 12(agent_timeline event-source 교체; deliverable_claims SSOT 병합→LLM 경계; keeper.tool_exec activity event; correlation-id로 dedup exact화).
+- **현재 상태 snapshot:** "Keeper request failed: <raw internal error>"가 answer slot 대체(24h 중 39/140 assistant row); agent_timeline false observation(`tools_used=[]`, `model=unknown` 실제 tool 실행에도 #23540 root-caused only); keeper-internal OAS tool 실행이 stream 부재(external-MCP만); `deliverable_claims_completion`이 영어-only string classifier 2모듈 byte-identical 중복(SSOT fix authored but unmerged); telemetry_unified shadow-tool dedup이 magic 5.0s window. auth bypass(#69) 3-step curl 확인. 옛 dashboard subsystem percentage는 acceptance가 아니며 Legacy Goal 수치를 포함하므로 현재 방향 근거에서 제외한다.
+- **open goals:** Goal 11(typed failure card + explicit retry transition; auth: `server_routes_http_dashboard_dev_token.ml` dev-token mint grep 0, unauth GET→404, unauth mutation 100%→401, dashboard.token role ≠ Admin; PR-KC1d server-side field verification), Goal 12(agent_timeline event-source 교체; deliverable_claims SSOT 병합→LLM 경계; keeper.tool_exec activity event; correlation-id로 dedup exact화).
 
 <a name="312-oas-internals"></a>
 ### 3.12 OAS Internals (pure library)
 
-`oas_compat`(`lib/oas_compat/oas_compat.ml`)를 넘어 OAS 자체 내부를 만지는 구현자를 위한 카드. 11개 MASC subsystem과 동일 형식으로 OAS의 det↔LLM 경계를 명시한다.
+OAS repo 구현자를 위한 카드다. MASC consumer는 OAS 내부를 복제하거나 `oas_compat`를 영구 경계로 만들지 않고 public `.mli`만 소비한다.
 
 - **책임:** provider 라우팅, 6-stage turn pipeline, checkpoint, tool-boundary cooperative yield, reasoning replay, wire observer, stop-reason 매핑, sub-agent 위임(handoff). downstream coordinator의 도메인 어휘를 모른다.
 - **소유 타입:** provider 라우팅 = `Provider.config`(4-variant `Local|Anthropic|OpenAICompat|Custom_registered`) + `Backend_*`(anthropic/openai/gemini/glm/ollama) + carrier `Provider_config.t`; 6-stage pipeline = `lib/pipeline/`(`pipeline.ml`/`pipeline_stage_prepare.ml`/`pipeline_stage_route.ml`); checkpoint = `Checkpoint.t`(v8 순수 값, serialize-only) + `Checkpoint_store`/`_codec`/`_delta`; tool-boundary yield = `Agent.Advanced.run_blocks`(`boundary_decision = Continue|Yield`, budget 미강제); reasoning replay = `Reasoning_replay_contract` + `Reasoning_history_projection`; wire observer = `Wire_observer`(@since 0.212, caller-owned redacted chunk); stop reason = `Types.stop_reason`(12-variant) + `Stop_reason_wire`(finish_reason 매핑 SSOT); handoff = `Handoff.make_handoff_tool`(서브에이전트 위임 도구); execution context = `lib/base/context.ml`; typed error = `lib/error_domain.mli`(`` `Internal of string ``). **삭제된 날조 용어(코드 실측 각 0건)**: "lossless ExecutionContract"→`Checkpoint.t`, "stream isolation"→caller-owned Eio switch(OAS는 isolation 객체 미소유), "stop semantics"→`Types.stop_reason`+`Stop_reason_wire`, "handoff fidelity"→`Handoff`(위임, fidelity 개념 없음).
@@ -347,56 +357,56 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 ---
 
 <a name="4-execution-roadmap"></a>
-## 4. Execution Roadmap (12 goals)
+## 4. Candidate Execution Roadmap (12 goals)
 
-각 goal: **문제 / 결정론 vs LLM 경계(heuristic·string-match 금지 명시) / touch할 modules·types / acceptance test / DoD.**
+각 goal은 문서 안의 구현 후보 label일 뿐 제품의 Legacy Goal 타입·상태·runtime이 아니다. GitHub live queue의 상태를 복제하지 않는다. 구현 전 현재 코드에서 여전히 필요한지 재검증하고, 이미 착지했거나 방향이 폐기된 항목은 재구현하지 않고 DROP한다. 각 goal: **문제 / 결정론 vs LLM 경계 / touch할 modules·types / acceptance test / DoD.**
 
-### Goal 1 — OAS 0.212 bootstrap [DONE, 잔여 검증 명시]
+### Goal 1 — OAS 0.212 bootstrap [MERGED SURFACE, ACCEPTANCE UNVERIFIED]
 
 - **문제:** typed cooperative yield + server runtime hard-cut을 400 churn 미만으로 병합.
 - **경계:** yield는 성공 host outcome(SDK error 아님, budget 미소비, lifecycle Ready). callback은 agent fiber에서 synchronous(host state inspect only, no blocking).
 - **touch:** OAS `Agent.Advanced.run_blocks/run_blocks_detailed`(`on_tool_boundary → Continue|Yield`, `run_outcome = Completed|Yielded{turn;checkpoint_stage;checkpoint}`); `Agent.run` stop gate 제거(#2590).
 - **acceptance:** yield가 provider lease 해제 후 반환; Continue가 `on_resume` invoke; checkpoint는 Yield에서만 capture.
-- **DoD/잔여 검증:** 0.212 "done"은 **stacked-green 아닌 real-build integration proof 필요**. 48h merge audit이 0.209 계보의 process breach(merge-before-green, stale-base, do-not-merge label 유지) 지적 — heavy CI가 stacked/feature-base PR에 미트리거되는 false-green 패턴. 병합 전 base=main + 실빌드로 재확인. **§2.5 6 silent regression이 이 goal의 미완 채무.**
+- **DoD/잔여 검증:** "done"은 **stacked-green 아닌 real-build integration proof 필요**. merged surface와 acceptance를 분리하며, §2.5 finding은 생존 판정에 따라 삭제 또는 focused behavior로 검증한다.
 
 ### Goal 2 — 삭제 잔재 숙청 (heuristic estimator / Context_reducer / limit·budget)
 
 - **문제:** 삭제된 OAS 계약·heuristic estimator·Context_reducer 및 limit·budget 잔재를 stacked PR로 제거.
 - **경계:** **string 분류기 제거지 추가 아님.** unknown→typed Unknown/None (permissive default 금지). N-of-M은 codemod로 일괄(개별 site 패치 금지).
-- **touch:** RFC-0153 saturation signal(flag+variant+docs 삭제 또는 emit 구현); `Runtime_attempt_fsm.decide`(4 keeper driver의 inline try-next 라우팅); voice_bridge(single named constant + Result); OAS `pricing_for_model`(unknown→typed Unknown/option, RFC-OAS-018 Phase 2); `deliverable_claims_completion` SSOT 병합; keeper_recurring cap/cooldown 제거; OAS `Context_intent` heuristic classifier(#2493 병합 확인 at HEAD).
-- **acceptance:** `rg <값> lib/`로 count≥2인 것만 SSOT 상수 추출; saturation flag caller grep=0이면 삭제; unknown model pricing이 $0 아닌 typed Unknown 반환.
+- **touch:** RFC-0153 saturation signal(flag+variant+docs 삭제 또는 emit 구현); `Runtime_attempt_fsm.decide`(4 keeper driver의 inline try-next 라우팅); voice_bridge(catalog/config-declared voice choice + Result); OAS `pricing_for_model`(unknown→typed Unknown/option, RFC-OAS-018 Phase 2); `deliverable_claims_completion` SSOT 병합; keeper_recurring cap/cooldown 제거; OAS `Context_intent` heuristic classifier는 public owner가 없으면 삭제한다. MASC에는 이를 port하지 않고 MASC-owned explicit compaction request/typed overflow policy만 둔다.
+- **acceptance:** 구현 PR마다 exact identifier·검색 경로·expected count를 명시한다(placeholder `rg <값>` 금지). caller 0인 saturation flag는 삭제; unknown model pricing은 $0 아닌 typed Unknown/None 반환.
 - **DoD:** limit/heuristic purge target 전부 grep-0 또는 typed로 대체; 이미 통합된 것은 DROP.
 
 ### Goal 3 — MASC LLM compaction → configured trigger + typed provider overflow
 
 - **문제:** compaction을 configured trigger + typed provider overflow에 연결, durable reinjection·before/after·failover 증명. **단일-gate compaction이 unseen transcript tail 유실할 수 있음(#23908/#23977).**
-- **경계:** compaction trigger는 typed provider overflow signal(임의 N turn 아님). reinjection ≠ re-observation(불변식).
-- **touch:** memory/compaction provider config(#24417: `temperature=0` fallback 복원 + unset-deterministic 테스트); `[runtime.lanes.<id>]` candidates + strategy='ordered'(failover 복원, `keeper_turn_driver.run_keeper_turn` single→candidate-list).
-- **acceptance:** compaction/memory provider가 runtime.toml unset 시 temp=0 → 재현 가능 요약(revert 시 red); 첫 provider 500→두 번째 성공, 전부 소진→typed "runtime lane exhausted", attempt당 manifest row 1개; before/after transcript durable.
+- **경계:** compaction은 MASC-owned 별도 state transition이다. trigger는 operator/config의 명시 요청 또는 typed provider overflow이며 임의 N turn/token estimate가 아니다. 최근 N개 보존, tool argument/output 절단, thinking 삭제, synthetic/stub ToolResult, overflow 뒤 동일 실행 hidden retry를 금지한다. reinjection ≠ re-observation(불변식).
+- **touch:** compaction request가 MASC-owned explicit sampling config와 typed provider overflow를 운반; `[runtime.lanes.<id>]` candidates + strategy='ordered'(failover 복원, `keeper_turn_driver.run_keeper_turn` single→candidate-list).
+- **acceptance:** hidden `temperature=0` fallback 없음. 결정론 설정이 요구되면 explicit config 부재가 typed error; 첫 provider 500→두 번째 성공, 전부 소진→typed "runtime lane exhausted", attempt당 manifest row 1개; before/after transcript durable.
 - **DoD:** compaction durability + failover가 stacked-green이 아닌 live로 증명.
 
 ### Goal 4 — Lane Per Keeper drain + partial/question/final wake (비차단)
 
 - **문제:** drain + partial/question/final wake를 비차단으로 완성. Pause 원칙 3중 위반 해소.
 - **경계:** typed `KeeperPresence` ADT exhaustive match(overlapping label 0). string-based state 판정 금지.
-- **touch:** keeper turn FSM(`Awaiting_provider→Streaming`·`Streaming⇄Awaiting_tool_result` emit_transition 배선 in `keeper_agent_run.run_turn`); `safe_emit_turn_end` catch-all → `Switch.on_release`(Cancelled_* FSM 도달, RISKY); turn-accept classifier(`String_util.contains_substring_ci` → typed `Keeper_contract_classifier.classify_actionable_signal`, dual-emit window); 3 count-budget→Paused/Dead path purge(#24059, backpressure/yield replacement RFC 선행).
-- **acceptance:** FSM transition이 streaming/tool-result loop에서 emit(test 커버리지); `Cancelled_supervisor_stop/provider_timeout/fleet_shutdown`이 full turn_id receipt 생성; TLA+ `CancelledNeverAbsorbed` hold; substring classifier가 turn-accept path에서 제거; dual-emit이 old vs new distribution 비교 후 cutover.
+- **touch:** keeper turn FSM(`Awaiting_provider→Streaming`·`Streaming⇄Awaiting_tool_result` emit_transition 배선 in `keeper_agent_run.run_turn`); `safe_emit_turn_end` catch-all → `Switch.on_release`(Cancelled_* FSM 도달, RISKY); source-domain closed actionable signal을 lane queue까지 직접 전달하고 `String_util.contains_substring_ci`/`Keeper_contract_classifier` turn-accept semantic classifier 삭제; 3 count-budget→Paused/Dead path purge(#24059, backpressure/yield replacement RFC 선행).
+- **acceptance:** FSM transition이 streaming/tool-result loop에서 emit(test 커버리지); `Cancelled_supervisor_stop/provider_timeout/fleet_shutdown`이 full turn_id receipt 생성; TLA+ `CancelledNeverAbsorbed` hold; turn admission path의 prose classifier·parallel old/new path grep 0; source signal variant exhaustive match.
 - **DoD:** 비차단 drain end-to-end; 한 lane 실패가 fleet pause 안 함.
 
 ### Goal 5 — Invocation composition (Model/Agent/Keeper/Tool[]/Heterogeneous[]) typed receipt
 
 - **문제:** "Keeper as a Tool" first-class surface 부재; composition을 typed receipt로 완성(Durable Intelligence C0-C4 unpromoted).
 - **경계:** typed target+capability(`CollaborationRequest`/`DurableRunRef`/`ResultContract`). untyped agent-name 라우팅 금지.
-- **touch:** fusion panel+judge(RFC-0277 heterogeneous group, RFC-0283 JoJ+staged reducer, RFC-0298 judge pool runtime placement, `lib/fusion/fusion_tool.ml`·`lib/fusion_core/fusion_config.ml`·`fusion_run_registry.ml`); `keeper.delegate/status` + `fusion.deliberate/status`가 run ref 즉시 반환(nonblocking, §3.13 Keeper-as-a-Tool); 0.212 crossover(#24510: `lib/keeper/keeper_context_core_message_json.ml` ToolResult content_blocks 소비, `lib/inference_utils.ml`/`lib/dashboard/dashboard_http_keeper_metrics.ml` block_tokens behavioral 테스트); #24448 observed stop-reason producer(§4.13 MD-3). **Cross-surface typed turn envelope(DESIGN-RICH §7 P0):** `Turn_requested/accepted/waiting/phase_changed/Tool_call_started/finished/Content_block/Turn_finished/Turn_failed/Poll_snapshot`을 runtime 경계에서 한 번만 emit — SSE/AG-UI adapter가 rich block을 drop하지 않도록. FSM 배선은 `lib/keeper/keeper_turn_fsm.ml`, emit은 `lib/keeper/keeper_agent_run.ml`(§3.8 Goal 4와 공유).
+- **touch:** fusion panel+judge(RFC-0277 heterogeneous group, RFC-0283 JoJ+staged reducer, RFC-0298 judge pool runtime placement, `lib/fusion/fusion_tool.ml`·`lib/fusion_core/fusion_config.ml`·`fusion_run_registry.ml`); `keeper.delegate/status` + `fusion.deliberate/status`가 run ref 즉시 반환(nonblocking, §3.13 Keeper-as-a-Tool); 0.212 crossover(#24510: `lib/keeper/keeper_context_core_message_json.ml` ToolResult content_blocks 소비, `lib/inference_utils.ml`/`lib/dashboard/dashboard_http_keeper_metrics.ml` block_tokens behavioral 테스트); orphan stop-reason 삭제(§4.13 CF-3). **Cross-surface typed turn envelope(DESIGN-RICH §7 P0):** `Turn_requested/accepted/waiting/phase_changed/Tool_call_started/finished/Content_block/Turn_finished/Turn_failed/Poll_snapshot`을 runtime 경계에서 한 번만 emit — SSE/AG-UI adapter가 rich block을 drop하지 않도록. FSM 배선은 `lib/keeper/keeper_turn_fsm.ml`, emit은 `lib/keeper/keeper_agent_run.ml`(§3.8 Goal 4와 공유).
 - **acceptance:** panel_group closed-record round-trip; single-group byte-identity derive pinned; JoJ <2 judges fail-closed; staged 9-judges/group-3 → 3×3, ragged fail-closed; usage가 all first-round + meta에 fold; ToolResult 멀티모달 undercount 0; **turn envelope의 각 variant가 runtime 경계에서 정확히 1회 emit(중복/유실 0)**; SSE/AG-UI adapter escaped-fallback downgrade(rich→plain) 카운트가 회귀 테스트에서 감소 assert(현재 값 **측정 필요**).
-- **DoD:** typed receipt로 5종 composition(Model/Agent/Keeper/Tool[]/Heterogeneous[]) 완성; cap-reached vs complete 구별 가능; turn envelope variant가 SSE와 dashboard 양쪽에서 동일 소스.
+- **DoD:** typed receipt로 5종 composition(Model/Agent/Keeper/Tool[]/Heterogeneous[]) 완성; yield/cancel/failure와 정상 completion 구별 가능; turn envelope variant가 SSE와 dashboard 양쪽에서 동일 소스.
 
-### Goal 6 — Scheduler legacy recurring/grant 삭제, durable wake만
+### Goal 6 — Scheduler legacy recurring 삭제, durable wake만
 
-- **문제:** legacy recurring/grant 계층 삭제, durable wake만 남김.
+- **문제:** legacy recurring 계층 삭제, durable wake만 남김. effect permission은 Scheduler가 소유하지 않는다.
 - **경계:** typed closed action variant(하드코딩 `Broadcast(label)` 아님). re-enable을 health signal에 gate(fixed cooldown 아님 — cap/cooldown 증상억제 제거).
-- **touch:** recurring persist(`.masc/keeper/<name>/recurring.json` + init reload); `masc_recurring_add`(typed closed action); `keeper_wake` dispatch("keeper not registered" → `Dispatch_failed`); standing grant(#48: `has_current_approved_grant`가 recurrence마다 재승인 요구하는 것 제거, 동일 digest 재승인 0회, digest 변경 시 재승인).
-- **acceptance:** 재시작 후 recurring reload; typo'd target이 Succeeded 아닌 Dispatch_failed; daily approval-required post가 한 번 fire 후 block 안 함(동일 digest 재승인 0); execution record가 dashboard에 projection; live-safe reservation smoke(create→due→dispatch→success→board post_id→dashboard/Otel proof, proof_check.sh --require-pass).
+- **touch:** recurring persist(`.masc/keeper/<name>/recurring.json` + init reload); `masc_recurring_add`(typed closed action); `keeper_wake` dispatch("keeper not registered" → `Dispatch_failed`); `has_current_approved_grant`와 digest-equality approval bypass 삭제.
+- **acceptance:** 재시작 후 recurring reload; typo'd target이 Succeeded 아닌 Dispatch_failed; approval-required occurrence마다 fresh request-local EffectIntent와 decision record 생성. operator-recorded Always Allowed rule을 쓰면 exact capability/target/argument constraint+expiry+revocation을 typed로 저장하고, 각 occurrence가 rule match와 decision source를 새 audit row로 기록한다. digest equality만으로 승인하지 않는다. execution record가 dashboard에 projection; live-safe reservation smoke(create→due→dispatch→success→board post_id→dashboard/Otel proof, proof_check.sh --require-pass).
 - **DoD:** recurring operational proof(현재 미증명); legacy row는 fake lifecycle event로 synthesize 안 함.
 
 ### Goal 7 — Schedule occurrence identity + 저장 실패 재시도 (동일 signal_id)
@@ -410,16 +420,16 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 ### Goal 8 — Multi-Connector exact origin/channel/actor intake + lane-isolated requeue
 
 - **문제:** exact origin/channel/actor intake + lane-isolated requeue 완성 (Discord+Slack).
-- **경계:** structured connector context(channel/workspace_id/user_id/name) end-to-end. unknown source label → `Gate{channel}`(permissive default 아님). busy-defer = LLM judged(silent drop 아님).
+- **경계:** structured connector context(channel/workspace_id/user_id/name) end-to-end. unknown/invalid origin → typed `Unrouted{reason}` 후 reply/effect fail-closed; string `Gate{channel}` 합성 금지. busy-defer = LLM judged(silent drop 아님).
 - **touch:** gate inbound(connector context carry + speaker identity persist, RFC-0223 P1/P2); `Slack_socket_client.run` 서버 bootstrap 배선(RFC-0317 PR-3) 또는 헤더 정정; busy-defer light response turn(LLM judge, RFC-0334 확장); backend sidecar lifecycle+config-write(0600 TOML)+JSON-schema endpoint; Slack ambient wake producer(현재 Discord-only).
 - **acceptance:** persisted user line이 speaker id + real Discord name(snowflake 아님); bound keeper world prompt에 presence section; busy keeper가 busy-defer reply(silent drop 아님); Slack non-mention이 idle keeper wake(RFC-0320 ambient re-engagement, Slack producer).
 - **DoD:** Discord+Slack 양쪽 lane-isolated requeue; RFC-0223 round-trip 테스트.
 
-### Goal 9 — Manual/Auto Judge/Always Allowed Gate 비차단 one-shot 판단 (적대 검증)
+### Goal 9 — Exact EffectIntent permission 비차단 one-shot 판단 (적대 검증)
 
-- **문제:** Gate를 비차단 one-shot 판단으로 적대적 검증.
+- **문제:** request-local exact external effect permission을 비차단 one-shot 판단으로 적대적 검증. 범용 governance·Board semantic 판단을 소유하지 않는다.
 - **경계:** 3 decision SOURCE(Manual/Auto Judge/Always Allowed), risk level 아님. **암묵적 4번째 source(tool name/command string/provider brand/repo host/guessed irreversibility) 금지.** Auto Judge failure = explicit request-local unsettled(silent approve/reject/global-stop 금지). default-deny boolean/unknown-risk bucket/global pause/pre-tool string classifier 재도입 금지.
-- **touch:** `keeper_gate.ml`/`keeper_tool_policy.ml`/`keeper_tool_dispatch_runtime.ml`; ApprovalsSurface(HITL resolution read model with wake/enqueue outcome column); board proactive attention LLM-judge consumer 배선(현재 producer-only dead scaffold) 또는 ledger+metric 삭제; anti_rationalization Gate 0 재활성(sole caller의 `evidence_refs=[]` 하드코딩 제거).
+- **touch:** `keeper_gate.ml`/`keeper_tool_policy.ml`/`keeper_tool_dispatch_runtime.ml`에서 exact `EffectIntent` validation+decision만 남기고 generic risk/governance classifier와 Gate 0 compatibility surface 삭제; ApprovalsSurface(HITL resolution read model with wake/enqueue outcome column); operator-recorded Always Allowed rule은 exact scope/expiry/revocation typed record와 occurrence별 fresh audit decision으로 제한.
 - **acceptance:** pending approval이 NO global pause + NO other-lane stall(outcome column이 wake vs enqueue); judge-unavailable 주입 테스트가 request unsettled + keeper other work 계속 + audit record; approve/deny/hold unit test.
 - **DoD:** decision resolved→wake/enqueue end-to-end + explicit audit trail.
 
@@ -433,85 +443,80 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 
 ### Goal 11 — 전체 회귀 CI green
 
-- **문제:** Board/Goal/Task/Scheduler/Connector/Memory/Runtime/Fusion/Keeper chat 전체 회귀 CI green. + §4.14 DS-3~DS-8 hygiene/gate 항목 fold-in.
+- **문제:** Board/Task/Scheduler/Connector/Memory/Runtime/Fusion/Keeper chat의 살아남은 경계 회귀 CI green.
 - **경계:** hermetic-required 분리(env-gated/manual green-wash 금지). #24448 stop-reason/#24442 file-write visibility fold-in(§4.13). code-hygiene(solid-js/Eio-mutex/RFC-0071)은 §4.14로 분리.
 - **touch (per-subsystem hermetic 테스트 매핑, grep 확인):**
   - Board → `test/test_board_sort.ml`·`test/test_board_author_identity_10297.ml`·`test/test_board_context_inference_resolution.ml` + status-rollup 비파괴 append 회귀
   - Task/verification → verification FSM ignition(`MASC_VERIFICATION_DEFAULT_ON=true` after solo-room guard), `check_timeouts` past-deadline scan
   - Scheduler → `test/test_schedule_runner.ml`·`test/test_schedule_store.ml`·`test/test_schedule_tool_wiring.ml`
   - Connector → `test/test_channel_gate.ml`·`test/test_channel_gate_metrics.ml`·`test/test_keeper_lane_mentions.ml`
-  - Memory → `test/test_keeper_memory_lane.ml` + FORGET/claim_kind clamp(§4 Goal 3)
+  - Memory → `test/test_keeper_memory_lane.ml`; FORGET/claim_kind clamp는 별도 Memory-owned slice가 승격될 때 추가
   - Runtime → `test/test_runtime_attempt_fsm.ml` + failover(§4 Goal 3)
   - Fusion → `test/test_fusion_sink_meta.ml` + turn envelope(§4 Goal 5)
-  - Keeper turn FSM → `test/stanzas/test_keeper_turn_fsm_tla_parity.inc`·`test/test_keeper_contract_classifier_pure.ml`·`test/test_keeper_context_isolation.ml`
+  - Keeper turn FSM → `test/stanzas/test_keeper_turn_fsm_tla_parity.inc`·`test/test_keeper_context_isolation.ml`; `test/test_keeper_contract_classifier_pure.ml`는 semantic classifier와 함께 삭제하고 source typed-signal acceptance test로 대체
   - Dashboard chat/observability → `test/test_tool_agent_timeline_build.ml`(#23540, Goal 12), event-bus `test/test_keeper_unified_turn_event_bus.ml`·`test/test_event_bus_subscription_contract.ml`
   - Dashboard auth(#69) → `lib/server/server_routes_http_dashboard_dev_token.ml` 강화
-  - Goal stagnation → RFC-0310 `iterations_without_progress` counter 배선 또는 arm 삭제
-- **acceptance:** 위 각 subsystem 테스트가 hermetic-required tier에서 green(env-gated/manual 아님); unauth GET /dashboard/dev-token→404, unauth mutation 100%→401; `check_timeouts`가 past-deadline AwaitingVerification scan+`force_cancel_task_r`(현재 caller 0); file-write-only turn이 `lib/keeper/keeper_execution_receipt.ml` receipt에서 visible+typed(§4.13 MD-5); cap-reached vs normal-completion 구별(§4.13 MD-3); §4.14 DS-3~DS-8 acceptance 충족.
-- **DoD:** 전 subsystem CI green + §4.14 hygiene green, env-gated/manual 분리.
+- **acceptance:** 위 살아남은 subsystem 테스트가 hermetic-required tier에서 green(env-gated/manual 아님); unauth GET /dashboard/dev-token→404, unauth mutation 100%→401; `check_timeouts`가 past-deadline AwaitingVerification scan+`force_cancel_task_r`(현재 caller 0); file-write-only turn이 typed receipt에서 visible(§4.13 CF-5); orphan cap stop-reason 0(§4.13 CF-3). §4.14 항목은 별도 승격 전 이 goal의 acceptance가 아님.
+- **DoD:** 살아남은 subsystem CI green, env-gated/manual 분리. Legacy Goal 회귀는 삭제.
 
 ### Goal 12 — 실제 런타임 48h As-Is/To-Be + 100% 판정
 
 - **문제:** 실제 런타임 48h As-Is/To-Be + dashboard/compaction/failover 관측으로 100% 판정.
 - **경계:** production-ready는 정량 주장 — 4 gate 첨부(Release Artifact smoke; Keeper Turn Evidence Chain ≥18 keepers/≥54 terminal & success turns/≥3per keeper/100% receipt·checkpoint·event-bus·memory-injection·tool-log coverage/0 dangling attempt/≤600s span·turn; Performance SLO; OAS Pin & Boundary=MASC semantics in OAS 0). **Missing data는 blocker지 pass 아님.**
-- **touch:** 48h live run; agent_timeline event-source 교체(#23540) — 관측 대상 모듈 = `lib/tool_agent_timeline.ml`(+`test/test_tool_agent_timeline_build.ml`); 현재 `tools_used=[]`·`model=unknown`을 emit하는 false-observation 소스. **#23540은 root-caused only** — 정확한 대체 event source(실제 tool 실행을 emit하는 emitter)는 아직 미지정 → **NEEDS_LOCATION**: `git -C masc grep -l 'keeper.tool_exec\|tool.called'`로 keeper.tool_exec activity event producer 후보 확정 후 착수. keeper.tool_exec activity event 신설; typed failure card + auto-retry(§3.11); failover/compaction 관측(Goal 3).
+- **touch:** 48h live run; agent_timeline event-source 교체(#23540) — 관측 대상 모듈 = `lib/tool_agent_timeline.ml`(+`test/test_tool_agent_timeline_build.ml`); 현재 `tools_used=[]`·`model=unknown`을 emit하는 false-observation 소스. **#23540은 root-caused only** — 정확한 대체 event source(실제 tool 실행을 emit하는 emitter)는 아직 미지정 → **NEEDS_LOCATION**: `git -C masc grep -l 'keeper.tool_exec\|tool.called'`로 keeper.tool_exec activity event producer 후보 확정 후 착수. keeper.tool_exec activity event 신설; typed failure card + explicit retry transition(§3.11); failover/compaction 관측(Goal 3).
 - **acceptance:** 48h live evidence + Evidence Chain gate 충족 + failover + compaction 관측 첨부; Turn/Tok·s/Tools 전부 observed; `lib/tool_agent_timeline.ml`가 실제 tool 실행에서 non-empty `tools_used`·구체 `model` emit(false observation 0).
 - **DoD:** missing data = blocker; 100% verdict가 stacked-green 아닌 live.
 
 ---
 
 <a name="413-migration-debt-goals"></a>
-## 4.13 Migration-Debt Goals (MD-1..MD-6, 감사 파생)
+## 4.13 Crossover finding details (CF-1..CF-6)
 
-§2.5의 6 silent-drop을 first-class numbered goal로 승격한다. Haiku 에이전트가 §4에서 작업을 고를 때 §2.5 표만 보고 놓치지 않도록, 각 항목에 grep-확인 modules + acceptance + DoD를 부여한다. **MD-N ↔ §2.5 표는 1:1 양방향 cross-link.** 원 12 goal은 재번호하지 않는다.
+§2.5의 감사 근거를 보존하는 appendix다. 별도 first-class goal이나 migration mandate가 아니며, `KILL` 판정은 구현하지 않는다.
 
-### MD-1 — Determinism pin (#24417)
-- **문제:** memory/compaction provider의 deterministic `temperature=0` fallback 삭제 → runtime.toml 미설정 시 ~0.7(요약 재현성 회귀). unset-deterministic 테스트도 삭제.
-- **결정론↔LLM:** 재현성 요구(구조적 결정론). `temperature=0`은 provider 판단이 아니라 결정론 제약.
-- **touch (grep 확인):** `lib/keeper/keeper_compaction_llm_summarizer.ml`(+.mli), `lib/keeper/keeper_memory_llm_summary.mli`, `lib/config/env_config_runtime_services.ml`, `lib/compaction_trigger/compaction_trigger.ml`.
-- **acceptance:** compaction/memory lane이 runtime.toml unset 시 구조적 `temperature=0`; 삭제된 unset-deterministic 회귀 테스트 복원(`test/test_compaction_llm_summarizer.ml`), revert 시 red.
-- **DoD:** temp=0 fallback 복원 + 회귀 green. (§2.5 #24417 / Goal 3)
+### CF-1 — [KILL] Implicit determinism pin (#24417)
+- **원 finding:** memory/compaction provider의 `temperature=0` fallback 삭제.
+- **ruling:** fallback 복원 금지. sampling은 catalog/provider default 또는 explicit MASC config만 사용한다.
+- **acceptance:** missing explicit determinism requirement를 `0`으로 보정하는 production branch 0. 별도 deterministic workflow가 필요하면 config 부재를 typed error로 검증한다.
 
-### MD-2 — Runaway watchdog (#24386)
-- **문제:** stream-idle 기본 120s→None(off) + 모든 numeric cap 제거 → 기본설정 runaway deadline 없음.
-- **결정론↔LLM (경계 ruling):** 해결책 = cap이 아닌 **provider/tool-local timeout + supervisor watchdog(정지 아닌 활동 전환)**. **§3.10 Runtime은 "전부 결정론"이라 했으나 watchdog의 activity-switch가 그 예외:** timeout 도달 = 결정론 gauge(트리거), saturated lane을 re-task할지의 판정 = system/LLM 경계. "Pause 금지(LAW 1) ↔ runaway 봉쇄"의 경계 ruling — watchdog는 fleet pause 없이 lane을 새 활동으로만 전환.
-- **touch (grep 확인):** `lib/keeper/keeper_supervisor.ml`, `lib/keeper/keeper_keepalive.ml`, `lib/config/env_config_keeper_supervisor.ml`(`MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` 재타이핑). **NEEDS re-introduction:** extraction이 지목한 `lib/supervisor.ml`(Supervision Tree)은 #20798에서 삭제되어 HEAD 미존재(`git ls-files` 확인) → 새 모듈로 재도입하거나 `keeper_supervisor.ml`에 fan-in supervisor fiber 추가.
-- **acceptance:** 기본설정 keeper가 hung provider에서 provider/tool-local timeout 도달→watchdog가 lane을 새 활동으로 전환(fleet pause 0); numeric cap 재도입 0.
-- **DoD:** hung-provider 주입 테스트가 activity-switch 관측, fleet pause 0. (§2.5 #24386 / 신규 runtime supervision)
+### CF-2 — [KILL] Implicit runaway watchdog (#24386)
+- **원 finding:** 기본 stream-idle/숫자 cap 제거 뒤 unbounded 실행.
+- **ruling:** unbounded가 기본 계약이다. whole-run lifetime은 caller-owned Eio cancellation/deadline이고, 명시하지 않은 timeout이나 heuristic re-task를 만들지 않는다.
+- **acceptance:** implicit numeric deadline 0; caller-supplied timeout은 해당 lane만 취소하고 다른 lane을 멈추지 않는 focused test.
 
-### MD-3 — Observed-stop orphan (#24448)
+### CF-3 — [KEEP AS DELETION] Observed-stop orphan (#24448)
 - **문제:** Observed stop reason(TurnLimit/ExecTimeout/ExecIdle) producer 0 → orphan dead branch 7파일. cap도달 vs 정상완료 구별 불가.
 - **결정론↔LLM:** typed-FSM terminal observability(LAW 3). 전부 결정론.
 - **touch (grep 확인):** `lib/keeper/keeper_turn_fsm.ml`(FSM), `lib/agent_observation/agent_observation.ml`(stop_reason 관측).
-- **acceptance:** 각 Observed variant에 ≥1 live producer(또는 variant 제거); receipt에서 cap-reached vs normal-completion 구별; TLA+ `CancelledNeverAbsorbed` 유지(`test/stanzas/test_keeper_turn_fsm_tla_parity.inc`); cooperative-yield producer revert(#24403 defer)와 조율.
-- **DoD:** dead branch 제거/배선. (§2.5 #24448 / Goal 12 + Goal 5)
+- **acceptance:** 실제 OAS outcome producer가 없는 variant와 consumer 삭제. cooperative yield/cancel/completion만 typed receipt로 전달하고, cap producer를 재도입하지 않는다. TLA+ `CancelledNeverAbsorbed` 유지(`test/stanzas/test_keeper_turn_fsm_tla_parity.inc`).
+- **DoD:** orphan branch grep 0. (§2.5 #24448 / Goal 12 + Goal 5)
 
-### MD-4 — Crossover N-of-M (#24510)
-- **문제:** 0.212 crossover N-of-M(exit_condition/server/dashboard/~20 테스트 미이전 자인). `block_tokens` 복구했으나 behavioral 테스트 없음, ToolResult가 0.212 content_blocks 무시→멀티모달 undercount.
-- **결정론↔LLM:** N-of-M 금지(LAW 4). codemod 일괄(개별 site 패치 금지).
+### CF-4 — [KEEP] Crossover behavioral correctness (#24510)
+- **문제:** 0.212 compilation migration은 완료됐지만 `block_tokens`·ToolResult `content_blocks` behavior 증명이 남았다.
+- **결정론↔LLM:** 이미 완료된 compilation migration을 다시 N-of-M 작업으로 열지 않는다. 남은 named behavior만 검증한다.
 - **touch (grep 확인):** `lib/keeper/keeper_context_core_message_json.ml`(content_blocks 소비), `lib/inference_utils.ml` + `lib/dashboard/dashboard_http_keeper_metrics.ml`(block_tokens).
-- **acceptance:** ToolResult가 content_blocks 소비(멀티모달 undercount 0); block_tokens behavioral 테스트; ~20 deferred 테스트 이전; typed receipt가 멀티모달 토큰 카운트.
-- **DoD:** "N/M sites" 자인 문구 소거, 전 사이트 이전. (§2.5 #24510 / Goal 5)
-- **[2026-07-15 진행]:** ~20 deferred 테스트 _compilation_ 이전은 착지 (#24468 벌크 + #24513 잔여 3파일; `dune build @check` green, 전 test 파일이 0.212 API에 대해 typecheck). N-of-M _compilation_ 채무 해소. **잔여(미검증):** ToolResult content_blocks _behavioral_ 소비 + block_tokens _behavioral_ 테스트 — @check(typecheck)는 이 런타임 동작을 증명하지 않으므로 별도 검증 필요.
+- **acceptance:** `lib/keeper/keeper_context_core_message_json.ml`의 ToolResult가 `content_blocks`를 소비해 멀티모달 undercount 0; `lib/inference_utils.ml`+`lib/dashboard/dashboard_http_keeper_metrics.ml`의 `block_tokens` behavioral test; typed receipt가 멀티모달 토큰 카운트.
+- **DoD:** named behavioral tests green. (§2.5 #24510 / Goal 5)
+- **[근거, 2026-07-15]:** compilation migration은 merge commit `2938dd46556255ac46c46ae0df8cc70bc9ee15ab`(#24468) + `5b0680bce4ca87702ac3352e8bd0358d4f1cf2ed`(#24513)로 완료. **잔여(미검증):** 위 두 behavioral test. typecheck는 runtime behavior를 증명하지 않는다.
 
-### MD-5 — File-write visibility (#24442)
+### CF-5 — [KEEP] File-write visibility (#24442)
 - **문제:** file-write visibility 축소(evidence 없는 file-write-only turn이 visible→invisible).
 - **결정론↔LLM:** No silent failure(LAW 3). 결정론.
 - **touch (grep 확인):** `lib/keeper/keeper_execution_receipt.ml`(+`keeper_execution_receipt_types.ml`), `lib/keeper/keeper_agent_run_receipt.ml`.
 - **acceptance:** file-write-only turn이 receipt/waiting surface에서 operator-visible; 회귀 테스트가 visibility assert.
 - **DoD:** visibility 회귀 green. (§2.5 #24442 / Goal 12)
 
-### MD-6 — Event-drop durability (#24447)
+### CF-6 — [KEEP, ROOT FIX REQUIRED] Event-drop durability (#24447)
 - **문제:** masc-domain never-drop(handoff/heartbeat/trust) → Drop_oldest(0.212가 Block 제거해 불가피). publisher가 drop을 unit으로만 받아 인지 못함.
 - **결정론↔LLM:** never-drop / preserve-and-surface(KEEPER-STATE-OWNERSHIP). 결정론.
 - **touch (grep 확인):** `lib/keeper_event_bus/keeper_event_bus.ml`, `lib/masc_event_bus/masc_event_bus.ml`, `lib/keeper/keeper_event_bridge.ml`, `lib/keeper/keeper_event_bus_drain_site.ml`.
-- **acceptance:** handoff/heartbeat/trust는 절대 silent drop 안 됨; publisher가 branch 가능한 **typed drop signal** 수신(unit 아님); full queue가 typed error 표면화하는 회귀(`test/test_event_bus_subscription_contract.ml`).
-- **DoD:** typed drop signal + 회귀 green. (§2.5 #24447 / 신규 event drop policy)
+- **acceptance:** handoff/heartbeat/trust source event를 durable store/outbox에 보존한 뒤 ack/retry하거나 enqueue 실패를 publisher에 typed error로 반환한다. full queue에서 source event loss 0을 증명(`test/test_event_bus_subscription_contract.ml`).
+- **DoD:** preservation + caller handling + saturation 회귀 green. counter 또는 typed drop signal만 추가한 변경은 미완료. (§2.5 #24447)
 
 <a name="414-deferred-subsystem-goals"></a>
-## 4.14 Deferred-Subsystem & Hygiene Goals (DS-1..DS-8)
+## 4.14 Deferred candidate specs (DS-1..DS-8)
 
-extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-class 실행 스펙. Goal 11은 CI-green umbrella, §4.14는 각 항목의 modules·acceptance. 원 12 goal 재번호 없음.
+extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으며, fresh evidence와 독립 issue/PR scope가 생긴 항목만 §4 goal로 승격한다. Goal 11은 이 목록 전체를 자동 소유하지 않는다.
 
 ### DS-1 — IDE Observation Plane v2 (§3.14)
 - **문제:** 미착수 후속 축 — 성능 A4 SSE fan-out · A5 consumer-gate · A6 orphan 파티션 repo 귀속(bounded ingestion #23072 위 스택); 교차 C2 latched_reason(#23058) · C4·C6 promote Done_action 게이트 + Verification_requested stimulus.
@@ -520,12 +525,12 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 - **acceptance:** SSE fan-out/consumer-gate bounded; orphan 파티션이 repo에 귀속; raw observation의 keeper 직접 wake = 0(불변식 테스트); promote gate가 Done_action/Verification_requested stimulus를 명시 경로로.
 - **DoD:** passive projection 불변식 유지 + bounded ingestion 회귀.
 
-### DS-2 — Keeper degenerate-repetition (O → F2 → F1, Harness First)
-- **문제:** keeper 반복 = 하네스가 keeper 자기 출력을 무필터 재입력(3중 되먹임 L1 모델→L2 OAS visible-text→L3 MASC context). O 관측 커버리지 0%→100%, F2 replay 완화, F1 content-level detector.
-- **결정론↔LLM (순서 강제, §5):** F1(content-level detector)은 반경 최대+오탐이라 **O로 지배 채널 실측 후에만**(Harness First). n-gram/hash 계산은 결정론이나 "정상 반복(코드블록)인가 degenerate인가" 최종 판정은 LLM 경계(오탐 0 목표).
-- **touch (grep 확인):** O = raw_trace wiring — `lib/keeper/keeper_turn_driver.ml`의 `?raw_trace` 훅(줄 277·566)이 존재하나 `call_run_named`가 미전달; F2 = `lib/keeper/keeper_agent_run_finalize_response.ml`(축자 replay) → `lib/keeper/keeper_run_prompt.ml`(continuity 필터 확장); Layer 2 = OAS `lib/llm_provider/backend_openai_serialize.ml`(무조건 재직렬화); F1 = normalized-text n-gram/hash detector(idle detection 확장).
-- **acceptance:** 관측 커버리지 0%→100%(배포 후 1 turn 전 구간 wire ≥1건); 되먹임 채널 가드 0.5/3 → 2.5/3; **dup_rate: baseline 17.4% → target <2%** — 17.4%는 extraction의 pre-fix 측정치이나 측정 조건/명령 미첨부이므로 **측정 필요**(재측정 후 조건과 함께 기재); 정상 반복(코드블록) 오탐 0.
-- **DoD:** O→F2→F1 순서 착지; F1은 O 실측 후.
+### DS-2 — Keeper replay provenance (F1 content detector rejected)
+- **문제:** keeper 자기 출력이 provenance 없이 다음 input에 중복 삽입되는 정확한 replay 경로를 찾는다.
+- **ruling:** n-gram/hash/score/LLM content-level 반복 detector(F1)는 오탐 기반 heuristic이라 **KILL**. 관측(O) 뒤 동일 source/turn/block identity의 재삽입을 typed provenance로 차단(F2 root fix)한다.
+- **touch:** O = `raw_trace` wiring; F2 = `keeper_agent_run_finalize_response.ml` → `keeper_run_prompt.ml` replay path와 OAS structured message identity. content text를 분류하지 않는다.
+- **acceptance:** 동일 typed source identity가 두 번 input에 들어가지 않는 revert-red test; 정상 반복 content는 그대로 보존.
+- **DoD:** exact duplicate insertion 0, content detector 0.
 
 ### DS-3 — OAS Eio-mutex + assert-false 하드닝 (§3.12)
 - **문제:** Stdlib Mutex가 Eio fiber 안에서 OS thread block; production `assert false`를 control flow로 사용(crash 대신 typed error 필요).
@@ -581,9 +586,9 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | Boundary law | OCaml quality(mli/Effect/GADT) | **독립(병렬)** | boundary semantics 안 건드림 |
 | Keeper FSM(Goal 4) | Scheduler G1-G8(Goal 6/7) | **결합(약)** | typed wake bus(enqueue/consume Result) 경계만 공유 → 안정 시 병렬 |
 | Runtime assignment(runtime.toml) | keeper.toml/persona | **독립** | provider/model 변경이 identity 파일 안 건드림 |
-| Goal 9(Gate) / Goal 10(cardinality) / Goal 11(CI breadth) | Goal 12(48h) | **결합** | Goal 12가 9-11의 green evidence + observability 선행 필요 |
-| O 관측계측 / F2 replay완화 / F3 librarian | F1 content-level detector | **순서 결합** | F1 반경 최대+오탐 → O→F2/F3→F1 강제(Harness First) |
-| #24448(observed-stop) | #24386(runaway watchdog) | **결합** | watchdog가 observed stop-reason 필요 |
+| Goal 9(exact effect permission) / Goal 10(cardinality) / Goal 11(CI breadth) | Goal 12(48h) | **결합** | Goal 12가 9-11의 green evidence + observability 선행 필요 |
+| O 관측계측 / typed replay provenance | F1 content-level detector | **분리 후 F1 폐기** | O로 exact replay path를 찾고 typed source identity로 수정; content detector는 heuristic이라 KILL |
+| #24448 orphan stop variants | #24386 implicit watchdog | **독립 삭제** | 실제 producer 없는 stop variant와 implicit watchdog를 각각 삭제; 서로를 살리는 근거로 사용 금지 |
 | #24447(drop policy) | #24442(file-write visibility) | **결합(테마)** | 둘 다 "no silent drop" 위반 → 한 슬라이스 |
 | Config centralization / transport-health truth / non-local auth | 서로 | **독립(병렬), 공통 gate** | 3 Track-C 독립이나 "front-door truth first"에 gate |
 | Fusion RFC 0277/0283/0298/0306 | 서로 | **layered, 독립 머지** | preset record 단일 generation point 공유(컴파일 강제 ripple) |
@@ -592,14 +597,14 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | 6 memory axis / OAS boundary owner split | MASC vs OAS 작업 | **독립(병렬)** | MASC=lifecycle/work-graph/store/approval/keeper-as-tool/fusion/basepath/memory/judge; OAS=agent_config/provider-routing/yield/stop-reason/handoff/checkpoint |
 | Judge(J) axis | Memory(M)/Work(X) | **독립** | Judge는 decision-only, memory/work persist 안 함; P vs T는 EffectIntent+receipt id로만 결합 |
 | Roadmap renumbering | 모든 코드 | **독립(doc-only)** | 단 release honesty gate block |
-| 6 0.212 silent regression | 서로(#24448/#24386 제외) | **대체로 독립 착지** | 전부 0.212 crossover downstream이나 각 fix 독립 |
+| 6 crossover findings | 서로 | **독립 판정** | CF-1/2는 KILL, CF-3은 deletion, CF-4/5/6만 살아남은 behavior/durability 작업 |
 | Wave 의존(Durable Intelligence) | — | **순서 결합** | W0(Evidence+BasePath)+W1(Activity kernel) 선행 → W2(approval+collab, W1 DurableRun/outbox 필요) → W3(OAS 재현 정합성/reasoning replay, frozen `agent_config`/`Contract` 필요) → W4(Judge+memory, W1+evidence 필요) → W5(real eval, all L0-L3 필요) |
 | 48h Resilience PR-A(failover)+PR-B(HITL async) | PR-C(OAS Eio)+PR-D(fusion persist) | **순서 결합** | A/B 선행 unblock, A/B interface 안정 후 C/D 병렬 |
 | Gap 3 그룹 | 서로 | **독립** | (1)reply-channel 비균일 (2)built-but-not-ignited (3)social/creator 미착수 |
 | OAS Eio-mutex/assert-false(DS-3) | Boundary law / MASC 작업 | **독립(병렬)** | OAS internal concurrency-correctness; MASC↔OAS 계약·redaction 안 건드림. 단 OAS pin bump와만 조율 |
 | solid-js/dead-code hygiene(DS-4) | 모든 코드 | **독립(병렬)** | dashboard build 위생; runtime semantics 무변 |
 | IDE Observation Plane v2(DS-1) | Keeper FSM / Connector / Board | **독립(약결합)** | passive projection read model — raw observation이 keeper 직접 wake 금지가 유일한 경계(위반 시 결합). ingestion이 main domain path 블록 안 함 |
-| DS-2 keeper-repetition O/F2/F1 | Boundary law | **독립** | 되먹임 채널 3개 모두 자체 구현(L1 모델/L2 OAS visible-text/L3 MASC context); OAS 계약 무변 |
+| DS-2 typed replay provenance(O/F2) | Boundary law | **독립** | typed source/turn/block identity 경계만 MASC에서 수정. F1 content classifier는 KILL이며 OAS 계약 무변 |
 
 ---
 
@@ -610,13 +615,13 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 
 | 변경 | 영향 모듈/subsystem | risk | rollback |
 |------|---------------------|------|----------|
-| Gate 재설계(Goal 9) | keeper_gate.ml, keeper_tool_policy.ml, keeper_tool_dispatch_runtime.ml, ApprovalsSurface | **높음** — 계층 classifier 재도입 시 전 lane liveness 회귀 | RFC-0305 non-reintroduction rule 위반 시 revert |
+| Exact EffectIntent permission(Goal 9) | keeper_gate.ml, keeper_tool_policy.ml, keeper_tool_dispatch_runtime.ml, ApprovalsSurface | **높음** — 계층 classifier 재도입 시 전 lane liveness 회귀 | exact request-local decision slice revert |
 | Capability registry projection | 4 surface(public_mcp/spawned_agent/local_worker/keeper) 동시 | **중** — SSOT choke이나 4 surface fan-out | registry 단일 revert |
 | Provider failover 복원(PR-A, Goal 3) | keeper_turn_driver.run_keeper_turn(single→candidate-list) + `[runtime.lanes.*]` TOML; RFC-0265 modality reroute 상호작용 | **높음** — core turn path, 18h; 기존 `[runtime.assignments]`=one-candidate lane 유지 필요 | candidate-list feature flag |
-| Runaway watchdog(#24386) | keeper_supervisor + keeper_keepalive + #24448 stop-reason producer(7파일) + 삭제된 lib/supervisor.ml 재도입 | **높음** — cross-cutting keeper turn loop, 3 subsystem | provider/tool-local timeout만 먼저 |
+| Implicit runaway watchdog(#24386) | keeper_supervisor + keeper_keepalive + orphan stop-reason | **KILL** — 삭제한 cap/heuristic supervision 재도입 | caller-owned explicit Eio lifetime만 유지 |
 | Step 5 Switch.on_release(Goal 4) | keeper_agent_run.ml/keeper_unified_turn.ml cancellation finalizer(TLA+ Cancelled 삼킴 버그 지점) | **높음** — 매 turn terminal path; KeeperOASAdvanced.tla `CancelledNeverAbsorbed` 검증 필수 | catch-all 복귀 |
-| Step 6b-2 typed accept classifier | turn-accept distribution(keeper가 turn 실행 빈도) | **높음** — dual-emit window 필수, 잘못된 cut이 fleet activity 변경 | dual-emit old-side |
-| #24447 drop policy | publisher/queue 경계(handoff/heartbeat/trust), oas_event_bridge | **높음** — silent loss가 fleet desync | Drop_oldest 유지(현상태) |
+| Source typed actionable signal direct cut | turn admission(keeper가 turn 실행하는 source event 집합) | **높음** — source variant 누락이 fleet activity 변경 | prose classifier 복구 금지; typed variant 누락 시 fail-closed+event 보존 |
+| #24447 durable event preservation | publisher/queue 경계(handoff/heartbeat/trust), oas_event_bridge | **높음** — silent loss가 fleet desync | durable outbox slice revert 또는 enqueue fail-closed; `Drop_oldest` 복귀 금지 |
 | Memory claim_kind clamp | types.ml(no-TTL) + recall.ml(visible) + consolidator.ml(promotable) 3 site 동시 | **중~높음** — 셋 다 flip 안 하면 mis-tagged fact이 durable+recall-visible+cross-keeper-promotable | 3-site 원자 revert |
 | RFC-0320 continuation | keeper_approval_queue, keeper_event_queue(payload→exhaustive match ripple), keeper_heartbeat_stimulus_intake, server_bootstrap_loops | **중** — optional field + Unrouted default=backward-compat; RFC-gated subsystem | optional field 무해 |
 | RFC-0266 async wake | keeper_event_queue(4th variant→exhaustive match), fusion_sink.emit, fusion_tool, fusion_run_registry | **중** — 컴파일 강제 | variant 제거 |
@@ -632,8 +637,8 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | Scheduler live proof(G0/G2/G4) | 배포 diverged runtime(source ≠ server HEAD) | **proof-only** — 코드 blast 아님; 모든 G* live-proof가 deploy identity 선행 | infra |
 | Tool discovery defer_loading | schema_registry(tool_dispatch.ml:299 단일 choke) | **낮음·축복** — 도구 정의 메타만, dispatch 로직 무변 | flag off |
 | OAS 직렬화 5-backend 추출 | backend_openai/ollama/gemini/anthropic + openai_serialize(산포) | **높음·저주** — 한 곳 누락=silent-ignore 재발; codemod 일괄 필수 | 함수 추출 단일 |
-| F1 content-dup detector(DS-2) | lib/keeper/keeper_agent_run_finalize_response.ml + lib/keeper/keeper_run_prompt.ml + OAS lib/llm_provider/backend_openai_serialize.ml(Layer 2 재직렬화) | **높음·저주** — 모든 OAS agent에 반경; 오탐 리스크(정상 코드블록 반복) → O 실측 선행 필수 | detector flag off; O/F2만 유지 |
-| Memory FORGET/decay librarian pipe(Goal 3) | lib/keeper/keeper_memory_policy.ml + lib/keeper/keeper_memory_os_gc.ml + keeper_memory_os_consolidation.ml + keeper_memory_os_types.ml(claim_kind clamp) | **중~높음** — 3축 중 부재 축 신설; asymmetric fail-safe toward retain 위반 시 데이터 유실 | LLM-boundary forget pipe flag off; retain-only |
+| Typed replay provenance(DS-2) | lib/keeper/keeper_agent_run_finalize_response.ml + lib/keeper/keeper_run_prompt.ml + OAS structured message identity | **중** — exact duplicate insertion 경로만 | source-id change revert; content detector는 도입하지 않음 |
+| Memory-owned FORGET librarian pipe(Goal 3과 독립) | lib/keeper/keeper_memory_policy.ml + lib/keeper/keeper_memory_os_gc.ml + keeper_memory_os_consolidation.ml + keeper_memory_os_types.ml(claim_kind clamp) | **중~높음** — 3축 중 부재 축 신설; asymmetric fail-safe toward retain 위반 시 데이터 유실 | LLM-boundary forget pipe flag off; retain-only |
 | Busy-defer connector reply(Goal 8) | lib/gate_keeper_backend.ml(inbound reply path) + lib/gate/slack_socket_client.ml + lib/gate/discord_gateway_client.ml | **중** — connector reply turn 신설; busy keeper의 inbound silent drop 제거 | busy-defer turn off(현상태=silent drop) |
 | Config-ownership snapshot(DS-5) | lib/env_config_introspect.ml + lib/config/env_config_snapshot.ml | **낮음·축복** — read 계약 단일화, write path 무변 | 중복 read path 복구 |
 | Transport-health-truth(DS-8b) | **NEEDS_LOCATION**(transport health read-model 사이트 미확정) | **중** — Front-Door blocker; reachability 오보고가 운영자 오도 | read-model revert |
@@ -645,22 +650,22 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 ---
 
 <a name="7-benchmark-lens"></a>
-## 7. Benchmark Lens
+## 7. Benchmark Lens (non-normative snapshot)
 
-사실만. hype 금지.
+비교·측정 후보를 보존하는 inventory다. source artifact/commit/명령이 없는 수치는 사실 주장이나 merge gate로 사용하지 않는다.
 
 - **Resilience:** MASC는 receipt-before-side-effect + typed FSM terminal state를 목표로 하나, 현재 provider failover가 회귀됨(단일 provider hiccup이 turn 종료). Hermes-Agent는 Docker + approval을 sandbox 레벨에서 강제하고, claude-code는 sandbox 파일이 압도적(perm/limit 대비). MASC의 차별점은 fleet-level 재현성 지향이지 단일 턴 회복이 아니다.
 - **Harness:** MASC eval은 현재 static-fixture self-grading(exact claim/path membership로 자가 채점, metrics_json=null). L4(real-worktree paired/chaos/differential + blinded independent Judge)는 미착수(W5 wave 미시작). claude-code/Anthropic agent eval은 20-50 task를 권장 시작점으로 두나 이는 MASC hard gate가 아니다.
-- **정량 목표의 측정 상태(anti-hype):** 본 문서의 수치 목표는 aspirational과 measured baseline을 구분 표기한다. **측정 필요(unverified)** 목록: dup_rate `17.4%→<2%`(DS-2, 17.4%는 extraction의 pre-fix 값이나 측정 조건/명령 미첨부); RFC-0071 wildcard `~100→<20`(DS-7, ~100은 est.); tool-search defer_loading "55k토큰/85% 절감"(§8.1, 수백 MCP 서버 기준 — MASC ~60-80 내부도구는 규모 다름, `Tool_dispatch.registered_count × 평균 스키마 토큰` 상한 추정 선행); SSE/AG-UI escaped-fallback downgrade 카운트(Goal 5). **measured baseline**: dashboard subsystem % (§3.11, live 관측치); scheduler G2 48%(scheduled=0/succeeded=0/failed=2/expired=2); dashboard chat 39/140 assistant row가 raw-error로 시작(24h 관측). 측정 조건 없는 정량 주장은 재측정 전 인용 금지.
+- **정량 목표의 측정 상태(anti-hype):** dup_rate `17.4%`, wildcard `~100`, tool-search `55k/85%`, dashboard/scheduler/chat 비율은 원 extraction의 historical number이며 이 RFC에 재현 artifact가 없다. **전부 unverified**로 취급하고 재측정 전 인용·acceptance 사용 금지. 새 baseline은 command, input set, commit SHA, timestamp를 함께 기록한다.
 - **Boundary:** MASC→OAS 단방향은 grep으로 확정(OAS lib에 masc/keeper/board/persona/hitl/fusion 어휘 각 0). 이 owner split(OAS=provider-routing/pipeline/checkpoint/yield/reasoning-replay/stop-reason/handoff; MASC=lifecycle/work-graph/board/HITL/fusion)은 SDK-runner 계열(claude-code-style)과 workspace/memory-graph 계열(OpenClaw/Hermes/DAW) 사이에서 **keeper별 자율 lane substrate + provider-agnostic router** 포지션이다 — 콘텐츠 판단=configured model, lifecycle 권한=operator로 분리(RFC-0318/0319에서 hierarchical supervisor 폐기).
 - **Lane isolation:** MASC는 lane-per-keeper를 척추로 두나 dashboard Lane surface는 43%(busy/deferred/wake-on-complete/per-lane failure isolation UI 미완). 1/100/1000 혼합 cardinality 회귀는 아직 없음(Goal 10). 진짜 하네스 보호는 sandbox+permission이며 turn/cost limit은 theater — 격리된 무한 루프는 무해(토큰 낭비, observation이 잡음), 자원 runaway는 cgroup/PID(sandbox)로 봉쇄.
 
 ---
 
 <a name="8-recovered--deferred-ideas"></a>
-## 8. Recovered / Deferred Ideas
+## 8. Recovered / Deferred Idea Inventory
 
-이 문서의 존재이유 중 하나. **하나도 버리지 말 것.** revival_value 순(high→medium→low).
+과거 논의의 provenance를 잃지 않기 위한 inventory다. **모두 기본값은 inactive**이며, 살아남는다는 뜻이 아니다. 현재 코드 근거, 독립 owner, 기계 acceptance가 있는 항목만 §4 또는 GitHub issue로 승격한다. `KILL` 판정과 충돌하는 아이디어는 revival 금지다.
 
 ### 8.1 High revival
 
@@ -673,7 +678,7 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | Full Durable Intelligence 12-axis × 5-ring rebuild (60 coord, W0-W5) | Plan-only(no impl/PR/task); "ρ0=retro-guess-score 안 함". 최대 deferred corpus | 매우 높음 | 새 ledger 착수 결정 |
 | Real-worktree eval harness(L4) + adversarial promotion ledger | 전 L4 unpromoted; W5 미시작; 현재 static-fixture self-grading | 높음 | blinded/order-swapped independent Judge + real live-task evidence |
 | submit_and_await production path purge | W2 deferred hard-cut; OAS-tool approval이 Critical에서 keeper fiber 무한 block(governance_pipeline.ml:550) | 높음(keeper fiber lifecycle) | nonblocking submit_pending+wake로 수렴 |
-| Supervision Tree (OneForOne/OneForAll/RestForOne, lib/supervisor.ml 실구현됨) | fan-in 0으로 배포 미배선, #20798 삭제; runaway watchdog(#24386)의 자연스러운 집 | 높음 | 실 fan-in supervisor fiber가 stall에 activity-switch/keeper_recover |
+| Supervision Tree (historical OneForOne/OneForAll/RestForOne) | fan-in 0으로 삭제된 구조; implicit watchdog의 재도입 명분이 됨 | 높음 | **KILL — current lane-local typed recovery가 증명하지 못하는 새 요구가 생기기 전 revival 금지** |
 | Related/proactive board wake via LLM/Fusion judgment | deterministic stigmergy + 키워드 scoring(+5 score/50 cap) 의도적 삭제; "real LLM/Fusion boundary 나올 때까지 absent" | 중~높음 | LLM/Fusion judgment producer |
 | Additional typed schedule payload variants (masc.board_post 외) | masc.board_post만 구현; 나머지는 unsupported terminal; "registry 통해서만 추가" | 중(schedule registry) | registry validator+dispatcher+dashboard+Otel kind mapping |
 | Recurring schedule operational proof | "still not proven"; single-shot terminal(failed/expired) evidence만; Goal 6가 삭제-대체할 legacy | 높음 | live recurrence evidence |
@@ -700,7 +705,7 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | keeper_recurring persistence (recurring.json + reload) | RFC-0314 §3 open question; in-memory Hashtbl 재시작 소멸 | 중 | Goal 6에서 착지 |
 | is_outcome_positive_for_shared_promotion measured outcome | TODO(#22447); category proxy가 real outcome evaluator 대체 | 중 | recall-injection ledger outcome을 fact metadata join |
 | RFC-OAS-018 Phase 2 fail-closed pricing (unknown model → option/typed Unknown) | provider.ml 주석 "Phase 2 deferred"; $0 collapse가 production-dead wrapper에 생존 | 중 | Goal 2에서 typed Unknown |
-| Board quality ranking fair formula (Reddit hot/confidence) + karma visibility | Partial(#23933 reactions/mention만); ranking formula/karma 결정 deferred | 중 | 문서화된 fair formula |
+| Board karma visibility(D5); quality-score ranking은 KILL | Partial(#23933 reactions/mention만). hot/confidence/karma score가 substantive·quality authority가 되는 formula는 heuristic이라 부활 금지 | 중 | visibility는 D5에서만 결정; 표시는 stable declared total order |
 | RFC-0271 §4.5 MaxTokens truncation continuation + dead #23648 arm cleanup | P2, max_tokens chain 병합 후 frequency 하락 de-prioritized | 중 | continuation + mutating-turn protection |
 | Board fixture-voter write-boundary fix (cast time typed voter identity) | self-documented workaround(#9921); read-time quarantine + MASC_BOARD_VOTE_QUARANTINE flag | 중 | write-path typed voter |
 | Judge calibration ledger (J3/J4, blind identity+order swap+cross-family) | 전 J-axis unpromoted; W4 미시작; single uncalibrated self-review만 | 중 | W4 착수 |
@@ -710,7 +715,7 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | Circuit Breaker (Closed/Open/HalfOpen) | Phase 2.2 P1 sketch 미배선; 0.212 cap-removal과 긴장(breaker=bounded counter) | 중 | provider-local-timeout 대체와 조율 |
 | Auto Recovery exponential backoff (1s→60s) | Phase 2.1 sketch 미구현; keeper_supervisor sweep가 piecemeal 대체하나 통합 backoff ladder 없음 | 중 | 통합 backoff-escalation |
 | Graceful Shutdown phase machine (StopAccepting→Drain→Cleanup→SaveState→Exit) | Phase 1.3 sketch; MASC_SHUTDOWN_* knob(untyped)만; lane-drain vs server-drain 혼동 | 중 | typed phase FSM |
-| GOAL LOOP OODA cadence scheduler (Observe 5s/Orient 60s/Decide 3600s...) | scripts/goal_loop_scheduler.py standalone(외부 phase command wrap); durable wake bus 미통합 | 중 | Schedule_store waiting plane과 조율 |
+| Legacy GOAL LOOP OODA cadence scheduler | Legacy Goal runtime과 함께 **KILL**. `scripts/goal_loop_scheduler.py` 및 관련 dashboard/test/config 삭제 | 중 | revival 금지; 명시적 Task+Keeper lane+typed Scheduler wake 사용 |
 | Automatic verification evidence from gh pr create + git-delta visibility | task-execution visibility audit "missing teeth"; tool_access naming vs semantics mismatch | 중 | 2026-06-04 audit 참조 |
 | Capability matching algorithm (masc_bind → routing) | MASC-V2-DESIGN "Should Have" 미체크; 4 Must-Have primitive만 배송 | 중 | matching 알고리즘 구현 |
 | Capability Honesty (실적 기반 anti-exaggeration) | "(목표)"로 강등; aspirational | 중 | track record 검증 |
@@ -741,12 +746,12 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | auto_recall.ml (File_context recall, score-based) | dead scaffold(caller 0), docs "TODO state"; hand-tuned float score가 RFC-0247 SSOT와 모순 | 낮음 | 삭제 또는 RFC-respec |
 | RFC-0314 typed closed 'action' variant | merge 시 scope 축소(Broadcast(label) 하드코딩); RFC Draft | 낮음 | Goal 6 |
 | Voice provider freedom (ElevenLabs 외 typed selection) | TODO/P3; voice_bridge 하드코딩 silent Error-swallow | 낮음 | provider 추상화 |
-| Repo-mapping repository existence decision + GitHub App device flow | RFC-0322/#23662 deferred; existence 미결, plain-text credential 잔존 | 낮음 | RFC-0322 |
+| Repo-mapping UI/policy + GitHub App device flow | 결정 권한과 옵션은 **D2만**. 이 inventory 행은 독립 결정이 아님 | 낮음 | D2 참조 |
 | RFC-0303 R2b self-cadence wake-tombstone | 의도적 supersede(Phase2/3 blind cadence 삭제, tombstone input 유실) | 낮음 | design evolution 기록 |
-| gRPC transport + LSP subsystem death judgment (#70) | TODO; caller grep 미결, suspected dead 대기 | 낮음 | keep/kill 결정 |
+| gRPC transport + LSP subsystem(#70) | hard-cut: exact public/runtime consumer 0이면 삭제. 제품 방향 선택으로 보류하지 않음 | 낮음 | §11 hard-cut 참조 |
 | F3 librarian empty root fix | DEMOTE; keeper_memory_os_types.ml:382-388이 이미 persist 전 거부; 재구현 충돌(telemetry-as-fix 회피) | 낮음 | — |
 | keeper_turn_driver_backpressure dedup/cooldown 반복가드 | DO-NOT: caller 0 dead module; dedup/cooldown=workaround(DROP); root=재입력 필터 | 낮음 | 금지(guardrail) |
-| MASC Interactive Install Wizard | NEEDS_DECISION; UX 설계지 코드 버그 아님 | 낮음 | 운영자 판단 |
+| MASC Interactive Install Wizard | 결정 권한과 옵션은 **D1만**. 이 inventory 행은 독립 결정이 아님 | 낮음 | D1 참조 |
 | Multiple Workspaces per Cluster ('frontend-team' 등) | "Future 예정"; Workspace ID 'default' 하드코딩 | 낮음 | — |
 | OCaml 5.4 quick wins (Gc.ramp_up 1줄, [@atomic], Iarray, Pqueue) | 권장/Tier-3 미착지 | 낮음 | — |
 | Deferred product tracks (package extraction, broad Eio cleanup, cluster mode) | PRODUCT-OPERATING-PLAN "Keep visible, but defer" | 낮음 | — |
@@ -776,7 +781,7 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | Transport/health read-model = reachable runtime state 일치 | Front-Door blocker; multi-transport matrix에서 보고 상태가 실 reachability와 divergence | 중(NEEDS_LOCATION) | DS-8b | medium |
 | RFC-0071 §3.4 warning-4 fragile pattern matching (Cat-3 `_ -> default` ~100→<20) | gate-able 목표이나 §4/§8 미등재였음; baseline ~100=est. 실측 필요 | 중(repo-wide, 컴파일러 강제) | DS-7 | medium |
 | Token budget drift #22893 (MASC 내부 자원회계 한정) | 진행보고서 인용 타 P0(timeout=∞ #22968, None→fn #22866, pin-drift)는 해소, 실측 OPEN은 이것뿐 | 중(MASC 자원회계; OAS는 이 개념 몰라야 함, 단방향) | #22893 CLOSED, 단방향 유지 | medium |
-| F1 content-level 반복 detector (dup_rate 17.4%→<2%) | Harness First로 O→F2 뒤 최후행; 반경 최대+오탐 리스크 | 높음·저주(finalize_response.ml/keeper_run_prompt.ml/backend_openai_serialize.ml) | O 실측으로 지배 채널 확정 후 DS-2 F1(측정 필요) | high |
+| F1 content-level 반복 detector (historical) | arbitrary text similarity가 정상 반복을 오판하는 heuristic | 높음·저주(finalize_response.ml/keeper_run_prompt.ml/backend_openai_serialize.ml) | **KILL — revival 금지; DS-2 typed provenance만** | none |
 | SSOT audit ~30 findings 재검증·통합 | org spend limit 429로 항목별 검증 미완 | 중 | Goal 2, `rg <값> lib/` count≥2 확인 후 SSOT 상수 추출(이미 통합된 것은 DROP) | medium |
 
 > **커버리지 노트:** §8.1-8.4는 7-cluster extraction의 97개 deferred_lost_idea를 dedup 후 전수 반영한다. OAS 직렬화 5-backend 추출은 §8.1 "drift 결함 3종"에 포함(중복 회피). raw_trace(O 관측) wiring도 §8.1에 존재.
@@ -832,9 +837,9 @@ FSM 전이 매트릭스는 `_ -> false` catch-all 금지 — 모든 쌍 명시. 
 ---
 
 <a name="10-source-index"></a>
-## 10. Source Index
+## 10. Evidence Source Index
 
-이 문서가 통합·대체(supersede)하는 소스. 아래 문서들은 **archive** 처리하고, 방향은 RFC-0000를 정본으로 한다.
+이 문서를 구성할 때 사용한 evidence/provenance 목록이다. 이 PR은 아래 파일을 archive하거나 OAS upstream 계약을 supersede하지 않는다. MASC 방향이 충돌하면 병합된 RFC-0000의 장기 경계를 따르되, 현재 구현 사실은 코드와 live evidence로 재검증한다.
 
 ### Doc-spine (North Star / Boundary / Positioning)
 - NORTH-STAR-OCAML.md · OAS-MASC-BOUNDARY.md · MASC-V2-DESIGN.md · **PRODUCT-OPERATING-PLAN.md** *(⚠ STALE worldview: "repo-local … one repository"·"supervised" — RFC-0318/0319/0322/0329/0337/0341이 폐기; §1.1 정본)* · PRODUCT-REVIEW.md · **external-comparison-and-positioning.md** *(⚠ STALE worldview: "operator-governed supervisor"·"supervised cycles not self-driven loops"·"autonomy bounded by phase policy" — 폐기; §1.1/§7 정본)* · VERSIONED-ROADMAP.md *(stale v2.87-v2.93; renumber 필요)* · sdk-independence-principle.md
@@ -845,7 +850,7 @@ FSM 전이 매트릭스는 `_ -> false` catch-all 금지 — 모든 쌍 명시. 
 ### Connector / Board / Fusion / Memory
 - CONNECTOR-CONFIG-SCHEMA.md · CONNECTOR-UI-DESIGN.md · DESIGN-RICH-CONNECTOR-RENDERING.md · Keeper Connector-Aware Continuation — Goal Matrix.html (RFC-0320) · RFC-0223-typed-connector-surfaces-presence-pull-speaker.md · RFC-0283-fusion-judge-of-judges.md · RFC-0277-fusion-heterogeneous-panels.md · RFC-0298-fusion-judge-pool.md · RFC-0266-fusion-async-completion-wake-and-visibility.md · RFC-0306-fusion-settings-typed-editor.md · RFC-0037-board-multimedia-vision-adapted.md · 2026-06-24-fusion-dashboard-wiring-rich-text-design.md · RFC-0247-memory-os-associative-graph-forgetting-brain.md · 2026-06-23-what-to-forget-keeper-memory-forgetting-policy.md · RFC-0332-memory-write-boundary-dedup.md (REJECTED)
 
-### HITL/Gate / Capability / Observability / CI
+### Effect permission / Capability / Observability / CI
 - CAPABILITY-REGISTRY-SSOT.md · PRODUCTION-READINESS-GATES.md · VERIFICATION-MATRIX.md · verification-pipeline-policy.md · MASC Keeper v2 Dashboard Adversarial Goal Matrix.html · RFC-0318-operator-overlay-llm-approval-resolver.md (Withdrawn) · RFC-0319-operator-approval-mode.md (Withdrawn) · RFC-0305-safety-gate-failclosed-default.md (Withdrawn) · RFC-0311-typed-evidence-gate.md (Withdrawn) · RFC-0337-evidence-gate-semantics.md (Withdrawn) · RFC-0303-stimulus-gated-keeper-wake.md
 
 ### OAS 0.212 downstream contract
@@ -870,15 +875,15 @@ FSM 전이 매트릭스는 `_ -> false` catch-all 금지 — 모든 쌍 명시. 
 | # | 결정 필요 사항 | 옵션 | 결정 시 blast-radius | 출처 |
 |---|----------------|------|----------------------|------|
 | **D1** | MASC Interactive Install Wizard 를 만들 것인가 | (a) wizard 구축 (b) 무기한 defer (c) drop | 낮음 — dashboard onboarding surface 신규, runtime 코드 무변 | §8.3 |
-| **D2** | keeper-repo-mapping repository 가 애초에 존재해야 하는가(sandboxing에 무관하면 제거) + plain-text credential 입력을 GitHub App device flow로 대체할 것인가 | (a) keep + device flow (b) repo-mapping 제거 (c) 현상 유지(plain-text 잔존) | **높음** — credential/identity RFC-gated(`lib/keeper/credential_*`·`lib/repo_manager/`); (c)는 plain-text credential 보안부채 유지 | RFC-0322/#23662, §8.3 |
-| **D3** | legacy schedule row(재시작 소멸분)용 operator-reviewed backfill tool 을 만들 것인가 | (a) operator-reviewed backfill 구축 (b) legacy row drop (c) in-memory 현상 유지 | 중 — `lib/schedule/*`; Goal 6가 legacy recurring을 durable wake로 삭제-대체하므로 (b)/(c)와 상호작용 | §8.3, Goal 6 |
+| **D2** | existing multi-repo substrate와 별개인 keeper-repo-mapping UI/policy layer를 유지할 것인가 + plain-text credential 입력을 GitHub App device flow로 대체할 것인가 | (a) typed device flow로 유지 (b) UI/policy layer 제거; plain-text 현상 유지는 선택지 아님 | **높음** — credential/identity RFC-gated(`lib/keeper/credential_*`·`lib/repo_manager/`) | RFC-0322/#23662, §8.3 |
 | **D4** | Product Portfolio Trim — 실험 카테고리 TRPG/Voice/MDAL/RISC 각각 keep/graduate/archive | 각 track별 (a) keep (b) graduate(Tier-2) (c) archive | 중 — roadmap 재번호(VERSIONED-ROADMAP v2.87-v2.93 stale) 선행 시 orphan 해소; Milestone 6 frozen legacy counter | VERSIONED-ROADMAP, §8.2 |
-| **D5** | Board karma 의 post-vote public visibility (표결 후 karma 공개 여부) + ranking fair formula(Reddit hot/confidence류) 채택 | (a) 공개 (b) 비공개 (c) operator-only; formula (i) documented fair (ii) 현 heuristic 유지 | 중 — `lib/board/board_votes.ml`; Board+Dashboard 결합; #58 suspected unfair ranking | #58, #23933, §8.2 |
+| **D5** | Board karma 의 post-vote public visibility (표결 후 karma 공개 여부) | (a) 공개 (b) 비공개 (c) operator-only. hot/confidence/karma quality-score ranking은 KILL이며 선택지 아님 | 중 — `lib/board/board_votes.ml`; Board+Dashboard 결합 | #58, #23933, §8.2 |
 | **D6** | RFC-0037 Board multimedia/vision 의 4 user open-question(§6) 해소 — Phase A0 PR 착수 전 필수 | 4개 질문 각각 답(provider_adapter 확장 범위/vision 커밋/frontend ergonomics 순서/cloud storage) | 중 — provider_adapter 확장; Board multimedia; Phase B vision commitment은 PR-time Evidence Record | RFC-0037, §8.2 |
-| **D7** | gRPC transport + LSP subsystem keep/kill(#70) — caller grep 미결, suspected dead | (a) keep (b) caller grep=0이면 bulldoze | 낮음~중 — DS-4 hygiene와 결합; `git grep -l`로 caller 확정 후 | #70, §8.3 |
 
 > 이 ledger의 항목은 §4 goal이 아니다 — 결정 전까지 구현 goal로 승격 금지. 결정되면 해당 행을 §4(신규 goal) 또는 §8(revival) 또는 Non-Goal(§1.3)로 이동하고 이 ledger에서 제거한다.
 
+**Hard-cut으로 이미 결정된 항목:** legacy schedule row는 drop하며 backfill/migration을 만들지 않는다(구 D3). gRPC/LSP는 exact public/runtime consumer가 없으면 삭제한다(구 D7); caller-0 dead code는 제품 방향 결정 대상이 아니다.
+
 ---
 
-*RFC-0000 끝. 이 문서 밖의 설계는 stale. 방향 변경은 이 문서 개정으로만.*
+*RFC-0000 끝. 장기 경계 변경은 이 문서를 개정하고, 현재 구현·pin·PR·CI·live 상태는 각 정본에서 확인한다.*

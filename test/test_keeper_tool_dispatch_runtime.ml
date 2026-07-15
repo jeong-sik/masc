@@ -860,13 +860,12 @@ let test_manual_gate_defers_publication_writes_before_recovery () =
        in
        List.iter
          (fun result ->
-            check string "Manual Gate outcome" "failure"
+            check string "Manual Gate outcome" "deferred"
               (outcome_label result.KTE.disposition);
-            check string
-              "Manual Gate returns typed defer"
-              "gate_deferred"
-              Yojson.Safe.Util.
-                (member "error" (parse_json result.raw_output) |> to_string))
+            match result.KTE.disposition with
+            | Tool_result.Deferred () -> ()
+            | Tool_result.Completed () | Tool_result.Failed _ ->
+              fail "Manual Gate lost its canonical deferred disposition")
          [ overwrite; edit ];
        check int
          "Manual Gate defers publication writes before provider acquisition"
@@ -874,6 +873,78 @@ let test_manual_gate_defers_publication_writes_before_recovery () =
          (Atomic.get provider_reads);
        check string "Manual Gate preserves exact target bytes" original
          (read_file path))
+;;
+
+let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
+  with_exec_fixture
+    "keeper_tool_dispatch_manual_gate_oas_bridge"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+       let path = Filename.concat config.base_path "manual-gate-oas.txt" in
+       let input =
+         `Assoc
+           [ "file_path", `String path
+           ; "content", `String "must remain deferred"
+           ]
+       in
+       let input_schema =
+         match KTD.descriptors_for_internal "tool_write_file" with
+         | [ descriptor ] -> descriptor.KTD.input_schema
+         | [] -> fail "missing tool_write_file descriptor"
+         | _ :: _ :: _ -> fail "duplicate tool_write_file descriptors"
+       in
+       let handler =
+         Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+           ~name:"Write"
+           ~input_schema
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~exec_cache:None
+           ()
+       in
+       let masc_result = handler input in
+       (match masc_result with
+        | Tool_result.Deferred output ->
+          check bool
+            "producer metadata is not a semantic channel"
+            true
+            (Option.is_none output.metadata);
+          check bool
+            "payload has no duplicate disposition field"
+            true
+            Yojson.Safe.Util.(output.data |> member "disposition" = `Null);
+          check bool
+            "payload has no duplicate success field"
+            true
+            Yojson.Safe.Util.(output.data |> member "ok" = `Null);
+          check string
+            "Gate decision remains typed domain evidence"
+            "deferred"
+            Yojson.Safe.Util.
+              (output.data |> member "gate" |> member "decision" |> to_string)
+        | Tool_result.Completed _ -> fail "Gate deferral became Completed"
+        | Tool_result.Failed _ -> fail "Gate deferral became Failed");
+       (match Masc.Tool_bridge.to_oas_typed_result masc_result with
+        | Ok { _meta = Some (`Assoc fields); _ } ->
+          check (option string)
+            "OAS receives the one-way deferred projection"
+            (Some "deferred")
+            (match List.assoc_opt "masc.tool_disposition" fields with
+             | Some (`String value) -> Some value
+             | Some _ | None -> None)
+        | Ok _ -> fail "Deferred OAS projection omitted its disposition marker"
+        | Error error ->
+          fail ("Deferred crossed the OAS boundary as failure: " ^ error.message));
+       check bool "Deferred Write executed no effect" false (Sys.file_exists path))
 ;;
 
 let test_publication_initialization_crash_is_redacted () =
@@ -2146,13 +2217,12 @@ let test_manual_gate_defers_web_tools_before_network () =
               in
               List.iter
                 (fun result ->
-                   check string "Manual Gate outcome" "failure"
+                   check string "Manual Gate outcome" "deferred"
                      (outcome_label result.KTE.disposition);
-                   check string
-                     "Manual Gate returns typed defer"
-                     "gate_deferred"
-                     Yojson.Safe.Util.
-                       (member "error" (parse_json result.raw_output) |> to_string))
+                   match result.KTE.disposition with
+                   | Tool_result.Deferred () -> ()
+                   | Tool_result.Completed () | Tool_result.Failed _ ->
+                     fail "Manual Gate lost its canonical deferred disposition")
                 [ search; fetch ];
               check int "Manual Gate executes no WebFetch callback" 0 !fetch_calls)))
 
@@ -2174,6 +2244,46 @@ let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
          "expected runtime_failure, got %s"
          (Tool_result.tool_failure_class_to_string cls))
   | None -> fail "expected failure_class"
+
+let test_manual_gate_defers_tool_execute_before_process () =
+  with_exec_fixture
+    "keeper_tool_dispatch_manual_execute_gate"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      (match
+         Masc.Keeper_gate_mode.set
+           config
+           ~actor:"test"
+           Masc.Keeper_gate_mode.Manual
+       with
+       | Ok _ -> ()
+       | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+      let marker = Filename.concat config.base_path "must-not-execute" in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"tool_execute"
+          ~input:
+            (`Assoc
+               [ "argv", `List [ `String "touch"; `String marker ]
+               ; "cwd", `String config.base_path
+               ; "timeout_sec", `Float 5.0
+               ])
+          ()
+      in
+      (match result.KTE.disposition with
+       | Tool_result.Deferred () -> ()
+       | Tool_result.Completed () -> fail "Manual Gate executed tool_execute"
+       | Tool_result.Failed _ -> fail "Manual Gate turned tool_execute into failure");
+      let data = Option.value ~default:`Null result.KTE.data in
+      check string
+        "Gate decision remains typed domain evidence"
+        "deferred"
+        Yojson.Safe.Util.(data |> member "gate" |> member "decision" |> to_string);
+      check bool "Manual Gate starts no process" false (Sys.file_exists marker))
 
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
@@ -2617,6 +2727,8 @@ let () =
         test_initializing_recovery_isolates_only_publication_writes;
       test_case "Manual Gate defers writes before recovery acquisition" `Quick
         test_manual_gate_defers_publication_writes_before_recovery;
+      test_case "Manual Gate deferral stays deferred through OAS bridge" `Quick
+        test_manual_gate_deferral_stays_deferred_through_oas_bridge;
       test_case "initialization crash is redacted from tool output" `Quick
         test_publication_initialization_crash_is_redacted;
       test_case "reconciliation evidence is redacted from tool output" `Quick
@@ -2651,6 +2763,8 @@ let () =
         test_manual_gate_defers_web_tools_before_network;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
+      test_case "Manual Gate defers tool_execute before process" `Quick
+        test_manual_gate_defers_tool_execute_before_process;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "OAS handler threads Eio context to keeper dispatch" `Quick

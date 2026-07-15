@@ -178,14 +178,14 @@ let apply_fusion_judge_output_contract provider_cfg =
    소비 전 실패(빌드/실행/빈 결과/provider 에러)는 [zero_usage]를 싣는다. 호출자는
    실패 경로에서도 비용을 회계할 수 있다. *)
 let run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model
-    ~web_tools ~max_tool_calls ~prompt () :
+    ~web_tools ~prompt () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
   match
     Fusion_oas.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
-      ~max_tool_calls ~timeout_s ?max_tokens
+      ~timeout_s ?max_tokens
       ~provider_config_transform:apply_fusion_judge_output_contract
       judge_model
   with
@@ -223,28 +223,28 @@ let run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_mod
          , Fusion_types.zero_usage ))
 
 let run ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~question
-    ~panel ~web_tools ~max_tool_calls () :
+    ~panel ~web_tools () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~web_tools
-    ~max_tool_calls ~prompt:(compose_prompt ~question ~panel) ()
+    ~prompt:(compose_prompt ~question ~panel) ()
 
 let run_refine ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~question
-    ~panel ~prior ~web_tools ~max_tool_calls () :
+    ~panel ~prior ~web_tools () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~web_tools
-    ~max_tool_calls ~prompt:(compose_refine_prompt ~question ~panel ~prior) ()
+    ~prompt:(compose_refine_prompt ~question ~panel ~prior) ()
 
 let run_meta ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~question
-    ~panel ~priors ~web_tools ~max_tool_calls () :
+    ~panel ~priors ~web_tools () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~web_tools
-    ~max_tool_calls ~prompt:(compose_meta_prompt ~question ~panel ~priors) ()
+    ~prompt:(compose_meta_prompt ~question ~panel ~priors) ()
 
 module For_testing = struct
   let apply_output_contract = apply_fusion_judge_output_contract

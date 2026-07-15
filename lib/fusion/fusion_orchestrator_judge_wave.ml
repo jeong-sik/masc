@@ -64,7 +64,6 @@ let run_first_judge
       ~question
       ~panel
       ~web_tools:j.jweb_tools
-      ~max_tool_calls:0
       ()
   in
   let elapsed_s = elapsed_since_t0 clock in
@@ -242,7 +241,6 @@ let run_fallback_judge
             ~question
             ~panel
             ~web_tools:judge_web_tools
-            ~max_tool_calls:judge_max_tool_calls
             ()
         in
         let elapsed_s = elapsed_since_t0 clock in

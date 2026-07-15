@@ -50,8 +50,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
               ~judge_model:preset.Fusion_policy.judge
-              ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools
-              ~max_tool_calls:judge_max_tool_calls ()
+              ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools ()
           in
           let refine_over (s1, u1) =
             let single_node =
@@ -65,7 +64,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                 ~judge_model:preset.Fusion_policy.judge
                 ~question:req.Fusion_types.prompt ~panel ~prior:s1
-                ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
+                ~web_tools:judge_web_tools ()
             with
             | Ok (s2, u2) ->
               ( Ok (s2, Fusion_types.add_usage u1 u2)
@@ -188,7 +187,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge
                          ~question:req.Fusion_types.prompt ~panel ~priors
-                         ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
+                         ~web_tools:judge_web_tools ()
                      with
                      | Ok (meta_s, meta_u) ->
                        ( Ok (meta_s, Fusion_types.add_usage firsts_usage meta_u)
@@ -286,7 +285,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                           ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                           ~judge_model:preset.Fusion_policy.judge
                           ~question:req.Fusion_types.prompt ~panel ~priors
-                          ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
+                          ~web_tools:judge_web_tools ()
                       with
                       | Ok (stage_s, stage_u) ->
                         ( ( stage_id
@@ -356,7 +355,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge
                          ~question:req.Fusion_types.prompt ~panel ~priors
-                         ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
+                         ~web_tools:judge_web_tools ()
                      with
                      | Ok (final_s, final_u) ->
                        ( Ok (final_s, Fusion_types.add_usage stage_usage final_u)

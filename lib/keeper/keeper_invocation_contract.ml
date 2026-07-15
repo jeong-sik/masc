@@ -1,11 +1,6 @@
 type capability = Keeper_invocation_types.capability = Invoke_turn
 type target = Keeper_invocation_types.target = Keeper of Keeper_id.Keeper_name.t
-
-type request =
-  { target : target
-  ; capability : capability
-  ; prompt : string
-  }
+type request = Keeper_invocation_types.request
 
 type run_ref = Keeper_invocation_types.run_ref =
   { run_id : string
@@ -95,13 +90,9 @@ let capability_of_json ~field = function
 ;;
 
 let request ~keeper_name ~prompt =
-  let* keeper_name =
-    Keeper_id.Keeper_name.of_string keeper_name
-    |> Result.map_error (fun reason -> Invalid_target reason)
-  in
-  if String.equal prompt ""
-  then Error Empty_prompt
-  else Ok { target = Keeper keeper_name; capability = Invoke_turn; prompt }
+  Keeper_invocation_types.keeper_turn ~keeper_name ~prompt
+  |> Result.map_error (fun reason ->
+    if String.equal prompt "" then Empty_prompt else Invalid_target reason)
 ;;
 
 let request_of_json json =
@@ -115,10 +106,10 @@ let request_of_json json =
   let* target_json = required_field ~field:"delegate" "target" fields in
   let* target = target_of_json target_json in
   let* capability_json = required_field ~field:"delegate" "capability" fields in
-  let* capability = capability_of_json ~field:"delegate.capability" capability_json in
+  let* (_ : capability) = capability_of_json ~field:"delegate.capability" capability_json in
   let* prompt_json = required_field ~field:"delegate" "prompt" fields in
   let* prompt = string_value ~field:"delegate.prompt" prompt_json in
-  if String.equal prompt "" then Error Empty_prompt else Ok { target; capability; prompt }
+  request ~keeper_name:(Keeper_invocation_types.target_name target) ~prompt
 ;;
 
 let request_error_to_string = function
@@ -132,23 +123,26 @@ let request_error_to_string = function
 let target_name_of_target = Keeper_invocation_types.target_name
 
 let target_name (request : request) =
-  target_name_of_target request.target
+  Keeper_invocation_types.request_target_name request
 ;;
 
-let prompt (request : request) = request.prompt
+let prompt = Keeper_invocation_types.request_prompt
 
 let submit ~background_sw ~base_path ~caller ~(request : request) ~f () =
   Keeper_msg_async.submit
     ~background_sw
     ~base_path
     ~caller
-    ~keeper_name:(target_name request)
+    ~request
     ~f:(f request)
     ()
 ;;
 
 let run_ref (request : request) run_id =
-  { run_id; target = request.target; capability = request.capability }
+  { run_id
+  ; target = Keeper_invocation_types.request_target request
+  ; capability = Keeper_invocation_types.request_capability request
+  }
 ;;
 
 let submission_receipt (request : request) outcome =
@@ -205,7 +199,9 @@ let run_ref_matches_entry reference (entry : Keeper_msg_async.entry) =
   String.equal reference.run_id entry.Keeper_msg_async.request_id
   && String.equal
        (target_name_of_target reference.target)
-       entry.Keeper_msg_async.keeper_name
+       (Keeper_invocation_types.request_target_name entry.Keeper_msg_async.request)
+  && (match reference.capability, Keeper_invocation_types.request_capability entry.request with
+      | Invoke_turn, Invoke_turn -> true)
 ;;
 
 let validate_entry reference entry =
@@ -266,8 +262,6 @@ let delegate_submission_to_json (request : request) outcome =
 let delegate_submission_error_to_json request = function
   | Keeper_msg_async.Submit_rejected rejection ->
     Keeper_msg_async.access_rejection_to_json rejection
-  | Keeper_msg_async.Submit_invalid_keeper_name { reason } ->
-    `Assoc [ "error", `String "invalid_target"; "message", `String reason ]
   | Keeper_msg_async.Initial_persistence_failed { reason } ->
     `Assoc [ "error", `String "invocation_persistence_failed"; "message", `String reason ]
   | Keeper_msg_async.Acceptance_persistence_failed { request_id; reason } ->
@@ -324,14 +318,10 @@ let entry_result = function
 
 let delegate_entry_to_json (entry : Keeper_msg_async.entry) =
   let contract = result_contract entry in
-  let* target_name =
-    Keeper_id.Keeper_name.of_string entry.Keeper_msg_async.keeper_name
-    |> Result.map_error (fun reason -> Invalid_target reason)
-  in
   let reference =
     { run_id = entry.request_id
-    ; target = Keeper target_name
-    ; capability = Invoke_turn
+    ; target = Keeper_invocation_types.request_target entry.request
+    ; capability = Keeper_invocation_types.request_capability entry.request
     }
   in
   let timing =

@@ -241,6 +241,12 @@ let temp_dir prefix =
 
 let keeper_msg_caller = "event-bus-test-caller"
 
+let durable_request keeper_name =
+  match Keeper_invocation_types.keeper_turn ~keeper_name ~prompt:"projection" with
+  | Ok request -> request
+  | Error reason -> Alcotest.fail reason
+;;
+
 let wait_for_done ~clock ~base_path request_id =
   let rec loop remaining =
     match Kmsg.poll ~base_path ~caller:keeper_msg_caller request_id with
@@ -327,7 +333,7 @@ let require_unique_assoc label = function
 let test_keeper_invocation_result_contracts () =
   let entry : Kmsg.entry =
     { request_id = "kmsg-entry-projection"
-    ; keeper_name = "projection-keeper"
+    ; request = durable_request "projection-keeper"
     ; base_path = "/projection/base"
     ; submitted_by = "projection-caller"
     ; status = Kmsg.Running
@@ -423,7 +429,7 @@ let test_typed_keeper_invocation_wire_contract () =
   in
   let entry : Kmsg.entry =
     { request_id = "typed-run-ref"
-    ; keeper_name = "projection-keeper"
+    ; request = durable_request "projection-keeper"
     ; base_path = "/projection/base"
     ; submitted_by = "projection-caller"
     ; status = Kmsg.Running

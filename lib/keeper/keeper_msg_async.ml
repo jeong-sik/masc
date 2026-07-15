@@ -40,7 +40,7 @@ type request_status =
 
 type entry =
   { request_id : string
-  ; keeper_name : string
+  ; request : Keeper_invocation_types.request
   ; base_path : string
   ; submitted_by : string
   ; status : request_status
@@ -119,7 +119,6 @@ and recovery_record_error_kind =
 
 type submit_error =
   | Submit_rejected of access_rejection
-  | Submit_invalid_keeper_name of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
       { request_id : string
@@ -498,7 +497,16 @@ let with_keeper_persistence_lock ~base_path ~keeper_name f =
 exception CancelledByOperator
 exception Worker_preempted of string
 exception Worker_already_settled of request_status
-let record_schema_version = 3
+let record_schema_version = 4
+
+let entry_keeper_name_id (entry : entry) =
+  match Keeper_invocation_types.request_target entry.request with
+  | Keeper_invocation_types.Keeper name -> name
+;;
+
+let entry_keeper_name (entry : entry) =
+  Keeper_id.Keeper_name.to_string (entry_keeper_name_id entry)
+;;
 
 let server_background_switch () =
   match Eio_context.get_root_switch_opt () with
@@ -658,11 +666,6 @@ let durable_terminal_entry proof = proof.terminal_entry
 
 let submit_error_to_json = function
   | Submit_rejected rejection -> access_rejection_to_json rejection
-  | Submit_invalid_keeper_name { reason } ->
-    `Assoc
-      [ "error", `String "invalid_keeper_name"
-      ; "message", `String reason
-      ]
   | Initial_persistence_failed { reason } ->
     `Assoc
       [ "error", `String "request_persistence_failed"
@@ -782,7 +785,7 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
   let fields =
     [ "schema_version", `Int record_schema_version
     ; "request_id", `String e.request_id
-    ; "keeper_name", `String e.keeper_name
+    ; "request", Keeper_invocation_types.request_to_json e.request
     ; "base_path", `String e.base_path
     ; "submitted_by", `String e.submitted_by
     ; "status", `String (status_to_string e.status)
@@ -815,7 +818,7 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
 
 let same_request_identity (left : entry) (right : entry) =
   String.equal left.request_id right.request_id
-  && String.equal left.keeper_name right.keeper_name
+  && Keeper_invocation_types.request_equal left.request right.request
   && String.equal left.base_path right.base_path
   && String.equal left.submitted_by right.submitted_by
   && Float.equal left.submitted_at right.submitted_at
@@ -874,7 +877,7 @@ let validate_record_fields ~status_fields json =
   let common_fields =
     [ "schema_version"
     ; "request_id"
-    ; "keeper_name"
+    ; "request"
     ; "base_path"
     ; "submitted_by"
     ; "status"
@@ -963,10 +966,10 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
            request_id
            expected_request_id)
   in
-  let* keeper_name = required_string "keeper_name" json in
-  let* keeper_name =
-    Keeper_id.Keeper_name.of_string keeper_name
-    |> Result.map Keeper_id.Keeper_name.to_string
+  let* request =
+    match Json_util.assoc_member_opt "request" json with
+    | Some request -> Keeper_invocation_types.request_of_json request
+    | None -> Error "record is missing required object field \"request\""
   in
   let* persisted_base_path = required_string "base_path" json in
   let* submitted_by = required_string "submitted_by" json in
@@ -997,7 +1000,7 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
   let* () = validate_record_fields ~status_fields json in
   Ok
     { request_id
-    ; keeper_name
+    ; request
     ; base_path = persisted_base_path
     ; submitted_by
     ; status
@@ -1076,7 +1079,6 @@ let remove_duplicate_source_unlocked ~ops ~(entry : entry) path =
 
 type persist_integrity_error =
   | Unsafe_request_id
-  | Invalid_keeper_name of string
   | Terminal_partition_nonterminal
   | Terminal_conflict
   | Terminal_unreadable of string
@@ -1092,7 +1094,6 @@ type persist_error =
 
 let persist_integrity_error_to_string = function
   | Unsafe_request_id -> "request_id is unsafe for persistence"
-  | Invalid_keeper_name reason -> reason
   | Terminal_partition_nonterminal ->
     "terminal partition contains a non-terminal request record"
   | Terminal_conflict ->
@@ -1189,13 +1190,10 @@ let persist_entry_unlocked ~ops ?source_path (entry : entry) =
 ;;
 
 let with_entry_persistence_transaction (entry : entry) f =
-  match Keeper_id.Keeper_name.of_string entry.keeper_name with
-  | Error reason -> Error (Integrity_failed (Invalid_keeper_name reason))
-  | Ok keeper_name ->
-    with_keeper_persistence_lock
-      ~base_path:entry.base_path
-      ~keeper_name
-      f
+  with_keeper_persistence_lock
+    ~base_path:entry.base_path
+    ~keeper_name:(entry_keeper_name_id entry)
+    f
 ;;
 
 let persist_entry ~ops ?source_path (entry : entry) =
@@ -1436,7 +1434,7 @@ let recover_record_path ~base_path ~request_id path report =
                ~store:Active_store
                ~path
                ~request_id
-               ~keeper_name:entry.keeper_name
+               ~keeper_name:(entry_keeper_name entry)
                Recovery_source_cleanup_failed
                report) with
             failed = report.failed + 1
@@ -1452,7 +1450,7 @@ let recover_record_path ~base_path ~request_id path report =
                ~store:Active_store
                ~path
                ~request_id
-               ~keeper_name:entry.keeper_name
+               ~keeper_name:(entry_keeper_name entry)
                (Recovery_persistence_failed (persist_error_to_string error))
                report) with
             failed = report.failed + 1
@@ -1468,7 +1466,7 @@ let recover_record_path ~base_path ~request_id path report =
             ~store:Active_store
             ~path
             ~request_id
-            ~keeper_name:entry.keeper_name
+            ~keeper_name:(entry_keeper_name entry)
             (Recovery_terminal_integrity
                (persist_integrity_error_to_string integrity_error))
             report) with
@@ -1486,7 +1484,7 @@ let recover_record_path ~base_path ~request_id path report =
                 ~store:Active_store
                 ~path
                 ~request_id
-                ~keeper_name:entry.keeper_name
+                ~keeper_name:(entry_keeper_name entry)
                 Recovery_source_cleanup_failed
                 report) with
              failed = report.failed + 1
@@ -1502,7 +1500,7 @@ let recover_record_path ~base_path ~request_id path report =
                 ~store:Active_store
                 ~path
                 ~request_id
-                ~keeper_name:entry.keeper_name
+                ~keeper_name:(entry_keeper_name entry)
                 (Recovery_persistence_failed (persist_error_to_string error))
                 report) with
              failed = report.failed + 1
@@ -1521,7 +1519,7 @@ let recover_record_path ~base_path ~request_id path report =
                 ~store:Active_store
                 ~path
                 ~request_id
-                ~keeper_name:entry.keeper_name
+                ~keeper_name:(entry_keeper_name entry)
                 (Recovery_persistence_failed reason)
                 report) with
              failed = report.failed + 1
@@ -1723,7 +1721,7 @@ let recover_lost_disk_records ~base_path () =
 
 let with_lock f = Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
 
-let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
+let reserve_new_request ~ops ~base_path ~submitted_by ~request =
   let rec reserve () =
     let request_id = ops.generate_request_id () in
     if not (is_safe_request_id request_id)
@@ -1742,7 +1740,7 @@ let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
               else
                 let entry =
                   { request_id
-                  ; keeper_name
+                  ; request
                   ; base_path
                   ; submitted_by
                   ; status = Queued
@@ -1984,18 +1982,18 @@ let runtime_cancelled_status () =
 ;;
 
 let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
-    ~base_path ~caller ~(f : Eio.Switch.t -> tool_result) ~keeper_name () :
+    ~base_path ~caller ~(f : Eio.Switch.t -> tool_result) ~request () :
     (submit_outcome, submit_error) result =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Submit_rejected rejection)
   | Ok (base_path, submitted_by) ->
-    (match Keeper_id.Keeper_name.of_string keeper_name with
-     | Error reason -> Error (Submit_invalid_keeper_name { reason })
-     | Ok keeper_name_id ->
-    let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
+    let keeper_name_id =
+      match Keeper_invocation_types.request_target request with
+      | Keeper_invocation_types.Keeper name -> name
+    in
     with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
     let request_id, entry, key, transition_lock =
-      reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name
+      reserve_new_request ~ops ~base_path ~submitted_by ~request
     in
     let reconciliation_outcome reason =
       Ok
@@ -2279,7 +2277,7 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
               Ok { request_id; acceptance = Durably_accepted }
             | Some cause -> background_start_failed (Printexc.to_string cause))
         | exception exn ->
-          background_start_failed (Printexc.to_string exn))))))
+          background_start_failed (Printexc.to_string exn)))))
 ;;
 
 let submit = submit_with_ops production_request_ops
@@ -2376,7 +2374,7 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
              match entry.status, keeper_name with
              | (Done _ | Lost _ | Cancelled _ | Persistence_failed _), _ -> acc
              | (Queued | Running | Cancelling _), Some name
-               when not (String.equal entry.keeper_name name) -> acc
+               when not (String.equal (entry_keeper_name entry) name) -> acc
              | (Queued | Running | Cancelling _), (Some _ | None) -> entry :: acc)
         pending
         [])
@@ -2388,7 +2386,7 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
 let entry_to_json (e : entry) : Yojson.Safe.t =
   let fields =
     [ "request_id", `String e.request_id
-    ; "keeper_name", `String e.keeper_name
+    ; "keeper_name", `String (entry_keeper_name e)
     ; "submitted_by", `String e.submitted_by
     ; "status", `String (status_to_string e.status)
     ; "submitted_at", `Float e.submitted_at

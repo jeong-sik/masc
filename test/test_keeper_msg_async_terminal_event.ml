@@ -27,6 +27,12 @@ let () = Mirage_crypto_rng_unix.use_default ()
 let caller = "terminal-event-test-caller"
 exception Synthetic_background_switch_closed
 
+let keeper_request keeper_name =
+  match Keeper_invocation_types.keeper_turn ~keeper_name ~prompt:"terminal event" with
+  | Ok request -> request
+  | Error reason -> fail reason
+;;
+
 let accepted_request_id = function
   | Ok
       ({ acceptance = Keeper_msg_async.Durably_accepted; request_id }
@@ -95,7 +101,7 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
             ~background_sw:sw
             ~base_path
             ~caller
-            ~keeper_name:"terminal-event-operator-cancel"
+            ~request:(keeper_request "terminal-event-operator-cancel")
             ~f:(fun _request_sw ->
               f_was_called := true;
               Eio.Promise.resolve worker_started_resolver ();
@@ -164,7 +170,7 @@ let test_abort_callback_failure_does_not_fail_server_switch () =
             ~background_sw:sw
             ~base_path
             ~caller
-            ~keeper_name:"terminal-event-callback-failure"
+            ~request:(keeper_request "terminal-event-callback-failure")
             ~f:(fun _request_sw ->
               Eio.Promise.resolve worker_started_resolver ();
               Eio.Promise.await never;
@@ -215,7 +221,7 @@ let test_normal_completion_never_invokes_on_worker_aborted () =
             ~background_sw:sw
             ~base_path
             ~caller
-            ~keeper_name:"terminal-event-normal-completion"
+            ~request:(keeper_request "terminal-event-normal-completion")
             ~f:(fun _request_sw -> Keeper_types_profile.tool_result_ok "ok")
             ()
           |> accepted_request_id
@@ -244,7 +250,7 @@ let test_acceptance_failure_prevents_worker_start () =
             ~background_sw:sw
             ~base_path
             ~caller
-            ~keeper_name:"terminal-event-acceptance-failure"
+            ~request:(keeper_request "terminal-event-acceptance-failure")
             ~f:(fun _request_sw ->
               worker_called := true;
               Keeper_types_profile.tool_result_ok "unreachable")
@@ -293,7 +299,7 @@ let test_closed_background_switch_rejects_worker_acceptance () =
                     ~background_sw:sw
                     ~base_path
                     ~caller
-                    ~keeper_name:"terminal-event-closed-background-switch"
+                    ~request:(keeper_request "terminal-event-closed-background-switch")
                     ~f:(fun _request_sw ->
                       fail "worker ran on a closed background switch")
                     ())))

@@ -529,11 +529,22 @@ let remove_meta_file ~config operation =
 
 let remove_session_dir ~config operation =
   if operation.cleanup_intent.remove_session
-  then
-    remove_tree
-      (Filename.concat
-         (Keeper_types_profile.session_base_dir config)
-         (Keeper_id.Trace_id.to_string operation.trace_id))
+  then (
+    let session_dir =
+      Filename.concat
+        (Keeper_types_profile.session_base_dir config)
+        (Keeper_id.Trace_id.to_string operation.trace_id)
+    in
+    match
+      Keeper_checkpoint_store.with_session_lock ~session_dir (fun session_dir ->
+        match remove_tree session_dir with
+        | Error _ as error -> error
+        | Ok () ->
+          Keeper_fs_durable_directory.invalidate session_dir;
+          Ok ())
+    with
+    | Error _ as error -> error
+    | Ok result -> result)
   else Ok ()
 ;;
 

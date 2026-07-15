@@ -579,9 +579,8 @@ let run_turn
                    session_id (the OAS agent carries no session field), so the
                    sink must stamp the keeper's own session identity before
                    persisting. [meta.runtime.trace_id] is a validated,
-                   non-empty [Trace_id.t]; without this restamp the OAS
-                   checkpoint store rejects the write with "session_id must not
-                   be empty" and every keeper turn dies. *)
+                   non-empty [Trace_id.t]; without this restamp the checkpoint
+                   transaction rejects an invalid persistence identity. *)
                 let checkpoint =
                   { snapshot.checkpoint with
                     session_id =
@@ -592,9 +591,13 @@ let run_turn
                        | None -> snapshot.checkpoint.working_context)
                   }
                 in
-                Keeper_checkpoint_store.save_oas
-                  ~session_dir:session.session_dir
-                  checkpoint
+                match
+                  Keeper_checkpoint_store.save_oas_classified
+                    ~session_dir:session.session_dir
+                    checkpoint
+                with
+                | Ok _ -> Ok ()
+                | Error _ as error -> error
               in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* Keeper does not impose a cumulative turn, time, token, or cost

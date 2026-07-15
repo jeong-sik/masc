@@ -59,27 +59,28 @@ type save_oas_outcome =
   | Saved of { relation : save_oas_relation; turn_count : int }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
-(** Save [ckpt] via the OAS Checkpoint_store when an Eio FS is
-    available; falls back to atomic file write otherwise. Always
-    appends to the OAS history archive on success.
+(** Save [ckpt] in one locked disk-SSOT transaction. A missing [session_dir]
+    is created by the durable writer, retaining the public create-first contract.
+    [Saved] means payload, rename, and parent-directory fsync succeeded; history
+    is observed best effort.
 
     RFC-0225 §3.2 checkpoint watermark: returns [Ok Stale_noop] when
-    [ckpt.turn_count] is older than the last checkpoint saved for the
-    same session. A stale writer must not clobber a conversation the
-    newer writer already persisted, but this is not a keeper lifecycle
-    failure. Equal turn_count re-saves pass. *)
+    [ckpt.turn_count] is older than the canonical checkpoint currently on disk.
+    A stale writer must not clobber a conversation the newer writer already
+    persisted, but this is not a keeper lifecycle failure. Equal turn_count
+    re-saves pass. A corrupt or unreadable existing checkpoint fails closed and
+    is never treated as a cold store. *)
 val save_oas_classified :
   session_dir:string ->
   Agent_sdk.Checkpoint.t ->
   (save_oas_outcome, string) result
 
-(** Compatibility wrapper around {!save_oas_classified}. [Saved] and
-    [Stale_noop] both return [Ok ()]; only real store/IO failures return
-    [Error]. *)
-val save_oas :
-  session_dir:string ->
-  Agent_sdk.Checkpoint.t ->
-  (unit, string) result
+(** Run [f] under the stable checkpoint lock for [session_dir]. The lock inode
+    is a sibling of the session subtree, so deleting/recreating that subtree
+    cannot replace it. [f] receives the canonical session location used to
+    derive the lock, keeping the lock and mutation on one path identity. *)
+val with_session_lock :
+  session_dir:string -> (string -> 'a) -> ('a, string) result
 
 (** Load failure classification used by callers to distinguish
     cold-start absence from real I/O / parse / SDK errors. *)
@@ -115,9 +116,3 @@ val load_oas :
   session_dir:string ->
   session_id:string ->
   (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
-
-module For_testing : sig
-  val reset_stale_write_guard : unit -> unit
-  (** Clear the process-local last-saved turn_count map so tests that
-      reuse session ids across temp dirs start from a cold state. *)
-end

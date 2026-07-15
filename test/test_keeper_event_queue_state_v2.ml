@@ -567,6 +567,30 @@ let test_settlement_controls_immediate_lane_drain () =
   | _ -> Alcotest.fail "busy turn slot requested an immediate retry loop"
 ;;
 
+let test_context_compaction_retry_continues_lane_drain () =
+  let source = stimulus "context-compaction-source" 1.0 in
+  let unrelated = stimulus "unrelated-ready" 2.0 in
+  let lease = lease_for source in
+  let followup =
+    Masc.Keeper_heartbeat_loop.ready_queue_followup_of_settlement
+      ~lease
+      (Masc.Keeper_registry_event_queue.Requeue
+         Masc.Keeper_registry_event_queue.Context_compaction_retry)
+  in
+  match followup with
+  | Masc.Keeper_heartbeat_loop.Drain_ready_queue { excluding = [ retained ] }
+    when Queue.stimulus_identity_equal source retained ->
+    Alcotest.(check int)
+      "compaction source does not hide unrelated ready work"
+      1
+      (Masc.Keeper_heartbeat_stimulus_intake.ready_stimulus_count
+         ~excluding:[ retained ]
+         (queue [ source; unrelated ]))
+  | _ ->
+    Alcotest.fail
+      "context-compaction retry did not exclude its source and continue lane drain"
+;;
+
 let test_unconsumed_approval_requeues_behind_other_work () =
   List.iter
     (fun reason ->
@@ -1085,6 +1109,10 @@ let () =
             "settlement controls immediate lane drain"
             `Quick
             test_settlement_controls_immediate_lane_drain
+        ; Alcotest.test_case
+            "context compaction retry continues lane drain"
+            `Quick
+            test_context_compaction_retry_continues_lane_drain
         ; Alcotest.test_case
             "unconsumed approval yields FIFO"
             `Quick

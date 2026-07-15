@@ -429,6 +429,7 @@ let ready_queue_followup_of_settlement ~lease = function
   | Keeper_registry_event_queue.Requeue
       ( Keeper_registry_event_queue.Rotate_now
       | Keeper_registry_event_queue.Retry_after_observed
+      | Keeper_registry_event_queue.Context_compaction_retry
       | Keeper_registry_event_queue.Approval_grant_unconsumed
       | Keeper_registry_event_queue.Approval_grant_state_unavailable ) ->
     Drain_ready_queue

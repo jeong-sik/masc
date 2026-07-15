@@ -124,8 +124,9 @@ val ready_queue_followup_of_settlement
   -> Keeper_registry_event_queue.settlement
   -> ready_queue_followup
 (** Decide whether a committed settlement may immediately drain other ready
-    work. Retryable/recoverable sources are excluded for this one follow-up so
-    they cannot monopolize the lane ahead of unrelated stimuli. *)
+    work. Retryable/recoverable sources, including a source awaiting context
+    compaction retry, are excluded for this one follow-up so they cannot
+    monopolize the lane ahead of unrelated stimuli. *)
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
     increments the registry turn-failure counter (shared with

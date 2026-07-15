@@ -3358,6 +3358,11 @@ let resolve_recovery_required
                                  })
                               (apply_transaction_result
                                  ~path entry plan execution))
+                   | Some _ ->
+                     Error
+                       (Snapshot_unavailable
+                          (load_error Parse_failed ~path
+                             "recovery index contains a non-recovery receipt"))
                    | None ->
                      receipt_not_recovery_required
                        ~base_path ~path entry ~receipt_id)

@@ -44,8 +44,6 @@ type compaction =
   }
 
 type read_error = Keeper_memory_recall_exn_class.t
-type consolidation_summarizer = Keeper_memory_bank.memory_consolidation_summarizer
-
 type t =
   { bank_summary : summary
   ; last_compaction : compaction
@@ -108,10 +106,6 @@ let append_from_tool_results config meta ~turn ~results =
     meta
     ~turn
     ~results
-;;
-
-let compact_if_needed ?summarizer config meta =
-  Keeper_memory_bank.compact_memory_bank_if_needed ?summarizer config meta
 ;;
 
 let summary_to_json = Keeper_memory_bank.memory_summary_to_json

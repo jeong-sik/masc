@@ -622,7 +622,8 @@ let deliver_finalized_completion ~config operation =
   | Finalizing_tasks _
   | Cleanup_ready _
   | Reconciliation_required _
-  | Blocked _ -> Error Unsupported_phase
+  | Blocked _
+  | Superseded _ -> Error Unsupported_phase
 ;;
 
 let complete_cleanup ~config ~entry operation cleanup =
@@ -711,7 +712,8 @@ let run ~config ~entry operation =
   | Finalized _ -> deliver_finalized_completion ~config operation
   | Prepared
   | Reconciliation_required _
-  | Blocked _ -> Error Unsupported_phase
+  | Blocked _
+  | Superseded _ -> Error Unsupported_phase
 ;;
 
 module For_testing = struct

@@ -141,6 +141,9 @@ type finalization_evidence =
   ; completion : completion_receipt
   }
 
+type supersession =
+  | Operator_metadata_update of { actor : string }
+
 type phase =
   | Prepared
   | Joined_idle
@@ -149,6 +152,7 @@ type phase =
   | Reconciliation_required of active_turn
   | Finalized of finalization_evidence
   | Blocked of failure
+  | Superseded of supersession
 
 type t =
   { schema_version : int
@@ -184,8 +188,23 @@ type invariant_error =
       }
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
+  | Superseded_cleanup_reason_mismatch of cleanup_reason
 
-let schema_version = 5
+let schema_version = 6
+
+let requires_admission_fence operation =
+  match operation.phase with
+  | Finalized { completion = Completion_pending _; _ } -> true
+  | Finalized
+      { completion = (Completion_not_requested | Completion_delivered _); _ }
+  | Superseded _ -> false
+  | Prepared
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Blocked _ -> true
+;;
 
 let meta_disposition_to_string = function
   | Retain_operator_pause -> "retain_operator_pause"
@@ -272,6 +291,10 @@ let invariant_error_to_string = function
       "shutdown finalized completion mismatch: cleanup_reason=%s, completion=%s"
       (cleanup_reason_label cleanup_reason)
       (completion_receipt_kind completion)
+  | Superseded_cleanup_reason_mismatch cleanup_reason ->
+    Printf.sprintf
+      "shutdown supersession requires operator_stop_retain_meta, actual=%s"
+      (cleanup_reason_label cleanup_reason)
 ;;
 
 let validate operation =
@@ -335,6 +358,13 @@ let validate operation =
            Error
              (Finalized_completion_mismatch
                 (operation.cleanup_intent.reason, completion)))
+    | Superseded (Operator_metadata_update _) ->
+      (match operation.cleanup_intent.reason with
+       | Operator_stop_retain_meta -> Ok ()
+       | ( Operator_stop_remove_meta
+         | Dead_tombstone_cleanup
+         | Dashboard_keeper_purge _ ) as cleanup_reason ->
+         Error (Superseded_cleanup_reason_mismatch cleanup_reason))
     | Prepared
     | Joined_idle
     | Finalizing_tasks _

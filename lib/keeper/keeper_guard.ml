@@ -18,7 +18,7 @@ let event_priority = function
   | Context_measured _ -> 5
   | Heartbeat_ok -> 10
   | Turn_succeeded -> 10
-  | Compaction_completed _ -> 10
+  | Compaction_completed -> 10
   | Compaction_failed _ -> 10
   | Handoff_completed _ -> 10
   | Handoff_failed _ -> 10

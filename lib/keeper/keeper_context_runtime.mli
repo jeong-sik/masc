@@ -84,9 +84,6 @@ type compaction_event =
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
-  ; before_tokens : int
-  ; after_tokens : int
-  ; saved_tokens : int
   }
 
 type post_turn_lifecycle =
@@ -165,42 +162,27 @@ val dispatch_keeper_phase_event
   -> Keeper_state_machine.event
   -> unit
 
-(** Canonical metric name for the compaction outcome counter.
+type lifecycle_dispatch_error =
+  | Transition_rejected of Keeper_state_machine.transition_error
+  | Compaction_invariant_violation of
+      Keeper_registry_types.compaction_transition_spec_violation
 
-    Labels: [("keeper", <name>); ("outcome", "ok" | "noop")].
-    Exported so tests can pin the name without hard-coding a string
-    literal.  #9988. *)
-val compaction_outcome_metric : string
+val lifecycle_dispatch_error_to_string : lifecycle_dispatch_error -> string
 
-(** [record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens]
-    emits the outcome counter and (for [saved_tokens <= 0]) a warn log,
-    without dispatching an FSM event.  Exposed for unit tests and for
-    callers that need the observability signal before/after a dispatch.  *)
-val record_compaction_outcome
-  :  keeper_name:string
-  -> before_tokens:int
-  -> after_tokens:int
-  -> unit
+val dispatch_keeper_phase_event_result
+  :  config:Workspace.config
+  -> ?origin:Keeper_registry.lifecycle_event_origin
+  -> keeper_name:string
+  -> Keeper_state_machine.event
+  -> (unit, lifecycle_dispatch_error) result
 
-(** [dispatch_compaction_completed ~config ~keeper_name ~before_tokens
-    ~after_tokens] dispatches a [Compaction_completed] phase event and
-    updates observability in one place.
-
-    Emits [compaction_outcome_metric] labelled with [outcome=ok] when
-    [after_tokens < before_tokens] and [outcome=noop] otherwise.  A
-    [noop] outcome also logs a warning — the FSM (#9988) keeps
-    [context_overflow] set in this case, so operators need the signal
-    to escalate profile / alert.
-
-    Explicit compaction completion paths funnel through this helper to keep
-    observability coherent. *)
+(** Dispatch [Compaction_completed] only after the prepared checkpoint has
+    been durably saved. *)
 val dispatch_compaction_completed
   :  config:Workspace.config
   -> origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
-  -> before_tokens:int
-  -> after_tokens:int
-  -> unit
+  -> (unit, lifecycle_dispatch_error) result
 
 val dispatch_post_turn_lifecycle_events
   :  config:Workspace.config

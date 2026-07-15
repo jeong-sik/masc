@@ -151,9 +151,6 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
         failure_reason = None;
         trigger = None;
         decision = KEC.Not_requested;
-        before_tokens = 0;
-        after_tokens = 0;
-        saved_tokens = 0;
       };
     turn_generation = meta.runtime.generation;
     context_ratio = 0.0;
@@ -285,9 +282,6 @@ let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
             };
         }
       in
@@ -344,9 +338,6 @@ let test_post_turn_compaction_runs_from_failing_health_lane () =
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
             };
         }
       in
@@ -374,7 +365,7 @@ let test_compaction_completion_without_started_is_nonfatal () =
       let meta = make_keeper_meta ~name:"keeper-missing-compaction-start" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       let labels =
-        [ ("keeper", meta.name); ("event", "compaction_completed(42->21)") ]
+        [ ("keeper", meta.name); ("event", "compaction_completed") ]
       in
       let before =
         Masc.Otel_metric_store.get_metric_value
@@ -393,9 +384,6 @@ let test_compaction_completion_without_started_is_nonfatal () =
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
             };
         }
       in
@@ -429,7 +417,7 @@ let test_post_turn_compaction_restarts_after_done_stage () =
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-repeat-compaction" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
-      let lifecycle before_tokens after_tokens =
+      let lifecycle =
         {
           (base_lifecycle ~meta) with
           compaction =
@@ -440,13 +428,10 @@ let test_post_turn_compaction_restarts_after_done_stage () =
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens;
-              after_tokens;
-              saved_tokens = before_tokens - after_tokens;
             };
         }
       in
-      let run_compaction label before_tokens after_tokens =
+      let run_compaction label =
         KEC.dispatch_keeper_phase_event
           ~config
           ~origin:KR.Post_turn_lifecycle
@@ -460,15 +445,15 @@ let test_post_turn_compaction_restarts_after_done_stage () =
         KEC.dispatch_post_turn_lifecycle_events
           ~config
           ~keeper_name:meta.name
-          (lifecycle before_tokens after_tokens);
+          lifecycle;
         match KR.get ~base_path:config.base_path meta.name with
         | Some entry ->
             check string (label ^ " completion returns running") "running"
               (KST.phase_to_string entry.phase)
         | None -> fail "expected registered keeper after compaction completion"
       in
-      run_compaction "first" 42 21;
-      run_compaction "second" 84 42)
+      run_compaction "first";
+      run_compaction "second")
 
 let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
   let base_dir = temp_dir "keeper_lifecycle_registry_origin_guard" in
@@ -526,10 +511,16 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
           ~labels ()
         |> Option.value ~default:0.0
       in
-      KEC.dispatch_keeper_phase_event
-        ~config
-        ~keeper_name:"missing-keeper"
-        KST.Compaction_started;
+      (match
+         KEC.dispatch_keeper_phase_event_result
+           ~config
+           ~keeper_name:"missing-keeper"
+           KST.Compaction_started
+       with
+       | Error (KEC.Transition_rejected _) -> ()
+       | Error (KEC.Compaction_invariant_violation _) ->
+         fail "missing keeper must be a transition rejection"
+       | Ok () -> fail "missing keeper lifecycle dispatch unexpectedly succeeded");
       let after =
         Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)

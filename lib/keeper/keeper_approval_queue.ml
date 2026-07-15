@@ -87,16 +87,6 @@ let pending_store_cross_context_mu = Stdlib.Mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
 
-type execution_context =
-  | Eio_fiber
-  | Non_eio
-
-let execution_context () =
-  match Eio.Fiber.check () with
-  | () -> Eio_fiber
-  | exception Effect.Unhandled _ -> Non_eio
-;;
-
 let rec lock_pending_store_cooperatively () =
   if Stdlib.Mutex.try_lock pending_store_cross_context_mu
   then ()
@@ -118,9 +108,9 @@ let rec lock_pending_store_cooperatively () =
     snapshot is returned as committed rather than reported as an ambiguous
     cancelled operation. *)
 let with_pending_store_lock f =
-  match execution_context () with
-  | Non_eio -> Stdlib.Mutex.protect pending_store_cross_context_mu f
-  | Eio_fiber ->
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> Stdlib.Mutex.protect pending_store_cross_context_mu f
+  | Eio_guard.Eio_fiber ->
     Eio.Mutex.use_ro pending_store_eio_gate (fun () ->
       lock_pending_store_cooperatively ();
       Eio.Cancel.protect (fun () ->

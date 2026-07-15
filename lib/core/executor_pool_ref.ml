@@ -22,8 +22,8 @@ let set p = Atomic.set pool (Some p)
     Inline fallback ensures callers work in tests and before server init.
     Re-raises [Eio.Cancel.Cancelled] to preserve structured concurrency. *)
 let submit_or_inline ?(weight = 1.0) f =
-  match Atomic.get pool with
-  | Some p ->
+  match Atomic.get pool, Eio_guard.execution_context () with
+  | Some p, Eio_guard.Eio_fiber ->
       (try Eio.Executor_pool.submit_exn p ~weight (fun () ->
          Eio.Switch.run (fun _sw -> f ()))
        with
@@ -32,4 +32,5 @@ let submit_or_inline ?(weight = 1.0) f =
            Log.Misc.warn "executor_pool submit failed, running inline: %s"
              (Printexc.to_string exn);
            f ())
-  | None -> f ()
+  | (Some _ | None), Eio_guard.Non_eio
+  | None, Eio_guard.Eio_fiber -> f ()

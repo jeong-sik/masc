@@ -69,16 +69,6 @@ let resolve ~base_path ~keeper_name =
 let base_path owner = fst owner.owner_key
 let keeper_name owner = snd owner.owner_key
 
-type execution_context =
-  | Eio_fiber
-  | Non_eio
-
-let execution_context () =
-  match Eio.Fiber.check () with
-  | () -> Eio_fiber
-  | exception Effect.Unhandled _ -> Non_eio
-;;
-
 let rec lock_cross_context_cooperatively mutex =
   if Stdlib.Mutex.try_lock mutex
   then ()
@@ -119,13 +109,13 @@ let with_eio_lock ~check_after owner f =
 ;;
 
 let with_lock owner f =
-  match execution_context () with
-  | Eio_fiber -> with_eio_lock ~check_after:true owner f
-  | Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> with_eio_lock ~check_after:true owner f
+  | Eio_guard.Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
 ;;
 
 let with_durable_lock owner f =
-  match execution_context () with
-  | Eio_fiber -> with_eio_lock ~check_after:false owner f
-  | Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> with_eio_lock ~check_after:false owner f
+  | Eio_guard.Non_eio -> Stdlib.Mutex.protect owner.cross_context_mutex f
 ;;

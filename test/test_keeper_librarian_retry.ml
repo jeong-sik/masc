@@ -83,6 +83,18 @@ let parse_retry_error_to_string = function
 let unparseable ?raw_evidence reason =
   R.Unparseable (R.unparseable_response ?raw_evidence reason)
 
+let test_operation_returns_missing_context () =
+  let input : Lib.input = { trace_id = "typed-operation"; generation = 1; messages = [] } in
+  let request : R.operation_request =
+    { runtime_id = "typed-runtime"; keeper_id = "typed-keeper"; input }
+  in
+  match R.execute_operation request with
+  | Error R.Eio_context_unavailable -> ()
+  | Error error ->
+    Alcotest.failf "unexpected operation error: %s" (R.operation_error_to_string error)
+  | Ok _ -> Alcotest.fail "operation unexpectedly ran without an installed Eio context"
+;;
+
 let nudge_count messages =
   List.length
     (List.filter
@@ -198,7 +210,7 @@ let test_nonempty_unparseable_evidence_outlives_empty_retry () =
 (* Drive [cadence_step] sequentially from a fresh keeper (counter -1) for
    [turns] turns, collecting the [due] decision each turn. When a turn is due
    we simulate a successful extraction by resetting the counter to 0, matching
-   the behavior of [run_best_effort] calling [cadence_record_success]. *)
+   the legacy cadence table transitions around [cadence_record_success]. *)
 let run_cadence ~cadence ~turns =
   let counter = ref (-1) in
   List.init turns (fun _ ->
@@ -273,8 +285,8 @@ let test_cadence_error_backoff_policy () =
   check bool "missing provider clock does not claim a completed attempt" false
     (R.should_record_cadence_backoff_after_error R.Provider_clock_unavailable)
 
-(* [cadence_due] drives the real per-(keeper, trace) counter table (the gate
-   [run_best_effort] uses). A fresh pair is due immediately, and successful
+(* [cadence_due] drives the legacy per-(keeper, trace) counter table. A fresh
+   pair is due immediately, and successful
    structured extractions are due once per configured period. Asserted as
    period-invariants so they hold for any configured cadence. *)
 let test_cadence_due_periodic () =
@@ -537,6 +549,12 @@ let () =
   Eio_main.run @@ fun _env ->
   run "keeper_librarian_retry"
     [
+      ( "operation",
+        [ test_case
+            "missing Eio capabilities is typed failure"
+            `Quick
+            test_operation_returns_missing_context
+        ] );
       ( "parse_retry",
         [
           test_case "succeeds on first attempt" `Quick test_succeeds_first_attempt;

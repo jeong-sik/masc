@@ -68,10 +68,35 @@ let run
     ; messages = librarian_messages
     }
   in
-  Keeper_librarian_runtime.run_best_effort
-    ~runtime_id
-    ~keeper_id:meta.name
-    librarian_input;
+  let librarian_request : Keeper_librarian_runtime.operation_request =
+    { runtime_id; keeper_id = meta.name; input = librarian_input }
+  in
+  (match Keeper_librarian_runtime.execute_operation librarian_request with
+   | Ok episode ->
+     Log.Keeper.info ~keeper_name:meta.name
+       "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
+       episode.Keeper_memory_os_types.trace_id
+       episode.generation
+       (List.length episode.claims)
+   | Error error ->
+     (match error with
+      | Keeper_librarian_runtime.Provider_slot_busy _ ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
+          ~labels:
+            [ "keeper", meta.name
+            ; "site", Keeper_librarian_runtime.memory_os_librarian_provider_slot_site
+            ]
+          ()
+      | _ -> ());
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string EpisodeCreateFailures)
+       ~labels:[ "keeper", meta.name; "site", "memory_os_librarian" ]
+       ();
+     Log.Keeper.error ~keeper_name:meta.name
+       "memory os librarian operation failed runtime=%s: %s"
+       runtime_id
+       (Keeper_librarian_runtime.operation_error_to_string error));
 
   (* Advisory delegation request drafts: keep review artifact persistence on the
      same bounded post-turn memory lane as draft-skill projection, not on the

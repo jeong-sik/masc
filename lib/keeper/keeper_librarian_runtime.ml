@@ -739,101 +739,65 @@ let provider_for_runtime ~runtime_id =
   Keeper_memory_runtime_resolution.provider_for_runtime ~runtime_id
 ;;
 
-let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_librarian.input) =
-  (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
-     advances its cadence counter, and a not-due turn skips extraction entirely
-     (the messages remain in the window for the next due turn). The cadence
-     counter is scoped to the active trace so a rollover does not inherit the
-     previous trace's schedule. *)
-  if enabled () && cadence_due ~keeper_id ~trace_id:inp.trace_id
-  then (
-    try
-      match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-      | Some sw, Some net ->
-        let runtime_id = runtime_id_for_librarian ~runtime_id in
-        (match provider_for_runtime ~runtime_id with
-         | Error err ->
-           Log.Keeper.warn ~keeper_name:keeper_id
-             "memory os librarian skipped runtime=%s: %s"
-             runtime_id
-             err
-         | Ok provider_cfg ->
-           if not (Keeper_memory_llm_summary.is_direct_completion_provider provider_cfg)
-           then
-             Log.Keeper.warn ~keeper_name:keeper_id
-               "memory os librarian skipped runtime=%s: provider does not support direct completion"
-               runtime_id
-           else (
-             let clock = Eio_context.get_clock_opt () in
-             let timeout_sec =
-               Option.value timeout_sec ~default:(default_timeout_sec ())
-             in
-             match clock with
-             | None ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string EpisodeCreateFailures)
-                 ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-                 ();
-               Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian failed runtime=%s: %s"
-                 runtime_id
-                 librarian_provider_clock_unavailable_error
-             | Some clock -> (
-             match
-               with_provider_slot ~keeper_id ~clock (fun () ->
-                 extract_and_append_with_provider_classified
-                   ?complete
-                   ~clock
-                   ~timeout_sec
-                   ~sw
-                   ~net
-                   ~keeper_id
-                   ~runtime_id
-                   ~provider_cfg
-                   inp)
-             with
-             | None ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
-                ~labels:
-                  [ "keeper", keeper_id; "site", memory_os_librarian_provider_slot_site ]
-                 ();
-               Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian skipped runtime=%s: per-keeper provider slot busy (capacity=%d)"
-                 runtime_id
-                 (per_keeper_slot_capacity ())
-             | Some (Ok episode) ->
-               cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
-               Log.Keeper.info ~keeper_name:keeper_id
-                 "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
-                 episode.Keeper_memory_os_types.trace_id
-                 episode.generation
-                 (List.length episode.claims)
-             | Some (Error err) ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string EpisodeCreateFailures)
-                 ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-                 ();
-               if should_record_cadence_backoff_after_error err
-               then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
-               Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian failed runtime=%s: %s; cadence deferred=%b"
-                 runtime_id
-                 (extraction_error_to_string err)
-                 (should_record_cadence_backoff_after_error err))))
-      | _ ->
-        Log.Keeper.warn ~keeper_name:keeper_id
-          "memory os librarian skipped: Eio context unavailable runtime=%s"
-          runtime_id
+type operation_request =
+  { runtime_id : string
+  ; keeper_id : string
+  ; input : Keeper_librarian.input
+  }
+
+type operation_error =
+  | Eio_context_unavailable
+  | Runtime_resolution_failed of string
+  | Direct_completion_unsupported
+  | Provider_slot_busy of { capacity : int }
+  | Extraction_failed of extraction_error
+  | Unexpected_failure of string
+
+let operation_error_to_string = function
+  | Eio_context_unavailable -> "memory os librarian Eio context unavailable"
+  | Runtime_resolution_failed detail -> "memory os librarian runtime resolution failed: " ^ detail
+  | Direct_completion_unsupported ->
+    "memory os librarian provider does not support direct completion"
+  | Provider_slot_busy { capacity } ->
+    Printf.sprintf "memory os librarian provider slot busy (capacity=%d)" capacity
+  | Extraction_failed error -> extraction_error_to_string error
+  | Unexpected_failure detail -> "memory os librarian unexpected failure: " ^ detail
+;;
+
+let execute_operation ?complete ?timeout_sec (request : operation_request) =
+  try
+    match
+      ( Eio_context.get_switch_opt ()
+      , Eio_context.get_net_opt ()
+      , Eio_context.get_clock_opt () )
     with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string EpisodeCreateFailures)
-        ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-        ();
-      Log.Keeper.warn ~keeper_name:keeper_id
-        "memory os librarian failed runtime=%s: %s"
-        runtime_id
-        (Printexc.to_string exn))
+    | Some sw, Some net, Some clock ->
+      let runtime_id = runtime_id_for_librarian ~runtime_id:request.runtime_id in
+      (match provider_for_runtime ~runtime_id with
+       | Error detail -> Error (Runtime_resolution_failed detail)
+       | Ok provider_cfg ->
+         if not (Keeper_memory_llm_summary.is_direct_completion_provider provider_cfg)
+         then Error Direct_completion_unsupported
+         else (
+           let timeout_sec = Option.value timeout_sec ~default:(default_timeout_sec ()) in
+           match
+             with_provider_slot ~keeper_id:request.keeper_id ~clock (fun () ->
+               extract_and_append_with_provider_classified
+                 ?complete
+                 ~clock
+                 ~timeout_sec
+                 ~sw
+                 ~net
+                 ~keeper_id:request.keeper_id
+                 ~runtime_id
+                 ~provider_cfg
+                 request.input)
+           with
+           | None -> Error (Provider_slot_busy { capacity = per_keeper_slot_capacity () })
+           | Some (Error error) -> Error (Extraction_failed error)
+           | Some (Ok episode) -> Ok episode))
+    | _ -> Error Eio_context_unavailable
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | exn -> Error (Unexpected_failure (Printexc.to_string exn))
 ;;

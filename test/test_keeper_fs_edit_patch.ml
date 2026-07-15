@@ -84,6 +84,7 @@ let setup ?(sandbox = Keeper_types_profile_sandbox.Local) f =
     match
       Fs_compat.open_publication_recovery_registry
         ~sw
+        ~fs
         ~registry_root:Eio.Path.(fs / Workspace.masc_root_dir config)
     with
     | Ok registry -> registry

@@ -254,106 +254,14 @@ type atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_targe
 type atomic_replace_recovery_target_error =
   Atomic_write.atomic_replace_recovery_target_error
 
-type publication_recovery_access = Atomic_write.publication_recovery_access
+module Publication_recovery = Publication_recovery_access
 
-type publication_recovery_registry = Atomic_write.publication_recovery_registry
-type publication_recovery_registry_error = Atomic_write.publication_recovery_registry_error
-
-type publication_recovery_lane_open_error =
-  Atomic_write.publication_recovery_lane_open_error
-
-type publication_recovery_owner = Atomic_write.publication_recovery_owner
-
-type publication_recovery_reconciliation_report =
-  Atomic_write.publication_recovery_reconciliation_report
-
-type publication_recovery_owner_inventory_row =
-  Atomic_write.publication_recovery_owner_inventory_row =
-  | Publication_recovery_valid_owner of publication_recovery_owner
-  | Publication_recovery_invalid_owner_name of string
-  | Publication_recovery_unexpected_owner_kind of
-      { owner : publication_recovery_owner
-      ; kind : Eio.File.Stat.kind
-      }
-  | Publication_recovery_missing_owner_entry of publication_recovery_owner
-  | Publication_recovery_owner_entry_unavailable of
-      { owner : publication_recovery_owner
-      ; error : publication_recovery_registry_error
-      }
-
-type publication_recovery_owner_inventory_error =
-  Atomic_write.publication_recovery_owner_inventory_error =
-  | Publication_recovery_registry_inventory_in_progress
-  | Publication_recovery_registry_inventory_failed of
-      publication_recovery_registry_error
-
-type publication_recovery_owner_block =
-  Atomic_write.publication_recovery_owner_block =
-  | Publication_recovery_owner_inventory_block of
-      publication_recovery_owner_inventory_row
-  | Publication_recovery_owner_report_block of
-      publication_recovery_reconciliation_report
-  | Publication_recovery_owner_crash_block of
-      { owner : publication_recovery_owner
-      ; exception_ : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_cancelled_block of
-      { owner : publication_recovery_owner
-      ; reason : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_activation_rejected_block of
-      publication_recovery_owner
-
-type publication_recovery_reconciliation_error =
-  Atomic_write.publication_recovery_reconciliation_error =
-  | Publication_recovery_owner_inventory_required of
-      publication_recovery_owner
-  | Publication_recovery_owner_inventory_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_owner_not_in_inventory of
-      publication_recovery_owner
-  | Publication_recovery_owner_reconciliation_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_owner_inventory_prevents_reconciliation of
-      publication_recovery_owner_inventory_row
-  | Publication_recovery_owner_reconciliation_crashed of
-      { owner : publication_recovery_owner
-      ; exception_ : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_reconciliation_cancelled of
-      { owner : publication_recovery_owner
-      ; reason : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_activation_rejected of
-      publication_recovery_owner
-
-type publication_recovery_activation_rejection_error =
-  Atomic_write.publication_recovery_activation_rejection_error =
-  | Publication_recovery_activation_inventory_required of
-      publication_recovery_owner
-  | Publication_recovery_activation_inventory_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_not_in_inventory of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_reconciliation_running of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_already_ready of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_already_blocked of
-      publication_recovery_owner_block
-
-type publication_recovery_lane_reconciliation_error =
-  Atomic_write.publication_recovery_lane_reconciliation_error =
-  | Publication_recovery_reconciliation_required of
-      publication_recovery_owner
-  | Publication_recovery_reconciliation_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_reconciliation_blocked of
-      publication_recovery_owner_block
+type publication_recovery_access = Publication_recovery.t
+type publication_recovery_registry = Publication_recovery.registry
+type publication_recovery_registry_error = Capability_recovery_obligation.transition_error
+type publication_recovery_lane_open_error = Publication_recovery.lane_open_error
+type publication_recovery_reconciliation_report = Capability_recovery_reconciler.report
+type publication_recovery_owner = Publication_recovery.owner
 
 type publication_recovery_record_area =
   Atomic_write.publication_recovery_record_area =
@@ -407,28 +315,10 @@ type publication_recovery_reconciliation_row_kind =
   | Publication_recovery_owner_store_unavailable
   | Publication_recovery_owner_inventory_unavailable
 
-let open_publication_recovery_registry =
-  Atomic_write.open_publication_recovery_registry
-;;
+let open_publication_recovery_registry = Publication_recovery.open_registry
 
 let publication_recovery_registry_error_to_string =
-  Atomic_write.publication_recovery_registry_error_to_string
-;;
-
-let inventory_publication_recovery_owners =
-  Atomic_write.inventory_publication_recovery_owners
-;;
-
-let publication_recovery_owner_to_string =
-  Atomic_write.publication_recovery_owner_to_string
-;;
-
-let reconcile_publication_recovery_owner =
-  Atomic_write.reconcile_publication_recovery_owner
-;;
-
-let reject_publication_recovery_owner_activation =
-  Atomic_write.reject_publication_recovery_owner_activation
+  Publication_recovery.transition_error_to_string
 ;;
 
 let publication_recovery_reconciliation_report_owner =
@@ -451,38 +341,10 @@ let publication_recovery_reconciliation_report_to_yojson =
   Atomic_write.publication_recovery_reconciliation_report_to_yojson
 ;;
 
-let publication_recovery_owner_inventory_row_to_string =
-  Atomic_write.publication_recovery_owner_inventory_row_to_string
-;;
-
-let publication_recovery_owner_inventory_error_to_string =
-  Atomic_write.publication_recovery_owner_inventory_error_to_string
-;;
-
-let publication_recovery_reconciliation_error_to_string =
-  Atomic_write.publication_recovery_reconciliation_error_to_string
-;;
-
-let publication_recovery_owner_block_to_string =
-  Atomic_write.publication_recovery_owner_block_to_string
-;;
-
-let publication_recovery_activation_rejection_error_to_string =
-  Atomic_write.publication_recovery_activation_rejection_error_to_string
-;;
-
-let with_publication_recovery_lane = Atomic_write.with_publication_recovery_lane
-
-let await_publication_recovery_lane_reconciliation =
-  Atomic_write.await_publication_recovery_lane_reconciliation
-;;
+let with_publication_recovery_lane = Publication_recovery.with_lane
 
 let publication_recovery_lane_open_error_to_string =
-  Atomic_write.publication_recovery_lane_open_error_to_string
-;;
-
-let publication_recovery_lane_reconciliation_error =
-  Atomic_write.publication_recovery_lane_reconciliation_error
+  Publication_recovery.lane_open_error_to_string
 ;;
 
 let atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
@@ -716,11 +578,6 @@ module Capability_write_for_testing = struct
         ; release_failure : exn option
         }
 
-  type reconciliation_interruption =
-    Atomic_write.Capability_write_for_testing.reconciliation_interruption =
-    | Cancel_reconciliation of exn
-    | Crash_reconciliation of exn
-
   type cleanup_body =
     Atomic_write.Capability_write_for_testing.cleanup_body =
     | Return_cleanup_value of string
@@ -771,25 +628,18 @@ module Capability_write_for_testing = struct
     | Closed_with_active_borrows of int
     | Closed_without_drain_signal
     | Drain_signal_already_resolved
-    | Inventory_finished_outside_running
-    | Reconciliation_finished_before_inventory
+    | Discovery_settled_twice
+    | Discovery_finished_outside_running
+    | Owner_inventory_owner_not_running of string
     | Reconciliation_owner_not_running of string
-    | Reconciliation_settled_twice of string
-    | Reconciliation_settled_before_terminal of string
+    | Owner_generation_settled_twice of string
+    | Owner_generation_settled_before_terminal of string
+    | Health_counter_underflow
+    | Health_counter_overflow
     | Cleanup_body_outcome_lost
-
-  type owner_settlement =
-    Atomic_write.Capability_write_for_testing.owner_settlement =
-    | Owner_untracked
-    | Owner_unsettled
-    | Owner_settled
 
   let run_publication_recovery_resource_scope =
     Atomic_write.Capability_write_for_testing.run_publication_recovery_resource_scope
-  ;;
-
-  let interrupt_publication_recovery_reconciliation =
-    Atomic_write.Capability_write_for_testing.interrupt_publication_recovery_reconciliation
   ;;
 
   let run_publication_recovery_cleanup_boundary =
@@ -798,10 +648,6 @@ module Capability_write_for_testing = struct
 
   let single_publication_recovery_borrow_balance =
     Atomic_write.Capability_write_for_testing.single_publication_recovery_borrow_balance
-  ;;
-
-  let publication_recovery_owner_settlement =
-    Atomic_write.Capability_write_for_testing.publication_recovery_owner_settlement
   ;;
 
   let publication_recovery_stage_name =

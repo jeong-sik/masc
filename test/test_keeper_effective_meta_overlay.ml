@@ -708,7 +708,10 @@ instructions = "missing sandbox profile"
       in
       let publication_recovery_registry =
         match
-          Fs_compat.open_publication_recovery_registry ~sw ~registry_root
+          Fs_compat.open_publication_recovery_registry
+            ~sw
+            ~fs:(Eio.Stdenv.fs env)
+            ~registry_root
         with
         | Ok registry -> registry
         | Error error ->

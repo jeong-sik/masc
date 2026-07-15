@@ -473,65 +473,47 @@ let schema_markdown =
     "CAS guard: expected_version == backlog.version";
   ]
 
-type publication_recovery_activation_row =
-  | Publication_recovery_owner_pending of { owner : string }
-  | Publication_recovery_owner_running of { owner : string }
-  | Publication_recovery_owner_report of
-      Fs_compat.publication_recovery_reconciliation_report
-  | Publication_recovery_owner_identity_rejected of
-      { owner : string
-      ; error : string
-      }
-  | Publication_recovery_owner_reconciliation_failed of
-      { owner : string
-      ; error : Fs_compat.publication_recovery_reconciliation_error
-      }
-  | Publication_recovery_owner_reconciliation_crashed of
-      { owner : string
-      ; exception_ : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_cancelled of
-      { owner : string
-      ; reason : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_inventory_issue of
-      Fs_compat.publication_recovery_owner_inventory_row
+type owner_identity_projection =
+  | Owner_identity_projection_pending
+  | Owner_identity_projection_complete of int
+  | Owner_identity_projection_failed of Eio.Exn.with_bt
 
-type publication_recovery_activation_slot =
-  { row : publication_recovery_activation_row Atomic.t
-  ; completion : unit Eio.Promise.t
+exception Owner_identity_projection_settled_more_than_once
+
+type publication_recovery_available =
+  { registry : Fs_compat.publication_recovery_registry
+  ; owner_identity_projection : owner_identity_projection Atomic.t
   }
 
-type publication_recovery_observation_event =
-  | Publication_recovery_inventory_activation
-  | Publication_recovery_inventory_terminal
-  | Publication_recovery_owner_terminal of { owner : string }
-
-type publication_recovery_observation_failure =
-  { event : publication_recovery_observation_event
-  ; exception_ : exn
-  ; backtrace : Printexc.raw_backtrace
-  }
-
-type publication_recovery_activation_report =
-  { slots : publication_recovery_activation_slot list
-  ; observation_failures :
-      publication_recovery_observation_failure list Atomic.t
-  }
+type publication_recovery_runtime_state =
+  | Publication_recovery_initializing
+  | Publication_recovery_available of publication_recovery_available
+  | Publication_recovery_unavailable of
+      Fs_compat.publication_recovery_registry_error
+  | Publication_recovery_initialization_crashed of Eio.Exn.with_bt
+  | Publication_recovery_non_runtime
 
 type publication_recovery_runtime =
-  { registry : Fs_compat.publication_recovery_registry
-  ; activation_report : publication_recovery_activation_report
+  { state : publication_recovery_runtime_state Atomic.t
+  ; initialized : unit Eio.Promise.t option
   }
 
-(** The active workspace and its publication-recovery runtime are one atomic
-    fact. Keeping the config, registry, and activation report in separate
-    fields would allow a workspace switch to publish a torn generation. *)
+type publication_recovery_runtime_snapshot =
+  | Publication_recovery_initializing_snapshot
+  | Publication_recovery_available_snapshot of
+      { health : Fs_compat.Publication_recovery.health_snapshot
+      ; owner_identity_projection : owner_identity_projection
+      }
+  | Publication_recovery_unavailable_snapshot of
+      Fs_compat.publication_recovery_registry_error
+  | Publication_recovery_initialization_crashed_snapshot
+  | Publication_recovery_non_runtime_snapshot
+
+(** The active workspace and its publication-recovery registry are one atomic
+    fact. The registry snapshot is the sole activation-health source. *)
 type workspace_scope =
   { config : Workspace.config
-  ; publication_recovery : publication_recovery_runtime option
+  ; publication_recovery : publication_recovery_runtime
   }
 
 type workspace_runtime =
@@ -566,371 +548,162 @@ let workspace_switch_error_to_string = function
       requested_root
 ;;
 
-type publication_recovery_activation_error =
-  | Publication_recovery_registry_unavailable of
-      Fs_compat.publication_recovery_registry_error
-  | Publication_recovery_inventory_unavailable of
-      Fs_compat.publication_recovery_owner_inventory_error
-  | Publication_recovery_owner_activation_rejection_failed of
-      { owner : Fs_compat.publication_recovery_owner
-      ; keeper_identity_error : string
-      ; rejection_error :
-          Fs_compat.publication_recovery_activation_rejection_error
-      }
-
-let publication_recovery_activation_error_to_string = function
-  | Publication_recovery_registry_unavailable error ->
-    "publication recovery registry unavailable: "
-    ^ Fs_compat.publication_recovery_registry_error_to_string error
-  | Publication_recovery_inventory_unavailable error ->
-    "publication recovery owner inventory unavailable: "
-    ^ Fs_compat.publication_recovery_owner_inventory_error_to_string error
-  | Publication_recovery_owner_activation_rejection_failed
-      { owner; keeper_identity_error; rejection_error } ->
-    Printf.sprintf
-      "publication recovery owner %S failed MASC identity validation (%s), \
-       but its activation rejection could not be settled: %s"
-      (Fs_compat.publication_recovery_owner_to_string owner)
-      keeper_identity_error
-      (Fs_compat.publication_recovery_activation_rejection_error_to_string
-         rejection_error)
-;;
-
-exception Publication_recovery_activation_failed of
-  publication_recovery_activation_error
-
-let () =
-  Printexc.register_printer (function
-    | Publication_recovery_activation_failed error ->
-      Some (publication_recovery_activation_error_to_string error)
-    | _ -> None)
-;;
-
 let workspace_scope state = Atomic.get state.workspace_runtime.scope
 let workspace_config state = (workspace_scope state).config
 
 let workspace_scope_publication_recovery_registry scope =
-  Option.map
-    (fun runtime -> runtime.registry)
-    scope.publication_recovery
+  match Atomic.get scope.publication_recovery.state with
+  | Publication_recovery_available available -> Some available.registry
+  | Publication_recovery_initializing
+  | Publication_recovery_unavailable _
+  | Publication_recovery_initialization_crashed _
+  | Publication_recovery_non_runtime -> None
 ;;
 
-let workspace_scope_publication_recovery_report scope =
-  Option.map
-    (fun runtime -> runtime.activation_report)
-    scope.publication_recovery
-;;
-
-let publication_recovery_activation_report_rows report =
-  List.map
-    (fun slot -> Atomic.get slot.row)
-    report.slots
-;;
-
-let rec record_publication_recovery_observation_failure report failure =
-  let current = Atomic.get report.observation_failures in
-  if
-    not
-      (Atomic.compare_and_set
-         report.observation_failures
-         current
-         (failure :: current))
-  then record_publication_recovery_observation_failure report failure
-;;
-
-let observe_publication_recovery_event report ~event observe =
-  match observe () with
-  | () -> ()
-  | exception (Eio.Cancel.Cancelled _ as exception_) ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    record_publication_recovery_observation_failure
-      report
-      { event; exception_; backtrace };
-    Printexc.raise_with_backtrace exception_ backtrace
-  | exception exception_ ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    record_publication_recovery_observation_failure
-      report
-      { event; exception_; backtrace }
-;;
-
-let publication_recovery_owner_inventory_row_to_yojson = function
-  | Fs_compat.Publication_recovery_valid_owner owner ->
-    `Assoc
-      [ "kind", `String "valid_owner"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ]
-  | Fs_compat.Publication_recovery_invalid_owner_name name ->
-    `Assoc
-      [ "kind", `String "invalid_owner_name"
-      ; "name", `String name
-      ]
-  | Fs_compat.Publication_recovery_unexpected_owner_kind { owner; kind } ->
-    `Assoc
-      [ "kind", `String "unexpected_owner_kind"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ; ( "resource_kind"
-        , `String (Format.asprintf "%a" Eio.File.Stat.pp_kind kind) )
-      ]
-  | Fs_compat.Publication_recovery_missing_owner_entry owner ->
-    `Assoc
-      [ "kind", `String "missing_owner_entry"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ]
-  | Fs_compat.Publication_recovery_owner_entry_unavailable { owner; error } ->
-    `Assoc
-      [ "kind", `String "owner_entry_unavailable"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ; ( "error"
-        , `String
-            (Fs_compat.publication_recovery_registry_error_to_string error) )
-      ]
-;;
-
-let publication_recovery_reconciliation_error_to_yojson = function
-  | Fs_compat.Publication_recovery_owner_inventory_required owner ->
-    `Assoc
-      [ "kind", `String "owner_inventory_required"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ]
-  | Fs_compat.Publication_recovery_owner_inventory_in_progress owner ->
-    `Assoc
-      [ "kind", `String "owner_inventory_in_progress"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ]
-  | Fs_compat.Publication_recovery_owner_not_in_inventory owner ->
-    `Assoc
-      [ "kind", `String "owner_not_in_inventory"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ]
-  | Fs_compat.Publication_recovery_owner_reconciliation_in_progress owner ->
-    `Assoc
-      [ "kind", `String "owner_reconciliation_in_progress"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ]
-  | Fs_compat.Publication_recovery_owner_inventory_prevents_reconciliation row ->
-    `Assoc
-      [ "kind", `String "owner_inventory_prevents_reconciliation"
-      ; "inventory", publication_recovery_owner_inventory_row_to_yojson row
-      ]
-  | Fs_compat.Publication_recovery_owner_reconciliation_crashed
-      { owner; exception_; backtrace } ->
-    `Assoc
-      [ "kind", `String "owner_reconciliation_crashed"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ; "exception", `String (Printexc.to_string exception_)
-      ; ( "backtrace"
-        , `String (Printexc.raw_backtrace_to_string backtrace) )
-      ]
-  | Fs_compat.Publication_recovery_owner_reconciliation_cancelled
-      { owner; reason; backtrace } ->
-    `Assoc
-      [ "kind", `String "owner_reconciliation_cancelled"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ; "reason", `String (Printexc.to_string reason)
-      ; ( "backtrace"
-        , `String (Printexc.raw_backtrace_to_string backtrace) )
-      ]
-  | Fs_compat.Publication_recovery_owner_activation_rejected owner ->
-    `Assoc
-      [ "kind", `String "owner_activation_rejected"
-      ; ( "owner"
-        , `String (Fs_compat.publication_recovery_owner_to_string owner) )
-      ]
-;;
-
-let publication_recovery_activation_row_to_yojson = function
-  | Publication_recovery_owner_pending { owner } ->
-    `Assoc
-      [ "kind", `String "owner_pending"
-      ; "owner", `String owner
-      ]
-  | Publication_recovery_owner_running { owner } ->
-    `Assoc
-      [ "kind", `String "owner_running"
-      ; "owner", `String owner
-      ]
-  | Publication_recovery_owner_report report ->
-    `Assoc
-      [ ( "kind"
-        , `String "owner_report" )
-      ; ( "report"
-        , Fs_compat.publication_recovery_reconciliation_report_to_yojson
-            report )
-      ]
-  | Publication_recovery_owner_identity_rejected { owner; error } ->
-    `Assoc
-      [ "kind", `String "owner_identity_rejected"
-      ; "owner", `String owner
-      ; "error", `String error
-      ]
-  | Publication_recovery_owner_reconciliation_failed { owner; error } ->
-    `Assoc
-      [ "kind", `String "owner_reconciliation_failed"
-      ; "owner", `String owner
-      ; "error", publication_recovery_reconciliation_error_to_yojson error
-      ]
-  | Publication_recovery_owner_reconciliation_crashed
-      { owner; exception_; backtrace } ->
-    `Assoc
-      [ "kind", `String "owner_reconciliation_crashed"
-      ; "owner", `String owner
-      ; "exception", `String (Printexc.to_string exception_)
-      ; ( "backtrace"
-        , `String (Printexc.raw_backtrace_to_string backtrace) )
-      ]
-  | Publication_recovery_owner_cancelled { owner; reason; backtrace } ->
-    `Assoc
-      [ "kind", `String "owner_cancelled"
-      ; "owner", `String owner
-      ; "reason", `String (Printexc.to_string reason)
-      ; ( "backtrace"
-        , `String (Printexc.raw_backtrace_to_string backtrace) )
-      ]
-  | Publication_recovery_owner_inventory_issue row ->
-    `Assoc
-      [ "kind", `String "owner_inventory_issue"
-      ; "inventory", publication_recovery_owner_inventory_row_to_yojson row
-      ]
-;;
-
-type publication_recovery_activation_health_counts =
-  { owner_pending : int
-  ; owner_running : int
-  ; owner_ready : int
-  ; owner_reconciliation_blocked : int
-  ; owner_identity_rejected : int
-  ; owner_reconciliation_failed : int
-  ; owner_reconciliation_crashed : int
-  ; owner_reconciliation_cancelled : int
-  ; owner_inventory_issue : int
-  }
-
-let empty_publication_recovery_activation_health_counts =
-  { owner_pending = 0
-  ; owner_running = 0
-  ; owner_ready = 0
-  ; owner_reconciliation_blocked = 0
-  ; owner_identity_rejected = 0
-  ; owner_reconciliation_failed = 0
-  ; owner_reconciliation_crashed = 0
-  ; owner_reconciliation_cancelled = 0
-  ; owner_inventory_issue = 0
-  }
-;;
-
-let add_publication_recovery_activation_health_row counts = function
-  | Publication_recovery_owner_pending _ ->
-    { counts with owner_pending = counts.owner_pending + 1 }
-  | Publication_recovery_owner_running _ ->
-    { counts with owner_running = counts.owner_running + 1 }
-  | Publication_recovery_owner_report report ->
-    if Fs_compat.publication_recovery_reconciliation_report_is_ready report
-    then { counts with owner_ready = counts.owner_ready + 1 }
-    else
-      { counts with
-        owner_reconciliation_blocked =
-          counts.owner_reconciliation_blocked + 1
+let workspace_scope_publication_recovery_snapshot scope =
+  match Atomic.get scope.publication_recovery.state with
+  | Publication_recovery_initializing ->
+    Publication_recovery_initializing_snapshot
+  | Publication_recovery_available available ->
+    Publication_recovery_available_snapshot
+      { health =
+          Fs_compat.Publication_recovery.health_snapshot available.registry
+      ; owner_identity_projection =
+          Atomic.get available.owner_identity_projection
       }
-  | Publication_recovery_owner_identity_rejected _ ->
-    { counts with
-      owner_identity_rejected = counts.owner_identity_rejected + 1
-    }
-  | Publication_recovery_owner_reconciliation_failed _ ->
-    { counts with
-      owner_reconciliation_failed = counts.owner_reconciliation_failed + 1
-    }
-  | Publication_recovery_owner_reconciliation_crashed _ ->
-    { counts with
-      owner_reconciliation_crashed = counts.owner_reconciliation_crashed + 1
-    }
-  | Publication_recovery_owner_cancelled _ ->
-    { counts with
-      owner_reconciliation_cancelled =
-        counts.owner_reconciliation_cancelled + 1
-    }
-  | Publication_recovery_owner_inventory_issue _ ->
-    { counts with owner_inventory_issue = counts.owner_inventory_issue + 1 }
+  | Publication_recovery_unavailable error ->
+    Publication_recovery_unavailable_snapshot error
+  | Publication_recovery_initialization_crashed _ ->
+    Publication_recovery_initialization_crashed_snapshot
+  | Publication_recovery_non_runtime ->
+    Publication_recovery_non_runtime_snapshot
 ;;
 
-type publication_recovery_observation_health_counts =
-  { inventory_activation : int
-  ; inventory_terminal : int
-  ; owner_terminal : int
-  }
+type publication_recovery_health_count =
+  | Owner_identity_rejected_health_count
+  | In_progress_health_count
+  | Demanded_owner_health_count
+  | Attention_health_count
 
-let empty_publication_recovery_observation_health_counts =
-  { inventory_activation = 0; inventory_terminal = 0; owner_terminal = 0 }
+type publication_recovery_health_count_violation =
+  | Negative_health_count of publication_recovery_health_count * int
+  | Health_count_overflow of publication_recovery_health_count
+
+exception Publication_recovery_health_count_violation of
+  publication_recovery_health_count_violation
+
+let checked_health_count_add ~count left right =
+  if left < 0
+  then
+    raise
+      (Publication_recovery_health_count_violation
+         (Negative_health_count (count, left)))
+  else if right < 0
+  then
+    raise
+      (Publication_recovery_health_count_violation
+         (Negative_health_count (count, right)))
+  else if left > Int.max_int - right
+  then
+    raise
+      (Publication_recovery_health_count_violation
+         (Health_count_overflow count))
+  else left + right
 ;;
 
-let add_publication_recovery_observation_health_failure counts failure =
-  match failure.event with
-  | Publication_recovery_inventory_activation ->
-    { counts with inventory_activation = counts.inventory_activation + 1 }
-  | Publication_recovery_inventory_terminal ->
-    { counts with inventory_terminal = counts.inventory_terminal + 1 }
-  | Publication_recovery_owner_terminal _ ->
-    { counts with owner_terminal = counts.owner_terminal + 1 }
+let checked_health_count_sum ~count values =
+  List.fold_left (checked_health_count_add ~count) 0 values
 ;;
 
-let publication_recovery_activation_report_to_health_yojson report =
-  let rows = publication_recovery_activation_report_rows report in
-  let counts =
-    List.fold_left
-      add_publication_recovery_activation_health_row
-      empty_publication_recovery_activation_health_counts
-      rows
+let checked_health_count_increment ~count value =
+  checked_health_count_add ~count value 1
+;;
+
+let publication_recovery_available_snapshot_to_health_yojson
+    ~owner_identity_projection
+    ({ discovery_phase
+     ; discovery_row_count
+     ; discovered_owner_count
+     ; invalid_owner_name_count
+     ; owners
+     } : Fs_compat.Publication_recovery.health_snapshot)
+  =
+  let discovery_phase_name, discovery_warming, discovery_failed =
+    match discovery_phase with
+    | Fs_compat.Publication_recovery.Health_discovery_required ->
+      "required", true, false
+    | Fs_compat.Publication_recovery.Health_discovery_running ->
+      "running", true, false
+    | Fs_compat.Publication_recovery.Health_discovery_failed ->
+      "failed", false, true
+    | Fs_compat.Publication_recovery.Health_discovery_complete ->
+      "complete", false, false
   in
-  let observation_failures = Atomic.get report.observation_failures in
-  let observation_counts =
-    List.fold_left
-      add_publication_recovery_observation_health_failure
-      empty_publication_recovery_observation_health_counts
-      observation_failures
+  let identity_projection_pending =
+    match discovery_phase, owner_identity_projection with
+    | Fs_compat.Publication_recovery.Health_discovery_complete,
+      Owner_identity_projection_pending -> true
+    | ( Fs_compat.Publication_recovery.Health_discovery_required
+      | Fs_compat.Publication_recovery.Health_discovery_running
+      | Fs_compat.Publication_recovery.Health_discovery_failed )
+      , _
+    | Fs_compat.Publication_recovery.Health_discovery_complete,
+      ( Owner_identity_projection_complete _
+      | Owner_identity_projection_failed _ ) -> false
   in
-  let in_progress_count = counts.owner_pending + counts.owner_running in
-  let blocking_count =
-    counts.owner_reconciliation_blocked
-    + counts.owner_identity_rejected
-    + counts.owner_reconciliation_failed
-    + counts.owner_reconciliation_crashed
-    + counts.owner_reconciliation_cancelled
-    + counts.owner_inventory_issue
+  let identity_projection_failed =
+    match owner_identity_projection with
+    | Owner_identity_projection_failed _ -> true
+    | Owner_identity_projection_pending
+    | Owner_identity_projection_complete _ -> false
   in
-  let observation_failure_count = List.length observation_failures in
+  let owner_identity_rejected_count =
+    match owner_identity_projection with
+    | Owner_identity_projection_pending -> 0
+    | Owner_identity_projection_complete count -> count
+    | Owner_identity_projection_failed _ -> 0
+  in
+  let in_progress_count =
+    checked_health_count_sum
+      ~count:In_progress_health_count
+      [ owners.inspection_pending
+      ; owners.inspection_running
+      ; owners.reconciliation_pending
+      ; owners.reconciliation_running
+      ]
+  in
+  let demanded_owner_count =
+    checked_health_count_sum
+      ~count:Demanded_owner_health_count
+      [ in_progress_count
+      ; owners.ready_without_obligation
+      ; owners.ready
+      ; owners.blocked
+      ]
+  in
+  let attention_count =
+    checked_health_count_sum
+      ~count:Attention_health_count
+      [ (if discovery_failed then 1 else 0)
+      ; (if identity_projection_failed then 1 else 0)
+      ; invalid_owner_name_count
+      ; owner_identity_rejected_count
+      ; owners.blocked
+      ]
+  in
   let status =
-    if blocking_count > 0
-    then Health_status.Blocked
-    else if observation_failure_count > 0
+    if attention_count > 0
     then Health_status.Degraded
-    else if in_progress_count > 0
+    else if discovery_warming || identity_projection_pending || in_progress_count > 0
     then Health_status.Warming
     else Health_status.Ok
   in
   let status_reason_fields =
-    [ ( counts.owner_reconciliation_blocked
-      , "owner_reconciliation_blocked" )
-    ; counts.owner_identity_rejected, "owner_identity_rejected"
-    ; counts.owner_reconciliation_failed, "owner_reconciliation_failed"
-    ; counts.owner_reconciliation_crashed, "owner_reconciliation_crashed"
-    ; counts.owner_reconciliation_cancelled, "owner_reconciliation_cancelled"
-    ; counts.owner_inventory_issue, "owner_inventory_issue"
-    ; ( observation_counts.inventory_activation
-      , "inventory_activation_observation_failed" )
-    ; ( observation_counts.inventory_terminal
-      , "inventory_terminal_observation_failed" )
-    ; ( observation_counts.owner_terminal
-      , "owner_terminal_observation_failed" )
+    [ (if discovery_failed then 1 else 0), "discovery_failed"
+    ; (if identity_projection_failed then 1 else 0), "owner_identity_projection_failed"
+    ; invalid_owner_name_count, "invalid_owner_name"
+    ; owner_identity_rejected_count, "owner_identity_rejected"
+    ; owners.blocked, "owner_blocked"
     ]
   in
   let status_reasons =
@@ -938,273 +711,262 @@ let publication_recovery_activation_report_to_health_yojson report =
       (fun (count, reason) -> if count > 0 then Some (`String reason) else None)
       status_reason_fields
   in
+  let status_reasons =
+    if identity_projection_pending
+    then `String "owner_identity_projection_pending" :: status_reasons
+    else status_reasons
+  in
   `Assoc
-    [ "status", `String (Health_status.to_string status)
-    ; "blocking", `Bool (blocking_count > 0)
-    ; ( "operator_action_required"
-      , `Bool (blocking_count > 0 || observation_failure_count > 0) )
-    ; "row_count", `Int (List.length rows)
+    [ "schema", `String "masc.publication_recovery_activation.v3"
+    ; "status", `String (Health_status.to_string status)
+    ; "global_blocking", `Bool false
+    ; "operator_action_required", `Bool (attention_count > 0)
+    ; "discovery_phase", `String discovery_phase_name
+    ; "discovery_row_count", `Int discovery_row_count
+    ; "demanded_owner_count", `Int demanded_owner_count
     ; "in_progress_count", `Int in_progress_count
-    ; "blocking_count", `Int blocking_count
-    ; "observation_failure_count", `Int observation_failure_count
+    ; "attention_count", `Int attention_count
     ; "status_reasons", `List status_reasons
     ; ( "row_counts"
       , `Assoc
-          [ "owner_pending", `Int counts.owner_pending
-          ; "owner_running", `Int counts.owner_running
-          ; "owner_ready", `Int counts.owner_ready
-          ; ( "owner_reconciliation_blocked"
-            , `Int counts.owner_reconciliation_blocked )
-          ; "owner_identity_rejected", `Int counts.owner_identity_rejected
-          ; ( "owner_reconciliation_failed"
-            , `Int counts.owner_reconciliation_failed )
-          ; ( "owner_reconciliation_crashed"
-            , `Int counts.owner_reconciliation_crashed )
-          ; ( "owner_reconciliation_cancelled"
-            , `Int counts.owner_reconciliation_cancelled )
-          ; "owner_inventory_issue", `Int counts.owner_inventory_issue
-          ] )
-    ; ( "observation_failure_counts"
-      , `Assoc
-          [ ( "inventory_activation"
-            , `Int observation_counts.inventory_activation )
-          ; "inventory_terminal", `Int observation_counts.inventory_terminal
-          ; "owner_terminal", `Int observation_counts.owner_terminal
+          [ "discovered_owner", `Int discovered_owner_count
+          ; "invalid_owner_name", `Int invalid_owner_name_count
+          ; "owner_identity_rejected", `Int owner_identity_rejected_count
+          ; "owner_inspection_pending", `Int owners.inspection_pending
+          ; "owner_inspection_running", `Int owners.inspection_running
+          ; ( "owner_reconciliation_pending"
+            , `Int owners.reconciliation_pending )
+          ; ( "owner_reconciliation_running"
+            , `Int owners.reconciliation_running )
+          ; "owner_ready", `Int owners.ready
+          ; ( "owner_ready_without_obligation"
+            , `Int owners.ready_without_obligation )
+          ; "owner_blocked", `Int owners.blocked
           ] )
     ]
 ;;
 
-let publication_recovery_activation_row_log_level = function
-  | Publication_recovery_owner_report report
-    when Fs_compat.publication_recovery_reconciliation_report_is_ready report ->
-    Log.Info
-  | Publication_recovery_owner_reconciliation_crashed _ -> Log.Error
-  | Publication_recovery_owner_pending _
-  | Publication_recovery_owner_running _ -> Log.Debug
-  | Publication_recovery_owner_report _
-  | Publication_recovery_owner_identity_rejected _
-  | Publication_recovery_owner_reconciliation_failed _
-  | Publication_recovery_owner_cancelled _
-  | Publication_recovery_owner_inventory_issue _ -> Log.Warn
+let publication_recovery_snapshot_to_health_yojson = function
+  | Publication_recovery_initializing_snapshot ->
+    `Assoc
+      [ "schema", `String "masc.publication_recovery_activation.v3"
+      ; "status", `String (Health_status.to_string Health_status.Warming)
+      ; "global_blocking", `Bool false
+      ; "operator_action_required", `Bool false
+      ; "discovery_phase", `String "initializing"
+      ; "discovery_row_count", `Int 0
+      ; "demanded_owner_count", `Int 0
+      ; "in_progress_count", `Int 0
+      ; "attention_count", `Int 0
+      ; "status_reasons", `List [ `String "registry_initializing" ]
+      ]
+  | Publication_recovery_available_snapshot
+      { health; owner_identity_projection } ->
+    publication_recovery_available_snapshot_to_health_yojson
+      ~owner_identity_projection
+      health
+  | Publication_recovery_unavailable_snapshot _ ->
+    `Assoc
+      [ "schema", `String "masc.publication_recovery_activation.v3"
+      ; "status", `String (Health_status.to_string Health_status.Degraded)
+      ; "global_blocking", `Bool false
+      ; "operator_action_required", `Bool true
+      ; "discovery_phase", `String "unavailable"
+      ; "discovery_row_count", `Int 0
+      ; "demanded_owner_count", `Int 0
+      ; "in_progress_count", `Int 0
+      ; "attention_count", `Int 1
+      ; "status_reasons", `List [ `String "registry_unavailable" ]
+      ]
+  | Publication_recovery_initialization_crashed_snapshot ->
+    `Assoc
+      [ "schema", `String "masc.publication_recovery_activation.v3"
+      ; "status", `String (Health_status.to_string Health_status.Degraded)
+      ; "global_blocking", `Bool false
+      ; "operator_action_required", `Bool true
+      ; "discovery_phase", `String "initialization_crashed"
+      ; "discovery_row_count", `Int 0
+      ; "demanded_owner_count", `Int 0
+      ; "in_progress_count", `Int 0
+      ; "attention_count", `Int 1
+      ; "status_reasons", `List [ `String "registry_initialization_crashed" ]
+      ]
+  | Publication_recovery_non_runtime_snapshot ->
+    `Assoc
+      [ "schema", `String "masc.publication_recovery_activation.v3"
+      ; "status", `String "unavailable"
+      ; "global_blocking", `Bool false
+      ; "operator_action_required", `Bool false
+      ; "reason", `String "non_runtime_state"
+      ]
 ;;
 
-let publication_recovery_activation_row_observation_event = function
-  | Publication_recovery_owner_pending { owner }
-  | Publication_recovery_owner_running { owner }
-  | Publication_recovery_owner_identity_rejected { owner; _ }
-  | Publication_recovery_owner_reconciliation_failed { owner; _ }
-  | Publication_recovery_owner_reconciliation_crashed { owner; _ }
-  | Publication_recovery_owner_cancelled { owner; _ } ->
-    Publication_recovery_owner_terminal { owner }
-  | Publication_recovery_owner_report report ->
-    Publication_recovery_owner_terminal
-      { owner =
-          Fs_compat.publication_recovery_reconciliation_report_owner report
-      }
-  | Publication_recovery_owner_inventory_issue _ ->
-    Publication_recovery_inventory_terminal
+let publication_recovery_owner_identity_rejected_count rows =
+  List.fold_left
+    (fun identity_rejected -> function
+      | Fs_compat.Publication_recovery.Invalid_owner_name _ ->
+        identity_rejected
+      | Fs_compat.Publication_recovery.Discovered_owner owner ->
+        (match
+           Keeper_id.Keeper_name.of_string
+             (Fs_compat.Publication_recovery.owner_to_string owner)
+         with
+         | Ok _ -> identity_rejected
+         | Error _ ->
+           checked_health_count_increment
+             ~count:Owner_identity_rejected_health_count
+             identity_rejected))
+    0
+    rows
 ;;
 
-let observe_publication_recovery_activation_row
-    report
-    ~registry_root
-    row
+let settle_owner_identity_projection_with
+    ~project
+    owner_identity_projection
+    rows
   =
-  let event = publication_recovery_activation_row_observation_event row in
-  observe_publication_recovery_event
-    report
-    ~event
-    (fun () ->
-      Log.Server.emit
-        (publication_recovery_activation_row_log_level row)
-        ~category:Log.Boundary
-        ~details:
-          (`Assoc
-             [ "registry_root", `String registry_root
-             ; ( "activation"
-               , publication_recovery_activation_row_to_yojson row )
-             ])
-        "publication recovery owner activation reached a terminal state")
-;;
-
-type publication_recovery_activation_job =
-  { owner : Fs_compat.publication_recovery_owner
-  ; owner_name : string
-  ; slot : publication_recovery_activation_slot
-  ; resolve_completion : unit Eio.Promise.u
-  }
-
-let create_complete_publication_recovery_activation_slot row =
-  let completion, resolve_completion = Eio.Promise.create () in
-  Eio.Promise.resolve resolve_completion ();
-  { row = Atomic.make row; completion }
-;;
-
-let create_pending_publication_recovery_activation_slot ~owner =
-  let completion, resolve_completion = Eio.Promise.create () in
-  ( { row = Atomic.make (Publication_recovery_owner_pending { owner })
-    ; completion
-    }
-  , resolve_completion )
-;;
-
-let prepare_publication_recovery_activation ~registry inventory =
-  let add_inventory_row
-      (slots, jobs, scheduled_owner_count, initial_terminal_count)
-      inventory_row
-    =
-    match inventory_row with
-    | Fs_compat.Publication_recovery_valid_owner owner ->
-      let owner_name =
-        Fs_compat.publication_recovery_owner_to_string owner
-      in
-      (match Keeper_id.Keeper_name.of_string owner_name with
-       | Error error ->
-         (match
-            Fs_compat.reject_publication_recovery_owner_activation
-              ~registry
-              ~owner
-          with
-          | Error rejection_error ->
-            raise
-              (Publication_recovery_activation_failed
-                 (Publication_recovery_owner_activation_rejection_failed
-                    { owner
-                    ; keeper_identity_error = error
-                    ; rejection_error
-                    }))
-          | Ok () ->
-            let slot =
-              create_complete_publication_recovery_activation_slot
-                (Publication_recovery_owner_identity_rejected
-                   { owner = owner_name; error })
-            in
-            ( slot :: slots
-            , jobs
-            , scheduled_owner_count
-            , initial_terminal_count + 1 ))
-       | Ok _ ->
-         let slot, resolve_completion =
-           create_pending_publication_recovery_activation_slot
-             ~owner:owner_name
-         in
-         let job = { owner; owner_name; slot; resolve_completion } in
-         ( slot :: slots
-         , job :: jobs
-         , scheduled_owner_count + 1
-         , initial_terminal_count ))
-    | ( Fs_compat.Publication_recovery_invalid_owner_name _
-      | Fs_compat.Publication_recovery_unexpected_owner_kind _
-      | Fs_compat.Publication_recovery_missing_owner_entry _
-      | Fs_compat.Publication_recovery_owner_entry_unavailable _ ) as row ->
-      let slot =
-        create_complete_publication_recovery_activation_slot
-          (Publication_recovery_owner_inventory_issue row)
-      in
-      ( slot :: slots
-      , jobs
-      , scheduled_owner_count
-      , initial_terminal_count + 1 )
-  in
-  let slots, jobs, scheduled_owner_count, initial_terminal_count =
-    List.fold_left
-      add_inventory_row
-      ([], [], 0, 0)
-      inventory
-  in
-  let activation_report =
-    { slots = List.rev slots; observation_failures = Atomic.make [] }
-  in
-  ( { registry; activation_report }
-  , List.rev jobs
-  , scheduled_owner_count
-  , initial_terminal_count )
-;;
-
-let publication_recovery_activation_crashed ~owner exception_ backtrace =
-  Publication_recovery_owner_reconciliation_crashed
-    { owner; exception_; backtrace }
-;;
-
-let run_publication_recovery_activation_job
-    ~fs
-    ~registry
-    ~registry_root
-    ~activation_report
-    job
-  =
-  Atomic.set
-    job.slot.row
-    (Publication_recovery_owner_running { owner = job.owner_name });
-  let terminal_row =
-    match
-      Fs_compat.reconcile_publication_recovery_owner
-        ~fs
-        ~registry
-        ~owner:job.owner
-    with
-    | exception (Eio.Cancel.Cancelled _ as exception_) -> raise exception_
+  let observation =
+    match project rows with
+    | count -> `Complete count
+    | exception (Eio.Cancel.Cancelled _ as cancellation) ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      `Cancelled (cancellation, backtrace)
     | exception exception_ ->
       let backtrace = Printexc.get_raw_backtrace () in
-      publication_recovery_activation_crashed
-        ~owner:job.owner_name
-        exception_
-        backtrace
-    | Ok report -> Publication_recovery_owner_report report
-    | Error error ->
-      Publication_recovery_owner_reconciliation_failed
-        { owner = job.owner_name; error }
+      `Failed (exception_, backtrace)
   in
-  Atomic.set job.slot.row terminal_row;
-  Eio.Promise.resolve job.resolve_completion ();
-  observe_publication_recovery_activation_row
-    activation_report
-    ~registry_root
-    terminal_row
+  let terminal =
+    match observation with
+    | `Complete count -> Owner_identity_projection_complete count
+    | `Cancelled failure
+    | `Failed failure -> Owner_identity_projection_failed failure
+  in
+  Eio.Cancel.protect (fun () ->
+    let current = Atomic.get owner_identity_projection in
+    match current with
+    | Owner_identity_projection_pending ->
+      if not
+           (Atomic.compare_and_set
+              owner_identity_projection
+              current
+              terminal)
+      then raise Owner_identity_projection_settled_more_than_once
+    | Owner_identity_projection_complete _
+    | Owner_identity_projection_failed _ ->
+      raise Owner_identity_projection_settled_more_than_once);
+  (match observation with
+   | `Cancelled ((_, backtrace) as cancellation) ->
+     (match Eio.Fiber.check () with
+      | () -> terminal
+      | exception Eio.Cancel.Cancelled _ ->
+        Printexc.raise_with_backtrace (fst cancellation) backtrace)
+   | `Complete _
+   | `Failed _ ->
+     Eio.Fiber.check ();
+     terminal)
 ;;
 
-let run_isolated_publication_recovery_activation_job
-    ~fs
-    ~registry
-    ~registry_root
-    ~activation_report
-    job
-  =
+let run_publication_recovery_discovery ~registry_root available =
   match
-    run_publication_recovery_activation_job
-      ~fs
-      ~registry
-      ~registry_root
-      ~activation_report
-      job
+    Fs_compat.Publication_recovery.discover_owners available.registry
   with
+  | Ok rows ->
+    let owner_identity_projection =
+      settle_owner_identity_projection_with
+        ~project:publication_recovery_owner_identity_rejected_count
+        available.owner_identity_projection
+        rows
+    in
+    let health =
+      Fs_compat.Publication_recovery.health_snapshot available.registry
+    in
+    (match owner_identity_projection with
+     | Owner_identity_projection_complete owner_identity_rejected_count ->
+       Log.Server.emit
+         (if
+            health.invalid_owner_name_count = 0
+            && owner_identity_rejected_count = 0
+          then Log.Info
+          else Log.Warn)
+         ~category:Log.Boundary
+         ~details:
+           (`Assoc
+              [ "registry_root", `String registry_root
+              ; "discovered_owner_count", `Int health.discovered_owner_count
+              ; "invalid_owner_name_count", `Int health.invalid_owner_name_count
+              ; ( "owner_identity_rejected_count"
+                , `Int owner_identity_rejected_count )
+              ])
+         "publication recovery owner discovery settled"
+     | Owner_identity_projection_failed (exception_, backtrace) ->
+       Log.Server.emit
+         Log.Error
+         ~category:Log.Boundary
+         ~details:
+           (`Assoc
+              [ "registry_root", `String registry_root
+              ; "exception", `String (Printexc.to_string exception_)
+              ; ( "backtrace"
+                , `String (Printexc.raw_backtrace_to_string backtrace) )
+              ])
+         "publication recovery owner identity projection failed"
+     | Owner_identity_projection_pending ->
+       raise Owner_identity_projection_settled_more_than_once)
+  | Error Fs_compat.Publication_recovery.Registry_discovery_in_progress ->
+    Log.Server.emit
+      Log.Debug
+      ~category:Log.Boundary
+      ~details:(`Assoc [ "registry_root", `String registry_root ])
+      "publication recovery owner discovery already running"
+  | Error
+      (Fs_compat.Publication_recovery.Registry_discovery_terminal failure) ->
+    Log.Server.emit
+      Log.Warn
+      ~category:Log.Boundary
+      ~details:
+        (`Assoc
+           [ "registry_root", `String registry_root
+           ; ( "failure"
+             , `String
+                 (Fs_compat.Publication_recovery.discovery_failure_to_string
+                    failure) )
+           ])
+      "publication recovery owner discovery degraded"
+;;
+
+let run_isolated_publication_recovery_discovery ~registry_root available =
+  match run_publication_recovery_discovery ~registry_root available with
   | () -> ()
-  | exception Eio.Cancel.Cancelled reason ->
+  | exception (Eio.Cancel.Cancelled _ as cancellation) ->
     let backtrace = Printexc.get_raw_backtrace () in
-    let current_context_cancelled =
-      match Eio.Fiber.check () with
-      | () -> false
-      | exception Eio.Cancel.Cancelled _ -> true
-    in
-    let terminal_row =
-      Publication_recovery_owner_cancelled
-        { owner = job.owner_name; reason; backtrace }
-    in
-    let published =
-      Eio.Cancel.protect (fun () ->
-        match Eio.Promise.peek job.slot.completion with
-        | Some () -> false
-        | None ->
-          Atomic.set job.slot.row terminal_row;
-          Eio.Promise.resolve job.resolve_completion ();
-          true)
-    in
-    if published && not current_context_cancelled
-    then
-      observe_publication_recovery_activation_row
-        activation_report
-        ~registry_root
-        terminal_row
+    (match Eio.Fiber.check () with
+     | exception Eio.Cancel.Cancelled _ ->
+       Printexc.raise_with_backtrace cancellation backtrace
+     | () ->
+       Log.Server.emit
+         Log.Error
+         ~category:Log.Boundary
+         ~details:
+           (`Assoc
+              [ "registry_root", `String registry_root
+              ; "exception", `String (Printexc.to_string cancellation)
+              ; ( "backtrace"
+                , `String (Printexc.raw_backtrace_to_string backtrace) )
+              ])
+         "publication recovery discovery raised non-current cancellation")
+  | exception exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Server.emit
+      Log.Error
+      ~category:Log.Boundary
+      ~details:
+        (`Assoc
+           [ "registry_root", `String registry_root
+           ; "exception", `String (Printexc.to_string exception_)
+           ; ( "backtrace"
+             , `String (Printexc.raw_backtrace_to_string backtrace) )
+           ])
+      "publication recovery discovery fiber crashed after isolation"
 ;;
 
 let validate_workspace_config state config =
@@ -1220,11 +982,43 @@ let set_workspace_config state config =
   match validate_workspace_config state config with
   | Error _ as error -> error
   | Ok () ->
-    let current_scope = workspace_scope state in
-    Atomic.set
-      state.workspace_runtime.scope
-      { config; publication_recovery = current_scope.publication_recovery };
+    let rec replace_config () =
+      let current_scope = workspace_scope state in
+      let replacement =
+        { config
+        ; publication_recovery = current_scope.publication_recovery
+        }
+      in
+      if not
+           (Atomic.compare_and_set
+              state.workspace_runtime.scope
+              current_scope
+              replacement)
+      then replace_config ()
+    in
+    replace_config ();
     Ok ()
+;;
+
+exception Publication_recovery_initialization_settled_twice
+exception Publication_recovery_initialized_more_than_once
+
+let set_publication_recovery_initialized runtime state =
+  let current = Atomic.get runtime.state in
+  match current with
+  | Publication_recovery_initializing ->
+    if not (Atomic.compare_and_set runtime.state current state)
+    then raise Publication_recovery_initialized_more_than_once
+  | Publication_recovery_available _
+  | Publication_recovery_unavailable _
+  | Publication_recovery_initialization_crashed _
+  | Publication_recovery_non_runtime ->
+    raise Publication_recovery_initialized_more_than_once
+;;
+
+let settle_publication_recovery_initialization resolver =
+  if not (Eio.Promise.try_resolve resolver ())
+  then raise Publication_recovery_initialization_settled_twice
 ;;
 
 let agent_session_bound_or_observe_failure state ~agent_name =
@@ -1251,6 +1045,51 @@ let agent_session_bound_or_observe_failure state ~agent_name =
 ;;
 
 module For_testing = struct
+  type health_count_sum_observation =
+    | Health_count_sum of int
+    | Health_count_negative
+    | Health_count_overflow
+
+  let publication_recovery_health_count_sum values =
+    match checked_health_count_sum ~count:Attention_health_count values with
+    | value -> Health_count_sum value
+    | exception
+        Publication_recovery_health_count_violation
+          (Negative_health_count _) -> Health_count_negative
+    | exception
+        Publication_recovery_health_count_violation
+          (Health_count_overflow _) -> Health_count_overflow
+  ;;
+
+  let publication_recovery_identity_projection_failure_health exception_ =
+    let owner_identity_projection =
+      Atomic.make Owner_identity_projection_pending
+    in
+    let owner_identity_projection =
+      settle_owner_identity_projection_with
+        ~project:(fun _ -> raise exception_)
+        owner_identity_projection
+        []
+    in
+    publication_recovery_available_snapshot_to_health_yojson
+      ~owner_identity_projection
+      { Fs_compat.Publication_recovery.discovery_phase =
+          Fs_compat.Publication_recovery.Health_discovery_complete
+      ; discovery_row_count = 0
+      ; discovered_owner_count = 0
+      ; invalid_owner_name_count = 0
+      ; owners =
+          { Fs_compat.Publication_recovery.inspection_pending = 0
+          ; inspection_running = 0
+          ; reconciliation_pending = 0
+          ; reconciliation_running = 0
+          ; ready_without_obligation = 0
+          ; ready = 0
+          ; blocked = 0
+          }
+      }
+  ;;
+
   let create_state ~base_path =
     let config = Workspace.default_config base_path in
     let registry = Session.create () in
@@ -1261,7 +1100,14 @@ module For_testing = struct
     let state =
       { workspace_runtime =
           { process_masc_root = Workspace.masc_root_dir config
-          ; scope = Atomic.make { config; publication_recovery = None }
+          ; scope =
+              Atomic.make
+                { config
+                ; publication_recovery =
+                    { state = Atomic.make Publication_recovery_non_runtime
+                    ; initialized = None
+                    }
+                }
           }
       ; session_registry = registry
       ; on_sse_broadcast = Atomic.make None
@@ -1278,11 +1124,32 @@ module For_testing = struct
     state
   ;;
 
-  let await_publication_recovery_activation report =
-    List.iter
-      (fun slot -> Eio.Promise.await slot.completion)
-      report.slots;
-    publication_recovery_activation_report_rows report
+  let await_publication_recovery_discovery registry =
+    Fs_compat.Publication_recovery.For_testing.await_discovery_settlement
+      registry
+  ;;
+
+  type publication_recovery_runtime_observation =
+    | Runtime_initializing
+    | Runtime_available
+    | Runtime_unavailable
+    | Runtime_initialization_crashed
+    | Runtime_non_runtime
+
+  let publication_recovery_runtime_observation state =
+    match Atomic.get (workspace_scope state).publication_recovery.state with
+    | Publication_recovery_initializing -> Runtime_initializing
+    | Publication_recovery_available _ -> Runtime_available
+    | Publication_recovery_unavailable _ -> Runtime_unavailable
+    | Publication_recovery_initialization_crashed _ ->
+      Runtime_initialization_crashed
+    | Publication_recovery_non_runtime -> Runtime_non_runtime
+  ;;
+
+  let await_publication_recovery_initialization state =
+    Option.iter
+      Eio.Promise.await
+      (workspace_scope state).publication_recovery.initialized
   ;;
 end
 
@@ -1330,44 +1197,21 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   );
   Keeper_supervisor.set_global_switch sw;
   let process_masc_root = Workspace.masc_root_dir config in
-  let publication_recovery_registry =
-    let registry_root = Eio.Path.(fs / process_masc_root) in
-    match
-      Fs_compat.open_publication_recovery_registry
-        ~sw
-        ~registry_root
-    with
-    | Ok registry -> registry
-    | Error error ->
-      raise
-        (Publication_recovery_activation_failed
-           (Publication_recovery_registry_unavailable error))
+  let publication_recovery_initialized,
+      resolve_publication_recovery_initialized =
+    Eio.Promise.create ()
   in
-  let publication_recovery_inventory =
-    match
-      Fs_compat.inventory_publication_recovery_owners
-        publication_recovery_registry
-    with
-    | Ok inventory -> inventory
-    | Error error ->
-      raise
-        (Publication_recovery_activation_failed
-           (Publication_recovery_inventory_unavailable error))
-  in
-  let ( publication_recovery
-      , activation_jobs
-      , scheduled_owner_count
-      , initial_terminal_count ) =
-    prepare_publication_recovery_activation
-      ~registry:publication_recovery_registry
-      publication_recovery_inventory
+  let publication_recovery =
+    { state = Atomic.make Publication_recovery_initializing
+    ; initialized = Some publication_recovery_initialized
+    }
   in
   let state = {
     workspace_runtime =
       { process_masc_root
       ; scope =
           Atomic.make
-            { config; publication_recovery = Some publication_recovery }
+            { config; publication_recovery }
       };
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
@@ -1378,36 +1222,89 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     net = Some net;
   } in
-  observe_publication_recovery_event
-    publication_recovery.activation_report
-    ~event:Publication_recovery_inventory_activation
-    (fun () ->
+  (* [Fiber.fork] starts its child immediately. Yield before opening the
+     registry so callers receive the typed [Initializing] state before any
+     publication-recovery filesystem work. The child performs one registry
+     open and one name discovery; exact owner work remains lane-demanded. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Fiber.yield ();
+    let registry_root = Eio.Path.(fs / process_masc_root) in
+    let initialization =
+      try
+        `Returned
+          (Fs_compat.open_publication_recovery_registry
+             ~sw
+             ~fs
+             ~registry_root)
+      with
+      | Eio.Cancel.Cancelled _ as cancellation ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        (match Eio.Fiber.check () with
+         | exception Eio.Cancel.Cancelled _ ->
+           Printexc.raise_with_backtrace cancellation backtrace
+         | () -> `Crashed (cancellation, backtrace))
+      | exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        `Crashed (exception_, backtrace)
+    in
+    match initialization with
+    | `Returned (Ok registry) ->
+      let available =
+        { registry
+        ; owner_identity_projection =
+            Atomic.make Owner_identity_projection_pending
+        }
+      in
+      Eio.Cancel.protect (fun () ->
+        set_publication_recovery_initialized
+          publication_recovery
+          (Publication_recovery_available available);
+        settle_publication_recovery_initialization
+          resolve_publication_recovery_initialized);
+      Eio.Fiber.check ();
+      run_isolated_publication_recovery_discovery
+        ~registry_root:process_masc_root
+        available
+    | `Returned (Error error) ->
+      Eio.Cancel.protect (fun () ->
+        set_publication_recovery_initialized
+          publication_recovery
+          (Publication_recovery_unavailable error);
+        settle_publication_recovery_initialization
+          resolve_publication_recovery_initialized);
+      Eio.Fiber.check ();
       Log.Server.emit
-        (if initial_terminal_count = 0 then Log.Info else Log.Warn)
+        Log.Warn
         ~category:Log.Boundary
         ~details:
           (`Assoc
              [ "registry_root", `String process_masc_root
-             ; ( "inventory_row_count"
-               , `Int (List.length publication_recovery_inventory) )
-             ; "scheduled_owner_count", `Int scheduled_owner_count
-             ; "initial_terminal_count", `Int initial_terminal_count
+             ; ( "error"
+               , `String
+                   (Fs_compat.publication_recovery_registry_error_to_string
+                      error) )
              ])
-        "publication recovery owner inventory activated");
-  (* Initial terminal inventory rows are retained exactly in the activation
-     report and projected by full health. One summary emission avoids an
-     O(owner-count) sequence of synchronous log-sink flushes before the server
-     can publish its state and start independent owner jobs. *)
-  List.iter
-    (fun job ->
-      Eio.Fiber.fork ~sw (fun () ->
-        run_isolated_publication_recovery_activation_job
-          ~fs
-          ~registry:publication_recovery_registry
-          ~registry_root:process_masc_root
-          ~activation_report:publication_recovery.activation_report
-          job))
-    activation_jobs;
+        "publication recovery registry is unavailable; publication filesystem tools fail closed"
+    | `Crashed (exception_, backtrace) ->
+      Eio.Cancel.protect (fun () ->
+        set_publication_recovery_initialized
+          publication_recovery
+          (Publication_recovery_initialization_crashed
+             (exception_, backtrace));
+        settle_publication_recovery_initialization
+          resolve_publication_recovery_initialized);
+      Eio.Fiber.check ();
+      Log.Server.emit
+        Log.Error
+        ~category:Log.Boundary
+        ~details:
+          (`Assoc
+             [ "registry_root", `String process_masc_root
+             ; "exception", `String (Printexc.to_string exception_)
+             ; ( "backtrace"
+               , `String (Printexc.raw_backtrace_to_string backtrace) )
+             ])
+        "publication recovery registry initialization crashed; publication filesystem tools fail closed");
   (* Agent-to-agent board feedback lookup follows the active workspace. *)
   Board_tool.set_agent_lookup (fun name ->
     agent_session_bound_or_observe_failure state ~agent_name:name);

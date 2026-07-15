@@ -37,94 +37,12 @@ val open_atomic_temp_file : temp_dir:string -> unit -> string * out_channel
 
 type atomic_replace_recovery_target
 type atomic_replace_recovery_target_error
-type publication_recovery_access
-type publication_recovery_registry
-type publication_recovery_registry_error
-type publication_recovery_lane_open_error
-type publication_recovery_owner
-type publication_recovery_reconciliation_report
-
-type publication_recovery_owner_inventory_row =
-  | Publication_recovery_valid_owner of publication_recovery_owner
-  | Publication_recovery_invalid_owner_name of string
-  | Publication_recovery_unexpected_owner_kind of
-      { owner : publication_recovery_owner
-      ; kind : Eio.File.Stat.kind
-      }
-  | Publication_recovery_missing_owner_entry of publication_recovery_owner
-  | Publication_recovery_owner_entry_unavailable of
-      { owner : publication_recovery_owner
-      ; error : publication_recovery_registry_error
-      }
-
-type publication_recovery_owner_inventory_error =
-  | Publication_recovery_registry_inventory_in_progress
-  | Publication_recovery_registry_inventory_failed of
-      publication_recovery_registry_error
-
-type publication_recovery_owner_block =
-  | Publication_recovery_owner_inventory_block of
-      publication_recovery_owner_inventory_row
-  | Publication_recovery_owner_report_block of
-      publication_recovery_reconciliation_report
-  | Publication_recovery_owner_crash_block of
-      { owner : publication_recovery_owner
-      ; exception_ : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_cancelled_block of
-      { owner : publication_recovery_owner
-      ; reason : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_activation_rejected_block of
-      publication_recovery_owner
-
-type publication_recovery_reconciliation_error =
-  | Publication_recovery_owner_inventory_required of
-      publication_recovery_owner
-  | Publication_recovery_owner_inventory_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_owner_not_in_inventory of
-      publication_recovery_owner
-  | Publication_recovery_owner_reconciliation_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_owner_inventory_prevents_reconciliation of
-      publication_recovery_owner_inventory_row
-  | Publication_recovery_owner_reconciliation_crashed of
-      { owner : publication_recovery_owner
-      ; exception_ : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_reconciliation_cancelled of
-      { owner : publication_recovery_owner
-      ; reason : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_activation_rejected of
-      publication_recovery_owner
-
-type publication_recovery_activation_rejection_error =
-  | Publication_recovery_activation_inventory_required of
-      publication_recovery_owner
-  | Publication_recovery_activation_inventory_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_not_in_inventory of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_reconciliation_running of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_already_ready of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_already_blocked of
-      publication_recovery_owner_block
-
-type publication_recovery_lane_reconciliation_error =
-  | Publication_recovery_reconciliation_required of
-      publication_recovery_owner
-  | Publication_recovery_reconciliation_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_reconciliation_blocked of
-      publication_recovery_owner_block
+type publication_recovery_access = Publication_recovery_access.t
+type publication_recovery_registry = Publication_recovery_access.registry
+type publication_recovery_registry_error = Capability_recovery_obligation.transition_error
+type publication_recovery_lane_open_error = Publication_recovery_access.lane_open_error
+type publication_recovery_owner = Publication_recovery_access.owner
+type publication_recovery_reconciliation_report = Capability_recovery_reconciler.report
 
 type publication_recovery_record_area =
   | Publication_recovery_active
@@ -175,43 +93,13 @@ type publication_recovery_reconciliation_row_kind =
 
 val open_publication_recovery_registry
   :  sw:Eio.Switch.t
+  -> fs:Eio.Fs.dir_ty Eio.Path.t
   -> registry_root:Eio.Fs.dir_ty Eio.Path.t
   -> (publication_recovery_registry, publication_recovery_registry_error) result
 
 val publication_recovery_registry_error_to_string
   :  publication_recovery_registry_error
   -> string
-
-(** Strict startup inventory of the exact lane registry. MASC must validate
-    every [Publication_recovery_valid_owner] name through
-    [Keeper_id.Keeper_name] before passing that opaque owner to
-    {!reconcile_publication_recovery_owner}. *)
-val inventory_publication_recovery_owners
-  :  publication_recovery_registry
-  -> ( publication_recovery_owner_inventory_row list
-       , publication_recovery_owner_inventory_error )
-       result
-
-val publication_recovery_owner_to_string
-  :  publication_recovery_owner
-  -> string
-
-(** Reconcile one caller-validated owner. Target trees are never scanned or
-    mutated; only exact MASC-owned recovery records may transition to forensic.
-    The returned immutable report is clean exactly when
-    {!publication_recovery_reconciliation_report_is_ready} is [true]. *)
-val reconcile_publication_recovery_owner
-  :  fs:Eio.Fs.dir_ty Eio.Path.t
-  -> registry:publication_recovery_registry
-  -> owner:publication_recovery_owner
-  -> ( publication_recovery_reconciliation_report
-       , publication_recovery_reconciliation_error )
-       result
-
-val reject_publication_recovery_owner_activation
-  :  registry:publication_recovery_registry
-  -> owner:publication_recovery_owner
-  -> (unit, publication_recovery_activation_rejection_error) result
 
 val publication_recovery_reconciliation_report_owner
   :  publication_recovery_reconciliation_report
@@ -240,49 +128,11 @@ val publication_recovery_reconciliation_report_to_yojson
   :  publication_recovery_reconciliation_report
   -> Yojson.Safe.t
 
-val publication_recovery_owner_inventory_row_to_string
-  :  publication_recovery_owner_inventory_row
-  -> string
-
-val publication_recovery_owner_inventory_error_to_string
-  :  publication_recovery_owner_inventory_error
-  -> string
-
-val publication_recovery_reconciliation_error_to_string
-  :  publication_recovery_reconciliation_error
-  -> string
-
-val publication_recovery_owner_block_to_string
-  :  publication_recovery_owner_block
-  -> string
-
-val publication_recovery_activation_rejection_error_to_string
-  :  publication_recovery_activation_rejection_error
-  -> string
-
 val with_publication_recovery_lane
   :  registry:publication_recovery_registry
   -> owner:string
   -> (publication_recovery_access -> 'a)
   -> ('a, publication_recovery_lane_open_error) result
-
-(** Await only the exact owner's reconciliation settlement. There is no
-    timeout, polling, retry, or global activation barrier. *)
-val await_publication_recovery_lane_reconciliation
-  :  registry:publication_recovery_registry
-  -> owner:string
-  -> (unit, publication_recovery_lane_open_error) result
-
-val publication_recovery_lane_open_error_to_string
-  :  publication_recovery_lane_open_error
-  -> string
-
-(** Typed projection of the per-owner reconciliation gate. Validation and
-    store-layout failures return [None] and remain available through the
-    original lane-open error. *)
-val publication_recovery_lane_reconciliation_error
-  :  publication_recovery_lane_open_error
-  -> publication_recovery_lane_reconciliation_error option
 
 (** Build the immutable recovery locator projection used by
     [replace_capability_file]. The allowed-root identity is caller-certified;
@@ -533,10 +383,6 @@ module Capability_write_for_testing : sig
         ; release_failure : exn option
         }
 
-  type reconciliation_interruption =
-    | Cancel_reconciliation of exn
-    | Crash_reconciliation of exn
-
   type cleanup_body =
     | Return_cleanup_value of string
     | Raise_cleanup_body of exn
@@ -582,31 +428,20 @@ module Capability_write_for_testing : sig
     | Closed_with_active_borrows of int
     | Closed_without_drain_signal
     | Drain_signal_already_resolved
-    | Inventory_finished_outside_running
-    | Reconciliation_finished_before_inventory
+    | Discovery_settled_twice
+    | Discovery_finished_outside_running
+    | Owner_inventory_owner_not_running of string
     | Reconciliation_owner_not_running of string
-    | Reconciliation_settled_twice of string
-    | Reconciliation_settled_before_terminal of string
+    | Owner_generation_settled_twice of string
+    | Owner_generation_settled_before_terminal of string
+    | Health_counter_underflow
+    | Health_counter_overflow
     | Cleanup_body_outcome_lost
-
-  type owner_settlement =
-    | Owner_untracked
-    | Owner_unsettled
-    | Owner_settled
 
   val run_publication_recovery_resource_scope
     :  callback:resource_scope_callback
     -> release_failure:exn option
     -> resource_scope_evidence
-
-  val interrupt_publication_recovery_reconciliation
-    :  fs:Eio.Fs.dir_ty Eio.Path.t
-    -> registry:publication_recovery_registry
-    -> owner:publication_recovery_owner
-    -> reconciliation_interruption
-    -> ( publication_recovery_reconciliation_report
-         , publication_recovery_reconciliation_error )
-         result
 
   val run_publication_recovery_cleanup_boundary
     :  body:cleanup_body
@@ -617,11 +452,6 @@ module Capability_write_for_testing : sig
     :  registry:publication_recovery_registry
     -> owner:string
     -> (single_borrow_evidence, publication_recovery_lane_open_error) result
-
-  val publication_recovery_owner_settlement
-    :  registry:publication_recovery_registry
-    -> owner:publication_recovery_owner
-    -> owner_settlement
 
   val publication_recovery_stage_name : Uuidm.t -> string
 

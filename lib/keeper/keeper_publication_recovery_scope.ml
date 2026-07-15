@@ -104,20 +104,13 @@ let with_lane_scope ~registry ~entry body =
   | None -> raise (Scope_failed Registry_not_provided)
   | Some registry ->
     (match
-       Fs_compat.await_publication_recovery_lane_reconciliation
+       Fs_compat.with_publication_recovery_lane
          ~registry
          ~owner:entry.Keeper_registry.name
+         (fun access -> run_attached ~entry ~access body)
      with
      | Error error -> raise (Scope_failed (Lane_open_failed error))
-     | Ok () ->
-       (match
-          Fs_compat.with_publication_recovery_lane
-            ~registry
-            ~owner:entry.Keeper_registry.name
-            (fun access -> run_attached ~entry ~access body)
-        with
-        | Ok value -> value
-        | Error error -> raise (Scope_failed (Lane_open_failed error))))
+     | Ok value -> value)
 ;;
 
 let () =

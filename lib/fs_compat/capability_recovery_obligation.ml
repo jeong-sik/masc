@@ -1606,22 +1606,18 @@ let open_registry ~sw ~registry_root =
     { lanes })
 ;;
 
-type owner_inventory_row =
-  | Valid_owner of owner
+type owner_discovery_row =
+  | Discovered_owner of owner
   | Invalid_owner_name of string
+
+type owner_inspection =
+  | Valid_owner
   | Unexpected_owner_kind of
-      { owner : owner
-      ; kind : Eio.File.Stat.kind
-      }
-  | Missing_owner_entry of owner
-  | Owner_entry_unavailable of
-      { owner : owner
-      ; error : transition_error
-      }
+      Eio.File.Stat.kind
+  | Missing_owner_entry
+  | Owner_entry_unavailable of transition_error
 
-type owner_inventory = owner_inventory_row list
-
-let inventory_owners (registry : registry) =
+let discover_owners (registry : registry) =
   protect_result ~store_effect:No_record_change (fun () ->
     let names =
       raise_io ~operation:Read_directory ~subject:Lanes_root (fun () ->
@@ -1631,39 +1627,39 @@ let inventory_owners (registry : registry) =
       (fun name ->
          match owner_of_string name with
          | Error _ -> Invalid_owner_name name
-         | Ok owner ->
-           (try
-              let kind =
-                raise_io
-                  ~operation:Inspect_directory
-                  ~subject:(Lane_root owner)
-                  (fun () ->
-                     Eio.Path.kind
-                       ~follow:false
-                       Eio.Path.(registry.lanes / name))
-              in
-              match kind with
-              | `Directory -> Valid_owner owner
-              | `Not_found -> Missing_owner_entry owner
-              | ( ( `Unknown
-                  | `Fifo
-                  | `Character_special
-                  | `Block_device
-                  | `Regular_file
-                  | `Symbolic_link
-                  | `Socket ) as
-                  kind ) ->
-                Unexpected_owner_kind { owner; kind }
-            with
-            | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
-            | Transition_failed error ->
-              Owner_entry_unavailable { owner; error }
-            | Store_failure failure ->
-              Owner_entry_unavailable
-                { owner
-                ; error = transition_error ~store_effect:No_record_change failure
-                }))
+         | Ok owner -> Discovered_owner owner)
       names)
+;;
+
+let inspect_owner (registry : registry) owner =
+  try
+    let kind =
+      raise_io
+        ~operation:Inspect_directory
+        ~subject:(Lane_root owner)
+        (fun () ->
+           Eio.Path.kind
+             ~follow:false
+             Eio.Path.(registry.lanes / owner_to_string owner))
+    in
+    match kind with
+    | `Directory -> Valid_owner
+    | `Not_found -> Missing_owner_entry
+    | ( ( `Unknown
+        | `Fifo
+        | `Character_special
+        | `Block_device
+        | `Regular_file
+        | `Symbolic_link
+        | `Socket ) as
+        kind ) ->
+      Unexpected_owner_kind kind
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | Transition_failed error -> Owner_entry_unavailable error
+  | Store_failure failure ->
+    Owner_entry_unavailable
+      (transition_error ~store_effect:No_record_change failure)
 ;;
 
 let open_store_in_scope ~sw ~registry ~owner =

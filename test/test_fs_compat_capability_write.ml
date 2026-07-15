@@ -44,15 +44,16 @@ let with_publication_recovery_access ~fs f =
   match
     Fs_compat.open_publication_recovery_registry
       ~sw
+      ~fs
       ~registry_root:Eio.Path.(fs / registry_directory)
   with
   | Error error ->
     fail (Fs_compat.publication_recovery_registry_error_to_string error)
   | Ok registry ->
-    (match Fs_compat.inventory_publication_recovery_owners registry with
+    (match Fs_compat.discover_publication_recovery_owners registry with
      | Error error ->
        fail
-         (Fs_compat.publication_recovery_owner_inventory_error_to_string
+         (Fs_compat.publication_recovery_discovery_error_to_string
             error)
      | Ok [] ->
        (match
@@ -72,7 +73,7 @@ let with_publication_recovery_access ~fs f =
          (String.concat
             "; "
             (List.map
-               Fs_compat.publication_recovery_owner_inventory_row_to_string
+               Fs_compat.publication_recovery_owner_discovery_row_to_string
                rows)))
 ;;
 

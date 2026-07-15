@@ -60,88 +60,6 @@ type publication_recovery_owner = Recovery_access.owner
 type publication_recovery_reconciliation_report =
   Capability_recovery_reconciler.report
 
-type publication_recovery_owner_inventory_row =
-  | Publication_recovery_valid_owner of publication_recovery_owner
-  | Publication_recovery_invalid_owner_name of string
-  | Publication_recovery_unexpected_owner_kind of
-      { owner : publication_recovery_owner
-      ; kind : Eio.File.Stat.kind
-      }
-  | Publication_recovery_missing_owner_entry of publication_recovery_owner
-  | Publication_recovery_owner_entry_unavailable of
-      { owner : publication_recovery_owner
-      ; error : publication_recovery_registry_error
-      }
-
-type publication_recovery_owner_inventory_error =
-  | Publication_recovery_registry_inventory_in_progress
-  | Publication_recovery_registry_inventory_failed of
-      publication_recovery_registry_error
-
-type publication_recovery_owner_block =
-  | Publication_recovery_owner_inventory_block of
-      publication_recovery_owner_inventory_row
-  | Publication_recovery_owner_report_block of
-      publication_recovery_reconciliation_report
-  | Publication_recovery_owner_crash_block of
-      { owner : publication_recovery_owner
-      ; exception_ : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_cancelled_block of
-      { owner : publication_recovery_owner
-      ; reason : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_activation_rejected_block of
-      publication_recovery_owner
-
-type publication_recovery_reconciliation_error =
-  | Publication_recovery_owner_inventory_required of
-      publication_recovery_owner
-  | Publication_recovery_owner_inventory_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_owner_not_in_inventory of
-      publication_recovery_owner
-  | Publication_recovery_owner_reconciliation_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_owner_inventory_prevents_reconciliation of
-      publication_recovery_owner_inventory_row
-  | Publication_recovery_owner_reconciliation_crashed of
-      { owner : publication_recovery_owner
-      ; exception_ : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_reconciliation_cancelled of
-      { owner : publication_recovery_owner
-      ; reason : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Publication_recovery_owner_activation_rejected of
-      publication_recovery_owner
-
-type publication_recovery_activation_rejection_error =
-  | Publication_recovery_activation_inventory_required of
-      publication_recovery_owner
-  | Publication_recovery_activation_inventory_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_not_in_inventory of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_reconciliation_running of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_already_ready of
-      publication_recovery_owner
-  | Publication_recovery_activation_owner_already_blocked of
-      publication_recovery_owner_block
-
-type publication_recovery_lane_reconciliation_error =
-  | Publication_recovery_reconciliation_required of
-      publication_recovery_owner
-  | Publication_recovery_reconciliation_in_progress of
-      publication_recovery_owner
-  | Publication_recovery_reconciliation_blocked of
-      publication_recovery_owner_block
-
 type publication_recovery_record_area =
   | Publication_recovery_active
   | Publication_recovery_owned
@@ -191,113 +109,6 @@ type publication_recovery_reconciliation_row_kind =
 
 let open_publication_recovery_registry = Recovery_access.open_registry
 let publication_recovery_registry_error_to_string = Recovery.transition_error_to_string
-
-let project_owner_inventory_row = function
-  | Recovery_access.Valid_owner owner ->
-    Publication_recovery_valid_owner owner
-  | Recovery_access.Invalid_owner_name name ->
-    Publication_recovery_invalid_owner_name name
-  | Recovery_access.Unexpected_owner_kind { owner; kind } ->
-    Publication_recovery_unexpected_owner_kind { owner; kind }
-  | Recovery_access.Missing_owner_entry owner ->
-    Publication_recovery_missing_owner_entry owner
-  | Recovery_access.Owner_entry_unavailable { owner; error } ->
-    Publication_recovery_owner_entry_unavailable { owner; error }
-;;
-
-let inventory_publication_recovery_owners registry =
-  match Recovery_access.inventory_owners registry with
-  | Error Recovery_access.Registry_inventory_in_progress ->
-    Error Publication_recovery_registry_inventory_in_progress
-  | Error (Recovery_access.Registry_inventory_failed error) ->
-    Error (Publication_recovery_registry_inventory_failed error)
-  | Ok rows -> Ok (List.map project_owner_inventory_row rows)
-;;
-
-let publication_recovery_owner_to_string = Recovery_access.owner_to_string
-
-let project_owner_inventory_row_back = function
-  | Publication_recovery_valid_owner owner ->
-    Recovery_access.Valid_owner owner
-  | Publication_recovery_invalid_owner_name name ->
-    Recovery_access.Invalid_owner_name name
-  | Publication_recovery_unexpected_owner_kind { owner; kind } ->
-    Recovery_access.Unexpected_owner_kind { owner; kind }
-  | Publication_recovery_missing_owner_entry owner ->
-    Recovery_access.Missing_owner_entry owner
-  | Publication_recovery_owner_entry_unavailable { owner; error } ->
-    Recovery_access.Owner_entry_unavailable { owner; error }
-;;
-
-let project_owner_block = function
-  | Recovery_access.Owner_inventory_block row ->
-    Publication_recovery_owner_inventory_block
-      (project_owner_inventory_row row)
-  | Recovery_access.Owner_reconciliation_block report ->
-    Publication_recovery_owner_report_block report
-  | Recovery_access.Owner_reconciliation_crash
-      { owner; exception_; backtrace } ->
-    Publication_recovery_owner_crash_block
-      { owner; exception_; backtrace }
-  | Recovery_access.Owner_reconciliation_cancelled_block
-      { owner; reason; backtrace } ->
-    Publication_recovery_owner_cancelled_block
-      { owner; reason; backtrace }
-  | Recovery_access.Owner_activation_rejected_block owner ->
-    Publication_recovery_owner_activation_rejected_block owner
-;;
-
-let project_reconciliation_error = function
-  | Recovery_access.Owner_inventory_required owner ->
-    Publication_recovery_owner_inventory_required owner
-  | Recovery_access.Owner_inventory_in_progress owner ->
-    Publication_recovery_owner_inventory_in_progress owner
-  | Recovery_access.Owner_not_in_inventory owner ->
-    Publication_recovery_owner_not_in_inventory owner
-  | Recovery_access.Owner_reconciliation_in_progress owner ->
-    Publication_recovery_owner_reconciliation_in_progress owner
-  | Recovery_access.Owner_inventory_prevents_reconciliation row ->
-    Publication_recovery_owner_inventory_prevents_reconciliation
-      (project_owner_inventory_row row)
-  | Recovery_access.Owner_reconciliation_crashed
-      { owner; exception_; backtrace } ->
-    Publication_recovery_owner_reconciliation_crashed
-      { owner; exception_; backtrace }
-  | Recovery_access.Owner_reconciliation_cancelled
-      { owner; reason; backtrace } ->
-    Publication_recovery_owner_reconciliation_cancelled
-      { owner; reason; backtrace }
-  | Recovery_access.Owner_activation_rejected owner ->
-    Publication_recovery_owner_activation_rejected owner
-;;
-
-let project_activation_rejection_error = function
-  | Recovery_access.Activation_inventory_required owner ->
-    Publication_recovery_activation_inventory_required owner
-  | Recovery_access.Activation_inventory_in_progress owner ->
-    Publication_recovery_activation_inventory_in_progress owner
-  | Recovery_access.Activation_owner_not_in_inventory owner ->
-    Publication_recovery_activation_owner_not_in_inventory owner
-  | Recovery_access.Activation_owner_reconciliation_running owner ->
-    Publication_recovery_activation_owner_reconciliation_running owner
-  | Recovery_access.Activation_owner_already_ready owner ->
-    Publication_recovery_activation_owner_already_ready owner
-  | Recovery_access.Activation_owner_already_blocked block ->
-    Publication_recovery_activation_owner_already_blocked
-      (project_owner_block block)
-;;
-
-let reconcile_publication_recovery_owner ~fs ~registry ~owner =
-  match Recovery_access.reconcile_owner ~fs ~registry ~owner with
-  | Ok report -> Ok report
-  | Error error -> Error (project_reconciliation_error error)
-;;
-
-let reject_publication_recovery_owner_activation ~registry ~owner =
-  match Recovery_access.reject_owner_activation ~registry ~owner with
-  | Ok () -> Ok ()
-  | Error error -> Error (project_activation_rejection_error error)
-;;
 
 let publication_recovery_reconciliation_report_owner =
   Capability_recovery_reconciler.report_owner
@@ -399,131 +210,10 @@ let publication_recovery_reconciliation_report_to_yojson =
   Capability_recovery_reconciler.report_to_yojson
 ;;
 
-let publication_recovery_owner_inventory_row_to_string row =
-  row
-  |> project_owner_inventory_row_back
-  |> Recovery_access.owner_inventory_row_to_string
-;;
-
-let publication_recovery_owner_inventory_error_to_string = function
-  | Publication_recovery_registry_inventory_in_progress ->
-    Recovery_access.inventory_error_to_string
-      Recovery_access.Registry_inventory_in_progress
-  | Publication_recovery_registry_inventory_failed error ->
-    Recovery_access.inventory_error_to_string
-      (Recovery_access.Registry_inventory_failed error)
-;;
-
-let publication_recovery_reconciliation_error_to_string error =
-  let internal =
-    match error with
-    | Publication_recovery_owner_inventory_required owner ->
-      Recovery_access.Owner_inventory_required owner
-    | Publication_recovery_owner_inventory_in_progress owner ->
-      Recovery_access.Owner_inventory_in_progress owner
-    | Publication_recovery_owner_not_in_inventory owner ->
-      Recovery_access.Owner_not_in_inventory owner
-    | Publication_recovery_owner_reconciliation_in_progress owner ->
-      Recovery_access.Owner_reconciliation_in_progress owner
-    | Publication_recovery_owner_inventory_prevents_reconciliation row ->
-      Recovery_access.Owner_inventory_prevents_reconciliation
-        (project_owner_inventory_row_back row)
-    | Publication_recovery_owner_reconciliation_crashed
-        { owner; exception_; backtrace } ->
-      Recovery_access.Owner_reconciliation_crashed
-        { owner; exception_; backtrace }
-    | Publication_recovery_owner_reconciliation_cancelled
-        { owner; reason; backtrace } ->
-      Recovery_access.Owner_reconciliation_cancelled
-        { owner; reason; backtrace }
-    | Publication_recovery_owner_activation_rejected owner ->
-      Recovery_access.Owner_activation_rejected owner
-  in
-  Recovery_access.reconciliation_error_to_string internal
-;;
-
-let publication_recovery_owner_block_to_string = function
-  | Publication_recovery_owner_inventory_block row ->
-    Recovery_access.owner_block_to_string
-      (Recovery_access.Owner_inventory_block
-         (project_owner_inventory_row_back row))
-  | Publication_recovery_owner_report_block report ->
-    Recovery_access.owner_block_to_string
-      (Recovery_access.Owner_reconciliation_block report)
-  | Publication_recovery_owner_crash_block
-      { owner; exception_; backtrace } ->
-    Recovery_access.owner_block_to_string
-      (Recovery_access.Owner_reconciliation_crash
-         { owner; exception_; backtrace })
-  | Publication_recovery_owner_cancelled_block
-      { owner; reason; backtrace } ->
-    Recovery_access.owner_block_to_string
-      (Recovery_access.Owner_reconciliation_cancelled_block
-         { owner; reason; backtrace })
-  | Publication_recovery_owner_activation_rejected_block owner ->
-    Recovery_access.owner_block_to_string
-      (Recovery_access.Owner_activation_rejected_block owner)
-;;
-
-let publication_recovery_activation_rejection_error_to_string = function
-  | Publication_recovery_activation_inventory_required owner ->
-    Recovery_access.activation_rejection_error_to_string
-      (Recovery_access.Activation_inventory_required owner)
-  | Publication_recovery_activation_inventory_in_progress owner ->
-    Recovery_access.activation_rejection_error_to_string
-      (Recovery_access.Activation_inventory_in_progress owner)
-  | Publication_recovery_activation_owner_not_in_inventory owner ->
-    Recovery_access.activation_rejection_error_to_string
-      (Recovery_access.Activation_owner_not_in_inventory owner)
-  | Publication_recovery_activation_owner_reconciliation_running owner ->
-    Recovery_access.activation_rejection_error_to_string
-      (Recovery_access.Activation_owner_reconciliation_running owner)
-  | Publication_recovery_activation_owner_already_ready owner ->
-    Recovery_access.activation_rejection_error_to_string
-      (Recovery_access.Activation_owner_already_ready owner)
-  | Publication_recovery_activation_owner_already_blocked block ->
-    let internal =
-      match block with
-      | Publication_recovery_owner_inventory_block row ->
-        Recovery_access.Owner_inventory_block
-          (project_owner_inventory_row_back row)
-      | Publication_recovery_owner_report_block report ->
-        Recovery_access.Owner_reconciliation_block report
-      | Publication_recovery_owner_crash_block
-          { owner; exception_; backtrace } ->
-        Recovery_access.Owner_reconciliation_crash
-          { owner; exception_; backtrace }
-      | Publication_recovery_owner_cancelled_block
-          { owner; reason; backtrace } ->
-        Recovery_access.Owner_reconciliation_cancelled_block
-          { owner; reason; backtrace }
-      | Publication_recovery_owner_activation_rejected_block owner ->
-        Recovery_access.Owner_activation_rejected_block owner
-    in
-    Recovery_access.activation_rejection_error_to_string
-      (Recovery_access.Activation_owner_already_blocked internal)
-;;
-
 let with_publication_recovery_lane = Recovery_access.with_lane
-
-let await_publication_recovery_lane_reconciliation =
-  Recovery_access.await_lane_reconciliation
-;;
 
 let publication_recovery_lane_open_error_to_string =
   Recovery_access.lane_open_error_to_string
-;;
-
-let publication_recovery_lane_reconciliation_error = function
-  | Recovery_access.Invalid_owner _ | Recovery_access.Store_failed _ -> None
-  | Recovery_access.Reconciliation_required owner ->
-    Some (Publication_recovery_reconciliation_required owner)
-  | Recovery_access.Reconciliation_in_progress owner ->
-    Some (Publication_recovery_reconciliation_in_progress owner)
-  | Recovery_access.Reconciliation_blocked block ->
-    Some
-      (Publication_recovery_reconciliation_blocked
-         (project_owner_block block))
 ;;
 
 let atomic_replace_recovery_target_error_to_string = function
@@ -2394,10 +2084,6 @@ module Capability_write_for_testing = struct
         ; release_failure : exn option
         }
 
-  type reconciliation_interruption =
-    | Cancel_reconciliation of exn
-    | Crash_reconciliation of exn
-
   type cleanup_body =
     | Return_cleanup_value of string
     | Raise_cleanup_body of exn
@@ -2443,17 +2129,15 @@ module Capability_write_for_testing = struct
     | Closed_with_active_borrows of int
     | Closed_without_drain_signal
     | Drain_signal_already_resolved
-    | Inventory_finished_outside_running
-    | Reconciliation_finished_before_inventory
+    | Discovery_settled_twice
+    | Discovery_finished_outside_running
+    | Owner_inventory_owner_not_running of string
     | Reconciliation_owner_not_running of string
-    | Reconciliation_settled_twice of string
-    | Reconciliation_settled_before_terminal of string
+    | Owner_generation_settled_twice of string
+    | Owner_generation_settled_before_terminal of string
+    | Health_counter_underflow
+    | Health_counter_overflow
     | Cleanup_body_outcome_lost
-
-  type owner_settlement =
-    | Owner_untracked
-    | Owner_unsettled
-    | Owner_settled
 
   let run_publication_recovery_resource_scope ~callback ~release_failure =
     let callback =
@@ -2477,30 +2161,6 @@ module Capability_write_for_testing = struct
     | Capability_recovery_reconciler.For_testing.Raised_callback
         { exception_; release_failure } ->
       Raised_callback { exception_; release_failure }
-  ;;
-
-  let interrupt_publication_recovery_reconciliation
-        ~fs
-        ~registry
-        ~owner
-        interruption
-    =
-    let interruption =
-      match interruption with
-      | Cancel_reconciliation reason ->
-        Recovery_access.For_testing.Cancel_reconciliation reason
-      | Crash_reconciliation exception_ ->
-        Recovery_access.For_testing.Crash_reconciliation exception_
-    in
-    match
-      Recovery_access.For_testing.interrupt_reconciliation
-        ~fs
-        ~registry
-        ~owner
-        interruption
-    with
-    | Ok report -> Ok report
-    | Error error -> Error (project_reconciliation_error error)
   ;;
 
   let observed_cleanup_failure
@@ -2563,16 +2223,19 @@ module Capability_write_for_testing = struct
       Closed_without_drain_signal
     | Recovery_access.Drain_signal_already_resolved ->
       Drain_signal_already_resolved
-    | Recovery_access.Inventory_finished_outside_running ->
-      Inventory_finished_outside_running
-    | Recovery_access.Reconciliation_finished_before_inventory ->
-      Reconciliation_finished_before_inventory
+    | Recovery_access.Discovery_settled_twice -> Discovery_settled_twice
+    | Recovery_access.Discovery_finished_outside_running ->
+      Discovery_finished_outside_running
+    | Recovery_access.Owner_inventory_owner_not_running owner ->
+      Owner_inventory_owner_not_running owner
     | Recovery_access.Reconciliation_owner_not_running owner ->
       Reconciliation_owner_not_running owner
-    | Recovery_access.Reconciliation_settled_twice owner ->
-      Reconciliation_settled_twice owner
-    | Recovery_access.Reconciliation_settled_before_terminal owner ->
-      Reconciliation_settled_before_terminal owner
+    | Recovery_access.Owner_generation_settled_twice owner ->
+      Owner_generation_settled_twice owner
+    | Recovery_access.Owner_generation_settled_before_terminal owner ->
+      Owner_generation_settled_before_terminal owner
+    | Recovery_access.Health_counter_underflow _ -> Health_counter_underflow
+    | Recovery_access.Health_counter_overflow _ -> Health_counter_overflow
     | Recovery_access.Cleanup_body_outcome_lost -> Cleanup_body_outcome_lost
   ;;
 
@@ -2591,13 +2254,6 @@ module Capability_write_for_testing = struct
       Ok (Single_borrow_invariant (project_invariant_violation invariant))
     | Ok (Recovery_access.For_testing.Single_borrow_raised failure) ->
       Ok (Single_borrow_raised (observed_cleanup_failure failure))
-  ;;
-
-  let publication_recovery_owner_settlement ~registry ~owner =
-    match Recovery_access.For_testing.owner_settlement registry owner with
-    | Recovery_access.For_testing.Owner_untracked -> Owner_untracked
-    | Recovery_access.For_testing.Owner_unsettled -> Owner_unsettled
-    | Recovery_access.For_testing.Owner_settled -> Owner_settled
   ;;
 
   let publication_recovery_stage_name operation_id =

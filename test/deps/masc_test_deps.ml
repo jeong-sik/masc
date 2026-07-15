@@ -238,20 +238,22 @@ let with_publication_recovery_lane
       f
   =
   let registry_root = Eio.Path.(fs / registry_root) in
-  match Fs_compat.open_publication_recovery_registry ~sw ~registry_root with
+  match
+    Fs_compat.open_publication_recovery_registry ~sw ~fs ~registry_root
+  with
   | Error error ->
     failwith
       ("test publication recovery registry open failed: "
        ^ Fs_compat.publication_recovery_registry_error_to_string error)
   | Ok publication_recovery_registry ->
     (match
-       Fs_compat.inventory_publication_recovery_owners
+       Fs_compat.discover_publication_recovery_owners
          publication_recovery_registry
      with
      | Error error ->
        failwith
-         ("test publication recovery inventory failed: "
-          ^ Fs_compat.publication_recovery_owner_inventory_error_to_string
+         ("test publication recovery discovery failed: "
+          ^ Fs_compat.publication_recovery_discovery_error_to_string
               error)
      | Ok [] ->
        (match
@@ -273,7 +275,7 @@ let with_publication_recovery_lane
           ^ String.concat
               "; "
               (List.map
-                 Fs_compat.publication_recovery_owner_inventory_row_to_string
+                 Fs_compat.publication_recovery_owner_discovery_row_to_string
                  rows)))
 
 let rng_initialized = Atomic.make false

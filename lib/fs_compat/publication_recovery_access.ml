@@ -3,9 +3,12 @@ module Reconciler = Capability_recovery_reconciler
 
 type owner = Core.owner
 
+type owner_discovery_row =
+  | Discovered_owner of owner
+  | Invalid_owner_name of string
+
 type owner_inventory_row =
   | Valid_owner of owner
-  | Invalid_owner_name of string
   | Unexpected_owner_kind of
       { owner : owner
       ; kind : Eio.File.Stat.kind
@@ -15,14 +18,37 @@ type owner_inventory_row =
       { owner : owner
       ; error : Core.transition_error
       }
+  | Owner_inventory_cancelled of
+      { owner : owner
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Owner_inventory_crashed of
+      { owner : owner
+      ; exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
 
-type owner_inventory = owner_inventory_row list
+type discovery_failure =
+  | Registry_discovery_failed of Core.transition_error
+  | Registry_discovery_cancelled of
+      { reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Registry_discovery_crashed of
+      { exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
 
-type inventory_error =
-  | Registry_inventory_in_progress
-  | Registry_inventory_failed of Core.transition_error
+type discovery_error =
+  | Registry_discovery_in_progress
+  | Registry_discovery_terminal of discovery_failure
 
-type owner_block =
+type inspection_error =
+  | Inspection_owner_in_progress of owner
+  | Inspection_owner_already_terminal of owner_block
+
+and owner_block =
   | Owner_inventory_block of owner_inventory_row
   | Owner_reconciliation_block of Reconciler.report
   | Owner_reconciliation_crash of
@@ -35,12 +61,11 @@ type owner_block =
       ; reason : exn
       ; backtrace : Printexc.raw_backtrace
       }
-  | Owner_activation_rejected_block of owner
 
 type reconciliation_error =
-  | Owner_inventory_required of owner
+  | Owner_inventory_pending of owner
   | Owner_inventory_in_progress of owner
-  | Owner_not_in_inventory of owner
+  | Owner_reconciliation_not_required of owner
   | Owner_reconciliation_in_progress of owner
   | Owner_inventory_prevents_reconciliation of owner_inventory_row
   | Owner_reconciliation_crashed of
@@ -53,24 +78,19 @@ type reconciliation_error =
       ; reason : exn
       ; backtrace : Printexc.raw_backtrace
       }
-  | Owner_activation_rejected of owner
-
-type activation_rejection_error =
-  | Activation_inventory_required of owner
-  | Activation_inventory_in_progress of owner
-  | Activation_owner_not_in_inventory of owner
-  | Activation_owner_reconciliation_running of owner
-  | Activation_owner_already_ready of owner
-  | Activation_owner_already_blocked of owner_block
 
 type readiness =
+  | Owner_inventory_pending_state
+  | Owner_inventory_running_state
+  | No_recovery_obligation of owner_inventory_row
   | Reconciliation_pending
   | Reconciliation_running
   | Reconciliation_ready of Reconciler.report
   | Reconciliation_blocked_state of owner_block
 
 type readiness_entry =
-  { readiness : readiness
+  { owner : owner
+  ; readiness : readiness
   ; settled : unit Eio.Promise.t
   ; resolve_settled : unit Eio.Promise.u
   }
@@ -78,27 +98,88 @@ type readiness_entry =
 module Owner_map = Map.Make (String)
 
 type registry_phase =
-  | Inventory_required
-  | Inventory_running
-  | Inventory_complete of
-      { rows : owner_inventory
-      ; readiness : readiness_entry Owner_map.t
-      }
+  | Discovery_required_state
+  | Discovery_running_state
+  | Discovery_failed_state of discovery_failure
+  | Discovery_complete_state of owner_discovery_row list
+
+type discovery_health_phase =
+  | Health_discovery_required
+  | Health_discovery_running
+  | Health_discovery_failed
+  | Health_discovery_complete
+
+type owner_health_counts =
+  { inspection_pending : int
+  ; inspection_running : int
+  ; reconciliation_pending : int
+  ; reconciliation_running : int
+  ; ready_without_obligation : int
+  ; ready : int
+  ; blocked : int
+  }
+
+type health_snapshot =
+  { discovery_phase : discovery_health_phase
+  ; discovery_row_count : int
+  ; discovered_owner_count : int
+  ; invalid_owner_name_count : int
+  ; owners : owner_health_counts
+  }
 
 type registry =
   { core : Core.registry
+  ; fs : Eio.Fs.dir_ty Eio.Path.t
   ; readiness_mutex : Eio.Mutex.t
+  ; discovery_settled : unit Eio.Promise.t
+  ; resolve_discovery_settled : unit Eio.Promise.u
   ; mutable registry_phase : registry_phase
+  ; mutable readiness : readiness_entry Owner_map.t
+  ; mutable health : health_snapshot
   }
 
 type access_error = Keeper_lane_not_available
 
 type lane_open_error =
   | Invalid_owner of Core.validation_error
-  | Reconciliation_required of owner
-  | Reconciliation_in_progress of owner
   | Reconciliation_blocked of owner_block
   | Store_failed of Core.transition_error
+
+type discovery_snapshot =
+  | Snapshot_discovery_required
+  | Snapshot_discovery_running
+  | Snapshot_discovery_failed of discovery_failure
+  | Snapshot_discovery_complete of owner_discovery_row list
+
+type owner_activation_snapshot =
+  | Snapshot_owner_inventory_pending of owner
+  | Snapshot_owner_inventory_running of owner
+  | Snapshot_owner_reconciliation_pending of owner
+  | Snapshot_owner_reconciliation_running of owner
+  | Snapshot_owner_ready_without_obligation of owner
+  | Snapshot_owner_ready of owner * Reconciler.report
+  | Snapshot_owner_blocked of owner * owner_block
+
+type registry_snapshot =
+  { discovery : discovery_snapshot
+  ; owners : owner_activation_snapshot list
+  }
+
+type health_counter =
+  | Discovery_row_counter
+  | Discovered_owner_counter
+  | Invalid_owner_name_counter
+  | Inspection_pending_counter
+  | Inspection_running_counter
+  | Reconciliation_pending_counter
+  | Reconciliation_running_counter
+  | Ready_without_obligation_counter
+  | Ready_counter
+  | Blocked_counter
+
+type health_counter_change =
+  | Increment_health_counter
+  | Decrement_health_counter
 
 type invariant_violation =
   | Borrow_count_underflow
@@ -107,11 +188,14 @@ type invariant_violation =
   | Closed_with_active_borrows of int
   | Closed_without_drain_signal
   | Drain_signal_already_resolved
-  | Inventory_finished_outside_running
-  | Reconciliation_finished_before_inventory
+  | Discovery_settled_twice
+  | Discovery_finished_outside_running
+  | Owner_inventory_owner_not_running of string
   | Reconciliation_owner_not_running of string
-  | Reconciliation_settled_twice of string
-  | Reconciliation_settled_before_terminal of string
+  | Owner_generation_settled_twice of string
+  | Owner_generation_settled_before_terminal of string
+  | Health_counter_underflow of health_counter
+  | Health_counter_overflow of health_counter
   | Cleanup_body_outcome_lost
 
 exception Invariant_violation of invariant_violation
@@ -192,11 +276,16 @@ let transition_error_to_string = Core.transition_error_to_string
 
 let owner_to_string = Core.owner_to_string
 
+let owner_discovery_row_to_string = function
+  | Discovered_owner owner ->
+    Printf.sprintf "discovered_owner(%S)" (owner_to_string owner)
+  | Invalid_owner_name name ->
+    Printf.sprintf "invalid_owner_name(%S)" name
+;;
+
 let owner_inventory_row_to_string = function
   | Valid_owner owner ->
     Printf.sprintf "valid_owner(%S)" (owner_to_string owner)
-  | Invalid_owner_name name ->
-    Printf.sprintf "invalid_owner_name(%S)" name
   | Unexpected_owner_kind { owner; kind } ->
     Format.asprintf
       "unexpected_owner_kind(%S,%a)"
@@ -210,6 +299,36 @@ let owner_inventory_row_to_string = function
       "owner_entry_unavailable(%S,%s)"
       (owner_to_string owner)
       (Core.transition_error_to_string error)
+  | Owner_inventory_cancelled { owner; reason; _ } ->
+    Printf.sprintf
+      "owner_inventory_cancelled(%S,%s)"
+      (owner_to_string owner)
+      (Printexc.to_string reason)
+  | Owner_inventory_crashed { owner; exception_; _ } ->
+    Printf.sprintf
+      "owner_inventory_crashed(%S,%s)"
+      (owner_to_string owner)
+      (Printexc.to_string exception_)
+;;
+
+let discovery_failure_to_string = function
+  | Registry_discovery_failed error ->
+    Core.transition_error_to_string error
+  | Registry_discovery_cancelled { reason; _ } ->
+    Printf.sprintf
+      "publication recovery registry discovery cancelled: %s"
+      (Printexc.to_string reason)
+  | Registry_discovery_crashed { exception_; _ } ->
+    Printf.sprintf
+      "publication recovery registry discovery crashed: %s"
+      (Printexc.to_string exception_)
+;;
+
+let discovery_error_to_string = function
+  | Registry_discovery_in_progress ->
+    "publication recovery registry discovery is already in progress"
+  | Registry_discovery_terminal failure ->
+    discovery_failure_to_string failure
 ;;
 
 let owner_block_to_string = function
@@ -225,30 +344,31 @@ let owner_block_to_string = function
       "owner_reconciliation_cancelled(%S,%s)"
       (owner_to_string owner)
       (Printexc.to_string reason)
-  | Owner_activation_rejected_block owner ->
-    Printf.sprintf
-      "owner_activation_rejected(%S)"
-      (owner_to_string owner)
 ;;
 
-let inventory_error_to_string = function
-  | Registry_inventory_in_progress ->
-    "publication recovery owner inventory is already in progress"
-  | Registry_inventory_failed error -> Core.transition_error_to_string error
+let inspection_error_to_string = function
+  | Inspection_owner_in_progress owner ->
+    Printf.sprintf
+      "publication recovery owner inspection is already in progress for %S"
+      (owner_to_string owner)
+  | Inspection_owner_already_terminal block ->
+    Printf.sprintf
+      "publication recovery owner was already terminal before inspection: %s"
+      (owner_block_to_string block)
 ;;
 
 let reconciliation_error_to_string = function
-  | Owner_inventory_required owner ->
+  | Owner_inventory_pending owner ->
     Printf.sprintf
-      "publication recovery owner inventory is required before reconciling owner %S"
+      "publication recovery owner inspection is required before reconciling owner %S"
       (owner_to_string owner)
   | Owner_inventory_in_progress owner ->
     Printf.sprintf
-      "publication recovery owner inventory is in progress before reconciling owner %S"
+      "publication recovery owner inspection is in progress before reconciling owner %S"
       (owner_to_string owner)
-  | Owner_not_in_inventory owner ->
+  | Owner_reconciliation_not_required owner ->
     Printf.sprintf
-      "publication recovery owner %S was not present in the startup inventory"
+      "publication recovery owner %S has no recovery obligation"
       (owner_to_string owner)
   | Owner_reconciliation_in_progress owner ->
     Printf.sprintf
@@ -268,49 +388,10 @@ let reconciliation_error_to_string = function
       "publication recovery reconciliation was internally cancelled for owner %S: %s"
       (owner_to_string owner)
       (Printexc.to_string reason)
-  | Owner_activation_rejected owner ->
-    Printf.sprintf
-      "publication recovery activation was rejected for owner %S"
-      (owner_to_string owner)
-;;
-
-let activation_rejection_error_to_string = function
-  | Activation_inventory_required owner ->
-    Printf.sprintf
-      "publication recovery owner inventory is required before rejecting activation for owner %S"
-      (owner_to_string owner)
-  | Activation_inventory_in_progress owner ->
-    Printf.sprintf
-      "publication recovery owner inventory is in progress while rejecting activation for owner %S"
-      (owner_to_string owner)
-  | Activation_owner_not_in_inventory owner ->
-    Printf.sprintf
-      "publication recovery owner %S was not present in the startup inventory"
-      (owner_to_string owner)
-  | Activation_owner_reconciliation_running owner ->
-    Printf.sprintf
-      "publication recovery reconciliation is running while rejecting activation for owner %S"
-      (owner_to_string owner)
-  | Activation_owner_already_ready owner ->
-    Printf.sprintf
-      "publication recovery owner %S was already ready when activation rejection arrived"
-      (owner_to_string owner)
-  | Activation_owner_already_blocked block ->
-    Printf.sprintf
-      "publication recovery owner was already terminal when activation rejection arrived: %s"
-      (owner_block_to_string block)
 ;;
 
 let lane_open_error_to_string = function
   | Invalid_owner error -> Core.validation_error_to_string error
-  | Reconciliation_required owner ->
-    Printf.sprintf
-      "publication recovery reconciliation is required for owner %S"
-      (owner_to_string owner)
-  | Reconciliation_in_progress owner ->
-    Printf.sprintf
-      "publication recovery reconciliation is in progress for owner %S"
-      (owner_to_string owner)
   | Reconciliation_blocked block ->
     Printf.sprintf
       "publication recovery reconciliation blocks this owner: %s"
@@ -318,131 +399,535 @@ let lane_open_error_to_string = function
   | Store_failed error -> Core.transition_error_to_string error
 ;;
 
-let open_registry ~sw ~registry_root =
+let empty_owner_health_counts =
+  { inspection_pending = 0
+  ; inspection_running = 0
+  ; reconciliation_pending = 0
+  ; reconciliation_running = 0
+  ; ready_without_obligation = 0
+  ; ready = 0
+  ; blocked = 0
+  }
+;;
+
+let initial_health_snapshot =
+  { discovery_phase = Health_discovery_required
+  ; discovery_row_count = 0
+  ; discovered_owner_count = 0
+  ; invalid_owner_name_count = 0
+  ; owners = empty_owner_health_counts
+  }
+;;
+
+let change_counter ~counter ~change value =
+  match change with
+  | Increment_health_counter ->
+    if value = Int.max_int
+    then raise (Invariant_violation (Health_counter_overflow counter))
+    else value + 1
+  | Decrement_health_counter ->
+    if value = 0
+    then raise (Invariant_violation (Health_counter_underflow counter))
+    else value - 1
+;;
+
+let change_readiness_count counts readiness change =
+  match readiness with
+  | Owner_inventory_pending_state ->
+    { counts with
+      inspection_pending =
+        change_counter
+          ~counter:Inspection_pending_counter
+          ~change
+          counts.inspection_pending
+    }
+  | Owner_inventory_running_state ->
+    { counts with
+      inspection_running =
+        change_counter
+          ~counter:Inspection_running_counter
+          ~change
+          counts.inspection_running
+    }
+  | Reconciliation_pending ->
+    { counts with
+      reconciliation_pending =
+        change_counter
+          ~counter:Reconciliation_pending_counter
+          ~change
+          counts.reconciliation_pending
+    }
+  | Reconciliation_running ->
+    { counts with
+      reconciliation_running =
+        change_counter
+          ~counter:Reconciliation_running_counter
+          ~change
+          counts.reconciliation_running
+    }
+  | No_recovery_obligation _ ->
+    { counts with
+      ready_without_obligation =
+        change_counter
+          ~counter:Ready_without_obligation_counter
+          ~change
+          counts.ready_without_obligation
+    }
+  | Reconciliation_ready _ ->
+    { counts with
+      ready =
+        change_counter ~counter:Ready_counter ~change counts.ready
+    }
+  | Reconciliation_blocked_state _ ->
+    { counts with
+      blocked =
+        change_counter ~counter:Blocked_counter ~change counts.blocked
+    }
+;;
+
+let set_readiness_entry
+    (registry : registry)
+    key
+    (entry : readiness_entry)
+  =
+  let counts =
+    match Owner_map.find_opt key registry.readiness with
+    | None -> registry.health.owners
+    | Some previous ->
+      change_readiness_count
+        registry.health.owners
+        previous.readiness
+        Decrement_health_counter
+  in
+  registry.health <-
+    { registry.health with
+      owners =
+        change_readiness_count
+          counts
+          entry.readiness
+          Increment_health_counter
+    };
+  registry.readiness <- Owner_map.add key entry registry.readiness
+;;
+
+let open_registry ~sw ~fs ~registry_root =
   match Core.open_registry ~sw ~registry_root with
   | Error _ as error -> error
   | Ok core ->
+    let discovery_settled, resolve_discovery_settled = Eio.Promise.create () in
     Ok
       { core
+      ; fs
       ; readiness_mutex = Eio.Mutex.create ()
-      ; registry_phase = Inventory_required
+      ; discovery_settled
+      ; resolve_discovery_settled
+      ; registry_phase = Discovery_required_state
+      ; readiness = Owner_map.empty
+      ; health = initial_health_snapshot
       }
 ;;
 
-let map_owner_inventory_row = function
-  | Core.Valid_owner owner -> Valid_owner owner
+let map_owner_discovery_row = function
+  | Core.Discovered_owner owner -> Discovered_owner owner
   | Core.Invalid_owner_name name -> Invalid_owner_name name
-  | Core.Unexpected_owner_kind { owner; kind } ->
+;;
+
+let map_owner_inspection owner = function
+  | Core.Valid_owner -> Valid_owner owner
+  | Core.Unexpected_owner_kind kind ->
     Unexpected_owner_kind { owner; kind }
-  | Core.Missing_owner_entry owner -> Missing_owner_entry owner
-  | Core.Owner_entry_unavailable { owner; error } ->
+  | Core.Missing_owner_entry -> Missing_owner_entry owner
+  | Core.Owner_entry_unavailable error ->
     Owner_entry_unavailable { owner; error }
 ;;
 
-let make_readiness_entry readiness =
+let make_readiness_entry owner readiness =
   let settled, resolve_settled = Eio.Promise.create () in
-  { readiness; settled; resolve_settled }
+  { owner; readiness; settled; resolve_settled }
 ;;
 
 let settle_owner key resolve_settled =
   if not (Eio.Promise.try_resolve resolve_settled ())
   then
     raise
-      (Invariant_violation (Reconciliation_settled_twice key))
+      (Invariant_violation (Owner_generation_settled_twice key))
 ;;
 
-let add_inventory_readiness (readiness, terminal_resolvers) row =
-  let owner_and_readiness =
-    match row with
-    | Valid_owner owner -> Some (owner, Reconciliation_pending)
-    | Missing_owner_entry owner ->
-      Some
-        ( owner
-        , Reconciliation_blocked_state (Owner_inventory_block row) )
-    | Owner_entry_unavailable { owner; _ } ->
-      Some
-        ( owner
-        , Reconciliation_blocked_state (Owner_inventory_block row) )
-    | Unexpected_owner_kind { owner; _ } ->
-      Some
-        ( owner
-        , Reconciliation_blocked_state (Owner_inventory_block row) )
-    | Invalid_owner_name _ -> None
-  in
-  match owner_and_readiness with
-  | None -> readiness, terminal_resolvers
-  | Some (owner, replacement) ->
-    let key = owner_to_string owner in
-    let entry = make_readiness_entry replacement in
-    let terminal_resolvers =
-      match replacement with
-      | Reconciliation_blocked_state _ ->
-        (key, entry.resolve_settled) :: terminal_resolvers
-      | Reconciliation_pending
-      | Reconciliation_running
-      | Reconciliation_ready _ -> terminal_resolvers
-    in
-    Owner_map.add key entry readiness, terminal_resolvers
+let settle_discovery registry =
+  if not (Eio.Promise.try_resolve registry.resolve_discovery_settled ())
+  then raise (Invariant_violation Discovery_settled_twice)
 ;;
 
-type begin_inventory =
-  | Begin_inventory
-  | Existing_inventory of owner_inventory
-  | Inventory_already_running
+type begin_discovery =
+  | Begin_discovery
+  | Existing_discovery of owner_discovery_row list
+  | Discovery_already_running
+  | Existing_discovery_failure of discovery_failure
 
-let begin_inventory registry =
+let begin_discovery registry =
   Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
     match registry.registry_phase with
-    | Inventory_required ->
-      registry.registry_phase <- Inventory_running;
-      Begin_inventory
-    | Inventory_running -> Inventory_already_running
-    | Inventory_complete { rows; _ } -> Existing_inventory rows)
+    | Discovery_required_state ->
+      registry.registry_phase <- Discovery_running_state;
+      registry.health <-
+        { registry.health with discovery_phase = Health_discovery_running };
+      Begin_discovery
+    | Discovery_running_state -> Discovery_already_running
+    | Discovery_failed_state failure -> Existing_discovery_failure failure
+    | Discovery_complete_state rows -> Existing_discovery rows)
 ;;
 
-let reset_interrupted_inventory registry =
-  Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
-    match registry.registry_phase with
-    | Inventory_running -> registry.registry_phase <- Inventory_required
-    | Inventory_required | Inventory_complete _ -> ())
+let finish_discovery registry terminal =
+  Eio.Cancel.protect (fun () ->
+    Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
+      match registry.registry_phase with
+      | Discovery_running_state ->
+        registry.registry_phase <- terminal;
+        registry.health <-
+          { registry.health with discovery_phase = Health_discovery_failed }
+      | Discovery_required_state
+      | Discovery_failed_state _
+      | Discovery_complete_state _ ->
+        raise (Invariant_violation Discovery_finished_outside_running));
+    settle_discovery registry)
 ;;
 
-let finish_inventory registry rows =
-  let readiness, terminal_resolvers =
+let finish_discovery_success registry rows =
+  let discovery_row_count, discovered_owner_count, invalid_owner_name_count =
     List.fold_left
-      add_inventory_readiness
-      (Owner_map.empty, [])
+      (fun (row_count, discovered, invalid) row ->
+        let row_count =
+          change_counter
+            ~counter:Discovery_row_counter
+            ~change:Increment_health_counter
+            row_count
+        in
+        match row with
+        | Discovered_owner _ ->
+          ( row_count
+          , change_counter
+              ~counter:Discovered_owner_counter
+              ~change:Increment_health_counter
+              discovered
+          , invalid )
+        | Invalid_owner_name _ ->
+          ( row_count
+          , discovered
+          , change_counter
+              ~counter:Invalid_owner_name_counter
+              ~change:Increment_health_counter
+              invalid ))
+      (0, 0, 0)
       rows
   in
-  Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
-    match registry.registry_phase with
-    | Inventory_running ->
-      registry.registry_phase <- Inventory_complete { rows; readiness }
-    | Inventory_required | Inventory_complete _ ->
-      raise
-        (Invariant_violation Inventory_finished_outside_running));
-  List.iter
-    (fun (key, resolve_settled) -> settle_owner key resolve_settled)
-    (List.rev terminal_resolvers)
+  Eio.Cancel.protect (fun () ->
+    Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
+      match registry.registry_phase with
+      | Discovery_running_state ->
+        registry.registry_phase <- Discovery_complete_state rows;
+        registry.health <-
+          { registry.health with
+            discovery_phase = Health_discovery_complete
+          ; discovery_row_count
+          ; discovered_owner_count
+          ; invalid_owner_name_count
+          }
+      | Discovery_required_state
+      | Discovery_failed_state _
+      | Discovery_complete_state _ ->
+        raise (Invariant_violation Discovery_finished_outside_running));
+    settle_discovery registry)
 ;;
 
-let inventory_owners registry =
-  match begin_inventory registry with
-  | Existing_inventory rows -> Ok rows
-  | Inventory_already_running -> Error Registry_inventory_in_progress
-  | Begin_inventory ->
-    (match Core.inventory_owners registry.core with
-     | Error error ->
-       reset_interrupted_inventory registry;
-       Error (Registry_inventory_failed error)
-     | Ok rows ->
-       let rows = List.map map_owner_inventory_row rows in
-       finish_inventory registry rows;
+let finish_discovery_failure registry failure =
+  finish_discovery registry (Discovery_failed_state failure)
+;;
+
+let discover_owners_with
+    ~before_discovery
+    ~before_terminalization
+    registry
+  =
+  match begin_discovery registry with
+  | Existing_discovery rows -> Ok rows
+  | Discovery_already_running -> Error Registry_discovery_in_progress
+  | Existing_discovery_failure failure ->
+    Error (Registry_discovery_terminal failure)
+  | Begin_discovery ->
+    let observation =
+      try
+        before_discovery ();
+        `Returned (Core.discover_owners registry.core)
+      with
+      | Eio.Cancel.Cancelled reason as cancellation ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        `Cancelled (reason, cancellation, backtrace)
+      | exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        `Crashed (exception_, backtrace)
+    in
+    (match observation with
+     | `Returned (Ok rows) ->
+       let rows = List.map map_owner_discovery_row rows in
+       before_terminalization ();
+       finish_discovery_success registry rows;
+       Eio.Fiber.check ();
        Ok rows
-     | exception exception_ ->
-       let backtrace = Printexc.get_raw_backtrace () in
-       reset_interrupted_inventory registry;
-       Printexc.raise_with_backtrace exception_ backtrace)
+     | `Returned (Error error) ->
+       let failure = Registry_discovery_failed error in
+       before_terminalization ();
+       finish_discovery_failure registry failure;
+       Eio.Fiber.check ();
+       Error (Registry_discovery_terminal failure)
+     | `Cancelled (reason, cancellation, backtrace) ->
+       let current_context_cancelled =
+         match Eio.Fiber.check () with
+         | () -> false
+         | exception Eio.Cancel.Cancelled _ -> true
+       in
+       let failure = Registry_discovery_cancelled { reason; backtrace } in
+       before_terminalization ();
+       finish_discovery_failure registry failure;
+       if current_context_cancelled
+       then Printexc.raise_with_backtrace cancellation backtrace
+       else (
+         Eio.Fiber.check ();
+         Error (Registry_discovery_terminal failure))
+     | `Crashed (exception_, backtrace) ->
+       let failure = Registry_discovery_crashed { exception_; backtrace } in
+       before_terminalization ();
+       finish_discovery_failure registry failure;
+       Eio.Fiber.check ();
+       Error (Registry_discovery_terminal failure))
+;;
+
+let discover_owners =
+  discover_owners_with
+    ~before_discovery:(fun () -> ())
+    ~before_terminalization:(fun () -> ())
+;;
+
+type begin_owner_inspection =
+  | Begin_owner_inspection
+  | Existing_owner_inspection of owner_inventory_row
+  | Begin_owner_inspection_failed of inspection_error
+
+let begin_owner_inspection registry owner =
+  let key = owner_to_string owner in
+  Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
+    match Owner_map.find_opt key registry.readiness with
+    | None ->
+      set_readiness_entry
+        registry
+        key
+        (make_readiness_entry owner Owner_inventory_running_state);
+      Begin_owner_inspection
+    | Some ({ readiness = Owner_inventory_pending_state; _ } as entry) ->
+      set_readiness_entry
+        registry
+        key
+        { entry with readiness = Owner_inventory_running_state };
+      Begin_owner_inspection
+    | Some { readiness = Owner_inventory_running_state; _ } ->
+      Begin_owner_inspection_failed
+        (Inspection_owner_in_progress owner)
+    | Some { readiness = No_recovery_obligation row; _ } ->
+      Existing_owner_inspection row
+    | Some
+        { readiness =
+            ( Reconciliation_pending
+            | Reconciliation_running
+            | Reconciliation_ready _ )
+        ; _
+        } ->
+      Existing_owner_inspection (Valid_owner owner)
+    | Some { readiness = Reconciliation_blocked_state block; _ } ->
+      (match block with
+       | Owner_inventory_block row -> Existing_owner_inspection row
+       | Owner_reconciliation_block _
+       | Owner_reconciliation_crash _
+       | Owner_reconciliation_cancelled_block _ ->
+         Begin_owner_inspection_failed
+           (Inspection_owner_already_terminal block)))
+;;
+
+let finish_owner_inspection registry owner ~replacement ~settle =
+  let key = owner_to_string owner in
+  Eio.Cancel.protect (fun () ->
+    let resolve_settled =
+      Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
+        match Owner_map.find_opt key registry.readiness with
+        | Some ({ readiness = Owner_inventory_running_state; _ } as entry) ->
+          set_readiness_entry registry key { entry with readiness = replacement };
+          Some entry.resolve_settled
+        | None
+        | Some
+            { readiness =
+                ( Owner_inventory_pending_state
+                | No_recovery_obligation _
+                | Reconciliation_pending
+                | Reconciliation_running
+                | Reconciliation_ready _
+                | Reconciliation_blocked_state _ )
+            ; _
+            } ->
+          raise
+            (Invariant_violation
+               (Owner_inventory_owner_not_running key)))
+    in
+    match settle, resolve_settled with
+    | true, Some resolver -> settle_owner key resolver
+    | false, Some _ -> ()
+    | _, None ->
+      raise (Invariant_violation (Owner_inventory_owner_not_running key)))
+;;
+
+let finish_owner_inspection_row registry owner row =
+  match row with
+  | Valid_owner _ ->
+    finish_owner_inspection
+      registry
+      owner
+      ~replacement:Reconciliation_pending
+      ~settle:false
+  | Missing_owner_entry _ ->
+    finish_owner_inspection
+      registry
+      owner
+      ~replacement:(No_recovery_obligation row)
+      ~settle:true
+  | Unexpected_owner_kind _
+  | Owner_entry_unavailable _
+  | Owner_inventory_cancelled _
+  | Owner_inventory_crashed _ ->
+    finish_owner_inspection
+      registry
+      owner
+      ~replacement:
+        (Reconciliation_blocked_state (Owner_inventory_block row))
+      ~settle:true
+;;
+
+let reset_interrupted_owner_inspection registry owner =
+  let key = owner_to_string owner in
+  let old_resolver =
+    Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
+      match Owner_map.find_opt key registry.readiness with
+      | Some ({ readiness = Owner_inventory_running_state; _ } as entry) ->
+        set_readiness_entry
+          registry
+          key
+          (make_readiness_entry owner Owner_inventory_pending_state);
+        entry.resolve_settled
+      | None
+      | Some
+          { readiness =
+              ( Owner_inventory_pending_state
+              | No_recovery_obligation _
+              | Reconciliation_pending
+              | Reconciliation_running
+              | Reconciliation_ready _
+              | Reconciliation_blocked_state _ )
+          ; _
+          } ->
+        raise
+          (Invariant_violation (Owner_inventory_owner_not_running key)))
+  in
+  settle_owner key old_resolver
+;;
+
+let inspect_owner_with
+    ~before_inspection
+    ~before_terminalization
+    ~registry
+    ~owner
+  =
+  match begin_owner_inspection registry owner with
+  | Existing_owner_inspection row -> Ok row
+  | Begin_owner_inspection_failed error -> Error error
+  | Begin_owner_inspection ->
+    let observation =
+      try
+        before_inspection ();
+        `Returned
+          (map_owner_inspection
+             owner
+             (Core.inspect_owner registry.core owner))
+      with
+      | Eio.Cancel.Cancelled reason as cancellation ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        `Cancelled (reason, cancellation, backtrace)
+      | exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        `Crashed (exception_, backtrace)
+    in
+    (match observation with
+     | `Returned row ->
+       before_terminalization ();
+       finish_owner_inspection_row registry owner row;
+       Eio.Fiber.check ();
+       Ok row
+     | `Cancelled (reason, cancellation, backtrace) ->
+       (match Eio.Fiber.check () with
+        | () ->
+         let row = Owner_inventory_cancelled { owner; reason; backtrace } in
+          before_terminalization ();
+          finish_owner_inspection_row registry owner row;
+          Eio.Fiber.check ();
+          Ok row
+       | exception Eio.Cancel.Cancelled _ ->
+          before_terminalization ();
+          Eio.Cancel.protect (fun () ->
+            reset_interrupted_owner_inspection registry owner);
+          Printexc.raise_with_backtrace cancellation backtrace)
+     | `Crashed (exception_, backtrace) ->
+       let row = Owner_inventory_crashed { owner; exception_; backtrace } in
+       before_terminalization ();
+       finish_owner_inspection_row registry owner row;
+       Eio.Fiber.check ();
+       Ok row)
+;;
+
+let inspect_owner =
+  inspect_owner_with
+    ~before_inspection:(fun () -> ())
+    ~before_terminalization:(fun () -> ())
+;;
+
+let snapshot_owner_activation ({ owner; readiness; _ } : readiness_entry) =
+  match readiness with
+  | Owner_inventory_pending_state -> Snapshot_owner_inventory_pending owner
+  | Owner_inventory_running_state -> Snapshot_owner_inventory_running owner
+  | No_recovery_obligation _ -> Snapshot_owner_ready_without_obligation owner
+  | Reconciliation_pending -> Snapshot_owner_reconciliation_pending owner
+  | Reconciliation_running -> Snapshot_owner_reconciliation_running owner
+  | Reconciliation_ready report -> Snapshot_owner_ready (owner, report)
+  | Reconciliation_blocked_state block ->
+    Snapshot_owner_blocked (owner, block)
+;;
+
+let snapshot registry =
+  let discovery, readiness =
+    Eio.Mutex.use_ro registry.readiness_mutex (fun () ->
+      let discovery =
+        match registry.registry_phase with
+        | Discovery_required_state -> Snapshot_discovery_required
+        | Discovery_running_state -> Snapshot_discovery_running
+        | Discovery_failed_state failure -> Snapshot_discovery_failed failure
+        | Discovery_complete_state rows -> Snapshot_discovery_complete rows
+      in
+      discovery, registry.readiness)
+  in
+  { discovery
+  ; owners =
+      readiness
+      |> Owner_map.bindings
+      |> List.map (fun (_, entry) -> snapshot_owner_activation entry)
+  }
+;;
+
+let health_snapshot registry =
+  Eio.Mutex.use_ro registry.readiness_mutex (fun () -> registry.health)
 ;;
 
 type begin_reconciliation =
@@ -453,24 +938,19 @@ type begin_reconciliation =
 let begin_reconciliation registry owner =
   let key = owner_to_string owner in
   Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
-    match registry.registry_phase with
-    | Inventory_required ->
-      Begin_reconciliation_failed (Owner_inventory_required owner)
-    | Inventory_running ->
+    match Owner_map.find_opt key registry.readiness with
+       | None -> Begin_reconciliation_failed (Owner_inventory_pending owner)
+       | Some { readiness = No_recovery_obligation _; _ } ->
+         Begin_reconciliation_failed (Owner_reconciliation_not_required owner)
+       | Some { readiness = Owner_inventory_pending_state; _ } ->
+         Begin_reconciliation_failed (Owner_inventory_pending owner)
+       | Some { readiness = Owner_inventory_running_state; _ } ->
       Begin_reconciliation_failed (Owner_inventory_in_progress owner)
-    | Inventory_complete state ->
-      (match Owner_map.find_opt key state.readiness with
-       | None -> Begin_reconciliation_failed (Owner_not_in_inventory owner)
        | Some ({ readiness = Reconciliation_pending; _ } as entry) ->
-         registry.registry_phase <-
-           Inventory_complete
-             { state with
-               readiness =
-                 Owner_map.add
-                   key
-                   { entry with readiness = Reconciliation_running }
-                   state.readiness
-             };
+         set_readiness_entry
+           registry
+           key
+           { entry with readiness = Reconciliation_running };
          Begin_reconciliation
        | Some { readiness = Reconciliation_running; _ } ->
          Begin_reconciliation_failed
@@ -509,49 +989,34 @@ let begin_reconciliation registry owner =
            } ->
          Begin_reconciliation_failed
            (Owner_reconciliation_cancelled { owner; reason; backtrace })
-       | Some
-           { readiness =
-               Reconciliation_blocked_state
-                 (Owner_activation_rejected_block owner)
-           ; _
-           } ->
-         Begin_reconciliation_failed (Owner_activation_rejected owner)))
+       )
 ;;
 
 let finish_reconciliation_terminal registry owner terminal =
   let key = owner_to_string owner in
-  let resolve_settled =
-    Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
-      match registry.registry_phase with
-      | Inventory_complete state ->
-        (match Owner_map.find_opt key state.readiness with
-         | Some ({ readiness = Reconciliation_running; _ } as entry) ->
-           registry.registry_phase <-
-             Inventory_complete
-               { state with
-                 readiness =
-                   Owner_map.add
-                     key
-                     { entry with readiness = terminal }
-                     state.readiness
-               };
-           entry.resolve_settled
-         | None
-         | Some
-             { readiness =
-                 ( Reconciliation_pending
-                 | Reconciliation_ready _
-                 | Reconciliation_blocked_state _ )
-             ; _
-             } ->
-           raise
-             (Invariant_violation
-                (Reconciliation_owner_not_running key)))
-      | Inventory_required | Inventory_running ->
-        raise
-          (Invariant_violation Reconciliation_finished_before_inventory))
-  in
-  settle_owner key resolve_settled
+  Eio.Cancel.protect (fun () ->
+    let resolve_settled =
+      Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
+        match Owner_map.find_opt key registry.readiness with
+        | Some ({ readiness = Reconciliation_running; _ } as entry) ->
+          set_readiness_entry registry key { entry with readiness = terminal };
+          entry.resolve_settled
+        | None
+        | Some
+            { readiness =
+                ( Owner_inventory_pending_state
+                | Owner_inventory_running_state
+                | No_recovery_obligation _
+                | Reconciliation_pending
+                | Reconciliation_ready _
+                | Reconciliation_blocked_state _ )
+            ; _
+            } ->
+          raise
+            (Invariant_violation
+               (Reconciliation_owner_not_running key)))
+    in
+    settle_owner key resolve_settled)
 ;;
 
 let finish_reconciliation registry owner report =
@@ -583,139 +1048,230 @@ let finish_reconciliation_cancelled registry owner reason backtrace =
 
 let reset_interrupted_reconciliation registry owner =
   let key = owner_to_string owner in
-  Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
-    match registry.registry_phase with
-    | Inventory_complete state ->
-      (match Owner_map.find_opt key state.readiness with
-       | Some ({ readiness = Reconciliation_running; _ } as entry) ->
-         registry.registry_phase <-
-           Inventory_complete
-             { state with
-               readiness =
-                 Owner_map.add
-                   key
-                   { entry with readiness = Reconciliation_pending }
-                   state.readiness
-             }
-       | None
-       | Some
-           { readiness =
-               ( Reconciliation_pending
-               | Reconciliation_ready _
-               | Reconciliation_blocked_state _ )
-           ; _
-           } -> ())
-    | Inventory_required | Inventory_running -> ())
-;;
-
-type activation_rejection_decision =
-  | Reject_activation of string * unit Eio.Promise.u
-  | Reject_activation_failed of activation_rejection_error
-
-let reject_owner_activation ~registry ~owner =
-  let key = owner_to_string owner in
-  let decision =
+  let old_resolver =
     Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
-      match registry.registry_phase with
-      | Inventory_required ->
-        Reject_activation_failed (Activation_inventory_required owner)
-      | Inventory_running ->
-        Reject_activation_failed (Activation_inventory_in_progress owner)
-      | Inventory_complete state ->
-        (match Owner_map.find_opt key state.readiness with
-         | None ->
-           Reject_activation_failed (Activation_owner_not_in_inventory owner)
-         | Some ({ readiness = Reconciliation_pending; _ } as entry) ->
-           let block = Owner_activation_rejected_block owner in
-           registry.registry_phase <-
-             Inventory_complete
-               { state with
-                 readiness =
-                   Owner_map.add
-                     key
-                     { entry with
-                       readiness = Reconciliation_blocked_state block
-                     }
-                     state.readiness
-               };
-           Reject_activation (key, entry.resolve_settled)
-         | Some { readiness = Reconciliation_running; _ } ->
-           Reject_activation_failed
-             (Activation_owner_reconciliation_running owner)
-         | Some { readiness = Reconciliation_ready _; _ } ->
-           Reject_activation_failed (Activation_owner_already_ready owner)
-         | Some { readiness = Reconciliation_blocked_state block; _ } ->
-           Reject_activation_failed (Activation_owner_already_blocked block)))
+      match Owner_map.find_opt key registry.readiness with
+      | Some ({ readiness = Reconciliation_running; _ } as entry) ->
+        set_readiness_entry
+          registry
+          key
+          (make_readiness_entry owner Reconciliation_pending);
+        entry.resolve_settled
+      | None
+      | Some
+          { readiness =
+              ( Owner_inventory_pending_state
+              | Owner_inventory_running_state
+              | No_recovery_obligation _
+              | Reconciliation_pending
+              | Reconciliation_ready _
+              | Reconciliation_blocked_state _ )
+          ; _
+          } ->
+        raise
+          (Invariant_violation (Reconciliation_owner_not_running key)))
   in
-  match decision with
-  | Reject_activation (key, resolve_settled) ->
-    settle_owner key resolve_settled;
-    Ok ()
-  | Reject_activation_failed error -> Error error
+  settle_owner key old_resolver
 ;;
 
-let reconcile_owner_with ~reconcile ~fs ~registry ~owner =
+let reconcile_owner_with
+    ~reconcile
+    ~before_terminalization
+    ~registry
+    ~owner
+  =
   match begin_reconciliation registry owner with
   | Existing_report report -> Ok report
   | Begin_reconciliation_failed error -> Error error
   | Begin_reconciliation ->
-    let report =
-      try reconcile ~fs ~registry:registry.core ~owner with
+    let observation =
+      try
+        `Report
+          (reconcile ~fs:registry.fs ~registry:registry.core ~owner)
+      with
       | Eio.Cancel.Cancelled reason as cancellation ->
         let backtrace = Printexc.get_raw_backtrace () in
-        let current_context_cancelled =
-          match Eio.Fiber.check () with
-          | () -> false
-          | exception Eio.Cancel.Cancelled _ -> true
-        in
-        if current_context_cancelled
-        then (
-          reset_interrupted_reconciliation registry owner;
-          Printexc.raise_with_backtrace cancellation backtrace)
-        else
-          (match
-             finish_reconciliation_cancelled
-               registry
-               owner
-               reason
-               backtrace
-           with
-           | () -> Printexc.raise_with_backtrace cancellation backtrace
-           | exception terminalization_exception ->
-             let terminalization_backtrace = Printexc.get_raw_backtrace () in
-             Printexc.raise_with_backtrace
-               (Reconciliation_cancellation_terminalization_failed
-                  { cancellation = cancellation, backtrace
-                  ; terminalization =
-                      terminalization_exception, terminalization_backtrace
-                  })
-               terminalization_backtrace)
+        `Cancelled (reason, cancellation, backtrace)
       | exception_ ->
         let backtrace = Printexc.get_raw_backtrace () in
-        (match
-           finish_reconciliation_crash
-             registry
-             owner
-             exception_
-             backtrace
-         with
-         | () -> Printexc.raise_with_backtrace exception_ backtrace
-         | exception terminalization_exception ->
-           let terminalization_backtrace = Printexc.get_raw_backtrace () in
-           Printexc.raise_with_backtrace
-             (Reconciliation_crash_terminalization_failed
-                { reconciliation = exception_, backtrace
-                ; terminalization =
-                    terminalization_exception, terminalization_backtrace
-                })
-             terminalization_backtrace)
+        `Crashed (exception_, backtrace)
     in
-    finish_reconciliation registry owner report;
-    Ok report
+    (match observation with
+     | `Report report ->
+       before_terminalization ();
+       finish_reconciliation registry owner report;
+       Eio.Fiber.check ();
+       Ok report
+     | `Cancelled (reason, cancellation, backtrace) ->
+       let current_context_cancelled =
+         match Eio.Fiber.check () with
+         | () -> false
+         | exception Eio.Cancel.Cancelled _ -> true
+       in
+       if current_context_cancelled
+       then (
+         before_terminalization ();
+         Eio.Cancel.protect (fun () ->
+           reset_interrupted_reconciliation registry owner);
+         Printexc.raise_with_backtrace cancellation backtrace)
+       else
+         (match
+            before_terminalization ();
+            finish_reconciliation_cancelled
+              registry
+              owner
+              reason
+              backtrace
+          with
+          | () ->
+            Eio.Fiber.check ();
+            Error
+              (Owner_reconciliation_cancelled
+                 { owner; reason; backtrace })
+          | exception terminalization_exception ->
+            let terminalization_backtrace = Printexc.get_raw_backtrace () in
+            Printexc.raise_with_backtrace
+              (Reconciliation_cancellation_terminalization_failed
+                 { cancellation = cancellation, backtrace
+                 ; terminalization =
+                     terminalization_exception, terminalization_backtrace
+                 })
+              terminalization_backtrace)
+     | `Crashed (exception_, backtrace) ->
+       (match
+          before_terminalization ();
+          finish_reconciliation_crash
+            registry
+            owner
+            exception_
+            backtrace
+        with
+        | () ->
+          Eio.Fiber.check ();
+          Error
+            (Owner_reconciliation_crashed
+               { owner; exception_; backtrace })
+        | exception terminalization_exception ->
+          let terminalization_backtrace = Printexc.get_raw_backtrace () in
+          Printexc.raise_with_backtrace
+            (Reconciliation_crash_terminalization_failed
+               { reconciliation = exception_, backtrace
+               ; terminalization =
+                   terminalization_exception, terminalization_backtrace
+               })
+            terminalization_backtrace))
 ;;
 
 let reconcile_owner =
-  reconcile_owner_with ~reconcile:Reconciler.reconcile_owner
+  reconcile_owner_with
+    ~reconcile:Reconciler.reconcile_owner
+    ~before_terminalization:(fun () -> ())
+;;
+
+let report_owner = Reconciler.report_owner
+let report_is_ready = Reconciler.report_is_ready
+let report_to_yojson = Reconciler.report_to_yojson
+
+type demand_decision =
+  | Demand_ready
+  | Demand_inspect_owner of owner
+  | Demand_reconcile_owner of owner
+  | Demand_wait_owner of unit Eio.Promise.t
+  | Demand_blocked of owner_block
+
+let demand_decision registry owner =
+  let key = owner_to_string owner in
+  Eio.Mutex.use_ro registry.readiness_mutex (fun () ->
+    match Owner_map.find_opt key registry.readiness with
+       | None -> Demand_inspect_owner owner
+       | Some
+           { readiness =
+               (No_recovery_obligation _ | Reconciliation_ready _)
+           ; _
+           } ->
+         Demand_ready
+       | Some { readiness = Owner_inventory_pending_state; _ } ->
+         Demand_inspect_owner owner
+       | Some { readiness = Reconciliation_pending; _ } ->
+         Demand_reconcile_owner owner
+       | Some
+           { readiness =
+               (Owner_inventory_running_state | Reconciliation_running)
+           ; settled
+           ; _
+           } ->
+         Demand_wait_owner settled
+       | Some { readiness = Reconciliation_blocked_state block; _ } ->
+         Demand_blocked block)
+;;
+
+let ensure_owner_ready_with
+    ~before_owner_settlement_wait
+    ~after_owner_settlement
+    ~registry
+    ~owner
+  =
+  match Core.owner_of_string owner with
+  | Error error -> Error (Invalid_owner error)
+  | Ok owner ->
+    let rec drive () =
+      match demand_decision registry owner with
+      | Demand_ready -> Ok ()
+      | Demand_blocked block -> Error (Reconciliation_blocked block)
+      | Demand_wait_owner settled ->
+        before_owner_settlement_wait settled;
+        Eio.Promise.await settled;
+        after_owner_settlement settled;
+        (match demand_decision registry owner with
+         | Demand_wait_owner current when current == settled ->
+           raise
+             (Invariant_violation
+                (Owner_generation_settled_before_terminal
+                   (owner_to_string owner)))
+         | Demand_wait_owner _ -> drive ()
+         | Demand_ready
+         | Demand_inspect_owner _
+         | Demand_reconcile_owner _
+         | Demand_blocked _ -> drive ())
+      | Demand_inspect_owner owner ->
+        (match inspect_owner ~registry ~owner with
+         | Ok _ -> drive ()
+         | Error (Inspection_owner_in_progress _) -> drive ()
+         | Error (Inspection_owner_already_terminal block) ->
+           Error (Reconciliation_blocked block))
+      | Demand_reconcile_owner owner ->
+        (match reconcile_owner ~registry ~owner with
+         | Ok _ -> drive ()
+         | Error
+             ( Owner_inventory_pending _
+             | Owner_inventory_in_progress _
+             | Owner_reconciliation_in_progress _ ) -> drive ()
+         | Error (Owner_reconciliation_not_required _) -> Ok ()
+         | Error (Owner_inventory_prevents_reconciliation row) ->
+           Error
+             (Reconciliation_blocked (Owner_inventory_block row))
+         | Error
+             (Owner_reconciliation_crashed
+               { owner; exception_; backtrace }) ->
+           Error
+             (Reconciliation_blocked
+                (Owner_reconciliation_crash
+                   { owner; exception_; backtrace }))
+         | Error
+             (Owner_reconciliation_cancelled
+               { owner; reason; backtrace }) ->
+           Error
+             (Reconciliation_blocked
+                (Owner_reconciliation_cancelled_block
+                   { owner; reason; backtrace })))
+    in
+    drive ()
+;;
+
+let ensure_owner_ready =
+  ensure_owner_ready_with
+    ~before_owner_settlement_wait:(fun _ -> ())
+    ~after_owner_settlement:(fun _ -> ())
 ;;
 
 let with_core_store_for_testing ~registry ~owner f =
@@ -888,86 +1444,13 @@ let with_store t f =
          Ok (f store))
 ;;
 
-type lane_readiness =
-  | Lane_ready
-  | Lane_reconciliation_required
-  | Lane_reconciliation_running
-  | Lane_reconciliation_blocked of owner_block
-
-type lane_wait_decision =
-  | Lane_wait_ready
-  | Lane_wait_inventory_required
-  | Lane_wait_inventory_running
-  | Lane_wait_pending of unit Eio.Promise.t
-  | Lane_wait_running of unit Eio.Promise.t
-  | Lane_wait_blocked of owner_block
-
-let lane_wait_decision registry owner =
-  let key = owner_to_string owner in
-  Eio.Mutex.use_ro registry.readiness_mutex (fun () ->
-    match registry.registry_phase with
-    | Inventory_required -> Lane_wait_inventory_required
-    | Inventory_running -> Lane_wait_inventory_running
-    | Inventory_complete { readiness; _ } ->
-      (match Owner_map.find_opt key readiness with
-       | None | Some { readiness = Reconciliation_ready _; _ } ->
-         Lane_wait_ready
-       | Some { readiness = Reconciliation_pending; settled; _ } ->
-         Lane_wait_pending settled
-       | Some { readiness = Reconciliation_running; settled; _ } ->
-         Lane_wait_running settled
-       | Some
-           { readiness = Reconciliation_blocked_state block; _ } ->
-         Lane_wait_blocked block))
-;;
-
-let lane_readiness registry owner =
-  match lane_wait_decision registry owner with
-  | Lane_wait_ready -> Lane_ready
-  | Lane_wait_inventory_required | Lane_wait_pending _ ->
-    Lane_reconciliation_required
-  | Lane_wait_inventory_running | Lane_wait_running _ ->
-    Lane_reconciliation_running
-  | Lane_wait_blocked block -> Lane_reconciliation_blocked block
-;;
-
-let await_lane_reconciliation ~registry ~owner =
-  match Core.owner_of_string owner with
-  | Error error -> Error (Invalid_owner error)
-  | Ok owner ->
-    let key = owner_to_string owner in
-    let rec await_terminal settled_once =
-      match lane_wait_decision registry owner with
-      | Lane_wait_ready -> Ok ()
-      | Lane_wait_inventory_required ->
-        Error (Reconciliation_required owner)
-      | Lane_wait_inventory_running ->
-        Error (Reconciliation_in_progress owner)
-      | Lane_wait_blocked block -> Error (Reconciliation_blocked block)
-      | Lane_wait_pending settled | Lane_wait_running settled ->
-        if settled_once
-        then
-          raise
-            (Invariant_violation
-               (Reconciliation_settled_before_terminal key));
-        Eio.Promise.await settled;
-        await_terminal true
-    in
-    await_terminal false
-;;
-
 let with_lane ~registry ~owner f =
-  match Core.owner_of_string owner with
-  | Error error -> Error (Invalid_owner error)
-  | Ok owner ->
-    (match lane_readiness registry owner with
-     | Lane_reconciliation_required ->
-       Error (Reconciliation_required owner)
-     | Lane_reconciliation_running ->
-       Error (Reconciliation_in_progress owner)
-     | Lane_reconciliation_blocked block ->
-       Error (Reconciliation_blocked block)
-     | Lane_ready ->
+  match ensure_owner_ready ~registry ~owner with
+  | Error _ as error -> error
+  | Ok () ->
+    (match Core.owner_of_string owner with
+     | Error error -> Error (Invalid_owner error)
+     | Ok owner ->
        (match
           Core.with_store ~registry:registry.core ~owner (fun store ->
             let access = create store in
@@ -1027,18 +1510,105 @@ module For_testing = struct
     | Owner_unsettled
     | Owner_settled
 
+  type discovery_phase =
+    | Discovery_required
+    | Discovery_running
+    | Discovery_failed
+    | Discovery_complete
+
+  type discovery_settlement =
+    | Discovery_unsettled
+    | Discovery_settled
+
+  let discover_owners ~before_discovery registry =
+    discover_owners_with
+      ~before_discovery
+      ~before_terminalization:(fun () -> ())
+      registry
+  ;;
+
+  let discover_owners_terminalization ~before_terminalization registry =
+    discover_owners_with
+      ~before_discovery:(fun () -> ())
+      ~before_terminalization
+      registry
+  ;;
+
+  let inspect_owner ~before_inspection ~registry ~owner =
+    inspect_owner_with
+      ~before_inspection
+      ~before_terminalization:(fun () -> ())
+      ~registry
+      ~owner
+  ;;
+
+  let inspect_owner_terminalization
+      ~before_terminalization
+      ~registry
+      ~owner
+    =
+    inspect_owner_with
+      ~before_inspection:(fun () -> ())
+      ~before_terminalization
+      ~registry
+      ~owner
+  ;;
+
   let observed_failure (exception_, backtrace) =
     { exception_; backtrace }
   ;;
 
-  let interrupt_reconciliation ~fs ~registry ~owner interruption =
+  let interrupt_reconciliation ~registry ~owner interruption =
     let reconcile ~fs:_ ~registry:_ ~owner:_ =
       match interruption with
       | Cancel_reconciliation reason ->
         raise (Eio.Cancel.Cancelled reason)
       | Crash_reconciliation exception_ -> raise exception_
     in
-    reconcile_owner_with ~reconcile ~fs ~registry ~owner
+    reconcile_owner_with
+      ~reconcile
+      ~before_terminalization:(fun () -> ())
+      ~registry
+      ~owner
+  ;;
+
+  let reconcile_owner ~before_reconciliation ~registry ~owner =
+    reconcile_owner_with
+      ~reconcile:(fun ~fs ~registry ~owner ->
+        before_reconciliation ();
+        Reconciler.reconcile_owner ~fs ~registry ~owner)
+      ~before_terminalization:(fun () -> ())
+      ~registry
+      ~owner
+  ;;
+
+  let reconcile_owner_terminalization
+      ~before_terminalization
+      ~registry
+      ~owner
+    =
+    reconcile_owner_with
+      ~reconcile:Reconciler.reconcile_owner
+      ~before_terminalization
+      ~registry
+      ~owner
+  ;;
+
+  let with_readiness_lock registry callback =
+    Eio.Mutex.use_rw ~protect:true registry.readiness_mutex callback
+  ;;
+
+  let ensure_owner_ready
+      ~before_owner_settlement_wait
+      ~after_owner_settlement
+      ~registry
+      ~owner
+    =
+    ensure_owner_ready_with
+      ~before_owner_settlement_wait
+      ~after_owner_settlement
+      ~registry
+      ~owner
   ;;
 
   let run_cleanup_boundary ~body ~cleanup_failure =
@@ -1113,14 +1683,38 @@ module For_testing = struct
   let owner_settlement registry owner =
     let key = owner_to_string owner in
     Eio.Mutex.use_ro registry.readiness_mutex (fun () ->
+      match Owner_map.find_opt key registry.readiness with
+      | None -> Owner_untracked
+      | Some { settled; _ } ->
+        (match Eio.Promise.peek settled with
+         | None -> Owner_unsettled
+         | Some () -> Owner_settled))
+  ;;
+
+  let discovery_phase registry =
+    Eio.Mutex.use_ro registry.readiness_mutex (fun () ->
       match registry.registry_phase with
-      | Inventory_required | Inventory_running -> Owner_untracked
-      | Inventory_complete { readiness; _ } ->
-        (match Owner_map.find_opt key readiness with
-         | None -> Owner_untracked
-         | Some { settled; _ } ->
-           (match Eio.Promise.peek settled with
-            | None -> Owner_unsettled
-            | Some () -> Owner_settled)))
+      | Discovery_required_state -> Discovery_required
+      | Discovery_running_state -> Discovery_running
+      | Discovery_failed_state _ -> Discovery_failed
+      | Discovery_complete_state _ -> Discovery_complete)
+  ;;
+
+  let discovery_settlement registry =
+    match Eio.Promise.peek registry.discovery_settled with
+    | None -> Discovery_unsettled
+    | Some () -> Discovery_settled
+  ;;
+
+  let await_discovery_settlement registry =
+    Eio.Promise.await registry.discovery_settled
+  ;;
+
+  let snapshot registry = snapshot registry
+
+  let health_counter_transition ~counter ~change ~value =
+    match change_counter ~counter ~change value with
+    | updated -> Ok updated
+    | exception Invariant_violation invariant -> Error invariant
   ;;
 end

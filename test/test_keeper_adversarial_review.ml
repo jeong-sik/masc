@@ -37,7 +37,12 @@ let publication_recovery_registry env sw config =
   let registry_root =
     Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_root_dir config)
   in
-  match Fs_compat.open_publication_recovery_registry ~sw ~registry_root with
+  match
+    Fs_compat.open_publication_recovery_registry
+      ~sw
+      ~fs:(Eio.Stdenv.fs env)
+      ~registry_root
+  with
   | Ok registry -> registry
   | Error error ->
     fail

@@ -162,13 +162,27 @@ val dispatch_keeper_phase_event
   -> Keeper_state_machine.event
   -> unit
 
+type lifecycle_dispatch_error =
+  | Transition_rejected of Keeper_state_machine.transition_error
+  | Compaction_invariant_violation of
+      Keeper_registry_types.compaction_transition_spec_violation
+
+val lifecycle_dispatch_error_to_string : lifecycle_dispatch_error -> string
+
+val dispatch_keeper_phase_event_result
+  :  config:Workspace.config
+  -> ?origin:Keeper_registry.lifecycle_event_origin
+  -> keeper_name:string
+  -> Keeper_state_machine.event
+  -> (unit, lifecycle_dispatch_error) result
+
 (** Dispatch [Compaction_completed] only after the prepared checkpoint has
     been durably saved. *)
 val dispatch_compaction_completed
   :  config:Workspace.config
   -> origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
-  -> unit
+  -> (unit, lifecycle_dispatch_error) result
 
 val dispatch_post_turn_lifecycle_events
   :  config:Workspace.config

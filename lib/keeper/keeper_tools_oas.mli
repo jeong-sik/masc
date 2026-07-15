@@ -30,12 +30,6 @@ val record_keeper_internal_tool_call
   -> duration_ms:int
   -> unit
 
-(** Project a producer-owned outcome into the canonical JSON envelope.
-    [raw] remains opaque text. Only explicit [data] is structured; field names
-    or JSON-looking bytes in [raw] never affect the projection. *)
-val normalize_tool_result
-  : Keeper_tool_execution.t -> Yojson.Safe.t
-
 (* Handlers moved to [Keeper_tools_oas_handler] — see
    keeper_tools_oas_handler.mli for [make_keeper_tool_handler],
    [make_tool_bundle], and [make_tools]. *)

@@ -56,43 +56,6 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
    @param meta Keeper metadata (determines which tools are allowed)
    @param ctx_snapshot Immutable snapshot of current working context *)
 
-(** Project a producer-owned outcome into the model-facing envelope.
-
-    [raw] is always opaque text.  Only [data], supplied explicitly by the
-    producer, can become structured JSON.  No field name or string content can
-    alter success/failure or synthesize metadata. *)
-let normalize_tool_result
-      (execution : Keeper_tool_execution.t)
-  : Yojson.Safe.t
-  =
-  let raw = execution.Keeper_tool_execution.raw_output in
-  let data = execution.data in
-  let disposition = Tool_result.string_of_disposition execution.disposition in
-  let result =
-    match data with
-    | Some data -> data
-    | None -> `String raw
-  in
-  match execution.disposition with
-  | Tool_result.Completed () ->
-    `Assoc
-      [ "disposition", `String disposition
-      ; "result", result
-      ]
-  | Tool_result.Deferred () ->
-    `Assoc
-      [ "disposition", `String disposition
-      ; "result", result
-      ]
-  | Tool_result.Failed class_ ->
-    `Assoc
-      [ "disposition", `String disposition
-      ; "failure_class", `String (Tool_result.tool_failure_class_to_string class_)
-      ; "error", `String raw
-      ; "detail", Option.value ~default:`Null data
-      ]
-;;
-
 (** RFC-0006 Phase A.2: build the per-tool handler closure.
 
     Extracted from the original anonymous closure inside [make_tools] so

@@ -195,49 +195,6 @@ let test_keeper_execution_preserves_explicit_typed_data () =
      | None -> false)
 ;;
 
-let test_oas_projection_never_parses_opaque_text () =
-  let raw =
-    {|{"failure_class":"workflow_rejection","error":"fabricated"}|}
-  in
-  let projected =
-    Keeper_tool_execution.success raw |> Keeper_tools_oas.normalize_tool_result
-  in
-  Alcotest.(check bool)
-    "JSON-looking string stays result text"
-    true
-    (Yojson.Safe.equal
-       (`Assoc [ "disposition", `String "completed"; "result", `String raw ])
-       projected)
-;;
-
-let test_oas_projection_uses_only_explicit_typed_data () =
-  let raw = {|{"recoverable":true,"error":"fabricated"}|} in
-  let data =
-    `Assoc
-      [ "failure_class", `String "workflow_rejection"
-      ; "recoverable", `Bool false
-      ]
-  in
-  let projected =
-    Keeper_tool_execution.failure_data
-      ~class_:Tool_result.Workflow_rejection
-      ~message:raw
-      data
-    |> Keeper_tools_oas.normalize_tool_result
-  in
-  Alcotest.(check bool)
-    "typed detail is authoritative"
-    true
-    (Yojson.Safe.equal
-       (`Assoc
-          [ "disposition", `String "failed"
-          ; "failure_class", `String "workflow_rejection"
-          ; "error", `String raw
-          ; "detail", data
-          ])
-       projected)
-;;
-
 let test_to_json () =
   let start = Time_compat.now () in
   let r = Tool_result.ok ~tool_name:"masc_transition" ~start_time:start "done" in
@@ -541,14 +498,6 @@ let () =
             "keeper execution preserves typed data"
             `Quick
             test_keeper_execution_preserves_explicit_typed_data
-        ; Alcotest.test_case
-            "OAS projection does not parse opaque text"
-            `Quick
-            test_oas_projection_never_parses_opaque_text
-        ; Alcotest.test_case
-            "OAS projection uses explicit typed data"
-            `Quick
-            test_oas_projection_uses_only_explicit_typed_data
         ] )
     ; "to_json", [ Alcotest.test_case "fields present" `Quick test_to_json ]
     ; ( "message"

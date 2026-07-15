@@ -6,7 +6,6 @@
 
     @since P1 extraction *)
 
-open Keeper_tools_oas
 open Keeper_tools_oas_handler_telemetry
 
 let make_keeper_tool_handler
@@ -38,14 +37,8 @@ let make_keeper_tool_handler
     result
   in
   fun raw_input ->
-    let t0 = Time_compat.now () in
     let handle_validation_error ~input validation_result =
-      let output_data =
-        validation_result
-        |> Keeper_tool_execution.of_tool_result
-        |> normalize_tool_result
-      in
-      let output_text = Yojson.Safe.to_string output_data in
+      let output_text = Tool_result.message validation_result in
       let duration_ms = 0 in
       let disposition = Tool_result.string_of_disposition validation_result in
       let ts = Time_compat.now () in
@@ -95,15 +88,7 @@ let make_keeper_tool_handler
             ; "disposition", `String disposition
             ; "error", `String error_text
             ]);
-      Tool_result.make_err
-        ~class_:
-          (Tool_result.failure_class validation_result
-           |> Option.value ~default:Tool_result.Runtime_failure)
-        ~tool_name:name
-        ~start_time:t0
-        ~data:output_data
-        output_text
-      |> record_result ~input
+      validation_result |> record_result ~input
     in
     match pre_validate_input raw_input with
     | Error validation_result ->

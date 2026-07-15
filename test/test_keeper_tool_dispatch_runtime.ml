@@ -2248,6 +2248,9 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
       let saw_turn_sw = Atomic.make false in
       let saw_clock = Atomic.make false in
       let saw_provider = Atomic.make false in
+      let delegated_data =
+        `Assoc [ "run_ref", `Assoc [ "run_id", `String "test-run" ] ]
+      in
       Fun.protect
         ~finally:(fun () ->
           Masc.Keeper_dispatch_ref.dispatch := previous_dispatch;
@@ -2266,8 +2269,11 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
               Atomic.set saw_provider
                 (observed_provider == publication_recovery.provider);
               Some
-                (Tool_result.ok ~tool_name:name ~start_time:0.0
-                   "{\"ok\":true,\"run_ref\":{\"run_id\":\"test-run\"}}"));
+                (Tool_result.make_ok
+                   ~tool_name:name
+                   ~start_time:0.0
+                   ~data:delegated_data
+                   ()));
           let handler =
             Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
               ~name:"masc_keeper_delegate"
@@ -2292,6 +2298,11 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
                 ])
           in
           check bool "handler succeeds" true (Tool_result.is_success result);
+          check
+            (testable Yojson.Safe.pp Yojson.Safe.equal)
+            "handler preserves producer data without a second outcome envelope"
+            delegated_data
+            (Tool_result.data result);
           check bool "turn switch reaches keeper dispatch" true (Atomic.get saw_turn_sw);
           check bool "clock reaches keeper dispatch" true (Atomic.get saw_clock);
           check bool "live provider reaches keeper dispatch" true

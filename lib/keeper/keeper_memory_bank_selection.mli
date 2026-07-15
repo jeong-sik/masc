@@ -77,10 +77,6 @@ val total_cap : unit -> int
 val kind_caps : unit -> (memory_kind * int) list
 val cap_for_kind : (memory_kind * int) list -> memory_kind -> int
 
-val with_stdlib_mutex : Mutex.t -> (unit -> 'a) -> 'a
-val memory_bank_locks_mu : Mutex.t
-val memory_bank_locks : (string, Mutex.t) Hashtbl.t
-val memory_bank_lock_for : string -> Mutex.t
 val with_memory_bank_lock : string -> (unit -> 'a) -> 'a
 val dedup_by_key : ('a -> string) -> 'a list -> 'a list
 val jaccard_similarity : string -> string -> float

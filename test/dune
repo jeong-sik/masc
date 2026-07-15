@@ -1880,6 +1880,8 @@
 
 (include stanzas/test_keeper_memory_bank_compaction_errors.inc)
 
+(include stanzas/test_keeper_memory_bank_fiber_lock.inc)
+
 (include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
 
 (include stanzas/test_keeper_memory_bank_consolidation_provenance.inc)

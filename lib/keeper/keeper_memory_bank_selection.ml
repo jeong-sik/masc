@@ -9,21 +9,22 @@ let with_stdlib_mutex mutex f =
 ;;
 
 let memory_bank_locks_mu = Stdlib.Mutex.create ()
-let memory_bank_locks : (string, Stdlib.Mutex.t) Hashtbl.t = Hashtbl.create 64
+let memory_bank_locks : (string, Cross_context_mutex.t) Hashtbl.t =
+  Hashtbl.create 64
 
 let memory_bank_lock_for path =
   with_stdlib_mutex memory_bank_locks_mu (fun () ->
     match Hashtbl.find_opt memory_bank_locks path with
     | Some mutex -> mutex
     | None ->
-      let mutex = Stdlib.Mutex.create () in
+      let mutex = Cross_context_mutex.create () in
       Hashtbl.add memory_bank_locks path mutex;
       mutex)
 ;;
 
 let with_memory_bank_lock path f =
   let mutex = memory_bank_lock_for path in
-  with_stdlib_mutex mutex f
+  Cross_context_mutex.with_lock mutex f
 ;;
 
 (** Filter a list to unique items by a key function.

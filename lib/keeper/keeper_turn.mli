@@ -21,7 +21,9 @@ val handle_keeper_up : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_r
 
     @since 2.110.0 *)
 val preflight_keeper_msg :
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> (unit, string) result
+  _ Keeper_types_profile.context ->
+  Yojson.Safe.t ->
+  (Keeper_invocation_contract.request, string) result
 (** Run synchronous validation for [handle_keeper_msg] before an async wrapper
     accepts the turn for later execution. *)
 

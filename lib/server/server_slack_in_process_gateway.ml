@@ -446,6 +446,10 @@ let submit_event ingress ~dispatch ~clock (ev : Gw.slack_event) =
   | Gw.Reaction_added _ | Gw.Ignored_event _ -> on_event ~dispatch ~clock ev
 ;;
 
+module For_testing = struct
+  let submit_event = submit_event
+end
+
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)
 (* ---------------------------------------------------------------- *)

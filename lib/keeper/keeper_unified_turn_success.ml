@@ -54,6 +54,71 @@ type terminal_outcome =
 type handle_result =
   | Completed of Keeper_meta_contract.keeper_meta
 
+let enqueue_configured_compaction
+      ~base_path
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~message_count
+      ~context_tokens
+      ~max_context
+      ~now
+  =
+  match meta.compaction.mode with
+  | Keeper_config.Deterministic -> Ok None
+  | Keeper_config.Llm ->
+    let token_count = Option.value context_tokens ~default:0 in
+    let context_ratio =
+      if max_context > 0
+      then float_of_int token_count /. float_of_int max_context
+      else 0.0
+    in
+    (match
+       Keeper_guard.configured_compaction_trigger
+         ~ratio_gate:meta.compaction.ratio_gate
+         ~message_gate:meta.compaction.message_gate
+         ~token_gate:meta.compaction.token_gate
+         ~cooldown_sec:meta.compaction.cooldown_sec
+         ~context_ratio
+         ~message_count
+         ~token_count
+         ~since_last_compaction_sec:
+           (Float.max 0.0 (now -. meta.runtime.compaction_rt.last_ts))
+     with
+     | None -> Ok None
+     | Some trigger ->
+       let wake_owner () =
+         Keeper_registry.wakeup
+           ~intent:Keeper_registry.Compaction_signal
+           ~base_path
+           meta.name
+         |> ignore
+       in
+       let stimulus : Keeper_event_queue.stimulus =
+         { post_id = Keeper_event_queue.configured_compaction_post_id
+         ; urgency = Normal
+         ; arrived_at = now
+         ; payload = Configured_compaction_requested trigger
+         }
+       in
+       (match
+          Keeper_registry_event_queue.enqueue_stimulus_durable_result
+            ~base_path
+            meta.name
+            stimulus
+        with
+        | Stimulus_storage_error detail ->
+          Log.Keeper.error
+            ~keeper_name:meta.name
+            "configured compaction enqueue failed: %s"
+            detail;
+          Error detail
+        | Stimulus_enqueued ->
+          wake_owner ();
+          Ok (Some trigger)
+        | Stimulus_already_present ->
+          wake_owner ();
+          Ok (Some trigger)))
+;;
+
 let acknowledge_pending_messages
       (meta : Keeper_meta_contract.keeper_meta)
       (observation : Keeper_world_observation.world_observation)
@@ -541,6 +606,8 @@ module For_testing = struct
 
   let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
   let acknowledge_pending_messages = acknowledge_pending_messages
+
+  let enqueue_configured_compaction = enqueue_configured_compaction
 end
 
 let emit_terminal_fsm
@@ -670,6 +737,23 @@ let handle
       ~original_meta:meta
       ~updated_meta
   in
+  let context_tokens =
+    match usage_trust with
+    | Keeper_usage_trust.Usage_trusted -> Some result.usage.input_tokens
+    | Keeper_usage_trust.Usage_missing
+    | Keeper_usage_trust.Usage_untrusted _ -> None
+  in
+  (match lifecycle.checkpoint with
+   | None -> ()
+   | Some _ ->
+     enqueue_configured_compaction
+       ~base_path:config.base_path
+       ~meta:updated_meta
+       ~message_count:lifecycle.message_count
+       ~context_tokens
+       ~max_context:final_execution.max_context
+       ~now:(Time_compat.now ())
+     |> ignore);
   let tool_call_summaries =
     result.Keeper_agent_run.tool_calls
     |> List.map (fun (d : Keeper_agent_run.tool_call_detail) ->

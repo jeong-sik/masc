@@ -2,6 +2,7 @@ open Keeper_meta_contract
 type success =
   { recovery : Keeper_context_runtime.overflow_retry_recovery }
 type failure =
+  | Unsupported_trigger of Compaction_trigger.t
   | Lifecycle of string * bool * Keeper_context_runtime.lifecycle_dispatch_error
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
@@ -39,7 +40,12 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
       Keeper_runtime_manifest.clock_refs_for_context
         context
         ~event:Keeper_runtime_manifest.Context_compacted
-        ~compaction_source:"operator_manual"
+        ~compaction_source:
+          (match trigger with
+           | Compaction_trigger.Manual -> "operator_manual"
+           | Ratio_threshold _ | Message_count _ | Token_count _ ->
+             "configured_threshold"
+           | Provider_overflow _ -> "provider_overflow")
         ()
     in
     Keeper_runtime_manifest.make_for_context
@@ -63,11 +69,11 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
       ()
     |> Keeper_runtime_manifest.append_once ~operation_id:recovery.operation_id config
 ;;
-let run ~(config : Workspace.config) ~(meta : keeper_meta) =
+let run ~(config : Workspace.config) ~(meta : keeper_meta) ~trigger =
   let dispatch stage event =
     Keeper_context_runtime.dispatch_keeper_phase_event_result
       ~config
-      ~origin:Keeper_registry.Operator_compact
+      ~origin:Keeper_registry.Requested_compaction
       ~keeper_name:meta.name
       event
     |> Result.map_error (fun error ->
@@ -76,11 +82,18 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
   let dispatch_failed reason =
     Keeper_context_runtime.dispatch_keeper_phase_event_result
       ~config
-      ~origin:Keeper_registry.Operator_compact
+      ~origin:Keeper_registry.Requested_compaction
       ~keeper_name:meta.name
       (Keeper_state_machine.Compaction_failed { reason })
   in
-  match dispatch "operator_request" Keeper_state_machine.Operator_compact_requested with
+  let request_dispatch =
+    match trigger with
+    | Compaction_trigger.Manual ->
+      dispatch "operator_request" Keeper_state_machine.Operator_compact_requested
+    | Ratio_threshold _ | Message_count _ | Token_count _ -> Ok ()
+    | Provider_overflow _ -> Error (Unsupported_trigger trigger)
+  in
+  match request_dispatch with
   | Error _ as error -> error
   | Ok () ->
     (match dispatch "compaction_started" Keeper_state_machine.Compaction_started with
@@ -93,7 +106,7 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
           Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
             ~base_dir
             ~meta
-            ~trigger:Compaction_trigger.Manual
+            ~trigger
             ~primary_model_max_tokens:(primary_max_context meta)
         with
         | Error error ->
@@ -115,7 +128,7 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
                 Keeper_context_runtime.dispatch_compaction_completed
                   ~config
                   ~keeper_name:meta.name
-                  ~origin:Keeper_registry.Operator_compact
+                  ~origin:Keeper_registry.Requested_compaction
               with
               | Error error ->
                 Error (Lifecycle ("compaction_completed", true, error))
@@ -128,6 +141,8 @@ let dispatch_result_to_string = function
 ;;
 
 let failure_to_string = function
+  | Unsupported_trigger trigger ->
+    Printf.sprintf "unsupported_trigger=%s" (Compaction_trigger.to_human trigger)
   | Lifecycle (stage, checkpoint_applied, error) ->
     Printf.sprintf
       "stage=%s checkpoint_applied=%b error=%s"

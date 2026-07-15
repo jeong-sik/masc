@@ -179,6 +179,7 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Manual_compaction_requested
+  | Keeper_event_queue.Configured_compaction_requested _
   | Keeper_event_queue.Goal_assigned _ ->
     None
 ;;

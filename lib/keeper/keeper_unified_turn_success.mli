@@ -28,6 +28,15 @@ module For_testing : sig
     :  Keeper_meta_contract.keeper_meta
     -> Keeper_world_observation.world_observation
     -> Keeper_meta_contract.keeper_meta
+
+  val enqueue_configured_compaction
+    :  base_path:string
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> message_count:int
+    -> context_tokens:int option
+    -> max_context:int
+    -> now:float
+    -> (Compaction_trigger.t option, string) result
 end
 
 type handle_result =

@@ -525,7 +525,7 @@ let test_applied_compaction_settles_followup_atomically () =
       ~stop_requested:false
       ~lease
       (Some
-         (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
+         (Masc.Keeper_heartbeat_loop_cycle.Requested_compaction_applied
             (Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure })))
   in
   let judgment_failure =
@@ -580,7 +580,7 @@ let test_manifest_projection_failure_requeues_compaction () =
       ~settled_at:8.0
       ~stop_requested:false
       ~lease
-      (Some (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_failed { meta; failure }))
+      (Some (Masc.Keeper_heartbeat_loop_cycle.Requested_compaction_failed { meta; failure }))
   with
   | Masc.Keeper_registry_event_queue.Requeue
       Masc.Keeper_registry_event_queue.Context_compaction_retry ->

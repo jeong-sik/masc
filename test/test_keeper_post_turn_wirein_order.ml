@@ -481,7 +481,7 @@ let test_manual_compaction_serializes_owner_lane () =
           ~turn_decision:decision
           ~shared_context:(Agent_sdk.Context.create_sync ())
           ~wake:(Masc.Keeper_registry.Woken [ Manual_compaction_requested ])
-          ~manual_compaction_requested:true
+          ~compaction_request:Compaction_trigger.Manual
           ()
       in
       (match run_cycle () with
@@ -519,7 +519,7 @@ let test_manual_compaction_serializes_owner_lane () =
           run_cycle
       in
       (match outcome with
-       | Cycle.Manual_compaction_applied _ -> ()
+       | Cycle.Requested_compaction_applied _ -> ()
        | _ -> fail "owner-lane cycle did not apply manual compaction");
       let compacted =
         Result.get_ok

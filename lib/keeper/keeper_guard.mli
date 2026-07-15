@@ -20,6 +20,17 @@ val context_actions :
   Keeper_measurement.measurement_snapshot ->
   Keeper_state_machine.context_actions
 
+val configured_compaction_trigger :
+  ratio_gate:float ->
+  message_gate:int ->
+  token_gate:int ->
+  cooldown_sec:int ->
+  context_ratio:float ->
+  message_count:int ->
+  token_count:int ->
+  since_last_compaction_sec:float ->
+  Compaction_trigger.t option
+
 (** Select the highest-priority event from the guard output.
     Priority: Crash > Compact > Handoff > No_transition.
     Returns [Heartbeat_ok] if the list is empty (no transitions needed). *)

@@ -24,7 +24,7 @@ let paired_lifecycle_origin origin event =
                (match event with
                 | Keeper_state_machine.Compaction_started
                 | Keeper_state_machine.Compaction_completed
-                | Keeper_state_machine.Compaction_failed _ -> " or origin=operator_compact"
+                | Keeper_state_machine.Compaction_failed _ -> " or origin=requested_compaction"
                 | _ -> "")
                (lifecycle_event_origin_to_string origin)
          })

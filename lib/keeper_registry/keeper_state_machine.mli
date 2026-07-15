@@ -113,7 +113,7 @@ type context_actions = {
     use [Post_turn_lifecycle], which runs synchronously at the tail of a
     keeper turn (inside [Keeper_unified_turn.run_keeper_cycle] or the
     legacy [Keeper_turn] path). Manual compaction uses the narrower
-    [Operator_compact] origin for compaction events only.
+    [Requested_compaction] origin for owner-lane compaction events only.
 
     The keepalive loop ({!Keeper_keepalive.run_heartbeat_loop}) does
     NOT explicitly gate dispatch on [phase]. It relies on the

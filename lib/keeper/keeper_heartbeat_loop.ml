@@ -135,6 +135,7 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Failure_judgment _
       | Keeper_event_queue.Manual_compaction_requested
+      | Keeper_event_queue.Configured_compaction_requested _
       | Keeper_event_queue.Goal_assigned _ ->
         None)
     stimuli
@@ -155,6 +156,7 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Failure_judgment _
        | Keeper_event_queue.Manual_compaction_requested
+       | Keeper_event_queue.Configured_compaction_requested _
        | Keeper_event_queue.Goal_assigned _ -> ())
     stimuli
 ;;
@@ -225,6 +227,7 @@ let failure_judgment_of_stimuli = function
            | Keeper_event_queue.Connector_attention _
            | Keeper_event_queue.Hitl_resolved _
            | Keeper_event_queue.Manual_compaction_requested
+           | Keeper_event_queue.Configured_compaction_requested _
            | Keeper_event_queue.Goal_assigned _ ->
              false)
         stimuli
@@ -232,9 +235,12 @@ let failure_judgment_of_stimuli = function
     else Ok None
 ;;
 
-let manual_compaction_requested_of_stimuli = function
-  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
-  | [] | [ _ ] | _ :: _ :: _ -> false
+let compaction_request_of_stimuli = function
+  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] ->
+    Some Compaction_trigger.Manual
+  | [ { Keeper_event_queue.payload = Configured_compaction_requested trigger; _ } ] ->
+    Some trigger
+  | [] | [ _ ] | _ :: _ :: _ -> None
 ;;
 
 let failure_judgment_successor
@@ -333,8 +339,8 @@ let resume_owner_lane_after_context_compaction ~base_path ~keeper_name = functio
       | Cycle.Skipped _
       | Cycle.Busy _
       | Cycle.Judgment_settled _
-      | Cycle.Manual_compaction_failed _
-      | Cycle.Manual_compaction_applied _ )
+      | Cycle.Requested_compaction_failed _
+      | Cycle.Requested_compaction_applied _ )
   | None ->
     None
 ;;
@@ -374,8 +380,8 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
          Keeper_registry_event_queue.Approval_grant_state_unavailable)
   | None ->
     (match outcome with
-  | Some (Cycle.Manual_compaction_applied _ as applied) ->
-    (match Cycle.manual_compaction_followup_failure applied with
+  | Some (Cycle.Requested_compaction_applied _ as applied) ->
+    (match Cycle.requested_compaction_followup_failure applied with
      | Some
          ({ Keeper_unified_turn.source_lease_disposition =
               Keeper_unified_turn.Follow_failure_route
@@ -422,7 +428,7 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
                { judge_runtime_id; rationale }
          ; successor = None
          })
-  | Some (Cycle.Manual_compaction_failed _) ->
+  | Some (Cycle.Requested_compaction_failed _) ->
     Keeper_registry_event_queue.Requeue
       Keeper_registry_event_queue.Context_compaction_retry
   | None ->
@@ -536,8 +542,8 @@ let run_keepalive_unified_turn
           | Cycle.Skipped _
           | Cycle.Busy _
           | Cycle.Judgment_settled _
-          | Cycle.Manual_compaction_failed _
-          | Cycle.Manual_compaction_applied _ )
+          | Cycle.Requested_compaction_failed _
+          | Cycle.Requested_compaction_applied _ )
       | None ->
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
@@ -588,8 +594,8 @@ let run_keepalive_unified_turn
         | Ok judgment -> judgment
         | Error message -> raise (Event_queue_settlement_failed message)
       in
-      let manual_compaction_requested =
-        manual_compaction_requested_of_stimuli event_intake.consumed_stimuli
+      let compaction_request =
+        compaction_request_of_stimuli event_intake.consumed_stimuli
       in
       (match event_intake.event_queue_claim_error with
        | None -> ()
@@ -801,7 +807,7 @@ let run_keepalive_unified_turn
               ~shared_context
               ~wake
               ?failure_judgment
-              ~manual_compaction_requested
+              ?compaction_request
               ()
           in
           cycle_outcome_ref := Some cycle_outcome;
@@ -855,12 +861,12 @@ let run_keepalive_unified_turn
           | Some (Cycle.Judgment_settled _) ->
             record_settlement_failure
               "failure judgment completed without an owning event queue lease"
-          | Some (Cycle.Manual_compaction_failed _) ->
+          | Some (Cycle.Requested_compaction_failed _) ->
             record_settlement_failure
-              "manual compaction failed without an owning event queue lease"
-          | Some (Cycle.Manual_compaction_applied _) ->
+              "requested compaction failed without an owning event queue lease"
+          | Some (Cycle.Requested_compaction_applied _) ->
             record_settlement_failure
-              "manual compaction completed without an owning event queue lease"
+              "requested compaction completed without an owning event queue lease"
           | Some
               ( Cycle.Completed _
               | Cycle.Cancelled _

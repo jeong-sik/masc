@@ -2,7 +2,22 @@
 
 - Status: Draft
 - Date: 2026-07-15
-- Related: masc#24528 (provider_id stamping fix), oas RFC-OAS-034 (endpoint/capability boundary), masc `codex/catalog-ssot-purge-20260714` (`6921f46c98`, vendored-catalog purge, unlanded), RFC-0206 §2.1 (no silent fallback)
+- Related: masc#24528 (provider_id stamping fix, merged), oas RFC-OAS-036 / oas#2604
+  (D1 overlay + alias-canonicalized lookup, implemented), oas RFC-OAS-034
+  (endpoint/capability boundary), masc `codex/catalog-ssot-purge-20260714`
+  (`6921f46c98`, vendored-catalog purge, unlanded), RFC-0206 §2.1 (no silent
+  fallback)
+
+> 2026-07-15 update: D1 is implemented on the OAS side as RFC-OAS-036
+> (`Model_catalog.merge` / `set_global_overlay`, oas#2604). That PR also
+> canonicalizes `lookup_for_provider` through the catalog's own `[[providers]]`
+> alias data, which makes **D3 optional**: a deployment alias can be declared
+> as pure overlay data (a provider entry `id = "vllm-qwen3-mtp"` with
+> `aliases = ["runpod_mtp"]`) instead of a masc-side `capability-namespace`
+> key. The masc key remains the better ergonomics when the declaration should
+> live next to the endpoint in runtime.toml; decide at D3 implementation time.
+> Remaining masc-side work: overlay file resolution at bootstrap (after the
+> oas release + pin bump), D2, D4.
 
 ## 1. Problem
 

@@ -1084,27 +1084,6 @@ let consume_approved_resolution
     Ok Consumption_committed
 ;;
 
-module For_testing = struct
-  let reset_audit_store () =
-    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
-    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-      Hashtbl.clear recent_audit_cache)
-  ;;
-
-  let get_pending_entry ~id = SMap.find_opt id (Atomic.get pending)
-  let with_pending_store_lock = with_pending_store_lock
-
-  let reset_runtime_state () =
-    with_pending_store_lock (fun () ->
-      Atomic.set pending SMap.empty;
-      Atomic.set deliveries SMap.empty;
-      Atomic.set unavailable_stores SMap.empty)
-  ;;
-
-  let pending_store_path = pending_store_path
-  let always_allowed_store_path ~base_path = rules_path ~base_path ()
-end
-
 let input_preview_of_json (json : Yojson.Safe.t) =
   (* Per-leaf marker-aware truncation: a naive [String.sub] on the
      serialized form would chop a [masc:blob ...] marker mid-field and
@@ -1886,15 +1865,16 @@ let complete_delivery delivery =
            | Ok () -> finish ())))
 ;;
 
-let install_persistence ~base_path =
-  (* Snapshot I/O and JSON parsing may yield. Keep them outside the
-     process-global commit mutex so a slow filesystem cannot block the Eio
-     domain through a contending [Stdlib.Mutex] waiter. The immutable loaded
-     maps are merged with the latest in-memory state inside the short commit
-     section below. *)
-  let loaded_snapshot = load_snapshot_unlocked ~base_path in
+let install_persistence_internal ~after_load ~base_path =
+  (* Snapshot read and installation are one transition. The hybrid pending
+     store lock serializes Eio and non-Eio callers, cooperatively gates Eio
+     waiters, and protects cancellation across the durable transition. Keeping
+     the load inside this boundary prevents a same-workspace mutation from
+     being published between the read and the replacement below. *)
   let installed =
     with_pending_store_lock (fun () ->
+      let loaded_snapshot = load_snapshot_unlocked ~base_path in
+      after_load ();
       match loaded_snapshot with
       | Error storage_error ->
         mark_store_unavailable_unlocked ~base_path storage_error;
@@ -1978,6 +1958,35 @@ let install_persistence ~base_path =
     in
     replay 0 [] loaded_deliveries
 ;;
+
+let install_persistence ~base_path =
+  install_persistence_internal ~after_load:(fun () -> ()) ~base_path
+;;
+
+module For_testing = struct
+  let reset_audit_store () =
+    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
+    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
+      Hashtbl.clear recent_audit_cache)
+  ;;
+
+  let get_pending_entry ~id = SMap.find_opt id (Atomic.get pending)
+  let with_pending_store_lock = with_pending_store_lock
+
+  let reset_runtime_state () =
+    with_pending_store_lock (fun () ->
+      Atomic.set pending SMap.empty;
+      Atomic.set deliveries SMap.empty;
+      Atomic.set unavailable_stores SMap.empty)
+  ;;
+
+  let install_persistence_with_after_load_hook ~base_path ~after_load =
+    install_persistence_internal ~after_load ~base_path
+  ;;
+
+  let pending_store_path = pending_store_path
+  let always_allowed_store_path ~base_path = rules_path ~base_path ()
+end
 
 let resolve_with_policy
       ~id

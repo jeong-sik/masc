@@ -58,8 +58,7 @@ let test_missing_checkpoint_is_typed_tool_failure () =
         ; proc_mgr = None
         ; net = None
         ; publication_recovery_provider =
-            Keeper_publication_recovery_availability.constant
-              Keeper_publication_recovery_availability.Non_runtime
+            Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
       match

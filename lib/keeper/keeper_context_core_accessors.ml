@@ -68,7 +68,7 @@ let ensure_dir path =
 
 (** Estimate token count for a raw string (CJK-aware). *)
 let estimate_char_tokens (s : string) : int =
-  Agent_sdk.Context_reducer.estimate_char_tokens s
+  Text_token_estimate.estimate_char_tokens s
 
 (** CJK-aware token estimate delegated to OAS Context_reducer.
     OAS estimator is already conservative (CJK-aware, ceil-based).
@@ -78,7 +78,7 @@ let msg_tokens (m : Agent_sdk.Types.message) : int =
   Agent_sdk.Context_reducer.estimate_message_tokens m
 
 let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
-  let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
+  let sys_tokens = Text_token_estimate.estimate_char_tokens system_prompt in
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
 let checkpoint_of_context (ctx : working_context) = ctx.checkpoint

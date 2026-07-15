@@ -114,7 +114,13 @@ let create ~sw ~on_failure () =
     ; on_failure
     }
   in
-  Eio.Fiber.fork ~sw (fun () -> run_dispatcher t);
+  (* The dispatcher idles on [t.condition] between submissions, so it must be
+     a daemon fiber: a regular [Fiber.fork] would keep the owning switch open
+     forever once all non-daemon fibers finish (the switch waits for the
+     dispatcher, which waits for a broadcast that never comes). In-flight
+     lane jobs are forked as regular fibers below, so the switch still drains
+     accepted work before the daemon is cancelled. *)
+  Eio.Fiber.fork_daemon ~sw (fun () -> run_dispatcher t);
   t
 ;;
 

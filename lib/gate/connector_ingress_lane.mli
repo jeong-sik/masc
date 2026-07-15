@@ -20,6 +20,9 @@ type t
 val lane_to_string : lane -> string
 val event_id_to_string : event_id -> string
 
+(** Forks the idle dispatcher as a daemon fiber on [sw]: the switch can
+    finish once its non-daemon fibers are done, after draining any in-flight
+    lane jobs (which run as regular fibers). *)
 val create :
   sw:Eio.Switch.t ->
   on_failure:(failure -> unit) ->

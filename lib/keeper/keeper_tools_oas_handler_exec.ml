@@ -49,10 +49,12 @@ let execute_with_observers
           ~input
           ())
     in
-    let raw_result = result.raw_output in
+    let raw_result = result.Keeper_tool_execution.raw_output in
     let producer_data = result.data in
-    match result.outcome with
-    | `Failure failure_class ->
+    let producer_metadata = result.metadata in
+    let disposition = Tool_result.string_of_disposition result.disposition in
+    match result.disposition with
+    | Tool_result.Failed failure_class ->
       let dispatch_result =
         Tool_result.make_err
           ~tool_name:name
@@ -65,8 +67,11 @@ let execute_with_observers
         ~base_path:config.base_path
         meta.name
         ~tool_name:name
-        ~success:false;
-      record_keeper_internal_tool_call ~tool_name:name ~success:false ~duration_ms;
+        ~disposition:result.disposition;
+      record_keeper_internal_tool_call
+        ~tool_name:name
+        ~disposition:result.disposition
+        ~duration_ms;
       (* Tool-call observability flows through the OAS Event_bus
          (ToolCalled + ToolCompleted). MASC-side observers removed
          in refactor/tool-call-single-source. *)
@@ -82,7 +87,7 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~tool_name:name
         ~duration_ms
-        ~success:false
+        ~disposition:result.disposition
         ~error_text:detail
         ~extra_fields:
           (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
@@ -94,9 +99,7 @@ let execute_with_observers
         ~labels:[ "tool", name; "site", "error_result" ]
         ();
       Log.Keeper.error "tool %s returned error result: %s" name detail;
-      let normalized_error_json =
-        normalize_tool_result ~success:false ~data:producer_data raw_result
-      in
+      let normalized_error_json = normalize_tool_result result in
       let normalized_error = Yojson.Safe.to_string normalized_error_json in
       append_tool_exec_decision_log
         ~config
@@ -109,7 +112,7 @@ let execute_with_observers
             ; "tool", `String name
             ; "duration_ms", `Int duration_ms
             ; "result_bytes", `Int (String.length normalized_error)
-            ; "ok", `Bool false
+            ; "disposition", `String disposition
             ; "error_preview", `String detail
             ]);
       Keeper_tool_call_log.set_truncation_info
@@ -122,7 +125,7 @@ let execute_with_observers
         ~start_time:t0
         ~data:normalized_error_json
         normalized_error
-    | `Success ->
+    | Tool_result.Completed () ->
       Option.iter
         (Keeper_tool_emission_hook.capture_typed_result_for_keeper
            ~keeper_name:meta.name)
@@ -131,13 +134,17 @@ let execute_with_observers
         ~base_path:config.base_path
         meta.name
         ~tool_name:name
-        ~success:true;
-      record_keeper_internal_tool_call ~tool_name:name ~success:true ~duration_ms;
+        ~disposition:result.disposition;
+      record_keeper_internal_tool_call
+        ~tool_name:name
+        ~disposition:result.disposition
+        ~duration_ms;
       (* Tool-call observability via OAS Event_bus. See above. *)
       (let tr : Tool_result.result =
-         Ok
+         Tool_result.Completed
            { Tool_result.tool_name = name
            ; data = Option.value ~default:(`String raw_result) producer_data
+           ; metadata = producer_metadata
            ; duration_ms = Float.of_int duration_ms
            }
        in
@@ -150,15 +157,13 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~tool_name:name
         ~duration_ms
-        ~success:true
+        ~disposition:result.disposition
         ~extra_fields:
           (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
         ~site:"success"
         ~ts
         ();
-      let final_result_json =
-        normalize_tool_result ~success:true ~data:producer_data raw_result
-      in
+      let final_result_json = normalize_tool_result result in
       let final_result = Yojson.Safe.to_string final_result_json in
       let original_len = String.length final_result in
       append_tool_exec_decision_log
@@ -172,7 +177,7 @@ let execute_with_observers
              ; "tool", `String name
              ; "duration_ms", `Int duration_ms
              ; "result_bytes", `Int original_len
-             ; "ok", `Bool true
+             ; "disposition", `String disposition
              ]));
       Keeper_tool_call_log.set_truncation_info
         ~keeper_name:meta.name
@@ -182,25 +187,88 @@ let execute_with_observers
         ~tool_name:name
         ~start_time:t0
         ~data:final_result_json
+        ?metadata:producer_metadata
         ()
+    | Tool_result.Deferred () ->
+      Option.iter
+        (Keeper_tool_emission_hook.capture_typed_result_for_keeper
+           ~keeper_name:meta.name)
+        producer_data;
+      Keeper_registry.record_tool_use
+        ~base_path:config.base_path
+        meta.name
+        ~tool_name:name
+        ~disposition:result.disposition;
+      record_keeper_internal_tool_call
+        ~tool_name:name
+        ~disposition:result.disposition
+        ~duration_ms;
+      let final_result_json = normalize_tool_result result in
+      let final_result = Yojson.Safe.to_string final_result_json in
+      let observed_result =
+        Tool_result.make_deferred
+          ~tool_name:name
+          ~start_time:t0
+          ~data:final_result_json
+          ?metadata:producer_metadata
+          ()
+      in
+      Tool_dispatch.run_dispatch_observers
+        Dispatch_outcome.Handled (Some observed_result);
+      let ts = Time_compat.now () in
+      broadcast_keeper_tool_call_event
+        ~keeper_name:meta.name
+        ~tool_name:name
+        ~duration_ms
+        ~disposition:result.disposition
+        ~extra_fields:
+          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
+        ~site:"deferred"
+        ~ts
+        ();
+      append_tool_exec_decision_log
+        ~config
+        ~keeper_name:meta.name
+        ~site:"deferred"
+        (`Assoc
+            [ "ts_unix", `Float ts
+            ; "event", `String "tool_exec"
+            ; "keeper_name", `String meta.name
+            ; "tool", `String name
+            ; "duration_ms", `Int duration_ms
+            ; "result_bytes", `Int (String.length final_result)
+            ; "disposition", `String disposition
+            ]);
+      Keeper_tool_call_log.set_truncation_info
+        ~keeper_name:meta.name
+        ~original_bytes:(String.length final_result)
+        ();
+      observed_result
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     let ts = Time_compat.now () in
     let duration_ms = int_of_float ((ts -. t0) *. 1000.0) in
     let error_text = Printexc.to_string exn in
+    let exception_disposition = Keeper_tool_execution.failure error_text in
+    let disposition =
+      Tool_result.string_of_disposition exception_disposition.disposition
+    in
     Keeper_registry.record_tool_use
       ~base_path:config.base_path
       meta.name
       ~tool_name:name
-      ~success:false;
-    record_keeper_internal_tool_call ~tool_name:name ~success:false ~duration_ms;
+      ~disposition:exception_disposition.disposition;
+    record_keeper_internal_tool_call
+      ~tool_name:name
+      ~disposition:exception_disposition.disposition
+      ~duration_ms;
     (* Tool-call observability via OAS Event_bus. See above. *)
     broadcast_keeper_tool_call_event
       ~keeper_name:meta.name
       ~tool_name:name
       ~duration_ms
-      ~success:false
+      ~disposition:exception_disposition.disposition
       ~error_text
       ~extra_fields:
         (tool_io_preview_fields ~tool_name:name ~input ~output:error_text ())
@@ -214,7 +282,7 @@ let execute_with_observers
       ();
     Log.Keeper.error "%s" msg;
     let normalized_exn_json =
-      normalize_tool_result ~success:false ~data:None error_text
+      normalize_tool_result exception_disposition
     in
     let normalized_exn = Yojson.Safe.to_string normalized_exn_json in
     append_tool_exec_decision_log
@@ -228,7 +296,7 @@ let execute_with_observers
           ; "tool", `String name
           ; "duration_ms", `Int duration_ms
           ; "result_bytes", `Int (String.length normalized_exn)
-          ; "ok", `Bool false
+          ; "disposition", `String disposition
           ; "error", `String error_text
           ]);
     Keeper_tool_call_log.set_truncation_info

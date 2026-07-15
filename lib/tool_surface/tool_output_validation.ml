@@ -57,13 +57,17 @@ let transform_result (result : Tool_result.result) : Tool_result.result =
     | _ -> None
   in
   match result with
-  | Ok ok ->
-    (match cap_data ok.data with
-     | Some data -> Ok { ok with data }
+  | Tool_result.Completed output ->
+    (match cap_data output.data with
+     | Some data -> Tool_result.Completed { output with data }
      | None -> result)
-  | Error err ->
+  | Tool_result.Deferred output ->
+    (match cap_data output.data with
+     | Some data -> Tool_result.Deferred { output with data }
+     | None -> result)
+  | Tool_result.Failed err ->
     (match cap_data err.data with
-     | Some data -> Error { err with data }
+     | Some data -> Tool_result.Failed { err with data }
      | None -> result)
 
 (* ── Installation ───────────────────────────────────────────── *)

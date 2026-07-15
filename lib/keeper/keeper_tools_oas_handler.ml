@@ -40,27 +40,21 @@ let make_keeper_tool_handler
   fun raw_input ->
     let t0 = Time_compat.now () in
     let handle_validation_error ~input validation_result =
-      let raw_result = Tool_result.message validation_result in
-      let producer_data =
-        match Tool_result.data validation_result with
-        | `String _ -> None
-        | data -> Some data
-      in
       let output_data =
-        normalize_tool_result
-          ~success:false
-          ~data:producer_data
-          raw_result
+        validation_result
+        |> Keeper_tool_execution.of_tool_result
+        |> normalize_tool_result
       in
       let output_text = Yojson.Safe.to_string output_data in
       let duration_ms = 0 in
+      let disposition = Tool_result.string_of_disposition validation_result in
       let ts = Time_compat.now () in
       let error_text = Tool_result.message validation_result in
       Keeper_registry.record_tool_use
         ~base_path:config.base_path
         meta.name
         ~tool_name:name
-        ~success:false;
+        ~disposition:validation_result;
       (* OAS input validation runs outside guarded_dispatch, so emit the
          shared dispatch observers explicitly with the same shape as the
          exec error path ([Handled] with the error result).  The rejection
@@ -76,7 +70,7 @@ let make_keeper_tool_handler
         ~keeper_name:meta.name
         ~tool_name:name
         ~duration_ms
-        ~success:false
+        ~disposition:validation_result
         ~error_text
         ~extra_fields:
           (tool_io_preview_fields ~tool_name:name ~input ~output:output_text ())
@@ -98,7 +92,7 @@ let make_keeper_tool_handler
             ; "tool", `String name
             ; "duration_ms", `Int duration_ms
             ; "result_bytes", `Int (String.length output_text)
-            ; "ok", `Bool false
+            ; "disposition", `String disposition
             ; "error", `String error_text
             ]);
       Tool_result.make_err

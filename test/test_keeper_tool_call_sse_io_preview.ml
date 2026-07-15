@@ -84,6 +84,26 @@ let test_sensitive_named_tool_preserves_redacted_io () =
     (member "tool_args" json |> member "token" |> Yojson.Safe.Util.to_string)
 ;;
 
+let test_tool_call_event_uses_canonical_disposition () =
+  let event =
+    Keeper_tools_oas_handler_telemetry.keeper_tool_call_event_json
+      ~keeper_name:"sangsu"
+      ~tool_name:"keeper_file_write"
+      ~duration_ms:12
+      ~disposition:(Tool_result.Deferred ())
+      ~ts:1.0
+      ()
+  in
+  Alcotest.(check (option string))
+    "deferred disposition preserved"
+    (Some "deferred")
+    (string_member "disposition" event);
+  Alcotest.(check (option bool))
+    "legacy success bool absent"
+    None
+    (bool_member "success" event)
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_call_sse_io_preview"
@@ -96,6 +116,10 @@ let () =
             "preserves redacted sensitive-named tool io"
             `Quick
             test_sensitive_named_tool_preserves_redacted_io
+        ; Alcotest.test_case
+            "preserves canonical disposition"
+            `Quick
+            test_tool_call_event_uses_canonical_disposition
         ] )
     ]
 ;;

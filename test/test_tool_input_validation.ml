@@ -73,7 +73,7 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
         Agent_sdk.Tool_input_validation.format_errors ~tool_name errors
       in
       Reject
-        (Error
+        (Tool_result.Failed
            { Tool_result.class_ = Tool_result.Runtime_failure
            ; message = msg
            ; data = `Assoc [("error", `String msg)]

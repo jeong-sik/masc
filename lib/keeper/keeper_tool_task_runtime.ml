@@ -59,18 +59,18 @@ let keeper_tool_result_json
   let has_json_field name fields =
     List.exists (fun (field, _) -> String.equal field name) fields
   in
-  let ok = Tool_result.is_success result in
   let message = Tool_result.message result in
+  let disposition_field =
+    "disposition", `String (Tool_result.string_of_disposition result)
+  in
   let failure_class_fields =
-    match Tool_result.failure_class result with
-    | Some cls when not ok ->
+    match result with
+    | Tool_result.Failed { class_ = cls; _ } ->
       [
         ( "failure_class"
         , `String (Tool_result.tool_failure_class_to_string cls) );
       ]
-    | Some _
-    | None ->
-      []
+    | Tool_result.Completed _ | Tool_result.Deferred _ -> []
   in
   let typed_outcome_fields =
     match typed_outcome with
@@ -84,14 +84,17 @@ let keeper_tool_result_json
         (fun acc (key, value) ->
            if has_json_field key acc then acc else acc @ [ key, value ])
         payload_fields
-        (failure_class_fields @ typed_outcome_fields)
+        (disposition_field :: failure_class_fields @ typed_outcome_fields)
     in
     Yojson.Safe.to_string (`Assoc payload_fields)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
     Yojson.Safe.to_string
       (`Assoc
-         ([ "ok", `Bool ok
-          ; (if ok then "result" else "error"), `String message
+         ([ disposition_field
+          ; (match result with
+             | Tool_result.Completed _ | Tool_result.Deferred _ ->
+               "result", `String message
+             | Tool_result.Failed _ -> "error", `String message)
           ]
           @ failure_class_fields
           @ typed_outcome_fields))
@@ -841,9 +844,10 @@ let handle_keeper_task_tool_with_outcome
       let payload =
         keeper_tool_result_json
           ~typed_outcome:
-            (if Tool_result.is_success transition_result
-             then Some Keeper_tool_outcome.Progress
-             else
+            (match transition_result with
+             | Tool_result.Completed _ -> Some Keeper_tool_outcome.Progress
+             | Tool_result.Deferred _ -> None
+             | Tool_result.Failed _ ->
                (* RFC-0239 / audit D1: a rejected completion (wrong owner, stale
                   or invalid transition) is not progress. Emit a typed Error so the
                   no-progress detector demotes it instead of counting the tool name
@@ -854,8 +858,11 @@ let handle_keeper_task_tool_with_outcome
           transition_result
       in
       match transition_result with
-      | Ok _ -> Keeper_tool_execution.success payload
-      | Error { class_; _ } -> Keeper_tool_execution.failure ~class_ payload)
+      | Tool_result.Completed _ -> Keeper_tool_execution.success payload
+      | Tool_result.Deferred { metadata; _ } ->
+        Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
+      | Tool_result.Failed { class_; _ } ->
+        Keeper_tool_execution.failure ~class_ payload)
 ;;
 
 let handle_keeper_task_tool ~config ~meta ~name ~args =

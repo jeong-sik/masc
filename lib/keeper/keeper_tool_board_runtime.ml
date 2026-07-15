@@ -117,11 +117,11 @@ let handle_keeper_board_tool_with_outcome
         (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
         board_args
     in
-    let ok = Tool_result.is_success result in
+    let disposition = Tool_result.string_of_disposition result in
     let msg = Tool_result.message result in
     Log.Keeper.info
-      "handle_tool result: ok=%b msg=%s"
-      ok
+      "handle_tool result: disposition=%s msg=%s"
+      disposition
       (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
     Keeper_tool_execution.of_tool_result result
   | Some Keeper_tool_name.Board_post_get ->

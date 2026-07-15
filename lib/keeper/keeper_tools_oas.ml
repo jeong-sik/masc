@@ -1,6 +1,6 @@
 (** Keeper_tools_oas — Wrap keeper tools as OAS Tool.t for Agent.run().
 
-    Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
+    Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] dispatch
     to [Agent_sdk.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
 
     Tool execution reads current context from [ctx_snapshot] (immutable),
@@ -22,22 +22,13 @@ let tool_usage_for_keeper keeper_name : (string * Keeper_types.tool_call_entry) 
   Keeper_registry_lookup.tool_usage_of_by_name keeper_name
 ;;
 
-let tool_usage_json keeper_name : Yojson.Safe.t =
-  `List
-    (List.map
-       (fun (name, e) ->
-          `Assoc
-            [ "tool_name", `String name
-            ; "count", `Int e.Keeper_types.count
-            ; "successes", `Int e.Keeper_types.successes
-            ; "failures", `Int e.Keeper_types.failures
-            ; "last_used_at", `Float e.Keeper_types.last_used_at
-            ])
-       (tool_usage_for_keeper keeper_name))
-;;
-
-let record_keeper_internal_tool_call ~tool_name ~success ~duration_ms =
-  Tool_registry.record_call ~source:Agent_internal ~tool_name ~success ~duration_ms ()
+let record_keeper_internal_tool_call ~tool_name ~disposition ~duration_ms =
+  Tool_registry.record_call
+    ~source:Agent_internal
+    ~tool_name
+    ~disposition
+    ~duration_ms
+    ()
 ;;
 
 let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
@@ -57,7 +48,7 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
 
 (* Build OAS Tool.t list from keeper's allowed tools.
 
-   Each tool delegates to [execute_keeper_tool_call] with the current
+   Each tool delegates to [execute_keeper_tool_call_with_outcome] with the current
    [ctx_snapshot] value. Tools that raise exceptions return error results
    instead of crashing the agent loop.
 
@@ -71,20 +62,27 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
     producer, can become structured JSON.  No field name or string content can
     alter success/failure or synthesize metadata. *)
 let normalize_tool_result
-      ~(success : bool)
-      ~(data : Yojson.Safe.t option)
-      (raw : string)
+      (execution : Keeper_tool_execution.t)
   : Yojson.Safe.t
   =
-  if success
-  then
+  let raw = execution.Keeper_tool_execution.raw_output in
+  let data = execution.data in
+  let disposition = Tool_result.string_of_disposition execution.disposition in
+  match execution.disposition with
+  | Tool_result.Completed () ->
     `Assoc
-      [ "ok", `Bool true
+      [ "disposition", `String disposition
       ; "result", Option.value ~default:(`String raw) data
       ]
-  else
+  | Tool_result.Deferred () ->
     `Assoc
-      [ "ok", `Bool false
+      [ "disposition", `String disposition
+      ; "result", Option.value ~default:(`String raw) data
+      ]
+  | Tool_result.Failed class_ ->
+    `Assoc
+      [ "disposition", `String disposition
+      ; "failure_class", `String (Tool_result.tool_failure_class_to_string class_)
       ; "error", `String raw
       ; "detail", Option.value ~default:`Null data
       ]

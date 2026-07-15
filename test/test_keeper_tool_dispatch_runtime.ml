@@ -1,6 +1,7 @@
 open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
+module KTE = Masc.Keeper_tool_execution
 module KES = Masc.Keeper_tool_shared_runtime
 module KTD = Masc.Keeper_tool_descriptor
 module Workspace = Masc.Workspace
@@ -137,17 +138,19 @@ let parse_json raw =
   | Yojson.Json_error err -> fail ("invalid json: " ^ err)
 
 let outcome_label = function
-  | `Success -> "success"
-  | `Failure _ -> "failure"
+  | Tool_result.Completed () -> "success"
+  | Tool_result.Deferred () -> "deferred"
+  | Tool_result.Failed _ -> "failure"
 
 let tool_call_detail_of_execution tool_name
       (result : KET.executed_tool_result)
   : Masc.Keeper_agent_result.tool_call_detail
   =
   let execution_outcome =
-    match result.outcome with
-    | `Success -> Tool_result.Ok
-    | `Failure _ -> Tool_result.Error
+    match result.disposition with
+    | Tool_result.Completed () -> Tool_result.Ok
+    | Tool_result.Deferred () -> Tool_result.Ok
+    | Tool_result.Failed _ -> Tool_result.Error
   in
   { tool_name
   ; provider = "test"
@@ -190,15 +193,15 @@ let json_string_field ~default field json =
   |> Option.value ~default
 
 let check_success_result label result =
-  if not (String.equal "success" (outcome_label result.KET.outcome))
+  if not (String.equal "success" (outcome_label result.KTE.disposition))
   then
     fail
       (Printf.sprintf
          "%s expected success, got %s: %s"
          label
-         (outcome_label result.KET.outcome)
-         result.KET.raw_output);
-  let json = Yojson.Safe.from_string result.KET.raw_output in
+         (outcome_label result.KTE.disposition)
+         result.KTE.raw_output);
+  let json = Yojson.Safe.from_string result.KTE.raw_output in
   check bool (label ^ " ok") true (json_bool_field ~default:false "ok" json);
   json
 
@@ -222,7 +225,7 @@ let test_public_read_rejects_unsupported_range_fields () =
           ()
       in
       check string "runtime outcome" "failure"
-        (match result.outcome with `Success -> "success" | `Failure _ -> "failure");
+        (outcome_label result.disposition);
       let json =
         match result.data with
         | Some data -> data
@@ -266,7 +269,7 @@ let test_public_read_rejects_offset_without_enrichment () =
                ])
           ()
       in
-      check string "runtime outcome" "failure" (outcome_label result.outcome);
+      check string "runtime outcome" "failure" (outcome_label result.disposition);
       let json =
         match result.data with
         | Some data -> data
@@ -555,7 +558,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
           ()
       in
       check string "missing file outcome" "failure"
-        (match result.outcome with `Success -> "success" | `Failure _ -> "failure");
+        (outcome_label result.disposition);
       let json = Yojson.Safe.from_string result.raw_output in
       check string "input path preserved" "config/runtime.toml"
         Yojson.Safe.Util.(member "input_file_path" json |> to_string);
@@ -567,15 +570,16 @@ let test_execute_with_outcome_missing_file_is_failure () =
         Yojson.Safe.Util.(member "available_repos" json = `Null))
 
 let check_publication_write_rejected label result =
-  check string (label ^ " outcome") "failure" (outcome_label result.KET.outcome);
-  (match result.outcome with
-   | `Failure Tool_result.Runtime_failure -> ()
-   | `Failure failure_class ->
+  check string (label ^ " outcome") "failure" (outcome_label result.KTE.disposition);
+  (match result.disposition with
+   | Tool_result.Failed Tool_result.Runtime_failure -> ()
+   | Tool_result.Failed failure_class ->
      failf
        "%s wrong failure class: %s"
        label
        (Tool_result.tool_failure_class_to_string failure_class)
-   | `Success -> fail (label ^ " unexpectedly succeeded"));
+   | Tool_result.Completed () -> fail (label ^ " unexpectedly succeeded")
+   | Tool_result.Deferred () -> fail (label ^ " unexpectedly deferred"));
   check string
     (label ^ " concise message")
     "publication recovery registry is still initializing"
@@ -616,15 +620,16 @@ let check_publication_recovery_failure
       ~target
       result
   =
-  check string (label ^ " outcome") "failure" (outcome_label result.KET.outcome);
-  (match result.outcome with
-   | `Failure Tool_result.Runtime_failure -> ()
-   | `Failure failure_class ->
+  check string (label ^ " outcome") "failure" (outcome_label result.KTE.disposition);
+  (match result.disposition with
+   | Tool_result.Failed Tool_result.Runtime_failure -> ()
+   | Tool_result.Failed failure_class ->
      failf
        "%s returned wrong failure class: %s"
        label
        (Tool_result.tool_failure_class_to_string failure_class)
-   | `Success -> fail (label ^ " unexpectedly wrote a file"));
+   | Tool_result.Completed () -> fail (label ^ " unexpectedly wrote a file")
+   | Tool_result.Deferred () -> fail (label ^ " unexpectedly deferred"));
   check string (label ^ " stable message") expected_message result.raw_output;
   let data =
     match result.data with
@@ -698,7 +703,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
        check string
          "non-file tool continues"
          "success"
-         (outcome_label time_result.outcome);
+         (outcome_label time_result.disposition);
        let read_result =
          execute
            ~name:"Read"
@@ -707,7 +712,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
        check string
          "read continues"
          "success"
-         (outcome_label read_result.outcome);
+         (outcome_label read_result.disposition);
        check int
          "non-file and read-only tools perform no recovery acquisition"
          0
@@ -725,7 +730,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
        check string
          "append to an existing file remains recovery-independent"
          "success"
-         (outcome_label append_existing.outcome);
+         (outcome_label append_existing.disposition);
        check string
          "append publishes exact bytes while recovery initializes"
          (untouched ^ " + appended")
@@ -746,7 +751,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
        check string
          "append-create remains recovery-independent"
          "success"
-         (outcome_label append_created.outcome);
+         (outcome_label append_created.disposition);
        check string
          "append-create publishes exact bytes while recovery initializes"
          "created by append"
@@ -767,7 +772,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
        check string
          "invalid Write is rejected"
          "failure"
-         (outcome_label invalid_write.outcome);
+         (outcome_label invalid_write.disposition);
        check int "invalid Write performs no recovery acquisition" 0
          (Atomic.get provider_reads);
        let write_path = Filename.concat config.base_path "must-not-exist.txt" in
@@ -856,7 +861,7 @@ let test_manual_gate_defers_publication_writes_before_recovery () =
        List.iter
          (fun result ->
             check string "Manual Gate outcome" "failure"
-              (outcome_label result.KET.outcome);
+              (outcome_label result.KTE.disposition);
             check string
               "Manual Gate returns typed defer"
               "gate_deferred"
@@ -904,13 +909,14 @@ let test_publication_initialization_crash_is_redacted () =
                 ])
            ()
        in
-       (match result.outcome with
-        | `Failure Tool_result.Runtime_failure -> ()
-        | `Failure failure_class ->
+       (match result.disposition with
+        | Tool_result.Failed Tool_result.Runtime_failure -> ()
+        | Tool_result.Failed failure_class ->
           failf
             "crashed initialization returned wrong failure class: %s"
             (Tool_result.tool_failure_class_to_string failure_class)
-        | `Success -> fail "crashed initialization unexpectedly wrote a file");
+        | Tool_result.Completed () -> fail "crashed initialization unexpectedly wrote a file"
+        | Tool_result.Deferred () -> fail "crashed initialization unexpectedly deferred");
        check string
          "crash message is concise and redacted"
          "publication recovery registry initialization crashed"
@@ -1155,7 +1161,7 @@ let test_publication_write_rereads_live_provider_after_initialization () =
        check string
          "next Write uses available provider"
          "success"
-         (outcome_label available.outcome);
+         (outcome_label available.disposition);
        check string "next Write published exact bytes" "available" (read_file path);
        check int "provider was reread once for each Write" 2
          (Atomic.get provider_reads);
@@ -1178,7 +1184,7 @@ let test_publication_write_rereads_live_provider_after_initialization () =
        check string
          "next Edit uses available provider"
          "success"
-         (outcome_label edit.outcome);
+         (outcome_label edit.disposition);
        check string "next Edit published exact bytes" "edited" (read_file path);
        check int "Edit performs exactly one additional provider read" 3
          (Atomic.get provider_reads))
@@ -1357,7 +1363,7 @@ let test_real_publication_release_failure_preserves_effect_truth () =
        let execute content = execute_at target content in
        let warmup = execute "warmup" in
        check string "warmup Write succeeds" "success"
-         (outcome_label warmup.outcome);
+         (outcome_label warmup.disposition);
        let release_fault =
          match
            Recovery_test.lane_scope_release_fault
@@ -1374,13 +1380,14 @@ let test_real_publication_release_failure_preserves_effect_truth () =
          Recovery_test.with_lane_scope_release_fault release_fault (fun () ->
            execute "committed")
        in
-       (match committed.outcome with
-        | `Failure Tool_result.Runtime_failure -> ()
-        | `Failure failure_class ->
+       (match committed.disposition with
+        | Tool_result.Failed Tool_result.Runtime_failure -> ()
+        | Tool_result.Failed failure_class ->
           failf
             "cleanup failure received wrong class: %s"
             (Tool_result.tool_failure_class_to_string failure_class)
-        | `Success -> fail "cleanup failure was reported as success");
+        | Tool_result.Completed () -> fail "cleanup failure was reported as success"
+        | Tool_result.Deferred () -> fail "cleanup failure was reported as deferred");
        check string
          "committed effect and cleanup failure are both explicit"
          "filesystem publication committed, but publication recovery lane cleanup failed"
@@ -1410,7 +1417,7 @@ let test_real_publication_release_failure_preserves_effect_truth () =
          (read_file target);
        let recovered = execute "recovered" in
        check string "same Keeper lane recovers on the next Write" "success"
-         (outcome_label recovered.outcome);
+         (outcome_label recovered.disposition);
        check string "recovered Write publishes exact bytes" "recovered"
          (read_file target);
        let write_fault =
@@ -1424,13 +1431,14 @@ let test_real_publication_release_failure_preserves_effect_truth () =
            Recovery_test.with_replace_dispatch_fault write_fault (fun () ->
              execute "replaced-before-failure"))
        in
-       (match failed_after_replace.outcome with
-        | `Failure Tool_result.Runtime_failure -> ()
-        | `Failure failure_class ->
+       (match failed_after_replace.disposition with
+        | Tool_result.Failed Tool_result.Runtime_failure -> ()
+        | Tool_result.Failed failure_class ->
           failf
             "post-replace cleanup failure received wrong class: %s"
             (Tool_result.tool_failure_class_to_string failure_class)
-        | `Success -> fail "post-replace cleanup failure was reported as success");
+        | Tool_result.Completed () -> fail "post-replace cleanup failure was reported as success"
+        | Tool_result.Deferred () -> fail "post-replace cleanup failure was reported as deferred");
        check string
          "post-replace callback and cleanup failures remain explicit"
          "filesystem publication produced an observable filesystem effect before the publication callback and recovery lane cleanup both failed"
@@ -1471,7 +1479,7 @@ let test_real_publication_release_failure_preserves_effect_truth () =
        check string
          "same Keeper lane recovers after callback and cleanup failure"
          "success"
-         (outcome_label recovered_after_callback_failure.outcome);
+         (outcome_label recovered_after_callback_failure.disposition);
        let unknown_fault =
          Recovery_test.remove_staging_payload_before_publish ()
        in
@@ -1518,7 +1526,7 @@ let test_real_publication_release_failure_preserves_effect_truth () =
        check string
          "same Keeper lane recovers after indeterminate target observation"
          "success"
-         (outcome_label recovered_after_unknown.outcome);
+         (outcome_label recovered_after_unknown.disposition);
        let created_parent =
          Filename.concat config.base_path "created-parent-effect"
        in
@@ -1623,7 +1631,7 @@ let test_real_directory_release_failure_preserves_effect_truth () =
        let warmup_target = Filename.concat config.base_path "lane-warmup.txt" in
        let warmup = execute warmup_target "warmup" in
        check string "directory matrix warmup succeeds" "success"
-         (outcome_label warmup.outcome);
+         (outcome_label warmup.disposition);
        let release_fault =
          match
            Recovery_test.lane_scope_release_fault
@@ -1659,14 +1667,15 @@ let test_real_directory_release_failure_preserves_effect_truth () =
                fault
                (fun () -> execute target "must-not-reach-target"))
          in
-         (match result.outcome with
-          | `Failure Tool_result.Runtime_failure -> ()
-          | `Failure failure_class ->
+         (match result.disposition with
+          | Tool_result.Failed Tool_result.Runtime_failure -> ()
+          | Tool_result.Failed failure_class ->
             failf
               "%s returned wrong failure class: %s"
               label
               (Tool_result.tool_failure_class_to_string failure_class)
-          | `Success -> failf "%s unexpectedly succeeded" label);
+          | Tool_result.Completed () -> failf "%s unexpectedly succeeded" label
+          | Tool_result.Deferred () -> failf "%s unexpectedly deferred" label);
          check string (label ^ " message") expected_message result.raw_output;
          let data =
            match result.data with
@@ -1704,7 +1713,7 @@ let test_real_directory_release_failure_preserves_effect_truth () =
          let result = execute warmup_target content in
          check string "same Keeper lane recovers between directory cases"
            "success"
-           (outcome_label result.outcome)
+           (outcome_label result.disposition)
        in
        run_case
          ~label:"directory-unchanged"
@@ -1752,7 +1761,7 @@ let test_tool_search_without_session_searcher_is_unavailable () =
           ~input:(`Assoc [])
           ()
       in
-      check string "search outcome" "failure" (outcome_label result.outcome);
+      check string "search outcome" "failure" (outcome_label result.disposition);
       let json = Yojson.Safe.from_string result.raw_output in
       check string "explicit unavailable error" "tool_search_unavailable"
         Yojson.Safe.Util.(member "error" json |> to_string);
@@ -1781,7 +1790,7 @@ let test_tool_search_uses_exact_injected_searcher () =
           ~input:(`Assoc [])
           ()
       in
-      check string "search outcome" "success" (outcome_label result.outcome);
+      check string "search outcome" "success" (outcome_label result.disposition);
       check bool "injected catalog provider called" true !observed;
       let json = Yojson.Safe.from_string result.raw_output in
       check string "injected result preserved" "injected-result"
@@ -1887,7 +1896,7 @@ let test_keeper_task_claim_accepts_specific_task_id () =
           ~input:(`Assoc [ "task_id", `String "task-002" ])
           ()
       in
-      check string "specific claim outcome" "success" (outcome_label result.outcome);
+      check string "specific claim outcome" "success" (outcome_label result.disposition);
       let json = Yojson.Safe.from_string result.raw_output in
       let claimed_task = Yojson.Safe.Util.member "claimed_task" json in
       check string "claimed requested task" "task-002"
@@ -1925,7 +1934,7 @@ let test_unknown_tool_returns_exact_error () =
           ~input:(`Assoc [ "pattern", `String "*.ml" ])
           ()
       in
-      check string "runtime outcome" "failure" (outcome_label result.outcome);
+      check string "runtime outcome" "failure" (outcome_label result.disposition);
       let json = Yojson.Safe.from_string result.raw_output in
       check string "exact unknown tool error" "unknown_tool"
         Yojson.Safe.Util.(member "error" json |> to_string);
@@ -1969,7 +1978,7 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
               ()
           in
           check string "web search outcome" "success"
-            (outcome_label result.outcome);
+            (outcome_label result.disposition);
           let json = parse_json result.raw_output in
           let result_json = Yojson.Safe.Util.member "result" json in
           check string "status" "ok"
@@ -2040,7 +2049,7 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
               ()
           in
           check string "web fetch alias outcome" "success"
-            (outcome_label result.outcome);
+            (outcome_label result.disposition);
           let json = parse_json result.raw_output in
           check string "status" "ok"
             Yojson.Safe.Util.(member "status" json |> to_string);
@@ -2087,7 +2096,7 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
               ()
           in
           check string "web fetch local outcome" "success"
-            (outcome_label result.outcome);
+            (outcome_label result.disposition);
           ()))
 
 let test_manual_gate_defers_web_tools_before_network () =
@@ -2138,7 +2147,7 @@ let test_manual_gate_defers_web_tools_before_network () =
               List.iter
                 (fun result ->
                    check string "Manual Gate outcome" "failure"
-                     (outcome_label result.KET.outcome);
+                     (outcome_label result.KTE.disposition);
                    check string
                      "Manual Gate returns typed defer"
                      "gate_deferred"
@@ -2165,18 +2174,6 @@ let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
          "expected runtime_failure, got %s"
          (Tool_result.tool_failure_class_to_string cls))
   | None -> fail "expected failure_class"
-
-let test_tool_result_or_error_preserves_failure_class () =
-  let result =
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name:"masc_transition"
-      ~start_time:(Unix.gettimeofday ())
-      workflow_rejection_message
-  in
-  let json = Yojson.Safe.from_string (KES.tool_result_or_error result) in
-  check string "failure_class" "workflow_rejection"
-    Yojson.Safe.Util.(member "failure_class" json |> to_string)
 
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
@@ -2380,7 +2377,7 @@ let test_success_payload_with_error_data_stays_success () =
           ())
   in
   check string "producer success remains success" "success"
-    (outcome_label result.outcome);
+    (outcome_label result.disposition);
   check string "opaque success payload preserved" raw result.raw_output
 ;;
 
@@ -2398,7 +2395,7 @@ let test_malformed_json_looking_success_stays_success () =
           ())
   in
   check string "producer success ignores payload syntax" "success"
-    (outcome_label result.outcome);
+    (outcome_label result.disposition);
   check string "malformed-looking payload preserved" raw result.raw_output
 ;;
 
@@ -2417,13 +2414,14 @@ let test_only_typed_producer_failure_is_failure () =
           raw)
   in
   check string "producer failure remains failure" "failure"
-    (outcome_label result.outcome);
+    (outcome_label result.disposition);
   check string "success-looking failure payload preserved" raw result.raw_output;
-  (match result.outcome with
-   | `Failure class_ ->
+  (match result.disposition with
+   | Tool_result.Failed class_ ->
      check string "typed failure class preserved" "workflow_rejection"
        (Tool_result.tool_failure_class_to_string class_)
-   | `Success -> fail "expected typed producer failure")
+   | Tool_result.Completed () -> fail "expected typed producer failure"
+   | Tool_result.Deferred () -> fail "expected typed producer failure, got deferred")
 ;;
 
 let test_registered_tool_dispatch_without_masc_prefix () =
@@ -2460,13 +2458,14 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
       with
       | None -> fail "expected registered keeper tool dispatch"
       | Some execution ->
-        (match execution.outcome with
-         | Masc.Keeper_tool_execution.Failed Tool_result.Workflow_rejection -> ()
-         | Masc.Keeper_tool_execution.Failed class_ ->
+        (match execution.disposition with
+         | Tool_result.Failed Tool_result.Workflow_rejection -> ()
+         | Tool_result.Failed class_ ->
            fail
              ("unexpected failure class: "
               ^ Tool_result.tool_failure_class_to_string class_)
-         | Masc.Keeper_tool_execution.Succeeded -> fail "expected typed failure");
+         | Tool_result.Completed () -> fail "expected typed failure"
+         | Tool_result.Deferred () -> fail "expected typed failure, got deferred");
         check bool "error message preserved" true
           (contains_substring execution.raw_output "Self-approval"))
 
@@ -2641,8 +2640,6 @@ let () =
         test_manual_gate_defers_web_tools_before_network;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
-      test_case "tool_result_or_error preserves failure_class" `Quick
-        test_tool_result_or_error_preserves_failure_class;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "OAS handler threads Eio context to keeper dispatch" `Quick

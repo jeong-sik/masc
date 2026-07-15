@@ -192,6 +192,7 @@ export interface SSEEvent {
   // Keeper tool call / tool skip fields
   tool_name?: string
   duration_ms?: number
+  disposition?: 'completed' | 'deferred' | 'failed'
   success?: boolean
   error_text?: string
   tool_args?: unknown

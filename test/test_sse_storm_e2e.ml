@@ -317,12 +317,6 @@ let ensure_dir path =
   else
     Unix.mkdir path 0o755
 
-let find_repo_file relative =
-  let roots = [ "."; ".."; "../.."; "../../.."; "../../../.." ] in
-  roots
-  |> List.map (fun root -> Filename.concat root relative)
-  |> List.find_opt Sys.file_exists
-
 let runtime_seed =
   {|
 [runtime]
@@ -346,6 +340,29 @@ is-default = true
 max-concurrent = 1
 |}
 
+(* Pinned OAS (v0.212.x) lookup identity: the declared provider gate resolves
+   (provider_name, bare id_prefix) rows by exact equality with no bare-row
+   fallback, so the synthetic [providers.sse_storm] table needs its own
+   provider-scoped catalog row. Seeded next to runtime.toml instead of
+   borrowing the repo catalog fork. *)
+let oas_catalog_seed =
+  {|
+[[models]]
+id_prefix = "deepseek-v4-flash"
+provider_name = "sse_storm"
+base = "openai_chat"
+max_context_tokens = 32768
+supports_tools = true
+supports_native_streaming = true
+|}
+
+let write_file_if_absent path contents =
+  if not (Sys.file_exists path) then
+    let oc = open_out path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc contents)
+
 let seed_server_config ~base_path =
   let masc_dir = Filename.concat base_path ".masc" in
   let config_dir = Filename.concat masc_dir "config" in
@@ -354,12 +371,10 @@ let seed_server_config ~base_path =
   List.iter
     (fun name -> ensure_dir (Filename.concat config_dir name))
     [ "keepers"; "personas"; "prompts" ];
-  let runtime_dst = Filename.concat config_dir "runtime.toml" in
-  if not (Sys.file_exists runtime_dst) then
-    let oc = open_out runtime_dst in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc runtime_seed)
+  write_file_if_absent (Filename.concat config_dir "runtime.toml") runtime_seed;
+  write_file_if_absent
+    (Filename.concat config_dir "oas-models.toml")
+    oas_catalog_seed
 
 let with_server f =
   let exe = find_main_eio_exe () in
@@ -374,9 +389,9 @@ let with_server f =
   Unix.mkdir base_path 0o755;
   seed_server_config ~base_path;
   let oas_model_catalog =
-    match find_repo_file "oas-models.toml" with
-    | Some path -> path
-    | None -> fail "oas-models.toml fixture not found"
+    Filename.concat
+      (Filename.concat (Filename.concat base_path ".masc") "config")
+      "oas-models.toml"
   in
   let log_fd =
     Unix.openfile log_file [Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC] 0o644

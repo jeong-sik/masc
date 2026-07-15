@@ -1,27 +1,339 @@
-# MASC runtime seed model catalog for OAS capability lookup.
-# Provenance: the canonical full catalog lives in ../oas/models.toml.
+# ═══════════════════════════════════════════════════════════════════════════
+# MASC repo OAS model catalog (pin-synced fork)
 #
-# OAS discovers this file by walking cwd parents for oas-models.toml. This is a
-# runtime-binding projection scoped to models referenced by config/runtime.toml,
-# not a full mirror of the canonical OAS models.toml catalog. Provider/model
-# capability interpretation remains in OAS; provider-qualified rows here exist
-# to validate MASC runtime bindings without redefining global bare-model
-# semantics.
+# Content = the pinned OAS release's models.toml (the exact file the pinned
+# binary embeds) + the masc deployment overlay rows appended at the bottom.
+# Row identity follows the pinned lookup semantics (oas v0.212.x): a
+# provider-scoped row is (provider_name = "<provider table name>",
+# id_prefix = "<bare model id>") matched by exact equality — provider-
+# qualified id_prefix strings ("provider/model") are no longer lookup keys.
+#
+# Regenerate on every OAS pin bump (scripts/oas-agent-sdk-pin.sh):
+#   git -C <oas-checkout> show v<OAS_AGENT_SDK_MIN_VERSION>:models.toml \
+#     > oas-models.toml
+#   then re-append the deployment overlay block at the bottom of this file.
+# Removal of this fork entirely (embedded catalog + config-root overlay,
+# RFC-0342 D1) is the tracked follow-up; until then this file must not drift
+# from the pin.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Unified Model Catalog Configuration
+
+# Anthropic Models
+# Current Claude model limits and thinking modes are sourced from the official
+# Claude Platform model overview / adaptive-thinking docs (checked 2026-07-10).
+# Static pricing rows use standard rates; time-limited promotional pricing is
+# intentionally not encoded as a model capability or runtime control.
+[[models]]
+id_prefix = "claude-fable-5"
+base = "anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+
+[[models]]
+id_prefix = "claude-mythos-5"
+base = "anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+
+[[models]]
+id_prefix = "claude-mythos-preview"
+base = "anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+
+[[models]]
+id_prefix = "claude-opus-4-8"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_only"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 5.0
+output_per_million = 25.0
+
+[[models]]
+id_prefix = "claude-opus-4-7"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_only"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 5.0
+output_per_million = 25.0
+
+[[models]]
+id_prefix = "claude-sonnet-5"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_default"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 3.0
+output_per_million = 15.0
+
+[[models]]
+id_prefix = "opus-4-6"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_preferred"
+accepted_reasoning_efforts = ["low", "medium", "high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 15.0
+output_per_million = 75.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "opus-4-5"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+accepted_reasoning_efforts = ["low", "medium", "high"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 15.0
+output_per_million = 75.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "sonnet-4-6"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_preferred"
+accepted_reasoning_efforts = ["low", "medium", "high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "sonnet-4"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "haiku-4-5"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 200000
+max_output_tokens = 8192
+input_per_million = 0.8
+output_per_million = 4.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# Fallbacks for Cli Tool / CC
+[[models]]
+id_prefix = "claude-3-7-sonnet"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude_code"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "cc:"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# OpenAI Models
+# OpenAI Responses API reasoning.effort reference, checked 2026-06-29:
+# gpt-5.1+ rows may declare none/minimal/low/medium/high/xhigh; the bare
+# gpt-5 row predates gpt-5.1 and therefore omits none/xhigh here.
+[[models]]
+id_prefix = "gpt-5.5"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 5.0
+output_per_million = 30.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.4-mini"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 0.75
+output_per_million = 4.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.4"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 2.5
+output_per_million = 15.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.3-codex"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 1.75
+output_per_million = 14.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+input_per_million = 5.0
+output_per_million = 30.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.2"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 32000
+input_per_million = 1.75
+output_per_million = 14.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-4.1"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 32000
+input_per_million = 2.0
+output_per_million = 8.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gpt-mini"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 0.15
+output_per_million = 0.6
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gpt-4o-mini"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 0.15
+output_per_million = 0.6
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gpt-4o"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 2.5
+output_per_million = 10.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gpt-4"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 2.5
+output_per_million = 10.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gpt"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 2.5
+output_per_million = 10.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
 
 # DeepSeek Models
+# DeepSeek V4 (pro/flash) rejects forced tool_choice in thinking mode — the
+# default for these rows (thinking_control_format = thinking_object). Both
+# tool_choice="required" and a named function tool_choice return HTTP 400.
+# Ref checked 2026-06-30: api-docs.deepseek.com/guides/function_calling and
+# deepseek-ai/DeepSeek-V3 issue #1376. supports_required_tool_choice=false and
+# supports_named_tool_choice=false make OAS reject forced tool_choice (typed
+# Unsupported_required_tool_choice / Unsupported_named_tool_choice) instead of
+# serializing a request the model 400s on. Plain auto still works, so
+# supports_tool_choice stays true (mirrors the Kimi/GLM profiles).
 [[models]]
 id_prefix = "deepseek-v4-pro"
 base = "openai_chat"
+provider_name = "deepseek"
 max_context_tokens = 1000000
 max_output_tokens = 384000
 supports_tools = true
 supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
 supports_response_format_json = true
-supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
@@ -30,21 +342,8 @@ output_per_million = 0.87
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.008333333333333333
 
-# WORKAROUND: same gap as the deepseek-v4-flash row below (see its comment for
-# the full explanation) — provider_config.ml has no base_url recognizer for
-# api.deepseek.com, so capabilities_for_config_model looks up
-# "openai_compat/deepseek-v4-pro" and the bare row above cannot satisfy it.
-# This provider-qualified row was missing here while the flash sibling had
-# already been fixed, which left [cross_verifier = "deepseek.deepseek-v4-pro"]
-# (config/runtime.toml) failing test_repo_runtime_bindings_resolve_through_oas_catalog
-# and breaking Runtime.init_default_strict / the CI "Runtime TOML gate" for
-# every PR built off main.
-# Root fix: same as deepseek-v4-flash's — a base_url recognizer for
-# api.deepseek.com in OAS (jeong-sik/oas#2374 precedent for runpod_mtp).
-# Removal target: after that OAS recognizer is pinned here and proven stable.
-# Capabilities mirror the bare deepseek-v4-pro row above.
 [[models]]
-id_prefix = "openai_compat/deepseek-v4-pro"
+id_prefix = "deepseek-ai/deepseek-v4-pro"
 base = "openai_chat"
 provider_name = "deepseek"
 max_context_tokens = 1000000
@@ -55,58 +354,10 @@ supports_required_tool_choice = false
 supports_named_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
 supports_response_format_json = true
-supports_structured_output = false
-supports_native_streaming = true
-supports_caching = true
-supports_prompt_caching = false
-input_per_million = 0.435
-output_per_million = 0.87
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.008333333333333333
-
-[[models]]
-id_prefix = "deepseek/deepseek-v4-pro"
-base = "openai_chat"
-provider_name = "deepseek"
-max_context_tokens = 1000000
-max_output_tokens = 384000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "thinking_object"
-supports_response_format_json = true
-supports_structured_output = false
-supports_native_streaming = true
-supports_caching = true
-supports_prompt_caching = false
-input_per_million = 0.435
-output_per_million = 0.87
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.008333333333333333
-
-[[models]]
-id_prefix = "deepseek.deepseek-v4-pro"
-base = "openai_chat"
-provider_name = "deepseek"
-max_context_tokens = 1000000
-max_output_tokens = 384000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "thinking_object"
-supports_response_format_json = true
-supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
@@ -118,13 +369,17 @@ cache_read_multiplier = 0.008333333333333333
 [[models]]
 id_prefix = "deepseek-v4-flash"
 base = "openai_chat"
+provider_name = "deepseek"
 max_context_tokens = 1000000
 max_output_tokens = 384000
 supports_tools = true
 supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
 supports_response_format_json = true
 supports_native_streaming = true
@@ -135,22 +390,8 @@ output_per_million = 0.28
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.02
 
-# WORKAROUND: the pinned OAS emits provider_label "openai_compat" for the
-# DeepSeek direct endpoint (https://api.deepseek.com) because provider_config.ml
-# has no base_url recognizer for it — only ollama_cloud and openai are matched,
-# everything else falls through to string_of_provider_kind OpenAI_compat =
-# "openai_compat". capabilities_for_config_model therefore looks up
-# "openai_compat/deepseek-v4-flash", and the bare "deepseek-v4-flash" row above
-# cannot satisfy it (bare fallback is refused for tool-capable openai_compat
-# models via catalog_entry_requires_endpoint_declaration, provider_config.ml:293).
-# Without this provider-qualified row Runtime.init_default_strict refuses to boot
-# for the [deepseek.deepseek-v4-flash] runtime binding.
-# Root fix: add a base_url recognizer for api.deepseek.com in OAS so the label
-# is semantic ("deepseek"), mirroring jeong-sik/oas#2374 for runpod_mtp.
-# Removal target: after that OAS recognizer is pinned here and proven stable.
-# Capabilities mirror the canonical ../oas/models.toml deepseek-v4-flash row.
 [[models]]
-id_prefix = "openai_compat/deepseek-v4-flash"
+id_prefix = "deepseek-ai/deepseek-v4-flash"
 base = "openai_chat"
 provider_name = "deepseek"
 max_context_tokens = 1000000
@@ -161,58 +402,10 @@ supports_required_tool_choice = false
 supports_named_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["high", "max"]
 thinking_control_format = "thinking_object"
 supports_response_format_json = true
-supports_structured_output = false
-supports_native_streaming = true
-supports_caching = true
-supports_prompt_caching = false
-input_per_million = 0.14
-output_per_million = 0.28
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.02
-
-[[models]]
-id_prefix = "deepseek/deepseek-v4-flash"
-base = "openai_chat"
-provider_name = "deepseek"
-max_context_tokens = 1000000
-max_output_tokens = 384000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "thinking_object"
-supports_response_format_json = true
-supports_structured_output = false
-supports_native_streaming = true
-supports_caching = true
-supports_prompt_caching = false
-input_per_million = 0.14
-output_per_million = 0.28
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.02
-
-[[models]]
-id_prefix = "deepseek.deepseek-v4-flash"
-base = "openai_chat"
-provider_name = "deepseek"
-max_context_tokens = 1000000
-max_output_tokens = 384000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "thinking_object"
-supports_response_format_json = true
-supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false
@@ -222,583 +415,55 @@ cache_write_multiplier = 1.0
 cache_read_multiplier = 0.02
 
 # MiniMax Models
+# Source: official MiniMax docs checked 2026-06-30:
+# - https://platform.minimaxi.com/docs/api-reference/text-chat-openai.md
+# - https://platform.minimaxi.com/docs/guides/text-m3-function-call.md
+# minimax-m3 is the memory-os librarian runtime (runtime.toml [runtime].librarian).
+# Without this entry it resolved to provider_default (OpenAI_compat) whose
+# thinking_control_format = No_thinking_control, so the librarian's
+# enable_thinking = false was silently dropped at the wire and the reasoning model
+# polluted/emptied the JSON-mode body (librarian "empty response" / "invalid episode
+# JSON"). This entry supersedes the inert MASC runtime.toml [models.minimax-m3.capabilities]
+# block (#21521), which OAS for_model_id never reads.
+# MiniMax-M3 Chat uses thinking.type adaptive|disabled plus reasoning_split=true
+# to expose thinking outside visible content. The Chat schema documents tools but
+# no tool_choice or response_format field, and its interleaved-thinking guide
+# requires replaying the complete assistant message including reasoning_details
+# or embedded <think> content.
+# Pricing intentionally omitted (float option): minimax-m3 rates not yet confirmed.
 [[models]]
 id_prefix = "minimax-m3"
 base = "openai_chat"
 max_context_tokens = 524288
-max_output_tokens = 131072
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "thinking_object"
-supports_response_format_json = true
-supports_structured_output = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-# GLM Models
-[[models]]
-id_prefix = "glm-5-turbo"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
 supports_tools = true
 supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_response_format_json = true
-supports_native_streaming = true
-input_per_million = 1.2
-output_per_million = 4.0
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.2
-
-[[models]]
-id_prefix = "openai_compat/GLM-5-Turbo"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_response_format_json = true
-supports_native_streaming = true
-input_per_million = 1.2
-output_per_million = 4.0
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.2
-
-[[models]]
-id_prefix = "glm-coding/GLM-5-Turbo"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_response_format_json = true
-supports_native_streaming = true
-input_per_million = 1.2
-output_per_million = 4.0
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.2
-
-[[models]]
-id_prefix = "glm-coding.GLM-5-Turbo"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_response_format_json = true
-supports_native_streaming = true
-input_per_million = 1.2
-output_per_million = 4.0
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.2
-
-[[models]]
-id_prefix = "glm-4.7"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_response_format_json = true
-supports_native_streaming = true
-input_per_million = 0.6
-output_per_million = 2.2
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.18333333333333332
-
-[[models]]
-id_prefix = "openai_compat/glm-4.7"
-base = "glm"
-max_context_tokens = 200000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_response_format_json = true
-supports_native_streaming = true
-input_per_million = 0.6
-output_per_million = 2.2
-cache_write_multiplier = 1.0
-cache_read_multiplier = 0.18333333333333332
-
-# Xiaomi MiMo V2.5 capability specs.
-# Token Plan and the regular API expose the same vendor model capabilities for
-# these rows, but they are different products operationally: Token Plan is a
-# coding-tool subscription with regional gateways and tp-* keys; the regular API
-# is pay-per-token billing on api.xiaomimimo.com. The /anthropic Token Plan
-# gateway is a different wire protocol and is not represented by these
-# openai_chat rows.
-[[models]]
-id_prefix = "mimo-v2.5-pro"
-base = "openai_chat"
-provider_name = "mimo"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
 supports_required_tool_choice = false
 supports_named_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = false
-thinking_control_format = "thinking_object_only"
+thinking_control_format = "thinking_object_adaptive"
 reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_response_format_json = true
-supports_structured_output = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "mimo-v2.5"
-base = "openai_chat"
-provider_name = "mimo"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "thinking_object_only"
-reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_response_format_json = true
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
 supports_structured_output = false
 supports_multimodal_inputs = true
 supports_image_input = true
-supports_audio_input = true
-supports_video_input = true
-supports_native_streaming = true
-
-# WORKAROUND: the pinned OAS capability label path can still classify the
-# Xiaomi token-plan endpoint as raw openai_compat when the SDK does not yet
-# contain a MiMo base-url recognizer. Bare rows above are the canonical model
-# declarations; these provider-qualified rows only satisfy the strict runtime
-# gate until the OAS recognizer is pinned here.
-[[models]]
-id_prefix = "openai_compat/mimo-v2.5-pro"
-base = "openai_chat"
-provider_name = "mimo"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "thinking_object_only"
-reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_response_format_json = true
-supports_structured_output = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "mimo/mimo-v2.5-pro"
-base = "openai_chat"
-provider_name = "mimo"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "thinking_object_only"
-reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_response_format_json = true
-supports_structured_output = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "mimo.mimo-v2.5-pro"
-base = "openai_chat"
-provider_name = "mimo"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "thinking_object_only"
-reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_response_format_json = true
-supports_structured_output = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "openai_compat/mimo-v2.5"
-base = "openai_chat"
-provider_name = "mimo"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "thinking_object_only"
-reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_response_format_json = true
-supports_structured_output = false
-supports_multimodal_inputs = true
-supports_image_input = true
-supports_audio_input = true
-supports_video_input = true
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "mimo/mimo-v2.5"
-base = "openai_chat"
-provider_name = "mimo"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "thinking_object_only"
-reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_response_format_json = true
-supports_structured_output = false
-supports_multimodal_inputs = true
-supports_image_input = true
-supports_audio_input = true
-supports_video_input = true
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "mimo.mimo-v2.5"
-base = "openai_chat"
-provider_name = "mimo"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-supports_tools = true
-supports_tool_choice = true
-supports_required_tool_choice = false
-supports_named_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "thinking_object_only"
-reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_response_format_json = true
-supports_structured_output = false
-supports_multimodal_inputs = true
-supports_image_input = true
-supports_audio_input = true
-supports_video_input = true
-supports_native_streaming = true
-
-# Gemma Models
-[[models]]
-id_prefix = "hf.co/unsloth/gemma-4"
-base = "ollama"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "ollama/hf.co/unsloth/gemma-4"
-base = "ollama"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "ollama.hf.co/unsloth/gemma-4"
-base = "ollama"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF"
-base = "ollama"
-max_context_tokens = 131072
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_multimodal_inputs = true
-supports_image_input = true
-supports_audio_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "ollama/hf.co/unsloth/gemma-4-E2B-it-qat-GGUF"
-base = "ollama"
-max_context_tokens = 131072
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_multimodal_inputs = true
-supports_image_input = true
-supports_audio_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "ollama.hf.co/unsloth/gemma-4-E2B-it-qat-GGUF"
-base = "ollama"
-max_context_tokens = 131072
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_multimodal_inputs = true
-supports_image_input = true
-supports_audio_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "gemma4-coder-"
-base = "openai_chat"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_native_streaming = true
-supports_top_k = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "runpod_rtxa6000/gemma4-coder-fable5-q4km"
-base = "openai_chat"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_native_streaming = true
-supports_top_k = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "runpod_rtxa6000.gemma4-coder-fable5-q4km"
-base = "openai_chat"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_native_streaming = true
-supports_top_k = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-# Live runtime config can bind Gemma coder through a dedicated RunPod endpoint
-# ([providers.runpod_rtxa6000]), but the OAS binding label for raw
-# OpenAI-compatible endpoints is openai_compat. Strict runtime init refuses the
-# bare gemma4-coder- fallback for tool-capable OpenAI-compatible endpoints
-# because that would silently drop thinking/sampling controls.
-# Capabilities mirror the bare Gemma coder row above.
-[[models]]
-id_prefix = "openai_compat/gemma4-coder-fable5-q4km"
-base = "openai_chat"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-thinking_control_format = "chat_template_token"
-thinking_control_token = "<|think|>"
-supports_native_streaming = true
-supports_top_k = true
-supports_seed = true
-input_per_million = 0.0
-output_per_million = 0.0
-
-# RunPod Models
-# WORKAROUND: current pinned OAS emits provider_label "openai_compat" for
-# RunPod proxy URLs because it does not recognize *.proxy.runpod.net base URLs.
-# The root fix is jeong-sik/oas#2374, which restores the dedicated
-# "runpod_mtp" label. Keep both provider-qualified rows during the OAS pin
-# transition so Runtime.init_default_strict resolves the model before and after
-# that OAS bump. Removal target: after #2374 is pinned here and proven stable,
-# drop the openai_compat row and keep runpod_mtp as canonical.
-
-[[models]]
-id_prefix = "runpod_mtp/qwen36-35b-a3b-mtp"
-base = "openai_chat"
-max_context_tokens = 131072
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "chat_template_kwargs"
-preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "runpod_mtp.qwen36-35b-a3b-mtp"
-base = "openai_chat"
-max_context_tokens = 131072
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "chat_template_kwargs"
-preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "openai_compat/qwen36-35b-a3b-mtp"
-base = "openai_chat"
-max_context_tokens = 131072
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "chat_template_kwargs"
-preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "qwen36-35b-a3b-mtp"
-base = "openai_chat"
-max_context_tokens = 131072
-supports_tools = true
-supports_tool_choice = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "chat_template_kwargs"
-preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
-supports_multimodal_inputs = false
-supports_image_input = false
 supports_native_streaming = true
 
 # Ollama Cloud Models (canonical 2026-06 seed)
 # Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
-# Provider-qualified entries preserve Ollama Cloud wire behavior when a model id overlaps another provider.
+# Provider-scoped entries preserve Ollama Cloud wire behavior when a model id
+# overlaps another provider; provider_name and id_prefix remain separate data.
+# The official structured-output documentation currently says that Ollama Cloud
+# does not support structured outputs. JSON mode remains a separate capability;
+# keep every Ollama Cloud row schema-disabled until the official provider
+# contract changes. Source: https://docs.ollama.com/capabilities/structured-outputs,
+# checked 2026-07-10.
 
 [[models]]
-id_prefix = "ollama_cloud/deepseek-v3.1:671b"
+id_prefix = "deepseek-v3.1:671b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 163840
 supports_tools = true
@@ -806,13 +471,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/deepseek-v3.2"
+id_prefix = "deepseek-v3.2"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 163840
 supports_tools = true
@@ -820,13 +486,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/deepseek-v4-flash"
+id_prefix = "deepseek-v4-flash"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 1048576
 supports_tools = true
@@ -834,27 +501,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud.deepseek-v4-flash"
-base = "ollama_cloud"
-max_context_tokens = 1048576
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "ollama_cloud/deepseek-v4-pro"
+id_prefix = "deepseek-v4-pro"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 524288
 supports_tools = true
@@ -862,27 +516,16 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
+# OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
+supports_structured_output = false
 
 [[models]]
-id_prefix = "ollama_cloud.deepseek-v4-pro"
-base = "ollama_cloud"
-max_context_tokens = 524288
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "ollama_cloud/devstral-2:123b"
+id_prefix = "devstral-2:123b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -895,10 +538,11 @@ supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 supports_response_format_json = true
-supports_structured_output = true
+supports_structured_output = false
 
 [[models]]
-id_prefix = "ollama_cloud/devstral-small-2:24b"
+id_prefix = "devstral-small-2:24b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -912,10 +556,11 @@ supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 supports_response_format_json = true
-supports_structured_output = true
+supports_structured_output = false
 
 [[models]]
-id_prefix = "ollama_cloud/gemini-3-flash-preview"
+id_prefix = "gemini-3-flash-preview"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 1048576
 supports_tools = true
@@ -923,14 +568,15 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/gemma3:4b"
+id_prefix = "gemma3:4b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 131072
 supports_tools = false
@@ -945,7 +591,8 @@ modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/gemma3:12b"
+id_prefix = "gemma3:12b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 131072
 supports_tools = false
@@ -960,7 +607,8 @@ modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/gemma3:27b"
+id_prefix = "gemma3:27b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 131072
 supports_tools = false
@@ -975,7 +623,8 @@ modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/gemma4:31b"
+id_prefix = "gemma4:31b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -983,14 +632,15 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/glm-4.7"
+id_prefix = "glm-4.7"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 202752
 supports_tools = true
@@ -998,13 +648,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/glm-5"
+id_prefix = "glm-5"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 202752
 supports_tools = true
@@ -1012,13 +663,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/glm-5.1"
+id_prefix = "glm-5.1"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 202752
 supports_tools = true
@@ -1026,13 +678,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/glm-5.2"
+id_prefix = "glm-5.2"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 1000000
 supports_tools = true
@@ -1040,13 +693,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/gpt-oss:20b"
+id_prefix = "gpt-oss:20b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 131072
 supports_tools = true
@@ -1054,13 +708,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/gpt-oss:120b"
+id_prefix = "gpt-oss:120b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 131072
 supports_tools = true
@@ -1068,13 +723,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/kimi-k2.5"
+id_prefix = "kimi-k2.5"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1082,15 +738,20 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
+# Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
+# recommended on all turns). Without this, the base replay policy is no_replay.
 reasoning_replay = "preserve_always"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
+# OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
+supports_structured_output = false
 
 [[models]]
-id_prefix = "ollama_cloud/kimi-k2.6"
+id_prefix = "kimi-k2.6"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1098,15 +759,20 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
+# Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
+# recommended on all turns). Without this, the base replay policy is no_replay.
 reasoning_replay = "preserve_always"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
+# OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
+supports_structured_output = false
 
 [[models]]
-id_prefix = "ollama_cloud.kimi-k2.6"
+id_prefix = "kimi-k2.7-code"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1114,31 +780,20 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
+# Kimi K2.7-code docs: Preserved Thinking is always-on (keep reasoning_content of
+# every historical assistant message) and thinking cannot be disabled.
 reasoning_replay = "preserve_always"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
+# OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
+supports_structured_output = false
 
 [[models]]
-id_prefix = "ollama_cloud/kimi-k2.7-code"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-reasoning_replay = "preserve_always"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "ollama_cloud/minimax-m2.1"
+id_prefix = "minimax-m2.1"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 204800
 supports_tools = true
@@ -1146,13 +801,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/minimax-m2.5"
+id_prefix = "minimax-m2.5"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 196608
 supports_tools = true
@@ -1160,13 +816,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/minimax-m2.7"
+id_prefix = "minimax-m2.7"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 196608
 supports_tools = true
@@ -1174,13 +831,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/minimax-m3"
+id_prefix = "minimax-m3"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 524288
 supports_tools = true
@@ -1188,63 +846,20 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
+reasoning_streaming_format = "delta:reasoning"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_response_format_json = true
-supports_structured_output = true
+# OpenAI-compatible /v1 transport accepts json_schema but does not guarantee
+# schema-shaped output; use the native /api/chat lane for strict schemas.
+supports_structured_output = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud.minimax-m3"
-base = "ollama_cloud"
-max_context_tokens = 524288
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_response_format_json = true
-supports_structured_output = true
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "ollama_cloud/ministral-3:3b"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-supports_extended_thinking = false
-supports_reasoning_budget = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "ollama_cloud/ministral-3:8b"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-supports_extended_thinking = false
-supports_reasoning_budget = false
-thinking_control_format = "none"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "ollama_cloud/ministral-3:14b"
+id_prefix = "ministral-3:3b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1258,10 +873,14 @@ supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 supports_response_format_json = true
-supports_structured_output = true
+# Live grouped SO check 2026-06-29: accepts JSON-format requests, but did not
+# return exact schema-shaped final JSON. Keep JSON mode enabled and native
+# structured-output guarantee disabled.
+supports_structured_output = false
 
 [[models]]
-id_prefix = "ollama_cloud/mistral-large-3:675b"
+id_prefix = "ministral-3:8b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1274,9 +893,53 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
+supports_response_format_json = true
+# Live grouped SO check 2026-06-29: accepts JSON-format requests, but did not
+# return exact schema-shaped final JSON. Keep JSON mode enabled and native
+# structured-output guarantee disabled.
+supports_structured_output = false
 
 [[models]]
-id_prefix = "ollama_cloud/nemotron-3-nano:30b"
+id_prefix = "ministral-3:14b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
+
+[[models]]
+id_prefix = "mistral-large-3:675b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_response_format_json = true
+# Live grouped SO check 2026-06-29: accepts JSON-format requests, but fenced or
+# drifted from the requested schema. Do not advertise native schema guarantee.
+supports_structured_output = false
+
+[[models]]
+id_prefix = "nemotron-3-nano:30b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1284,13 +947,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/nemotron-3-super"
+id_prefix = "nemotron-3-super"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1298,13 +962,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/nemotron-3-ultra"
+id_prefix = "nemotron-3-ultra"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1312,13 +977,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/qwen3-coder:480b"
+id_prefix = "qwen3-coder:480b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1332,7 +998,8 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/qwen3-coder-next"
+id_prefix = "qwen3-coder-next"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1346,7 +1013,8 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "ollama_cloud/qwen3.5:397b"
+id_prefix = "qwen3.5:397b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 262144
 supports_tools = true
@@ -1354,28 +1022,14 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 
-[[models]]
-id_prefix = "ollama_cloud/rnj-1:8b"
-base = "ollama_cloud"
-max_context_tokens = 32768
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-supports_extended_thinking = false
-supports_reasoning_budget = false
-thinking_control_format = "none"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-# Bare entries for Cloud models not already represented above by a direct-provider seed.
-# Runtime startup still checks bare model membership before OAS provider-qualified dispatch.
+# Provider-independent entries for Cloud models not already represented by a
+# direct-provider seed. Callers opt into these only through bare fallback.
 
 [[models]]
 id_prefix = "deepseek-v3.1:671b"
@@ -1386,7 +1040,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1400,7 +1054,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1418,6 +1072,8 @@ thinking_control_format = "none"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "devstral-small-2:24b"
@@ -1433,21 +1089,8 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
-
-[[models]]
-id_prefix = "gemini-3-flash-preview"
-base = "ollama_cloud"
-max_context_tokens = 1048576
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "gemma3:4b"
@@ -1503,10 +1146,24 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5.2"
+base = "glm"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_multimodal_inputs = false
+supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
@@ -1518,7 +1175,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1532,56 +1189,10 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
-
-# kimi-for-coding is the Kimi Code *coding plan* alias (api.kimi.com/coding),
-# not the pay-per-token platform API: the key comes from the Kimi Code console,
-# the two credentials are not interchangeable, and the gateway picks the served
-# version (Thinking on = K2.7 Code, off = K2.6). Pricing 0.0 means
-# subscription-included, not free-tier.
-[[models]]
-id_prefix = "kimi-for-coding"
-base = "kimi"
-max_context_tokens = 256000
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "kimi-k2"
-base = "kimi"
-max_context_tokens = 256000
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "kimi-k2.7-code"
-base = "kimi"
-max_context_tokens = 256000
-supports_reasoning_budget = false
-thinking_control_format = "none"
-preserve_thinking_control_format = "always_preserved"
-input_per_million = 0.0
-output_per_million = 0.0
-
-# Bare kimi-k2.* ids are native Kimi. Ollama Cloud's overlapping Kimi ids are
-# represented only by provider-qualified ollama_cloud/kimi-* rows so a bare
-# native route does not silently inherit Ollama Cloud wire semantics.
-[[models]]
-id_prefix = "kimi-k2.5:cloud"
-base = "kimi"
-max_context_tokens = 256000
-input_per_million = 0.0
-output_per_million = 0.0
-
-[[models]]
-id_prefix = "kimi-k2.6:cloud"
-base = "kimi"
-max_context_tokens = 256000
-input_per_million = 0.0
-output_per_million = 0.0
 
 [[models]]
 id_prefix = "minimax-m2.1"
@@ -1592,7 +1203,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1606,7 +1217,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1620,7 +1231,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1639,6 +1250,8 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "ministral-3:8b"
@@ -1654,6 +1267,8 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "ministral-3:14b"
@@ -1669,6 +1284,8 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "mistral-large-3:675b"
@@ -1684,6 +1301,8 @@ supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
 
 [[models]]
 id_prefix = "nemotron-3-nano:30b"
@@ -1694,7 +1313,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1708,7 +1327,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1722,7 +1341,7 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1764,14 +1383,1405 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "ollama_think"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
 supports_native_streaming = true
 
+# Gemini Models
+[[models]]
+id_prefix = "gemini-2.5"
+base = "gemini"
+max_context_tokens = 1000000
+supports_reasoning_budget = true
+accepted_reasoning_efforts = []
+
+[[models]]
+id_prefix = "gemini-3.5-flash"
+base = "gemini"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+
+[[models]]
+id_prefix = "gemini-3-flash-preview"
+base = "gemini"
+max_context_tokens = 1000000
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+input_per_million = 0.50
+output_per_million = 3.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gemini-3.1-pro-preview"
+base = "gemini"
+max_context_tokens = 1000000
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["low", "medium", "high"]
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gemini-3.1-pro"
+base = "gemini"
+max_context_tokens = 1000000
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["low", "medium", "high"]
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gemini-3.1-flash-lite-preview"
+base = "gemini"
+max_context_tokens = 1000000
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+input_per_million = 0.25
+output_per_million = 1.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gemini-3.1-flash-lite"
+base = "gemini"
+max_context_tokens = 1000000
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+input_per_million = 0.25
+output_per_million = 1.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "gemini-3"
+base = "gemini"
+max_context_tokens = 1000000
+input_per_million = 0.50
+output_per_million = 3.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+# GLM Models
+[[models]]
+id_prefix = "glm-5.1"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
+
+[[models]]
+id_prefix = "glm-5-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "glm-5v-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "glm-ocr"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 16384
+supports_tools = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+input_per_million = 0.0
+output_per_million = 0.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "glm-4.7-flashx"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.07
+output_per_million = 0.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.14285714285714285
+
+[[models]]
+id_prefix = "glm-4.7-flash"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.0
+output_per_million = 0.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "glm-4.5-x"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 2.2
+output_per_million = 8.9
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.20454545454545455
+
+[[models]]
+id_prefix = "glm-4.5-airx"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.1
+output_per_million = 4.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "glm-4.5-air"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.2
+output_per_million = 1.1
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.15
+
+[[models]]
+id_prefix = "glm-4.5-flash"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.0
+output_per_million = 0.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+id_prefix = "glm-5-code"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "glm-5"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "glm-4.6"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+id_prefix = "glm-4.7"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+id_prefix = "glm-4.5"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+id_prefix = "glm-4-flash"
+provider_name = "glm"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4v"
+provider_name = "glm"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4"
+provider_name = "glm"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_tool_choice = false
+supports_native_streaming = true
+
+# Kimi Models
+#
+# kimi-for-coding is the Kimi Code *coding plan* alias (api.kimi.com/coding),
+# not the pay-per-token platform API: the key comes from the Kimi Code console,
+# the two credentials are not interchangeable, and the gateway picks the served
+# version (Thinking on = K2.7 Code, off = K2.6 — kimi.com/code docs, checked
+# 2026-07-03). Pricing 0.0 means subscription-included, not free-tier.
+# Structured output is path-dependent on this gateway: the OpenAI-compatible
+# /v1/chat/completions path honors response_format json_schema (measured 10/10,
+# 2026-07-03) while the Anthropic-compatible /v1/messages path — the one the
+# builtin "kimi" provider uses — silently ignores output_format. The row
+# inherits supports_structured_output=false from base="kimi"; override
+# per-entry only for a deployment that routes through the OpenAI path.
+[[models]]
+id_prefix = "kimi-for-coding"
+base = "kimi"
+max_context_tokens = 256000
+# Kimi API parameter docs checked 2026-07-04: K2.7/K2.6/K2.5 use fixed
+# temperature/top_p values and reject non-default overrides. OAS omits caller
+# values instead of sending invalid request fields.
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "kimi-k2.6"
+base = "kimi"
+max_context_tokens = 256000
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning_budget = false
+thinking_control_format = "thinking_object_only"
+preserve_thinking_control_format = "thinking_object_keep_all"
+reasoning_replay = "default"
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "kimi-k2.5"
+base = "kimi"
+max_context_tokens = 256000
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning_budget = false
+thinking_control_format = "thinking_object_only"
+preserve_thinking_control_format = "none"
+reasoning_replay = "default"
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "kimi-k2"
+base = "kimi"
+max_context_tokens = 256000
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "kimi-k2.7-code"
+base = "kimi"
+max_context_tokens = 256000
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Bare kimi-k2.* rows are native Kimi. Ollama Cloud's overlapping Kimi rows
+# carry provider_name = "ollama_cloud" separately, so a native route does not
+# inherit Ollama Cloud wire semantics.
+[[models]]
+id_prefix = "kimi-k2.5:cloud"
+base = "kimi"
+max_context_tokens = 256000
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "kimi-k2.6:cloud"
+base = "kimi"
+max_context_tokens = 256000
+input_per_million = 0.0
+output_per_million = 0.0
+
+# xAI Grok Models
+[[models]]
+id_prefix = "xai/grok-4.3"
+base = "openai_chat_extended"
+provider_name = "xai"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+supports_caching = true
+
+[[models]]
+id_prefix = "grok-4.3"
+base = "openai_chat_extended"
+provider_name = "xai"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+supports_caching = true
+
+[[models]]
+id_prefix = "grok-latest"
+base = "openai_chat_extended"
+provider_name = "xai"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+supports_caching = true
+
+# Mistral Models
+[[models]]
+id_prefix = "mistral-large"
+base = "openai_chat"
+provider_name = "mistral"
+max_context_tokens = 260000
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "mistral-small"
+base = "openai_chat_extended"
+provider_name = "mistral"
+max_context_tokens = 256000
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+# Cohere Command Models
+[[models]]
+id_prefix = "command-r-plus"
+base = "openai_chat"
+provider_name = "cohere"
+max_context_tokens = 256000
+max_output_tokens = 32000
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+# DashScope / Alibaba Models
+[[models]]
+id_prefix = "dashscope-3"
+base = "dashscope"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# NOTE: the former `provider_h_3` (DashScope) qwen3 entry was a dead cipher-era
+# duplicate — brand wire ids ("qwen3*") never matched its `provider_h_3` prefix
+# (RFC-OAS-023 §369), so they resolved to the openai_chat `qwen3` entry below.
+# Removed here to avoid a duplicate `qwen3` id_prefix; the DashScope route stays
+# represented by `dashscope_3`. Proper model×transport split: RFC-OAS-023.
+[[models]]
+id_prefix = "dashscope_3"
+base = "dashscope"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Qwen Models
+[[models]]
+id_prefix = "qwen3"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+
+[[models]]
+id_prefix = "qwen-3"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+
+[[models]]
+id_prefix = "qwen/qwen3.6"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+
+# Serving-contract namespace (RFC-OAS-034 §2 rule 1): the capability set below
+# (MTP, chat_template_kwargs thinking, tools, reasoning) is a function of the
+# serving runtime x model, NOT of where the endpoint is rented. The namespace is
+# named for that contract ("vllm-qwen3-mtp"), not for a hosting provider. A
+# consumer selects it with the explicit pair provider_name = "vllm-qwen3-mtp"
+# and the bare runtime model id. Capability provenance is never inferred from
+# a host such as *.proxy.runpod.net. (Renamed from "runpod_mtp"; RunPod is an
+# opaque transport alias OAS does not classify on.)
+[[models]]
+id_prefix = "qwen36-35b-a3b-mtp"
+base = "openai_chat"
+provider_name = "vllm-qwen3-mtp"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "qwen36-35b-a3b-mtp"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_native_streaming = true
+
+# Llama Models
+[[models]]
+id_prefix = "llama-4"
+base = "openai_chat"
+max_context_tokens = 1000000
+supports_tools = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "llama4"
+base = "openai_chat"
+max_context_tokens = 1000000
+supports_tools = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Provider connection and exact endpoint-identity declarations. Provider/model
+# identity is catalog data; runtime code does not branch on vendor host strings.
+[[providers]]
+id = "nous"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:8085"
+request_path = "/v1/chat/completions"
+api_key_env = ""
+capabilities_base = "openai_chat_extended"
+
+[[providers]]
+id = "claude"
+kind = "anthropic"
+base_url = "https://api.anthropic.com"
+request_path = "/v1/messages"
+api_key_env = "ANTHROPIC_API_KEY"
+capabilities_base = "anthropic"
+
+[[providers]]
+id = "gemini"
+kind = "gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+request_path = ""
+api_key_env = "GEMINI_API_KEY"
+capabilities_base = "gemini"
+
+[[providers]]
+id = "glm-coding"
+kind = "glm"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+request_path = "/chat/completions"
+api_key_env = "ZAI_CODING_API_KEY"
+capabilities_base = "glm"
+
+[[providers]]
+id = "openrouter"
+kind = "openai_compat"
+base_url = "https://openrouter.ai/api/v1"
+request_path = "/chat/completions"
+api_key_env = "OPENROUTER_API_KEY"
+capabilities_base = "openai_chat_extended"
+
+[[providers]]
+id = "groq"
+kind = "openai_compat"
+base_url = "https://api.groq.com/openai/v1"
+request_path = "/chat/completions"
+api_key_env = "GROQ_API_KEY"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "dashscope"
+kind = "dashscope"
+base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+request_path = "/chat/completions"
+api_key_env = "DASHSCOPE_API_KEY"
+capabilities_base = "dashscope"
+
+[[providers]]
+id = "siliconflow"
+kind = "openai_compat"
+base_url = "https://api.siliconflow.cn/v1"
+request_path = "/chat/completions"
+api_key_env = "SILICONFLOW_API_KEY"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "ollama"
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+request_path = "/api/chat"
+api_key_env = ""
+capabilities_base = "ollama"
+
+[[providers]]
+id = "deepseek"
+kind = "openai_compat"
+base_url = "https://api.deepseek.com"
+request_path = "/chat/completions"
+api_key_env = "DEEPSEEK_API_KEY"
+capabilities_base = "openai_chat"
+identity_hosts = ["api.deepseek.com"]
+
+[[providers]]
+id = "kimi"
+kind = "kimi"
+identity_kinds = ["kimi", "openai_compat"]
+base_url = "https://api.kimi.com/coding"
+request_path = "/v1/messages"
+api_key_env = "KIMI_API_KEY"
+capabilities_base = "kimi"
+identity_hosts = ["api.kimi.com"]
+
+[[providers]]
+id = "ollama_cloud"
+kind = "ollama"
+identity_kinds = ["ollama", "openai_compat"]
+base_url = "https://ollama.com"
+request_path = "/api/chat"
+api_key_env = "OLLAMA_CLOUD_API_KEY"
+capabilities_base = "ollama_cloud"
+identity_hosts = ["ollama.com"]
+
+[[providers]]
+id = "glm"
+kind = "glm"
+identity_kinds = ["glm", "openai_compat"]
+base_url = "https://api.z.ai/api/paas/v4"
+request_path = "/chat/completions"
+api_key_env = "ZAI_API_KEY"
+capabilities_base = "glm"
+identity_hosts = ["api.z.ai"]
+
+[[providers]]
+id = "xai"
+kind = "openai_compat"
+base_url = "https://api.x.ai/v1"
+request_path = "/chat/completions"
+api_key_env = "XAI_API_KEY"
+capabilities_base = "xai"
+identity_hosts = ["api.x.ai"]
+
+[[providers]]
+id = "mistral"
+kind = "openai_compat"
+base_url = "https://api.mistral.ai/v1"
+request_path = "/chat/completions"
+api_key_env = "MISTRAL_API_KEY"
+capabilities_base = "mistral"
+identity_hosts = ["api.mistral.ai"]
+
+[[providers]]
+id = "cohere"
+kind = "openai_compat"
+base_url = "https://api.cohere.com/compatibility/v1"
+request_path = "/chat/completions"
+api_key_env = "COHERE_API_KEY"
+capabilities_base = "cohere"
+identity_hosts = ["api.cohere.com"]
+
+# Xiaomi MiMo V2.5 capability specs.
+# Token Plan and the regular API expose the same vendor model capabilities for
+# these rows, but they are different products operationally: Token Plan is a
+# coding-tool subscription with regional gateways and tp-* keys; the regular API
+# is pay-per-token billing on api.xiaomimimo.com. The /anthropic Token Plan
+# gateway is a different wire protocol and is not represented by these
+# openai_chat rows.
+[[providers]]
+id = "mimo"
+kind = "openai_compat"
+base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+base_url_env = "MIMO_BASE_URL"
+request_path = "/chat/completions"
+api_key_env = "MIMO_API_KEY"
+default_model = "mimo-v2.5-pro"
+capabilities_base = "mimo"
+identity_hosts = [
+  "api.xiaomimimo.com",
+  "token-plan-cn.xiaomimimo.com",
+  "token-plan-sgp.xiaomimimo.com",
+  "token-plan-ams.xiaomimimo.com",
+]
+
+[[models]]
+id_prefix = "mimo-v2.5-pro"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_response_format_json = true
+# Xiaomi documents structured output as JSON mode (`json_object`) and directs
+# clients to validate schema conformance locally. Do not advertise native
+# json_schema structured output from the chat-completions catalog row.
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_audio_input = false
+supports_video_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "mimo-v2.5"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+# Live MiMo V2.5 OpenAI-compatible smoke, checked 2026-06-29: responses carry
+# reasoning in the `reasoning_content` side-channel, accept tool calls, stream
+# reasoning/tool deltas separately, and accept response_format/json_schema.
+# MiMo's Deep Thinking docs require assistant tool-call messages to pass back
+# `reasoning_content` in later rounds; plain-answer reasoning still stays out
+# of replay to avoid context growth.
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_response_format_json = true
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+supports_video_input = true
+supports_native_streaming = true
+
+# Nvidia Models
+[[models]]
+id_prefix = "nvidia/nvidia-vl"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+id_prefix = "nvidia-vl"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+id_prefix = "nvidia/nvidia"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+
+[[models]]
+id_prefix = "nvidia"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+
+# Gemma Models
+[[models]]
+id_prefix = "google/gemma-4"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+id_prefix = "google/gemma-4-e2b"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+id_prefix = "google/gemma-4-e4b"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+id_prefix = "google/gemma-4-12b"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+id_prefix = "gemma4-coder-fable5-q4km"
+base = "openai_chat"
+provider_name = "runpod_rtxa6000"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_top_k = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "gemma4-coder-fable5-q4km"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_top_k = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "hf.co/google/gemma-4"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "hf.co/unsloth/gemma-4"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Local Ollama exact Gemma 4 E2B QAT row. Verified with:
+# `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`
+# on 2026-07-06: context 131072; capabilities tools, completion, vision, audio.
+[[models]]
+id_prefix = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "ollama/hf.co/unsloth/gemma-4-E2B-it-qat-GGUF"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Generic/Ollama/Other Fallbacks
+[[models]]
+id_prefix = "ollama"
+base = "ollama"
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "nous"
+base = "openai_chat"
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Extra Aliased and Specific Model Rules
+[[models]]
+id_prefix = "claude-opus-4-6"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_preferred"
+accepted_reasoning_efforts = ["low", "medium", "high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 15.0
+output_per_million = 75.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude-opus-4-5"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+accepted_reasoning_efforts = ["low", "medium", "high"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 15.0
+output_per_million = 75.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude-opus-4"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 15.0
+output_per_million = 75.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude-sonnet-4-6"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_preferred"
+accepted_reasoning_efforts = ["low", "medium", "high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude-sonnet-4"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude-haiku-4-5"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 200000
+max_output_tokens = 8192
+input_per_million = 0.8
+output_per_million = 4.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "claude-haiku-4"
+base = "anthropic"
+anthropic_thinking_control = "manual_budget"
+max_context_tokens = 200000
+max_output_tokens = 8192
+input_per_million = 0.8
+output_per_million = 4.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-5.3-codex-spark"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+
+[[models]]
+id_prefix = "o3-mini"
+base = "openai_chat"
+max_context_tokens = 200000
+max_output_tokens = 100000
+input_per_million = 1.1
+output_per_million = 4.4
+
+[[models]]
+id_prefix = "glm-coding-plan:glm-5-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "glm-coding-plan:glm-5.1"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
+
+[[models]]
+id_prefix = "glm-coding-plan:glm-5"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "google/gemma-4-26b-a4b"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+id_prefix = "google/gemma-4-31b"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+id_prefix = "glm-4.6v"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.5v"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 16384
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# masc deployment overlay rows (mirror of the deployment config-root
+# oas-models-overlay.toml, RFC-OAS-036 / RFC-0342 D1). Transport aliases for
+# [providers.<id>] table names upstream cannot know + locally probed builds.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# MiniMax M3 on the Ollama Cloud native /api/chat lane, bound by the repo
+# seed config/runtime.toml ([ollama_cloud_native.minimax-m3-native-structured]).
+# Mirrors the pin's (ollama_cloud, minimax-m3) row except structured output:
+# the pin row's own comment routes strict schemas to this native lane, so this
+# row declares supports_structured_output = true.
+[[models]]
+id_prefix = "minimax-m3"
+provider_name = "ollama_cloud_native"
+base = "ollama_cloud"
+max_context_tokens = 524288
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "ollama_think"
+reasoning_streaming_format = "delta:reasoning"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+# Ollama Cloud RNJ-1 8B. Carried from the pre-pin-sync fork (values probed
+# when the row was first added); absent from the pin catalog, bound by the
+# repo seed config/runtime.toml ([ollama_cloud.ollama-cloud-rnj-1-8b]).
 [[models]]
 id_prefix = "rnj-1:8b"
+provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 32768
 supports_tools = true
@@ -1783,3 +2793,128 @@ thinking_control_format = "none"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
+
+# GLM-4.7 through the Z.AI coding-plan endpoint, bound by the repo seed
+# config/runtime.toml ([glm-coding.glm-4-7-coding]). Values mirror the
+# upstream bare "glm-4.7" row (standard-API pricing; coding-plan rates for
+# glm-4.7 are not separately published).
+[[models]]
+id_prefix = "glm-4.7"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+# Z.AI coding-plan endpoint (api.z.ai/api/coding/paas/v4) under the deployment
+# provider table [providers.glm-coding]. Capabilities mirror the upstream
+# "glm-coding-plan:glm-5-turbo" serving-contract row.
+[[models]]
+id_prefix = "glm-5-turbo"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+# Kimi Code coding-plan gateway (api.kimi.com/coding, OpenAI-compatible path)
+# under the deployment provider table [providers.kimi_code]. Mirrors the
+# upstream bare "kimi-for-coding" row.
+[[models]]
+id_prefix = "kimi-for-coding"
+provider_name = "kimi_code"
+base = "kimi"
+max_context_tokens = 256000
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Deployment transport alias for the "vllm-qwen3-mtp" serving contract
+# (RunPod-hosted llama-server/vLLM MTP endpoint). Mirrors the upstream
+# provider_name = "vllm-qwen3-mtp" row.
+[[models]]
+id_prefix = "qwen36-35b-a3b-mtp"
+provider_name = "runpod_mtp"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_native_streaming = true
+
+# Local Ollama QAT builds pulled from hf.co. Provider-scoped because the
+# declared provider gate no longer takes the bare-row fallback. Capability
+# values from the live /api/show + tool-call probes recorded in runtime.toml
+# (2026-06-12).
+[[models]]
+id_prefix = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+provider_name = "ollama"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Gemma 4 E2B edge build. Modality values mirror the pin's bare E2B row
+# (`ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`, 2026-07-06:
+# tools, completion, vision, audio); JSON response format per runtime.toml
+# local caps.
+[[models]]
+id_prefix = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+provider_name = "ollama"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0

@@ -91,7 +91,10 @@ default_model = "contract-verifier"
 capabilities_base = "openai_chat"
 
 [[models]]
-id_prefix = "contract_verifier/contract-verifier"
+# Pinned OAS (v0.212.x) lookup identity: provider-scoped rows key on
+# (provider_name, bare id_prefix) with exact equality; the old
+# "provider/model" qualified id_prefix is not a lookup key.
+id_prefix = "contract-verifier"
 base = "openai_chat"
 provider_name = "contract_verifier"
 max_context_tokens = 32768

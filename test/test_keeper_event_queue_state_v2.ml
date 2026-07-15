@@ -507,40 +507,6 @@ let test_unconsumed_approval_requeues_behind_other_work () =
     ]
 ;;
 
-let test_context_compaction_retry_preserves_source_identity () =
-  let source = stimulus "overflow-source" 1.0 in
-  let peer = stimulus "peer-work" 2.0 in
-  let state = State.with_pending (queue [ source; peer ]) State.empty in
-  let state, lease = claim_head state in
-  let lease = require_some "overflow source lease" lease in
-  let state, _ =
-    State.settle
-      ~settled_at:3.0
-      ~lease
-      ~settlement:(State.Requeue State.Context_compaction_retry)
-      state
-    |> require_ok "settle context-compacted source"
-  in
-  let state =
-    State.of_yojson (State.to_yojson state)
-    |> require_ok "round-trip context-compaction settlement"
-  in
-  match Queue.to_list (State.pending state), State.transition_outbox state with
-  | [ next; retained ], [ outbox ] ->
-    Alcotest.(check string)
-      "peer work remains ahead of the compacted retry"
-      peer.post_id
-      next.post_id;
-    Alcotest.(check bool)
-      "exact leased source identity is retained"
-      true
-      (Queue.stimulus_identity_equal source retained);
-    (match outbox.receipt.settlement with
-     | State.Requeue State.Context_compaction_retry -> ()
-     | _ -> Alcotest.fail "outbox lost context-compaction retry reason")
-  | _ -> Alcotest.fail "context-compaction retry changed queue topology"
-;;
-
 let rec remove_tree path =
   if Sys.file_exists path
   then if Sys.is_directory path
@@ -577,9 +543,10 @@ let read_schema path =
   | Ok _ -> Alcotest.fail "migrated state is not an object"
 ;;
 
-let test_retryable_failure_restores_exact_stimulus_at_fifo_tail () =
+let test_context_compaction_retry_is_durable_and_lane_local () =
   with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
     let keeper_name = "retry_tail_keeper" in
+    let peer_keeper_name = "independent_peer_keeper" in
     let source =
       stimulus
         ~payload:
@@ -591,9 +558,13 @@ let test_retryable_failure_restores_exact_stimulus_at_fifo_tail () =
         1.25
     in
     let unrelated = stimulus "unrelated-board-work" 2.5 in
+    let peer_work = stimulus "independent-peer-work" 2.75 in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
       List.fold_left Queue.enqueue pending [ source; unrelated ])
     |> require_ok "seed retry tail queue";
+    Persistence.update_result ~base_path ~keeper_name:peer_keeper_name (fun pending ->
+      Queue.enqueue pending peer_work)
+    |> require_ok "seed independent peer lane";
     let lease =
       Persistence.claim_when_result
         ~base_path
@@ -611,14 +582,31 @@ let test_retryable_failure_restores_exact_stimulus_at_fifo_tail () =
           ~keeper_name
           ~settled_at:4.0
           ~lease
-          ~settlement:(State.Requeue State.Retry_after_observed)
+          ~settlement:(State.Requeue State.Context_compaction_retry)
           ()
-        |> require_ok "settle retryable source"
+        |> require_ok "settle context-compacted source"
       with
       | Persistence.Settled receipt -> receipt
       | Persistence.Already_settled _ ->
         Alcotest.fail "first retryable settlement was already settled"
     in
+    let peer_lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name:peer_keeper_name
+        ~claimed_at:4.5
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim peer while owner projection is pending"
+      |> require_some "independent peer lease"
+    in
+    (match Persistence.lease_stimuli peer_lease with
+     | [ claimed ] ->
+       Alcotest.(check bool)
+         "owner compaction transition does not block peer lane"
+         true
+         (Queue.stimulus_identity_equal peer_work claimed)
+     | _ -> Alcotest.fail "peer lane claim changed the stimulus set");
     let restored =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "restore retryable state"
@@ -642,8 +630,8 @@ let test_retryable_failure_restores_exact_stimulus_at_fifo_tail () =
       | _ -> Alcotest.fail "retryable settlement must retain one transition receipt"
     in
     (match outbox_entry.receipt.settlement with
-     | State.Requeue State.Retry_after_observed -> ()
-     | _ -> Alcotest.fail "retryable transition lost its typed requeue reason");
+     | State.Requeue State.Context_compaction_retry -> ()
+     | _ -> Alcotest.fail "compaction transition lost its typed requeue reason");
     (match outbox_entry.stimuli with
      | [ retained ] ->
        Alcotest.(check bool)
@@ -942,16 +930,12 @@ let () =
             "unconsumed approval yields FIFO"
             `Quick
             test_unconsumed_approval_requeues_behind_other_work
-        ; Alcotest.test_case
-            "context compaction preserves source identity"
-            `Quick
-            test_context_compaction_retry_preserves_source_identity
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case
-            "retryable failure durable FIFO tail"
+            "context compaction retry is durable and lane-local"
             `Quick
-            test_retryable_failure_restores_exact_stimulus_at_fifo_tail
+            test_context_compaction_retry_is_durable_and_lane_local
         ; Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once
         ; Alcotest.test_case
             "transition outbox projection"

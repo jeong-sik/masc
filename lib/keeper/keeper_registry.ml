@@ -378,6 +378,7 @@ type wakeup_intent =
   | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal
+  | Compaction_signal
 
 let wakeup_intent_to_wire = function
   | Reactive_signal -> "reactive_signal"
@@ -386,6 +387,7 @@ let wakeup_intent_to_wire = function
   | Supervisor_resume -> "supervisor_resume"
   | Hitl_resolution -> "hitl_resolution"
   | Broadcast_signal -> "broadcast_signal"
+  | Compaction_signal -> "compaction_signal"
 ;;
 
 type wakeup_outcome =

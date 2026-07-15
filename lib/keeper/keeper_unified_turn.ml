@@ -240,23 +240,6 @@ let recover_provider_context_overflow_in_lane
     Not_provider_overflow
 ;;
 
-let compaction_evidence_json
-      (evidence : Keeper_compact_policy.compaction_evidence)
-  =
-  `Assoc
-    [ "before_checkpoint_bytes", `Int evidence.before_checkpoint_bytes
-    ; "after_checkpoint_bytes", `Int evidence.after_checkpoint_bytes
-    ; "before_message_count", `Int evidence.before_message_count
-    ; "after_message_count", `Int evidence.after_message_count
-    ; "summarized_message_count", `Int evidence.summarized_message_count
-    ; "dropped_message_count", `Int evidence.dropped_message_count
-    ; "before_tool_use_count", `Int evidence.before_tool_use_count
-    ; "after_tool_use_count", `Int evidence.after_tool_use_count
-    ; "before_tool_result_count", `Int evidence.before_tool_result_count
-    ; "after_tool_result_count", `Int evidence.after_tool_result_count
-    ]
-;;
-
 let append_provider_overflow_manifest
       ~config
       ~runtime_manifest_context
@@ -292,7 +275,8 @@ let append_provider_overflow_manifest
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
                ; "source_requeued", `Bool true
                ; "error", error
-               ; "exact_evidence", compaction_evidence_json evidence
+               ; ( "exact_evidence"
+                 , Keeper_compact_policy.compaction_evidence_to_json evidence )
                ]))
         Keeper_runtime_manifest.Context_compacted
     in

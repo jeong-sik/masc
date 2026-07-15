@@ -41,6 +41,9 @@ type compaction_evidence =
     tool-block counts are measured from the actual checkpoint on both sides;
     no token estimate is synthesized. *)
 
+val compaction_evidence_to_json : compaction_evidence -> Yojson.Safe.t
+(** Lossless wire projection shared by every MASC compaction producer. *)
+
 type compaction_preparation =
   { context : Keeper_context_core.working_context
   ; decision : compaction_decision

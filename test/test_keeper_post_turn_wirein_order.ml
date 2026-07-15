@@ -196,12 +196,17 @@ let test_prepared_becomes_applied_only_after_save () =
     check string "saved checkpoint returned" "durable-checkpoint" checkpoint
   | Ok _ -> fail "successful checkpoint save did not produce Applied Manual"
 
-let make_meta () : Masc.Keeper_meta_contract.keeper_meta =
+let make_meta
+      ?(name = "post-turn-no-auto-compact")
+      ?(trace_id = "trace-post-turn-no-auto-compact")
+      ()
+  : Masc.Keeper_meta_contract.keeper_meta
+  =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
-        [ "name", `String "post-turn-no-auto-compact"
-        ; "trace_id", `String "trace-post-turn-no-auto-compact"
+        [ "name", `String name
+        ; "trace_id", `String trace_id
         ; "compaction_mode", `String "llm"
         ])
   with
@@ -359,6 +364,136 @@ let test_stale_compaction_is_not_applied () =
           (Masc.Keeper_registry.packed_compaction_stage_label entry.compaction_stage)
       | None -> fail "registered keeper disappeared")
 
+let decode_only_manifest_row path =
+  match
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+  with
+  | [ line ] ->
+    (match
+       try Ok (Yojson.Safe.from_string line) with
+       | Yojson.Json_error detail -> Error detail
+     with
+     | Error detail -> failf "manual compaction manifest JSON failed: %s" detail
+     | Ok json ->
+       (match Masc.Keeper_runtime_manifest.of_json json with
+        | Ok row -> row
+        | Error detail -> failf "manual compaction manifest decode failed: %s" detail))
+  | rows -> failf "expected one manual compaction manifest row, got %d" (List.length rows)
+;;
+
+let test_manual_compaction_wakes_only_owner_lane () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let meta, checkpoint = make_meta (), make_checkpoint () in
+  let peer =
+    make_meta
+      ~name:"manual-compaction-peer"
+      ~trace_id:"trace-manual-compaction-peer"
+      ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Compact_policy.register_record_pre_compact no_pre_compact;
+      Masc.Keeper_registry.unregister ~base_path meta.name;
+      Masc.Keeper_registry.unregister ~base_path peer.name;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      let runtime_path =
+        Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+      in
+      Result.get_ok (Runtime.init_default ~config_path:runtime_path);
+      Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+      let owner_entry = Masc.Keeper_registry.register ~base_path meta.name meta in
+      let peer_entry = Masc.Keeper_registry.register ~base_path peer.name peer in
+      Atomic.set owner_entry.fiber_wakeup false;
+      Atomic.set peer_entry.fiber_wakeup false;
+      let session =
+        Masc.Keeper_context_core.create_session
+          ~session_id:checkpoint.session_id
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+      in
+      Masc.Keeper_checkpoint_store.save_oas_classified
+        ~session_dir:session.session_dir checkpoint
+      |> Result.get_ok |> ignore;
+      Compact_policy.register_record_pre_compact no_pre_compact;
+      let plan =
+        Masc.Keeper_compaction_llm_summarizer.plan_of_json
+          ~message_count:3
+          (`Assoc
+            [ "summary", `String "durable compacted context"
+            ; "kept_indices", `List [ `Int 0 ]
+            ; "summarized_indices", `List [ `Int 1; `Int 2 ]
+            ; "dropped_indices", `List []
+            ])
+        |> Result.get_ok
+      in
+      let ctx : _ Masc.Keeper_tool_surface.context =
+        { config; agent_name = "operator"; sw; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      let result =
+        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+          (fun ~runtime_id:_ ~keeper_name:_ () ->
+             Some (fun ~messages:_ -> Some plan))
+          (fun () ->
+             Masc.Keeper_tool_surface.dispatch
+               ctx
+               ~name:"masc_keeper_compact"
+               ~args:(`Assoc [ "name", `String meta.name ]))
+      in
+      let data =
+        match result with
+        | Some (Ok success) -> Tool_result.data (Ok success)
+        | Some (Error failure) ->
+          failf "manual compaction failed: %s" failure.message
+        | None -> fail "masc_keeper_compact is not registered"
+      in
+      let open Yojson.Safe.Util in
+      check string "durable manifest appended" "appended"
+        (data |> member "manifest" |> member "outcome" |> to_string);
+      check string "owner lane signaled" "signaled"
+        (data |> member "wake" |> member "outcome" |> to_string);
+      check bool "owner wake flag set" true (Atomic.get owner_entry.fiber_wakeup);
+      check bool "peer wake flag untouched" false (Atomic.get peer_entry.fiber_wakeup);
+      let compacted =
+        Masc.Keeper_checkpoint_store.load_oas
+          ~session_dir:session.session_dir
+          ~session_id:checkpoint.session_id
+        |> Result.get_ok
+      in
+      check int "LLM plan reduced durable messages" 2 (List.length compacted.messages);
+      let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let manifest =
+        Masc.Keeper_runtime_manifest.path_for_trace
+          config
+          ~keeper_name:meta.name
+          ~trace_id
+        |> decode_only_manifest_row
+      in
+      check bool "typed compaction row" true
+        (manifest.event = Masc.Keeper_runtime_manifest.Context_compacted);
+      check int "exact before message count" 3
+        (manifest.decision
+         |> member "exact_evidence"
+         |> member "before_message_count"
+         |> to_int);
+      check int "exact summarized message count" 2
+        (manifest.decision
+         |> member "exact_evidence"
+         |> member "summarized_message_count"
+         |> to_int))
+;;
+
 let () =
   run "RFC-0065 §3.2.3 WireinOrderPinned (OCaml-side guard)" [
     "WireinOrderPinned", [
@@ -372,6 +507,8 @@ let () =
         `Quick test_prepared_becomes_applied_only_after_save;
       test_case "stale tool compaction is not applied"
         `Quick test_stale_compaction_is_not_applied;
+      test_case "manual compaction wakes only its owner lane"
+        `Quick test_manual_compaction_wakes_only_owner_lane;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
     ];

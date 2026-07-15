@@ -464,6 +464,103 @@ let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option)
     in
     max min_ctx resolution.effective_budget
 
+let append_manual_compaction_manifest
+      ~(config : Workspace.config)
+      ~base_dir
+      ~(meta : keeper_meta)
+      (recovery : Keeper_context_runtime.overflow_retry_recovery)
+  =
+  match recovery.compaction.trigger with
+  | None -> Error "manual compaction completed without its typed trigger"
+  | Some trigger ->
+    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let manifest_context : Keeper_runtime_manifest.turn_context =
+      { manifest_keeper_name = meta.name
+      ; manifest_agent_name = Some meta.agent_name
+      ; manifest_trace_id = trace_id
+      ; manifest_generation = Some recovery.turn_generation
+      ; manifest_keeper_turn_id = Some recovery.checkpoint.turn_count
+      }
+    in
+    let checkpoint_path =
+      Keeper_checkpoint_store.oas_checkpoint_path
+        ~session_dir:(Filename.concat base_dir recovery.checkpoint.session_id)
+        ~session_id:recovery.checkpoint.session_id
+    in
+    let clock_refs =
+      Keeper_runtime_manifest.clock_refs_for_context
+        manifest_context
+        ~event:Keeper_runtime_manifest.Context_compacted
+        ~compaction_source:"operator_manual"
+        ()
+    in
+    Keeper_runtime_manifest.make_for_context
+      manifest_context
+      ~event:Keeper_runtime_manifest.Context_compacted
+      ?runtime_id:recovery.evidence.selected_runtime_id
+      ~status:"compacted"
+      ~decision:
+        (Keeper_runtime_manifest.with_clock_refs
+           ~clock_refs
+           (Keeper_runtime_manifest.with_payload_role
+              ~payload_role:Keeper_runtime_manifest.Checkpoint
+              (`Assoc
+                [ "trigger", `String (Compaction_trigger.to_label trigger)
+                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+                ; ( "exact_evidence"
+                  , Keeper_compact_policy.compaction_evidence_to_json
+                      recovery.evidence )
+                ])))
+      ~checkpoint_path
+      ()
+    |> Keeper_runtime_manifest.append config
+;;
+
+let manual_compaction_manifest_observation ~keeper_name = function
+  | Ok () -> `Assoc [ "outcome", `String "appended" ]
+  | Error detail ->
+    Log.Keeper.error
+      ~keeper_name
+      "manual compaction manifest append failed after durable checkpoint: %s"
+      detail;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WriteMetaFailures)
+      ~labels:[ "keeper", keeper_name; "phase", "manual_compaction_manifest" ]
+      ();
+    `Assoc [ "outcome", `String "failed"; "detail", `String detail ]
+;;
+
+let manual_compaction_wakeup_observation ~base_path keeper_name =
+  match
+    Keeper_registry.wakeup
+      ~intent:Keeper_registry.Compaction_signal
+      ~base_path
+      keeper_name
+  with
+  | Keeper_registry.Signaled -> `Assoc [ "outcome", `String "signaled" ]
+  | Keeper_registry.Deferred_unregistered ->
+    Log.Keeper.info
+      "%s: durable manual compaction committed without a registered wake target"
+      keeper_name;
+    `Assoc [ "outcome", `String "deferred_unregistered" ]
+  | Keeper_registry.Deferred_not_running phase ->
+    let phase = Keeper_state_machine.phase_to_string phase in
+    Log.Keeper.info
+      "%s: durable manual compaction wake deferred in phase=%s"
+      keeper_name
+      phase;
+    `Assoc
+      [ "outcome", `String "deferred_not_running"; "phase", `String phase ]
+  | Keeper_registry.Deferred_lifecycle denial ->
+    let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+    Log.Keeper.info
+      "%s: durable manual compaction wake deferred by lifecycle reason=%s"
+      keeper_name
+      reason;
+    `Assoc
+      [ "outcome", `String "deferred_lifecycle"; "reason", `String reason ]
+;;
+
 (** Operator-initiated context compaction.
 
     Dispatches [Operator_compact_requested] to the FSM, then compacts the
@@ -564,6 +661,14 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                    ~primary_model_max_tokens:max_tokens
                with
                | Ok recovery ->
+                 let manifest_observation =
+                   append_manual_compaction_manifest
+                     ~config
+                     ~base_dir
+                     ~meta
+                     recovery
+                   |> manual_compaction_manifest_observation ~keeper_name:name
+                 in
                  (match
                     Keeper_context_runtime.dispatch_compaction_completed
                       ~config ~keeper_name:name
@@ -578,6 +683,11 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                          error)
                   | Ok () ->
                     invalidate_status_cache name;
+                    let wake_observation =
+                      manual_compaction_wakeup_observation
+                        ~base_path:config.base_path
+                        name
+                    in
                     Otel_metric_store.inc_counter
                       Keeper_metrics.(to_string OperatorCompact)
                       ~labels:
@@ -606,6 +716,8 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
                               | Some trigger ->
                                 Compaction_trigger.to_detail_json trigger
                               | None -> `Null )
+                          ; "manifest", manifest_observation
+                          ; "wake", wake_observation
                           ]))
                | Error recovery_error ->
                  let recovery_tag =

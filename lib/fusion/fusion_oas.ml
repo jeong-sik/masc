@@ -76,7 +76,6 @@ let panel_failure_code (failure : Fusion_types.panel_failure) : string =
   | Fusion_types.Provider_error _ -> "provider_error"
   | Fusion_types.Invalid_structured_response _ -> "invalid_structured_response"
   | Fusion_types.Empty_response _ -> "empty_response"
-  | Fusion_types.Invalid_max_output_tokens _ -> "invalid_max_output_tokens"
 
 let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : string =
   match failure with
@@ -85,8 +84,6 @@ let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : st
   | Fusion_types.Provider_error detail -> provider_error_detail ~runtime_id detail
   | Fusion_types.Invalid_structured_response detail -> detail
   | Fusion_types.Empty_response detail -> detail
-  | Fusion_types.Invalid_max_output_tokens n ->
-    Printf.sprintf "invalid max_output_tokens %d" n
 
 (* 이미 attribution된 실패를 재-attribution 없이 렌더한다. Provider_error의 detail은
    실패 시점(panel outcome_of_result / build_agent)에 provider_error_detail
@@ -101,8 +98,6 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
   | Fusion_types.Provider_error detail -> detail
   | Fusion_types.Invalid_structured_response detail -> detail
   | Fusion_types.Empty_response detail -> detail
-  | Fusion_types.Invalid_max_output_tokens n ->
-    Printf.sprintf "invalid max_output_tokens %d" n
 
 let timeout_budget_opt timeout_s =
   if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None

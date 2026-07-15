@@ -197,8 +197,6 @@ let test_panel_failure_yojson_round_trips_current_shapes () =
     (Fusion_types.Provider_error "Provider 'runtime': quota");
   check_round_trip "empty response"
     (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)");
-  check_round_trip "invalid max output tokens"
-    (Fusion_types.Invalid_max_output_tokens 0);
   Alcotest.(check bool)
     "detail empty response serializes as tagged payload, not legacy string"
     true

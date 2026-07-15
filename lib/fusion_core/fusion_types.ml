@@ -67,7 +67,6 @@ type panel_failure =
   | Provider_error of string
   | Invalid_structured_response of string
   | Empty_response of string
-  | Invalid_max_output_tokens of int
 [@@deriving to_yojson, show, eq]
 
 let panel_failure_of_yojson = function
@@ -78,8 +77,6 @@ let panel_failure_of_yojson = function
   | `List [ `String "Invalid_structured_response"; `String detail ] ->
     Ok (Invalid_structured_response detail)
   | `List [ `String "Empty_response"; `String detail ] -> Ok (Empty_response detail)
-  | `List [ `String "Invalid_max_output_tokens"; `Int value ] ->
-    Ok (Invalid_max_output_tokens value)
   | json ->
     Error
       (Printf.sprintf
@@ -242,7 +239,7 @@ type judge_error_node =
       (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E).
           [panel_error]와 달리 심판 실패는 토큰 소비 후일 수 있어 usage를 동반한다. *)
   ; elapsed_s : float
-      (** 이 심판 노드가 시작된 시점부터 실패까지 경과한 시간(초). 예산/타임아웃
+      (** 이 심판 노드가 시작된 시점부터 실패까지 경과한 시간(초). 타임아웃
           분석에 쓰인다(RFC-0284-FUSION-P0). [timed_out]은 [judge_failure_is_timeout failure]
           로 파생 가능해 별도 필드에서 제거했다. *)
   }

@@ -178,17 +178,6 @@ let test_panel_meta_empty_response_text () =
   check (option string) "empty response reason_code" (Some "empty_response")
     (string_field a "reason_code")
 
-let test_panel_meta_invalid_max_output_tokens_text () =
-  let o =
-    Failed
-      { failed_model = "skeptic (claude)"; reason = Invalid_max_output_tokens 0 }
-  in
-  let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
-  check (option string) "invalid max tokens reason_detail"
-    (Some "invalid max_output_tokens 0") (string_field a "reason_detail");
-  check (option string) "invalid max tokens reason_code"
-    (Some "invalid_max_output_tokens") (string_field a "reason_code")
-
 (* --- RFC-0284: judge_node_meta — 관측 record를 board [judges] 배열 원소로 직렬화 ---
    role(위상 의미) + identity(First는 panelist_id) + judge_meta와 동일한 5섹션 스키마
    공유 + 노드별 usage 를 핀한다. 값-핀(value-blind coverage 회피): role/identity가
@@ -296,8 +285,6 @@ let () =
         ; test_case "answered_uses_identity" `Quick test_panel_meta_answered_uses_identity
         ; test_case "timeout_text" `Quick test_panel_meta_timeout_text
         ; test_case "empty_response_text" `Quick test_panel_meta_empty_response_text
-        ; test_case "invalid_max_output_tokens_text" `Quick
-            test_panel_meta_invalid_max_output_tokens_text
         ] )
     ; ( "judge_node_meta_observation"
       , [ test_case "first_carries_panelist_identity" `Quick

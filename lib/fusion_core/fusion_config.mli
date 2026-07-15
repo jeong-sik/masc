@@ -25,12 +25,12 @@ type config_error =
       (** preset의 judge 모델 id가 비어있음 (필수, 빈 문자열 default 거부) *)
   | Invalid_staged_judge_group_size of int
       (** staged_judge_group_size < Fusion_policy.min_staged_judge_group_size *)
-  | Invalid_max_output_tokens of string * int
-      (** (preset 이름, 값) — max_output_tokens override는 양수여야 함 *)
   | Missing_default_preset of string
       (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자엏도 거부 —
           preset 생략 호출이 default_preset로 폭빽하는데 ""는 항상 Preset_unknown로
           deny되기 때문. *)
+  | Unexpected_field of string * string
+      (** (config location, field) — Fusion schema에 없는 필드는 무시하지 않고 거부. *)
   | Judge_panel_prompt_missing of string
       (** preset 이름 — JOJ 1차 심판 system prompt 누락 (RFC-0283). *)
   | Duplicate_judge of string * string
@@ -55,8 +55,8 @@ val disabled : Fusion_policy.t
     - panel/judge system prompt 누락 → [Error [Missing_prompt _]].
     - judge 모델 id 누락 → [Error [Missing_judge_model _]].
     - staged_judge_group_size < 2 → [Error [Invalid_staged_judge_group_size _]].
-    - max_output_tokens override가 0 이하 → [Error [Invalid_max_output_tokens _]].
     - default_preset가 presets에 없음 → [Error [Missing_default_preset _]].
+    - 알 수 없는 preset/panel/judge 필드 → [Error [Unexpected_field _]].
     - 필드 타입 불일치 → [Error [Toml_type_error _]].
     여러 에러는 누적되어 한 번에 반환된다. *)
 val of_toml : Otoml.t -> (Fusion_policy.t, config_error list) result

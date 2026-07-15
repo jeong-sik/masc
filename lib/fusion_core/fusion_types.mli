@@ -74,8 +74,6 @@ type panel_failure =
   | Empty_response of string
       (** 모델이 빈 응답. detail에는 stop_reason/usage/content shape만 보존하고,
           reasoning/thinking 본문은 노출하지 않는다. *)
-  | Invalid_max_output_tokens of int
-      (** Runtime defense-in-depth: output token override must be positive. *)
 [@@deriving to_yojson, show, eq]
 
 val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result
@@ -206,10 +204,8 @@ type judge_role =
 
 (** 심판(judge) 한 명이 실패하는 방식. {!panel_failure}와 동형인 닫힌 합이되, 심판
     도메인에만 존재하는 사유([Empty_result]/[Build_error]/[Parse_error])
-    를 추가로 담는다. [panel_failure]를 literal하게 공유하지 않는 이유: 판(panel) 전용인
-    [Invalid_max_output_tokens]가 심판에서 dead variant가 되고, wave-budget SKIP을
-    [Provider_error "...skipped..."] 문자열에 숨기면 orchestrator의 fallback 분류가
-    substring match로 잔존하기 때문이다(CLAUDE.md §string-classifier 안티패턴).
+    를 추가로 담는다. panel/judge 실패를 별도 닫힌 합으로 유지해 호출자가 문자열을
+    역분류하지 않고 exhaustive match로 처리한다.
 
     근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Agent_sdk.Error}의
     [Timeout] variant를 match에서 잡아 [Timeout]으로, provider/transport 에러를
@@ -257,7 +253,7 @@ type judge_error_node =
   ; usage : usage
       (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
   ; elapsed_s : float
-      (** Wave start부터 실패까지 경과한 시간(초). 타임아웃/예산 원인 분석용. *)
+      (** Wave start부터 실패까지 경과한 시간(초). 타임아웃 원인 분석용. *)
   }
 [@@deriving yojson, show, eq]
 

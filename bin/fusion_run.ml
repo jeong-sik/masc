@@ -26,8 +26,7 @@
    [Fusion_judge.run] directly. Bypassing the orchestrator avoids the sink
    side effect (which writes a transcript to a keeper chat lane and, for a
    synthetic keeper, can return [Sink_failed] and discard the computed panel
-   and judge results). (An hourly budget counter used to be listed here; it
-   was removed in PR #22051 and no invocation rate limit exists.)
+   and judge results).
 
    The baseline and the self-consistency arm reuse [Fusion_panel.run] so the
    call path is identical to a panel member: the arms differ only in model set
@@ -54,8 +53,6 @@ let string_of_failure (f : Fusion_types.panel_failure) : string =
   | Fusion_types.Empty_response detail -> "empty_response: " ^ detail
   | Fusion_types.Invalid_structured_response detail ->
     "invalid_structured_response: " ^ detail
-  | Fusion_types.Invalid_max_output_tokens n ->
-    Printf.sprintf "invalid_max_output_tokens: %d" n
 
 let string_of_decision (d : Fusion_types.judge_decision) : string =
   match d with

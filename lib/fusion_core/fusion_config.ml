@@ -10,8 +10,9 @@ type config_error =
   | Missing_prompt of string
   | Missing_judge_model of string
   | Invalid_staged_judge_group_size of int
-  | Invalid_max_output_tokens of string * int
   | Missing_default_preset of string
+  | Unexpected_field of string * string
+      (** (config location, field): Fusion schema에 없는 필드. *)
   | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
   | Invalid_meta_timeout of string * float
@@ -26,6 +27,50 @@ let disabled : Fusion_policy.t =
   ; presets = []
   }
 
+let unexpected_field ~location ~allowed tbl =
+  Otoml.get_table tbl
+  |> List.find_map (fun (field, _) ->
+         if List.mem field allowed then None else Some (Unexpected_field (location, field)))
+
+let validate_preset_schema name tbl =
+  let preset_fields =
+    [ "panel"
+    ; "label"
+    ; "panel_system_prompt"
+    ; "web_tools"
+    ; "panel_timeout_s"
+    ; "panels"
+    ; "judge"
+    ; "judge_system_prompt"
+    ; "judge_timeout_s"
+    ; "meta_timeout_s"
+    ; "judges"
+    ; "fallback_judge_model"
+    ]
+  in
+  let panel_fields = [ "panel"; "label"; "panel_system_prompt"; "web_tools"; "panel_timeout_s" ] in
+  let judge_fields = [ "model"; "label"; "system_prompt"; "web_tools"; "timeout_s" ] in
+  let nested_unexpected key allowed =
+    match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ key ] with
+    | None -> None
+    | Some entries ->
+      entries
+      |> List.mapi (fun index entry ->
+             unexpected_field
+               ~location:(Printf.sprintf "fusion.presets.%s.%s[%d]" name key index)
+               ~allowed entry)
+      |> List.find_map Fun.id
+  in
+  match unexpected_field ~location:("fusion.presets." ^ name) ~allowed:preset_fields tbl with
+  | Some error -> Error error
+  | None ->
+    (match nested_unexpected "panels" panel_fields with
+     | Some error -> Error error
+     | None ->
+       (match nested_unexpected "judges" judge_fields with
+        | Some error -> Error error
+        | None -> Ok ()))
+
 (* 패널 그룹 한 개 파싱. 그룹 sub-table(새 [[...panels]] 문법)에도, preset table
    자체(legacy flat 문법의 desugar)에도 동일하게 적용된다 — 두 문법이 같은 키
    이름(panel/label/panel_system_prompt/web_tools/panel_timeout_s)을
@@ -38,8 +83,6 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
   ; system_prompt =
       Otoml.find_or ~default:"" tbl Otoml.get_string [ "panel_system_prompt" ]
   ; web_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
-  ; max_output_tokens =
-      Otoml.find_opt tbl Otoml.get_integer [ "max_output_tokens_per_panel" ]
   ; timeout_s =
       Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
         [ "panel_timeout_s" ]
@@ -55,7 +98,6 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
   ; jsystem_prompt =
       Otoml.find_or ~default:"" tbl Otoml.get_string [ "system_prompt" ]
   ; jweb_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
-  ; jmax_output_tokens = Otoml.find_opt tbl Otoml.get_integer [ "max_output_tokens" ]
   ; jtimeout_s =
       Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
         [ "timeout_s" ]
@@ -77,9 +119,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
       [ "judge_timeout_s" ]
   in
-  let judge_max_output_tokens =
-    Otoml.find_opt tbl Otoml.get_integer [ "judge_max_output_tokens" ]
-  in
   (* meta_timeout_s: 누락 시 judge_timeout_s와 byte-identical (legacy). *)
   let meta_timeout_s =
     Otoml.find_or ~default:judge_timeout_s tbl Otoml.get_float [ "meta_timeout_s" ]
@@ -98,7 +137,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     ; judge
     ; judge_system_prompt
     ; judge_timeout_s
-    ; judge_max_output_tokens
     ; judges
     ; meta_timeout_s
     ; fallback_judge_model
@@ -118,8 +156,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
          | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
          | Fusion_policy.Validated_preset.Duplicate_panelist id ->
            Duplicate_panelist (name, id)
-         | Fusion_policy.Validated_preset.Bad_max_output_tokens v ->
-           Invalid_max_output_tokens (name, v)
          | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
            Judge_panel_prompt_missing name
          | Fusion_policy.Validated_preset.Duplicate_judge id ->
@@ -140,7 +176,8 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
    Key_error만 삼키고 Type_error는 전파하므로(otoml_base.ml:332-337) of_toml의
    Type_error 핸들러가 Toml_type_error로 fail-fast한다. 여기서 find_opt는 panels/panel
    존재 여부(Some/None) 판별에만 쓰인다 — Type_error 회피 목적이 아니다. *)
-let parse_preset (name, tbl) : (Fusion_policy.Validated_preset.t, config_error) result =
+let parse_preset_unchecked (name, tbl)
+  : (Fusion_policy.Validated_preset.t, config_error) result =
   let groups_opt = Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "panels" ] in
   let has_flat_panel = Option.is_some (Otoml.find_opt tbl Otoml.get_value [ "panel" ]) in
   match groups_opt, has_flat_panel with
@@ -148,6 +185,11 @@ let parse_preset (name, tbl) : (Fusion_policy.Validated_preset.t, config_error) 
   | Some [], _ -> Error (Empty_panels name)
   | Some (_ :: _ as gs), false -> finish_preset name tbl (List.map parse_group gs)
   | None, _ -> finish_preset name tbl [ parse_group tbl ]
+
+let parse_preset ((name, tbl) as entry) =
+  match validate_preset_schema name tbl with
+  | Error _ as error -> error
+  | Ok () -> parse_preset_unchecked entry
 
 (* [fusion] 존재 확정 후의 본 파싱. Otoml.Type_error는 of_toml이 감싼다. *)
 let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =

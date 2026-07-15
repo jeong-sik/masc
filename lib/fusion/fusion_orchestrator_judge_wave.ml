@@ -167,7 +167,6 @@ let run_fallback_judge
       ; jlabel = "fallback"
       ; jsystem_prompt = preset.Fusion_policy.judge_system_prompt
       ; jweb_tools = judge_web_tools
-      ; jmax_output_tokens = preset.Fusion_policy.judge_max_output_tokens
       ; jtimeout_s = preset.Fusion_policy.judge_timeout_s
       }
     in

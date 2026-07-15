@@ -7,10 +7,6 @@
    string ([fusion_config_loader.ml]). This is a read-only projection; it does
    not round-trip back to TOML (the write path is line-based, RFC-0306 §3.2). *)
 
-let opt_int : int option -> Yojson.Safe.t = function
-  | None -> `Null
-  | Some n -> `Int n
-
 let opt_string : string option -> Yojson.Safe.t = function
   | None -> `Null
   | Some s -> `String s
@@ -22,7 +18,6 @@ let panel_group_to_yojson (g : Fusion_policy.panel_group) : Yojson.Safe.t =
     ; ("label", `String g.Fusion_policy.label)
     ; ("system_prompt", `String g.Fusion_policy.system_prompt)
     ; ("web_tools", `Bool g.Fusion_policy.web_tools)
-    ; ("max_output_tokens", opt_int g.Fusion_policy.max_output_tokens)
     ; ("timeout_s", `Float g.Fusion_policy.timeout_s)
     ]
 
@@ -34,7 +29,6 @@ let judge_spec_to_yojson (j : Fusion_policy.judge_spec) : Yojson.Safe.t =
     ; ("label", `String j.Fusion_policy.jlabel)
     ; ("system_prompt", `String j.Fusion_policy.jsystem_prompt)
     ; ("web_tools", `Bool j.Fusion_policy.jweb_tools)
-    ; ("max_output_tokens", opt_int j.Fusion_policy.jmax_output_tokens)
     ; ("timeout_s", `Float j.Fusion_policy.jtimeout_s)
     ]
 
@@ -45,7 +39,6 @@ let preset_to_yojson (p : Fusion_policy.preset) : Yojson.Safe.t =
     ; ("judge", `String p.Fusion_policy.judge)
     ; ("judge_system_prompt", `String p.Fusion_policy.judge_system_prompt)
     ; ("judge_timeout_s", `Float p.Fusion_policy.judge_timeout_s)
-    ; ("judge_max_output_tokens", opt_int p.Fusion_policy.judge_max_output_tokens)
     ; ("meta_timeout_s", `Float p.Fusion_policy.meta_timeout_s)
     ; ("judges", `List (List.map judge_spec_to_yojson p.Fusion_policy.judges))
     ; ("fallback_judge_model", opt_string p.Fusion_policy.fallback_judge_model)

@@ -13,7 +13,6 @@ type panel_group =
           → legacy/단일-occurrence는 byte-identical. 정체성 derive는 [panelist_id]. *)
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부 *)
-  ; max_output_tokens : int option  (** 그룹 모델당 출력 토큰 예산 override *)
   ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초) *)
   }
 [@@deriving show, eq]
@@ -26,7 +25,6 @@ type judge_spec =
   ; jlabel : string  (** 정체성 라벨 ([panelist_id]와 동형). ""면 정체성=jmodel *)
   ; jsystem_prompt : string  (** 이 1차 심판의 lens (config 필수) *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부 *)
-  ; jmax_output_tokens : int option  (** 출력 토큰 예산 override *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초) *)
   }
 [@@deriving show, eq]
@@ -38,23 +36,18 @@ type preset =
       (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0283) *)
   ; judge_system_prompt : string
   ; judge_timeout_s : float
-  ; judge_max_output_tokens : int option
   ; meta_timeout_s : float
       (** meta/stage-meta/final-meta 호출 구조적 타임아웃 (초). *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   ; fallback_judge_model : string option
-      (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
+      (** 전원 타임아웃 시 단일 fallback 심판 모델. *)
   }
 [@@deriving show, eq]
 
 let min_staged_judge_group_size = 2
 let default_staged_judge_group_size = 3
-
-let valid_max_output_tokens = function
-  | None -> true
-  | Some n -> n > 0
 
 (* 패널/심판 호출 구조적 타임아웃 기본값 (preset이 명시 안 할 때). 운영 노브 —
    행동 휴리스틱이 아니므로 named SSOT 상수로 둔다 (Magic Number 회피). *)
@@ -224,16 +217,14 @@ module Validated_preset = struct
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
-    | Bad_max_output_tokens of int
-        (** 그룹/심판 출력 토큰 예산 override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
 
   (* 검증 순서는 config 로드 시점과 동일: non-empty models → 패널 prompt →
-     judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
-     1차 심판 prompt → 1차 심판 정체성 중복 → 심판 max_output_tokens 범위.
+     judge model → 패널 정체성 중복 → (RFC-0283)
+     1차 심판 prompt → 1차 심판 정체성 중복.
      judges=[]면 1차 심판 관련 셋은 통과(simple/refine/conditional preset은 기존과 동일
      결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =
@@ -244,32 +235,14 @@ module Validated_preset = struct
       match preset_duplicate_panelist p with
       | Some id -> Error (Duplicate_panelist id)
       | None ->
-        (match
-           List.find_map
-             (fun (g : panel_group) ->
-               match g.max_output_tokens with
-               | Some n when not (valid_max_output_tokens (Some n)) -> Some n
-               | _ -> None)
-             p.panels
-         with
-         | Some n -> Error (Bad_max_output_tokens n)
-         | None ->
-           if not (preset_judge_prompts_present p) then Error Judge_panel_prompt_missing
-           else (
-             match preset_duplicate_judge p with
-             | Some id -> Error (Duplicate_judge id)
-             | None ->
-               (match
-                  p.judge_max_output_tokens
-                  :: List.map (fun (j : judge_spec) -> j.jmax_output_tokens) p.judges
-                  |> List.find_opt (fun v -> not (valid_max_output_tokens v))
-                with
-                | Some (Some n) -> Error (Bad_max_output_tokens n)
-                | Some None | None ->
-                  if
-                    not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
-                  then Error (Bad_meta_timeout p.meta_timeout_s)
-                  else Ok p)))
+        if not (preset_judge_prompts_present p) then Error Judge_panel_prompt_missing
+        else (
+          match preset_duplicate_judge p with
+          | Some id -> Error (Duplicate_judge id)
+          | None ->
+            if not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
+            then Error (Bad_meta_timeout p.meta_timeout_s)
+            else Ok p)
 
   let preset (t : t) : preset = t
 

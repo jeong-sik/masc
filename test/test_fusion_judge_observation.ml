@@ -22,7 +22,6 @@ let sample_judge model : Fusion_policy.judge_spec =
   ; jlabel = ""
   ; jsystem_prompt = "judge"
   ; jweb_tools = false
-  ; jmax_output_tokens = None
   ; jtimeout_s = 1.0
   }
 

@@ -39,12 +39,8 @@ type t = {
 }
 
 (* Recent-history retention for [Completed] runs. [Running] runs are never
-   evicted (active state must stay accurate). NOTE: 이전 주석은 [Running]이
-   "per-hour fusion budget (RFC-0252 §10)으로 bounded"라고 주장했으나 그 budget은
-   PR #22051에서 제거되어 존재하지 않는다 — 현재 fusion 호출률 제한은 없다(설계
-   미결정, 집계만 한다는 운영 원칙과 정합). This is a log-retention bound, not a
-   symptom cap — it stops the table from growing without limit over a long
-   server lifetime. *)
+   evicted (active state must stay accurate). This is log retention only; it
+   never limits execution or invocation rate. *)
 let max_completed_retained = 64
 
 let create ?path () : t = { runs = Atomic.make []; path }

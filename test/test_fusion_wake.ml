@@ -185,7 +185,6 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; label = "panel"
     ; system_prompt = "panel system prompt"
     ; web_tools = false
-    ; max_output_tokens = None
     ; timeout_s = Fusion_policy.default_timeout_s
     }
   in
@@ -195,7 +194,6 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; judge = "judge.model"
     ; judge_system_prompt = "judge system prompt"
     ; judge_timeout_s = Fusion_policy.default_timeout_s
-    ; judge_max_output_tokens = None
     ; meta_timeout_s = Fusion_policy.default_timeout_s
     ; judges = []
     ; fallback_judge_model = None

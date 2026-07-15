@@ -6,46 +6,16 @@
 import { isRecord } from './type-guards'
 import { asRecord, asString, asBoolean } from './json-coerce'
 
-function decodeOcamlStringLiteral(value: string): string {
-  return value
-    .replace(/\\\\/g, '\u0000')
-    .replace(/\\"/g, '"')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\u0000/g, '\\')
-}
-
-function normalizeProviderAttribution(model: string, reason: string): string {
-  const unknownPrefix = "Provider 'unknown'"
-  if (model === '?' || !reason.startsWith(unknownPrefix)) return reason
-  return `Provider '${model}'${reason.slice(unknownPrefix.length)}`
-}
-
 /**
- * Normalize panel failure reasons. Current `fusion_sink.ml` emits structured
- * `reason_code`/`reason_detail`; the OCaml constructor parsing below is a
- * legacy fallback for older board/meta payloads and direct show-derived
- * fixtures.
+ * Normalize the structured `reason_detail` emitted by `fusion_sink.ml`.
+ * Failure attribution is carried by separate structured fields; this function
+ * never reclassifies or rewrites human-readable detail strings.
  */
-export function normalizeFusionPanelReason(model: string, reason: string | undefined): string | undefined {
+export function normalizeFusionPanelReason(reason: string | undefined): string | undefined {
   if (!reason) return undefined
   const trimmed = reason.trim()
-  const providerMatch = trimmed.match(/^\(?\s*Fusion_types\.Provider_error\s+"([\s\S]*)"\s*\)?$/)
-  if (providerMatch) {
-    return normalizeProviderAttribution(model, decodeOcamlStringLiteral(providerMatch[1] ?? '').trim())
-  }
-  if (/^\(?\s*Fusion_types\.Timeout\s*\)?$/.test(trimmed)) return 'timeout'
-  const emptyMatch = trimmed.match(/^\(?\s*Fusion_types\.Empty_response(?:\s+"([\s\S]*)")?\s*\)?$/)
-  if (emptyMatch) {
-    return decodeOcamlStringLiteral(emptyMatch[1] ?? '').trim() || 'empty response'
-  }
-  const invalidMaxOutputTokensMatch = trimmed.match(
-    /^\(?\s*Fusion_types\.Invalid_max_output_tokens\s+(-?\d+)\s*\)?$/,
-  )
-  if (invalidMaxOutputTokensMatch) {
-    return `invalid max_output_tokens ${invalidMaxOutputTokensMatch[1]}`
-  }
-  return normalizeProviderAttribution(model, trimmed)
+  if (trimmed === '') return undefined
+  return trimmed
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +108,7 @@ function normalizePanelEntry(value: unknown, index: number): FusionPanelEntry | 
     model,
     status: firstString(entry, ['status']) ?? 'unknown',
     answer: firstString(entry, ['answer', 'content', 'output']),
-    reason: reasonRaw ? normalizeFusionPanelReason(model, reasonRaw) : undefined,
+    reason: reasonRaw ? normalizeFusionPanelReason(reasonRaw) : undefined,
     reasonCode: firstString(entry, ['reason_code']) ?? undefined,
     inputTokens:
       firstNumber(entry, ['input_tokens', 'inputTokens'])

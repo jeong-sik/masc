@@ -1921,7 +1921,7 @@ function asFusionPanel(meta: unknown): FusionPanelEntry[] {
       model,
       status: stringOrUndef(r.status) ?? 'unknown',
       answer: stringOrUndef(r.answer),
-      reason: normalizeFusionPanelReason(model, reason),
+      reason: normalizeFusionPanelReason(reason),
       outputTokens: numOrUndef(r.output_tokens),
     }]
   })

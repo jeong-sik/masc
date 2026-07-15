@@ -148,6 +148,17 @@ let test_ingress_observes_callback_failure_and_continues () =
           true
           (String.length failure.reason > 0)))
 
+let test_ingress_dispatcher_has_switch_scoped_lifetime () =
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      ignore
+        (Ingress.create
+           ~sw
+           ~on_failure:(fun failure ->
+             fail
+               ("unexpected connector callback failure: " ^ failure.reason))
+           ())))
+
 let () =
   run "discord_gateway_client"
     [
@@ -167,5 +178,9 @@ let () =
             "callback failure is observed and later work continues"
             `Quick
             test_ingress_observes_callback_failure_and_continues
+        ; test_case
+            "dispatcher ends with its owner switch"
+            `Quick
+            test_ingress_dispatcher_has_switch_scoped_lifetime
         ] )
     ]

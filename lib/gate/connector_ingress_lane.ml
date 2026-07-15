@@ -96,7 +96,7 @@ let take_ready_lane t =
        | Some _ | None -> None))
 ;;
 
-let rec run_dispatcher t =
+let rec run_dispatcher t : [ `Stop_daemon ] =
   let lane, state =
     Eio.Condition.loop_no_mutex t.condition (fun () -> take_ready_lane t)
   in
@@ -114,7 +114,7 @@ let create ~sw ~on_failure () =
     ; on_failure
     }
   in
-  Eio.Fiber.fork ~sw (fun () -> run_dispatcher t);
+  Eio.Fiber.fork_daemon ~sw (fun () -> run_dispatcher t);
   t
 ;;
 

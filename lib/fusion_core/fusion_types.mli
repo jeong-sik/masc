@@ -330,13 +330,8 @@ type fusion_topology =
       (** panel → judge → (1차 판정이 [Insufficient]일 때만) judge'(refine) → sink.
           애매할 때만 한 단계 더 깊이; 그 외엔 1차 종합 그대로(= Simple). *)
   | Judge_of_judges
-      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
-          심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
-  | Staged_judge_of_judges
-      (** panel → [N개 1차 심판] → fixed-size stage meta reducers → final meta reducer
-          → sink. preset.judges count must form at least two exact groups of
-          TOML key [staged_judge_group_size]. Named topology only; it does
-          not relax the nested fusion depth guard. *)
+      (** panel → [1차 심판 전체] → meta-judge → sink (RFC-0283). 설정된
+          typed judge 목록 순서를 그대로 보존해 전체를 실행한다. *)
 [@@deriving yojson, show, eq]
 
 (** 안정적 wire 문자열 ([masc_fusion] 도구 인자·로깅용). *)

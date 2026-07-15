@@ -17,7 +17,6 @@ let topology_label = function
   | Refine -> "refine"
   | Conditional -> "conditional"
   | Judge_of_judges -> "judge_of_judges"
-  | Staged_judge_of_judges -> "staged_judge_of_judges"
 
 let judge_role_of_outcome = function
   | Synthesized node -> node.role

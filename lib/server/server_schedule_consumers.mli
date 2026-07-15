@@ -5,11 +5,6 @@ type keeper_wake_reaction_ledger_status =
   | Keeper_wake_reaction_ledger_record_failed of string
 
 type dispatch_receipt =
-  | Board_post_created of
-      { post_id : string
-      ; author : string
-      ; hearth : string option
-      }
   | Keeper_wake_enqueued of
       { keeper_name : string
       ; schedule_id : string

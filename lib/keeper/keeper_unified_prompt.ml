@@ -288,7 +288,7 @@ let format_scheduled_automation_summary
            Buffer.add_char ubuf '\n')
         summary.items;
       Buffer.add_string ubuf
-        "- Use masc_schedule_get for details; each consumer applies its own leaf Gate before an external effect.\n");
+        "- Use masc_schedule_get for details; a due Schedule wakes the Keeper lane and grants no effect authority.\n");
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
 ;;

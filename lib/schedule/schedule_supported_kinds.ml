@@ -18,7 +18,7 @@
 let board_post = "masc.board_post"
 let keeper_wake = "masc.keeper_wake"
 
-let supported = [ board_post; keeper_wake ]
+let supported = [ keeper_wake ]
 
 let supported_list_string () = String.concat ", " supported
 

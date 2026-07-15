@@ -3,7 +3,6 @@
    loop logs aggregate dispatch counts for runtime telemetry. *)
 
 let supported_payload_kinds = Schedule_payload_projection.supported_payload_kinds
-let board_post_created_kind = "masc.board_post.created"
 let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
 let keeper_event_queue_label = "keeper_event_queue"
 let reaction_ledger_recorded_label = "recorded"
@@ -110,11 +109,6 @@ let keeper_wake_reaction_ledger_status_json_fields = function
 ;;
 
 type dispatch_receipt =
-  | Board_post_created of
-      { post_id : string
-      ; author : string
-      ; hearth : string option
-      }
   | Keeper_wake_enqueued of
       { keeper_name : string
       ; schedule_id : string
@@ -129,13 +123,7 @@ type dispatch_receipt =
 let dispatch_receipt_of_detail = function
   | `Assoc fields ->
     let* kind = string_field "kind" fields in
-    if String.equal kind board_post_created_kind
-    then
-      let* post_id = string_field "post_id" fields in
-      let* author = string_field "author" fields in
-      let* hearth = optional_string_field "hearth" fields in
-      Ok (Board_post_created { post_id; author; hearth })
-    else if String.equal kind keeper_wake_enqueued_kind
+    if String.equal kind keeper_wake_enqueued_kind
     then
       let* keeper_name = keeper_name_field "keeper_name" fields in
       let* schedule_id = string_field "schedule_id" fields in
@@ -163,13 +151,6 @@ let dispatch_receipt_of_detail = function
 ;;
 
 let dispatch_receipt_to_yojson = function
-  | Board_post_created { post_id; author; hearth } ->
-    `Assoc
-      [ "kind", `String board_post_created_kind
-      ; "post_id", `String post_id
-      ; "author", `String author
-      ; "hearth", (match hearth with None -> `Null | Some hearth -> `String hearth)
-      ]
   | Keeper_wake_enqueued
       { keeper_name
       ; schedule_id
@@ -202,66 +183,6 @@ let accepts request =
   | Error rejection ->
     record_unsupported_payload_dispatch request rejection;
     Error (Schedule_payload_projection.dispatch_rejection_message rejection)
-;;
-
-let schedule_meta_json (request : Schedule_domain.schedule_request) payload user_meta =
-  let base =
-    [ "source", `String "scheduled_automation"
-    ; "schedule_id", `String request.schedule_id
-    ; "payload_kind", `String (Schedule_payload_projection.view_kind payload)
-    ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
-    ; "requested_by", `String request.requested_by.id
-    ; "scheduled_by", `String request.scheduled_by.id
-    ; "due_at", `Float request.due_at
-    ]
-  in
-  match user_meta with
-  | None -> `Assoc base
-  | Some meta -> `Assoc (base @ [ "payload_meta", meta ])
-;;
-
-let dispatch_board_post request payload =
-  let* content = Schedule_payload_projection.body_required_string payload "content" in
-  let* title = Schedule_payload_projection.body_optional_string payload "title" in
-  let* author = Schedule_payload_projection.body_optional_string payload "author" in
-  let* hearth = Schedule_payload_projection.body_optional_string payload "hearth" in
-  let* thread_id = Schedule_payload_projection.body_optional_string payload "thread_id" in
-  let* ttl_hours = Schedule_payload_projection.body_optional_int payload "ttl_hours" in
-  let* user_meta = Schedule_payload_projection.body_optional_assoc payload "meta" in
-  let author =
-    (* DET-OK: absent board-post author maps to the stable scheduled automation
-       actor label for auditability. *)
-    match author with
-    | None -> "schedule-bot"
-    | Some author -> author
-  in
-  let meta_json = schedule_meta_json request payload user_meta in
-  match
-    Board_dispatch.create_post
-      ~author
-      ~content
-      ?title
-      ~post_kind:Board.System_post
-      ~meta_json
-      ~visibility:Board.Internal
-      ?ttl_hours
-      ?hearth
-      ?thread_id
-      ()
-  with
-  | Error err -> Error (Board_types.show_board_error err)
-  | Ok post ->
-    let post_id = Board.Post_id.to_string post.id in
-    Ok
-      (`Assoc
-        [ "kind", `String board_post_created_kind
-        ; "post_id", `String post_id
-        ; "author", `String author
-        ; ( "hearth"
-          , match hearth with
-            | None -> `Null
-            | Some hearth -> `String hearth )
-        ])
 ;;
 
 let body_keeper_name payload =
@@ -325,10 +246,18 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     }
   in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
-  Keeper_registry_event_queue.enqueue
-    ~base_path:config.Workspace_utils.base_path
-    keeper_name
-    stimulus;
+  let* () =
+    match
+      Keeper_registry_event_queue.enqueue_stimulus_durable_result
+        ~base_path:config.Workspace_utils.base_path
+        keeper_name
+        stimulus
+    with
+    | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+      Error ("scheduled keeper wake durable enqueue failed: " ^ detail)
+    | Keeper_registry_event_queue.Stimulus_enqueued
+    | Keeper_registry_event_queue.Stimulus_already_present -> Ok ()
+  in
   let wakeup_outcome =
     Keeper_registry.wakeup
       ~intent:Keeper_registry.Scheduled_signal
@@ -388,7 +317,6 @@ let dispatch config ~now request =
     Error (Schedule_payload_projection.dispatch_rejection_message rejection)
   | Ok (kind, payload) ->
     (match kind with
-     | Schedule_payload_projection.Board_post -> dispatch_board_post request payload
      | Schedule_payload_projection.Keeper_wake ->
        dispatch_keeper_wake config ~now request payload)
 ;;

@@ -502,8 +502,19 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
    2026-06-24): four byte-for-output-identical copies unified. *)
 
-let with_timeout ~clock ~timeout_sec f =
-  try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
+(* WHY: run the librarian extraction to completion instead of force-killing it
+   on a wall-clock budget. Killing a legitimate in-flight provider call on a
+   deadline produced kill -> retry churn without recovering the turn. Per
+   RFC-0156 (Withdraw MASC turn-budget timeout policy) total attempt time stays
+   observable but is not a lifecycle/admission decision; a protocol-level
+   timeout is local to the call. [clock]/[timeout_sec] are retained in the
+   signature for the surrounding transport plumbing but no longer gate
+   execution — this helper no longer imposes a timeout despite its name.
+   The [Eio.Time.Timeout -> None] arm is kept so an inner-transport
+   (connect/idle/HTTP) timeout still maps to the typed [Provider_timeout];
+   [Eio.Cancel.Cancelled] is not caught here and so still propagates. *)
+let with_timeout ~clock:_ ~timeout_sec:_ f =
+  try Some (f ()) with
   | Eio.Time.Timeout -> None
 ;;
 

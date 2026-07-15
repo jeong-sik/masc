@@ -37,9 +37,14 @@ end
     numeric fact-count threshold never suppresses model judgment. Returns the
     outcome without raising for the expected failure modes so a
     caller fiber stays alive. If [timeout_sec] is configured but no [clock] is
-    available, the provider call is refused as [Transport_failed _] rather than
-    running without a deadline. [runtime_id] remains paired with [provider_cfg]
-    so model-level temperature declarations survive request tuning. *)
+    available, the provider call is refused as [Transport_failed _] (without a
+    clock the provider's inner transport cannot enforce its idle/connect
+    deadlines). When a clock is present the call runs to natural completion:
+    [timeout_sec] is advisory and never force-kills a legitimate provider call
+    (fail-open per RFC-0156); only a genuine inner transport [Eio.Time.Timeout]
+    surfaces as [Transport_failed _]. [runtime_id] remains paired with
+    [provider_cfg] so model-level temperature declarations survive request
+    tuning. *)
 val consolidate_keeper
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

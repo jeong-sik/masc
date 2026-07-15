@@ -35,7 +35,7 @@ type t =
   | Library_search
   | Memory_search
   | Memory_write
-  | Keeper_msg
+  | Keeper_delegate
   | Search_files
   | Surface_read
   | Surface_post
@@ -86,7 +86,7 @@ let all : t list =
   ; Library_search
   ; Memory_search
   ; Memory_write
-  ; Keeper_msg
+  ; Keeper_delegate
   ; Search_files
   ; Surface_read
   ; Surface_post
@@ -139,7 +139,7 @@ let to_string = function
   | Library_search -> "keeper_library_search"
   | Memory_search -> "keeper_memory_search"
   | Memory_write -> "keeper_memory_write"
-  | Keeper_msg -> "masc_keeper_msg"
+  | Keeper_delegate -> "masc_keeper_delegate"
   | Search_files -> "tool_search_files"
   | Surface_read -> "keeper_surface_read"
   | Surface_post -> "keeper_surface_post"
@@ -191,7 +191,7 @@ let of_string = function
   | "keeper_library_search" -> Some Library_search
   | "keeper_memory_search" -> Some Memory_search
   | "keeper_memory_write" -> Some Memory_write
-  | "masc_keeper_msg" -> Some Keeper_msg
+  | "masc_keeper_delegate" -> Some Keeper_delegate
   | "tool_search_files" -> Some Search_files
   | "keeper_surface_read" -> Some Surface_read
   | "keeper_surface_post" -> Some Surface_post

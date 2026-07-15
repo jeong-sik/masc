@@ -656,7 +656,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
     | Ok () ->
       (match
          ensure_strict_http_token_auth
-           ~endpoint:"HTTP tool access for masc_keeper_msg"
+           ~endpoint:"HTTP tool access for masc_keeper_delegate"
            auth_cfg
        with
        | Ok _ -> Ok ()
@@ -670,7 +670,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
       (match resolved_agent_name_result, effective_role_result with
        | Error err, _ | _, Error err -> Error err
        | Ok agent_name, Ok role ->
-         Auth.authorize_tool_for_role ~agent_name ~role ~tool_name:"masc_keeper_msg")
+         Auth.authorize_tool_for_role ~agent_name ~role ~tool_name:"masc_keeper_delegate")
   in
   let can_keeper_msg, keeper_msg_error =
     match keeper_authorization_result with

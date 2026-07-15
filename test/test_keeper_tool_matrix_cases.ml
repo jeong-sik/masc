@@ -510,7 +510,7 @@ let extra_guard_fragments_for_name = function
         "\"reason\":\"disabled\"";
       ]
   | "masc_library_promote" -> [ "no candidate matching" ]
-  | "masc_keeper_msg" ->
+  | "masc_keeper_delegate" ->
       [
         "keeper management tool";
         "use MCP client";
@@ -523,8 +523,9 @@ let extra_guard_fragments_for_name = function
         "docker_container_start_failed";
         "no such container";
       ]
-  | "masc_keeper_list" | "masc_keeper_msg_result"
-  | "masc_keeper_msg_cancel" | "masc_keeper_msg_queue" | "masc_keeper_status" ->
+  | "masc_keeper_list" | "masc_keeper_delegate_status"
+  | "masc_keeper_delegate_cancel" | "masc_keeper_delegate_list"
+  | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]
   | "masc_keeper_up" -> [ "server_initializing" ]
   | "tool_execute" -> [ "worktree not found" ]

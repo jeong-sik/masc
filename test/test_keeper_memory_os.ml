@@ -1009,16 +1009,12 @@ let find_config_env env entries =
 (* Introspection-parity SSOT rows: one row per Memory OS knob pairing the
    exported env-key constant with a thunk exercising its compiled reader. A
    snapshot registry entry cannot be added to this list without a reader
-   existing (the phantom MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS
-   regression: registered + tested, zero readers, so setting it was a silent
-   no-op reported as source=env). *)
+   existing. *)
 let memory_os_knob_readers : (string * (unit -> unit)) list =
   [ ( Env_config.KeeperMemoryOs.recall_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.recall_enabled () : bool) )
   ; ( Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_timeout_sec () : float) )
-  ; ( Env_config.KeeperMemoryOs.librarian_max_tokens_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_tokens () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
     , fun () ->
         ignore (Env_config.KeeperMemoryOs.librarian_runtime_id () : string option) )
@@ -1155,40 +1151,20 @@ let test_librarian_timeout_override_env () =
          (Librarian_runtime.default_timeout_sec ()))
 ;;
 
-let test_librarian_max_tokens_override_env () =
-  let env = Env_config.KeeperMemoryOs.librarian_max_tokens_env_key in
-  let default = Env_config.KeeperMemoryOs.librarian_max_tokens_default in
-  (* Exercise the cap through [provider_for_librarian] (the consuming site):
-     before the knob was wired to a reader, setting the env var was a silent
-     no-op while the config snapshot reported source=env. *)
-  let effective_cap () =
-    (Librarian_runtime.provider_for_librarian
-       (test_provider_cfg ()))
+let test_librarian_preserves_runtime_max_tokens () =
+  let base = test_provider_cfg () in
+  let project max_tokens =
+    (Librarian_runtime.provider_for_librarian { base with max_tokens })
       .Llm_provider.Provider_config.max_tokens
   in
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv env "")
-    (fun () ->
-       Unix.putenv env "";
-       Alcotest.(check (option int))
-         "empty max tokens override falls back"
-         (Some default)
-         (effective_cap ());
-       Unix.putenv env "512";
-       Alcotest.(check (option int))
-         "max tokens override caps the librarian provider config"
-         (Some 512)
-         (effective_cap ());
-       Unix.putenv env "0";
-       Alcotest.(check int)
-         "non-positive max tokens override floors at 1"
-         1
-         (Env_config.KeeperMemoryOs.librarian_max_tokens ());
-       Unix.putenv env "bogus";
-       Alcotest.(check (option int))
-         "invalid max tokens override falls back"
-         (Some default)
-         (effective_cap ()))
+  Alcotest.(check (option int))
+    "explicit runtime max_tokens is preserved"
+    (Some 8192)
+    (project (Some 8192));
+  Alcotest.(check (option int))
+    "omitted runtime max_tokens remains omitted"
+    None
+    (project None)
 ;;
 
 let test_librarian_preserves_admission_memory_text () =
@@ -4510,9 +4486,9 @@ let () =
             `Quick
             test_librarian_timeout_override_env
         ; Alcotest.test_case
-            "librarian max tokens override env"
+            "librarian preserves runtime max tokens"
             `Quick
-            test_librarian_max_tokens_override_env
+            test_librarian_preserves_runtime_max_tokens
         ; Alcotest.test_case
             "librarian preserves admission memory text"
             `Quick

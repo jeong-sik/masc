@@ -162,12 +162,10 @@ end
     then the boot override store, then the hardcoded defaults below. *)
 
 module KeeperMemoryOs = struct
-  let get_int_logged = Env_config_memory.get_int_logged
   let get_float_positive_logged = Env_config_memory.get_float_positive_logged
 
   let recall_enabled_default = true
   let librarian_timeout_sec_default = 600.0
-  let librarian_max_tokens_default = 4096
   let librarian_runtime_id_default = None
   let gc_enabled_default = true
   let consolidation_enabled_default = false
@@ -179,7 +177,6 @@ module KeeperMemoryOs = struct
      compilation instead of silently drifting into a phantom registry entry. *)
   let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
   let librarian_timeout_sec_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
-  let librarian_max_tokens_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
   let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
   let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
@@ -222,18 +219,6 @@ module KeeperMemoryOs = struct
     get_float_positive_logged
       librarian_timeout_sec_env_key
       ~default:librarian_timeout_sec_default
-  ;;
-
-  (** Output token cap for librarian extraction, applied as min with the
-      provider max_tokens. Default: 4096, floored to 1.
-      @category Runtime
-      @ops_class operator *)
-  let librarian_max_tokens () =
-    max
-      1
-      (get_int_logged
-         librarian_max_tokens_env_key
-         ~default:librarian_max_tokens_default)
   ;;
 
   (** Optional runtime id override for librarian extraction.

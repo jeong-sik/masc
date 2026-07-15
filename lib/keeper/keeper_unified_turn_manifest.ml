@@ -9,8 +9,7 @@ open Keeper_meta_contract
 open Keeper_unified_turn_types
 open Keeper_unified_turn_phase_plan
 
-let append_manifest
-      ~config
+let prepare_manifest
       ~runtime_manifest_context
       ~turn_start
       ~(turn_state : turn_state)
@@ -20,7 +19,6 @@ let append_manifest
       ?clock_refs
       ?compaction_source
       ?checkpoint_path
-      ~site
       event
   =
   let decision, manifest_seq =
@@ -53,16 +51,81 @@ let append_manifest
       in
       Some (Keeper_runtime_manifest.with_clock_refs ~clock_refs decision), manifest_seq
   in
-  Keeper_runtime_manifest.make_for_context
-    runtime_manifest_context
-    ~event
-    ?runtime_id
-    ?status
-    ?decision
-    ?checkpoint_path
-    ()
-  |> Keeper_runtime_manifest.append_best_effort ~site config;
-  { turn_state with manifest_seq }
+  ( Keeper_runtime_manifest.make_for_context
+      runtime_manifest_context
+      ~event
+      ?runtime_id
+      ?status
+      ?decision
+      ?checkpoint_path
+      ()
+  , { turn_state with manifest_seq } )
+;;
+
+let append_manifest
+      ~config
+      ~runtime_manifest_context
+      ~turn_start
+      ~turn_state
+      ?status
+      ?decision
+      ?runtime_id
+      ?clock_refs
+      ?compaction_source
+      ?checkpoint_path
+      ~site
+      event
+  =
+  let manifest, turn_state =
+    prepare_manifest
+      ~runtime_manifest_context
+      ~turn_start
+      ~turn_state
+      ?status
+      ?decision
+      ?runtime_id
+      ?clock_refs
+      ?compaction_source
+      ?checkpoint_path
+      event
+  in
+  Keeper_runtime_manifest.append_best_effort ~site config manifest;
+  turn_state
+;;
+
+let append_manifest_once
+      ~operation_id
+      ~config
+      ~runtime_manifest_context
+      ~turn_start
+      ~turn_state
+      ?status
+      ?decision
+      ?runtime_id
+      ?clock_refs
+      ?compaction_source
+      ?checkpoint_path
+      event
+  =
+  let manifest, turn_state =
+    prepare_manifest
+      ~runtime_manifest_context
+      ~turn_start
+      ~turn_state
+      ?status
+      ?decision
+      ?runtime_id
+      ?clock_refs
+      ?compaction_source
+      ?checkpoint_path
+      event
+  in
+  match Keeper_runtime_manifest.append_once ~operation_id config manifest with
+  | Ok
+      ( Keeper_runtime_manifest.Appended
+      | Keeper_runtime_manifest.Already_present ) ->
+    Ok turn_state
+  | Error _ as error -> error
 ;;
 
 let append_phase_gate_decision

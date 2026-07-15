@@ -26,11 +26,16 @@ let with_temp_dir f =
   let path = Filename.temp_file "runtime-manifest-once-" "" in
   Sys.remove path;
   Unix.mkdir path 0o755;
-  Fun.protect
-    ~finally:(fun () ->
+  let rec remove path =
+    if Sys.is_directory path then (
       Sys.readdir path
-      |> Array.iter (fun name -> Sys.remove (Filename.concat path name));
+      |> Array.iter (fun name -> remove (Filename.concat path name));
       Unix.rmdir path)
+    else
+      Sys.remove path
+  in
+  Fun.protect
+    ~finally:(fun () -> remove path)
     (fun () -> f path)
 ;;
 
@@ -216,6 +221,59 @@ let test_append_once_rejects_corrupt_manifest () =
       (Fs_compat.file_exists target_path)
 ;;
 
+let empty_turn_state : Masc.Keeper_unified_turn_types.turn_state =
+  { cycle_completed = false
+  ; manifest_seq = 0
+  ; current_turn_blocker_info = None
+  ; last_execution = None
+  ; degraded_retry_info = None
+  ; runtime_rotation_attempts = []
+  ; failure_reason = None
+  ; retry_phase_started_at = None
+  }
+;;
+
+let test_manifest_once_advances_state_only_after_projection () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let keeper_name = "projection-owner" in
+  let operation_id = "compaction-operation-3" in
+  let manifest_dir = M.base_dir config ~keeper_name in
+  Fs_compat.mkdir_p manifest_dir;
+  let corrupt_path = Filename.concat manifest_dir "corrupt.jsonl" in
+  Fs_compat.save_file corrupt_path "{not-json}\n";
+  let runtime_manifest_context : M.turn_context =
+    { manifest_keeper_name = keeper_name
+    ; manifest_agent_name = Some "projection-agent"
+    ; manifest_trace_id = "projection-trace"
+    ; manifest_generation = Some 1
+    ; manifest_keeper_turn_id = Some 1
+    }
+  in
+  let append turn_state =
+    Masc.Keeper_unified_turn_manifest.append_manifest_once
+      ~operation_id
+      ~config
+      ~runtime_manifest_context
+      ~turn_start:(Mtime_clock.now ())
+      ~turn_state
+      ~decision:(`Assoc [ "operation_id", `String operation_id ])
+      M.Context_compacted
+  in
+  (match append empty_turn_state with
+   | Ok _ -> Alcotest.fail "corrupt store committed a manifest sequence"
+   | Error _ -> ());
+  Alcotest.(check int)
+    "immutable input state is unchanged"
+    0
+    empty_turn_state.manifest_seq;
+  Sys.remove corrupt_path;
+  match append empty_turn_state with
+  | Error detail -> Alcotest.failf "valid projection failed: %s" detail
+  | Ok committed ->
+    Alcotest.(check int) "sequence advances after commit" 1 committed.manifest_seq
+;;
+
 let () =
   Alcotest.run "keeper_runtime_manifest_completeness"
     [ ( "completeness"
@@ -234,5 +292,7 @@ let () =
             test_append_once_across_trace_files
         ; Alcotest.test_case "append once rejects corrupt manifest" `Quick
             test_append_once_rejects_corrupt_manifest
+        ; Alcotest.test_case "manifest state advances after projection" `Quick
+            test_manifest_once_advances_state_only_after_projection
         ] )
     ]

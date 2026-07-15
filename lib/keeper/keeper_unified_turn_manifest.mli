@@ -32,6 +32,23 @@ val append_manifest
     incremented [manifest_seq]. [clock_refs] is computed automatically
     when omitted. *)
 
+val append_manifest_once
+  :  operation_id:string
+  -> config:Workspace.config
+  -> runtime_manifest_context:Keeper_runtime_manifest.turn_context
+  -> turn_start:Mtime.t
+  -> turn_state:Keeper_unified_turn_types.turn_state
+  -> ?status:string
+  -> ?decision:Yojson.Safe.t
+  -> ?runtime_id:string
+  -> ?clock_refs:Yojson.Safe.t
+  -> ?compaction_source:string
+  -> ?checkpoint_path:string
+  -> Keeper_runtime_manifest.event_kind
+  -> (Keeper_unified_turn_types.turn_state, string) result
+(** Append an operation-bearing row exactly once. The immutable manifest
+    sequence advances only after the durable projection exists. *)
+
 val append_phase_gate_decision
   :  config:Workspace.config
   -> runtime_manifest_context:Keeper_runtime_manifest.turn_context

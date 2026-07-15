@@ -319,7 +319,11 @@ let delegate_submission_error_to_json request = function
 let entry_result = function
   | Keeper_msg_async.Queued | Keeper_msg_async.Running -> []
   | Keeper_msg_async.Done { body; data; _ } ->
-    [ "result", Option.value ~default:(`String body) data ]
+    [ ( "result"
+      , match data with
+        | Some value -> value
+        | None -> `String body )
+    ]
   | Keeper_msg_async.Lost { reason } ->
     [ "result", `Assoc [ "error", `String "invocation_lost"; "reason", `String reason ] ]
   | Keeper_msg_async.Cancelled { reason; cancelled_by } ->

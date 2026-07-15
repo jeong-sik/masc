@@ -217,7 +217,7 @@ let test_apply_compaction_completed () =
     apply_ok
       ~current_phase:SM.Compacting
       ~conditions:compacting_conds
-      ~event:(SM.Compaction_completed { before_checkpoint_bytes = 100000; after_checkpoint_bytes = 50000 })
+      ~event:SM.Compaction_completed
   in
   check phase_t "Compacting -> Running" SM.Running tr.new_phase;
   check bool "compaction done" false tr.updated_conditions.compaction_active
@@ -231,7 +231,7 @@ let test_apply_compaction_completed_returns_to_failing_health_lane () =
     apply_ok
       ~current_phase:SM.Compacting
       ~conditions:compacting_conds
-      ~event:(SM.Compaction_completed { before_checkpoint_bytes = 100000; after_checkpoint_bytes = 50000 })
+      ~event:SM.Compaction_completed
   in
   check phase_t "Compacting -> Failing" SM.Failing tr.new_phase;
   check bool "compaction done" false tr.updated_conditions.compaction_active
@@ -723,9 +723,15 @@ let test_can_transition_paused_to_stopped () =
     (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Stopped)
 ;;
 
-let test_can_execute_turn_running_and_failing_only () =
-  check bool "Running executes turns" true (SM.can_execute_turn SM.Running);
-  check bool "Failing executes turns" true (SM.can_execute_turn SM.Failing)
+let test_can_execute_turn_work_capable_phases () =
+  List.iter
+    (fun phase ->
+       check
+         bool
+         ("work-capable phase " ^ SM.phase_to_string phase)
+         true
+         (SM.can_execute_turn phase))
+    [ SM.Running; SM.Failing; SM.Overflowed; SM.Compacting; SM.HandingOff ]
 ;;
 
 let test_can_execute_turn_blocks_other_phases () =
@@ -737,8 +743,6 @@ let test_can_execute_turn_blocks_other_phases () =
          false
          (SM.can_execute_turn phase))
     [ SM.Offline
-    ; SM.Compacting
-    ; SM.HandingOff
     ; SM.Draining
     ; SM.Paused
     ; SM.Stopped
@@ -971,7 +975,7 @@ let test_chain_happy_path () =
       ; SM.Heartbeat_ok, SM.Running
       ; SM.Heartbeat_ok, SM.Running
       ; SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed { before_checkpoint_bytes = 90000; after_checkpoint_bytes = 40000 }
+      ; ( SM.Compaction_completed
         , SM.Running )
       ; SM.Handoff_started, SM.HandingOff
       ; SM.Handoff_completed { new_trace_id = "gen2"; generation = 2 }, SM.Running
@@ -1010,7 +1014,7 @@ let test_chain_operator_intervention () =
       ~init_conditions:running_conditions
       [ SM.Heartbeat_ok, SM.Running
       ; SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed { before_checkpoint_bytes = 80000; after_checkpoint_bytes = 35000 }
+      ; ( SM.Compaction_completed
         , SM.Running )
       ; SM.Operator_pause, SM.Paused
       ; SM.Operator_resume, SM.Running
@@ -1052,12 +1056,12 @@ let test_chain_long_running_multi_cycle () =
       [ (* Cycle 1: compaction *)
         SM.Heartbeat_ok, SM.Running
       ; SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed { before_checkpoint_bytes = 90000; after_checkpoint_bytes = 45000 }
+      ; ( SM.Compaction_completed
         , SM.Running )
       ; SM.Heartbeat_ok, SM.Running
       ; (* Cycle 2: compaction again *)
         SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed { before_checkpoint_bytes = 85000; after_checkpoint_bytes = 40000 }
+      ; ( SM.Compaction_completed
         , SM.Running )
       ; (* Cycle 3: handoff (context still growing) *)
         SM.Handoff_started, SM.HandingOff
@@ -1065,7 +1069,7 @@ let test_chain_long_running_multi_cycle () =
       ; SM.Heartbeat_ok, SM.Running
       ; (* Cycle 4: compaction in new generation *)
         SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed { before_checkpoint_bytes = 70000; after_checkpoint_bytes = 30000 }
+      ; ( SM.Compaction_completed
         , SM.Running )
       ; (* Cycle 5: another handoff *)
         SM.Handoff_started, SM.HandingOff
@@ -1296,7 +1300,7 @@ let test_chain_no_phoenix () =
         ; context_actions = { compact = false; handoff = false }
         }
     ; SM.Compaction_started
-    ; SM.Compaction_completed { before_checkpoint_bytes = 100; after_checkpoint_bytes = 50 }
+    ; SM.Compaction_completed
     ; SM.Compaction_failed { reason = "test" }
     ; SM.Handoff_started
     ; SM.Handoff_completed { new_trace_id = "x"; generation = 99 }
@@ -1359,7 +1363,7 @@ let test_chain_triple_restart_survives () =
       ; (* Finally stabilizes *)
         SM.Heartbeat_ok, SM.Running
       ; SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed { before_checkpoint_bytes = 60000; after_checkpoint_bytes = 25000 }
+      ; ( SM.Compaction_completed
         , SM.Running )
       ; SM.Heartbeat_ok, SM.Running
       ]
@@ -1397,7 +1401,7 @@ let test_chain_maximum_turbulence () =
       ~init_conditions:running_conditions
       [ (* Compaction cycle *)
         SM.Compaction_started, SM.Compacting
-      ; ( SM.Compaction_completed { before_checkpoint_bytes = 90000; after_checkpoint_bytes = 40000 }
+      ; ( SM.Compaction_completed
         , SM.Running )
       ; (* Handoff cycle *)
         SM.Handoff_started, SM.HandingOff
@@ -1717,7 +1721,7 @@ let test_invariant_stop_requested_monotonic () =
     ; SM.Turn_succeeded
     ; SM.Turn_failed { consecutive = 1 }
     ; SM.Compaction_started
-    ; SM.Compaction_completed { before_checkpoint_bytes = 100; after_checkpoint_bytes = 50 }
+    ; SM.Compaction_completed
     ; SM.Handoff_started
     ; SM.Handoff_completed { new_trace_id = "x"; generation = 1 }
     ; SM.Operator_pause
@@ -1787,7 +1791,7 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Turn_succeeded
     ; SM.Turn_failed { consecutive = 3 }
     ; SM.Compaction_started
-    ; SM.Compaction_completed { before_checkpoint_bytes = 100; after_checkpoint_bytes = 50 }
+    ; SM.Compaction_completed
     ; SM.Compaction_failed { reason = "test" }
     ; SM.Handoff_started
     ; SM.Handoff_completed { new_trace_id = "x"; generation = 1 }
@@ -2009,7 +2013,7 @@ let test_setclear_coverage () =
           } )
     ; "Compaction_started", SM.Compaction_started
     ; ( "Compaction_completed"
-      , SM.Compaction_completed { before_checkpoint_bytes = 100; after_checkpoint_bytes = 50 } )
+      , SM.Compaction_completed )
     ; "Compaction_failed", SM.Compaction_failed { reason = "test" }
     ; "Handoff_started", SM.Handoff_started
     ; "Handoff_completed", SM.Handoff_completed { new_trace_id = "x"; generation = 99 }
@@ -2284,9 +2288,9 @@ let () =
             test_can_transition_paused_to_latent_buffer_states
         ; test_case "Paused -> Stopped" `Quick test_can_transition_paused_to_stopped
         ; test_case
-            "Running|Failing execute turns"
+            "work-capable phases execute turns"
             `Quick
-            test_can_execute_turn_running_and_failing_only
+            test_can_execute_turn_work_capable_phases
         ; test_case
             "other phases skip turns"
             `Quick

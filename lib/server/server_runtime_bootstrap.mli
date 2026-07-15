@@ -15,11 +15,6 @@ type model_catalog_env_resolution =
   ; source : model_catalog_env_source
   }
 
-and capability_manifest_env_resolution =
-  { path : string
-  ; source : capability_manifest_env_source
-  }
-
 and model_catalog_env_source =
   | Env_var of model_catalog_env_var
   | Config_root_catalog_file of string
@@ -27,10 +22,6 @@ and model_catalog_env_source =
       { origin : model_catalog_parent_origin
       ; filename : string
       }
-
-and capability_manifest_env_source =
-  | Capability_manifest_env_var
-  | Config_root_file of string
 
 and model_catalog_env_var =
   | Oas_model_catalog
@@ -41,7 +32,6 @@ and model_catalog_parent_origin =
   | Argv0_parent
 
 val model_catalog_env_source_to_string : model_catalog_env_source -> string
-val capability_manifest_env_source_to_string : capability_manifest_env_source -> string
 
 val resolve_oas_model_catalog_path :
   ?env:(string -> string option) ->
@@ -51,12 +41,6 @@ val resolve_oas_model_catalog_path :
   unit ->
   model_catalog_env_resolution option
 
-val resolve_oas_capability_manifest_path :
-  ?env:(string -> string option) ->
-  config_root:string ->
-  unit ->
-  capability_manifest_env_resolution option
-
 val configure_oas_model_catalog_env :
   ?env:(string -> string option) ->
   ?config_root:string ->
@@ -64,21 +48,10 @@ val configure_oas_model_catalog_env :
   ?argv0:string ->
   ?putenv:(string -> string -> unit) ->
   ?agent_sdk_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
-  ?clear_catalog:(unit -> unit) ->
   ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
   ?set_catalog:(Llm_provider.Model_catalog.t -> unit) ->
   unit ->
   model_catalog_env_resolution option
-
-val configure_oas_capability_manifest_env :
-  ?env:(string -> string option) ->
-  config_root:string ->
-  ?putenv:(string -> string -> unit) ->
-  ?clear_manifest:(unit -> unit) ->
-  ?load_manifest:(string -> (Llm_provider.Capability_manifest.t, string) result) ->
-  ?set_manifest:(Llm_provider.Capability_manifest.t -> unit) ->
-  unit ->
-  capability_manifest_env_resolution option
 
 (** {1 Runtime Context}
 

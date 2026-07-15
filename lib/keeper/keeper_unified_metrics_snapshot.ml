@@ -115,12 +115,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("message_count", `Int message_count);
         ("continuity_state", `Null);
         ("compacted", `Bool compaction.applied);
-        ( "compaction_before_checkpoint_bytes"
-        , `Int compaction.before_checkpoint_bytes );
-        ( "compaction_after_checkpoint_bytes"
-        , `Int compaction.after_checkpoint_bytes );
-        ( "compaction_saved_checkpoint_bytes"
-        , `Int compaction.saved_checkpoint_bytes );
         ("compaction_trigger",
           match compaction.trigger with
           | Some trigger -> `String (Compaction_trigger.to_label trigger)

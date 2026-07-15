@@ -22,12 +22,6 @@ let broadcast_lifecycle_events ~(name : string)
              ("type", `String "keeper_compaction");
              ("name", `String name);
              ("generation", `Int turn_generation);
-             ( "before_checkpoint_bytes"
-             , `Int compaction.before_checkpoint_bytes );
-             ( "after_checkpoint_bytes"
-             , `Int compaction.after_checkpoint_bytes );
-             ( "saved_checkpoint_bytes"
-             , `Int compaction.saved_checkpoint_bytes );
              ( "trigger",
                match compaction.trigger with
                | Some trigger -> `String (Compaction_trigger.to_label trigger)

@@ -80,10 +80,7 @@ type event =
       ; context_actions : context_actions
       }
   | Compaction_started
-  | Compaction_completed of
-      { before_checkpoint_bytes : int
-      ; after_checkpoint_bytes : int
-      }
+  | Compaction_completed
   | Compaction_failed of { reason : string }
   | Handoff_started
   | Handoff_completed of
@@ -120,11 +117,7 @@ let event_to_string = function
   | Turn_failed r -> Printf.sprintf "turn_failed(%d)" r.consecutive
   | Context_measured r -> Printf.sprintf "context_measured(ratio=%.3f)" r.context_ratio
   | Compaction_started -> "compaction_started"
-  | Compaction_completed r ->
-    Printf.sprintf
-      "compaction_completed(%dB->%dB)"
-      r.before_checkpoint_bytes
-      r.after_checkpoint_bytes
+  | Compaction_completed -> "compaction_completed"
   | Compaction_failed r -> Printf.sprintf "compaction_failed(%s)" r.reason
   | Handoff_started -> "handoff_started"
   | Handoff_completed r -> Printf.sprintf "handoff_completed(gen=%d)" r.generation

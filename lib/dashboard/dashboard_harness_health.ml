@@ -274,18 +274,102 @@ let role_counts_to_json (counts : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (role, n) -> role, `Int n) counts)
 ;;
 
-let role_counts_of_json json : (string * int) list =
-  Safe_ops.json_assoc "role_counts" json
-  |> List.filter_map (fun (role, value) ->
-    match value with
-    | `Int n -> Some (role, n)
-    | `Intlit s -> Option.map (fun n -> role, n) (int_of_string_opt s)
-    | _ -> None)
+let ( let* ) result f = Result.bind result f
+
+let required_member fields key =
+  match List.assoc_opt key fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "missing required field %S" key)
 ;;
+
+let required_string fields key =
+  let* value = required_member fields key in
+  match value with
+  | `String value -> Ok value
+  | _ -> Error (Printf.sprintf "field %S must be a string" key)
+;;
+
+let required_non_empty_string fields key =
+  let* value = required_string fields key in
+  if String.equal value ""
+  then Error (Printf.sprintf "field %S must be non-empty" key)
+  else Ok value
+;;
+
+let int_json ~field = function
+  | `Int value -> Ok value
+  | `Intlit raw ->
+    (match int_of_string_opt raw with
+     | Some value -> Ok value
+     | None -> Error (Printf.sprintf "field %S has an invalid integer" field))
+  | _ -> Error (Printf.sprintf "field %S must be an integer" field)
+;;
+
+let required_int fields key =
+  let* value = required_member fields key in
+  int_json ~field:key value
+;;
+
+let required_nonnegative_int fields key =
+  let* value = required_int fields key in
+  if value < 0
+  then Error (Printf.sprintf "field %S must be non-negative" key)
+  else Ok value
+;;
+
+let required_positive_int fields key =
+  let* value = required_int fields key in
+  if value <= 0
+  then Error (Printf.sprintf "field %S must be positive" key)
+  else Ok value
+;;
+
+let required_float fields key =
+  let* value = required_member fields key in
+  let* value =
+    match value with
+    | `Float value -> Ok value
+    | `Int value -> Ok (Float.of_int value)
+    | `Intlit raw ->
+      (match float_of_string_opt raw with
+       | Some value -> Ok value
+       | None -> Error (Printf.sprintf "field %S has an invalid number" key))
+    | _ -> Error (Printf.sprintf "field %S must be a number" key)
+  in
+  if Float.is_finite value
+  then Ok value
+  else Error (Printf.sprintf "field %S must be finite" key)
+;;
+
+let required_bool fields key =
+  let* value = required_member fields key in
+  match value with
+  | `Bool value -> Ok value
+  | _ -> Error (Printf.sprintf "field %S must be a boolean" key)
+;;
+
+let required_role_counts fields =
+  let* value = required_member fields "role_counts" in
+  match value with
+  | `Assoc counts ->
+    List.fold_left
+      (fun result (role, value) ->
+         let* counts = result in
+         let* count = int_json ~field:("role_counts." ^ role) value in
+         if count < 0
+         then Error (Printf.sprintf "field %S must be non-negative" ("role_counts." ^ role))
+         else Ok ((role, count) :: counts))
+      (Ok [])
+      counts
+    |> Result.map List.rev
+  | _ -> Error "field \"role_counts\" must be an object of integer counts"
+;;
+
+let wake_payload_record_type = "wake_payload"
 
 let wake_payload_record_json (event : wake_payload_event) =
   `Assoc
-    [ "record_type", `String "wake_payload"
+    [ "record_type", `String wake_payload_record_type
     ; "timestamp", `Float event.timestamp
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
@@ -319,31 +403,68 @@ let wake_payload_event_json (event : wake_payload_event) =
 ;;
 
 let wake_payload_event_of_json json =
-  let record_type = string_field json "record_type" in
-  if record_type <> "" && not (String.equal record_type "wake_payload")
-  then None
-  else
-    Some
-      { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
-      ; keeper_name = string_field json "keeper_name"
-      ; trace_id = string_field json "trace_id"
-      ; turn_index = Safe_ops.json_int ~default:0 "turn_index" json
-      ; context_window =
-          Safe_ops.json_int
-            ~default:Runtime_constants.fallback_context_window
-            "context_window"
-            json
-      ; system_prompt_bytes = Safe_ops.json_int ~default:0 "system_prompt_bytes" json
-      ; tool_schema_json_bytes =
-          Safe_ops.json_int ~default:0 "tool_schema_json_bytes" json
-      ; message_content_bytes =
-          Safe_ops.json_int ~default:0 "message_content_bytes" json
-      ; message_count = Safe_ops.json_int ~default:0 "message_count" json
-      ; role_counts = role_counts_of_json json
-      ; tool_count = Safe_ops.json_int ~default:0 "tool_count" json
-      ; has_compact_happened =
-          Safe_ops.json_bool ~default:false "has_compact_happened" json
-      }
+  match json with
+  | `Assoc fields ->
+    let* record_type = required_string fields "record_type" in
+    if not (String.equal record_type wake_payload_record_type)
+    then Error (Printf.sprintf "unexpected record_type %S" record_type)
+    else
+      let* timestamp = required_float fields "timestamp" in
+      let* keeper_name = required_non_empty_string fields "keeper_name" in
+      let* trace_id = required_non_empty_string fields "trace_id" in
+      let* turn_index = required_nonnegative_int fields "turn_index" in
+      let* context_window = required_positive_int fields "context_window" in
+      let* system_prompt_bytes = required_nonnegative_int fields "system_prompt_bytes" in
+      let* tool_schema_json_bytes =
+        required_nonnegative_int fields "tool_schema_json_bytes"
+      in
+      let* message_content_bytes =
+        required_nonnegative_int fields "message_content_bytes"
+      in
+      let* message_count = required_positive_int fields "message_count" in
+      let* role_counts = required_role_counts fields in
+      let* () =
+        let role_count_sum =
+          List.fold_left (fun sum (_, count) -> sum + count) 0 role_counts
+        in
+        if role_count_sum = message_count
+        then Ok ()
+        else
+          Error
+            (Printf.sprintf
+               "role_counts sum %d does not equal message_count %d"
+               role_count_sum
+               message_count)
+      in
+      let* tool_count = required_nonnegative_int fields "tool_count" in
+      let* has_compact_happened = required_bool fields "has_compact_happened" in
+      Ok
+        { timestamp
+        ; keeper_name
+        ; trace_id
+        ; turn_index
+        ; context_window
+        ; system_prompt_bytes
+        ; tool_schema_json_bytes
+        ; message_content_bytes
+        ; message_count
+        ; role_counts
+        ; tool_count
+        ; has_compact_happened
+        }
+  | _ -> Error "wake-payload record must be a JSON object"
+;;
+
+let wake_payload_record_identity json =
+  match json with
+  | `Assoc fields ->
+    let string_or_missing key =
+      match List.assoc_opt key fields with
+      | Some (`String value) -> value
+      | _ -> "<missing>"
+    in
+    string_or_missing "keeper_name", string_or_missing "trace_id"
+  | _ -> "<missing>", "<missing>"
 ;;
 
 let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ()
@@ -406,7 +527,18 @@ let read_pre_compact_events ?since ?until () =
 let read_wake_payload_events ?since ?until () =
   let records = read_store_records (get_wake_payload_store ()) ?since ?until () in
   let events : wake_payload_event list =
-    records |> List.filter_map wake_payload_event_of_json
+    records
+    |> List.filter_map (fun json ->
+      match wake_payload_event_of_json json with
+      | Ok event -> Some event
+      | Error detail ->
+        let keeper_name, trace_id = wake_payload_record_identity json in
+        Log.Harness.warn
+          "[wake_payload] rejected persisted record keeper=%s trace=%s: %s"
+          keeper_name
+          trace_id
+          detail;
+        None)
   in
   List.sort
     (fun (left : wake_payload_event) (right : wake_payload_event) ->

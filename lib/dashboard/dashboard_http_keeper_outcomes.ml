@@ -40,7 +40,7 @@ let compute_outcomes_rollup
   List.iter
     (fun (tr : Keeper_transition_audit.transition_record) ->
       match tr.selected_event with
-      | Keeper_state_machine.Compaction_completed _ -> incr succ_compactions
+      | Keeper_state_machine.Compaction_completed -> incr succ_compactions
       | Compaction_failed _ -> incr fail_compaction
       | Handoff_completed _ -> incr succ_handoffs
       | Handoff_failed _ -> incr fail_handoff

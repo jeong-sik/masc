@@ -2230,7 +2230,9 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
       ~tools:[]
   in
   let config =
-    { config with session_id = Some "multimodal-runtime-proof-session" }
+    { config with
+      session_id = Some "multimodal-runtime-proof-session";
+    }
   in
   let agent_ref = ref None in
   let blocks =
@@ -2242,8 +2244,13 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
   (match
      Runtime_agent.run_blocks ~sw ~net:env#net ~config ~agent_ref blocks
    with
-   | Error _ -> ()
-   | Ok _ -> fail "invalid provider endpoint unexpectedly completed the run");
+   | Ok result -> (
+       match result.Runtime_agent.stop_reason with
+       | Runtime_agent.Completed -> fail "invalid provider endpoint completed"
+       | stop_reason ->
+           failf "unexpected stop reason after exit-condition proof: %s"
+             (Keeper_execution_receipt_types.stop_reason_to_string stop_reason))
+   | Error err -> ignore (Agent_sdk.Error.to_string err));
   match !agent_ref with
   | None -> fail "expected Runtime_agent.run_blocks to expose built OAS agent"
   | Some agent -> (

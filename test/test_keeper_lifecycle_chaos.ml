@@ -44,7 +44,7 @@ let get_phase name =
 
 let paired_lifecycle_origin = function
   | KSM.Compaction_started
-  | KSM.Compaction_completed _
+  | KSM.Compaction_completed
   | KSM.Compaction_failed _
   | KSM.Handoff_started
   | KSM.Handoff_completed _
@@ -134,7 +134,7 @@ let test_compaction_crash_recovery () =
   let tr = dispatch "compact" KSM.Compaction_started in
   check phase_t "2nd compaction" KSM.Compacting tr.new_phase;
   let tr = dispatch "compact"
-    (KSM.Compaction_completed { before_checkpoint_bytes = 100000; after_checkpoint_bytes = 30000 }) in
+    KSM.Compaction_completed in
   check phase_t "2nd compact → running" KSM.Running tr.new_phase;
 
   let tr = dispatch "compact"
@@ -185,7 +185,7 @@ let test_full_chaos_sequence () =
   let tr = dispatch "chaos" KSM.Compaction_started in
   check phase_t "compacting" KSM.Compacting tr.new_phase;
   let tr = dispatch "chaos"
-    (KSM.Compaction_completed { before_checkpoint_bytes = 100000; after_checkpoint_bytes = 30000 }) in
+    KSM.Compaction_completed in
   check phase_t "post-compact → running" KSM.Running tr.new_phase;
 
   let tr = dispatch "chaos" KSM.Handoff_started in

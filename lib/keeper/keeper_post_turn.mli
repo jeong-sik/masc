@@ -25,9 +25,6 @@ type compaction_event =
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
-  ; before_checkpoint_bytes : int
-  ; after_checkpoint_bytes : int
-  ; saved_checkpoint_bytes : int
   }
 
 (** Combined post-turn outcome — compaction + rollover + per-turn context
@@ -104,10 +101,8 @@ val apply_post_turn_lifecycle_with_resilience_handles :
     is one store per keeper, owned by the keeper bridge. *)
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
-    compaction request so the caller can continue from a smaller context.
-    Returns [None] when no checkpoint exists, when compaction did
-    not actually shrink the token count, or when the recovery save
-    failed. *)
+    compaction request. Returns a durably saved [Applied] checkpoint only for a
+    structurally changed [Prepared] candidate; otherwise returns [None]. *)
 val recover_latest_checkpoint_for_overflow_retry :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -115,3 +110,15 @@ val recover_latest_checkpoint_for_overflow_retry :
   trigger:Compaction_trigger.t ->
   primary_model_max_tokens:int ->
   overflow_retry_recovery option
+
+module For_testing : sig
+  (** Promote a structurally [Prepared] trigger only after [save] reports an
+      actual durable write. Callers with a classified store result must not
+      map a stale no-op to [Ok]. *)
+  val commit_prepared_after_save :
+    trigger:Compaction_trigger.t ->
+    save:(unit -> ('checkpoint, 'error) result) ->
+    ( 'checkpoint * Keeper_compact_policy.compaction_decision
+    , 'error )
+    result
+end

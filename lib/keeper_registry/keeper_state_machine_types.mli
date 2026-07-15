@@ -47,10 +47,7 @@ type event =
       token_count : int; context_actions : context_actions;
     }
   | Compaction_started
-  | Compaction_completed of
-      { before_checkpoint_bytes : int
-      ; after_checkpoint_bytes : int
-      }
+  | Compaction_completed
   | Compaction_failed of { reason : string; }
   | Handoff_started
   | Handoff_completed of { new_trace_id : string; generation : int; }

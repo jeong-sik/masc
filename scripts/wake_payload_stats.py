@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import sys
 from collections import defaultdict
@@ -31,6 +32,65 @@ NUMERIC_FIELDS = (
     "message_count",
     "tool_count",
 )
+REQUIRED_INTEGER_FIELDS = ("turn_index", "context_window", *NUMERIC_FIELDS)
+
+
+def warn_skip(path: str, lineno: int, detail: str) -> None:
+    print(f"[warn] {path}:{lineno} skipped ({detail})", file=sys.stderr)
+
+
+def validate_wake_payload_record(record: dict, path: str, lineno: int) -> bool:
+    for field in ("keeper_name", "trace_id"):
+        value = record.get(field)
+        if not isinstance(value, str) or not value:
+            warn_skip(path, lineno, f"{field} must be a non-empty string")
+            return False
+    timestamp = record.get("timestamp")
+    timestamp_is_finite_number = (
+        isinstance(timestamp, int) and not isinstance(timestamp, bool)
+    ) or (isinstance(timestamp, float) and math.isfinite(timestamp))
+    if not timestamp_is_finite_number:
+        warn_skip(path, lineno, "timestamp must be a finite number")
+        return False
+    for field in REQUIRED_INTEGER_FIELDS:
+        value = record.get(field)
+        if isinstance(value, bool) or not isinstance(value, int):
+            warn_skip(path, lineno, f"{field} must be an integer")
+            return False
+        if value < 0:
+            warn_skip(path, lineno, f"{field} must be non-negative")
+            return False
+    if record["context_window"] <= 0:
+        warn_skip(path, lineno, "context_window must be positive")
+        return False
+    if record["message_count"] <= 0:
+        warn_skip(path, lineno, "message_count must be positive")
+        return False
+    compacted = record.get("has_compact_happened")
+    if not isinstance(compacted, bool):
+        warn_skip(path, lineno, "has_compact_happened must be a boolean")
+        return False
+    role_counts = record.get("role_counts")
+    if not isinstance(role_counts, dict):
+        warn_skip(path, lineno, "role_counts must be an object")
+        return False
+    for role, count in role_counts.items():
+        if isinstance(count, bool) or not isinstance(count, int):
+            warn_skip(path, lineno, f"role_counts.{role} must be an integer")
+            return False
+        if count < 0:
+            warn_skip(path, lineno, f"role_counts.{role} must be non-negative")
+            return False
+    role_count_sum = sum(role_counts.values())
+    if role_count_sum != record["message_count"]:
+        warn_skip(
+            path,
+            lineno,
+            f"role_counts sum {role_count_sum} does not equal "
+            f"message_count {record['message_count']}",
+        )
+        return False
+    return True
 
 
 def iter_records(paths: Sequence[str]) -> Iterable[dict]:
@@ -59,10 +119,20 @@ def iter_records(paths: Sequence[str]) -> Iterable[dict]:
                     )
                     continue
                 if not isinstance(record, dict):
+                    warn_skip(path, lineno, "record must be a JSON object")
                     continue
-                if record.get("record_type") != "wake_payload":
+                record_type = record.get("record_type")
+                if record_type is None:
+                    warn_skip(path, lineno, "missing record_type")
                     continue
-                yield record
+                if not isinstance(record_type, str):
+                    warn_skip(path, lineno, "record_type must be a string")
+                    continue
+                if record_type != "wake_payload":
+                    warn_skip(path, lineno, f"unexpected record_type {record_type!r}")
+                    continue
+                if validate_wake_payload_record(record, path, lineno):
+                    yield record
         finally:
             if close:
                 source.close()
@@ -81,7 +151,7 @@ def summarize(name: str, records: List[dict]) -> List[str]:
     n = len(records)
     row = [name, str(n)]
     for field in NUMERIC_FIELDS:
-        vals = [int(r.get(field, 0)) for r in records]
+        vals = [r[field] for r in records]
         if not vals:
             row += ["0", "0", "0", "0"]
             continue
@@ -98,13 +168,8 @@ def average_role_counts(records: List[dict]) -> dict[str, float]:
     """Compute mean of each role's count across all records."""
     totals: dict[str, int] = defaultdict(int)
     for r in records:
-        counts = r.get("role_counts") or {}
-        if isinstance(counts, dict):
-            for role, n in counts.items():
-                try:
-                    totals[role] += int(n)
-                except (TypeError, ValueError):
-                    pass
+        for role, count in r["role_counts"].items():
+            totals[role] += count
     if not records:
         return {}
     return {role: total / len(records) for role, total in totals.items()}
@@ -133,8 +198,7 @@ def main(argv: List[str]) -> int:
 
     by_keeper: dict[str, List[dict]] = defaultdict(list)
     for r in records:
-        keeper = r.get("keeper_name") or "(unknown)"
-        by_keeper[keeper].append(r)
+        by_keeper[r["keeper_name"]].append(r)
 
     header = ["keeper", "n"]
     for field in NUMERIC_FIELDS:

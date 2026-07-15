@@ -265,9 +265,14 @@ let finish_slack_stream_reply ~clock state ~final_content =
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
 
-let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
-    ~text ~ts ~mentions_bot ~is_app_mention =
-  match State.resolve_keeper_for_channel ~channel_id with
+let handle_inbound ?resolved_binding ~dispatch ~clock ~channel_id ~thread_ts
+    ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention =
+  let binding =
+    match resolved_binding with
+    | Some binding -> Some binding
+    | None -> State.resolve_keeper_for_channel ~channel_id
+  in
+  match binding with
   | None ->
     (* No binding for this channel — drop quietly. The bot may sit in channels
        it isn't bound to. *)
@@ -387,7 +392,7 @@ let handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
            Slack_observability.record_reply
              Slack_observability.Reply_send_failed)
 
-let on_event ~dispatch ~clock (ev : Gw.slack_event) =
+let on_event ?resolved_binding ~dispatch ~clock (ev : Gw.slack_event) =
   match ev with
   | Gw.Message_create
       { channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot
@@ -402,12 +407,13 @@ let on_event ~dispatch ~clock (ev : Gw.slack_event) =
     | None ->
       Slack_observability.record_gateway_event
         ~route:Slack_observability.Triggered Slack_observability.Message_create;
-      handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id ~user_name
-        ~text ~ts ~mentions_bot ~is_app_mention:false)
+      handle_inbound ?resolved_binding ~dispatch ~clock ~channel_id ~thread_ts
+        ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention:false)
   | Gw.App_mention { channel_id; thread_ts; user_id; text; ts } ->
     Slack_observability.record_gateway_event ~route:Slack_observability.Triggered
       Slack_observability.App_mention;
-    handle_inbound ~dispatch ~clock ~channel_id ~thread_ts ~user_id
+    handle_inbound ?resolved_binding ~dispatch ~clock ~channel_id ~thread_ts
+      ~user_id
       ~user_name:None ~text ~ts ~mentions_bot:true ~is_app_mention:true
   | Gw.Reaction_added _ ->
     (* Ambient this pass: reactions are not turn-starters (RFC-0317). *)
@@ -416,6 +422,33 @@ let on_event ~dispatch ~clock (ev : Gw.slack_event) =
   | Gw.Ignored_event _ ->
     Slack_observability.record_gateway_event ~route:Slack_observability.Control
       Slack_observability.Ignored
+
+let submit_event ingress ~dispatch ~clock (ev : Gw.slack_event) =
+  let submit ~channel_id ~event_id =
+    match State.resolve_keeper_for_channel_result ~channel_id with
+    | Error reason ->
+      Slack_observability.record_inbound_dispatch Slack_observability.Gate_error;
+      Log.Server.error
+        "Slack ingress binding unavailable channel=%s event=%s: %s"
+        channel_id event_id reason
+    | Ok None -> on_event ~dispatch ~clock ev
+    | Ok (Some resolution) ->
+      Connector_ingress_lane.submit
+        ingress
+        ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
+        ~event_id:{ source = "slack_triggered"; opaque_id = event_id }
+        (fun () -> on_event ~resolved_binding:resolution ~dispatch ~clock ev)
+  in
+  match ev with
+  | Gw.Message_create { bot_id = Some _; _ } -> on_event ~dispatch ~clock ev
+  | Gw.Message_create { channel_id; ts; bot_id = None; _ }
+  | Gw.App_mention { channel_id; ts; _ } -> submit ~channel_id ~event_id:ts
+  | Gw.Reaction_added _ | Gw.Ignored_event _ -> on_event ~dispatch ~clock ev
+;;
+
+module For_testing = struct
+  let submit_event = submit_event
+end
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)
@@ -468,6 +501,17 @@ let start ~sw ~env ~state =
              None)
        in
        State.set_trigger_policy policy;
+       let ingress =
+         Connector_ingress_lane.create
+           ~sw
+           ~on_failure:(fun failure ->
+             Log.Server.error
+               "Slack ingress callback failed lane=%s event=%s: %s"
+               (Connector_ingress_lane.lane_to_string failure.lane)
+               (Connector_ingress_lane.event_id_to_string failure.event_id)
+               failure.reason)
+           ()
+       in
        let dispatch_for_config config =
          (* Tag this dispatch as the Slack connector so a message arriving while
             the keeper is in flight enqueues onto [Keeper_chat_queue] (drained
@@ -493,7 +537,11 @@ let start ~sw ~env ~state =
              ~trigger_policy:policy
              ~on_event:(fun ev ->
                let config = Mcp_server.workspace_config state in
-               on_event ~dispatch:(dispatch_for_config config) ~clock ev)
+               submit_event
+                 ingress
+                 ~dispatch:(dispatch_for_config config)
+                 ~clock
+                 ev)
              ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e

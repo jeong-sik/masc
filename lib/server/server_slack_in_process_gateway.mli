@@ -56,6 +56,15 @@ val load_trigger_policy_from_toml :
 
 val trigger_policy_load_error_to_string : trigger_policy_load_error -> string
 
+module For_testing : sig
+  val submit_event :
+    Connector_ingress_lane.t ->
+    dispatch:Channel_gate.streaming_dispatch_fn ->
+    clock:_ Eio.Time.clock ->
+    Slack_socket_client.slack_event ->
+    unit
+end
+
 val start :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->

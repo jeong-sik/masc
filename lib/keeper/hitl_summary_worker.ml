@@ -50,7 +50,7 @@ let () =
        no_provider_config | no_net | prompt_error | crashed | \
        degraded_plain_json | restart_worker_recovered | \
        restart_judgment_recovered | restart_retryable_recovered | \
-       lane_activity_retry). \
+       lane_activity_retry | lane_activity_judgment_recovered). \
        [degraded_plain_json] is emitted alongside the terminal outcome when \
        the judge endpoint could not serve native structured output and the \
        strict plain-JSON capability path was used. The restart outcomes record which exact persisted work \

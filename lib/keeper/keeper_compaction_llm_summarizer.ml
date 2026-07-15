@@ -1,7 +1,7 @@
 (** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
     See keeper_compaction_llm_summarizer.mli. Structure mirrors
     Keeper_memory_llm_summary: opt-in gate + fiber-local Eio capture +
-    schema-capable provider filter + timeout + fail-closed [None]. *)
+    schema-capable provider filter + fail-closed [None]. *)
 
 module Schema = Keeper_structured_output_schema
 module Int_set = Set.Make (Int)
@@ -11,6 +11,7 @@ type compaction_plan =
   ; kept : int list
   ; summarized : int list
   ; dropped : int list
+  ; selected_runtime_id : string option
   }
 
 type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
@@ -166,7 +167,7 @@ let plan_of_json ~message_count json =
     then Error "plan keeps every message without summarizing or dropping any"
     else Ok ()
   in
-  Ok { summary; kept; summarized; dropped }
+  Ok { summary; kept; summarized; dropped; selected_runtime_id = None }
 
 (* Marker prefix so the folded summary is recognizable in the transcript and
    by downstream tooling, matching the memory-bank [MEMORY_SUMMARY] convention. *)
@@ -221,7 +222,7 @@ let run_plan
     None
   | Ok response ->
     (match plan_of_response ~message_count response with
-     | Ok plan -> Some plan
+     | Ok plan -> Some { plan with selected_runtime_id = Some runtime_id }
      | Error detail ->
        Log.Keeper.warn ~keeper_name
          "compaction LLM plan rejected runtime=%s: %s"

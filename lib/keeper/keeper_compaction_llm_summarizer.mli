@@ -13,10 +13,13 @@ type compaction_plan = private
   ; kept : int list
   ; summarized : int list
   ; dropped : int list
+  ; selected_runtime_id : string option
+    (** Exact Runtime candidate that produced this plan. [None] only for a
+        plan parsed directly through {!plan_of_json} before provider binding. *)
   }
 
 (** [summarizer ~messages] returns [Some plan] when the LLM produced a valid
-    plan over [messages], or [None] on any failure (timeout, http error, empty
+    plan over [messages], or [None] on any failure (provider error, empty
     or invalid structured response). Total and synchronous; the effect is
     hidden in the closure captured by {!make}. *)
 type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option

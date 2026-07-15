@@ -20,6 +20,11 @@ export interface KeeperRunRefWire {
   readonly capability: 'invoke_turn'
 }
 
+export interface KeeperRunTracking {
+  readonly runRef: KeeperRunRef
+  readonly resultContract: KeeperRunResultContract
+}
+
 export type KeeperRunResultContract =
   | 'awaiting_execution'
   | 'publication_uncertain'
@@ -111,6 +116,42 @@ export function parseKeeperRunResultContract(value: unknown): KeeperRunResultCon
     default:
       throw new Error(`unsupported Keeper run result contract: ${JSON.stringify(value)}`)
   }
+}
+
+export function parseKeeperRunTracking(value: unknown): KeeperRunTracking {
+  if (!isRecord(value)) throw new Error('Keeper run tracking envelope must be an object')
+  if (!isRecord(value.tracking)) throw new Error('Keeper run tracking must be an object')
+  exactFields(value.tracking, ['kind', 'run_ref', 'result_contract'], 'tracking')
+  if (value.tracking.kind !== 'keeper_run') {
+    throw new Error('tracking.kind must be keeper_run')
+  }
+  const runRef = parseKeeperRunRef(value.tracking.run_ref)
+  if (value.destination_type !== 'keeper' || value.destination_id !== runRef.target.name) {
+    throw new Error('Keeper run tracking destination must match run_ref.target')
+  }
+  return Object.freeze({
+    runRef,
+    resultContract: parseKeeperRunResultContract(value.tracking.result_contract),
+  })
+}
+
+export function parseKeeperRunTerminal(value: unknown): KeeperRunTracking {
+  if (!isRecord(value)) throw new Error('Keeper run terminal must be an object')
+  const fields = Object.keys(value)
+  if (
+    !Object.hasOwn(value, 'run_ref')
+    || !Object.hasOwn(value, 'result_contract')
+    || fields.some(field => field !== 'run_ref' && field !== 'result_contract' && field !== 'message')
+  ) {
+    throw new Error('Keeper run terminal must contain run_ref, result_contract, and optional message')
+  }
+  if (Object.hasOwn(value, 'message') && typeof value.message !== 'string') {
+    throw new Error('Keeper run terminal message must be a string')
+  }
+  return Object.freeze({
+    runRef: parseKeeperRunRef(value.run_ref),
+    resultContract: parseKeeperRunResultContract(value.result_contract),
+  })
 }
 
 export function isTerminalKeeperRunResult(contract: KeeperRunResultContract): boolean {

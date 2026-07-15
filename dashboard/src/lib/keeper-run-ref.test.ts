@@ -6,6 +6,8 @@ import {
   keeperRunRefToWire,
   parseKeeperRunRef,
   parseKeeperRunResultContract,
+  parseKeeperRunTerminal,
+  parseKeeperRunTracking,
   sameKeeperRunRef,
 } from './keeper-run-ref'
 
@@ -55,5 +57,43 @@ describe('Keeper run reference', () => {
     expect(() => parseKeeperRunResultContract('done')).toThrow(
       'unsupported Keeper run result contract',
     )
+  })
+
+  it('decodes typed Gate tracking and terminal envelopes', () => {
+    const tracking = parseKeeperRunTracking({
+      tracking: {
+        kind: 'keeper_run',
+        run_ref: RUN_REF_WIRE,
+        result_contract: 'awaiting_execution',
+      },
+      destination_type: 'keeper',
+      destination_id: 'luna',
+    })
+    expect(tracking.runRef).toEqual(parseKeeperRunRef(RUN_REF_WIRE))
+    expect(tracking.resultContract).toBe('awaiting_execution')
+
+    const terminal = parseKeeperRunTerminal({
+      run_ref: RUN_REF_WIRE,
+      result_contract: 'yielded',
+      message: 'checkpoint',
+    })
+    expect(terminal.runRef).toEqual(tracking.runRef)
+    expect(terminal.resultContract).toBe('yielded')
+  })
+
+  it('rejects retargeted and raw terminal SSE identities', () => {
+    expect(() => parseKeeperRunTracking({
+      tracking: {
+        kind: 'keeper_run',
+        run_ref: RUN_REF_WIRE,
+        result_contract: 'running',
+      },
+      destination_type: 'keeper',
+      destination_id: 'other',
+    })).toThrow('destination must match run_ref.target')
+    expect(() => parseKeeperRunTerminal({ request_id: 'typed-run-1', status: 'done' }))
+      .toThrow('must contain run_ref, result_contract')
+    expect(() => parseKeeperRunTerminal({ run_ref: RUN_REF_WIRE, result_contract: 'failed', message: 7 }))
+      .toThrow('message must be a string')
   })
 })

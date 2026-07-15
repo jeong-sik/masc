@@ -24,7 +24,12 @@ import { keeperTurnOutcomeSuppressesReply } from './keeper-message'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import { compareKeeperQueueRevisions } from './lib/keeper-chat-receipt'
-import { parseKeeperRunRef } from './lib/keeper-run-ref'
+import {
+  isTerminalKeeperRunResult,
+  parseKeeperRunRef,
+  parseKeeperRunTerminal,
+  parseKeeperRunTracking,
+} from './lib/keeper-run-ref'
 import type {
   ChatBlock,
   KeeperConversationAttachment,
@@ -72,7 +77,6 @@ import {
   abortKeeperThreadMessage,
   applyKeeperStreamEvent,
   flushPendingKeeperStreamDeltas,
-  TERMINAL_REQUEST_STATUSES,
 } from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
@@ -1285,6 +1289,7 @@ export async function sendKeeperThreadMessage(
   setActiveStream(keeperName, assistantId, controller)
   let requestId: string | null = null
   let requestTerminalSeen = false
+  let requestNeedsReconciliation = false
   let toolCallEnded = false
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
@@ -1296,14 +1301,23 @@ export async function sendKeeperThreadMessage(
       onEvent: event => {
         markKeeperStreamSignal(keeperName)
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST') {
-          const nextRequestId = isRecord(event.value)
-            ? asString(event.value.request_id, '').trim()
-            : ''
-          if (!nextRequestId) {
-            const message = 'Keeper queue request event missing request_id; server cancel unavailable.'
+          let nextRequestId = ''
+          try {
+            const tracking = parseKeeperRunTracking(event.value)
+            if (tracking.resultContract !== 'awaiting_execution') {
+              throw new Error('Keeper queue tracking must be awaiting_execution')
+            }
+            if (tracking.runRef.target.name !== keeperName) {
+              throw new Error('Keeper queue tracking target does not match the active Keeper')
+            }
+            nextRequestId = tracking.runRef.runId
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error)
+            const message = `Keeper queue event has invalid typed run tracking: ${detail}`
             console.warn(`[keeper] ${message}`)
             setRecordValue(keeperActionErrors, keeperName, message)
-          } else if (controller.signal.aborted) {
+          }
+          if (nextRequestId && controller.signal.aborted) {
             requestId = nextRequestId
             const pendingRequest: PendingKeeperChatRequest = {
               requestId: nextRequestId,
@@ -1322,7 +1336,7 @@ export async function sendKeeperThreadMessage(
               }
               return undefined
             })
-          } else {
+          } else if (nextRequestId) {
             requestId = nextRequestId
             // This live send now owns the request; resume must defer to it
             // (and not mint a duplicate pending entry) until handoff/finally.
@@ -1336,14 +1350,26 @@ export async function sendKeeperThreadMessage(
             })
           }
         }
-        if (event.type === 'CUSTOM' && event.name === 'KEEPER_REQUEST_TERMINAL' && isRecord(event.value)) {
-          const terminalRequestId = asString(event.value.request_id, '').trim()
-          const status = asString(event.value.status, '').trim()
+        if (event.type === 'CUSTOM' && event.name === 'KEEPER_REQUEST_TERMINAL') {
+          const terminal = parseKeeperRunTerminal(event.value)
+          if (terminal.runRef.target.name !== keeperName) {
+            throw new Error('Keeper run terminal target does not match the active Keeper')
+          }
+          const terminalRequestId = terminal.runRef.runId
           const matchesActiveRequest =
-            Boolean(terminalRequestId) && requestId !== null && terminalRequestId === requestId
-          if (matchesActiveRequest && TERMINAL_REQUEST_STATUSES.has(status)) {
-            requestTerminalSeen = true
-            removePendingKeeperChatRequest(terminalRequestId)
+            requestId !== null && terminalRequestId === requestId
+          if (matchesActiveRequest) {
+            if (terminal.resultContract === 'publication_uncertain') {
+              requestNeedsReconciliation = true
+            } else if (isTerminalKeeperRunResult(terminal.resultContract)) {
+              requestNeedsReconciliation = false
+              requestTerminalSeen = true
+              removePendingKeeperChatRequest(terminalRequestId)
+            } else {
+              throw new Error(
+                `Keeper run terminal has nonterminal result_contract: ${terminal.resultContract}`,
+              )
+            }
           }
         }
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
@@ -1363,7 +1389,7 @@ export async function sendKeeperThreadMessage(
       (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
     const finalText = finalEntry?.text.trim() ?? ''
 
-    if (!outcome.terminal) {
+    if (!outcome.terminal || requestNeedsReconciliation) {
       if (requestId) {
         removeThreadEntries(keeperName, [localId, assistantId])
         // Hand off to resume: release ownership FIRST so our own resume

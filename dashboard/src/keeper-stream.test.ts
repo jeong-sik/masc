@@ -31,6 +31,38 @@ function assistantEntry(): void {
   })
 }
 
+function keeperRunWire(runId: string) {
+  return {
+    run_id: runId,
+    target: { kind: 'keeper', name: 'sangsu' },
+    capability: 'invoke_turn',
+  } as const
+}
+
+function keeperQueueValue(runId: string) {
+  return {
+    tracking: {
+      kind: 'keeper_run',
+      run_ref: keeperRunWire(runId),
+      result_contract: 'awaiting_execution',
+    },
+    destination_type: 'keeper',
+    destination_id: 'sangsu',
+  } as const
+}
+
+function keeperTerminalValue(
+  runId: string,
+  resultContract: 'yielded' | 'cancelled' | 'completed' | 'failed',
+  message?: string,
+) {
+  return {
+    run_ref: keeperRunWire(runId),
+    result_contract: resultContract,
+    ...(message === undefined ? {} : { message }),
+  } as const
+}
+
 describe('applyKeeperStreamEvent', () => {
   beforeEach(() => {
     _resetKeeperStreamBuffersForTests()
@@ -78,11 +110,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_QUEUE_REQUEST',
-      value: {
-        request_id: 'kmsg_sangsu_1',
-        status: 'queued',
-        modalities: ['text'],
-      },
+      value: keeperQueueValue('kmsg_sangsu_1'),
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
@@ -211,12 +239,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_sangsu_1',
-        status: 'error',
-        ok: false,
-        message: 'Timeout after 630.0s',
-      },
+      value: keeperTerminalValue('kmsg_sangsu_1', 'failed', 'Timeout after 630.0s'),
     })).toBe('Timeout after 630.0s')
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
@@ -232,12 +255,11 @@ describe('applyKeeperStreamEvent', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_sangsu_1',
-        status: 'cancelled',
-        ok: false,
-        message: 'keeper chat stream cancelled by client',
-      },
+      value: keeperTerminalValue(
+        'kmsg_sangsu_1',
+        'cancelled',
+        'keeper chat stream cancelled by client',
+      ),
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
@@ -269,11 +291,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
+      value: keeperTerminalValue('kmsg_current', 'completed'),
     })).toBeNull()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_END',
@@ -294,10 +312,7 @@ describe('applyKeeperStreamEvent', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_QUEUE_REQUEST',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'queued',
-      },
+      value: keeperQueueValue('kmsg_current'),
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -312,11 +327,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
+      value: keeperTerminalValue('kmsg_current', 'completed'),
     })).toBeNull()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_END',
@@ -344,11 +355,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
+      value: keeperTerminalValue('kmsg_current', 'yielded'),
     })).toBeNull()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_END',
@@ -374,11 +381,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
+      value: keeperTerminalValue('kmsg_current', 'completed'),
     })).toBeNull()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_END',
@@ -400,12 +403,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_stale',
-        status: 'cancelled',
-        ok: false,
-        message: 'stale terminal',
-      },
+      value: keeperTerminalValue('kmsg_stale', 'cancelled', 'stale terminal'),
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
@@ -413,7 +411,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBe('opening')
   })
 
-  it('ignores no-id terminal events while a request id is active', () => {
+  it('rejects raw terminal events while a request id is active', () => {
     assistantEntry()
     setActiveStreamRequestId('sangsu', 'kmsg_current')
 
@@ -425,7 +423,7 @@ describe('applyKeeperStreamEvent', () => {
         ok: false,
         message: 'legacy terminal without request id',
       },
-    })).toBeNull()
+    })).toContain('invalid typed identity')
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('sending')
@@ -433,7 +431,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(activeStreamRequestId('sangsu')).toBe('kmsg_current')
   })
 
-  it('ignores non-terminal request status events', () => {
+  it('rejects non-terminal result contracts on terminal events', () => {
     assistantEntry()
     setActiveStreamRequestId('sangsu', 'kmsg_current')
 
@@ -441,12 +439,11 @@ describe('applyKeeperStreamEvent', () => {
       type: 'CUSTOM',
       name: 'KEEPER_REQUEST_TERMINAL',
       value: {
-        request_id: 'kmsg_current',
-        status: 'running',
-        ok: false,
+        run_ref: keeperRunWire('kmsg_current'),
+        result_contract: 'running',
         message: 'not terminal yet',
       },
-    })).toBeNull()
+    })).toBe('Keeper run terminal has nonterminal result_contract: running')
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('sending')

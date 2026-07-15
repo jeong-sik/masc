@@ -258,6 +258,18 @@ let discord_chat_metadata ~guild_id ~channel_id ~message_id =
     ("external_message_id", message_id);
   ]
 
+let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
+    Gate_keeper_backend.connector_delivery =
+  let parent_channel_id = State.parent_channel_of_thread ~channel_id in
+  let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
+  { source = Keeper_chat_queue.Discord { channel_id; user_id = author_id }
+  ; surface =
+      Surface_ref.Discord
+        { guild_id; channel_id; parent_channel_id; thread_id }
+  ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
+  ; external_message_id = Some message_id
+  }
+
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
   =
@@ -343,8 +355,7 @@ let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
                     },
                     [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
 
-let handle_message_create ?resolved_binding ~dispatch
-      ~clock
+let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(channel_id : string) ~(message_id : string)
       ~(guild_id : string option)
       ~base_dir
@@ -367,7 +378,7 @@ let handle_message_create ?resolved_binding ~dispatch
        channels it isn't bound to (e.g. server-wide guild messages). *)
     Discord_observability.record_inbound_dispatch
       Discord_observability.Dropped_unbound;
-    ()
+    None
   | Some (resolution, resolution_metadata) ->
     let keeper_name = resolution.State.keeper_name in
     let metadata =
@@ -422,16 +433,14 @@ let handle_message_create ?resolved_binding ~dispatch
       ; metadata
       }
     in
-    let stream_reply =
-      make_discord_stream_reply ~channel_id ~reply_to_message_id:message_id
+    let delivery =
+      discord_delivery ~guild_id ~channel_id ~message_id ~author_id
     in
-    let on_text_snapshot =
-      publish_discord_stream_snapshot stream_reply
+    let outcome =
+      Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
     in
-    (match
-       with_response_wait_typing_indicator ~clock ~channel_id (fun () ->
-         Channel_gate.handle_inbound_streaming ~dispatch ~on_text_snapshot msg)
-     with
+    Some (fun () ->
+     match outcome with
      | Error gate_err ->
        (match gate_err with
         | Channel_gate.Dispatch_unavailable ->
@@ -478,54 +487,36 @@ let handle_message_create ?resolved_binding ~dispatch
          Discord_observability.record_reply Discord_observability.Reply_empty
        end
        else
-         (match finish_discord_stream_reply stream_reply ~final_content:out.content with
-          | Stream_completed ->
-              (match attention_event_id with
-               | Some event_id ->
-                   mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                     ~reason:"discord_reply_streamed"
-               | None -> ());
-              Discord_observability.record_inbound_dispatch
-                Discord_observability.Reply_sent;
-              Discord_observability.record_reply
-                Discord_observability.Reply_send_ok
-          | Stream_not_started | Stream_final_edit_failed _ ->
-              (match State.send_message ~channel_id ~content:out.content ~reply_to_message_id:message_id () with
-               | Ok _ ->
-                 (match attention_event_id with
-                  | Some event_id ->
-                      mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                        ~reason:"discord_reply_sent"
-                  | None -> ());
-                 Discord_observability.record_inbound_dispatch
-                   Discord_observability.Reply_sent;
-                 Discord_observability.record_reply
-                   Discord_observability.Reply_send_ok
-               | Error e ->
-                 Discord_observability.record_inbound_dispatch
-                   Discord_observability.Reply_send_error;
-                 Discord_observability.record_reply
-                   Discord_observability.Reply_send_failed;
-                 Log.Server.error "discord send_message failed (channel=%s): %s"
-                   channel_id
-                   (Format.asprintf "%a" State.pp_send_error e))
-          | Stream_overflow_send_failed _ ->
-              (match attention_event_id with
-               | Some event_id ->
-                   mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                     ~reason:"discord_reply_partial_overflow"
-               | None -> ());
-              Discord_observability.record_inbound_dispatch
-                Discord_observability.Reply_send_error;
-              Discord_observability.record_reply
-                Discord_observability.Reply_send_failed))
+         (match
+            State.send_message ~channel_id ~content:out.content
+              ~reply_to_message_id:message_id ()
+          with
+          | Ok _ ->
+            (match attention_event_id with
+             | Some event_id ->
+               mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                 ~reason:"discord_reply_sent"
+             | None -> ());
+            Discord_observability.record_inbound_dispatch
+              Discord_observability.Reply_sent;
+            Discord_observability.record_reply
+              Discord_observability.Reply_send_ok
+          | Error e ->
+            Discord_observability.record_inbound_dispatch
+              Discord_observability.Reply_send_error;
+            Discord_observability.record_reply
+              Discord_observability.Reply_send_failed;
+            Log.Server.error "discord send_message failed (channel=%s): %s"
+              channel_id
+              (Format.asprintf "%a" State.pp_send_error e)))
 
-let on_event ?resolved_binding ~dispatch ~clock ~base_dir
+let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
   | Gw.Ready { bot_user_id; _ } ->
     State.record_ready ~bot_user_id;
-    Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id
+    Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id;
+    None
   | Gw.Message_create
       { channel_id
       ; message_id
@@ -542,7 +533,7 @@ let on_event ?resolved_binding ~dispatch ~clock ~base_dir
       } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
-    handle_message_create ?resolved_binding ~dispatch ~clock ~channel_id
+    accept_message_create ~resolved_binding ~dispatch_for_delivery ~channel_id
       ~message_id ~author_id
       ~guild_id ~base_dir ~author_name ~content ~mentions_bot ~explicit_mentions_bot
       ~message_reference_channel_id ~message_reference_message_id
@@ -551,27 +542,30 @@ let on_event ?resolved_binding ~dispatch ~clock ~base_dir
     (* The previous Python sidecar used a configurable emoji
        trigger to drain pending messages. That feature is dropped in
        the in-process gateway; re-add as a follow-up if needed. *)
-    ()
+    None
   | Gw.Thread_tracked { thread_id; parent_channel_id } ->
     State.register_thread ~thread_id ~parent_channel_id;
     Log.Server.info
       "Discord thread registered: %s -> parent %s (total=%d)"
       thread_id parent_channel_id
-      (State.registered_thread_count ())
+      (State.registered_thread_count ());
+    None
   | Gw.Threads_bulk_tracked { threads } ->
     List.iter (fun (tid, pid) -> State.register_thread ~thread_id:tid ~parent_channel_id:pid) threads;
     Log.Server.info
       "Discord guild threads bulk registered: %d threads (total=%d)"
       (List.length threads)
-      (State.registered_thread_count ())
+      (State.registered_thread_count ());
+    None
   | Gw.Thread_removed { thread_id } ->
     State.unregister_thread ~thread_id;
     Log.Server.info
       "Discord thread removed: %s (total=%d)"
       thread_id
-      (State.registered_thread_count ())
+      (State.registered_thread_count ());
+    None
   | Gw.Ignored _ ->
-    ()
+    None
 
 (* RFC-0226 ambient lane recording: a bound-channel message that failed
    the trigger policy is still conversation the keeper sits in. Persist
@@ -728,7 +722,7 @@ let submit_ingress ingress ~lane ~event_id run =
       (Connector_ingress_lane.submit_error_to_string error)
 ;;
 
-let submit_triggered_event ingress ~dispatch ~clock ~base_dir
+let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
@@ -736,26 +730,33 @@ let submit_triggered_event ingress ~dispatch ~clock ~base_dir
     (match
        resolve_binding_for_message ~channel_id ~message_reference_channel_id
      with
-     | None -> on_event ~dispatch ~clock ~base_dir ev
+     | None ->
+       ignore
+         (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
      | Some ((resolution, _) as resolved_binding) ->
-       submit_ingress
-         ingress
-         ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
-         ~event_id:{ source = "discord_triggered"; opaque_id = message_id }
-         (fun () ->
-            on_event
-              ~resolved_binding
-              ~dispatch
-              ~clock
-              ~base_dir
-              ev))
+       (match
+          accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ev
+        with
+        | None -> ()
+        | Some accepted_delivery ->
+          submit_ingress
+            ingress
+            ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
+            ~event_id:{ source = "discord_triggered"; opaque_id = message_id }
+            (Option.value deliver ~default:accepted_delivery)))
   | Gw.Ready _
   | Gw.Reaction_add _
   | Gw.Thread_tracked _
   | Gw.Threads_bulk_tracked _
   | Gw.Thread_removed _
-  | Gw.Ignored _ -> on_event ~dispatch ~clock ~base_dir ev
+  | Gw.Ignored _ ->
+    ignore
+      (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
 ;;
+
+module For_testing = struct
+  let submit_triggered_event = submit_triggered_event
+end
 
 let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   match ev with
@@ -799,21 +800,8 @@ let start ~sw ~env ~clock ~state =
             (Connector_ingress_lane.failure_reason_to_string failure.reason))
         ()
     in
-    let dispatch_for_config config =
-      (* RFC-connector-deferred-reply-via-chat-queue: tag this dispatch as the Discord connector so a message that
-         arrives while the keeper is in flight is enqueued onto
-         [Keeper_chat_queue] (drained by the serial consumer, delivered back to
-         the channel via [Keeper_chat_discord.adapter_loop]) rather than the
-         outbound-less async poll store ([Keeper_msg_async]). *)
-      Gate_keeper_backend.dispatch_with_text_snapshot
-        ~connector_kind:Gate_keeper_backend.Discord
-        ~submission_owner:Gate_keeper_backend.Channel_actor
-        ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr
-        ~net:state.Mcp_server.net
-        ~publication_recovery_provider:
-          (Mcp_server.publication_recovery_availability_provider state)
-        ~config
+    let dispatch_for_config config delivery =
+      Gate_keeper_backend.accept_connector ~delivery ~clock ~config
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
@@ -830,8 +818,7 @@ let start ~sw ~env ~clock ~state =
             let config = Mcp_server.workspace_config state in
             submit_triggered_event
               ingress
-              ~dispatch:(dispatch_for_config config)
-              ~clock
+              ~dispatch_for_delivery:(dispatch_for_config config)
               ~base_dir:config.base_path
               ev)
           ~on_ambient:(fun ev ->

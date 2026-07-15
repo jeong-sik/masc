@@ -36,6 +36,17 @@ val parse_trigger_policy : string -> Discord_gateway_client.trigger_policy
     rather than being silently coerced. Exposed for unit testing the
     config boundary. *)
 
+module For_testing : sig
+  val submit_triggered_event :
+    ?deliver:(unit -> unit) ->
+    Connector_ingress_lane.t ->
+    dispatch_for_delivery:
+      (Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
+    base_dir:string ->
+    Discord_gateway_client.gateway_event ->
+    unit
+end
+
 val start :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->

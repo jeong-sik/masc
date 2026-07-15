@@ -35,9 +35,12 @@ type submission_owner =
   | Authenticated_caller of string
   | Channel_actor
 
-type durable_connector =
-  | Discord_connector
-  | Slack_connector
+type connector_delivery =
+  { source : Keeper_chat_queue.message_source
+  ; surface : Surface_ref.t
+  ; conversation_id : string option
+  ; external_message_id : string option
+  }
 
 (* [route_busy_connector] decides where a connector message goes when the keeper
    is already in flight. Pure and exhaustive over [connector_kind] so a new
@@ -482,10 +485,6 @@ let ensure_metadata key value metadata =
       if Option.is_some (List.assoc_opt key metadata) then metadata
       else metadata @ [ (key, value) ]
 
-let connector_kind_of_durable = function
-  | Discord_connector -> Discord
-  | Slack_connector -> Slack
-
 let delivery_key_of_receipt receipt_id =
   match Keeper_chat_delivery_identity.Receipt_ids.of_list [ receipt_id ] with
   | Ok receipt_ids ->
@@ -550,58 +549,32 @@ let terminal_connector_reply ~redact_text ~channel ~channel_user_id
     ; message_request = Some message_request
     }
 
-let accept_connector ~connector ~clock ~config ~channel ~channel_user_id
+let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
     ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
     ~metadata ~content =
+  ignore channel_workspace_id;
   let keeper_name = String.trim keeper_name in
-  let connector_kind = connector_kind_of_durable connector in
   let redaction =
     Keeper_secret_redaction.snapshot
       ~base_path:config.Workspace.base_path
       ~keeper_name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in
-  let conversation_id =
-    conversation_id_for_channel_context ~connector_kind ~channel
-      ~channel_workspace_id ~metadata
-  in
-  let external_message_id =
-    external_message_id_for_channel_context ~idempotency_key ~metadata
-  in
+  let conversation_id = delivery.conversation_id in
+  let external_message_id = delivery.external_message_id in
   let metadata =
     metadata
     |> ensure_metadata "conversation_id" conversation_id
     |> ensure_metadata "external_message_id" external_message_id
   in
-  let surface =
-    surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
-      ~metadata ?conversation_id ?external_message_id ()
-  in
+  let surface = delivery.surface in
   let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
-  let slack_reply_thread_ts =
-    match slack_thread_ts metadata with
-    | Some thread_ts -> Some thread_ts
-    | None ->
-      metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
-  in
-  let source =
-    match
-      route_busy_connector connector_kind
-        ~channel_id:channel_workspace_id ~user_id:channel_user_id
-        ~user_name:channel_user_name ~team_id:(slack_team_id metadata)
-        ~thread_ts:slack_reply_thread_ts
-    with
-    | `Enqueue_chat_queue source -> Ok source
-    | `Async_poll ->
-      Error "durable connector resolved to the async poll route"
-  in
   match
-    Keeper_chat_delivery_identity.Request_id.of_string idempotency_key,
-    source
+    Keeper_chat_delivery_identity.Request_id.of_string idempotency_key
   with
-  | Error detail, _ | _, Error detail ->
+  | Error detail ->
     Gate_protocol.Keeper_error_result (redact_text detail)
-  | Ok request_id, Ok source ->
+  | Ok request_id ->
     let receipt_id = Keeper_chat_queue.Receipt_id.of_request_id request_id in
     (match delivery_key_of_receipt receipt_id with
      | Error detail ->
@@ -641,7 +614,7 @@ let accept_connector ~connector ~clock ~config ~channel ~channel_user_id
                ; user_blocks = []
                ; attachments = []
                ; timestamp = Eio.Time.now clock
-               ; source
+               ; source = delivery.source
                ; user_row_origin =
                    Keeper_chat_store.Already_persisted { row_id }
                }
@@ -1021,11 +994,50 @@ let dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
     ~idempotency_key ~metadata ~content =
   match connector_kind with
   | Discord ->
-    accept_connector ~connector:Discord_connector ~clock ~config ~channel
+    let delivery =
+      { source =
+          Keeper_chat_queue.Discord
+            { channel_id = channel_workspace_id; user_id = channel_user_id }
+      ; surface =
+          surface_for_channel_context ~connector_kind ~channel
+            ~channel_workspace_id ~metadata ()
+      ; conversation_id =
+          conversation_id_for_channel_context ~connector_kind ~channel
+            ~channel_workspace_id ~metadata
+      ; external_message_id =
+          external_message_id_for_channel_context ~idempotency_key ~metadata
+      }
+    in
+    accept_connector ~delivery ~clock ~config ~channel
       ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
       ~idempotency_key ~metadata ~content
   | Slack ->
-    accept_connector ~connector:Slack_connector ~clock ~config ~channel
+    let thread_ts =
+      match slack_thread_ts metadata with
+      | Some thread_ts -> Some thread_ts
+      | None ->
+        metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
+    in
+    let delivery =
+      { source =
+          Keeper_chat_queue.Slack
+            { channel_id = channel_workspace_id
+            ; user_id = channel_user_id
+            ; user_name = channel_user_name
+            ; team_id = slack_team_id metadata
+            ; thread_ts
+            }
+      ; surface =
+          surface_for_channel_context ~connector_kind ~channel
+            ~channel_workspace_id ~metadata ()
+      ; conversation_id =
+          conversation_id_for_channel_context ~connector_kind ~channel
+            ~channel_workspace_id ~metadata
+      ; external_message_id =
+          external_message_id_for_channel_context ~idempotency_key ~metadata
+      }
+    in
+    accept_connector ~delivery ~clock ~config ~channel
       ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
       ~idempotency_key ~metadata ~content
   | Generic ->
@@ -1040,13 +1052,15 @@ let dispatch_with_text_snapshot ~connector_kind ~submission_owner
     ~keeper_name ~idempotency_key ~metadata ~content =
   match connector_kind with
   | Discord ->
-    accept_connector ~connector:Discord_connector ~clock ~config ~channel
-      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-      ~idempotency_key ~metadata ~content
+    dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
+      ~publication_recovery_provider ~config ~channel ~channel_user_id
+      ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+      ~metadata ~content
   | Slack ->
-    accept_connector ~connector:Slack_connector ~clock ~config ~channel
-      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-      ~idempotency_key ~metadata ~content
+    dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
+      ~publication_recovery_provider ~config ~channel ~channel_user_id
+      ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+      ~metadata ~content
   | Generic ->
     dispatch_core ~connector_kind ~submission_owner ~on_text_snapshot ~sw
       ~clock ~proc_mgr ~net ~publication_recovery_provider ~config ~channel

@@ -14,8 +14,8 @@
 
     Off by default: if [SLACK_APP_TOKEN] is unset the gateway logs a
     warning and skips startup; the server still boots normally. A message
-    arriving while the keeper is in flight is enqueued (connector_kind [Slack])
-    for deferred delivery, not dropped.
+    arriving while the keeper is in flight is enqueued with the leaf-owned
+    Slack delivery source for deferred delivery, not dropped.
 
     Not covered this pass (RFC-0317 follow-up): ambient recording + idle-keeper
     wake on non-triggering messages, and reaction-as-trigger.
@@ -59,7 +59,8 @@ module For_testing : sig
   val submit_event :
     ?deliver:(unit -> unit) ->
     Connector_ingress_lane.t ->
-    dispatch:Channel_gate.dispatch_fn ->
+    dispatch_for_delivery:
+      (Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
     clock:_ Eio.Time.clock ->
     Slack_socket_client.slack_event ->
     unit

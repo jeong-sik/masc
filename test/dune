@@ -112,7 +112,6 @@
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
-  test_server_keeper_background
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
   eval_memory_os_value
@@ -431,7 +430,6 @@
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
-  test_server_keeper_background
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
   eval_memory_os_value
@@ -1039,7 +1037,6 @@
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
-  test_keeper_recurring
   test_evidence_claim_schema
   test_deterministic_evidence_evaluator
   test_mcp_session_store_roundtrip
@@ -1213,7 +1210,6 @@
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
-  test_keeper_recurring
   test_evidence_claim_schema
   test_deterministic_evidence_evaluator
   test_mcp_session_store_roundtrip

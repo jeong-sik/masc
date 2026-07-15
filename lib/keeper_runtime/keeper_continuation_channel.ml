@@ -143,9 +143,10 @@ let string_field name fields =
 
 let optional_string_field name fields =
   match List.assoc_opt name fields with
-  | Some (`String s) when String.trim s <> "" -> Some s
-  | Some (`String _) | Some `Null | None -> None
-  | Some _ -> None
+  | Some (`String s) when String.trim s <> "" -> Ok (Some s)
+  | Some (`String _) | Some `Null | None -> Ok None
+  | Some _ ->
+    Error (Printf.sprintf "continuation_channel: field %s must be a string or null" name)
 
 let of_yojson json =
   let* fields = assoc_fields json in
@@ -157,26 +158,27 @@ let of_yojson json =
   | "discord" ->
     let* channel_id = string_field "channel_id" fields in
     let* user_id = string_field "user_id" fields in
+    let* guild_id = optional_string_field "guild_id" fields in
+    let* parent_channel_id = optional_string_field "parent_channel_id" fields in
+    let* thread_id = optional_string_field "thread_id" fields in
     Ok
       (Discord
-         { guild_id = optional_string_field "guild_id" fields
+         { guild_id
          ; channel_id
-         ; parent_channel_id = optional_string_field "parent_channel_id" fields
-         ; thread_id = optional_string_field "thread_id" fields
+         ; parent_channel_id
+         ; thread_id
          ; user_id
          })
   | "slack" ->
-    let* channel_id =
-      match string_field "channel_id" fields with
-      | Ok value -> Ok value
-      | Error _ -> string_field "channel" fields
-    in
+    let* channel_id = string_field "channel_id" fields in
     let* user_id = string_field "user_id" fields in
+    let* team_id = optional_string_field "team_id" fields in
+    let* thread_ts = optional_string_field "thread_ts" fields in
     Ok
       (Slack
-         { team_id = optional_string_field "team_id" fields
+         { team_id
          ; channel_id
-         ; thread_ts = optional_string_field "thread_ts" fields
+         ; thread_ts
          ; user_id
          })
   | "unrouted" ->

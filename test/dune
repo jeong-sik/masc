@@ -2477,6 +2477,8 @@
 
 (include stanzas/test_keeper_meta_canonicalize.inc)
 
+(include stanzas/test_keeper_meta_json_config_toml_only.inc)
+
 (test
  (name test_keeper_visible_path_projection)
  (modules test_keeper_visible_path_projection)

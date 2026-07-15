@@ -26,12 +26,6 @@ let expect_ok = function
   | Error error -> fail (Direct.error_to_string error)
 ;;
 
-let keeper_request keeper_name =
-  match Keeper_invocation_types.keeper_turn ~keeper_name ~prompt:"소스코드를 확인해" with
-  | Ok request -> request
-  | Error reason -> fail reason
-;;
-
 let request_id wire =
   Direct.Request_id.of_string wire
   |> function
@@ -53,7 +47,36 @@ let with_temp_dir f =
   let path = Filename.temp_file "keeper-chat-direct-delivery" "" in
   Sys.remove path;
   Unix.mkdir path 0o700;
-  Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
+  Fun.protect
+    ~finally:(fun () -> remove_tree path)
+    (fun () -> Eio.Switch.run (fun background_sw -> f path background_sw))
+;;
+
+let direct_request keeper_name =
+  let direct : Keeper_direct_invocation.t =
+    { execution_prompt = "소스코드를 확인해"
+    ; attachments = []
+    ; user_blocks = [ Keeper_direct_invocation.User_text "소스코드를 확인해" ]
+    ; turn_instructions = None
+    ; connector_context = None
+    ; continuation_channel =
+        Keeper_continuation_channel.Dashboard { thread_id = "dashboard-session" }
+    ; projection =
+        { user_content = "소스코드를 확인해"
+        ; surface = Surface_ref.Dashboard { session_id = Some "dashboard-session" }
+        ; conversation_id = Some "conversation-1"
+        ; external_message_id = None
+        ; speaker =
+            { speaker_id = Some "owner"
+            ; speaker_name = Some "Owner"
+            ; speaker_authority = Keeper_direct_invocation.Owner
+            }
+        }
+    }
+  in
+  match Keeper_invocation_types.direct_turn ~keeper_name direct with
+  | Ok request -> request
+  | Error reason -> fail reason
 ;;
 
 let payload ?(keeper_name = "sangsu") ?(submitted_by = "owner") () :
@@ -88,6 +111,48 @@ let assistant_effect ?(body = "completed") () : Direct.staged_effect =
   }
 ;;
 
+let accepted_request_id = function
+  | Ok
+      ({ request_id; acceptance = Keeper_msg_async.Durably_accepted }
+        : Keeper_msg_async.submit_outcome) -> request_id
+  | Ok outcome ->
+    fail
+      (Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string)
+  | Error error ->
+    fail (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+;;
+
+let submit_canonical_request ~background_sw ~base_path request_id =
+  let request_id_wire = Direct.Request_id.to_string request_id in
+  let ops =
+    Keeper_msg_async.For_testing.make_request_ops
+      ~generate_request_id:(fun () -> request_id_wire)
+      ()
+  in
+  let submitted =
+    Keeper_msg_async.For_testing.submit
+      ops
+      ~background_sw
+      ~base_path
+      ~caller:"owner"
+      ~request:(direct_request "sangsu")
+      ~f:(fun _ -> Keeper_types_profile.tool_result_ok "completed")
+      ()
+    |> accepted_request_id
+  in
+  check string "canonical request id" request_id_wire submitted
+;;
+
+let prepare ?(submit_request = true) ~background_sw ~base_path ~request_id ~payload ~now =
+  if submit_request then submit_canonical_request ~background_sw ~base_path request_id;
+  Direct.prepare ~base_path ~request_id ~payload ~now
+;;
+
+let prepare_for_testing io ~background_sw ~base_path ~request_id ~payload ~now =
+  submit_canonical_request ~background_sw ~base_path request_id;
+  Direct.For_testing.prepare io ~base_path ~request_id ~payload ~now
+;;
+
 type flow =
   { prepared : Direct.t
   ; user_committed : Direct.t
@@ -96,10 +161,23 @@ type flow =
   ; transcript_committed : Direct.t
   }
 
-let complete_flow ?(time_offset = 0.0) ~base_path ~request_id () =
+let complete_flow
+      ?(time_offset = 0.0)
+      ?(submit_request = true)
+      ~background_sw
+      ~base_path
+      ~request_id
+      ()
+  =
   let at value = time_offset +. value in
   let prepared =
-    Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:(at 1.0)
+    prepare
+      ~submit_request
+      ~background_sw
+      ~base_path
+      ~request_id
+      ~payload:(payload ())
+      ~now:(at 1.0)
     |> expect_ok
   in
   let user_committed =
@@ -129,9 +207,9 @@ let complete_flow ?(time_offset = 0.0) ~base_path ~request_id () =
 ;;
 
 let test_direct_flow_is_active_only _env =
-  with_temp_dir (fun base_path ->
+  with_temp_dir (fun base_path background_sw ->
     let request_id = request_id "direct-flow" in
-    let flow = complete_flow ~base_path ~request_id () in
+    let flow = complete_flow ~background_sw ~base_path ~request_id () in
     check int64 "five active phases produce four revisions" 4L flow.transcript_committed.revision;
     let loaded =
       Direct.load ~base_path ~keeper_name:"sangsu" ~request_id |> expect_ok
@@ -173,11 +251,12 @@ let expect_published_indeterminate = function
 ;;
 
 let test_post_rename_ambiguity_is_reconcilable _env =
-  with_temp_dir (fun base_path ->
+  with_temp_dir (fun base_path background_sw ->
     let request_id = request_id "direct-published-indeterminate" in
     let io = fail_after_rename_io () in
-    Direct.For_testing.prepare
+    prepare_for_testing
       io
+      ~background_sw
       ~base_path
       ~request_id
       ~payload:(payload ())
@@ -206,10 +285,15 @@ let test_post_rename_ambiguity_is_reconcilable _env =
 ;;
 
 let test_transcript_append_crash_retries_once _env =
-  with_temp_dir (fun base_path ->
+  with_temp_dir (fun base_path background_sw ->
     let request_id = request_id "direct-transcript-crash" in
     let prepared =
-      Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:1.0
+      prepare
+        ~background_sw
+        ~base_path
+        ~request_id
+        ~payload:(payload ())
+        ~now:1.0
       |> expect_ok
     in
     let user_committed =
@@ -262,10 +346,15 @@ let test_transcript_append_crash_retries_once _env =
 ;;
 
 let test_mutations_do_not_inventory_the_lane _env =
-  with_temp_dir (fun base_path ->
+  with_temp_dir (fun base_path background_sw ->
     let request_id = request_id "direct-exact-hot-path" in
     let prepared =
-      Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:1.0
+      prepare
+        ~background_sw
+        ~base_path
+        ~request_id
+        ~payload:(payload ())
+        ~now:1.0
       |> expect_ok
     in
     let active_dir =
@@ -304,7 +393,7 @@ let test_mutations_do_not_inventory_the_lane _env =
 ;;
 
 let test_lane_quarantine_is_local_and_legacy_is_ignored _env =
-  with_temp_dir (fun base_path ->
+  with_temp_dir (fun base_path _background_sw ->
     let legacy_dir =
       Direct.For_testing.active_dir ~base_path ~keeper_name:"sangsu"
       |> expect_ok
@@ -337,10 +426,15 @@ let test_lane_quarantine_is_local_and_legacy_is_ignored _env =
 ;;
 
 let test_codec_and_filename_are_direct_only _env =
-  with_temp_dir (fun base_path ->
+  with_temp_dir (fun base_path background_sw ->
     let request_id = request_id "direct-codec" in
     let prepared =
-      Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:1.0
+      prepare
+        ~background_sw
+        ~base_path
+        ~request_id
+        ~payload:(payload ())
+        ~now:1.0
       |> expect_ok
     in
     let path =
@@ -376,11 +470,16 @@ let test_codec_and_filename_are_direct_only _env =
 ;;
 
 let test_filename_record_identity_mismatch_is_quarantined _env =
-  with_temp_dir (fun base_path ->
+  with_temp_dir (fun base_path background_sw ->
     let first_id = request_id "direct-filename-first" in
     let second_id = request_id "direct-filename-second" in
     ignore
-      (Direct.prepare ~base_path ~request_id:first_id ~payload:(payload ()) ~now:1.0
+      (prepare
+         ~background_sw
+         ~base_path
+         ~request_id:first_id
+         ~payload:(payload ())
+         ~now:1.0
        |> expect_ok
         : Direct.t);
     let first_path =
@@ -411,18 +510,7 @@ let test_filename_record_identity_mismatch_is_quarantined _env =
     | Direct.Ready _ -> fail "filename-to-record mismatch was silently accepted")
 ;;
 
-let accepted_request_id = function
-  | Ok
-      ({ request_id; acceptance = Keeper_msg_async.Durably_accepted }
-        : Keeper_msg_async.submit_outcome) -> request_id
-  | Ok outcome ->
-    fail
-      (Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string)
-  | Error error ->
-    fail (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-;;
-
-let await_settlement ~ops ~background_sw ~base_path ~request_id =
+let start_settlement ~ops ~background_sw ~base_path ~request_id ~f =
   let settlement, resolve_settlement = Eio.Promise.create () in
   let delivered = Atomic.make false in
   let submitted_request_id =
@@ -434,8 +522,8 @@ let await_settlement ~ops ~background_sw ~base_path ~request_id =
       ~background_sw
       ~base_path
       ~caller:"owner"
-      ~request:(keeper_request "sangsu")
-      ~f:(fun _request_sw -> Keeper_types_profile.tool_result_ok "completed")
+      ~request:(direct_request "sangsu")
+      ~f
       ()
     |> accepted_request_id
   in
@@ -443,7 +531,17 @@ let await_settlement ~ops ~background_sw ~base_path ~request_id =
     "async request id is the checkpoint id"
     (Direct.Request_id.to_string request_id)
     submitted_request_id;
-  Eio.Promise.await settlement
+  settlement
+;;
+
+let await_settlement ~ops ~background_sw ~base_path ~request_id =
+  start_settlement
+    ~ops
+    ~background_sw
+    ~base_path
+    ~request_id
+    ~f:(fun _request_sw -> Keeper_types_profile.tool_result_ok "completed")
+  |> Eio.Promise.await
 ;;
 
 let expect_durable_done = function
@@ -456,10 +554,8 @@ let expect_durable_done = function
 ;;
 
 let test_remove_requires_canonical_terminal_proof_and_reports_ambiguity _env =
-  with_temp_dir (fun base_path ->
-    Eio.Switch.run (fun background_sw ->
+  with_temp_dir (fun base_path background_sw ->
       let request_id = request_id "direct-remove-proof" in
-      let flow = complete_flow ~base_path ~request_id () in
       let ops =
         Keeper_msg_async.For_testing.make_request_ops
           ~generate_request_id:(fun () -> Direct.Request_id.to_string request_id)
@@ -469,6 +565,14 @@ let test_remove_requires_canonical_terminal_proof_and_reports_ambiguity _env =
         await_settlement ~ops ~background_sw ~base_path ~request_id
       in
       expect_durable_done settlement;
+      let flow =
+        complete_flow
+          ~submit_request:false
+          ~background_sw
+          ~base_path
+          ~request_id
+          ()
+      in
       (* Model startup after the worker has durably settled: the proof must be
          reconstructible from the exact canonical terminal record alone. *)
       Keeper_msg_async.For_testing.clear ();
@@ -501,7 +605,13 @@ let test_remove_requires_canonical_terminal_proof_and_reports_ambiguity _env =
        | Error error -> fail (Direct.error_to_string error)
        | Ok _ -> fail "active checkpoint survived an observed unlink");
       let replacement =
-        complete_flow ~time_offset:10.0 ~base_path ~request_id ()
+        complete_flow
+          ~time_offset:10.0
+          ~submit_request:false
+          ~background_sw
+          ~base_path
+          ~request_id
+          ()
       in
       (match
          Direct.remove_after_async_terminal
@@ -520,14 +630,12 @@ let test_remove_requires_canonical_terminal_proof_and_reports_ambiguity _env =
           (Float.equal
              replacement.transcript_committed.created_at
              checkpoint.created_at)
-      | Error error -> fail (Direct.error_to_string error)))
+      | Error error -> fail (Direct.error_to_string error))
 ;;
 
 let test_startup_checkpoint_rejects_volatile_poll_terminal _env =
-  with_temp_dir (fun base_path ->
-    Eio.Switch.run (fun background_sw ->
+  with_temp_dir (fun base_path background_sw ->
       let request_id = request_id "direct-volatile-terminal" in
-      let flow = complete_flow ~base_path ~request_id () in
       let publications = Atomic.make 0 in
       let ops =
         Keeper_msg_async.For_testing.make_request_ops
@@ -548,9 +656,27 @@ let test_startup_checkpoint_rejects_volatile_poll_terminal _env =
             | Keeper_fs.Temp_directory_fsync_after_rename -> ())
           ()
       in
+      let release, resolve_release = Eio.Promise.create () in
       let settlement =
-        await_settlement ~ops ~background_sw ~base_path ~request_id
+        start_settlement
+          ~ops
+          ~background_sw
+          ~base_path
+          ~request_id
+          ~f:(fun _request_sw ->
+            Eio.Promise.await release;
+            Keeper_types_profile.tool_result_ok "completed")
       in
+      let flow =
+        complete_flow
+          ~submit_request:false
+          ~background_sw
+          ~base_path
+          ~request_id
+          ()
+      in
+      Eio.Promise.resolve resolve_release ();
+      let settlement = Eio.Promise.await settlement in
       (match settlement with
        | Keeper_msg_async.Status_settlement
            { status = Keeper_msg_async.Done _
@@ -579,14 +705,12 @@ let test_startup_checkpoint_rejects_volatile_poll_terminal _env =
           "startup checkpoint remains until canonical durability is proven"
           flow.transcript_committed.revision
           checkpoint.revision
-      | Error error -> fail (Direct.error_to_string error)))
+      | Error error -> fail (Direct.error_to_string error))
 ;;
 
 let test_corrupt_canonical_terminal_is_typed_and_preserved _env =
-  with_temp_dir (fun base_path ->
-    Eio.Switch.run (fun background_sw ->
+  with_temp_dir (fun base_path background_sw ->
       let request_id = request_id "direct-corrupt-terminal" in
-      let flow = complete_flow ~base_path ~request_id () in
       let request_id_wire = Direct.Request_id.to_string request_id in
       let ops =
         Keeper_msg_async.For_testing.make_request_ops
@@ -595,6 +719,14 @@ let test_corrupt_canonical_terminal_is_typed_and_preserved _env =
       in
       await_settlement ~ops ~background_sw ~base_path ~request_id
       |> expect_durable_done;
+      let flow =
+        complete_flow
+          ~submit_request:false
+          ~background_sw
+          ~base_path
+          ~request_id
+          ()
+      in
       Keeper_msg_async.For_testing.clear ();
       let terminal_path =
         match
@@ -622,7 +754,7 @@ let test_corrupt_canonical_terminal_is_typed_and_preserved _env =
           "corrupt async evidence preserves the direct checkpoint"
           flow.transcript_committed.revision
           checkpoint.revision
-      | Error error -> fail (Direct.error_to_string error)))
+      | Error error -> fail (Direct.error_to_string error))
 ;;
 
 let () =

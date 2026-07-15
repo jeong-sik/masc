@@ -210,7 +210,7 @@ masc_claim_next()
 
 - repo workspace collaboration: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
 - keeper runtime front door: `masc_keeper_list`, `masc_keeper_status`, `masc_keeper_up`, `masc_keeper_down`
-- keeper async turn injection: `masc_keeper_msg` (advanced/callable, hidden from default `tools/list`)
+- keeper async invocation: `masc_keeper_delegate` (advanced/callable, hidden from default `tools/list`)
 
 retired orchestration surfaces are historical only. 새 사용자는 repo workspace collaboration과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
 

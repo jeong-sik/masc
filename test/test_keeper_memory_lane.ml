@@ -31,7 +31,7 @@ let check_state ~keeper_name ~pending ~queued ~workers =
 ;;
 
 let metric_value metric ~labels =
-  Metrics.metric_value_or_zero Masc.Keeper_metrics.(to_string metric) ~labels ()
+  Metrics.metric_value_or_zero Keeper_metrics.(to_string metric) ~labels ()
 ;;
 
 let check_metric_delta label metric ~labels ~before expected =

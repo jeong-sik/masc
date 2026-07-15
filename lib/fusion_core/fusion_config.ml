@@ -16,8 +16,6 @@ type config_error =
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
   | Invalid_meta_timeout of string * float
       (** (preset 이름, meta_timeout_s): 양수 유한수가 아님. *)
-  | Invalid_adaptive_timeout_factor of string * float
-      (** (preset 이름, adaptive_timeout_factor): 1.0 미만. *)
   | Toml_type_error of string
 [@@deriving show, eq]
 
@@ -61,8 +59,6 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
   ; jtimeout_s =
       Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
         [ "timeout_s" ]
-  ; jmax_timeout_s =
-      Otoml.find_opt tbl Otoml.get_float [ "max_timeout_s" ]
   }
 
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
@@ -93,9 +89,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
   in
-  let adaptive_timeout_factor =
-    Otoml.find_or ~default:1.0 tbl Otoml.get_float [ "adaptive_timeout_factor" ]
-  in
   let fallback_judge_model =
     Otoml.find_opt tbl Otoml.get_string [ "fallback_judge_model" ]
   in
@@ -108,7 +101,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     ; judge_max_output_tokens
     ; judges
     ; meta_timeout_s
-    ; adaptive_timeout_factor
     ; fallback_judge_model
     }
   in
@@ -134,8 +126,7 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Duplicate_judge (name, id)
          | Fusion_policy.Validated_preset.Bad_meta_timeout v ->
            Invalid_meta_timeout (name, v)
-       | Fusion_policy.Validated_preset.Bad_adaptive_factor v ->
-         Invalid_adaptive_timeout_factor (name, v))
+      )
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.

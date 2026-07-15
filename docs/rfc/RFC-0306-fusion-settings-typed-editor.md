@@ -187,8 +187,7 @@ no longer enforces.
 - Budget/cost/turn controls — collected, not edited (product rule).
 - Creating/deleting whole presets from the UI (edit existing presets only); preset
   CRUD is a possible follow-up, see §7.2.
-- Per-call `timeout_s` range validation beyond what `of_preset` already checks
-  (`Bad_meta_timeout`, `Bad_adaptive_factor`).
+- Per-call `timeout_s` range validation beyond `Bad_meta_timeout`.
 
 ## 5. Implementation plan
 

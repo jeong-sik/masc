@@ -786,8 +786,8 @@
 ; and sink meta JSON for failed judge nodes.
 
 (test
- (name test_fusion_adaptive_timeout)
- (modules test_fusion_adaptive_timeout)
+ (name test_fusion_judge_observation)
+ (modules test_fusion_judge_observation)
  (libraries masc_test_deps masc.fusion_core))
 
 ; RFC-0266 §7 Phase D — fusion run registry persistence: JSONL append + replay.

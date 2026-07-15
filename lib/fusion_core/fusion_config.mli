@@ -23,8 +23,6 @@ type config_error =
       (** preset의 panel/judge system prompt가 비어있음 (코드 default 금지) *)
   | Missing_judge_model of string
       (** preset의 judge 모델 id가 비어있음 (필수, 빈 문자열 default 거부) *)
-  | Invalid_max_concurrent_panels of int  (** max_concurrent_panels < 1 *)
-  | Invalid_max_concurrent_judges of int  (** max_concurrent_judges < 1 *)
   | Invalid_staged_judge_group_size of int
       (** staged_judge_group_size < Fusion_policy.min_staged_judge_group_size *)
   | Invalid_max_output_tokens of string * int
@@ -64,8 +62,6 @@ val disabled : Fusion_policy.t
       같은 model이라도 통과(same-model-different-prompt, RFC-0278).
     - panel/judge system prompt 누락 → [Error [Missing_prompt _]].
     - judge 모델 id 누락 → [Error [Missing_judge_model _]].
-    - max_concurrent_panels < 1 → [Error [Invalid_max_concurrent_panels _]].
-    - max_concurrent_judges < 1 → [Error [Invalid_max_concurrent_judges _]].
     - staged_judge_group_size < 2 → [Error [Invalid_staged_judge_group_size _]].
     - max_output_tokens override가 0 이하 → [Error [Invalid_max_output_tokens _]].
     - min_answered가 1..패널 모델 총합 범위 밖 → [Error [Invalid_min_answered _]].

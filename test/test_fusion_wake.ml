@@ -206,8 +206,6 @@ let fusion_tool_policy () : Fusion_policy.t =
   in
   { enabled = true
   ; default_preset = preset.name
-  ; max_concurrent_panels = 1
-  ; max_concurrent_judges = Fusion_policy.default_max_concurrent_judges
   ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets = [ validated_preset preset ]
   }

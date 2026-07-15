@@ -35,8 +35,6 @@ let raw = Fusion_policy.Validated_preset.preset
 let base_policy : Fusion_policy.t =
   { Fusion_policy.enabled = true
   ; default_preset = "trio"
-  ; max_concurrent_panels = 2
-  ; max_concurrent_judges = Fusion_policy.default_max_concurrent_judges
   ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets =
       [ validated
@@ -106,8 +104,6 @@ let valid_toml =
 [fusion]
 enabled = true
 default_preset = "trio"
-max_concurrent_panels = 2
-max_concurrent_judges = 4
 staged_judge_group_size = 3
 [fusion.presets.trio]
 web_tools = false
@@ -121,7 +117,6 @@ let test_config_valid () =
   match Fusion_config.of_toml (parse valid_toml) with
   | Ok p ->
     Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
-    Alcotest.(check int) "judge concurrency" 4 p.Fusion_policy.max_concurrent_judges;
     Alcotest.(check int) "staged judge group size" 3
       p.Fusion_policy.staged_judge_group_size;
     Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
@@ -569,46 +564,6 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Missing_judge_model "p1") es)
   | Ok _ -> Alcotest.fail "expected Error Missing_judge_model"
 
-let test_config_bad_concurrency () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p1"
-max_concurrent_panels = 0
-[fusion.presets.p1]
-panel = ["a", "b"]
-judge = "a"
-panel_system_prompt = "p"
-judge_system_prompt = "j"
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_max_concurrent_panels present" true
-      (List.mem (Fusion_config.Invalid_max_concurrent_panels 0) es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_max_concurrent_panels"
-
-let test_config_bad_judge_concurrency () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p1"
-max_concurrent_judges = 0
-[fusion.presets.p1]
-panel = ["a", "b"]
-judge = "a"
-panel_system_prompt = "p"
-judge_system_prompt = "j"
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_max_concurrent_judges present" true
-      (List.mem (Fusion_config.Invalid_max_concurrent_judges 0) es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_max_concurrent_judges"
-
 let test_config_bad_staged_judge_group_size () =
   let s =
     {|
@@ -825,8 +780,6 @@ let seed_disabled_toml =
 [fusion]
 enabled = false
 default_preset = "trio"
-max_concurrent_panels = 2
-max_concurrent_judges = 3
 staged_judge_group_size = 3
 [fusion.presets.trio]
 web_tools = false
@@ -846,8 +799,6 @@ let test_config_disabled_with_preset () =
   match Fusion_config.of_toml (parse seed_disabled_toml) with
   | Ok p ->
     Alcotest.(check bool) "seed disabled" false p.Fusion_policy.enabled;
-    Alcotest.(check int) "seed judge concurrency" 3
-      p.Fusion_policy.max_concurrent_judges;
     Alcotest.(check int) "seed staged group size" 3
       p.Fusion_policy.staged_judge_group_size;
     Alcotest.(check int) "trio preset present" 1 (List.length p.Fusion_policy.presets);
@@ -1096,7 +1047,7 @@ let g_web4 : Fusion_policy.panel_group =
 let test_judge_args_single_group_identity () =
   let groups = [ g_web4 ] in
   Alcotest.(check (float 0.001)) "outer timeout = sole group timeout" 123.0
-    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2 groups);
+    (Fusion_policy.panel_outer_timeout_of groups);
   Alcotest.(check bool) "judge web = req||group, req=false, group=true" true
     (Fusion_policy.judge_web_tools_of ~req_web_tools:false groups);
   Alcotest.(check bool) "judge web = req||group, both false" false
@@ -1109,30 +1060,21 @@ let test_judge_args_single_group_identity () =
 let test_judge_args_multi_group () =
   let g_slow = { g_web4 with Fusion_policy.models = [ "y" ]; timeout_s = 200.0 } in
   Alcotest.(check (float 0.001)) "outer timeout = max over groups (single wave)" 200.0
-    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2 [ g_web4; g_slow ])
+    (Fusion_policy.panel_outer_timeout_of [ g_web4; g_slow ])
 
-(* --- outer timeout wave math: ceil(총원/max_fibers) 웨이브 × max timeout.
-       2026-07-01 사고 회귀 가드: 라이브 config(3패널, max_concurrent_panels=2,
-       120s)에서 외곽이 120s로 잡혀 마지막 웨이브가 구조적으로 데드라인 밖에
-       놓였고, 완료된 패널 답변까지 폐기됐다(bare timeout 9건 서명). --- *)
-let test_panel_outer_timeout_wave_math () =
+(* Panel/Judge fan-out uses the complete supplied member set. Cardinality does
+   not create an invented serial-wave deadline. *)
+let test_panel_outer_timeout_member_count_independent () =
   let g3 = { g_web4 with Fusion_policy.models = [ "a"; "b"; "c" ]; timeout_s = 120.0 } in
   Alcotest.(check (float 0.001))
-    "3 panelists / max_fibers=2 -> 2 waves x 120s" 240.0
-    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2 [ g3 ]);
+    "three panelists use the declared group timeout" 120.0
+    (Fusion_policy.panel_outer_timeout_of [ g3 ]);
   Alcotest.(check (float 0.001))
-    "3 panelists / max_fibers=3 -> 1 wave (byte-identity with max)" 120.0
-    (Fusion_policy.panel_outer_timeout_of ~max_fibers:3 [ g3 ]);
-  Alcotest.(check (float 0.001))
-    "5 panelists across groups / max_fibers=2 -> 3 waves x max(123,200)" 600.0
-    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2
+    "five panelists across groups use the maximum declared timeout" 200.0
+    (Fusion_policy.panel_outer_timeout_of
        [ { g_web4 with Fusion_policy.models = [ "a"; "b" ] }
        ; { g_web4 with Fusion_policy.models = [ "c"; "d"; "e" ]; timeout_s = 200.0 }
-       ]);
-  Alcotest.(check (float 0.001))
-    "max_fibers <= 0 clamps to 1 (defensive; config validation forbids it)" 369.0
-    (Fusion_policy.panel_outer_timeout_of ~max_fibers:0
-       [ { g_web4 with Fusion_policy.models = [ "a"; "b"; "c" ] } ])
+       ])
 
 (* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
 
@@ -1705,9 +1647,6 @@ let () =
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
         ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model
-        ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
-        ; Alcotest.test_case "bad_judge_concurrency" `Quick
-            test_config_bad_judge_concurrency
         ; Alcotest.test_case "bad_staged_judge_group_size" `Quick
             test_config_bad_staged_judge_group_size
         ; Alcotest.test_case "council_staged_eligible" `Quick
@@ -1762,8 +1701,8 @@ let () =
       , [ Alcotest.test_case "single_group_identity" `Quick
             test_judge_args_single_group_identity
         ; Alcotest.test_case "multi_group" `Quick test_judge_args_multi_group
-        ; Alcotest.test_case "outer_timeout_wave_math" `Quick
-            test_panel_outer_timeout_wave_math
+        ; Alcotest.test_case "outer_timeout_member_count_independent" `Quick
+            test_panel_outer_timeout_member_count_independent
         ] )
     ; ( "adaptive_timeout"
       , [ Alcotest.test_case "disabled" `Quick test_adjust_judge_timeout_disabled

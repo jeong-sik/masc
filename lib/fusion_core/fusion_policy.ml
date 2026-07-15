@@ -61,7 +61,6 @@ let min_panel = 1
 let max_panel = 8
 let min_answered_floor = 1
 let default_min_answered = min_answered_floor
-let default_max_concurrent_judges = max_panel
 let min_staged_judge_group_size = 2
 let default_staged_judge_group_size = 3
 
@@ -220,27 +219,9 @@ let staged_judge_groups ~group_size judges =
 
 (* 외곽 run_safe 타임아웃. 하나의 Async_agent.all은 하나의 외곽 타임아웃만
    가지므로(RFC-0252-A §4.3) 그룹별 정밀 timeout은 build_agent에 반영하고 외곽은
-   상한으로만 둔다.
-
-   상한은 fan-out 직렬화를 반영해야 한다: [Async_agent.all ~max_fibers]는 패널
-   총원 N을 [max_fibers]씩 웨이브로 실행하므로, 웨이브 수 = ceil(N / max_fibers)
-   이고 각 웨이브의 상한은 그룹 timeout 중 max다. 이전 구현(max만)은 N >
-   max_fibers일 때 마지막 웨이브가 구조적으로 외곽 데드라인 밖에 놓여, 이미
-   완료된 패널 답변까지 통째로 취소·폐기하고 전 패널을 bare [Timeout]으로
-   보고했다 (2026-07-01 사고의 reason_code=timeout 9건 서명; 라이브 config
-   3패널 × max_concurrent_panels=2 × 120s → 외곽 120s < 필요 240s).
-   [max_fibers <= 0]은 config 검증이 막지만 나눗셈 방어로 1로 clamp한다.
-   단일 웨이브(N <= max_fibers)면 이전과 byte-identical (max of group timeouts). *)
-let panel_outer_timeout_of ~max_fibers (groups : panel_group list) =
-  let max_group_timeout =
-    List.fold_left (fun acc (g : panel_group) -> Float.max acc g.timeout_s) 0.0 groups
-  in
-  let total_panelists =
-    List.fold_left (fun acc (g : panel_group) -> acc + List.length g.models) 0 groups
-  in
-  let max_fibers = max 1 max_fibers in
-  let waves = (total_panelists + max_fibers - 1) / max_fibers in
-  float_of_int (max 1 waves) *. max_group_timeout
+   입력 전체가 한 wave로 실행되는 현재 구조에 맞춰 그룹 timeout 중 max로 둔다. *)
+let panel_outer_timeout_of (groups : panel_group list) =
+  List.fold_left (fun acc (g : panel_group) -> Float.max acc g.timeout_s) 0.0 groups
 
 (* 심판은 preset당 1개이므로 그룹들에서 web_tools를 derive한다: req 또는 어느 그룹이든
    web_tools면 심판도 web tool. 단일 그룹이면 req || group.web_tools = 오늘의
@@ -396,8 +377,6 @@ end
 type t =
   { enabled : bool
   ; default_preset : string
-  ; max_concurrent_panels : int
-  ; max_concurrent_judges : int
   ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }

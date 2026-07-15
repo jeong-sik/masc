@@ -83,10 +83,6 @@ val min_answered_floor : int
 
 val default_min_answered : int
 
-(** Default JOJ first-judge concurrency. Derived from {!max_panel} so judge
-    fan-out has its own bounded capacity instead of borrowing panel throttling. *)
-val default_max_concurrent_judges : int
-
 (** Default staged JOJ group size. A staged judge-of-judges run groups first
     judges into fixed-size cohorts before a final meta reduction; default 3
     expresses the common 3x3x3 shape. *)
@@ -170,11 +166,9 @@ val staged_judge_groups
   -> judge_spec list
   -> (judge_spec list list, staged_judge_group_error) result
 
-(** 외곽 run_safe 타임아웃 = ceil(패널 총원 / max_fibers) 웨이브 × 그룹 timeout 중 max.
-    [max_fibers]는 패널 fan-out에 실제로 쓰는 동시성(= [max_concurrent_panels])과 같은
-    값을 넘겨야 한다 — 웨이브 직렬화를 무시하면 마지막 웨이브가 외곽 데드라인 밖에
-    놓여 완료된 답변까지 폐기된다. 단일 웨이브(N <= max_fibers)면 그룹 timeout 중 max. *)
-val panel_outer_timeout_of : max_fibers:int -> panel_group list -> float
+(** 외곽 run_safe 타임아웃 = 그룹 timeout 중 max. 패널은 입력 집합 전체를 구조적으로
+    fan-out하므로 별도 concurrency 설정이나 가짜 wave 계산을 두지 않는다. *)
+val panel_outer_timeout_of : panel_group list -> float
 
 (** 심판 web_tools를 그룹들에서 derive: [req_web_tools] 또는 어느 그룹이든 web_tools.
     단일 그룹이면 [req_web_tools || group.web_tools] (오늘과 byte-identical). *)
@@ -253,8 +247,6 @@ end
 type t =
   { enabled : bool
   ; default_preset : string
-  ; max_concurrent_panels : int
-  ; max_concurrent_judges : int
   ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }

@@ -103,7 +103,7 @@ fusion 대비 차이: 디스크 영속 있음, child switch 격리(더 강건), 
 ### 3.2 B안 — false (P0 3개)
 
 - **P0① root switch FD leak**: `Autonomy_exec.run`의 spawn_child가 stdout/stderr FD를 `Eio.Switch.on_release ~sw`로 등록(`autonomy_exec.ml:231-232`). server-lifetime root switch에 fork하면 on_release는 서버 종료 시에만 발화 → **매 spawn마다 FD 2개 + 클로저 영구 누적**. fusion은 외부 subprocess가 없어 무해했음 — "기계적 일반화"가 깨지는 지점.
-- **P0② admission cap 부재**: fusion은 `max_concurrent_panels` bound(`fusion_orchestrator.ml:42,123`). B안은 cap 없음. ~15 keeper × 무제한 spawn → root switch 무제한 fiber + `Eio_unix.run_in_systhread` waitpid blocking(`autonomy_exec.ml:310`) → systhread pool 압박 + scheduler starvation. CLAUDE.md backpressure 안티패턴의 정반대.
+- **P0② resource model 불일치**: Fusion의 LLM fan-out은 provider/runtime가 전송 backpressure를 소유하지만, B안의 subprocess는 root switch에 FD와 `waitpid` systhread를 직접 매단다. 따라서 Fusion 정책을 복제할 문제가 아니라 작업별 switch 수명과 FD 정리를 먼저 소유해야 한다.
 - **P0③ 시그니처 환각**: 설계가 `Autonomy_exec.run ~sw ~timeout command`로 호출했으나 실제는 `run ~sw ~clock ~config ~argv ~timeout_s` (Result record). workflow가 직접 재확인해 정정.
 
 ### 3.3 C안 — false as written, wait 제거 시 survivable

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const SAMPLE = `[fusion]
 enabled = true
 default_preset = "trio"
-max_concurrent_panels = 2
 
 [fusion.gate]
 per_hour_budget = 20
@@ -173,7 +172,7 @@ describe('FusionSettingsPanel', () => {
   })
 
   it('surfaces malformed live TOML instead of rendering fallback values', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: '[fusion]\nenabled = maybe\nmax_concurrent_panels = 1.5\n' }))
+    fetchMock.mockResolvedValue(cfg({ source_text: '[fusion]\nenabled = maybe\n' }))
     const { FusionSettingsPanel } = await import('./fusion-settings-panel')
     render(h(FusionSettingsPanel, {}), container)
 
@@ -190,24 +189,6 @@ describe('FusionSettingsPanel', () => {
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
     expect(q('[data-testid="fusion-settings-loading"]')).toBeNull()
     expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('network down')
-  })
-
-  it('does not POST empty or fractional number inputs', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    await mount()
-    const maxInput = q('[data-testid="fusion-max-concurrent-panels"]') as HTMLInputElement
-    maxInput.value = ''
-    await fireEvent.input(maxInput)
-
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
-    expect(saveMock).not.toHaveBeenCalled()
-
-    maxInput.value = '1.5'
-    await fireEvent.input(maxInput)
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('정수'))
-    expect(saveMock).not.toHaveBeenCalled()
   })
 
   it('renders the read-only preset composition parsed from the loaded config', async () => {
@@ -230,7 +211,6 @@ describe('FusionSettingsPanel', () => {
     const noSection = `[fusion]
 enabled = false
 default_preset = "ghost"
-max_concurrent_panels = 2
 `
     fetchMock.mockResolvedValue(cfg({ source_text: noSection }))
     await mount()
@@ -245,7 +225,6 @@ max_concurrent_panels = 2
     const noPanel = `[fusion]
 enabled = true
 default_preset = "trio"
-max_concurrent_panels = 2
 
 [fusion.presets.trio]
 min_answered = 2
@@ -263,7 +242,6 @@ min_answered = 2
     const noPanel = `[fusion]
 enabled = true
 default_preset = "trio"
-max_concurrent_panels = 2
 
 [fusion.presets.trio]
 min_answered = 2
@@ -284,7 +262,6 @@ min_answered = 2
     const grouped = `[fusion]
 enabled = true
 default_preset = "mixed"
-max_concurrent_panels = 2
 
 [fusion.presets.mixed]
 judge = "j"
@@ -310,7 +287,6 @@ panel = ["careful1"]
     const quorumLike = `[fusion]
 enabled = true
 default_preset = "quorum"
-max_concurrent_panels = 2
 
 [fusion.presets.quorum]
 panel = ["p1", "p2"]

@@ -31,12 +31,8 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               groups
           in
           let panel =
-            let panel_count = max 1 (List.length (Fusion_policy.preset_models preset)) in
             Fusion_panel.run ~sw ~net
-              ~max_fibers:panel_count
-              ~outer_timeout_s:
-                (Fusion_policy.panel_outer_timeout_of
-                   ~max_fibers:panel_count groups)
+              ~outer_timeout_s:(Fusion_policy.panel_outer_timeout_of groups)
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
           let judge_web_tools =
@@ -99,7 +95,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             Fusion_orchestrator_judge_wave.run_first_judges
               ~sw
               ~net
-              ~max_concurrent_judges:(max 1 (List.length judges))
               ~preset
               ~panel
               ~question:req.Fusion_types.prompt

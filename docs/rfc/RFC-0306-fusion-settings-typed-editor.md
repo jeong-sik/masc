@@ -28,7 +28,7 @@ accurate.
 Editable in the panel (frontend line-surgical scalar writer,
 `dashboard/src/lib/fusion-settings.ts:262-277`):
 
-- `[fusion].enabled`, `[fusion].default_preset`, `[fusion].max_concurrent_panels`
+- `[fusion].enabled`, `[fusion].default_preset`
 - `[fusion.presets.<default>].min_answered`
 
 Read-only display only (`dashboard/src/lib/fusion-preset-view.ts`, header comment
@@ -36,11 +36,11 @@ Read-only display only (`dashboard/src/lib/fusion-preset-view.ts`, header commen
 
 - `panel = [...]` roster, `judge` (meta), `[[fusion.presets.<name>.judges]]` (JoJ
   first-round judges), `panel_timeout_s`, `judge_timeout_s`,
-  `max_tool_calls_per_panel`, `max_concurrent_judges`, `staged_judge_group_size`.
+  `staged_judge_group_size`.
 
 Backend schema (`lib/fusion_core/fusion_config.ml`, `lib/fusion_core/fusion_policy.ml`)
 and orchestrator (`lib/fusion/fusion_orchestrator.ml:145` `run_judge_of_judges`)
-support all of the above. The gap is UI/write-path, not engine.
+support the remaining fields above. The gap is UI/write-path, not engine.
 
 ### 1.2 Root cause
 

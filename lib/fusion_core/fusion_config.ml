@@ -9,8 +9,6 @@ type config_error =
   | Duplicate_panelist of string * string
   | Missing_prompt of string
   | Missing_judge_model of string
-  | Invalid_max_concurrent_panels of int
-  | Invalid_max_concurrent_judges of int
   | Invalid_staged_judge_group_size of int
   | Invalid_max_output_tokens of string * int
   | Missing_default_preset of string
@@ -31,8 +29,6 @@ type config_error =
 let disabled : Fusion_policy.t =
   { enabled = false
   ; default_preset = ""
-  ; max_concurrent_panels = 1
-  ; max_concurrent_judges = Fusion_policy.default_max_concurrent_judges
   ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets = []
   }
@@ -193,13 +189,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   let default_preset =
     Otoml.find_or ~default:"" toml Otoml.get_string [ "fusion"; "default_preset" ]
   in
-  let max_concurrent_panels =
-    Otoml.find_or ~default:1 toml Otoml.get_integer [ "fusion"; "max_concurrent_panels" ]
-  in
-  let max_concurrent_judges =
-    Otoml.find_or ~default:Fusion_policy.default_max_concurrent_judges toml
-      Otoml.get_integer [ "fusion"; "max_concurrent_judges" ]
-  in
   let staged_judge_group_size =
     Otoml.find_or ~default:Fusion_policy.default_staged_judge_group_size toml
       Otoml.get_integer [ "fusion"; "staged_judge_group_size" ]
@@ -215,27 +204,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   (* 추가 검증 — enabled일 때만 강제 (disabled면 빈 config 허용). *)
   let errors =
     if enabled && presets = [] then Empty_presets :: errors else errors
-  in
-  (* Structural concurrency bounds are validated unconditionally even when
-     [enabled] is [false].  A disabled config is still persisted and can be
-     re-enabled without reloading, so invalid bounds must be rejected at the
-     source rather than deferred to runtime.  Only preset-related rules (empty
-     presets, default preset membership) are gated on [enabled] because they
-     describe the active policy surface, not the underlying resource limits. *)
-  (* max_concurrent_panels는 Async_agent.all ~max_fibers로 직결된다. <1이면 Eio가
-     예외를 던지고 패널이 전부 Timeout으로 오분류되므로 로드 단계에서 fail-fast. *)
-  let errors =
-    if max_concurrent_panels < 1
-    then Invalid_max_concurrent_panels max_concurrent_panels :: errors
-    else errors
-  in
-  (* JOJ judge waves do not share the panel cap.  A low panel cap is often
-     provider backpressure for panel models; coupling judges to it serializes
-     independent judge lenses and lets one slow judge delay the rest. *)
-  let errors =
-    if max_concurrent_judges < 1
-    then Invalid_max_concurrent_judges max_concurrent_judges :: errors
-    else errors
   in
   (* Staged JOJ uses this as an exact reducer group size.  Values below 2
      silently degenerate the tree into pass-through, so reject them at load. *)
@@ -263,8 +231,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
     Ok
       { Fusion_policy.enabled
       ; default_preset
-      ; max_concurrent_panels
-      ; max_concurrent_judges
       ; staged_judge_group_size
       ; presets
       }

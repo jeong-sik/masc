@@ -108,7 +108,7 @@ type preset =
 - judge 수는 group size로 나누어떨어져야 하며, 최소 두 개의 full group을 만들어야 한다.
   예: 9 judges + group size 3 → `3 + 3 + 3` stage meta → final meta. 8 judges + group
   size 3은 ragged라 실행 전 에러로 fail-closed.
-- 1차 judge wave와 stage meta wave는 `max_concurrent_judges` cap을 쓴다. Final meta는 1회 호출이다.
+- 1차 judge wave와 stage meta wave는 입력된 judge 전체를 실행한다. Final meta는 1회 호출이다.
 - 각 stage meta 실패는 해당 stage의 첫 성공 1차 종합으로 degrade하고, final meta 실패는 첫 성공
   stage 종합으로 degrade한다. 모든 stage가 실패하면 canonical judge는 Error다.
 

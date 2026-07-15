@@ -87,9 +87,8 @@ Operational meaning:
   watcher.
 - `[fusion]` is also read from this file by `Fusion_config_loader.load` at
   `masc_fusion` handler time. Fusion edits therefore take effect on the next
-  `masc_fusion` request, including `max_concurrent_judges` and
-  `staged_judge_group_size`, and invalid `[fusion]` config fails that request
-  closed.
+  `masc_fusion` request, including `staged_judge_group_size`, and invalid
+  `[fusion]` config fails that request closed.
 
 ## Rules for New TOML Files
 

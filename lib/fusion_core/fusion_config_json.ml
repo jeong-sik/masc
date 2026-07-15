@@ -64,8 +64,6 @@ let to_yojson (c : Fusion_policy.t) : Yojson.Safe.t =
   `Assoc
     [ ("enabled", `Bool c.Fusion_policy.enabled)
     ; ("default_preset", `String c.Fusion_policy.default_preset)
-    ; ("max_concurrent_panels", `Int c.Fusion_policy.max_concurrent_panels)
-    ; ("max_concurrent_judges", `Int c.Fusion_policy.max_concurrent_judges)
     ; ("staged_judge_group_size", `Int c.Fusion_policy.staged_judge_group_size)
     ; ( "presets"
       , `List

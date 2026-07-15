@@ -15,7 +15,6 @@ const SAMPLE = `# live runtime config
 [fusion]
 enabled = true
 default_preset = "trio"
-max_concurrent_panels = 2
 
 [fusion.gate]
 per_hour_budget = 20
@@ -34,7 +33,6 @@ describe('readFusionSettings', () => {
     expect(readFusionSettings(SAMPLE)).toEqual({
       enabled: true,
       defaultPreset: 'trio',
-      maxConcurrentPanels: 2,
       minAnswered: 2,
     })
   })
@@ -44,14 +42,11 @@ describe('readFusionSettings', () => {
   })
 
   it('surfaces malformed scalars instead of coercing them into plausible values', () => {
-    const src = '[fusion]\nenabled = maybe\nmax_concurrent_panels = 1.5\n'
+    const src = '[fusion]\nenabled = maybe\n'
     const result = readFusionSettingsResult(src)
     expect(result.ok).toBe(false)
     if (!result.ok) {
-      expect(result.issues.map(issue => issue.key)).toEqual([
-        'fusion.enabled',
-        'fusion.max_concurrent_panels',
-      ])
+      expect(result.issues.map(issue => issue.key)).toEqual(['fusion.enabled'])
     }
     expect(() => readFusionSettings(src)).toThrow(/Invalid fusion settings/)
   })
@@ -64,7 +59,6 @@ describe('readFusionSettings', () => {
     expect(readFusionSettings(`[fusion]
 enabled = false
 default_preset = "rocket\\U0001F680"
-max_concurrent_panels = 1
 `).defaultPreset).toBe(`rocket${rocket}`)
 
     const invalid = readFusionSettingsResult(SAMPLE.replace('default_preset = "trio"', 'default_preset = "tri\\/o"'))
@@ -73,17 +67,6 @@ max_concurrent_panels = 1
       expect(invalid.issues[0]).toMatchObject({
         key: 'fusion.default_preset',
         message: 'unsupported TOML string escape',
-      })
-    }
-  })
-
-  it('rejects negative integer tokens with the same positive-integer contract used by the editor draft', () => {
-    const result = readFusionSettingsResult('[fusion]\nmax_concurrent_panels = -1\n')
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.issues[0]).toMatchObject({
-        key: 'fusion.max_concurrent_panels',
-        message: 'expected an integer >= 1',
       })
     }
   })
@@ -103,12 +86,10 @@ max_concurrent_panels = 1
     const disabledUnknownPreset = `[fusion]
 enabled = false
 default_preset = "old"
-max_concurrent_panels = 1
 `
     expect(readFusionSettings(disabledUnknownPreset)).toEqual({
       enabled: false,
       defaultPreset: 'old',
-      maxConcurrentPanels: 1,
       minAnswered: 1,
     })
   })
@@ -131,13 +112,11 @@ describe('applyFusionSettings', () => {
     const next = applyFusionSettings(SAMPLE, {
       enabled: false,
       defaultPreset: 'trio',
-      maxConcurrentPanels: 4,
       minAnswered: 3,
     })
     expect(readFusionSettings(next)).toEqual({
       enabled: false,
       defaultPreset: 'trio',
-      maxConcurrentPanels: 4,
       minAnswered: 3,
     })
   })
@@ -150,7 +129,7 @@ describe('applyFusionSettings', () => {
   })
 
   it('never touches the removed per_hour_budget key (RFC-0277)', () => {
-    const next = applyFusionSettings(SAMPLE, { ...readFusionSettings(SAMPLE), maxConcurrentPanels: 5 })
+    const next = applyFusionSettings(SAMPLE, readFusionSettings(SAMPLE))
     // unchanged verbatim — the editor neither reads nor writes it
     expect(next).toContain('per_hour_budget = 20')
   })
@@ -165,7 +144,6 @@ min_answered = 1
     const switched = applyFusionSettings(withDuo, {
       enabled: true,
       defaultPreset: 'duo',
-      maxConcurrentPanels: 2,
       minAnswered: 1,
     })
     expect(switched.split('[fusion.presets.trio]')[1]?.split('[runtime]')[0]).not.toContain('min_answered')
@@ -174,23 +152,13 @@ min_answered = 1
     const cleared = applyFusionSettings(SAMPLE, {
       enabled: true,
       defaultPreset: '',
-      maxConcurrentPanels: 2,
       minAnswered: 1,
     })
     expect(cleared.split('[fusion.presets.trio]')[1]?.split('[runtime]')[0]).not.toContain('min_answered')
   })
 
-  it('rejects invalid local editor values before writing', () => {
-    expect(() => applyFusionSettings(SAMPLE, {
-      enabled: true,
-      defaultPreset: 'trio',
-      maxConcurrentPanels: 0,
-      minAnswered: 1,
-    })).toThrow(/max_concurrent_panels/)
-  })
-
   it('preserves comments and untouched sections/keys', () => {
-    const next = applyFusionSettings(SAMPLE, { ...readFusionSettings(SAMPLE), maxConcurrentPanels: 5 })
+    const next = applyFusionSettings(SAMPLE, readFusionSettings(SAMPLE))
     expect(next).toContain('# live runtime config')
     expect(next).toContain('[runtime]')
     expect(next).toContain('default = "x.y"')

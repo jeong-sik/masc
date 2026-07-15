@@ -1013,18 +1013,11 @@ trigger_policy = "mention_or_thread"
 # Deny로 즉시 반환되고 모델을 호출하지 않는다.
 #
 # 패널/심판 모델 문자열은 위의 <provider>.<model> 런타임 id를 그대로 쓴다.
-# 패널은 1..8개. 심판은 패널 답변을 종합한다.
+# 패널은 비어 있지 않은 typed model 집합이다. 심판은 패널 답변을 종합한다.
 [fusion]
 enabled = true
 default_preset = "trio"
-# 동시성 knob은 의도적으로 분리한다.
-# - max_concurrent_panels: 패널 답변 fan-out 상한.
-# - max_concurrent_judges: judge_of_judges 계열 judge wave fan-out 상한.
 # - staged_judge_group_size: staged_judge_of_judges의 고정 reducer group 크기.
-# 패널 cap은 답변 모델/provider backpressure 보호용이고, 심판 cap은 느린 심판
-# 하나가 나머지 독립 심판 lens를 직렬화하지 않게 하는 용도다.
-max_concurrent_panels = 2
-max_concurrent_judges = 3
 staged_judge_group_size = 3
 
 # 패널 프리셋. 패널 답변은 free text다. 2026-07-01 사고(ollama.com cloud가 json_schema를

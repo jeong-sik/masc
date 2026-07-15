@@ -66,7 +66,7 @@ let bridge_failure_of_error (error : Agent_sdk.Error.sdk_error) : Fusion_types.p
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
   | _ -> Fusion_types.Bridge_error (Agent_sdk.Error.to_string error)
 
-let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
+let run ~sw ~net ~outer_timeout_s ~groups ~prompt ()
   : Fusion_types.panel_outcome list
   =
   (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/timeout)으로
@@ -96,7 +96,6 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
   in
   let built = List.rev built in
   let build_failures = List.rev build_failures in
-  let _ = max_fibers in
   let max_fibers = max 1 (List.length built) in
   (* 2. 모든 그룹을 하나의 Async_agent.all에 union으로 던진다 — 이종 설정은 이미 각
         agent에 baked되어 있으므로 단일 fan-out으로 충분. 외곽 run_safe는 그룹 timeout

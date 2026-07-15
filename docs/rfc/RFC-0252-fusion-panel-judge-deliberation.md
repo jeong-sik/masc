@@ -58,7 +58,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
         ┌─────────┴───────── gate: Fusion_policy.decide ──▶ Allow req | Deny reason
         │ (Deny면 사유를 chat lane에 1줄로 남기고 종료)
         ▼
-   Fusion_panel.run ── Async_agent.all ~max_fibers ── (model×N, 각자 web 도구·tool budget)
+   Fusion_panel.run ── Async_agent.all ── (model×N, 각자 web 도구)
         │   → (name × api_response result) list → panel_outcome list (실패 격리)
         ▼
    Fusion_judge.run ── Structured.extract(judge_synthesis schema, provider=judge model)
@@ -189,7 +189,7 @@ val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
        -> (string * (Types.api_response, Error.sdk_error) Result.t) list
 ```
 - per-agent 에러 격리(한 패널 실패가 나머지 안 죽임), 부모 switch 취소 전파.
-- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → `Async_agent.all ~max_fibers:policy.max_concurrent_panels` → 결과를 `panel_outcome list`로 매핑. 각 호출은 `Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s`로 감싼다.
+- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입) → 입력된 전체 모델을 `Async_agent.all`로 실행 → 결과를 `panel_outcome list`로 매핑. 각 호출은 `Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s`로 감싼다.
 
 ### 7.2 심판 — `Structured.extract`
 
@@ -243,7 +243,6 @@ judge 결론만 키퍼 **메인** conversation에 남긴다. 패널 트랜스크
 [fusion]
 enabled = false                       # opt-in. 기본 OFF (fail-safe)
 default_preset = "budget"
-max_concurrent_panels = 2             # provider max-concurrent 존중 (qwen36=2)
 
 [fusion.gate]
 low_confidence_threshold = 0.55
@@ -345,7 +344,7 @@ test/fusion/
 3. **대시보드 meta 뷰어 부재**: v1은 meta_json raw 도달. PostDetail 뷰어는 후속.
 4. **chat lane author 필드**: v1 content-prefix. 구조화 author는 코어 스키마 변경(코덱 마이그레이션 필요) → v2.
 5. **action fusion(v2)**: 패널이 tool-call 제안 → 심판 선택·실행. tool-call consensus + side-effect atomicity 필요. 별도 RFC.
-6. **provider 동시성**: qwen36 max-concurrent=2 등 → `max_concurrent_panels`로 존중, 초과 패널은 queue.
+6. **provider 동시성**: Fusion은 입력된 패널 전체를 실행한다. 실제 전송 용량과 backpressure는 provider/runtime 경계가 관리한다.
 7. **`run_with_caller` vs `run_safe`**: v1은 string caller `run_safe`. 타입드 `Env_config_oas_bridge.caller` 변형 추가는 후속(해당 모듈 침습).
 
 ---
@@ -358,7 +357,7 @@ test/fusion/
 | string/substring 분류기 | **회피** — judge는 `Structured.extract` 닫힌 타입, surface-string 리스트 없음 |
 | N-of-M 패치 | N/A — 신규 서브시스템, 단일 abstraction |
 | catch-all `_ ->` 추가 | **회피** — 모든 분기 닫힌 합(trigger/decision/failure/deny) |
-| cap/cooldown/dedup/repair | per_hour_budget/cost cap은 *기능적 게이트*(비용 통제)지 증상 억제 아님. backpressure는 `max_concurrent_panels` 명시 |
+| cap/cooldown/dedup/repair | 실행 예산과 고정 동시성 정책은 Fusion 기능 게이트가 아니다. 전송 backpressure는 provider/runtime 경계의 책임이다. |
 | test backdoor | mock provider는 test 디렉토리 한정, prod 경로 비노출 |
 | Unknown→Permissive | **회피** — unknown preset/model = fail-fast 에러, silent default 없음 |
 

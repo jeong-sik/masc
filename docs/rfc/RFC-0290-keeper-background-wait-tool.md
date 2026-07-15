@@ -32,7 +32,7 @@ The second shape is what fusion already does and what RFC-0020 (hint signal `fib
 
 ### 2.3 Generalizing fusion is "mechanical" only if the resource model is identical — it is not
 
-Fusion forks LLM judge fibers: no OS file descriptors, and a hard cap (`max_concurrent_panels`, `fusion_orchestrator.ml:42,123`). A generic background tool that runs subprocesses via `Autonomy_exec.run` (`cdal_runtime/autonomy_exec.ml:295`) has neither property for free: the subprocess pipe FDs are registered with `Eio.Switch.on_release ~sw` (`autonomy_exec.ml:231-232`), and there is no built-in concurrency bound. Forking such work onto the server-lifetime root switch without correction leaks FDs for the server's whole lifetime and admits unbounded fibers. These are not theoretical; they are the two P0 findings in §7. The generalization is sound only with the §5 isolation and cap design.
+Fusion forks LLM judge fibers without owning OS file descriptors; transport backpressure belongs to the provider/runtime boundary. A generic background tool that runs subprocesses via `Autonomy_exec.run` (`cdal_runtime/autonomy_exec.ml:295`) does not inherit that resource model: the subprocess pipe FDs are registered with `Eio.Switch.on_release ~sw` (`autonomy_exec.ml:231-232`). Forking such work onto the server-lifetime root switch without correction leaks FDs for the server's whole lifetime. The generalization is sound only with the §5 switch-isolation design.
 
 ## 3. Non-goals (explicitly excluded from v1)
 

@@ -28,7 +28,6 @@ val elapsed_since_t0 : clock -> float
 val run_first_judges
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> max_concurrent_judges:int
   -> preset:Fusion_policy.preset
   -> panel:Fusion_types.panel_outcome list
   -> question:string

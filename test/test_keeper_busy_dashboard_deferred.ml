@@ -50,6 +50,10 @@ let with_env body =
     (fun () ->
       Eio_main.run
       @@ fun env ->
+      Eio.Switch.run
+      @@ fun sw ->
+      Eio_guard.enable ();
+      Eio.Switch.on_release sw Eio_guard.disable;
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let clock = Eio.Stdenv.clock env in
       let config = Workspace.default_config base in
@@ -59,9 +63,8 @@ let with_env body =
       let report = Keeper_chat_queue.configure_persistence ~base_path:base in
       check "chat queue persistence configured without load errors"
         (report.load_errors = []);
-      Eio.Switch.run (fun sw ->
-        Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
-        body ~base ~clock))
+      Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
+      body ~base ~clock)
 ;;
 
 let with_busy_slot ~base ~sw ?(keeper_name = keeper_name) f =

@@ -1176,6 +1176,11 @@ let ensure_owned_parent ~ownership_root path =
   | Ok _ -> validate_owned_parent ~ownership_root path
   | Error error -> Error (durable_directory_failure_to_string error)
 
+let prepare_database_parent ~ownership_root ~path ~create_if_missing =
+  if create_if_missing
+  then ensure_owned_parent ~ownership_root path
+  else Ok ()
+
 let database_sidecars path = [ path ^ "-journal"; path ^ "-wal"; path ^ "-shm" ]
 
 let validate_database_paths ~ownership_root path =
@@ -1469,11 +1474,10 @@ let close_database handle =
   combine_cleanup_error close_result identity_result
 
 let open_database ~ownership_root ~path ~create_if_missing ~schema_validation =
-  let* () =
-    if create_if_missing
-    then ensure_owned_parent ~ownership_root path
-    else validate_owned_parent ~ownership_root path
-  in
+  (* This function runs inside [Eio_guard.run_in_systhread]. Keep it limited
+     to blocking SQLite/Unix operations: directory creation is Eio-aware and
+     must be completed by [prepare_database_parent] before this boundary. *)
+  let* () = validate_owned_parent ~ownership_root path in
   let* initial = validate_database_paths ~ownership_root path in
   let missing = initial = Path_absent in
   if missing && not create_if_missing
@@ -1537,6 +1541,7 @@ let with_database
     ~path
     ~create_if_missing
     body =
+  let* () = prepare_database_parent ~ownership_root ~path ~create_if_missing in
   Eio_guard.run_in_systhread (fun () ->
       try
         let* handle =
@@ -1973,7 +1978,10 @@ let run_transaction ~ownership_root ~path ~create_if_missing plan =
   let visit stage =
     if testing_active then visit_transaction_stage stage
   in
-  Eio_guard.run_in_systhread (fun () ->
+  match prepare_database_parent ~ownership_root ~path ~create_if_missing with
+  | Error detail -> Transaction_failed (not_published_failure detail)
+  | Ok () ->
+    Eio_guard.run_in_systhread (fun () ->
       let protect_result f =
         try f () with
         | Eio.Cancel.Cancelled _ as exception_ -> raise exception_

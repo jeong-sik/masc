@@ -455,6 +455,11 @@ let test_typed_keeper_invocation_wire_contract () =
   in
   check string "typed target decoded" "projection-keeper"
     (Invocation.target_name request);
+  check string "leaf result codec" "awaiting_execution"
+    (Keeper_invocation_types.result_contract_to_string Invocation.Awaiting_execution);
+  check bool "leaf parser preserves the shared type" true
+    (Keeper_invocation_types.result_contract_of_string "running"
+     = Some Invocation.Running);
   (match
      Invocation.request_of_json
        (`Assoc [ "name", `String "projection-keeper"; "message", `String "legacy" ])

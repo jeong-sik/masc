@@ -96,6 +96,32 @@ let current_prompt_assets files =
           , String.sub rel prefix_len (String.length rel - prefix_len) ))
     files
 
+let owned_parent_state ~prompts_dir dest =
+  let parent = Filename.dirname dest in
+  match Fs_compat.inspect_owned_directory_chain ~ownership_root:prompts_dir parent with
+  | Error rejection ->
+    Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+  | Ok Fs_compat.Owned_directory_missing -> Ok `Missing
+  | Ok (Fs_compat.Owned_directory _) -> Ok `Directory
+
+let prepare_owned_parent ~prompts_dir dest =
+  match owned_parent_state ~prompts_dir dest with
+  | Error _ as error -> error
+  | Ok `Directory -> Ok ()
+  | Ok `Missing ->
+    Fs_compat.mkdir_p (Filename.dirname dest);
+    (match owned_parent_state ~prompts_dir dest with
+     | Ok `Directory -> Ok ()
+     | Ok `Missing -> Error "managed prompt asset parent remained missing after creation"
+     | Error _ as error -> error)
+
+let writable_leaf_state dest =
+  match Fs_compat.exact_path_kind ~follow:false dest with
+  | Fs_compat.Exact_missing -> Ok `Missing
+  | Fs_compat.Exact_kind Unix.S_REG -> Ok `Regular
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+    Error "managed prompt asset leaf is not a regular file"
+
 let sync_prompt_assets ~read ~files ~prompts_dir () =
   let current_assets = current_prompt_assets files in
   let initial = { copied = []; overwritten = []; removed = []; failed = [] } in
@@ -118,21 +144,40 @@ let sync_prompt_assets ~read ~files ~prompts_dir () =
           }
         | Some content ->
           let dest = Filename.concat prompts_dir runtime_rel in
-          let existing = read_file_opt dest in
-          (match existing with
-           | Some current when String.equal current content -> acc
-           | _ ->
-             (try
-                Fs_compat.mkdir_p (Filename.dirname dest);
-                Fs_compat.save_file dest content;
-                if Option.is_some existing
-                then
-                  { acc with overwritten = embedded_rel :: acc.overwritten }
-                else { acc with copied = embedded_rel :: acc.copied }
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | Sys_error msg ->
-                { acc with failed = (embedded_rel, msg) :: acc.failed })))
+          (try
+             match prepare_owned_parent ~prompts_dir dest with
+             | Error msg ->
+               { acc with failed = (embedded_rel, msg) :: acc.failed }
+             | Ok () ->
+               (match writable_leaf_state dest with
+                | Error msg ->
+                  { acc with failed = (embedded_rel, msg) :: acc.failed }
+                | Ok leaf_state ->
+                  let existing = read_file_opt dest in
+                  (match existing with
+                   | Some current when String.equal current content -> acc
+                   | _ ->
+                     Fs_compat.save_file dest content;
+                     (match leaf_state with
+                      | `Regular ->
+                        { acc with overwritten = embedded_rel :: acc.overwritten }
+                      | `Missing ->
+                        { acc with copied = embedded_rel :: acc.copied })))
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | Sys_error msg ->
+             { acc with failed = (embedded_rel, msg) :: acc.failed }
+           | Unix.Unix_error (error, operation, argument) ->
+             { acc with
+               failed =
+                 ( embedded_rel
+                 , Printf.sprintf
+                     "%s(%s): %s"
+                     operation
+                     argument
+                     (Unix.error_message error) )
+                 :: acc.failed
+             }))
     initial
     current_assets
   in
@@ -176,22 +221,39 @@ let sync_prompt_assets ~read ~files ~prompts_dir () =
                let embedded_rel = prompts_asset_prefix ^ runtime_rel in
                let dest = Filename.concat prompts_dir runtime_rel in
                (try
-                  if not (Sys.file_exists dest)
-                  then acc
-                  else if Sys.is_directory dest
-                  then
-                    { acc with
-                      failed =
-                        (embedded_rel, "managed prompt asset resolved to a directory")
-                        :: acc.failed
-                    }
-                  else (
-                    Sys.remove dest;
-                    { acc with removed = embedded_rel :: acc.removed })
+                  match owned_parent_state ~prompts_dir dest with
+                  | Error msg ->
+                    { acc with failed = (embedded_rel, msg) :: acc.failed }
+                  | Ok `Missing -> acc
+                  | Ok `Directory ->
+                    (match Fs_compat.exact_path_kind ~follow:false dest with
+                     | Fs_compat.Exact_missing -> acc
+                     | Fs_compat.Exact_kind Unix.S_REG
+                     | Fs_compat.Exact_kind Unix.S_LNK ->
+                       Sys.remove dest;
+                       { acc with removed = embedded_rel :: acc.removed }
+                     | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+                       { acc with
+                         failed =
+                           ( embedded_rel
+                           , "managed prompt asset leaf is neither a regular file nor a symbolic link" )
+                           :: acc.failed
+                       })
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | Sys_error msg ->
-                  { acc with failed = (embedded_rel, msg) :: acc.failed }))
+                  { acc with failed = (embedded_rel, msg) :: acc.failed }
+                | Unix.Unix_error (error, operation, argument) ->
+                  { acc with
+                    failed =
+                      ( embedded_rel
+                      , Printf.sprintf
+                          "%s(%s): %s"
+                          operation
+                          argument
+                          (Unix.error_message error) )
+                      :: acc.failed
+                  }))
            managed
            synced)
 

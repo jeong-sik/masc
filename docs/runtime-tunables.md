@@ -14,7 +14,7 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 273 unique knobs across 9 modules.
+**Total**: 272 unique knobs across 9 modules.
 
 **Typed getter classification**: 38/156 tagged (`operator`: 38, `algorithm`: 0, `unclassified`: 118).
 
@@ -265,14 +265,14 @@ the categorization roadmap. Newly-added typed getters in
 |---|---|---|---|---|---|
 | `MASC_SLACK_TRIGGER_POLICY` | string_literal | n/a | n/a | 20 |  |
 
-## Env_config_snapshot (66 knobs; typed classification 0/0)
+## Env_config_snapshot (65 knobs; typed classification 0/0)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 29 |  |
-| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 566 |  |
-| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 570 |  |
-| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 572 |  |
+| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 564 |  |
+| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 568 |  |
+| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 570 |  |
 | `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 184 |  |
 | `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 270 |  |
 | `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 272 |  |
@@ -294,8 +294,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_ECONOMY_REWARD_MENTION_RESPONSE` | string_literal | n/a | n/a | 339 |  |
 | `MASC_ECONOMY_REWARD_TASK_DONE` | string_literal | n/a | n/a | 341 |  |
 | `MASC_ECONOMY_REWARD_UPVOTE` | string_literal | n/a | n/a | 343 |  |
-| `MASC_EVENT_BUFFER_SIZE` | string_literal | n/a | n/a | 650 |  |
-| `MASC_GOAL_DISPATCH_RUNTIME` | string_literal | n/a | n/a | 524 |  |
+| `MASC_EVENT_BUFFER_SIZE` | string_literal | n/a | n/a | 648 |  |
 | `MASC_GRPC_STREAM_MAX_BUFFER` | string_literal | n/a | n/a | 76 |  |
 | `MASC_HEBBIAN_DECAY` | string_literal | n/a | n/a | 177 |  |
 | `MASC_HEBBIAN_RATE` | string_literal | n/a | n/a | 176 |  |
@@ -310,25 +309,25 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 151 |  |
 | `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 150 |  |
 | `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 178 |  |
-| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 626 |  |
-| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 660 |  |
-| `MASC_ROUTING_RUNTIME` | string_literal | n/a | n/a | 526 |  |
+| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 624 |  |
+| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 658 |  |
+| `MASC_ROUTING_RUNTIME` | string_literal | n/a | n/a | 524 |  |
 | `MASC_RUNTIME_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 375 |  |
-| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 668 |  |
-| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 594 |  |
-| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 596 |  |
-| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 598 |  |
-| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 600 |  |
-| `MASC_SSE_KEEPALIVE_SEC` | string_literal | n/a | n/a | 652 |  |
-| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 606 |  |
+| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 666 |  |
+| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 592 |  |
+| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 594 |  |
+| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 596 |  |
+| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 598 |  |
+| `MASC_SSE_KEEPALIVE_SEC` | string_literal | n/a | n/a | 650 |  |
+| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 604 |  |
 | `MASC_TELEMETRY_MAX_BYTES` | string_literal | n/a | n/a | 48 |  |
 | `MASC_TELEMETRY_RETENTION_DAYS` | string_literal | n/a | n/a | 45 |  |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 642 |  |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 644 |  |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 640 |  |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 642 |  |
 | `MASC_TLA_TRACE` | string_literal | n/a | n/a | 138 |  |
-| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 694 |  |
-| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 696 |  |
-| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 698 |  |
+| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 692 |  |
+| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 694 |  |
+| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 696 |  |
 | `MASC_WS_ACK_STALE_THRESHOLD_SEC` | string_literal | n/a | n/a | 86 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 83 |  |
 | `MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION` | string_literal | n/a | n/a | 110 |  |

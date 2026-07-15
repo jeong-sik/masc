@@ -307,7 +307,7 @@ let test_replace_preflight_detects_payload_leaf_swap ~fs () =
   (match
      replace_capability_file_for_testing
        ~before_stage:(function
-         | Fs_compat.Publish_replace ->
+         | Fs_compat.Verify_entry_identity ->
            let staging = only_entry_except directory [ "target" ] in
            let staging_path = Filename.concat directory staging in
            let payload = Filename.concat staging_path "payload" in
@@ -372,10 +372,12 @@ let test_staging_name_swap_does_not_redirect_pinned_payload ~fs () =
     (Sys.is_directory displaced)
 ;;
 
-let test_append_and_replace_share_nonblocking_entry_lease ~fs () =
+let test_append_and_replace_share_existing_target_lease ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
+  let target_alias = Filename.concat directory "target-alias" in
   write_file target "old";
+  Unix.link target target_alias;
   with_replace_context ~fs directory @@ fun parent recovery ->
   Eio.Switch.run @@ fun sw ->
   let writer_entered, resolve_writer_entered = Eio.Promise.create () in
@@ -404,7 +406,7 @@ let test_append_and_replace_share_nonblocking_entry_lease ~fs () =
       Fs_compat.open_capability_append_file
         ~sw:append_sw
         ~parent
-        ~leaf:"target"
+        ~leaf:"target-alias"
       |> require_append_file
     in
     let alias_rejected =
@@ -419,7 +421,7 @@ let test_append_and_replace_share_nonblocking_entry_lease ~fs () =
     in
     Fs_compat.append_capability_observed file "append", alias_rejected
   in
-  check bool "append immediately reports entry contention" true
+  check bool "hard-link alias reports target identity contention" true
     (append_outcome.write_failure
      = Some Fs_compat.Capability_append_mutation_contended);
   check int "contended append writes no bytes" 0 append_outcome.bytes_written;
@@ -442,10 +444,526 @@ let test_append_and_replace_share_nonblocking_entry_lease ~fs () =
     in
     Fs_compat.append_capability_observed file "after-release"
   in
-  check bool "atomic writer releases the entry lease" true
+  check bool "atomic writer releases the target identity lease" true
     (Option.is_none append_after_release.write_failure);
   check string "replacement completes before the later append"
     "replacementafter-release"
+    (read_file target)
+;;
+
+let test_hard_link_replaces_share_existing_target_lease ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  let target_alias = Filename.concat directory "target-alias" in
+  write_file target "old";
+  Unix.link target target_alias;
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  Eio.Switch.run @@ fun sw ->
+  let writer_entered, resolve_writer_entered = Eio.Promise.create () in
+  let release_writer, resolve_release_writer = Eio.Promise.create () in
+  let writer_result, resolve_writer_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      replace_capability_file_for_testing
+        ~before_stage:(function
+          | Fs_compat.Create_staging_directory ->
+            Eio.Promise.resolve resolve_writer_entered ();
+            Eio.Promise.await release_writer
+          | _ -> ())
+        ~recovery
+        ~allowed_root_path:directory
+        ~parent
+        ~leaf:"target"
+        ~permissions:0o640
+        "replacement"
+    in
+    Eio.Promise.resolve resolve_writer_result result);
+  Eio.Promise.await writer_entered;
+  (match
+     replace_capability_file
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"target-alias"
+       ~permissions:0o640
+       "alias-replacement"
+   with
+   | Ok () -> fail "hard-link alias bypassed the existing-target lease"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "hard-link replace reports target identity contention" true
+       (failure.stage = Fs_compat.Acquire_mutation_lease
+        && failure.cause = Fs_compat.Mutation_contended));
+  check string "both names retain the old inode while paused" "old"
+    (read_file target_alias);
+  Eio.Promise.resolve resolve_release_writer ();
+  Eio.Promise.await writer_result |> require_ok;
+  require_ok
+    (replace_capability_file
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"target-alias"
+       ~permissions:0o640
+       "alias-replacement");
+  check string "first replace publishes its payload" "replacement"
+    (read_file target);
+  check string "released inode lease permits the alias replace"
+    "alias-replacement"
+    (read_file target_alias)
+;;
+
+let test_replace_reobserves_binding_after_lease_acquisition ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  let displaced = Filename.concat directory "displaced" in
+  write_file target "old";
+  let swapped = ref false in
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  (match
+     replace_capability_file_for_testing
+       ~before_stage:(function
+         | Fs_compat.Acquire_mutation_lease when not !swapped ->
+           swapped := true;
+           Unix.rename target displaced;
+           write_file target "external-replacement"
+         | _ -> ())
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"target"
+       ~permissions:0o640
+       "writer-payload"
+   with
+   | Ok () -> fail "replace accepted a binding changed before lease acquisition"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "binding drift is explicit after lease acquisition" true
+       (failure.stage = Fs_compat.Inspect_target_entry
+        && failure.cause = Fs_compat.Resource_identity_changed);
+     check bool "writer reports no target mutation" true
+       (error.target_effect = Fs_compat.Target_unchanged));
+  check bool "test changed the binding at the acquisition boundary" true !swapped;
+  check string "new binding remains untouched" "external-replacement"
+    (read_file target);
+  check string "displaced preliminary inode remains untouched" "old"
+    (read_file displaced);
+  check (list string) "no staging state was created before binding validation"
+    [ "displaced"; "target" ]
+    (directory_entries directory);
+  require_ok
+    (replace_capability_file
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"target"
+       ~permissions:0o640
+       "after-release");
+  check string "failed validation released its preliminary inode lease"
+    "after-release"
+    (read_file target)
+;;
+
+let test_existing_replace_reobserves_binding_at_publication ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  let unlinked = ref false in
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  (match
+     replace_capability_file_for_testing
+       ~before_stage:(function
+         | Fs_compat.Acquire_publication_lease when not !unlinked ->
+           unlinked := true;
+           Unix.unlink target
+         | _ -> ())
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"target"
+       ~permissions:0o640
+       "writer-payload"
+   with
+   | Ok () -> fail "existing replace republished over an externally unlinked target"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "final target reobservation reports exact binding drift" true
+       (failure.stage = Fs_compat.Verify_target_binding
+        && failure.cause = Fs_compat.Resource_identity_changed);
+     check bool "failed final validation reports no publication" true
+       (error.target_effect = Fs_compat.Target_unchanged));
+  check bool "test removed the target before the publication guard" true
+    !unlinked;
+  check bool "old replace did not recreate the unlinked name" false
+    (Sys.file_exists target);
+  check (list string) "failed publication cleaned its staging state" []
+    (directory_entries directory);
+  require_ok
+    (Fs_compat.create_capability_file_exclusive
+       ~parent
+       ~leaf:"target"
+       ~permissions:0o640
+       "after-release");
+  check string "publication guard releases after final validation failure"
+    "after-release"
+    (read_file target)
+;;
+
+let test_existing_replace_yields_to_cooperative_absent_publication ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  Eio.Switch.run @@ fun sw ->
+  let stale_at_guard, resolve_stale_at_guard = Eio.Promise.create () in
+  let release_stale_guard, resolve_release_stale_guard = Eio.Promise.create () in
+  let stale_result, resolve_stale_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      replace_capability_file_for_testing
+        ~before_stage:(function
+          | Fs_compat.Acquire_publication_lease ->
+            Eio.Promise.resolve resolve_stale_at_guard ();
+            Eio.Promise.await release_stale_guard
+          | _ -> ())
+        ~recovery
+        ~allowed_root_path:directory
+        ~parent
+        ~leaf:"target"
+        ~permissions:0o640
+        "stale-replacement"
+    in
+    Eio.Promise.resolve resolve_stale_result result);
+  Eio.Promise.await stale_at_guard;
+  Unix.unlink target;
+  let create_visible, resolve_create_visible = Eio.Promise.create () in
+  let release_create, resolve_release_create = Eio.Promise.create () in
+  let create_result, resolve_create_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+        ~before_stage:(function
+          | Fs_compat.Inspect_open_resource ->
+            Eio.Promise.resolve resolve_create_visible ();
+            Eio.Promise.await release_create
+          | _ -> ())
+        ~parent
+        ~leaf:"target"
+        ~permissions:0o640
+        "cooperative-publication"
+    in
+    Eio.Promise.resolve resolve_create_result result);
+  Eio.Promise.await create_visible;
+  Eio.Promise.resolve resolve_release_stale_guard ();
+  (match Eio.Promise.await stale_result with
+   | Ok () -> fail "stale replace crossed a cooperative absent publication"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "stale replace reports short publication contention" true
+       (failure.stage = Fs_compat.Acquire_publication_lease
+        && failure.cause = Fs_compat.Mutation_contended);
+     check bool "stale replace reports no target effect" true
+       (error.target_effect = Fs_compat.Target_unchanged));
+  Eio.Promise.resolve resolve_release_create ();
+  Eio.Promise.await create_result |> require_ok;
+  check string "cooperative absent writer retains the public target"
+    "cooperative-publication"
+    (read_file target);
+  check (list string) "stale writer cleaned its private staging state"
+    [ "target" ]
+    (directory_entries directory)
+;;
+
+let test_absent_replace_reobserves_binding_at_publication ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  let inserted = ref false in
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  (match
+     replace_capability_file_for_testing
+       ~before_stage:(function
+         | Fs_compat.Verify_target_binding when not !inserted ->
+           inserted := true;
+           write_file target "external"
+         | _ -> ())
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"target"
+       ~permissions:0o640
+       "writer-payload"
+   with
+   | Ok () -> fail "absent replace overwrote a target inserted before publication"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "absent publication reobserves the exact target binding" true
+       (failure.stage = Fs_compat.Verify_target_binding
+        && failure.cause = Fs_compat.Resource_identity_changed);
+     check bool "inserted target remains outside writer effects" true
+       (error.target_effect = Fs_compat.Target_unchanged));
+  check bool "test inserted the target at final observation" true !inserted;
+  check string "external target is not overwritten" "external"
+    (read_file target);
+  check (list string) "failed absent publication cleans staging" [ "target" ]
+    (directory_entries directory)
+;;
+
+let test_existing_publication_guard_blocks_absent_sibling ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  let sibling = Filename.concat directory "sibling" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  Eio.Switch.run @@ fun sw ->
+  let guard_held, resolve_guard_held = Eio.Promise.create () in
+  let release_guard, resolve_release_guard = Eio.Promise.create () in
+  let writer_result, resolve_writer_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      replace_capability_file_for_testing
+        ~before_stage:(function
+          | Fs_compat.Verify_target_binding ->
+            Eio.Promise.resolve resolve_guard_held ();
+            Eio.Promise.await release_guard
+          | _ -> ())
+        ~recovery
+        ~allowed_root_path:directory
+        ~parent
+        ~leaf:"target"
+        ~permissions:0o640
+        "replacement"
+    in
+    Eio.Promise.resolve resolve_writer_result result);
+  Eio.Promise.await guard_held;
+  (match
+     Fs_compat.create_capability_file_exclusive
+       ~parent
+       ~leaf:"sibling"
+       ~permissions:0o640
+       "sibling"
+   with
+   | Ok () -> fail "absent sibling crossed an active publication guard"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "short publication guard reports parent contention" true
+       (failure.stage = Fs_compat.Acquire_mutation_lease
+        && failure.cause = Fs_compat.Mutation_contended));
+  check bool "contended sibling remains absent" false
+    (Sys.file_exists sibling);
+  Eio.Promise.resolve resolve_release_guard ();
+  Eio.Promise.await writer_result |> require_ok;
+  require_ok
+    (Fs_compat.create_capability_file_exclusive
+       ~parent
+       ~leaf:"sibling"
+       ~permissions:0o640
+       "sibling");
+  check string "publication completed after releasing the guard" "replacement"
+    (read_file target);
+  check string "absent sibling proceeds after the short guard" "sibling"
+    (read_file sibling)
+;;
+
+let test_absent_replace_blocks_visible_and_absent_sibling_mutations ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  let sibling = Filename.concat directory "sibling" in
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  Eio.Switch.run @@ fun sw ->
+  let published, resolve_published = Eio.Promise.create () in
+  let release_writer, resolve_release_writer = Eio.Promise.create () in
+  let writer_result, resolve_writer_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      replace_capability_file_for_testing
+        ~before_stage:(function
+          | Fs_compat.Sync_staging_directory ->
+            Eio.Promise.resolve resolve_published ();
+            Eio.Promise.await release_writer
+          | _ -> ())
+        ~recovery
+        ~allowed_root_path:directory
+        ~parent
+        ~leaf:"target"
+        ~permissions:0o640
+        "replacement"
+    in
+    Eio.Promise.resolve resolve_writer_result result);
+  Eio.Promise.await published;
+  check string "absent replace has published before the pause" "replacement"
+    (read_file target);
+  let append_outcome =
+    Eio.Switch.run @@ fun append_sw ->
+    let file =
+      Fs_compat.open_capability_append_file
+        ~sw:append_sw
+        ~parent
+        ~leaf:"target"
+      |> require_append_file
+    in
+    Fs_compat.append_capability_observed file "append"
+  in
+  check bool "published inode remains covered by the absent-parent lease" true
+    (append_outcome.write_failure
+     = Some Fs_compat.Capability_append_mutation_contended);
+  (match
+     replace_capability_file
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"target"
+       ~permissions:0o640
+       "contending-replace"
+   with
+   | Ok () -> fail "published absent replace admitted an existing-target replace"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "published target replace reports parent transition contention"
+       true
+       (failure.stage = Fs_compat.Acquire_mutation_lease
+        && failure.cause = Fs_compat.Mutation_contended));
+  (match
+     Fs_compat.create_capability_file_exclusive
+       ~parent
+       ~leaf:"sibling"
+       ~permissions:0o640
+       "sibling"
+   with
+   | Ok () -> fail "absent sibling bypassed the absent-parent lease"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "absent sibling reports the same parent contention" true
+       (failure.stage = Fs_compat.Acquire_mutation_lease
+        && failure.cause = Fs_compat.Mutation_contended));
+  check bool "contended absent sibling was not created" false
+    (Sys.file_exists sibling);
+  Eio.Promise.resolve resolve_release_writer ();
+  Eio.Promise.await writer_result |> require_ok;
+  require_ok
+    (Fs_compat.create_capability_file_exclusive
+       ~parent
+       ~leaf:"sibling"
+       ~permissions:0o640
+       "sibling");
+  check string "absent-parent lease releases after replace completion" "sibling"
+    (read_file sibling)
+;;
+
+let test_exclusive_create_visibility_remains_under_parent_lease ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  Eio.Switch.run @@ fun sw ->
+  let target_visible, resolve_target_visible = Eio.Promise.create () in
+  let release_create, resolve_release_create = Eio.Promise.create () in
+  let create_result, resolve_create_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+        ~before_stage:(function
+          | Fs_compat.Inspect_open_resource ->
+            Eio.Promise.resolve resolve_target_visible ();
+            Eio.Promise.await release_create
+          | _ -> ())
+        ~parent
+        ~leaf:"target"
+        ~permissions:0o640
+        "created"
+    in
+    Eio.Promise.resolve resolve_create_result result);
+  Eio.Promise.await target_visible;
+  check bool "exclusive target is visible before payload write" true
+    (Sys.file_exists target);
+  let append_outcome =
+    Eio.Switch.run @@ fun append_sw ->
+    let file =
+      Fs_compat.open_capability_append_file
+        ~sw:append_sw
+        ~parent
+        ~leaf:"target"
+      |> require_append_file
+    in
+    Fs_compat.append_capability_observed file "append"
+  in
+  check bool "append cannot enter the visible incomplete create" true
+    (append_outcome.write_failure
+     = Some Fs_compat.Capability_append_mutation_contended);
+  (match
+     replace_capability_file
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"target"
+       ~permissions:0o640
+       "replacement"
+   with
+   | Ok () -> fail "replace entered a visible incomplete exclusive create"
+   | Error error ->
+     let failure = require_write_primary_failure error in
+     check bool "replace reports the create transition contention" true
+       (failure.stage = Fs_compat.Acquire_mutation_lease
+        && failure.cause = Fs_compat.Mutation_contended));
+  Eio.Promise.resolve resolve_release_create ();
+  Eio.Promise.await create_result |> require_ok;
+  check string "exclusive creator completes without interleaved mutation"
+    "created"
+    (read_file target)
+;;
+
+let test_existing_target_lease_allows_absent_sibling_progress ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  let sibling = Filename.concat directory "sibling" in
+  let replacement_sibling = Filename.concat directory "replacement-sibling" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  Eio.Switch.run @@ fun sw ->
+  let writer_entered, resolve_writer_entered = Eio.Promise.create () in
+  let release_writer, resolve_release_writer = Eio.Promise.create () in
+  let writer_result, resolve_writer_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      replace_capability_file_for_testing
+        ~before_stage:(function
+          | Fs_compat.Create_staging_directory ->
+            Eio.Promise.resolve resolve_writer_entered ();
+            Eio.Promise.await release_writer
+          | _ -> ())
+        ~recovery
+        ~allowed_root_path:directory
+        ~parent
+        ~leaf:"target"
+        ~permissions:0o640
+        "replacement"
+    in
+    Eio.Promise.resolve resolve_writer_result result);
+  Eio.Promise.await writer_entered;
+  require_ok
+    (Fs_compat.create_capability_file_exclusive
+       ~parent
+       ~leaf:"sibling"
+       ~permissions:0o640
+       "sibling");
+  require_ok
+    (replace_capability_file
+       ~recovery
+       ~allowed_root_path:directory
+       ~parent
+       ~leaf:"replacement-sibling"
+       ~permissions:0o640
+       "replacement-sibling");
+  check string "exclusive create progresses beside existing target mutation"
+    "sibling"
+    (read_file sibling);
+  check string "absent replace progresses beside existing target mutation"
+    "replacement-sibling"
+    (read_file replacement_sibling);
+  check string "paused existing target remains unchanged" "old"
+    (read_file target);
+  Eio.Promise.resolve resolve_release_writer ();
+  Eio.Promise.await writer_result |> require_ok;
+  check string "existing target completes after sibling publications"
+    "replacement"
     (read_file target)
 ;;
 
@@ -1378,8 +1896,29 @@ let () =
             (test_replace_preflight_detects_payload_leaf_swap ~fs)
         ; test_case "pinned staging payload resists name swap" `Quick
             (test_staging_name_swap_does_not_redirect_pinned_payload ~fs)
-        ; test_case "append and replace share entry lease" `Quick
-            (test_append_and_replace_share_nonblocking_entry_lease ~fs)
+        ; test_case "append and replace share target identity lease" `Quick
+            (test_append_and_replace_share_existing_target_lease ~fs)
+        ; test_case "hard-link replaces share target identity lease" `Quick
+            (test_hard_link_replaces_share_existing_target_lease ~fs)
+        ; test_case "replace reobserves binding after lease acquisition" `Quick
+            (test_replace_reobserves_binding_after_lease_acquisition ~fs)
+        ; test_case "existing replace reobserves binding at publication" `Quick
+            (test_existing_replace_reobserves_binding_at_publication ~fs)
+        ; test_case "existing replace yields to absent publication" `Quick
+            (test_existing_replace_yields_to_cooperative_absent_publication
+               ~fs)
+        ; test_case "absent replace reobserves binding at publication" `Quick
+            (test_absent_replace_reobserves_binding_at_publication ~fs)
+        ; test_case "existing publication guard blocks absent sibling" `Quick
+            (test_existing_publication_guard_blocks_absent_sibling ~fs)
+        ; test_case "absent replace covers publication transition" `Quick
+            (test_absent_replace_blocks_visible_and_absent_sibling_mutations
+               ~fs)
+        ; test_case "exclusive create covers visibility transition" `Quick
+            (test_exclusive_create_visibility_remains_under_parent_lease ~fs)
+        ; test_case "existing target permits absent sibling progress" `Quick
+            (test_existing_target_lease_allows_absent_sibling_progress
+               ~fs)
         ; test_case "append lease blocks replace then releases" `Quick
             (test_append_lease_blocks_replace_then_releases ~fs)
         ; test_case "independent targets progress concurrently" `Quick

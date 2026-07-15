@@ -576,7 +576,9 @@ type capability_write_operation =
 type capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
+  | Acquire_publication_lease
   | Inspect_target_entry
+  | Verify_target_binding
   | Prepare_recovery_obligation
   | Create_staging_directory
   | Inspect_staging_directory
@@ -759,7 +761,9 @@ let capability_write_operation_to_string = function
 let capability_write_stage_to_string = function
   | Validate_leaf -> "validate_leaf"
   | Acquire_mutation_lease -> "acquire_mutation_lease"
+  | Acquire_publication_lease -> "acquire_publication_lease"
   | Inspect_target_entry -> "inspect_target_entry"
+  | Verify_target_binding -> "verify_target_binding"
   | Prepare_recovery_obligation -> "prepare_recovery_obligation"
   | Create_staging_directory -> "create_staging_directory"
   | Inspect_staging_directory -> "inspect_staging_directory"
@@ -813,7 +817,8 @@ let capability_write_cause_to_string = function
     Printf.sprintf
       "invalid recovery target: %s"
       (atomic_replace_recovery_target_error_to_string error)
-  | Mutation_contended -> "another cooperative writer owns this entry"
+  | Mutation_contended ->
+    "another cooperative writer owns this target or parent publication boundary"
   | Posix_descriptor_unavailable -> "POSIX descriptor unavailable"
   | Unexpected_resource_kind kind ->
     Format.asprintf "unexpected resource kind: %a" Eio.File.Stat.pp_kind kind
@@ -1341,21 +1346,52 @@ let recovery_identity_of_stat ~stage (stat : Eio.File.Stat.t) =
   recovery_identity ~stage { dev = stat.dev; ino = stat.ino }
 ;;
 
-let observe_target_entry ~before_stage target =
-  run_stage ~before_stage Inspect_target_entry (fun () ->
+let observe_target_entry_at ~before_stage ~stage target =
+  run_stage ~before_stage stage (fun () ->
     try
       let stat = Eio.Path.stat ~follow:false target in
       (match stat.kind with
        | `Regular_file | `Symbolic_link ->
          Recovery.Present
            { kind = stat.kind
-           ; identity =
-               recovery_identity_of_stat ~stage:Inspect_target_entry stat
+           ; identity = recovery_identity_of_stat ~stage stat
            }
        | kind ->
-         raise_failure Inspect_target_entry (Unexpected_resource_kind kind))
+         raise_failure stage (Unexpected_resource_kind kind))
     with
     | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Recovery.Absent)
+;;
+
+let observe_target_entry ~before_stage target =
+  observe_target_entry_at ~before_stage ~stage:Inspect_target_entry target
+;;
+
+let mutation_lease_key
+      ~(parent_stat : Eio.File.Stat.t)
+      (observation : Recovery.entry_observation)
+  =
+  match observation with
+  | Recovery.Absent ->
+    Capability_mutation_lease.Absent_target_parent
+      { parent_dev = parent_stat.dev; parent_ino = parent_stat.ino }
+  | Recovery.Present { identity; _ } ->
+    Capability_mutation_lease.Existing_target
+      { target_dev = Recovery.identity_dev identity
+      ; target_ino = Recovery.identity_ino identity
+      ; parent_dev = parent_stat.dev
+      ; parent_ino = parent_stat.ino
+      }
+;;
+
+let same_target_observation left right =
+  match left, right with
+  | Recovery.Absent, Recovery.Absent -> true
+  | ( Recovery.Present left
+    , Recovery.Present right ) ->
+    left.kind = right.kind
+    && Recovery.equal_identity left.identity right.identity
+  | Recovery.Absent, Recovery.Present _
+  | Recovery.Present _, Recovery.Absent -> false
 ;;
 
 let write_cleanup_failures failures =
@@ -1522,9 +1558,9 @@ let replace_capability_file_with
   let target_effect = ref Target_unchanged in
   let callback_result = ref None in
   try
-    let leaf =
+    let () =
       match Capability_leaf.of_string recovery_target.target_leaf with
-      | Some leaf -> leaf
+      | Some _ -> ()
       | None ->
         raise_failure
           Validate_leaf
@@ -1533,30 +1569,39 @@ let replace_capability_file_with
                 (Recovery.Invalid_target_leaf recovery_target.target_leaf)))
     in
     Eio.Switch.run @@ fun sw ->
-    let parent_stat, mutation_lease =
-      run_stage ~before_stage Acquire_mutation_lease (fun () ->
+    let parent_stat =
+      run_stage
+        ~before_stage:(fun _ -> ())
+        Acquire_mutation_lease
+        (fun () ->
         let parent_stat = Eio.Path.stat ~follow:true parent in
         if parent_stat.kind <> `Directory
         then
           raise_failure
             Acquire_mutation_lease
             (Unexpected_resource_kind parent_stat.kind);
+        parent_stat)
+    in
+    let target_path = Eio.Path.(parent / recovery_target.target_leaf) in
+    let preliminary_target = observe_target_entry ~before_stage target_path in
+    let mutation_lease =
+      run_stage ~before_stage Acquire_mutation_lease (fun () ->
         match
-          Capability_mutation_lease.try_acquire
-            ~parent_dev:parent_stat.dev
-            ~parent_ino:parent_stat.ino
-            ~leaf
+          preliminary_target
+          |> mutation_lease_key ~parent_stat
+          |> Capability_mutation_lease.try_acquire
         with
-        | Some lease -> parent_stat, lease
+        | Some lease -> lease
         | None -> raise_failure Acquire_mutation_lease Mutation_contended)
     in
     Eio.Switch.on_release sw (fun () ->
       Capability_mutation_lease.release mutation_lease);
-    let target_path = Eio.Path.(parent / recovery_target.target_leaf) in
+    let initial_target = observe_target_entry ~before_stage target_path in
+    if not (same_target_observation preliminary_target initial_target)
+    then raise_failure Inspect_target_entry Resource_identity_changed;
     let parent_identity =
       recovery_identity_of_stat ~stage:Inspect_target_entry parent_stat
     in
-    let initial_target = observe_target_entry ~before_stage target_path in
     let locator =
       match
         Recovery.locator
@@ -1832,22 +1877,61 @@ let replace_capability_file_with
        close_open_entry ~before_stage open_file;
        Eio.Fiber.check ();
        Eio.Cancel.protect (fun () ->
-         run_stage ~before_stage Publish_replace (fun () -> ());
          verify_entry_identity
            ~before_stage
            ~stage:Verify_entry_identity
            entry
            payload_identity;
-         (try Eio.Path.rename entry target_path with
-          | Eio.Cancel.Cancelled _ as cancellation ->
-            target_effect := Target_state_unknown;
-            raise cancellation
-          | exception_ ->
-            let backtrace = Printexc.get_raw_backtrace () in
-            target_effect := Target_state_unknown;
-            raise
-              (Capability_write_failed
-                 (operation_failure Publish_replace exception_ backtrace, [])));
+         let publish () =
+           let publication_target =
+             observe_target_entry_at
+               ~before_stage
+               ~stage:Verify_target_binding
+               target_path
+           in
+           if not (same_target_observation initial_target publication_target)
+           then
+             raise_failure
+               Verify_target_binding
+               Resource_identity_changed;
+           run_stage ~before_stage Publish_replace (fun () ->
+             try Eio.Path.rename entry target_path with
+             | Eio.Cancel.Cancelled _ as cancellation ->
+               target_effect := Target_state_unknown;
+               raise cancellation
+             | exception_ ->
+               let backtrace = Printexc.get_raw_backtrace () in
+               target_effect := Target_state_unknown;
+               raise
+                 (Capability_write_failed
+                    ( operation_failure
+                        Publish_replace
+                        exception_
+                        backtrace
+                    , [] )))
+         in
+         (match initial_target with
+          | Recovery.Absent -> publish ()
+          | Recovery.Present _ ->
+            let publication_lease =
+              run_stage ~before_stage Acquire_publication_lease (fun () ->
+                match
+                  Capability_mutation_lease.try_acquire
+                    (Capability_mutation_lease.Existing_publication_parent
+                       { parent_dev = parent_stat.dev
+                       ; parent_ino = parent_stat.ino
+                       })
+                with
+                | Some lease -> lease
+                | None ->
+                  raise_failure
+                    Acquire_publication_lease
+                    Mutation_contended)
+            in
+            Fun.protect
+              ~finally:(fun () ->
+                Capability_mutation_lease.release publication_lease)
+              publish);
          published := true;
          target_effect := Target_replaced;
          parent_dirty := true;
@@ -2026,9 +2110,10 @@ let create_capability_file_exclusive_with
             (Unexpected_resource_kind parent_stat.kind);
         match
           Capability_mutation_lease.try_acquire
-            ~parent_dev:parent_stat.dev
-            ~parent_ino:parent_stat.ino
-            ~leaf
+            (Capability_mutation_lease.Absent_target_parent
+               { parent_dev = parent_stat.dev
+               ; parent_ino = parent_stat.ino
+               })
         with
         | Some lease -> lease
         | None -> raise_failure Acquire_mutation_lease Mutation_contended)

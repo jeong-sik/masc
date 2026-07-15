@@ -156,7 +156,6 @@ type capability_append_operation_failure =
 
 type capability_append_failure =
   | Capability_append_posix_descriptor_unavailable
-  | Capability_append_inode_contended
   | Capability_append_mutation_contended
   | Capability_append_operation_failed of capability_append_operation_failure
 
@@ -197,13 +196,15 @@ val open_capability_append_file
 val capability_append_file_stat : capability_append_file -> Eio.File.Stat.t
 
 (** Append through an opaque append capability without destructive rollback.
-    Cooperative same-process mutations of the same parent/leaf and appends to
-    the same inode use non-blocking leases. The leaf-to-open-file identity is
-    checked before and after the write, so an external rename is reported
-    rather than misclassified as a visible append. External processes are an
-    observation boundary, not an exclusion guarantee. Partial bytes and their
-    fsync result remain explicit. The caller owns the next cancellation
-    checkpoint. *)
+    Cooperative same-process mutations of the same opened target identity use
+    one shared non-blocking lease without lexical-name normalization. An active
+    absent-target publication under the same parent also excludes the append,
+    covering the transition from an absent name to a visible inode. The
+    leaf-to-open-file identity is checked before and after the write, so an
+    external rename is reported rather than misclassified as a visible append.
+    External processes are an observation boundary, not an exclusion
+    guarantee. Partial bytes and their fsync result remain explicit. The caller
+    owns the next cancellation checkpoint. *)
 val append_capability_observed
   :  capability_append_file
   -> string
@@ -494,7 +495,9 @@ type capability_write_operation =
 type capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
+  | Acquire_publication_lease
   | Inspect_target_entry
+  | Verify_target_binding
   | Prepare_recovery_obligation
   | Create_staging_directory
   | Inspect_staging_directory

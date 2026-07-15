@@ -309,7 +309,9 @@ type capability_write_operation =
 type capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
+  | Acquire_publication_lease
   | Inspect_target_entry
+  | Verify_target_binding
   | Prepare_recovery_obligation
   | Create_staging_directory
   | Inspect_staging_directory

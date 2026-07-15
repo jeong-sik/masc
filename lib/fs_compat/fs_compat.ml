@@ -498,7 +498,9 @@ type capability_write_operation = Atomic_write.capability_write_operation =
 type capability_write_stage = Atomic_write.capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
+  | Acquire_publication_lease
   | Inspect_target_entry
+  | Verify_target_binding
   | Prepare_recovery_obligation
   | Create_staging_directory
   | Inspect_staging_directory
@@ -1755,66 +1757,6 @@ let rec lock_whole_file fd =
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file fd
 ;;
 
-module Append_inode_key = struct
-  type t = int64 * int64
-
-  let equal (left_dev, left_ino) (right_dev, right_ino) =
-    Int64.equal left_dev right_dev && Int64.equal left_ino right_ino
-  ;;
-
-  let hash = Hashtbl.hash
-end
-
-module Append_inode_table = Hashtbl.Make (Append_inode_key)
-
-type append_inode_entry =
-  { held : bool Atomic.t
-  ; mutable users : int
-  }
-
-type append_inode_lease =
-  { key : Append_inode_key.t
-  ; entry : append_inode_entry
-  }
-
-let append_inode_registry_mu = Stdlib.Mutex.create ()
-let append_inode_registry = Append_inode_table.create 0
-
-let release_append_inode_user key entry =
-  Stdlib.Mutex.protect append_inode_registry_mu (fun () ->
-    entry.users <- entry.users - 1;
-    if entry.users = 0
-    then
-      match Append_inode_table.find_opt append_inode_registry key with
-      | Some current when current == entry ->
-        Append_inode_table.remove append_inode_registry key
-      | Some _ | None -> ())
-;;
-
-let try_acquire_append_inode key =
-  let entry =
-    Stdlib.Mutex.protect append_inode_registry_mu (fun () ->
-      match Append_inode_table.find_opt append_inode_registry key with
-      | Some entry ->
-        entry.users <- entry.users + 1;
-        entry
-      | None ->
-        let entry = { held = Atomic.make false; users = 1 } in
-        Append_inode_table.add append_inode_registry key entry;
-        entry)
-  in
-  if Atomic.compare_and_set entry.held false true
-  then Some { key; entry }
-  else (
-    release_append_inode_user key entry;
-    None)
-;;
-
-let release_append_inode { key; entry } =
-  Atomic.set entry.held false;
-  release_append_inode_user key entry
-;;
-
 type capability_append_operation_failure =
   { exception_ : exn
   ; backtrace : Printexc.raw_backtrace
@@ -1822,7 +1764,6 @@ type capability_append_operation_failure =
 
 type capability_append_failure =
   | Capability_append_posix_descriptor_unavailable
-  | Capability_append_inode_contended
   | Capability_append_mutation_contended
   | Capability_append_operation_failed of capability_append_operation_failure
 
@@ -1855,10 +1796,8 @@ type capability_append_file =
 let capability_append_failure_to_string = function
   | Capability_append_posix_descriptor_unavailable ->
     "POSIX descriptor unavailable"
-  | Capability_append_inode_contended ->
-    "append inode is busy in another cooperative writer"
   | Capability_append_mutation_contended ->
-    "append entry is busy in another cooperative writer"
+    "append target identity is busy in another cooperative writer"
   | Capability_append_operation_failed { exception_; _ } ->
     Printexc.to_string exception_
 ;;
@@ -2056,9 +1995,12 @@ let append_capability_observed_with ~after_write file content =
     | Ok parent_stat ->
       (match
          Capability_mutation_lease.try_acquire
-           ~parent_dev:parent_stat.dev
-           ~parent_ino:parent_stat.ino
-           ~leaf
+           (Capability_mutation_lease.Existing_target
+              { target_dev = opened_stat.dev
+              ; target_ino = opened_stat.ino
+              ; parent_dev = parent_stat.dev
+              ; parent_ino = parent_stat.ino
+              })
        with
        | None ->
          capability_append_outcome
@@ -2086,47 +2028,31 @@ let append_capability_observed_with ~after_write file content =
                   ~target_binding:Capability_append_target_verified
                   ()
               | Some fd ->
-                (match
-                   try_acquire_append_inode
-                     (opened_stat.dev, opened_stat.ino)
+                (try
+                   Eio_unix.run_in_systhread
+                     ~label:"fs-compat-open-file-append"
+                     (fun () ->
+                        Eio_unix.Fd.use_exn
+                          "fs-compat-open-file-append"
+                          fd
+                          (fun unix_fd ->
+                             append_fd_observed
+                               ~io:capability_append_unix_io
+                               ~fd:unix_fd
+                               content))
                  with
-                 | None ->
+                 | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+                 | exception_ ->
+                   let backtrace = Printexc.get_raw_backtrace () in
                    capability_append_outcome
                      ~requested_bytes
-                     ~write_failure:Capability_append_inode_contended
+                     ~write_failure:
+                       (Capability_append_operation_failed
+                          (capability_append_operation_failure
+                             exception_
+                             backtrace))
                      ~target_binding:Capability_append_target_verified
-                     ()
-                 | Some lease ->
-                   Fun.protect
-                     ~finally:(fun () -> release_append_inode lease)
-                     (fun () ->
-                        try
-                          Eio_unix.run_in_systhread
-                            ~label:"fs-compat-open-file-append"
-                            (fun () ->
-                               Eio_unix.Fd.use_exn
-                                 "fs-compat-open-file-append"
-                                 fd
-                                 (fun unix_fd ->
-                                    append_fd_observed
-                                      ~io:capability_append_unix_io
-                                      ~fd:unix_fd
-                                      content))
-                        with
-                        | Eio.Cancel.Cancelled _ as cancellation ->
-                          raise cancellation
-                        | exception_ ->
-                          let backtrace = Printexc.get_raw_backtrace () in
-                          capability_append_outcome
-                            ~requested_bytes
-                            ~write_failure:
-                              (Capability_append_operation_failed
-                                 (capability_append_operation_failure
-                                    exception_
-                                    backtrace))
-                            ~target_binding:
-                              Capability_append_target_verified
-                            ()))
+                     ())
             in
             after_write ();
             let target_binding =

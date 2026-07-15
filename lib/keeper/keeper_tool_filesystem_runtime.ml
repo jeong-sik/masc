@@ -1389,7 +1389,6 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
        (Printexc.raw_backtrace_to_string backtrace)
    | ( None
      | Some Fs_compat.Capability_append_posix_descriptor_unavailable
-     | Some Fs_compat.Capability_append_inode_contended
      | Some Fs_compat.Capability_append_mutation_contended ) -> ());
   let observe_operation_failure
         label

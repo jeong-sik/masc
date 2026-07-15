@@ -58,9 +58,14 @@
 
 ### 1.1 Product thesis
 
-**MASC**는 하나의 repo/worktree 안에서 다수의 장기 실행 Keeper·MCP client·workspace 상태를 조율하는 **repo-local MCP coordination server**다. 주 사용자는 같은 checkout에 여러 coding agent를 돌리는 한 명의 엔지니어 또는 소규모 신뢰팀이다. MASC가 최적화하는 것은 단일 턴 지연이 아니라 **fleet 수준 재현성(receipt-before-side-effect)**, **provider-agnostic 라우팅**, **단계적 신뢰(phase gate: idle/heartbeat/direct/autonomous)**다. 트레이드오프는 명시적이다 — 속도보다 결정론, 에이전트 자율보다 운영자 가시성.
+**MASC**는 다수의 **자율·영속 Keeper**를 조율하는 **멀티-repo coordination server**다. 서버 프로세스는 하나의 `base_path`(`.masc` 런타임/설정 루트)에 앵커되지만, 조율 대상은 `repositories.toml`에 등록된 **여러 독립 repo**다 — 각 repo는 자기 `url`에서 `local_path`(`.masc` 밖 절대경로 가능)로 clone되고, keeper별로 `.masc/playground/<keeper>/repos/<repo>` per-keeper checkout을 갖는다(공유 checkout 아님; RFC-0213/0324/0338). *server-local ≠ work-repo-local* — 서버가 한 checkout에서 도는 것과 조율 대상이 한 repo에 갇히는 것은 별개이며, MASC는 전자이되 후자가 아니다. 각 Keeper는 자기 persona(`personas/<name>/AGENT.md`)로 공유 MASC world에 상주하는 자율 에이전트다 — repo를 다루는 코딩일 수도, Board 토론·투표·Discord/Slack 대화·Voice·역할극일 수도 있다(repo 바인딩 없는 Keeper도 1급; keeper↔repo 매핑은 `policy_mode=advisory` 기본값이지 authorization 경계가 아님).
 
-**OAS**는 순수 단일 에이전트 라이브러리다. provider 어댑터, lossless ExecutionContract, stream isolation, stop semantics, handoff fidelity, checkpoint primitive를 소유한다. OAS는 어떤 downstream coordinator의 도메인 어휘도 모른다.
+MASC가 최적화하는 것은 단일 턴 지연이 아니라 **fleet 수준 재현성(receipt-before-side-effect)**, **provider-agnostic 라우팅(OAS 소유·MASC 소비)**, **lane별 격리와 연속성**이다. 경계는 트레이드오프가 아니다:
+- **결정론/비결정론 경계를 명확히** 둔다 — 의미 판단(완료·승인·관련성)은 LLM Auto Judge에 위임하고, typed-input·path-jail·sandbox 불변식은 각 execution boundary에서 결정론적으로 강제한다. ("속도보다 결정론"을 *선택*하는 게 아니라, 무엇을 경계 어느 쪽에 두느냐의 문제.)
+- **자율과 관측은 직교**한다 — cost/token/turn은 stop/pause 권한이 아니라 **관측**이다(`KEEPER-CAPABILITY-MATRIX.md:176`). 전부 관측하되 자율을 제약하지 않는다. ("자율보다 가시성"은 트레이드오프가 아님.)
+- 운영자 권한은 좁은 typed lifecycle 명령(Stop/Boot/Delete) + Always-allowed 규칙 + Manual HITL + Dead_tombstone human-review gate로 **한정**된다(RFC-0341 Accepted; RFC-0318/0319/0337이 hierarchical/risk-band 승인 폐기). idle/heartbeat/direct/autonomous는 운영자가 풀어주는 신뢰 사다리가 **아니라** 서로 다른 층위의 운영 메커니즘이다: `Autonomous`/`Chat`은 turn admission의 두 lane(`keeper_turn_admission.mli`: `type lane = Autonomous | Chat`), `heartbeat`는 autonomous lane 스케줄러, `direct`는 Chat lane transport, `idle`은 autonomous FSM phase다. autonomy-first — `autoboot_enabled`/`proactive_enabled`가 켜지면 기본 자율 실행되고, autonomous admission 거부는 오직 `Autonomous_paused`/`Dead_tombstone`(실제로 멈췄거나 죽은 keeper)에만.
+
+**OAS**는 순수 단일 에이전트 라이브러리다. 소유하는 실제 primitive는 provider 라우팅(`Provider.config` 4-variant + `Backend_*`), checkpoint(`Checkpoint.t` v8 순수 값 + `Checkpoint_store`), tool-boundary cooperative yield(`Agent.Advanced.run_blocks`, `Continue|Yield`), reasoning replay(`Reasoning_replay_contract`/`Reasoning_history_projection`), wire observer(`Wire_observer`), stop reason(`Types.stop_reason` 12-variant + `Stop_reason_wire`), sub-agent 위임(`Handoff.make_handoff_tool`), 6-stage turn pipeline(`Pipeline`)이다. OAS는 masc/keeper/board/persona/hitl/fusion 등 downstream coordinator의 도메인 어휘를 전혀 모른다(grep 실측 각 0건, §2.2).
 
 ### 1.2 The Four Laws (MASC 런타임 헌법)
 
@@ -78,12 +83,12 @@
 - Custom PR system (`.masc/pulls/` — 취소). remote PR lifecycle 재발명 금지 (CASPER: "PR 시스템 재발명 금지").
 - Commander/Worker 역할 계층 (BALTHASAR: "역할 구분은 인간중심적 함정"). capability-based 라우팅만.
 - Auto-merge 정책. 최종 main 머지는 인간 승인 필수.
-- 단일 턴 지연 최적화 / 에이전트 완전 자율 / 최소 setup.
+- 단일 턴 지연 최적화 / operator lifecycle 권한(Stop·Boot·Delete·HITL·Dead_tombstone)을 제거한 **무제약** 자율 / 최소 setup. (자율 자체는 non-goal이 아니다 — Keeper는 기본 autonomy-first이며, 좁은 typed lifecycle 명령만 operator가 보유.)
 - 장기·일반 대화 메모리, cross-generation recall, active checkpoint window 밖 assistant reply recall, memory bank 부활.
 - cost/token/turn/latency를 runtime gate로 사용 (측정·용량계획 전용). provider의 실제 context/output ceiling만 protocol-correctness 제약으로 보존.
 - Qdrant 재도입 (Supabase pgvector only).
 - Runtime storage selector (filesystem `.masc/` 단일 lane; Redis/PostgreSQL mode 은퇴).
-- MASC를 AutoGPT/goal-decomposition loop로 보는 프레이밍 (MASC는 operator-governed phase machine).
+- MASC를 AutoGPT/goal-decomposition loop로 보는 프레이밍, 또는 operator-governed phase-policy machine으로 보는 프레이밍. (둘 다 아니다: MASC는 keeper별 자율 lane substrate이며, 콘텐츠 판단=configured model / lifecycle 권한=operator로 분리된다. hierarchical phase-policy 승인은 RFC-0318/0319에서 폐기.)
 - MASC가 Provider SDK를 대체한다는 프레이밍 (MASC는 SDK 호출을 provider attempt로 emit하는 router).
 
 **OAS Non-Goals:**
@@ -279,7 +284,7 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 ### 3.10 Runtime (Provider/Model catalog)
 
 - **책임:** logical use → provider/model 라우팅 + fallback. MASC는 lane만 노출, OAS가 provider identity 소유.
-- **소유 타입:** runtime.toml `[runtime.assignments]`(keeper-name keyed) + `[runtime].default`; `[runtime.lanes.<id>]`(candidates + strategy). `Runtime_attempt_fsm.decide` SSOT. OAS: immutable `ExecutionContract`(provider/model/system/sampling/tools/schema/thinking/context/cache/seed, 모든 semantic 필드 serializable+hashable). `Provider_config.provider_id`. `estimate_cost → Estimated|Incomplete`. embedded catalog.
+- **소유 타입:** runtime.toml `[runtime.assignments]`(keeper-name keyed) + `[runtime].default`; `[runtime.lanes.<id>]`(candidates + strategy). `Runtime_attempt_fsm.decide` SSOT. OAS: immutable `agent_config`(`lib/base/types.mli`: provider/model/system/sampling/tools/schema/thinking/context/cache/seed serializable 필드), OAS `Contract`(`lib/contract.mli`)가 typed tool set 등을 first-class로 패키징. `Provider_config.provider_id`. `estimate_cost → Estimated|Incomplete`. embedded catalog.
 - **경계 계약:** MASC policy code는 logical use/declared capability/profile order/health/capacity/receipt state로 라우팅 — vendor/model 리터럴에 branch 안 함. `max_tokens` synthesis 금지(oas 0.211.0 + #24098): override 없으면 omit, provider default 사용. capability = serving-runtime × model(WHAT), NOT host/URL(WHERE). unknown host/provider/model/label → Unknown/None/fail-closed. path→wire-protocol(Responses vs Chat)은 exact-string exhaustive match만. cache key는 FULL contract에서 재구성. 각 streaming retry attempt buffered, 정확히 하나의 committed attempt만 consumer에 visible. OAS pricing은 telemetry-only, execution gate 아님.
 - **불변식:** provider failover는 ordered candidate lane. 첫 provider 500 → 두 번째 성공; 전부 소진 → typed "runtime lane exhausted" error; attempt당 manifest row 1개. unknown model pricing → typed Unknown/option(silent $0 금지).
 - **결정론↔LLM:** 라우팅/failover는 전부 결정론(라우팅에 판단 없음). **단 하나의 예외 = runaway watchdog(#24386, §4.13 MD-2):** provider/tool-local timeout 도달은 결정론 gauge(트리거)이나, saturated lane을 **새 활동으로 re-task할지**의 판정은 system/LLM 경계다("Pause 금지 ↔ runaway 봉쇄"의 경계 ruling — watchdog는 정지가 아니라 활동 전환만).
@@ -302,8 +307,8 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 
 `oas_compat`(`lib/oas_compat/oas_compat.ml`)를 넘어 OAS 자체 내부를 만지는 구현자를 위한 카드. 11개 MASC subsystem과 동일 형식으로 OAS의 det↔LLM 경계를 명시한다.
 
-- **책임:** provider adapter, lossless ExecutionContract(stage pipeline), stream isolation, stop semantics, handoff fidelity, checkpoint primitive. downstream coordinator의 도메인 어휘를 모른다.
-- **소유 타입:** ExecutionContract/stage pipeline = OAS `lib/pipeline/pipeline.ml`(+`pipeline_stage_prepare.ml`/`pipeline_stage_route.ml`); provider adapter = `lib/provider.ml` + `lib/llm_provider/*`(`backend_openai_serialize.ml`, `pricing.ml`, `capabilities.ml`, `discovery.ml`); `Agent.Advanced.run_blocks` = `lib/agent/agent.ml`; execution context = `lib/base/context.ml`; typed error = `lib/error_domain.mli`(`` `Internal of string ``).
+- **책임:** provider 라우팅, 6-stage turn pipeline, checkpoint, tool-boundary cooperative yield, reasoning replay, wire observer, stop-reason 매핑, sub-agent 위임(handoff). downstream coordinator의 도메인 어휘를 모른다.
+- **소유 타입:** provider 라우팅 = `Provider.config`(4-variant `Local|Anthropic|OpenAICompat|Custom_registered`) + `Backend_*`(anthropic/openai/gemini/glm/ollama) + carrier `Provider_config.t`; 6-stage pipeline = `lib/pipeline/`(`pipeline.ml`/`pipeline_stage_prepare.ml`/`pipeline_stage_route.ml`); checkpoint = `Checkpoint.t`(v8 순수 값, serialize-only) + `Checkpoint_store`/`_codec`/`_delta`; tool-boundary yield = `Agent.Advanced.run_blocks`(`boundary_decision = Continue|Yield`, budget 미강제); reasoning replay = `Reasoning_replay_contract` + `Reasoning_history_projection`; wire observer = `Wire_observer`(@since 0.212, caller-owned redacted chunk); stop reason = `Types.stop_reason`(12-variant) + `Stop_reason_wire`(finish_reason 매핑 SSOT); handoff = `Handoff.make_handoff_tool`(서브에이전트 위임 도구); execution context = `lib/base/context.ml`; typed error = `lib/error_domain.mli`(`` `Internal of string ``). **삭제된 날조 용어(코드 실측 각 0건)**: "lossless ExecutionContract"→`Checkpoint.t`, "stream isolation"→caller-owned Eio switch(OAS는 isolation 객체 미소유), "stop semantics"→`Types.stop_reason`+`Stop_reason_wire`, "handoff fidelity"→`Handoff`(위임, fidelity 개념 없음).
 - **경계 계약:** OAS lib에 MASC 어휘 0건(§2.2 grep 확정). pricing은 telemetry-only(execution gate 아님). `max_tokens` synthesis 금지(override 없으면 omit → provider default). capability = serving-runtime × model(WHAT), NOT host/URL(WHERE).
 - **불변식:** 각 streaming retry attempt는 buffered, 정확히 하나의 committed attempt만 consumer에 visible. unknown host/provider/model → typed Unknown/None/fail-closed. **production `assert false`를 control flow로 쓰지 않는다** — unreachable proof arm에만 허용(OAS `.ci/hardening-baseline.json`이 assert false를 ratchet에서 제외하는 근거와 동일). control-flow용 실패는 `` `Internal `` 등 typed error로 반환.
 - **결정론↔LLM:** **OAS는 순수 라이브러리 = 전부 결정론.** 유일한 LLM 호출은 provider adapter의 **opaque forward** — provider가 반환하는 바이트는 OAS에게 불투명하고, OAS는 그 내용에 판단을 하지 않는다(파싱/재직렬화만).
@@ -581,11 +586,11 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 | Fusion RFC 0277/0283/0298/0306 | 서로 | **layered, 독립 머지** | preset record 단일 generation point 공유(컴파일 강제 ripple) |
 | Memory RFC-0247 phases | 서로 | **additive 독립** | α=0/lifecycle-default Live로 byte-identical; 단 P0a가 P0b sleep 재활성 gate |
 | RFC-0320 5 wake family(Hitl/Connector/Bg/Fusion/Schedule) | 서로 | **결합(공유 fix)** | 하나의 continuation_channel 구조 변경(per-family patch 아님) |
-| 6 memory axis / OAS boundary owner split | MASC vs OAS 작업 | **독립(병렬)** | MASC=lifecycle/work-graph/store/approval/keeper-as-tool/fusion/basepath/memory/judge; OAS=ExecutionContract/adapter/stream/stop/handoff/checkpoint |
+| 6 memory axis / OAS boundary owner split | MASC vs OAS 작업 | **독립(병렬)** | MASC=lifecycle/work-graph/store/approval/keeper-as-tool/fusion/basepath/memory/judge; OAS=agent_config/provider-routing/yield/stop-reason/handoff/checkpoint |
 | Judge(J) axis | Memory(M)/Work(X) | **독립** | Judge는 decision-only, memory/work persist 안 함; P vs T는 EffectIntent+receipt id로만 결합 |
 | Roadmap renumbering | 모든 코드 | **독립(doc-only)** | 단 release honesty gate block |
 | 6 0.212 silent regression | 서로(#24448/#24386 제외) | **대체로 독립 착지** | 전부 0.212 crossover downstream이나 각 fix 독립 |
-| Wave 의존(Durable Intelligence) | — | **순서 결합** | W0(Evidence+BasePath)+W1(Activity kernel) 선행 → W2(approval+collab, W1 DurableRun/outbox 필요) → W3(OAS fidelity, frozen ExecutionContract 필요) → W4(Judge+memory, W1+evidence 필요) → W5(real eval, all L0-L3 필요) |
+| Wave 의존(Durable Intelligence) | — | **순서 결합** | W0(Evidence+BasePath)+W1(Activity kernel) 선행 → W2(approval+collab, W1 DurableRun/outbox 필요) → W3(OAS 재현 정합성/reasoning replay, frozen `agent_config`/`Contract` 필요) → W4(Judge+memory, W1+evidence 필요) → W5(real eval, all L0-L3 필요) |
 | 48h Resilience PR-A(failover)+PR-B(HITL async) | PR-C(OAS Eio)+PR-D(fusion persist) | **순서 결합** | A/B 선행 unblock, A/B interface 안정 후 C/D 병렬 |
 | Gap 3 그룹 | 서로 | **독립** | (1)reply-channel 비균일 (2)built-but-not-ignited (3)social/creator 미착수 |
 | OAS Eio-mutex/assert-false(DS-3) | Boundary law / MASC 작업 | **독립(병렬)** | OAS internal concurrency-correctness; MASC↔OAS 계약·redaction 안 건드림. 단 OAS pin bump와만 조율 |
@@ -644,7 +649,7 @@ extraction에서 `maps_to_goal: 11` 또는 `new`로 표기된 항목의 first-cl
 - **Resilience:** MASC는 receipt-before-side-effect + typed FSM terminal state를 목표로 하나, 현재 provider failover가 회귀됨(단일 provider hiccup이 turn 종료). Hermes-Agent는 Docker + approval을 sandbox 레벨에서 강제하고, claude-code는 sandbox 파일이 압도적(perm/limit 대비). MASC의 차별점은 fleet-level 재현성 지향이지 단일 턴 회복이 아니다.
 - **Harness:** MASC eval은 현재 static-fixture self-grading(exact claim/path membership로 자가 채점, metrics_json=null). L4(real-worktree paired/chaos/differential + blinded independent Judge)는 미착수(W5 wave 미시작). claude-code/Anthropic agent eval은 20-50 task를 권장 시작점으로 두나 이는 MASC hard gate가 아니다.
 - **정량 목표의 측정 상태(anti-hype):** 본 문서의 수치 목표는 aspirational과 measured baseline을 구분 표기한다. **측정 필요(unverified)** 목록: dup_rate `17.4%→<2%`(DS-2, 17.4%는 extraction의 pre-fix 값이나 측정 조건/명령 미첨부); RFC-0071 wildcard `~100→<20`(DS-7, ~100은 est.); tool-search defer_loading "55k토큰/85% 절감"(§8.1, 수백 MCP 서버 기준 — MASC ~60-80 내부도구는 규모 다름, `Tool_dispatch.registered_count × 평균 스키마 토큰` 상한 추정 선행); SSE/AG-UI escaped-fallback downgrade 카운트(Goal 5). **measured baseline**: dashboard subsystem % (§3.11, live 관측치); scheduler G2 48%(scheduled=0/succeeded=0/failed=2/expired=2); dashboard chat 39/140 assistant row가 raw-error로 시작(24h 관측). 측정 조건 없는 정량 주장은 재측정 전 인용 금지.
-- **Boundary:** MASC→OAS 단방향은 grep으로 확정(OAS lib에 coordinator 어휘 0). 이 owner split(OAS=ExecutionContract/adapter/stream/stop; MASC=lifecycle/work-graph/approval/fusion)은 SDK-runner 계열(claude-code-style)과 workspace/memory-graph 계열(OpenClaw/Hermes/DAW) 사이의 operator-governed supervisor+router 포지션이다.
+- **Boundary:** MASC→OAS 단방향은 grep으로 확정(OAS lib에 masc/keeper/board/persona/hitl/fusion 어휘 각 0). 이 owner split(OAS=provider-routing/pipeline/checkpoint/yield/reasoning-replay/stop-reason/handoff; MASC=lifecycle/work-graph/board/HITL/fusion)은 SDK-runner 계열(claude-code-style)과 workspace/memory-graph 계열(OpenClaw/Hermes/DAW) 사이에서 **keeper별 자율 lane substrate + provider-agnostic router** 포지션이다 — 콘텐츠 판단=configured model, lifecycle 권한=operator로 분리(RFC-0318/0319에서 hierarchical supervisor 폐기).
 - **Lane isolation:** MASC는 lane-per-keeper를 척추로 두나 dashboard Lane surface는 43%(busy/deferred/wake-on-complete/per-lane failure isolation UI 미완). 1/100/1000 혼합 cardinality 회귀는 아직 없음(Goal 10). 진짜 하네스 보호는 sandbox+permission이며 turn/cost limit은 theater — 격리된 무한 루프는 무해(토큰 낭비, observation이 잡음), 자원 runaway는 cgroup/PID(sandbox)로 봉쇄.
 
 ---
@@ -829,7 +834,7 @@ FSM 전이 매트릭스는 `_ -> false` catch-all 금지 — 모든 쌍 명시. 
 이 문서가 통합·대체(supersede)하는 소스. 아래 문서들은 **archive** 처리하고, 방향은 RFC-0000를 정본으로 한다.
 
 ### Doc-spine (North Star / Boundary / Positioning)
-- NORTH-STAR-OCAML.md · OAS-MASC-BOUNDARY.md · MASC-V2-DESIGN.md · PRODUCT-OPERATING-PLAN.md · PRODUCT-REVIEW.md · external-comparison-and-positioning.md · VERSIONED-ROADMAP.md *(stale v2.87-v2.93; renumber 필요)* · sdk-independence-principle.md
+- NORTH-STAR-OCAML.md · OAS-MASC-BOUNDARY.md · MASC-V2-DESIGN.md · **PRODUCT-OPERATING-PLAN.md** *(⚠ STALE worldview: "repo-local … one repository"·"supervised" — RFC-0318/0319/0322/0329/0337/0341이 폐기; §1.1 정본)* · PRODUCT-REVIEW.md · **external-comparison-and-positioning.md** *(⚠ STALE worldview: "operator-governed supervisor"·"supervised cycles not self-driven loops"·"autonomy bounded by phase policy" — 폐기; §1.1/§7 정본)* · VERSIONED-ROADMAP.md *(stale v2.87-v2.93; renumber 필요)* · sdk-independence-principle.md
 
 ### Keeper / Runtime / Scheduler
 - KEEPER-STATE-OWNERSHIP.md · KEEPER-FILE-MODEL.md · KEEPER-CAPABILITY-MATRIX.md · keeper-turn-lifecycle.md · KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md · KEEPER-SANDBOX-BOUNDARY-POLICY.md · IMMORTAL-SERVER-ROADMAP.md · GOAL-LOOP-RUNTIME-SCHEDULER.md · runtime-tunables.md · SUPERVISOR-MODE.md · Keeper Scheduler _ Waiting Goal Matrix - 2026-07-04.html

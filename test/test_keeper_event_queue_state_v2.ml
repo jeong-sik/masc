@@ -430,6 +430,55 @@ let cycle_meta () =
   | Error message -> Alcotest.failf "cycle meta fixture: %s" message
 ;;
 
+let test_applied_compaction_settles_followup_atomically () =
+  let lease =
+    lease_for
+      (stimulus
+         ~payload:Queue.Manual_compaction_requested
+         Queue.manual_compaction_post_id
+         1.0)
+  in
+  let meta = cycle_meta () in
+  let settlement failure =
+    Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+      ~base_path:(Sys.getcwd ())
+      ~settled_at:8.0
+      ~stop_requested:false
+      ~lease
+      (Some
+         (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
+            (Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure })))
+  in
+  let judgment_failure =
+    turn_failure
+      (Keeper_runtime_failure_route.Escalate_judgment
+         { judgment = Keeper_runtime_failure_route.Contract_violation
+         ; provenance = Keeper_runtime_failure_route.Oas_agent_error
+         ; detail = "post-compaction contract failure"
+         })
+  in
+  (match settlement judgment_failure with
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
+       ; successor = Some { Queue.payload = Queue.Failure_judgment successor; _ }
+       } ->
+     Alcotest.(check string)
+       "atomic successor keeps exact final runtime"
+       judgment_failure.runtime_id
+       successor.fj_runtime_id
+   | _ -> Alcotest.fail "applied compaction lost its follow-up judgment");
+  let retry_failure =
+    turn_failure
+      (Keeper_runtime_failure_route.Retry_after_observed
+         { retry_class = Keeper_runtime_failure_route.Rate_limited
+         ; retry_after = None
+         })
+  in
+  match settlement retry_failure with
+  | Masc.Keeper_registry_event_queue.Ack -> ()
+  | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction"
+;;
+
 let test_cancelled_and_skipped_cycles_requeue () =
   let lease = lease_for (stimulus "phase-gated" 1.0) in
   let meta = cycle_meta () in
@@ -922,6 +971,10 @@ let () =
             `Quick
             test_judgment_terminal_evidence_is_durable
         ; Alcotest.test_case "failed cycle route mapping" `Quick test_failed_cycle_route_mapping
+        ; Alcotest.test_case
+            "applied compaction settles follow-up atomically"
+            `Quick
+            test_applied_compaction_settles_followup_atomically
         ; Alcotest.test_case
             "cancelled and skipped cycles requeue"
             `Quick

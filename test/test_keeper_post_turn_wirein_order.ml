@@ -25,6 +25,11 @@ open Alcotest
 
 module Compact_policy = Masc.Keeper_compact_policy
 module Post_turn = Masc.Keeper_post_turn
+module Admission = Masc.Keeper_turn_admission
+module Cycle = Masc.Keeper_heartbeat_loop_cycle
+module Queue = Masc.Keeper_event_queue
+module Registry_queue = Masc.Keeper_registry_event_queue
+module WO = Masc.Keeper_world_observation
 
 let source_relpath = "lib/keeper/keeper_post_turn.ml"
 
@@ -276,6 +281,220 @@ let test_regular_post_turn_does_not_auto_compact () =
     check bool "checkpoint messages retained exactly" true
       (retained.messages = checkpoint.messages)
 
+let only_compaction_manifest config meta =
+  let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  Masc.Keeper_runtime_manifest.path_for_trace
+    config
+    ~keeper_name:meta.name
+    ~trace_id
+  |> Fs_compat.load_file
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+    if String.equal (String.trim line) ""
+    then None
+    else
+      match Masc.Keeper_runtime_manifest.of_json (Yojson.Safe.from_string line) with
+      | Ok ({ event = Context_compacted; _ } as row) -> Some row
+      | Ok _ -> None
+      | Error detail -> failf "runtime manifest decode failed: %s" detail)
+  |> function
+  | [ row ] -> row
+  | rows -> failf "expected one manual compaction manifest, got %d" (List.length rows)
+;;
+
+let test_manual_compaction_serializes_owner_lane () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let meta = make_meta ~name:"compaction-owner" ~trace_id:"trace-compaction-owner" () in
+  let peer = make_meta ~name:"compaction-peer" ~trace_id:"trace-compaction-peer" () in
+  Fun.protect
+    ~finally:(fun () ->
+      Admission.For_testing.reset ();
+      Masc.Keeper_registry.unregister ~base_path meta.name;
+      Masc.Keeper_registry.unregister ~base_path peer.name;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+      let owner_entry = Masc.Keeper_registry.register ~base_path meta.name meta in
+      let peer_entry = Masc.Keeper_registry.register ~base_path peer.name peer in
+      Atomic.set owner_entry.fiber_wakeup false;
+      Atomic.set peer_entry.fiber_wakeup false;
+      let checkpoint =
+        { (make_checkpoint ()) with session_id = "trace-compaction-owner"
+        ; agent_name = meta.agent_name
+        }
+      in
+      let session =
+        Masc.Keeper_context_core.create_session
+          ~session_id:checkpoint.session_id
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+      in
+      Masc.Keeper_checkpoint_store.save_oas_classified
+        ~session_dir:session.session_dir
+        checkpoint
+      |> Result.get_ok
+      |> ignore;
+      let ctx : _ Masc.Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      let held, held_u = Eio.Promise.create () in
+      let release, release_u = Eio.Promise.create () in
+      let finished, finished_u = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        let result =
+          Admission.run_serialized ~base_path ~keeper_name:meta.name (fun () ->
+            Eio.Promise.resolve held_u ();
+            Eio.Promise.await release;
+            let expanded =
+              { checkpoint with
+                turn_count = checkpoint.turn_count + 1
+              ; messages =
+                  checkpoint.messages
+                  @ [ Agent_sdk.Types.text_message Agent_sdk.Types.User "old turn tail" ]
+              }
+            in
+            Masc.Keeper_checkpoint_store.save_oas_classified
+              ~session_dir:session.session_dir
+              expanded
+            |> Result.get_ok
+            |> ignore)
+        in
+        Eio.Promise.resolve finished_u result);
+      Eio.Promise.await held;
+      let tool_result =
+        Masc.Keeper_tool_surface.dispatch
+          ctx
+          ~name:"masc_keeper_compact"
+          ~args:(`Assoc [ "name", `String meta.name ])
+      in
+      (match tool_result with
+       | Some (Ok success) ->
+         let data = Tool_result.data (Ok success) in
+         check string "request durably enqueued" "enqueued"
+           Yojson.Safe.Util.(data |> member "queue_outcome" |> to_string)
+       | Some (Error failure) -> failf "compaction enqueue failed: %s" failure.message
+       | None -> fail "masc_keeper_compact is not registered");
+      check bool "owner wake set" true (Atomic.get owner_entry.fiber_wakeup);
+      check bool "peer wake untouched" false (Atomic.get peer_entry.fiber_wakeup);
+      let intake =
+        Masc.Keeper_heartbeat_loop.heartbeat_event_intake
+          ~ctx
+          ~meta_after_triage:meta
+          ~pending_board_events:[]
+      in
+      let lease =
+        match intake.claimed_lease, intake.consumed_stimuli with
+        | Some lease, [ { Queue.payload = Manual_compaction_requested; _ } ] -> lease
+        | _ -> fail "manual compaction request was not the sole durable lease"
+      in
+      let obs =
+        WO.observe
+          ~pending_board_events:(Some intake.pending_board_events)
+          ~config
+          ~meta
+      in
+      let decision : WO.keeper_cycle_decision =
+        { should_run = true
+        ; channel = Reactive
+        ; verdict = Run { reasons = Manual_compaction_pending, [] }
+        ; since_last_scheduled_autonomous = None
+        }
+      in
+      let run_cycle () =
+        Cycle.run_keeper_cycle
+          ~ctx
+          ~meta_after_triage:meta
+          ~stop:(Atomic.make false)
+          ~obs
+          ~turn_decision:decision
+          ~shared_context:(Agent_sdk.Context.create_sync ())
+          ~wake:(Masc.Keeper_registry.Woken [ Manual_compaction_requested ])
+          ~manual_compaction_requested:true
+          ()
+      in
+      (match run_cycle () with
+       | Cycle.Busy _ -> ()
+       | _ -> fail "manual compaction crossed an active owner turn slot");
+      (match Admission.run_if_free ~base_path ~keeper_name:peer.name (fun () -> ()) with
+       | `Ran () -> ()
+       | `Busy _ -> fail "owner turn blocked an independent peer lane");
+      check int "checkpoint unchanged while owner busy" 3
+        (Result.get_ok
+           (Masc.Keeper_checkpoint_store.load_oas
+              ~session_dir:session.session_dir
+              ~session_id:checkpoint.session_id)
+         |> fun saved -> List.length saved.messages);
+      Eio.Promise.resolve release_u ();
+      (match Eio.Promise.await finished with
+       | `Ran () -> ()
+       | `Rejected _ -> fail "simulated owner turn was rejected");
+      let plan =
+        Masc.Keeper_compaction_llm_summarizer.plan_of_json
+          ~message_count:4
+          (`Assoc
+            [ "summary", `String "owner-lane compacted context"
+            ; "kept_indices", `List [ `Int 0 ]
+            ; "summarized_indices", `List [ `Int 1; `Int 2; `Int 3 ]
+            ; "dropped_indices", `List []
+            ])
+        |> Result.get_ok
+      in
+      Atomic.set owner_entry.fiber_stop true;
+      let outcome =
+        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+          (fun ~runtime_id:_ ~keeper_name:_ () ->
+             Some (fun ~messages:_ -> Some plan))
+          run_cycle
+      in
+      (match outcome with
+       | Cycle.Manual_compaction_applied _ -> ()
+       | _ -> fail "owner-lane cycle did not apply manual compaction");
+      let compacted =
+        Result.get_ok
+          (Masc.Keeper_checkpoint_store.load_oas
+             ~session_dir:session.session_dir
+             ~session_id:checkpoint.session_id)
+      in
+      check int "latest running-turn checkpoint compacted" 2
+        (List.length compacted.messages);
+      let _, reinjectable =
+        Masc.Keeper_context_runtime.load_context_from_checkpoint
+          ~trace_id:checkpoint.session_id
+          ~primary_model_max_tokens:8192
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+      in
+      check int "compacted checkpoint available to same-lane injection" 2
+        (reinjectable
+         |> Option.map Masc.Keeper_context_runtime.messages_of_context
+         |> Option.value ~default:[]
+         |> List.length);
+      let manifest = only_compaction_manifest config meta in
+      check int "manifest records post-turn source size" 4
+        Yojson.Safe.Util.(manifest.decision |> member "exact_evidence"
+                          |> member "before_message_count" |> to_int);
+      Registry_queue.settle_result
+        ~base_path
+        meta.name
+        ~settled_at:(Time_compat.now ())
+        ~lease
+        ~settlement:Ack
+      |> Result.get_ok
+      |> ignore)
+;;
+
 let () =
   run "RFC-0065 §3.2.3 WireinOrderPinned (OCaml-side guard)" [
     "WireinOrderPinned", [
@@ -289,5 +508,7 @@ let () =
         `Quick test_prepared_becomes_applied_only_after_save;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
+      test_case "manual compaction serializes the owner lane"
+        `Quick test_manual_compaction_serializes_owner_lane;
     ];
   ]

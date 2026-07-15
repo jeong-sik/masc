@@ -58,7 +58,9 @@ let test_descriptor_registry_admits_masc_keeper_cluster () =
           fail (Printf.sprintf
                   "%s must resolve (boot policy gate would exit 1), got Unknown (tried: %s)"
                   name (TR.string_of_tried tried)))
-    [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_msg_cancel"; "masc_keeper_msg_queue"; "masc_keeper_list"; "masc_keeper_status" ]
+    [ "masc_keeper_delegate"; "masc_keeper_delegate_status"
+    ; "masc_keeper_delegate_cancel"; "masc_keeper_delegate_list"
+    ; "masc_keeper_list"; "masc_keeper_status" ]
 
 let test_keeper_report_state_removed () =
   match TR.resolve "keeper_report_state" with
@@ -201,10 +203,10 @@ let policy_tool_names =
       "masc_goal_upsert";
       "masc_heartbeat";
       "masc_keeper_list";
-      "masc_keeper_msg";
-      "masc_keeper_msg_result";
-      "masc_keeper_msg_cancel";
-      "masc_keeper_msg_queue";
+      "masc_keeper_delegate";
+      "masc_keeper_delegate_status";
+      "masc_keeper_delegate_cancel";
+      "masc_keeper_delegate_list";
       "masc_keeper_status";
       "masc_messages";
       "masc_plan_get";

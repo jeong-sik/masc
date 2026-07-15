@@ -336,7 +336,7 @@ let available_actions : available_action list =
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
       ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Inject a backlog task into the namespace.";
-    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
+    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_delegate"
       ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Send a direct operator message to a keeper.";
     make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"

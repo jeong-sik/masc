@@ -16,6 +16,11 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; outcome : failure_judgment_terminal
       }
+  | Manual_compaction_failed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; failure : Keeper_manual_compaction.failure
+      }
+  | Manual_compaction_applied of cycle_outcome
 
 and failure_judgment_terminal =
   | Judgment_boundary_failed of { detail : string }
@@ -25,6 +30,7 @@ and failure_judgment_terminal =
       }
 
 val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
+
 (** Metadata projection for callers that must continue the heartbeat state
     machine independently of whether the turn completed, failed, or was not
     admitted.  Queue ownership must inspect the full {!cycle_outcome}; this
@@ -42,5 +48,6 @@ val run_keeper_cycle
   -> shared_context:Agent_sdk.Context.t
   -> wake:Keeper_registry.wake_reason
   -> ?failure_judgment:Keeper_event_queue.failure_judgment
+  -> ?manual_compaction_requested:bool
   -> unit
   -> cycle_outcome

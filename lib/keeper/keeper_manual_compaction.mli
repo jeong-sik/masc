@@ -11,3 +11,5 @@ val run
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> (success, failure) result
+val failure_to_string : failure -> string
+val observe_manifest : keeper_name:string -> (unit, string) result -> unit

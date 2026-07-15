@@ -134,6 +134,7 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Failure_judgment _
+      | Keeper_event_queue.Manual_compaction_requested
       | Keeper_event_queue.Goal_assigned _ ->
         None)
     stimuli
@@ -153,6 +154,7 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Failure_judgment _
+       | Keeper_event_queue.Manual_compaction_requested
        | Keeper_event_queue.Goal_assigned _ -> ())
     stimuli
 ;;
@@ -222,11 +224,17 @@ let failure_judgment_of_stimuli = function
            | Keeper_event_queue.Bootstrap
            | Keeper_event_queue.Connector_attention _
            | Keeper_event_queue.Hitl_resolved _
+           | Keeper_event_queue.Manual_compaction_requested
            | Keeper_event_queue.Goal_assigned _ ->
              false)
         stimuli
     then Error "failure judgment must be the sole stimulus in its event queue lease"
     else Ok None
+;;
+
+let manual_compaction_requested_of_stimuli = function
+  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
+  | [] | [ _ ] | _ :: _ :: _ -> false
 ;;
 
 let failure_judgment_successor
@@ -314,6 +322,7 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
          Keeper_registry_event_queue.Approval_grant_state_unavailable)
   | None ->
     (match outcome with
+  | Some (Cycle.Manual_compaction_applied _) -> Keeper_registry_event_queue.Ack
   | Some (Cycle.Completed _) -> Keeper_registry_event_queue.Ack
   | Some (Cycle.Cancelled _) ->
     Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
@@ -340,6 +349,9 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
                { judge_runtime_id; rationale }
          ; successor = None
          })
+  | Some (Cycle.Manual_compaction_failed _) ->
+    Keeper_registry_event_queue.Requeue
+      Keeper_registry_event_queue.Context_compaction_retry
   | None ->
     if stop_requested
     then Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
@@ -450,7 +462,9 @@ let run_keepalive_unified_turn
           | Cycle.Cancelled _
           | Cycle.Skipped _
           | Cycle.Busy _
-          | Cycle.Judgment_settled _ )
+          | Cycle.Judgment_settled _
+          | Cycle.Manual_compaction_failed _
+          | Cycle.Manual_compaction_applied _ )
       | None ->
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
@@ -500,6 +514,9 @@ let run_keepalive_unified_turn
         match failure_judgment_of_stimuli event_intake.consumed_stimuli with
         | Ok judgment -> judgment
         | Error message -> raise (Event_queue_settlement_failed message)
+      in
+      let manual_compaction_requested =
+        manual_compaction_requested_of_stimuli event_intake.consumed_stimuli
       in
       (match event_intake.event_queue_claim_error with
        | None -> ()
@@ -711,6 +728,7 @@ let run_keepalive_unified_turn
               ~shared_context
               ~wake
               ?failure_judgment
+              ~manual_compaction_requested
               ()
           in
           cycle_outcome_ref := Some cycle_outcome;
@@ -758,6 +776,12 @@ let run_keepalive_unified_turn
           | Some (Cycle.Judgment_settled _) ->
             record_settlement_failure
               "failure judgment completed without an owning event queue lease"
+          | Some (Cycle.Manual_compaction_failed _) ->
+            record_settlement_failure
+              "manual compaction failed without an owning event queue lease"
+          | Some (Cycle.Manual_compaction_applied _) ->
+            record_settlement_failure
+              "manual compaction completed without an owning event queue lease"
           | Some
               ( Cycle.Completed _
               | Cycle.Cancelled _

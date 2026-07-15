@@ -1,10 +1,6 @@
 val default_runtime_id : unit -> string
 val min_keeper_context_tokens : int
 val max_keeper_context_tokens : int
-val alert_error_detail_max_chars : int
-val alert_excerpt_min_chars : int
-val alert_message_preview_max_chars : int
-val alert_reply_preview_max_chars : int
 val default_proactive_enabled : bool
 val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool

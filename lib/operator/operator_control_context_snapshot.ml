@@ -54,20 +54,7 @@ let keeper_context_snapshot_from_metrics_json (json : Yojson.Safe.t) =
 let latest_keeper_context_snapshot_from_files config keeper_name =
   let metrics_lines =
     let store = Keeper_types_support.keeper_metrics_store config keeper_name in
-    let dated = Dated_jsonl.read_recent_lines store 32 in
-    if dated <> []
-    then dated
-    else (
-      let path = Keeper_types_support.keeper_metrics_path config keeper_name in
-      match
-        Keeper_memory.read_file_tail_lines_result path
-          ~max_bytes:32000 ~max_lines:32
-      with
-      | Ok lines -> lines
-      | Error exn_class ->
-          Keeper_memory.record_memory_recall_read_error
-            ~site:"operator_context_snapshot_metrics" path exn_class;
-          [])
+    Dated_jsonl.read_recent_lines store 32
   in
   let snapshots =
     List.rev metrics_lines

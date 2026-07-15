@@ -5,18 +5,11 @@
 
 type keeper_artifact =
   | Metadata
-  | Metrics_log
   | Memory_log
   | Generation_index_log
-  | Policy_log
   | Decision_log
   | Feedback_log
   | Tla_trace_log
-
-type global_artifact =
-  | Alerts_log
-  | Alerts_retry_log
-  | Alerts_deadletter_log
 
 type t =
   | Keeper of
@@ -24,13 +17,8 @@ type t =
       ; artifact : keeper_artifact
       ; rotation : int option
       }
-  | Global of
-      { artifact : global_artifact
-      ; rotation : int option
-      }
 
 val keeper_basename : keeper_name:string -> keeper_artifact -> string
-val global_basename : global_artifact -> string
 val basename : t -> string
 
 (** Return every typed interpretation whose canonical renderer exactly

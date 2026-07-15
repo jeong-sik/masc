@@ -484,27 +484,7 @@ let keepers_json
                                    let store =
                                      Keeper_types_support.keeper_metrics_store config name
                                    in
-                                   let lines =
-                                     let dated = Dated_jsonl.read_recent_lines store 5 in
-                                     if dated <> []
-                                     then dated
-                                     else (
-                                       let metrics_path =
-                                         Keeper_types_support.keeper_metrics_path config name
-                                       in
-                                       match
-                                         Keeper_memory.read_file_tail_lines_result
-                                           metrics_path
-                                           ~max_bytes:8000
-                                           ~max_lines:5
-                                       with
-                                       | Ok lines -> lines
-                                       | Error exn_class ->
-                                           Keeper_memory.record_memory_recall_read_error
-                                             ~site:"operator_recent_activity_metrics"
-                                             metrics_path exn_class;
-                                           [])
-                                   in
+                                   let lines = Dated_jsonl.read_recent_lines store 5 in
                                    `List
                                      (List.filter_map
                                         (fun line ->

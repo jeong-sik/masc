@@ -30,32 +30,6 @@ let min_keeper_context_tokens = 64_000
     provider registry entry. *)
 let max_keeper_context_tokens = 1_000_000
 
-(* ── Alert preview truncation lengths ─────────────────────── *)
-(* Invariant: excerpt_min < message_max < reply_max.
-   Violating this makes the min/max logic in keeper_alerting.ml degenerate. *)
-
-(** Error detail truncation for alert messages. *)
-let alert_error_detail_max_chars = 280
-
-(** Floor for excerpt cap (minimum preview length). *)
-let alert_excerpt_min_chars = 240
-
-(** Message preview cap for alert formatting. *)
-let alert_message_preview_max_chars = 300
-
-(** Reply preview cap for alert formatting. *)
-let alert_reply_preview_max_chars = 420
-
-let () =
-  if not
-       (alert_excerpt_min_chars < alert_message_preview_max_chars
-       && alert_message_preview_max_chars < alert_reply_preview_max_chars)
-  then
-    invalid_arg
-      "Keeper_config alert preview lengths must satisfy excerpt < message < reply";
-  if alert_error_detail_max_chars <= 0 then
-    invalid_arg "Keeper_config alert_error_detail_max_chars must be positive"
-
 include Keeper_config_text
 
 

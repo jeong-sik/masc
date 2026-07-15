@@ -112,6 +112,23 @@ let argv0_parent_dir ~cwd argv0 =
   | None -> None
   | Some path -> Some (Filename.dirname path)
 
+(* RFC-0342 D1 / RFC-OAS-036: deployment-local capability deltas live in a
+   config-root overlay merged onto the embedded catalog
+   ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
+   shadows every embedded row and goes stale on each OAS release. A resolved
+   full catalog (env var or config-root file) still wins outright:
+   [Model_catalog.global] gives the [set_global] replacement precedence over
+   the overlay. *)
+let resolve_oas_model_catalog_overlay_path ?config_root () =
+  match config_root with
+  | None -> None
+  | Some root ->
+    let root = String.trim root in
+    if String.equal root "" then
+      None
+    else
+      existing_file (Filename.concat root oas_models_overlay_toml_filename)
+
 let resolve_oas_model_catalog_path
       ?(env = Sys.getenv_opt)
       ?config_root
@@ -152,12 +169,23 @@ let resolve_oas_model_catalog_path
         with
         | Some _ as found -> found
         | None ->
-          (match find_catalog_in_parents ~origin:Cwd_parent search_cwd with
-           | Some _ as found -> found
-           | None ->
-             (match argv0_parent_dir ~cwd:process_cwd argv0 with
-              | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
-              | None -> None))))
+          (* A config-root overlay declares an embedded-based deployment
+             (RFC-0342 D1). The parent-directory walk below is a
+             checkout-dev convenience; letting it resolve a repo copy here
+             would whole-replace the embedded ⊕ overlay catalog with a file
+             that cannot know the deployment's delta rows (2026-07-15 boot
+             FATAL: argv0-parent found the masc repo oas-models.toml).
+             Explicit env vars and a config-root full catalog above still
+             take precedence over the overlay. *)
+          if Option.is_some (resolve_oas_model_catalog_overlay_path ?config_root ())
+          then None
+          else
+            (match find_catalog_in_parents ~origin:Cwd_parent search_cwd with
+             | Some _ as found -> found
+             | None ->
+               (match argv0_parent_dir ~cwd:process_cwd argv0 with
+                | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
+                | None -> None))))
 
 let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
   match load_catalog path with
@@ -200,23 +228,6 @@ let configure_oas_model_catalog_env
      | None ->
        raise (Env_config_core.Config_error "model_catalog: OAS embedded model catalog is unavailable"));
     None
-
-(* RFC-0342 D1 / RFC-OAS-036: deployment-local capability deltas live in a
-   config-root overlay merged onto the embedded catalog
-   ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
-   shadows every embedded row and goes stale on each OAS release. A resolved
-   full catalog (env var or config-root file above) still wins outright:
-   [Model_catalog.global] gives the [set_global] replacement precedence over
-   the overlay. *)
-let resolve_oas_model_catalog_overlay_path ?config_root () =
-  match config_root with
-  | None -> None
-  | Some root ->
-    let root = String.trim root in
-    if String.equal root "" then
-      None
-    else
-      existing_file (Filename.concat root oas_models_overlay_toml_filename)
 
 let configure_oas_model_catalog_overlay
       ?config_root

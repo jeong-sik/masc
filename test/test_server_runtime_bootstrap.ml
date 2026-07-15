@@ -301,6 +301,56 @@ let test_model_catalog_configuration_prefers_config_root_catalog () =
     Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
     Alcotest.(check int) "set catalog override" 1 !set_calls)
 
+let test_model_catalog_overlay_suppresses_parent_fallback () =
+  with_temp_dir "model-catalog-overlay-no-parent-fallback" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let repo = Filename.concat dir "repo" in
+    let bin = Filename.concat repo "_build/default/bin/main_eio.exe" in
+    let parent_catalog = Filename.concat repo "oas-models.toml" in
+    mkdir_p config_root;
+    mkdir_p (Filename.dirname bin);
+    write_file bin "";
+    write_file parent_catalog "[[models]]\nid_prefix = \"repo-copy\"\n";
+    write_file
+      (Filename.concat config_root "oas-models-overlay.toml")
+      "[[models]]\nid_prefix = \"deployment-delta\"\n";
+    let result =
+      Server_runtime_bootstrap.resolve_oas_model_catalog_path
+        ~env:(fun _ -> None)
+        ~config_root
+        ~cwd:repo
+        ~argv0:bin
+        ()
+    in
+    Alcotest.(check bool)
+      "overlay declares embedded base; parent repo copy must not resolve"
+      true
+      (Option.is_none result))
+
+let test_model_catalog_config_root_full_catalog_wins_over_overlay () =
+  with_temp_dir "model-catalog-full-beats-overlay" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let full = Filename.concat config_root "oas-models.toml" in
+    mkdir_p config_root;
+    write_file full "[[models]]\nid_prefix = \"explicit-full\"\n";
+    write_file
+      (Filename.concat config_root "oas-models-overlay.toml")
+      "[[models]]\nid_prefix = \"deployment-delta\"\n";
+    match
+      Server_runtime_bootstrap.resolve_oas_model_catalog_path
+        ~env:(fun _ -> None)
+        ~config_root
+        ~cwd:config_root
+        ~argv0:(Filename.concat config_root "main_eio.exe")
+        ()
+    with
+    | None -> Alcotest.fail "expected config-root full catalog resolution"
+    | Some resolution ->
+      Alcotest.(check string)
+        "explicit config-root full catalog still wins"
+        (canonical_path full)
+        (canonical_path resolution.Server_runtime_bootstrap.path))
+
 let test_model_catalog_overlay_installs_config_root_overlay () =
   with_temp_dir "model-catalog-overlay-install" (fun dir ->
     let config_root = Filename.concat dir "config-root" in
@@ -4713,6 +4763,12 @@ let () =
           Alcotest.test_case
             "model catalog configuration prefers config-root catalog"
             `Quick test_model_catalog_configuration_prefers_config_root_catalog;
+          Alcotest.test_case
+            "model catalog overlay suppresses parent fallback"
+            `Quick test_model_catalog_overlay_suppresses_parent_fallback;
+          Alcotest.test_case
+            "model catalog config-root full catalog wins over overlay"
+            `Quick test_model_catalog_config_root_full_catalog_wins_over_overlay;
           Alcotest.test_case
             "model catalog overlay installs config-root overlay"
             `Quick test_model_catalog_overlay_installs_config_root_overlay;

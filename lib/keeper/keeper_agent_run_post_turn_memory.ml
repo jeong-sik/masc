@@ -27,10 +27,10 @@ let run
       (Keeper_tool_emission_hook.accumulator_for_keeper
          meta.Keeper_meta_contract.name)
   in
-  (* (1) deterministic write, (2) librarian extraction, (3) compaction run on
-     this keeper's memory lane (RFC-0257), detached from the turn lane. All
-     three touch the keeper's memory bank (no internal lock); the lane's
-     per-keeper FIFO worker serializes them. meta/config are immutable snapshots, so
+  (* (1) deterministic write and (2) LLM librarian extraction run on this
+     keeper's memory lane (RFC-0257), detached from the turn lane. Both may
+     touch the keeper's memory stores; the per-keeper FIFO worker serializes
+     them. meta/config are immutable snapshots, so
      using them after the turn returns does not race a later turn.
      See RFC #3646 Section 3: Det/NonDet boundary. *)
   let memory_series () =
@@ -112,40 +112,8 @@ let run
        "delegation_requests failed: %s"
        (Printexc.to_string exn));
 
-  (* Memory bank compaction: dedup + consolidate if over threshold. *)
-  (try
-     let memory_summarizer =
-       Keeper_memory_llm_summary.make
-         ~runtime_id
-         ~keeper_name:meta.name
-         ()
-     in
-     let compaction =
-       Memory.compact_if_needed
-         ?summarizer:memory_summarizer
-         config
-         meta
-     in
-     if compaction.performed
-     then
-       Log.Keeper.info ~keeper_name:meta.name
-         "memory_compacted before=%d after=%d dropped=%d"
-         compaction.before_notes
-         compaction.after_notes
-         compaction.dropped_notes
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string DispatchEventFailures)
-       ~labels:[ "keeper", meta.name; "site", "memory_bank_compaction" ]
-       ();
-     Log.Keeper.warn ~keeper_name:meta.name
-       "runtime=%s compaction failed: %s"
-       (Keeper_meta_contract.runtime_id_of_meta meta)
-       (Printexc.to_string exn))
   in
-  (* RFC-0257: detach (1)-(3) onto the per-keeper memory lane. Admission failure
+  (* RFC-0257: detach (1)-(2) onto the per-keeper memory lane. Admission failure
      is explicit and observable; provider-backed work never falls back into the
      submitting turn fiber. *)
   (match

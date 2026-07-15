@@ -259,9 +259,6 @@ let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
       proof_source ~id:"execution_trust"
         ~label:"Execution trust provenance"
         ~route:"/api/v1/dashboard/execution-trust";
-      proof_source ~id:"surface_readiness"
-        ~label:"Dashboard surface readiness refs"
-        ~route:"/api/v1/dashboard/surface-readiness";
     ]
   in
   let by_status =

@@ -11,8 +11,8 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Operator_remote
 
 let operator_remote_instructions =
-  "MASC remote operator profile exposes five operator tools plus surface audit: \
-masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_chat_recovery_resolve, masc_operator_confirm, and masc_surface_audit. \
+  "MASC remote operator profile exposes five operator tools: \
+masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_chat_recovery_resolve, and masc_operator_confirm. \
 Read raw state with masc_operator_snapshot first when needed, and prefer masc_operator_digest for intervention-oriented supervision. \
 Use masc_operator_action for guided actions only. \
 Use masc_operator_chat_recovery_resolve only with the exact receipt_id, revision, and lease_id observed from queue state; it never auto-redelivers. \

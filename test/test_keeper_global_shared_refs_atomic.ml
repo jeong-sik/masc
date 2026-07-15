@@ -97,22 +97,6 @@ let test_tool_dispatch_runtime () =
     (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 ;;
 
-let test_tool_in_process_runtime () =
-  let open Masc in
-  let called = ref false in
-  Keeper_tool_in_process_runtime.register_dashboard_surface_readiness
-    (fun ?surface_id:_ () ->
-       called := true;
-       `Bool true);
-  let json =
-    Keeper_tool_in_process_runtime.handle_masc_surface_audit ~args:(`Assoc [])
-  in
-  check bool "surface readiness callback was invoked" true !called;
-  check string "surface readiness JSON returned" "true" json;
-  Keeper_tool_in_process_runtime.register_dashboard_surface_readiness
-    (fun ?surface_id:_ () -> `Assoc [])
-;;
-
 let test_keepalive_signal_callbacks () =
   let open Masc in
   let started = ref false in
@@ -279,12 +263,6 @@ let () =
         ] )
     ; ( "tool-dispatch-runtime"
       , [ test_case "recorder and searcher registration" `Quick test_tool_dispatch_runtime
-        ] )
-    ; ( "tool-in-process-runtime"
-      , [ test_case
-            "dashboard surface readiness callback"
-            `Quick
-            test_tool_in_process_runtime
         ] )
     ; ( "keepalive-signal"
       , [ test_case

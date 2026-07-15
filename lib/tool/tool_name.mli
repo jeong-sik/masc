@@ -82,9 +82,7 @@ module Operator_name : sig
 end
 
 module Operator_remote_name : sig
-  type t =
-    | Operator_tool of Operator_name.t
-    | Surface_audit
+  type t = Operator_tool of Operator_name.t
 
   val to_string : t -> string
   val of_string : string -> t option

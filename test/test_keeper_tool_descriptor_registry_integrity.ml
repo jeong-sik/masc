@@ -1198,8 +1198,7 @@ let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
     (contains_substring source "Tool_catalog.is_public_mcp")
 ;;
 
-(* RFC-0182 §3.1 — verify keeper / surface_audit descriptors project from name
-   → descriptor
+(* RFC-0182 §3.1 — verify keeper descriptors project from name → descriptor
    via [descriptors_for_internal] with the expected [runtime_handler].
 
    This catches future typos in the [~name:"masc_X"] strings (which the
@@ -1220,7 +1219,6 @@ let cluster_projection_table =
   ; "masc_keeper_down", "tool_masc_keeper_dispatch"
   ; "masc_keeper_msg", "tool_masc_keeper_dispatch"
   ; "masc_keeper_up", "tool_masc_keeper_dispatch"
-  ; "masc_surface_audit", "tool_masc_surface_audit"
   ]
 ;;
 
@@ -1513,7 +1511,7 @@ let () =
         ] )
     ; ( "rfc-0182-clusters"
       , [ test_case
-            "keeper/surface_audit project to descriptors"
+            "keeper clusters project to descriptors"
             `Quick
             test_rfc_0182_clusters_have_descriptor_projection
         ] )

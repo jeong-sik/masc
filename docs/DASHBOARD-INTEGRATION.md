@@ -6,7 +6,6 @@ code_refs:
   - dashboard/src/components/status.ts
   - dashboard/src/components/work.ts
   - dashboard/src/components/lab.ts
-  - lib/dashboard/dashboard_surface_readiness.ml
 ---
 
 # Dashboard Integration Spec (v1 Shell)
@@ -102,7 +101,7 @@ code_refs:
 - `connectors:connector-telegram -> connectors:connector-status&connector=telegram`
 - `workspace:goals -> workspace:planning`
 
-이 redirect는 router/navigation 호환성 계약이다. `surface-readiness`에는 legacy surface를 다시 등재하지 않는다.
+이 redirect는 router/navigation 호환성 계약이다. `navigation.ts`에는 legacy surface를 다시 등재하지 않는다.
 
 ## Monitor IA Contract
 - Monitor default는 `#monitoring?section=agents` 이다.
@@ -182,8 +181,6 @@ code_refs:
   - code IDE annotations, source regions, and live collaboration presence
 - `GET /api/v1/dashboard/logs`
   - log viewer
-- `GET /api/v1/dashboard/surface-readiness`
-  - canonical surface inventory + readiness refs
 
 ## Supporting / Compatibility Read Models
 - `GET /api/v1/dashboard/briefing`

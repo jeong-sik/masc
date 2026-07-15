@@ -930,24 +930,6 @@ let handle_masc_local_runtime
      ()).raw_output
 ;;
 
-let dashboard_surface_readiness_callback
-    : (?surface_id:string -> unit -> Yojson.Safe.t) Atomic.t
-  =
-  Atomic.make (fun ?surface_id:_ () -> `Assoc [])
-
-let register_dashboard_surface_readiness fn = Atomic.set dashboard_surface_readiness_callback fn
-
-(* RFC-0182 §3.1 — masc_surface_audit singleton.  Body is pure
-   ([Dashboard_surface_readiness.json ?surface_id ()]) with no ctx
-   requirements; direct import is cycle-safe.
-
-   TEL-OK: read-only dashboard surface snapshot, telemetry lives in
-   [Dashboard_surface_readiness]. *)
-let handle_masc_surface_audit ~args =
-  let surface_id = Safe_ops.json_string_opt "surface_id" args in
-  Yojson.Safe.to_string (Atomic.get dashboard_surface_readiness_callback ?surface_id ())
-;;
-
 (* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/
    (late) but exposes keeper workspace tools.  A direct import here
    closes a cycle, so we dispatch through [Keeper_dispatch_ref], forwarding

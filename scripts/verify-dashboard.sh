@@ -131,23 +131,6 @@ check_http "dashboard briefing 200" "$BASE/api/v1/dashboard/briefing" "200"
 check_json "dashboard briefing exposes summary and keepers" "$BASE/api/v1/dashboard/briefing" "'summary' in d and 'keeper_briefs' in d" '^True$'
 check_http "dashboard briefing sections 200" "$BASE/api/v1/dashboard/briefing/sections" "200"
 check_json "dashboard briefing sections exposes provenance" "$BASE/api/v1/dashboard/briefing/sections" "'provenance' in d and 'criteria' in d" '^True$'
-check_http "surface-readiness 200" "$BASE/api/v1/dashboard/surface-readiness" "200"
-check_json \
-  "surface-readiness has canonical surface count" \
-  "$BASE/api/v1/dashboard/surface-readiness" \
-  "len(d.get('surfaces', []))" \
-  '^22$'
-check_json \
-  "surface-readiness matches canonical surface ids" \
-  "$BASE/api/v1/dashboard/surface-readiness" \
-  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
-  '^True$'
-check_json \
-  "surface-readiness dropped retired surfaces" \
-  "$BASE/api/v1/dashboard/surface-readiness" \
-  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'monitoring.runtime-config', 'workspace.collab-mvp'])" \
-  '^True$'
-
 echo "[3/7] Monitoring"
 check_http "namespace-truth 200" "$BASE/api/v1/dashboard/namespace-truth" "200"
 check_json_eventually \

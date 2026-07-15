@@ -194,22 +194,16 @@ module Operator_name = struct
 end
 
 module Operator_remote_name = struct
-  type t =
-    | Operator_tool of Operator_name.t
-    | Surface_audit
+  type t = Operator_tool of Operator_name.t
 
   let to_string = function
     | Operator_tool tool -> Operator_name.to_string tool
-    | Surface_audit -> "masc_surface_audit"
   ;;
 
   let of_string value =
     match Operator_name.of_string value with
     | Some tool -> Some (Operator_tool tool)
-    | None ->
-      (match value with
-       | "masc_surface_audit" -> Some Surface_audit
-       | _ -> None)
+    | None -> None
   ;;
 
   let all =
@@ -218,7 +212,6 @@ module Operator_remote_name = struct
     ; Operator_tool Operator_name.Operator_action
     ; Operator_tool Operator_name.Operator_chat_recovery_resolve
     ; Operator_tool Operator_name.Operator_confirm
-    ; Surface_audit
     ]
   ;;
 

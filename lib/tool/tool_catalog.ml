@@ -303,7 +303,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
     ("masc_operator_confirm", broadcast_tool);
-    ("masc_surface_audit", read_state_tool);
     ("masc_persona_list", read_state_tool);
     ("masc_persona_create", broadcast_tool);
     ("masc_persona_update", broadcast_tool);

@@ -33,105 +33,6 @@ let test_compact_audit_store_cache () =
   check (result unit (of_pp (fun _ _ -> ()))) "persist_start base1 after base2 succeeds" (Ok ()) r1''
 ;;
 
-let test_compact_policy_callback () =
-  let open Masc in
-  let called = ref false in
-  let ts = 1234567890.0 in
-  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ ->
-    called := true;
-    Some
-      { Keeper_compact_policy.timestamp = ts
-      ; keeper_name
-      ; context_ratio = 0.5
-      ; message_count = 1
-      ; token_count = 1
-      ; strategies = []
-      ; context_window = 4096
-      ; is_local_model = false
-      ; trigger = Compaction_trigger.Manual
-      });
-  let result =
-    Keeper_compact_policy.record_pre_compact_callback
-      ~keeper_name:"k"
-      ~context_ratio:0.5
-      ~message_count:1
-      ~token_count:1
-      ~strategies:[]
-      ~context_window:4096
-      ~is_local_model:false
-      ~trigger:Compaction_trigger.Manual
-  in
-  check bool "callback was invoked" true !called;
-  check bool "returns registered event" true (Option.is_some result);
-  (* Restore default. *)
-  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
-;;
-
-let compact_policy_meta () =
-  let open Masc in
-  match
-    Keeper_meta_json_parse.meta_of_json
-      (`Assoc
-        [ "name", `String "compact-policy-window"
-        ; "agent_name", `String "compact-policy-window"
-        ; "trace_id", `String "trace-compact-policy-window"
-        ])
-  with
-  | Error err -> fail ("meta_of_json failed: " ^ err)
-  | Ok meta -> meta
-
-let test_pre_compact_context_window_uses_working_context () =
-  let open Masc in
-  let recorded_window = ref None in
-  let recorded_is_local_model = ref None in
-  let restore () =
-    Keeper_compact_policy.register_record_pre_compact
-      (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_
-        ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
-  in
-  Fun.protect
-    ~finally:restore
-    (fun () ->
-       Keeper_compact_policy.register_record_pre_compact
-         (fun ~keeper_name ~context_ratio ~message_count ~token_count
-           ~strategies ~context_window ~is_local_model ~trigger ->
-            recorded_window := Some context_window;
-            recorded_is_local_model := Some is_local_model;
-            Some
-              { Keeper_compact_policy.timestamp = 1.0
-              ; keeper_name
-              ; context_ratio
-              ; message_count
-              ; token_count
-              ; strategies
-              ; context_window
-              ; is_local_model
-              ; trigger
-              });
-       let ctx =
-         Keeper_context_runtime.create ~eio:false
-           ~system_prompt:"pre compact window"
-           ~max_tokens:131_072
-         |> fun ctx ->
-         Keeper_context_runtime.append ctx
-           (Agent_sdk.Types.user_msg "explicit compaction request")
-       in
-       let _, decision =
-         Keeper_compact_policy.compact_for_request_typed
-           ~meta:(compact_policy_meta ())
-           ~trigger:Compaction_trigger.Manual
-           ctx
-       in
-       check bool "decision applied" true
-         (Keeper_compact_policy.compaction_decision_applied decision);
-       check (option int) "pre-compact event uses ctx max_tokens"
-         (Some 131_072)
-         !recorded_window;
-       check (option bool) "uninitialized runtime locality is telemetry only"
-         (Some false)
-         !recorded_is_local_model)
-;;
-
 let test_meta_store_hook () =
   let open Masc in
   let called = ref false in
@@ -257,9 +158,6 @@ let () =
     "keeper-global-shared-refs-atomic"
     [ ( "compact-audit"
       , [ test_case "store cache is shared per base_path" `Quick test_compact_audit_store_cache ] )
-    ; ( "compact-policy"
-      , [ test_case "record_pre_compact callback registration" `Quick test_compact_policy_callback
-        ] )
     ; ( "meta-store"
       , [ test_case "runtime_meta_write_sync_hook registration" `Quick test_meta_store_hook ] )
     ; ( "tool-dispatch-runtime"

@@ -103,6 +103,15 @@ type compaction_evidence =
   ; after_tool_result_count : int
   }
 
+type compaction_receipt =
+  { operation_id : string
+  ; source_session_id : string
+  ; source_generation : int
+  ; source_turn_count : int
+  ; trigger : Compaction_trigger.t
+  ; evidence : compaction_evidence
+  }
+
 let compaction_evidence_to_json evidence =
   `Assoc
     [ "before_checkpoint_bytes", `Int evidence.before_checkpoint_bytes
@@ -116,6 +125,237 @@ let compaction_evidence_to_json evidence =
     ; "before_tool_result_count", `Int evidence.before_tool_result_count
     ; "after_tool_result_count", `Int evidence.after_tool_result_count
     ]
+;;
+
+let compaction_receipt_context_key = "masc_compaction_receipt_v1"
+
+let compaction_operation_id
+      ~source_session_id
+      ~source_generation
+      ~source_turn_count
+      ~trigger
+  =
+  let identity =
+    `Assoc
+      [ "schema_version", `Int 1
+      ; "source_session_id", `String source_session_id
+      ; "source_generation", `Int source_generation
+      ; "source_turn_count", `Int source_turn_count
+      ; "trigger", Compaction_trigger.to_detail_json trigger
+      ]
+    |> Yojson.Safe.to_string
+  in
+  "compaction:" ^ Digestif.SHA256.(digest_string identity |> to_hex)
+;;
+
+let compaction_receipt_to_json receipt =
+  `Assoc
+    [ "schema_version", `Int 1
+    ; "operation_id", `String receipt.operation_id
+    ; "source_session_id", `String receipt.source_session_id
+    ; "source_generation", `Int receipt.source_generation
+    ; "source_turn_count", `Int receipt.source_turn_count
+    ; "trigger", Compaction_trigger.to_detail_json receipt.trigger
+    ; ( "selected_runtime_id"
+      , Json_util.string_opt_to_json receipt.evidence.selected_runtime_id )
+    ; "evidence", compaction_evidence_to_json receipt.evidence
+    ]
+;;
+
+let compaction_receipt_of_json json =
+  let ( let* ) = Result.bind in
+  let required name fields =
+    match List.assoc_opt name fields with
+    | Some value -> Ok value
+    | None -> Error (Printf.sprintf "compaction receipt missing %s" name)
+  in
+  let int_value name = function
+    | `Int value when value >= 0 -> Ok value
+    | _ -> Error (Printf.sprintf "compaction receipt %s must be a non-negative integer" name)
+  in
+  let string_value name = function
+    | `String value when not (String.equal value "") -> Ok value
+    | _ -> Error (Printf.sprintf "compaction receipt %s must be a non-empty string" name)
+  in
+  let selected_runtime_id = function
+    | `Null -> Ok None
+    | `String value when not (String.equal value "") -> Ok (Some value)
+    | _ -> Error "compaction receipt selected_runtime_id must be null or a non-empty string"
+  in
+  let validate_fields ~surface ~allowed fields =
+    let keys = List.map fst fields in
+    match
+      List.find_opt
+        (fun key -> List.length (List.filter (String.equal key) keys) > 1)
+        keys
+    with
+    | Some key -> Error (Printf.sprintf "%s duplicates %s" surface key)
+    | None ->
+      (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+       | Some (key, _) -> Error (Printf.sprintf "%s contains unknown %s" surface key)
+       | None -> Ok ())
+  in
+  let evidence_of_fields selected_runtime_id fields =
+    let* () =
+      validate_fields
+        ~surface:"compaction receipt evidence"
+        ~allowed:
+          [ "before_checkpoint_bytes"; "after_checkpoint_bytes"
+          ; "before_message_count"; "after_message_count"
+          ; "summarized_message_count"; "dropped_message_count"
+          ; "before_tool_use_count"; "after_tool_use_count"
+          ; "before_tool_result_count"; "after_tool_result_count"
+          ]
+        fields
+    in
+    let int_field name = Result.bind (required name fields) (int_value name) in
+    let* before_checkpoint_bytes = int_field "before_checkpoint_bytes" in
+    let* after_checkpoint_bytes = int_field "after_checkpoint_bytes" in
+    let* before_message_count = int_field "before_message_count" in
+    let* after_message_count = int_field "after_message_count" in
+    let* summarized_message_count = int_field "summarized_message_count" in
+    let* dropped_message_count = int_field "dropped_message_count" in
+    let* before_tool_use_count = int_field "before_tool_use_count" in
+    let* after_tool_use_count = int_field "after_tool_use_count" in
+    let* before_tool_result_count = int_field "before_tool_result_count" in
+    let* after_tool_result_count = int_field "after_tool_result_count" in
+    let values =
+      [ before_checkpoint_bytes; after_checkpoint_bytes; before_message_count
+      ; after_message_count; summarized_message_count; dropped_message_count
+      ; before_tool_use_count; after_tool_use_count; before_tool_result_count
+      ; after_tool_result_count
+      ]
+    in
+    if List.exists (fun value -> value < 0) values
+    then Error "compaction receipt evidence values must be non-negative"
+    else
+      Ok
+        { selected_runtime_id
+        ; before_checkpoint_bytes
+        ; after_checkpoint_bytes
+        ; before_message_count
+        ; after_message_count
+        ; summarized_message_count
+        ; dropped_message_count
+        ; before_tool_use_count
+        ; after_tool_use_count
+        ; before_tool_result_count
+        ; after_tool_result_count
+        }
+  in
+  match json with
+  | `Assoc fields ->
+    let allowed =
+      [ "schema_version"; "operation_id"; "source_session_id"
+      ; "source_generation"; "source_turn_count"; "trigger"
+      ; "selected_runtime_id"; "evidence"
+      ]
+    in
+    (match validate_fields ~surface:"compaction receipt" ~allowed fields with
+     | Error _ as error -> error
+     | Ok () ->
+          let* version =
+            Result.bind (required "schema_version" fields) (int_value "schema_version")
+          in
+          if version <> 1
+          then Error (Printf.sprintf "unsupported compaction receipt schema %d" version)
+          else (
+            let* operation_id =
+              Result.bind (required "operation_id" fields) (string_value "operation_id")
+            in
+            let* source_session_id =
+              Result.bind
+                (required "source_session_id" fields)
+                (string_value "source_session_id")
+            in
+            let* source_generation =
+              Result.bind
+                (required "source_generation" fields)
+                (int_value "source_generation")
+            in
+            let* source_turn_count =
+              Result.bind
+                (required "source_turn_count" fields)
+                (int_value "source_turn_count")
+            in
+            let* trigger_json = required "trigger" fields in
+            let* trigger =
+              match Compaction_trigger.of_detail_json trigger_json with
+              | Some trigger -> Ok trigger
+              | None -> Error "compaction receipt trigger is invalid"
+            in
+            let* selected_runtime_id_json = required "selected_runtime_id" fields in
+            let* selected_runtime_id = selected_runtime_id selected_runtime_id_json in
+            let* evidence_json = required "evidence" fields in
+            let* evidence =
+              match evidence_json with
+              | `Assoc evidence_fields -> evidence_of_fields selected_runtime_id evidence_fields
+              | _ -> Error "compaction receipt evidence must be an object"
+            in
+            let expected_operation_id =
+              compaction_operation_id
+                ~source_session_id
+                ~source_generation
+                ~source_turn_count
+                ~trigger
+            in
+            if not (String.equal operation_id expected_operation_id)
+            then Error "compaction receipt operation_id does not match its typed source"
+            else
+              Ok
+                { operation_id
+                ; source_session_id
+                ; source_generation
+                ; source_turn_count
+                ; trigger
+                ; evidence
+                }))
+  | _ -> Error "compaction receipt must be an object"
+;;
+
+let with_compaction_receipt ~generation ~trigger ~evidence ctx =
+  let checkpoint = checkpoint_of_context ctx in
+  let receipt =
+    { operation_id =
+        compaction_operation_id
+          ~source_session_id:checkpoint.session_id
+          ~source_generation:generation
+          ~source_turn_count:checkpoint.turn_count
+          ~trigger
+    ; source_session_id = checkpoint.session_id
+    ; source_generation = generation
+    ; source_turn_count = checkpoint.turn_count
+    ; trigger
+    ; evidence
+    }
+  in
+  let context = Agent_sdk.Context.copy checkpoint.context in
+  Agent_sdk.Context.set_scoped
+    context
+    Agent_sdk.Context.Session
+    compaction_receipt_context_key
+    (compaction_receipt_to_json receipt);
+  { ctx with checkpoint = { checkpoint with context } }, receipt
+;;
+
+let compaction_receipt_for_request ~checkpoint ~generation ~trigger =
+  match
+    Agent_sdk.Context.get_scoped
+      checkpoint.Agent_sdk.Checkpoint.context
+      Agent_sdk.Context.Session
+      compaction_receipt_context_key
+  with
+  | None -> Ok None
+  | Some json ->
+    (match compaction_receipt_of_json json with
+     | Error _ as error -> error
+     | Ok receipt ->
+       if String.equal receipt.source_session_id checkpoint.session_id
+          && receipt.source_generation = generation
+          && receipt.source_turn_count = checkpoint.turn_count
+          && receipt.trigger = trigger
+       then Ok (Some receipt)
+       else Ok None)
 ;;
 
 type compaction_preparation =

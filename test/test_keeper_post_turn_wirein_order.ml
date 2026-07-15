@@ -251,6 +251,65 @@ let make_checkpoint () =
     ; working_context = None
     }
 
+let test_compaction_receipt_is_exact_and_immutable () =
+  let checkpoint = make_checkpoint () in
+  let evidence : Compact_policy.compaction_evidence =
+    { selected_runtime_id = Some "runtime-a"
+    ; before_checkpoint_bytes = 4096
+    ; after_checkpoint_bytes = 1024
+    ; before_message_count = 3
+    ; after_message_count = 1
+    ; summarized_message_count = 2
+    ; dropped_message_count = 0
+    ; before_tool_use_count = 0
+    ; after_tool_use_count = 0
+    ; before_tool_result_count = 0
+    ; after_tool_result_count = 0
+    }
+  in
+  let context =
+    Masc.Keeper_context_runtime.context_of_oas_checkpoint
+      checkpoint
+      ~primary_model_max_tokens:8192
+  in
+  let with_receipt, created =
+    Compact_policy.with_compaction_receipt
+      ~generation:4
+      ~trigger:Compaction_trigger.Manual
+      ~evidence
+      context
+  in
+  (match
+     Compact_policy.compaction_receipt_for_request
+       ~checkpoint
+       ~generation:4
+       ~trigger:Compaction_trigger.Manual
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "receipt mutation leaked into the source checkpoint"
+   | Error detail -> failf "source receipt read failed: %s" detail);
+  let persisted = Masc.Keeper_context_runtime.checkpoint_of_context with_receipt in
+  (match
+     Compact_policy.compaction_receipt_for_request
+       ~checkpoint:persisted
+       ~generation:4
+       ~trigger:Compaction_trigger.Manual
+   with
+   | Ok (Some replayed) ->
+     check string "stable operation identity" created.operation_id replayed.operation_id;
+     check int "before evidence preserved" 4096 replayed.evidence.before_checkpoint_bytes
+   | Ok None -> fail "persisted receipt did not match its exact source"
+   | Error detail -> failf "persisted receipt rejected: %s" detail);
+  match
+    Compact_policy.compaction_receipt_for_request
+      ~checkpoint:{ persisted with turn_count = persisted.turn_count + 1 }
+      ~generation:4
+      ~trigger:Compaction_trigger.Manual
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "receipt from an older checkpoint version was reused"
+  | Error detail -> failf "new checkpoint receipt read failed: %s" detail
+
 let test_regular_post_turn_does_not_auto_compact () =
   Eio_main.run @@ fun _env ->
   let meta = make_meta () in
@@ -506,6 +565,8 @@ let () =
     "durable compaction", [
       test_case "Prepared requires a successful checkpoint save"
         `Quick test_prepared_becomes_applied_only_after_save;
+      test_case "receipt is exact and source context remains immutable"
+        `Quick test_compaction_receipt_is_exact_and_immutable;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "manual compaction serializes the owner lane"

@@ -272,7 +272,8 @@ let append_provider_overflow_manifest
           (Keeper_runtime_manifest.with_payload_role
              ~payload_role:Checkpoint
              (`Assoc
-               [ "trigger", `String (Compaction_trigger.to_label trigger)
+               [ "operation_id", `String recovery.operation_id
+               ; "trigger", `String (Compaction_trigger.to_label trigger)
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
                ; "owner_lane_resume_requested", `Bool true
                ; "error", error

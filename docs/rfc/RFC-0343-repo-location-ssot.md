@@ -6,11 +6,23 @@
 - Related: RFC-0128 (§4.5 write partition), RFC-0324 (filesystem-repo-truth), RFC-0000 §3.15 (Keeper-Config SSOT) / D9
 - Supersedes: none (extends RFC-0128 §4.5 attribution mechanism)
 
+> **Status update (2026-07-15, code-verified).** The initial draft named
+> `clone_sandbox_repo` / `playground_repo_readiness` as a live production path.
+> Fresh caller trace proved that entire module is **dead** (no production caller;
+> `Repo_git.clone`'s only live caller is `repo_sync.ml:69`, the registered
+> `.masc/repos` tree; per-keeper playground repos are keeper-self-cloned). It is
+> deleted in **PR #24558**. Consequences: **§3.2 is moot** (it "fixed" a dead
+> `default_branch="main"` that `Repo_git.clone` never reads), and **§3.3's
+> `local_path` dual-role dissolves** with the module (the clone-path overload
+> lived only there; the registered `local_path` is now single-role). The single
+> remaining LIVE item is **§3.1 — the reverse-parse attribution**
+> (`parse_playground_repo_path`, live caller `keeper_tool_filesystem_runtime.ml:314`).
+
 ## 0. Summary
 
 MASC defines "where repository X lives for a keeper" in **two independent authorities** joined by a reverse-parse of a filesystem path. This RFC removes the reverse-parse and makes write-attribution read the checkout's own `origin` URL (`git remote get-url`), an operation the codebase already performs for the same purpose in `discover_repositories`. Repo **identity** (id/name/url/aliases) is already SSOT in `repositories.toml` and is unchanged.
 
-Scope: attribution mechanism + the `clone_sandbox_repo` record fabrication + a field rename. Not in scope: the D8 decision to delete the playground bundle entirely (this RFC is a prerequisite that makes D8 (b3) trivial, not D8 itself).
+Scope (LIVE, post-#24558): the **reverse-parse attribution** mechanism only (§3.1). The clone-record and field-rename items (§3.2/§3.3) are moot/optional after the dead-module deletion — see the status note above. Not in scope: the D8 decision to delete the playground bundle entirely (this RFC's §3.1 makes D8 (b3) trivial, not D8 itself).
 
 ## 1. Problem (evidence)
 
@@ -23,7 +35,7 @@ Two location authorities, no linking invariant:
 Concrete failures:
 
 - **`path_not_found` 379/24h (2026-07-08 audit).** A prior prompt invariant ("every catalog id resolves under `repos/<name>/`") was removed (RFC-0324 B-1) because it was false; keepers trusted a path that was never cloned.
-- **default_branch/aliases dropped.** `clone_sandbox_repo` hardcodes `default_branch="main"`, `aliases=[]`, `id=repo_name` (`playground_repo_readiness.ml:354-357`). A catalog repo whose `default_branch` is `master`/`develop` is cloned and reasoned about as `main`. The **same hardcode** is duplicated in `discover_repositories` (`repo_store.ml:439-`).
+- ~~**default_branch/aliases dropped.** `clone_sandbox_repo` hardcodes `default_branch="main"`...~~ **[RETRACTED — dead code]** `Repo_git.clone` runs `git clone <url> <path>` and never reads `default_branch`; the fabricated record is ephemeral; and `playground_repo_readiness` has no production caller (deleted, PR #24558). This was not a live bug. (`discover_repositories` at `repo_store.ml:439` does carry a `default_branch="main"` on discovered repos, but that is the registered-tree path, separate from attribution — a minor cleanup, not part of this RFC's live scope.)
 - **id ≠ dir-name attribution break.** `make_repo_record` sets `id := repo_name` (sandbox dir basename); when it differs from the catalog id, `parse_playground_repo_path` mis-attributes → `sandbox_unregistered_repo` orphan, defeating collision detection against the operator working tree.
 
 ## 2. Non-goals
@@ -47,17 +59,25 @@ Concrete failures:
 
 Fail-closed: if `get_origin_url`/`worktree_root` returns `Error` (not a git repo, no origin), the write is attributed to a typed `Unattributed { reason }` and the caller handles it explicitly — never silently bucketed. (Matches the existing `sandbox_unregistered_repo` failure surface, but typed rather than path-derived.)
 
-### 3.2 `clone_sandbox_repo` reads the full catalog record
+### 3.2 `clone_sandbox_repo` reads the full catalog record — **[MOOT / superseded by deletion]**
 
-- `clone_sandbox_repo` (`playground_repo_readiness.ml:346`) looks up the **catalog record** by id (not just URL) and reuses `default_branch` and `aliases`. Delete the hardcoded `"main"`/`[]`.
-- The per-keeper clone location becomes a pure function keyed by **catalog id**, not an operator-chosen `repo_name` dir basename: `clone_path(keeper, catalog_id)`. This makes `id ≠ dir-name` unrepresentable.
-- Apply the same fix at `repo_store.ml:439` (`discover_repositories`), which carries the identical `default_branch="main"` hardcode — codemod both sites in one change, do not patch one and leave the other (N-of-M bar).
+Retracted. `clone_sandbox_repo` and its module are dead code (`Repo_git.clone`
+ignores `default_branch`; no production caller). Deleted in PR #24558 rather than
+fixed. No live behavior existed to correct. (The `repo_store.ml:439`
+`discover_repositories` `default_branch="main"` is a separate registered-tree
+minor cleanup, out of this RFC's live scope.)
 
-### 3.3 Split the overloaded `local_path` field → `operator_checkout_path`
+### 3.3 Split the overloaded `local_path` field → `operator_checkout_path` — **[DISSOLVED by deletion; optional clarity]**
 
-- `Repo_manager_types.repository.local_path` is read by **both** roles: `repo_sync`/routes read the REGISTERED operator tree; `clone_sandbox_repo:352` overloads it to carry the CLONE path into `Repo_git.clone`.
-- Rename the registered field to `operator_checkout_path` (identity/registry role). The clone path stops masquerading as the same field — `clone_sandbox_repo` passes the clone path explicitly to `Repo_git.clone` without reusing the registry field name.
-- Touch surface (REGISTERED consumers, ~11 sites): `repo_store.ml:101,210-211,260-261,278-281,387-398,448`, `repo_store_lookup.ml:80`, `repo_sync.ml:62`, `server_ide_http.ml:45`, `server_routes_http_routes_repositories.ml:45,73,100`, `server_routes_http_routes_workspace.ml:104`. The dashboard JSON key `"local_path"` (`server_routes_http_routes_repositories.ml:100`) is an **API-visible rename** — version or alias it.
+The `local_path` dual-role was: registered tree (`repo_sync`/routes) **vs** the
+clone-path overload in `clone_sandbox_repo`/`make_repo_record`. Both overload
+sites lived in the now-deleted `playground_repo_readiness` module, so after
+PR #24558 the registered `local_path` is **single-role** — no field is
+carrying a clone path anymore. The rename to `operator_checkout_path` is now an
+**optional naming-clarity change**, not a correctness fix, and is deferred out
+of this RFC's live scope. (Registered consumers unchanged: `repo_sync.ml:62`,
+`server_ide_http.ml:45`, `server_routes_http_routes_repositories.ml:45,73`,
+`server_routes_http_routes_workspace.ml:104`.)
 
 ### 3.4 `docker/` segment becomes deletable
 

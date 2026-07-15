@@ -35,6 +35,10 @@ and dispatch_result =
   ; error : string option
   }
 
+type consumer_dispatch_error =
+  | Retryable_dispatch_failure of string
+  | Terminal_dispatch_rejection of string
+
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
   ; dispatch :
@@ -42,7 +46,7 @@ type consumer =
       now:float ->
       wake_signal ->
       Schedule_domain.schedule_request ->
-      (Yojson.Safe.t, string) result
+      (Yojson.Safe.t, consumer_dispatch_error) result
   }
 
 type runner_error =
@@ -234,7 +238,7 @@ let dispatch_result ?detail ?error schedule_id status =
   { schedule_id; status; detail; error }
 ;;
 
-let finish_failed_dispatch config ~now ~schedule_id error =
+let finish_terminal_dispatch config ~now ~schedule_id error =
   match Schedule_store.fail_running config ~now ~schedule_id ~error with
   | Ok _ -> dispatch_result ~error schedule_id Dispatch_failed
   | Error err ->
@@ -247,9 +251,28 @@ let finish_failed_dispatch config ~now ~schedule_id error =
     dispatch_result ~error schedule_id Dispatch_failed
 ;;
 
+let finish_retryable_dispatch config ~now ~schedule_id detail =
+  let reason = Schedule_store.Retryable_dispatch_failure detail in
+  let error = Schedule_store.running_recovery_reason_to_string reason in
+  match Schedule_store.retry_running config ~now ~schedule_id ~reason with
+  | Ok _ -> dispatch_result ~error schedule_id Dispatch_failed
+  | Error err ->
+    let error =
+      Printf.sprintf
+        "%s; failed to return schedule to due: %s"
+        error
+        (Schedule_store.store_error_to_string err)
+    in
+    dispatch_result ~error schedule_id Dispatch_failed
+;;
+
 let safe_consumer_dispatch config ~now consumer signal request =
-  try consumer.dispatch config ~now signal request with
-  | exn -> Error (Printexc.to_string exn)
+  Cancel_safe.protect
+    ~on_exn:(fun exn ->
+      Error
+        (Retryable_dispatch_failure
+           ("consumer dispatch raised: " ^ Printexc.to_string exn)))
+    (fun () -> consumer.dispatch config ~now signal request)
 ;;
 
 let dispatch_candidate
@@ -279,7 +302,10 @@ let dispatch_candidate
          Dispatch_start_rejected
      | Ok running_request ->
        (match safe_consumer_dispatch config ~now consumer signal running_request with
-        | Error error -> finish_failed_dispatch config ~now ~schedule_id error
+        | Error (Retryable_dispatch_failure detail) ->
+          finish_retryable_dispatch config ~now ~schedule_id detail
+        | Error (Terminal_dispatch_rejection detail) ->
+          finish_terminal_dispatch config ~now ~schedule_id detail
         | Ok detail ->
           (match Schedule_store.complete_running config ~now ~schedule_id ~detail () with
            | Ok _ -> dispatch_result ~detail schedule_id Dispatch_succeeded

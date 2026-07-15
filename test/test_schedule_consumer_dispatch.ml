@@ -308,6 +308,8 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (receipt |> member "projection_status" |> to_string);
     check string "receipt kind" "masc.keeper_wake.enqueued"
       (receipt |> member "kind" |> to_string);
+    check string "receipt occurrence awaits ack" "awaiting_ack"
+      (receipt |> member "occurrence_status" |> to_string);
     check string "receipt queue" "keeper_event_queue"
       (receipt |> member "queue" |> to_string);
     check string "receipt stimulus" "schedule_due"
@@ -377,7 +379,7 @@ let test_recurring_wakes_keep_distinct_occurrence_ids () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
-let test_keeper_wake_durable_enqueue_failure_is_not_success () =
+let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
   with_workspace
   @@ fun config ->
   let keeper_owner_path =
@@ -390,6 +392,7 @@ let test_keeper_wake_durable_enqueue_failure_is_not_success () =
   write_empty_file keeper_owner_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
+  let occurrence_id = single_signal_id result in
   (match List.hd result.dispatches with
    | { status = Schedule_runner.Dispatch_failed; error = Some message; _ } ->
      check bool "storage failure is explicit" true
@@ -400,13 +403,110 @@ let test_keeper_wake_durable_enqueue_failure_is_not_success () =
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing"
    | Some stored ->
-     check string "schedule did not report success" "failed"
+     check string "schedule remains retryable" "due"
        (Schedule_domain.schedule_status_to_string stored.status));
   check int "failed commit leaves no queued wake" 0
     (Keeper_event_queue.length
        (Keeper_registry_event_queue.snapshot
           ~base_path:config.Workspace_utils.base_path
-          "schedule-keeper"))
+          "schedule-keeper"));
+  Sys.remove keeper_owner_path;
+  let retried = tick_ok config ~now:202.0 in
+  check int "signal log is not duplicated" 0 (List.length retried.emitted);
+  (match List.hd retried.dispatches with
+   | { status = Schedule_runner.Dispatch_succeeded; _ } -> ()
+   | _ -> fail "next sequential tick did not retry the durable enqueue");
+  let queued =
+    Keeper_registry_event_queue.snapshot
+      ~base_path:config.Workspace_utils.base_path
+      "schedule-keeper"
+    |> Keeper_event_queue.to_list
+  in
+  check (list string) "retry preserves occurrence id" [ occurrence_id ]
+    (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
+;;
+
+let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let entry =
+    Keeper_registry.register ~base_path keeper_name (keeper_meta_for_name keeper_name)
+  in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.unregister ~base_path keeper_name)
+    (fun () ->
+      let request = create_keeper_wake_schedule config in
+      let signal =
+        match Schedule_runner.tick config ~now:201.0 with
+        | Ok { emitted = [ signal ]; _ } -> signal
+        | Ok _ -> fail "expected one durable schedule signal"
+        | Error err -> fail (Schedule_runner.runner_error_to_string err)
+      in
+      let running =
+        match
+          Schedule_store.start_due_candidate
+            config
+            ~now:201.5
+            ~schedule_id:request.schedule_id
+        with
+        | Ok running -> running
+        | Error err -> fail (Schedule_store.store_error_to_string err)
+      in
+      Atomic.set entry.fiber_wakeup false;
+      (match
+         Server_schedule_consumers.consumer.dispatch config ~now:202.0 signal running
+       with
+       | Ok _ -> ()
+       | Error _ -> fail "initial schedule occurrence dispatch failed");
+      check bool "initial dispatch wakes lane" true (Atomic.get entry.fiber_wakeup);
+      let lease =
+        match
+          Keeper_registry_event_queue.claim_when_result
+            ~base_path
+            keeper_name
+            ~claimed_at:202.5
+            ~ready:(fun _ -> true)
+        with
+        | Ok (Some lease) -> lease
+        | Ok None -> fail "scheduled occurrence was not queued"
+        | Error detail -> fail detail
+      in
+      (match
+         Keeper_registry_event_queue.settle_result
+           ~base_path
+           keeper_name
+           ~settled_at:203.0
+           ~lease
+           ~settlement:Keeper_registry_event_queue.Ack
+       with
+       | Ok (Keeper_registry_event_queue.Settled _)
+       | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
+       | Error detail -> fail detail);
+      (match Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+       | Some stored ->
+         check string "crash window leaves schedule running" "running"
+           (Schedule_domain.schedule_status_to_string stored.status)
+       | None -> fail "running schedule disappeared before recovery");
+      (match Schedule_store.recover_running_on_startup config ~now:204.0 with
+       | Ok (_, 1) -> ()
+       | Ok (_, recovered) -> failf "expected one recovered schedule, got %d" recovered
+       | Error err -> fail (Schedule_store.store_error_to_string err));
+      Atomic.set entry.fiber_wakeup false;
+      let retried = tick_ok config ~now:205.0 in
+      check bool "retry sends no second wake" false (Atomic.get entry.fiber_wakeup);
+      (match List.hd retried.dispatches with
+       | { detail = Some detail; _ } ->
+         check string "retry observes terminal ack" "already_acked"
+           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
+       | _ -> fail "retry completion receipt missing");
+      check int "retry enqueues no second occurrence" 0
+        (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         |> Keeper_event_queue.length))
 ;;
 
 let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
@@ -687,7 +787,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (acked_reaction_evidence |> member "matched_record_count" |> to_int))
 ;;
 
-let test_keeper_wake_ledger_failure_keeps_dispatch_success_visible () =
+let test_keeper_wake_ledger_failure_is_retryable () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
@@ -702,44 +802,18 @@ let test_keeper_wake_ledger_failure_keeps_dispatch_success_visible () =
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
-  check string "dispatch status stays succeeded" "succeeded"
+  check string "dispatch reports retryable failure" "failed"
     (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
-  let runner_status = runner_status_json_after_dispatches result in
-  let runner_counts =
-    Yojson.Safe.Util.(runner_status |> member "last_counts")
-  in
-  check string "ledger failure degrades runner health" "degraded"
-    Yojson.Safe.Util.(runner_status |> member "status" |> to_string);
-  check int "ledger failure still counts wake enqueue" 1
-    Yojson.Safe.Util.(runner_counts |> member "wake_enqueued" |> to_int);
-  check int "ledger failure increments wake failure" 1
-    Yojson.Safe.Util.(runner_counts |> member "wake_failed" |> to_int);
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing"
    | Some stored ->
-     check string "schedule succeeded" "succeeded"
+     check string "schedule remains due" "due"
        (Schedule_domain.schedule_status_to_string stored.status));
-  check int "wake remains durably queued" 1
-    (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
-  let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
-  in
-  let open Yojson.Safe.Util in
-  let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
-  let receipt = row |> member "dispatch_receipt" in
-  check string "receipt recognized" "recognized"
-    (receipt |> member "projection_status" |> to_string);
-  check string "ledger failure visible" "record_failed"
-    (receipt |> member "reaction_ledger_status" |> to_string);
-  check bool "ledger failure reason visible" true
-    (String.length (receipt |> member "reaction_ledger_error" |> to_string) > 0);
-  let queue_evidence = row |> member "keeper_queue_evidence" in
-  check string "queue evidence still matched" "matched_pending"
-    (queue_evidence |> member "projection_status" |> to_string);
-  let reaction_evidence = row |> member "keeper_reaction_evidence" in
-  check string "reaction ledger miss visible" "not_found"
-    (reaction_evidence |> member "projection_status" |> to_string)
+  (match (List.hd result.dispatches).error with
+   | Some detail ->
+     check bool "ledger failure is explicit" true
+       (String_util.contains_substring detail "keeper reaction ledger")
+   | None -> fail "ledger failure detail missing")
 ;;
 
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
@@ -785,8 +859,10 @@ let () =
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
-        ; test_case "keeper wake durable enqueue failure is not success" `Quick
-            test_keeper_wake_durable_enqueue_failure_is_not_success
+        ; test_case "keeper wake durable enqueue retries same occurrence" `Quick
+            test_keeper_wake_durable_enqueue_failure_retries_same_occurrence
+        ; test_case "acked occurrence recovery does not enqueue or wake again" `Quick
+            test_acked_occurrence_recovery_does_not_enqueue_or_wake_again
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "dashboard live supported non-terminal evidence matches supported request"
@@ -797,8 +873,8 @@ let () =
             test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported_payloads
         ; test_case "keeper wake dashboard tracks runtime inflight lease" `Quick
             test_keeper_wake_dashboard_tracks_runtime_inflight_lease
-        ; test_case "keeper wake ledger failure keeps dispatch success visible" `Quick
-            test_keeper_wake_ledger_failure_keeps_dispatch_success_visible
+        ; test_case "keeper wake ledger failure is retryable" `Quick
+            test_keeper_wake_ledger_failure_is_retryable
         ; test_case "keeper wake rejects invalid keeper name" `Quick
             test_keeper_wake_consumer_rejects_invalid_keeper_name
         ] )

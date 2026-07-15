@@ -4,6 +4,10 @@ type keeper_wake_reaction_ledger_status =
   | Keeper_wake_reaction_ledger_recorded
   | Keeper_wake_reaction_ledger_record_failed of string
 
+type keeper_wake_occurrence_status =
+  | Keeper_wake_awaiting_ack
+  | Keeper_wake_already_acked
+
 type dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
@@ -14,6 +18,7 @@ type dispatch_receipt =
       ; stimulus : string
       ; stimulus_id : string option
       ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
+      ; occurrence_status : keeper_wake_occurrence_status
       }
 
 val dispatch_receipt_of_detail :

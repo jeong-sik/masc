@@ -112,6 +112,11 @@ let request_of_json json =
   request ~keeper_name:(Keeper_invocation_types.target_name target) ~prompt
 ;;
 
+let with_reply_to ~keeper_name request =
+  Keeper_invocation_types.with_reply_to ~keeper_name request
+  |> Result.map_error (fun reason -> Invalid_target reason)
+;;
+
 let request_error_to_string = function
   | Invalid_target reason -> reason
   | Empty_prompt -> "message is required"
@@ -128,8 +133,15 @@ let target_name (request : request) =
 
 let prompt = Keeper_invocation_types.request_prompt
 
-let submit ~background_sw ~base_path ~caller ~(request : request) ~f () =
+let reply_to_keeper_name request =
+  Keeper_invocation_types.request_reply_to request
+  |> Option.map Keeper_invocation_types.reply_to_keeper_name
+;;
+
+let submit ?on_worker_settled ~background_sw ~base_path ~caller
+    ~(request : request) ~f () =
   Keeper_msg_async.submit
+    ?on_worker_settled
     ~background_sw
     ~base_path
     ~caller

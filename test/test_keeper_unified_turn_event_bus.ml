@@ -11,6 +11,25 @@ module Invocation = Masc.Keeper_invocation_contract
 module Kmsg = Masc.Keeper_msg_async
 module Ops = Masc.Keeper_tool_surface_ops
 module Turn_outcome = Masc.Keeper_turn_outcome
+module Event_queue = Masc.Keeper_event_queue
+module Registry_queue = Masc.Keeper_registry_event_queue
+
+let with_temp_dir prefix f =
+  let path = Filename.temp_file prefix "" in
+  Unix.unlink path;
+  Unix.mkdir path 0o700;
+  let rec remove target =
+    if Sys.is_directory target
+    then (
+      Sys.readdir target
+      |> Array.iter (fun name -> remove (Filename.concat target name));
+      Unix.rmdir target)
+    else Unix.unlink target
+  in
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_registry.clear (); remove path)
+    (fun () -> f path)
+;;
 
 let dummy_event payload =
   { Agent_sdk.Event_bus.meta =
@@ -483,6 +502,84 @@ let test_typed_keeper_invocation_wire_contract () =
     (List.mem_assoc "request_id" rejection_fields)
 ;;
 
+let test_keeper_completion_wake_is_typed_and_idempotent () =
+  with_temp_dir "keeper-completion-wake" @@ fun base_path ->
+  Masc.Keeper_registry.clear ();
+  let caller_meta =
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String "caller"
+         ; "agent_name", `String "keeper-caller-agent"
+         ; "trace_id", `String "caller-completion-wake-trace"
+         ])
+    |> Result.get_ok
+  in
+  ignore (Masc.Keeper_registry.register ~base_path "caller" caller_meta);
+  let raw_request =
+    Invocation.request ~keeper_name:"callee" ~prompt:"do work" |> Result.get_ok
+  in
+  let request =
+    match
+      Ops.For_testing.request_with_registered_reply_to
+        ~base_path
+        ~submitted_by:"keeper-caller-agent"
+        raw_request
+    with
+    | Ok request -> request
+    | Error _ -> Alcotest.fail "registered caller route rejected"
+  in
+  ignore (Masc.Keeper_registry.register ~base_path "caller-shadow" caller_meta);
+  (match
+     Ops.For_testing.request_with_registered_reply_to
+       ~base_path
+       ~submitted_by:"keeper-caller-agent"
+       raw_request
+   with
+   | Error (Ops.Ambiguous_caller_identity (_, 2)) -> ()
+   | _ -> Alcotest.fail "ambiguous caller identity was not rejected");
+  let durable_request =
+    Keeper_invocation_types.keeper_turn ~keeper_name:"callee" ~prompt:"do work"
+    |> Result.get_ok
+    |> Keeper_invocation_types.with_reply_to ~keeper_name:"caller"
+    |> Result.get_ok
+    |> Keeper_invocation_types.request_to_json
+    |> Keeper_invocation_types.request_of_json
+    |> Result.get_ok
+  in
+  check (option string) "reply-to survives durable codec" (Some "caller")
+    (durable_request
+     |> Keeper_invocation_types.request_reply_to
+     |> Option.map Keeper_invocation_types.reply_to_keeper_name);
+  let success =
+    Kmsg.Status_settlement
+      { status = Kmsg.Done { ok = true; body = "finished"; data = None }
+      ; durability = Kmsg.Durable
+      ; origin = Kmsg.Transition_commit
+      }
+  in
+  let project =
+    Ops.For_testing.project_keeper_completion
+      ~base_path
+      ~request
+      ~request_id:"run-success"
+  in
+  ignore (project success : Ops.keeper_completion_projection);
+  check bool "terminal replay reuses identity" true
+    (project success = Ops.Completion_already_present);
+  check bool "failure remains typed" true
+    (Ops.For_testing.terminal_completion_outcome (Kmsg.Lost { reason = "lost" })
+     = Some (Event_queue.Bg_failed "lost"));
+  let pending = Registry_queue.snapshot ~base_path "caller" |> Event_queue.to_list in
+  check int "one completion stimulus after replay" 1 (List.length pending);
+  match pending with
+  | [ { Event_queue.payload = Event_queue.Bg_completed completion; _ } ] ->
+    check bool "typed Keeper invocation kind" true
+      (completion.bg_kind = Event_queue.Keeper_invocation);
+    check bool "typed success outcome" true
+      (completion.bg_outcome = Event_queue.Bg_ok "finished");
+  | _ -> Alcotest.fail "expected one typed Keeper completion stimulus"
+;;
+
 let test_take_drain_cancel_clears_active_without_spin () =
   let open EB.For_testing in
   let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
@@ -568,6 +665,8 @@ let () =
             test_keeper_invocation_result_contracts
         ; test_case "typed Keeper invocation wire contract" `Quick
             test_typed_keeper_invocation_wire_contract
+        ; test_case "Keeper completion wake is typed and idempotent" `Quick
+            test_keeper_completion_wake_is_typed_and_idempotent
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

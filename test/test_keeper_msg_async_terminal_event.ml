@@ -96,7 +96,7 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
             ~on_worker_aborted:(fun reason ->
               aborted := reason :: !aborted;
               Ok ())
-            ~on_worker_settled:(fun settlement ->
+            ~on_worker_settled:(fun ~request_id:_ settlement ->
               settled := settlement :: !settled)
             ~background_sw:sw
             ~base_path
@@ -294,7 +294,7 @@ let test_closed_background_switch_rejects_worker_acceptance () =
                     ~on_worker_aborted:(fun reason ->
                       aborted := reason :: !aborted;
                       Ok ())
-                    ~on_worker_settled:(fun settlement ->
+                    ~on_worker_settled:(fun ~request_id:_ settlement ->
                       settled := settlement :: !settled)
                     ~background_sw:sw
                     ~base_path

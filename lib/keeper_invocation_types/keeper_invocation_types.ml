@@ -1,5 +1,6 @@
 type capability = Invoke_turn
 type target = Keeper of Keeper_id.Keeper_name.t
+type reply_to = Caller_keeper of Keeper_id.Keeper_name.t
 
 type input =
   | Delegated_turn of string
@@ -10,6 +11,7 @@ type request =
   { target : target
   ; capability : capability
   ; input : input
+  ; reply_to : reply_to option
   }
 
 type run_ref = { run_id : string; target : target; capability : capability }
@@ -40,6 +42,7 @@ let keeper_turn ~keeper_name ~prompt =
         { target = Keeper target_name
         ; capability = Invoke_turn
         ; input = Delegated_turn prompt
+        ; reply_to = None
         }
 ;;
 
@@ -47,7 +50,18 @@ let direct_turn ~keeper_name payload =
   let ( let* ) = Result.bind in
   let* () = Keeper_direct_invocation.validate payload in
   let* target_name = Keeper_id.Keeper_name.of_string keeper_name in
-  Ok { target = Keeper target_name; capability = Invoke_turn; input = Direct_delivery payload }
+  Ok
+    { target = Keeper target_name
+    ; capability = Invoke_turn
+    ; input = Direct_delivery payload
+    ; reply_to = None
+    }
+;;
+
+let with_reply_to ~keeper_name request =
+  Keeper_id.Keeper_name.of_string keeper_name
+  |> Result.map (fun keeper_name ->
+    { request with reply_to = Some (Caller_keeper keeper_name) })
 ;;
 
 let request_target (request : request) = request.target
@@ -65,11 +79,26 @@ let request_direct_delivery (request : request) =
   | Direct_delivery payload -> Some payload
 ;;
 
+let request_reply_to (request : request) = request.reply_to
+
+let reply_to_keeper_name = function
+  | Caller_keeper name -> Keeper_id.Keeper_name.to_string name
+;;
+
 let request_equal (left : request) (right : request) =
   match left.target, right.target, left.capability, right.capability with
   | Keeper left_name, Keeper right_name, Invoke_turn, Invoke_turn ->
     Keeper_id.Keeper_name.equal left_name right_name
     && equal_input left.input right.input
+    && Option.equal ( = ) left.reply_to right.reply_to
+;;
+
+let reply_to_to_json = function
+  | Caller_keeper name ->
+    `Assoc
+      [ "kind", `String "keeper"
+      ; "name", `String (Keeper_id.Keeper_name.to_string name)
+      ]
 ;;
 
 let request_to_json (request : request) =
@@ -77,6 +106,7 @@ let request_to_json (request : request) =
     [ "target", target_to_json request.target
     ; "capability", `String "invoke_turn"
     ; "input", input_to_yojson request.input
+    ; "reply_to", Option.fold ~none:`Null ~some:reply_to_to_json request.reply_to
     ]
 ;;
 
@@ -99,10 +129,29 @@ let required_string ~field name fields =
   | Some _ | None -> Error (Printf.sprintf "%s.%s must be a string" field name)
 ;;
 
+let reply_to_of_json = function
+  | `Null -> Ok None
+  | json ->
+    let ( let* ) = Result.bind in
+    let* fields =
+      exact_object ~field:"request.reply_to" ~expected:[ "kind"; "name" ] json
+    in
+    let* kind = required_string ~field:"request.reply_to" "kind" fields in
+    let* keeper_name = required_string ~field:"request.reply_to" "name" fields in
+    if not (String.equal kind "keeper")
+    then Error "request.reply_to.kind must be keeper"
+    else
+      Keeper_id.Keeper_name.of_string keeper_name
+      |> Result.map (fun name -> Some (Caller_keeper name))
+;;
+
 let request_of_json json =
   let ( let* ) = Result.bind in
   let* fields =
-    exact_object ~field:"request" ~expected:[ "target"; "capability"; "input" ] json
+    exact_object
+      ~field:"request"
+      ~expected:[ "target"; "capability"; "input"; "reply_to" ]
+      json
   in
   let* target_json =
     match List.assoc_opt "target" fields with
@@ -124,6 +173,12 @@ let request_of_json json =
     input_of_yojson input_json
     |> Result.map_error (fun detail -> "request.input: " ^ detail)
   in
+  let* reply_to_json =
+    match List.assoc_opt "reply_to" fields with
+    | Some value -> Ok value
+    | None -> Error "request.reply_to is required"
+  in
+  let* reply_to = reply_to_of_json reply_to_json in
   let* () =
     if input_to_yojson input = input_json
     then Ok ()
@@ -134,9 +189,12 @@ let request_of_json json =
   else if not (String.equal capability "invoke_turn")
   then Error "request.capability must be invoke_turn"
   else
-    match input with
-    | Delegated_turn prompt -> keeper_turn ~keeper_name ~prompt
-    | Direct_delivery payload -> direct_turn ~keeper_name payload
+    let* request =
+      match input with
+      | Delegated_turn prompt -> keeper_turn ~keeper_name ~prompt
+      | Direct_delivery payload -> direct_turn ~keeper_name payload
+    in
+    Ok { request with reply_to }
 ;;
 
 let run_id reference = reference.run_id

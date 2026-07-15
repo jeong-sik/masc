@@ -726,7 +726,7 @@ let test_keeper_msg_async_running_double_write_failure_is_terminal_in_memory () 
        let request_id =
          Keeper_msg_async.For_testing.submit
            request_ops
-           ~on_worker_settled:(fun settlement ->
+           ~on_worker_settled:(fun ~request_id:_ settlement ->
              settlements := settlement :: !settlements)
            ~background_sw
            ~base_path
@@ -784,7 +784,7 @@ let test_keeper_msg_async_running_write_failure_projects_durable_marker_once () 
            ~on_worker_aborted:(fun reason ->
              aborts := reason :: !aborts;
              Ok ())
-           ~on_worker_settled:(fun settlement ->
+           ~on_worker_settled:(fun ~request_id:_ settlement ->
              settlements := settlement :: !settlements)
            ~background_sw
            ~base_path
@@ -1144,7 +1144,7 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
            ~on_worker_aborted:(fun reason ->
              aborts := reason :: !aborts;
              Ok ())
-           ~on_worker_settled:(fun settlement ->
+           ~on_worker_settled:(fun ~request_id:_ settlement ->
              settlements := settlement :: !settlements)
            ~background_sw:sw
            ~base_path
@@ -1599,7 +1599,7 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
        let request_id =
          Keeper_msg_async.For_testing.submit
            request_ops
-           ~on_worker_settled:(fun settlement ->
+           ~on_worker_settled:(fun ~request_id:_ settlement ->
              settlements := settlement :: !settlements)
            ~background_sw:sw
            ~base_path
@@ -1695,7 +1695,7 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
        let settlements = ref [] in
        let request_id =
          Keeper_msg_async.submit
-           ~on_worker_settled:(fun settlement ->
+           ~on_worker_settled:(fun ~request_id:_ settlement ->
              settlements := settlement :: !settlements)
            ~background_sw:sw
            ~base_path

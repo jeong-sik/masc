@@ -1622,6 +1622,7 @@ let process_single_turn ~user_row_origin ~queued_turn
            "canonical request terminal committed while its direct transcript checkpoint remains incomplete")
   in
   let publish_committed_completion
+      ~request_id:_
       (settlement : Keeper_msg_async.worker_settlement) =
     cleanup_direct_checkpoint ();
     let completion =

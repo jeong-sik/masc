@@ -129,9 +129,11 @@ and bg_job_completion = {
     [bg_board_post_id] correlates to an optional board evidence post ("" if
     none). *)
 
-and bg_job_kind = Subprocess
-(** RFC-0290: background job kinds. Closed sum (v1 = [Subprocess]); a new kind
-    forces every match to add an arm rather than defaulting. *)
+and bg_job_kind =
+  | Subprocess
+  | Keeper_invocation
+(** Background completion kinds. [Keeper_invocation] carries the terminal
+    result of a delegated Keeper turn back to its caller lane. *)
 
 and bg_job_outcome =
   | Bg_ok of string  (** result payload *)

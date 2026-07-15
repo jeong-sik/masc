@@ -2679,6 +2679,29 @@ let test_extract_turn_stats_missing_returns_none () =
   let result = Gate_keeper_backend.extract_turn_stats body in
   check bool "missing fields returns None" true (result = None)
 
+let parse_keeper_ack body =
+  Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+    ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
+
+let test_typed_keeper_ack () =
+  let body =
+    {|{"run_ref":{"run_id":"run-1","target":{"kind":"keeper","name":"luna"},"capability":"invoke_turn"},"result_contract":"awaiting_execution"}|}
+  in
+  match parse_keeper_ack body with
+  | Ok { tracking = Gate_protocol.Keeper_run { run_ref; result_contract }; _ } ->
+    check string "run id" "run-1" (Keeper_invocation_contract.run_id run_ref);
+    check bool "contract" true
+      (result_contract = Keeper_invocation_contract.Awaiting_execution)
+  | Ok _ | Error _ -> fail "expected typed Keeper-run ACK"
+
+let test_keeper_ack_rejects_retargeting () =
+  let body =
+    {|{"run_ref":{"run_id":"run-1","target":{"kind":"keeper","name":"other"},"capability":"invoke_turn"},"result_contract":"awaiting_execution"}|}
+  in
+  match parse_keeper_ack body with
+  | Error (Gate_keeper_backend.Run_ref_target_mismatch _) -> ()
+  | Ok _ | Error _ -> fail "expected exact Keeper target rejection"
+
 (* ── RFC-connector-deferred-reply-via-chat-queue connector deferred-reply routing ───────────────── *)
 
 let test_route_busy_discord_enqueues () =
@@ -2923,5 +2946,9 @@ let () =
             test_extract_turn_stats_ignores_model_only_payload;
           test_case "turn stats missing returns None" `Quick
             test_extract_turn_stats_missing_returns_none;
+        ] );
+      ( "typed_ack",
+        [ test_case "accepts exact run_ref" `Quick test_typed_keeper_ack
+        ; test_case "rejects retargeting" `Quick test_keeper_ack_rejects_retargeting
         ] );
     ]

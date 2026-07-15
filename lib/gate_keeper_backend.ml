@@ -28,7 +28,7 @@ type connector_kind =
       (** Every connector that is not a wired in-process inbound gateway with its
           own outbound adapter. Today this is the HTTP gate-route lane
           (imessage-bot, cli-connector) which POSTs and awaits synchronously, so
-          a busy message keeps the async [masc_keeper_msg] poll path; see
+          a busy message keeps the asynchronous typed Keeper-run path; see
           RFC-connector-deferred-reply-via-chat-queue §3.3 option (a). *)
 
 type submission_owner =
@@ -93,7 +93,7 @@ let non_empty_opt value =
     legitimate reply *without* an ACK contract (queued, running — handled
     separately by the [Streaming] arm of the dispatch match), and the
     backend could not parse the ACK contract at all (malformed JSON,
-    missing request_id, missing status, unknown future status). The
+    missing/invalid run_ref or result contract). The
     connector could not distinguish "queued" from "parse failed".
 
     Exposing the failure as a typed sum lets the dispatch site surface
@@ -101,28 +101,34 @@ let non_empty_opt value =
     rather than silently substituting the keeper's reply text. *)
 type ack_parse_failure =
   | Invalid_json of string
-  | Missing_request_id
-  | Empty_request_id
-  | Missing_status
-  | Invalid_status of string
+  | Missing_run_ref
+  | Invalid_run_ref of Keeper_invocation_contract.request_error
+  | Run_ref_target_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Missing_result_contract
+  | Invalid_result_contract of string
 
 let ack_parse_failure_to_string = function
   | Invalid_json detail ->
       Printf.sprintf "invalid json: %s" detail
-  | Missing_request_id -> "missing request_id"
-  | Empty_request_id -> "empty request_id"
-  | Missing_status -> "missing status"
-  | Invalid_status raw ->
-      Printf.sprintf "unknown status %S (not in the closed status set)" raw
+  | Missing_run_ref -> "missing run_ref"
+  | Invalid_run_ref error ->
+    Keeper_invocation_contract.request_error_to_string error
+  | Run_ref_target_mismatch { expected; actual } ->
+    Printf.sprintf "run_ref target %S does not match expected Keeper %S" actual expected
+  | Missing_result_contract -> "missing result_contract"
+  | Invalid_result_contract raw ->
+    Printf.sprintf "unknown result_contract %S" raw
 
 (** Parse the async ACK envelope from a keeper tool response body.
 
-    Returns [Ok request] when the body is a valid JSON object with both
-    a non-empty [request_id] and a [status] that maps to one of the
-    closed [Gate_protocol.message_request_status] variants.
+    Returns [Ok request] when the body carries a valid typed [run_ref] and
+    closed Keeper invocation result contract.
 
     Returns [Error reason] otherwise. JSON parse failures are isolated
-    from the closed-sum status check so that a malformed envelope is
+    from the typed tracking check so that a malformed envelope is
     surfaced as a backend-degraded path, distinct from a legitimately
     absent ACK field. *)
 let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata body :
@@ -134,47 +140,33 @@ let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata
   match json with
   | Error failure -> Error failure
   | Ok json ->
-      let request_id =
-        match Json_util.get_string json "request_id" with
-        | None -> None
-        | Some value -> non_empty_opt value
-      in
-      (match request_id with
-       | None ->
-           (match Json_util.get_string json "request_id" with
-            | Some _ -> Error Empty_request_id
-            | None -> Error Missing_request_id)
-       | Some trimmed_request_id -> (
-           match Json_util.get_string json "status" with
-           | None -> Error Missing_status
-           | Some raw ->
-               let normalized = String.lowercase_ascii (String.trim raw) in
-               (match
-                  Gate_protocol.message_request_status_of_string normalized
-                with
-               | Some status ->
-                   let destination_id =
-                     match Json_util.get_string json "keeper_name" with
-                     | Some value ->
-                       (match non_empty_opt value with
-                        | Some trimmed -> trimmed
-                        | None -> keeper_name)
-                     | None -> keeper_name
-                   in
-                   let request : Gate_protocol.message_request =
-                     { request_id = trimmed_request_id
-                     ; destination_type = "keeper"
-                     ; destination_id
-                     ; channel
-                     ; actor_id = non_empty_opt channel_user_id
-                     ; status
-                     ; modalities = [ "text" ]
-                     ; transport = non_empty_opt channel
-                     ; metadata = ("status_source", "keeper_msg_async") :: metadata
-                     }
-                   in
-                   Ok request
-               | None -> Error (Invalid_status normalized))))
+    (match Json_util.assoc_member_opt "run_ref" json with
+     | None -> Error Missing_run_ref
+     | Some run_ref_json ->
+       (match Keeper_invocation_contract.run_ref_of_json run_ref_json with
+        | Error error -> Error (Invalid_run_ref error)
+        | Ok run_ref ->
+          let actual = Keeper_invocation_contract.run_ref_target_name run_ref in
+          if not (String.equal actual keeper_name)
+          then Error (Run_ref_target_mismatch { expected = keeper_name; actual })
+          else
+            match Json_util.get_string json "result_contract" with
+            | None -> Error Missing_result_contract
+            | Some raw ->
+              (match Keeper_invocation_contract.result_contract_of_string raw with
+               | None -> Error (Invalid_result_contract raw)
+               | Some result_contract ->
+                 Ok
+                   { Gate_protocol.tracking =
+                       Gate_protocol.Keeper_run { run_ref; result_contract }
+                   ; destination_type = "keeper"
+                   ; destination_id = actual
+                   ; channel
+                   ; actor_id = non_empty_opt channel_user_id
+                   ; modalities = [ "text" ]
+                   ; transport = non_empty_opt channel
+                   ; metadata = ("tracking_source", "keeper_invocation") :: metadata
+                   })))
 
 let in_flight_metadata (info : Keeper_turn_admission.in_flight_info option) =
   match info with
@@ -183,7 +175,12 @@ let in_flight_metadata (info : Keeper_turn_admission.in_flight_info option) =
       [ "in_flight_lane", Keeper_turn_admission.lane_to_string lane ]
 
 let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
-  let status = Gate_protocol.message_request_status_to_string request.status in
+  let tracking =
+    match request.tracking with
+    | Gate_protocol.Keeper_run { result_contract; _ } ->
+      Keeper_invocation_contract.result_contract_to_string result_contract
+    | Gate_protocol.Chat_receipt { receipt_id } -> "queued receipt " ^ receipt_id
+  in
   let in_flight_text =
     match in_flight with
     | None -> ""
@@ -193,15 +190,14 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
           (Keeper_turn_admission.lane_to_string lane)
   in
   Printf.sprintf
-    "%s is busy; your message is %s (request_id=%s).%s"
+    "%s is busy; the Keeper invocation contract is %s. Preserve the returned tracking value.%s"
     request.destination_id
-    status
-    request.request_id
+    tracking
     in_flight_text
 
 (* ACK text for the RFC-connector-deferred-reply-via-chat-queue chat-queue deferral path. The
    message was durably enqueued onto [Keeper_chat_queue], so its receipt id is
-   the correlation handle instead of a [Keeper_msg_async] poll request id. The
+   the correlation handle instead of a Keeper-run reference. The
    reply is delivered later by the serial consumer through the connector's
    outbound adapter. *)
 let busy_ack_reply_text_queued
@@ -252,16 +248,15 @@ let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
         [ ( "shutdown_operation_id"
           , Keeper_shutdown_types.Operation_id.to_string operation_id ) ]
   in
-  { Gate_protocol.request_id = receipt_id
+  { Gate_protocol.tracking = Gate_protocol.Chat_receipt { receipt_id }
   ; destination_type = "keeper"
   ; destination_id = keeper_name
   ; channel
   ; actor_id = non_empty_opt channel_user_id
-  ; status = Gate_protocol.Queued
   ; modalities = [ "text" ]
   ; transport = non_empty_opt channel
   ; metadata =
-      [ "status_source", "keeper_chat_queue"
+      [ "tracking_source", "keeper_chat_queue"
       ; "receipt_id", receipt_id
       ; "queue_revision", Int64.to_string receipt.revision
       ; "pending_count", string_of_int receipt.pending_count
@@ -706,13 +701,13 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
                body — that collapses the queued state with a degraded
                parse path and breaks the connector's "is this queued?"
                decision. Log the parse failure with the same
-               [status_source=keeper_msg_async] surface so on-call can
+               [tracking_source=keeper_invocation] surface so on-call can
                triage whether the keeper contract regressed or the body
                was truncated mid-flight, and emit a degraded reply that
                names the parse failure without leaking the raw body. *)
             Log.Server.warn
               "channel gate async ACK parse failure (keeper=%s, lane=%s, \
-               request_id_context=%s, failure=%s): connector will see a \
+               payload_bytes=%s, failure=%s): connector will see a \
                degraded ACK, not the keeper's reply body."
               keeper_name lane (extract_reply_text body |> String.length |> string_of_int)
               (ack_parse_failure_to_string failure);
@@ -720,7 +715,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
             , Printf.sprintf
                 "%s is busy; the gate could not parse the async ACK \
                  envelope (%s). Your message was forwarded to the keeper, \
-                 but no durable request id is available. Treat this as a \
+                 but no typed tracking value is available. Treat this as a \
                  transient backend degradation rather than a queued reply."
                 keeper_name
                 (ack_parse_failure_to_string failure) )
@@ -753,7 +748,8 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
       let reply =
         redact_text
           (busy_ack_reply_text_queued ~admission_rejection ~keeper_name
-             ~receipt_id:message_request.request_id
+             ~receipt_id:
+               (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id)
              ~recovery_required_count:receipt.recovery_required_count)
       in
       let stats =

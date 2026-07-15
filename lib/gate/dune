@@ -58,6 +58,7 @@
   ; existing
   masc_config
   masc_core
+  masc.keeper_invocation_types
   masc_pulse
   masc.http_client
   masc.masc_log

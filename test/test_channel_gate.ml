@@ -162,21 +162,20 @@ let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~channel_user_name:_
 
 let queued_request : Gate_protocol.message_request =
   {
-    request_id = "req-queued";
+    tracking = Gate_protocol.Chat_receipt { receipt_id = "receipt-queued" };
     destination_type = "keeper";
     destination_id = "luna";
     channel = "discord";
     actor_id = Some "user-1";
-    status = Gate_protocol.Queued;
     modalities = [ "text" ];
     transport = Some "discord";
-    metadata = [ ("status_source", "keeper_msg_async") ];
+    metadata = [ ("tracking_source", "keeper_chat_queue") ];
   }
 
 let mock_dispatch_queued ~channel:_ ~channel_user_id:_ ~channel_user_name:_
     ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_ ~content:_ =
   Gate_protocol.Reply
-    { content = "luna is busy; your message is queued (request_id=req-queued)."
+    { content = "luna is busy; your message is durably queued."
     ; structured = None
     ; stats = None
     ; message_request = Some queued_request
@@ -200,13 +199,14 @@ let test_handle_inbound_surfaces_message_request () =
   match Channel_gate.handle_inbound ~dispatch:mock_dispatch_queued msg with
   | Ok out -> (
       check string "reply content"
-        "luna is busy; your message is queued (request_id=req-queued)."
+        "luna is busy; your message is durably queued."
         out.content;
       match out.message_request with
       | Some request ->
-          check string "request id" "req-queued" request.request_id;
-          check string "status" "queued"
-            (Gate_protocol.message_request_status_to_string request.status)
+          (match request.tracking with
+           | Gate_protocol.Chat_receipt { receipt_id } ->
+             check string "chat receipt" "receipt-queued" receipt_id
+           | Gate_protocol.Keeper_run _ -> fail "expected chat receipt tracking")
       | None -> fail "expected message_request")
   | Error e -> fail (Channel_gate.gate_error_to_string e)
 

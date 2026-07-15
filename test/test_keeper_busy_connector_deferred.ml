@@ -24,6 +24,7 @@ let check name cond =
     Printf.printf "  \xe2\x9c\x97 %s\n%!" name)
 
 let contains ~affix text = Astring.String.is_infix ~affix text
+let chat_receipt = function Gate_protocol.Chat_receipt r -> Some r.receipt_id | _ -> None
 
 let keeper_name = "busy-connector-keeper"
 
@@ -116,11 +117,11 @@ let test_busy_discord_enqueues () =
         (match reply with
          | Gate_protocol.Reply
              { message_request = Some request; content; _ } ->
-             ack_receipt_id := Some request.request_id;
-             check "busy connector ACK is queued"
-               (request.status = Gate_protocol.Queued);
-             check "busy connector ACK carries queue status source"
-               (List.assoc_opt "status_source" request.metadata
+             ack_receipt_id := chat_receipt request.tracking;
+             check "busy connector ACK carries a chat receipt"
+               (Option.is_some !ack_receipt_id);
+             check "busy connector ACK carries queue tracking source"
+               (List.assoc_opt "tracking_source" request.metadata
                 = Some "keeper_chat_queue");
              check "busy connector ACK carries queue revision"
                (List.assoc_opt "queue_revision" request.metadata <> None);
@@ -229,8 +230,8 @@ let test_unpublished_busy_slot_queues_without_resolved_meta () =
         in
         (match reply with
          | Gate_protocol.Reply { message_request = Some request; _ } ->
-           check "unpublished busy slot returns a queued ACK"
-             (request.status = Gate_protocol.Queued)
+           check "unpublished busy slot returns a chat receipt"
+             (Option.is_some (chat_receipt request.tracking))
          | Gate_protocol.Reply { message_request = None; _ }
          | Gate_protocol.Keeper_error_result _
          | Gate_protocol.Unavailable_result ->
@@ -335,7 +336,8 @@ let test_pending_receipt_prevents_direct_overtake () =
       in
       (match reply with
        | Gate_protocol.Reply { message_request = Some request; _ } ->
-         check "later connector input is queued" (request.status = Gate_protocol.Queued)
+         check "later connector input has a chat receipt"
+           (Option.is_some (chat_receipt request.tracking))
        | _ -> check "later connector input is queued" false);
       let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
       check "FIFO keeps both accepted receipts pending"
@@ -382,7 +384,8 @@ let test_busy_slack_preserves_thread_context () =
       in
       (match reply with
        | Gate_protocol.Reply { message_request = Some request; _ } ->
-         check "Slack busy input is queued" (request.status = Gate_protocol.Queued)
+         check "Slack busy input has a chat receipt"
+           (Option.is_some (chat_receipt request.tracking))
        | _ -> check "Slack busy input is queued" false);
       match (Keeper_chat_queue.snapshot ~keeper_name).pending with
       | [ { message =
@@ -454,8 +457,8 @@ let test_shutdown_fenced_connector_ack
         (match reply with
          | Gate_protocol.Reply
              { message_request = Some request; content = ack_text; _ } ->
-           check (label ^ " shutdown-fenced input is durably queued")
-             (request.status = Gate_protocol.Queued);
+           check (label ^ " shutdown-fenced input has a durable chat receipt")
+             (Option.is_some (chat_receipt request.tracking));
            check (label ^ " ACK metadata carries shutdown operation id")
              (List.assoc_opt "shutdown_operation_id" request.metadata
               = Some operation_id_text);

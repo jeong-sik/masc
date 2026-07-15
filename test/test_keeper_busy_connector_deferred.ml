@@ -2,7 +2,7 @@
 
    Production-path proof (not a pure-helper test): a Discord connector message
    that arrives while the keeper already holds an in-flight turn is routed
-   through [Gate_keeper_backend.dispatch] onto [Keeper_chat_queue] (where the
+   through [Gate_keeper_backend.accept_connector] onto [Keeper_chat_queue] (where the
    serial consumer can drain it and deliver the reply via the Discord outbound
    adapter), NOT the outbound-less async [Keeper_msg_async] poll store — the
    RFC root-cause fix. It also pins the recording-ownership invariant: the gate
@@ -26,6 +26,30 @@ let check name cond =
 let contains ~affix text = Astring.String.is_infix ~affix text
 
 let keeper_name = "busy-connector-keeper"
+
+let discord_delivery ~channel_id ~user_id ~external_message_id :
+    Gate_keeper_backend.connector_delivery =
+  { source = Keeper_chat_queue.Discord { channel_id; user_id }
+  ; surface =
+      Surface_ref.Discord
+        { guild_id = None
+        ; channel_id
+        ; parent_channel_id = None
+        ; thread_id = None
+        }
+  ; conversation_id = Some (Printf.sprintf "discord:dm:channel:%s" channel_id)
+  ; external_message_id = Some external_message_id
+  }
+
+let slack_delivery ~channel_id ~user_id ~user_name ~team_id ~thread_ts
+    ~external_message_id : Gate_keeper_backend.connector_delivery =
+  { source =
+      Keeper_chat_queue.Slack
+        { channel_id; user_id; user_name; team_id; thread_ts }
+  ; surface = Surface_ref.Slack { team_id; channel_id; thread_ts }
+  ; conversation_id = Some (Printf.sprintf "slack:channel:%s" channel_id)
+  ; external_message_id = Some external_message_id
+  }
 
 (* Hold the keeper's admission slot busy in a forked fiber (the proven pattern
    from test_keeper_turn_admission): the body resolves [started] then blocks on
@@ -97,13 +121,11 @@ let test_busy_discord_enqueues () =
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
           with_busy_slot ~base ~sw (fun () ->
-            Gate_keeper_backend.dispatch
-              ~connector_kind:Gate_keeper_backend.Discord
-              ~submission_owner:Gate_keeper_backend.Channel_actor
-              ~sw ~clock ~proc_mgr:None ~net:None
-              ~publication_recovery_provider:
-                Masc_test_deps.non_runtime_publication_recovery_provider
-              ~config
+            Gate_keeper_backend.accept_connector
+              ~delivery:
+                (discord_delivery ~channel_id:"chan-777" ~user_id:"user-42"
+                   ~external_message_id:"discord-msg-777")
+              ~clock ~config
               ~channel:"discord" ~channel_user_id:"user-42"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
               ~keeper_name ~idempotency_key:"discord-msg-777"
@@ -215,13 +237,12 @@ let test_unpublished_busy_slot_queues_without_resolved_meta () =
           with_unpublished_busy_slot ~base ~sw (fun () ->
             check "raw lock has no published in-flight metadata"
               (Keeper_turn_admission.in_flight ~base_path:base ~keeper_name = None);
-            Gate_keeper_backend.dispatch
-              ~connector_kind:Gate_keeper_backend.Discord
-              ~submission_owner:Gate_keeper_backend.Channel_actor
-              ~sw ~clock ~proc_mgr:None ~net:None
-              ~publication_recovery_provider:
-                Masc_test_deps.non_runtime_publication_recovery_provider
-              ~config
+            Gate_keeper_backend.accept_connector
+              ~delivery:
+                (discord_delivery ~channel_id:"chan-unpublished"
+                   ~user_id:"user-unpublished"
+                   ~external_message_id:"discord-msg-unpublished")
+              ~clock ~config
               ~channel:"discord" ~channel_user_id:"user-unpublished"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-unpublished"
               ~keeper_name ~idempotency_key:"discord-msg-unpublished"
@@ -265,13 +286,11 @@ let test_busy_discord_persist_failure_is_explicit () =
           with_busy_slot ~base ~sw (fun () ->
             Keeper_chat_queue.For_testing.fail_transaction_at_stages
               [ Mutation_applied ];
-            Gate_keeper_backend.dispatch
-              ~connector_kind:Gate_keeper_backend.Discord
-              ~submission_owner:Gate_keeper_backend.Channel_actor
-              ~sw ~clock ~proc_mgr:None ~net:None
-              ~publication_recovery_provider:
-                Masc_test_deps.non_runtime_publication_recovery_provider
-              ~config
+            Gate_keeper_backend.accept_connector
+              ~delivery:
+                (discord_delivery ~channel_id:"chan-777" ~user_id:"user-42"
+                   ~external_message_id:"discord-msg-persist-fail")
+              ~clock ~config
               ~channel:"discord" ~channel_user_id:"user-42"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
               ~keeper_name ~idempotency_key:"discord-msg-persist-fail"
@@ -319,15 +338,13 @@ let test_pending_receipt_prevents_direct_overtake () =
                  { channel_id = "chan-777"; user_id = "user-42" }
            ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
            });
-      Eio.Switch.run @@ fun sw ->
+      Eio.Switch.run @@ fun _sw ->
       let reply =
-        Gate_keeper_backend.dispatch
-          ~connector_kind:Gate_keeper_backend.Discord
-          ~submission_owner:Gate_keeper_backend.Channel_actor
-          ~sw ~clock ~proc_mgr:None ~net:None
-          ~publication_recovery_provider:
-            Masc_test_deps.non_runtime_publication_recovery_provider
-          ~config
+        Gate_keeper_backend.accept_connector
+          ~delivery:
+            (discord_delivery ~channel_id:"chan-777" ~user_id:"user-42"
+               ~external_message_id:"discord-msg-778")
+          ~clock ~config
           ~channel:"discord" ~channel_user_id:"user-42"
           ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
           ~keeper_name ~idempotency_key:"discord-msg-778"
@@ -364,13 +381,13 @@ let test_busy_slack_preserves_thread_context () =
       Eio.Switch.run @@ fun sw ->
       let reply =
         with_busy_slot ~base ~sw (fun () ->
-          Gate_keeper_backend.dispatch
-            ~connector_kind:Gate_keeper_backend.Slack
-            ~submission_owner:Gate_keeper_backend.Channel_actor
-            ~sw ~clock ~proc_mgr:None ~net:None
-            ~publication_recovery_provider:
-              Masc_test_deps.non_runtime_publication_recovery_provider
-            ~config
+          Gate_keeper_backend.accept_connector
+            ~delivery:
+              (slack_delivery ~channel_id:"C-777" ~user_id:"U-42"
+                 ~user_name:"Slack User" ~team_id:(Some "T-777")
+                 ~thread_ts:(Some "171.001")
+                 ~external_message_id:"slack-msg-171.001")
+            ~clock ~config
             ~channel:"slack" ~channel_user_id:"U-42"
             ~channel_user_name:"Slack User" ~channel_workspace_id:"C-777"
             ~keeper_name ~idempotency_key:"slack-msg-171.001"
@@ -481,7 +498,7 @@ let test_exact_source_identity_converges () =
         (snapshot.pending = [] && Int64.equal snapshot.terminal_count 1L))
 
 let test_shutdown_fenced_connector_ack
-    ~label ~connector_kind ~channel ~channel_user_id ~channel_user_name
+    ~label ~delivery ~channel ~channel_user_id ~channel_user_name
     ~channel_workspace_id ~metadata ~content ~source_matches =
   Printf.printf
     "Test: shutdown-fenced %s ACK carries typed operation cause\n%!"
@@ -519,13 +536,7 @@ let test_shutdown_fenced_connector_ack
       Eio.Switch.run (fun sw ->
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
-          Gate_keeper_backend.dispatch
-            ~connector_kind
-            ~submission_owner:Gate_keeper_backend.Channel_actor
-            ~sw ~clock ~proc_mgr:None ~net:None
-            ~publication_recovery_provider:
-              Masc_test_deps.non_runtime_publication_recovery_provider
-            ~config
+          Gate_keeper_backend.accept_connector ~delivery ~clock ~config
             ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
             ~keeper_name
             ~idempotency_key:("shutdown-fenced-" ^ String.lowercase_ascii label)
@@ -572,7 +583,10 @@ let test_shutdown_fenced_connector_ack
 
 let test_shutdown_fenced_discord_ack () =
   test_shutdown_fenced_connector_ack
-    ~label:"Discord" ~connector_kind:Gate_keeper_backend.Discord
+    ~label:"Discord"
+    ~delivery:
+      (discord_delivery ~channel_id:"discord-channel" ~user_id:"discord-user"
+         ~external_message_id:"shutdown-fenced-discord")
     ~channel:"discord" ~channel_user_id:"discord-user"
     ~channel_user_name:"Discord User" ~channel_workspace_id:"discord-channel"
     ~metadata:[] ~content:"keep this until restart"
@@ -583,7 +597,12 @@ let test_shutdown_fenced_discord_ack () =
 
 let test_shutdown_fenced_slack_ack () =
   test_shutdown_fenced_connector_ack
-    ~label:"Slack" ~connector_kind:Gate_keeper_backend.Slack
+    ~label:"Slack"
+    ~delivery:
+      (slack_delivery ~channel_id:"C-SHUTDOWN" ~user_id:"U-SHUTDOWN"
+         ~user_name:"Slack User" ~team_id:(Some "T-SHUTDOWN")
+         ~thread_ts:(Some "171.999")
+         ~external_message_id:"shutdown-fenced-slack")
     ~channel:"slack" ~channel_user_id:"U-SHUTDOWN"
     ~channel_user_name:"Slack User" ~channel_workspace_id:"C-SHUTDOWN"
     ~metadata:

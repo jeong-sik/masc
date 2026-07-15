@@ -1,4 +1,6 @@
 module Cases = Test_mcp_tool_matrix_cases
+module Mcp_eio = Masc.Mcp_server_eio
+module Mcp_server = Masc.Mcp_server
 
 let contains_substring text fragment =
   let text_len = String.length text in

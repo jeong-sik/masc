@@ -134,7 +134,7 @@ let create_keeper env sw state name =
       clock = Eio.Stdenv.clock env;
       proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
       publication_recovery_registry =
-        (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
+        (Lib.Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
     }
   in
   match

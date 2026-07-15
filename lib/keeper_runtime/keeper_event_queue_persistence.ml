@@ -3,7 +3,6 @@ module State = Keeper_event_queue_state
 
 type lease_kind = State.lease_kind =
   | Single
-  | Board_batch
   | Legacy_inflight
 
 type requeue_reason = State.requeue_reason =
@@ -552,19 +551,6 @@ let claim_when_result
   =
   commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
     match State.claim_when ~claimed_at ~ready state with
-    | Error _ as error -> error
-    | Ok (state, lease) -> Ok (state, lease))
-;;
-
-let claim_board_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~claimed_at
-      ()
-  =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.claim_board ~claimed_at state with
     | Error _ as error -> error
     | Ok (state, lease) -> Ok (state, lease))
 ;;

@@ -5,11 +5,10 @@
 
     - the [heartbeat_event_intake] record returned to the heartbeat loop;
     - per-class string labels used in Otel_metric_store and log lines;
-    - per-stimulus consumption ([consume_single_heartbeat_stimulus]) +
-      board-batch consumption ([consume_board_stimulus_batch]);
+    - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
     - the top-level RFC-0020 §3 Rule 4 draining function
-      ([heartbeat_event_intake]) that prefers a debounced board batch and
-      falls back to a single non-board queue dequeue. *)
+      ([heartbeat_event_intake]) that leases the earliest ready stimulus
+      without assigning priority to a payload family. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -241,29 +240,6 @@ let consume_single_heartbeat_stimulus
     []
 ;;
 
-let consume_board_stimulus_batch ~meta_after_triage batch =
-  let batch_len = List.length batch in
-  if batch_len > 1 then
-    Log.Keeper.info
-      "turn digest: coalesced %d board signals into one turn (keeper=%s)"
-      batch_len
-      meta_after_triage.name;
-  List.filter_map
-    (fun (stim : Keeper_event_queue.stimulus) ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string StimulusConsumed)
-         ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
-         ();
-       Log.Keeper.info
-         "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=board_signal \
-          (keeper=%s)"
-         stim.post_id
-         (stimulus_urgency_to_string stim.urgency)
-         meta_after_triage.name;
-       pending_board_event_of_stimulus ~meta_after_triage stim)
-    batch
-;;
-
 let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
   | Keeper_event_queue.Hitl_resolved resolution ->
@@ -286,28 +262,19 @@ let heartbeat_event_intake
       ~meta_after_triage
       ~pending_board_events
   =
-  (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus per
-     turn, where the board unit is the turn digest: every queued board
-     signal is consumed as one batch ({!Keeper_event_queue.drain_board_all},
-     RFC-0334 W2 — arrival-window batching is retired), and the non-board
-     fallback below stays a single stimulus. *)
+  (* RFC-0020 §3 Rule 4 — lease at most one Event Layer stimulus per turn.
+     The queue chooses the earliest ready stimulus while preserving every
+     skipped unready entry in place. Board, Connector, HITL, Schedule, Fusion,
+     and Goal inputs therefore share one lane order instead of a domain
+     priority hierarchy. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
   let claim_new () =
-    match
-      Keeper_registry_event_queue.claim_board_result
-        ~base_path
-        keeper_name
-        ~claimed_at:(Time_compat.now ())
-    with
-    | Error _ as error -> error
-    | Ok (Some _ as lease) -> Ok lease
-    | Ok None ->
-      Keeper_registry_event_queue.claim_when_result
-        ~base_path
-        keeper_name
-        ~claimed_at:(Time_compat.now ())
-        ~ready:stimulus_ready_for_intake
+    Keeper_registry_event_queue.claim_when_result
+      ~base_path
+      keeper_name
+      ~claimed_at:(Time_compat.now ())
+      ~ready:stimulus_ready_for_intake
   in
   let claimed_lease =
     match Keeper_registry_event_queue.active_lease_result ~base_path keeper_name with
@@ -328,10 +295,7 @@ let heartbeat_event_intake
       let stimuli = Keeper_registry_event_queue.lease_stimuli lease in
       let observations =
         match Keeper_registry_event_queue.lease_kind lease, stimuli with
-        | Keeper_event_queue_persistence.Board_batch, batch ->
-          consume_board_stimulus_batch ~meta_after_triage batch
-        | ( Keeper_event_queue_persistence.Single
-          | Keeper_event_queue_persistence.Legacy_inflight ), [ stimulus ] ->
+        | Keeper_event_queue_persistence.Single, [ stimulus ] ->
           consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stimulus
         | ( Keeper_event_queue_persistence.Single
           | Keeper_event_queue_persistence.Legacy_inflight ), stimuli ->

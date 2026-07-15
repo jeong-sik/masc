@@ -3,11 +3,6 @@ type urgency =
   | Normal
   | Low
 
-let urgency_rank = function
-  | Immediate -> 0
-  | Normal -> 1
-  | Low -> 2
-
 type post_id = string
 
 type board_stimulus_kind =
@@ -313,29 +308,6 @@ let remove_by_post_id_pair post_id left right =
   let right_removed, right' = remove_by_post_id post_id right in
   uniq_stimuli (left_removed @ right_removed), left', right'
 
-let dedup_by_post_id ?(window_seconds = 60.0) (queue : t) : t =
-  let within_window a b =
-    Float.abs (a.arrived_at -. b.arrived_at) <= window_seconds
-  in
-  let rec aux acc = function
-    | [] -> List.rev acc
-    | s :: rest ->
-        let later =
-          List.filter
-            (fun s' -> not (s'.post_id = s.post_id && within_window s s'))
-            rest
-        in
-        aux (s :: acc) later
-  in
-  of_list (aux [] (to_list queue))
-
-let sort_by_urgency (queue : t) : t =
-  queue
-  |> to_list
-  |> List.stable_sort
-       (fun a b -> Int.compare (urgency_rank a.urgency) (urgency_rank b.urgency))
-  |> of_list
-
 let payload_kind_label = function
   | Board_signal _ -> "board_signal"
   | Board_attention _ -> "board_attention"
@@ -354,12 +326,6 @@ let is_board_signal = function
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Failure_judgment _ | Goal_assigned _ ->
     false
-
-let drain_board_all (queue : t) : stimulus list * t =
-  let board, rest =
-    List.partition (fun s -> is_board_signal s.payload) (to_list queue)
-  in
-  (to_list (sort_by_urgency (of_list board)), of_list rest)
 
 let summary (queue : t) : string =
   Printf.sprintf "%d stimulus%s pending"

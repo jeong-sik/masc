@@ -7,7 +7,6 @@
 
 type lease_kind =
   | Single
-  | Board_batch
   | Legacy_inflight
 
 type requeue_reason =
@@ -87,12 +86,10 @@ val claim_when :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   t ->
   (t * lease option, string) result
-(** Lease the pending head when [ready] accepts it.  A successful claim removes
-    the stimuli from [pending] and advances the monotonic lease sequence in the
-    same returned state. *)
-
-val claim_board : claimed_at:float -> t -> (t * lease option, string) result
-(** Lease every pending board stimulus as one ordered digest. *)
+(** Lease the earliest pending stimulus accepted by [ready]. Earlier unready
+    stimuli retain their exact relative position, so one unavailable HITL
+    continuation cannot block unrelated ready work in the same Keeper lane. A
+    successful claim advances the monotonic lease sequence in the same state. *)
 
 val add_legacy_inflight :
   Keeper_event_queue.stimulus list -> t -> (t * lease option, string) result

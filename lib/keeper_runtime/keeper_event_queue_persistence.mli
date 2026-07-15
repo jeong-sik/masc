@@ -7,7 +7,6 @@
 
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
-  | Board_batch
   | Legacy_inflight
 
 type requeue_reason = Keeper_event_queue_state.requeue_reason =
@@ -118,14 +117,6 @@ val claim_when_result :
   keeper_name:string ->
   claimed_at:float ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
-  unit ->
-  (lease option, string) result
-
-val claim_board_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  claimed_at:float ->
   unit ->
   (lease option, string) result
 

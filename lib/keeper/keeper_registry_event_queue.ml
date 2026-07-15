@@ -332,18 +332,6 @@ let claim_when_result ~base_path name ~claimed_at ~ready =
       ()
 ;;
 
-let claim_board_result ~base_path name ~claimed_at =
-  match Keeper_registry.get ~base_path name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
-  | Some _ ->
-    Keeper_event_queue_persistence.claim_board_result
-      ~base_path
-      ~keeper_name:name
-      ~claimed_at
-      ~after_commit:(publish_pending ~base_path name)
-      ()
-;;
-
 let settle_result ~base_path name ~settled_at ~lease ~settlement =
   Keeper_event_queue_persistence.settle_result
     ~base_path

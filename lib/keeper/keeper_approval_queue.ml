@@ -82,9 +82,53 @@ let install_error_to_string = function
 
 let pending_store_version = 2
 let pending_store_surface = "keeper_gate_pending"
-let pending_store_mu = Stdlib.Mutex.create ()
+let pending_store_eio_gate = Eio.Mutex.create ()
+let pending_store_cross_context_mu = Stdlib.Mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
+
+type execution_context =
+  | Eio_fiber
+  | Non_eio
+
+let execution_context () =
+  match Eio.Fiber.check () with
+  | () -> Eio_fiber
+  | exception Effect.Unhandled _ -> Non_eio
+;;
+
+let rec lock_pending_store_cooperatively () =
+  if Stdlib.Mutex.try_lock pending_store_cross_context_mu
+  then ()
+  else (
+    Eio.Fiber.yield ();
+    lock_pending_store_cooperatively ())
+;;
+
+(** Serialize one durable pending/delivery snapshot transition across both Eio
+    fibers and non-Eio callers.  A plain [Stdlib.Mutex.protect] is invalid here:
+    snapshot publication uses [Eio.Path] and may suspend while the lock is held,
+    letting another fiber on the same domain re-enter the OS mutex and raise
+    [Sys_error "Mutex.lock: Resource deadlock avoided"].
+
+    The cooperative gate ensures only one Eio fiber reaches the cross-context
+    mutex.  [use_ro] releases rather than poisons the gate when [f] raises; the
+    shared OS mutex is always released before that exception propagates.
+    Cancellation is deferred across the durable transition so a published
+    snapshot is returned as committed rather than reported as an ambiguous
+    cancelled operation. *)
+let with_pending_store_lock f =
+  match execution_context () with
+  | Non_eio -> Stdlib.Mutex.protect pending_store_cross_context_mu f
+  | Eio_fiber ->
+    Eio.Mutex.use_ro pending_store_eio_gate (fun () ->
+      lock_pending_store_cooperatively ();
+      Eio.Cancel.protect (fun () ->
+        Fun.protect
+          ~finally:(fun () ->
+            Stdlib.Mutex.unlock pending_store_cross_context_mu)
+          f))
+;;
 
 let mark_store_unavailable_unlocked ~base_path error =
   Atomic.set
@@ -960,7 +1004,7 @@ let approved_delivery_unlocked ~base_path ~id =
 ;;
 
 let approved_resolution_request ~base_path ~id =
-  Stdlib.Mutex.protect pending_store_mu (fun () ->
+  with_pending_store_lock (fun () ->
     match approved_delivery_unlocked ~base_path ~id with
     | Error _ as error -> error
     | Ok Approved_delivery_consumed -> Ok None
@@ -974,7 +1018,7 @@ let approved_resolution_request ~base_path ~id =
 ;;
 
 let approved_resolution_state ~base_path ~id =
-  Stdlib.Mutex.protect pending_store_mu (fun () ->
+  with_pending_store_lock (fun () ->
     match approved_delivery_unlocked ~base_path ~id with
     | Error _ as error -> error
     | Ok Approved_delivery_consumed -> Ok Resolution_consumed
@@ -989,7 +1033,7 @@ let consume_approved_resolution
       ~input
   =
   let result =
-    Stdlib.Mutex.protect pending_store_mu (fun () ->
+    with_pending_store_lock (fun () ->
       match approved_delivery_unlocked ~base_path ~id with
       | Error error -> Error error
       | Ok Approved_delivery_consumed ->
@@ -1048,9 +1092,10 @@ module For_testing = struct
   ;;
 
   let get_pending_entry ~id = SMap.find_opt id (Atomic.get pending)
+  let with_pending_store_lock = with_pending_store_lock
 
   let reset_runtime_state () =
-    Stdlib.Mutex.protect pending_store_mu (fun () ->
+    with_pending_store_lock (fun () ->
       Atomic.set pending SMap.empty;
       Atomic.set deliveries SMap.empty;
       Atomic.set unavailable_stores SMap.empty)
@@ -1236,7 +1281,7 @@ let get_pending_entry ~id : pending_approval option = SMap.find_opt id (Atomic.g
 (** Complete an in-flight judge exactly once. A result cannot skip the
     [Summary_pending] state or overwrite a terminal summary. *)
 let complete_summary ~id summary_status =
-  Stdlib.Mutex.protect pending_store_mu (fun () ->
+  with_pending_store_lock (fun () ->
     let map = Atomic.get pending in
     match SMap.find_opt id map with
     | None -> Ok false
@@ -1277,7 +1322,7 @@ let publish_summary_transition ~id = function
 
 let mark_summary_pending ~id =
   let result =
-    Stdlib.Mutex.protect pending_store_mu (fun () ->
+    with_pending_store_lock (fun () ->
     let map = Atomic.get pending in
     match SMap.find_opt id map with
     | None -> Ok false
@@ -1315,7 +1360,7 @@ let mark_summary_failed ~id ~reason ~retryable =
 
 let restart_retryable_summary ~id =
   let updated =
-    Stdlib.Mutex.protect pending_store_mu (fun () ->
+    with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
       match SMap.find_opt id map with
       | Some
@@ -1584,7 +1629,7 @@ let submit_pending
     Option.value continuation_channel ~default:(default_continuation_channel ())
   in
   let stored =
-    Stdlib.Mutex.protect pending_store_mu (fun () ->
+    with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
       match
         find_pending_id_in_map
@@ -1689,7 +1734,7 @@ type journal_error =
   | Journal_storage of storage_error
 
 let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
-  Stdlib.Mutex.protect pending_store_mu (fun () ->
+  with_pending_store_lock (fun () ->
     let pending_map = Atomic.get pending in
     match SMap.find_opt id pending_map with
     | None -> Error Journal_not_found
@@ -1719,7 +1764,7 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
 ;;
 
 let remove_delivery_from_store delivery =
-  Stdlib.Mutex.protect pending_store_mu (fun () ->
+  with_pending_store_lock (fun () ->
     let delivery_map = Atomic.get deliveries in
     let updated_deliveries = SMap.remove delivery.entry.id delivery_map in
     match
@@ -1849,7 +1894,7 @@ let install_persistence ~base_path =
      section below. *)
   let loaded_snapshot = load_snapshot_unlocked ~base_path in
   let installed =
-    Stdlib.Mutex.protect pending_store_mu (fun () ->
+    with_pending_store_lock (fun () ->
       match loaded_snapshot with
       | Error storage_error ->
         mark_store_unavailable_unlocked ~base_path storage_error;

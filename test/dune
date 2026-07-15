@@ -907,7 +907,6 @@
   test_tool_quality_classify
   test_tui_decode
   test_dashboard_labels
-  test_dashboard_surface_readiness
   test_activity_graph
   test_tool_agent_timeline_build
   test_masc_log
@@ -1084,7 +1083,6 @@
   test_tool_quality_classify
   test_tui_decode
   test_dashboard_labels
-  test_dashboard_surface_readiness
   test_activity_graph
   test_tool_agent_timeline_build
   test_masc_log

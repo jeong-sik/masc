@@ -96,7 +96,6 @@ type runtime_handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
-  | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
   | Tool_masc_library_dispatch

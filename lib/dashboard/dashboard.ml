@@ -605,7 +605,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
     ]
 
 let () =
-  Keeper_tool_in_process_runtime.register_dashboard_surface_readiness Dashboard_surface_readiness.json;
   Tool_misc.register_dashboard_handler (fun ~tool_name:tool_name_arg ~start_time ctx args ->
     let open Tool_result in
     let compact =

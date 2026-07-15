@@ -34,10 +34,6 @@ vi.mock('./components/server-config', () => ({
   refreshServerConfig: vi.fn(),
 }))
 
-vi.mock('./components/surface-readiness-panel', () => ({
-  refreshSurfaceReadiness: vi.fn(),
-}))
-
 vi.mock('./components/observatory/observatory', () => ({
   refreshObservatorySurface: vi.fn(),
 }))
@@ -50,7 +46,6 @@ import { refreshFeatureHealth } from './components/feature-health'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshActiveKeeperChatHistory } from './keeper-runtime'
 import { refreshServerConfig } from './components/server-config'
-import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
 import { refreshExecution, refreshFusionBoard, refreshFusionRuns, refreshShell } from './store'
 
@@ -136,11 +131,6 @@ describe('refreshPlanForRoute', () => {
       tab: 'command',
       params: { section: 'operations' },
     })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest'])
-
-    expect(refreshPlanForRoute({
-      tab: 'command',
-      params: { section: 'operations', view: 'surfaces' },
-    })).toEqual(['surfaceReadiness'])
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {
@@ -200,17 +190,6 @@ describe('refreshPlanForRoute', () => {
     await waitFor(() => {
       expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
       expect(refreshServerConfig).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  it('refreshes the surface readiness view on route entry', async () => {
-    refreshForRoute({
-      tab: 'command',
-      params: { section: 'operations', view: 'surfaces' },
-    })
-
-    await waitFor(() => {
-      expect(refreshSurfaceReadiness).toHaveBeenCalledTimes(1)
     })
   })
 

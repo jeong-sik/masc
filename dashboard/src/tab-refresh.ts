@@ -29,11 +29,6 @@ async function refreshServerConfigSurface(): Promise<void> {
   await refreshServerConfig()
 }
 
-async function refreshSurfaceReadinessSurface(): Promise<void> {
-  const { refreshSurfaceReadiness } = await import('./components/surface-readiness-panel')
-  await refreshSurfaceReadiness()
-}
-
 async function refreshActiveKeeperChatSurface(): Promise<void> {
   const { refreshActiveKeeperChatHistory } = await import('./keeper-runtime')
   // Guard-respecting (non-force): a no-op while the open keeper's transcript
@@ -54,7 +49,6 @@ type RefreshTask =
   | 'harness'
   | 'toolQuality'
   | 'inspector'
-  | 'surfaceReadiness'
   | 'operatorSnapshot'
   | 'operatorWorkspaceDigest'
   | 'fusionRuns'
@@ -120,9 +114,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.view === 'inspector') {
         return ['inspector']
       }
-      if (routeState.params.view === 'surfaces') {
-        return ['surfaceReadiness']
-      }
       return ['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest']
     case 'workspace': {
       const section = routeState.params.section
@@ -183,7 +174,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
     void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
   },
-  surfaceReadiness: () => { void refreshSurfaceReadinessSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorWorkspaceDigest: () => { void refreshOperatorWorkspaceDigest({ force: true }) },
   fusionRuns: () => { void refreshFusionRuns() },

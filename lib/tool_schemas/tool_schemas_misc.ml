@@ -55,23 +55,6 @@ let control_schema = function
 
 let control_schemas = List.map control_schema control_operations
 
-let surface_audit_schema ~remote =
-  { name = "masc_surface_audit"
-  ; description =
-      (if remote
-       then
-         "Read dashboard surface readiness, exposure policy, and evidence references. Use this before pointing operators to an experimental surface."
-       else
-         "Read dashboard surface readiness, exposure policy, and evidence references. Use this to decide whether a surface belongs in main navigation, Lab, or should stay hidden.")
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; "properties", `Assoc [ "surface_id", `Assoc [ "type", `String "string" ] ]
-        ; "additionalProperties", `Bool false
-        ]
-  }
-;;
-
 (* [schemas] is the generated public misc schema set. Operator control schemas
    use the dedicated typed projection above so they remain registered without
    entering Config's public/front-door inventory. Descriptor-owned web backend

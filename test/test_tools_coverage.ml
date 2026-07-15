@@ -432,7 +432,6 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       "masc_operator_confirm";
       "masc_operator_judgment_write";
       "masc_keeper_repair";
-      "masc_surface_audit";
       "masc_operation_start";
       "masc_dispatch_tick";
       "masc_goal_review";

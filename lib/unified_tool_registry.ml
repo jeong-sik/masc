@@ -99,7 +99,6 @@ let tag_of_name name : TD.module_tag option =
   else if prefix "masc_compact_" then Some Mod_compact
   else if prefix "masc_board_" then Some Mod_inline
   else if prefix "masc_keeper_" then Some Mod_external
-  else if String.equal name "masc_surface_audit" then Some Mod_inline
   else if is_keeper_task_tool_name name then Some Mod_keeper_task
   else if prefix "keeper_" then Some Mod_external
   else if

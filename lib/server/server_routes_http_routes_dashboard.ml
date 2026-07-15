@@ -1397,20 +1397,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/surface-readiness" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let surface_id = Server_utils.query_param req "surface_id" in
-         let cache_key =
-           Printf.sprintf "surface_readiness:%s"
-             (Option.value ~default:"-" surface_id)
-         in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_surface_readiness.json ?surface_id ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let n =

@@ -79,7 +79,6 @@ type runtime_handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
-  | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
   | Tool_masc_library_dispatch
@@ -203,7 +202,6 @@ let runtime_handler_to_string = function
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
-  | Tool_masc_surface_audit -> "tool_masc_surface_audit"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
   | Tool_masc_library_dispatch -> "tool_masc_library_dispatch"
@@ -232,7 +230,6 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_masc_misc_dispatch
   | Tool_web_search
   | Tool_web_fetch
-  | Tool_masc_surface_audit
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> Core_group
   | Tool_surface_read | Tool_surface_post | Tool_person_note_set -> Surface_group
@@ -1971,19 +1968,6 @@ let internal_descriptors : t list =
       "Submit an async keeper turn (returns request_id for keeper_msg_result polling)." ~readonly:false
   ; masc_keeper_descriptor "up" "masc_keeper_up"
       "Bring a keeper online (create new or update existing)." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_surface_audit singleton ────────────── *)
-  ; let schema = Tool_schemas_misc.surface_audit_schema ~remote:false in
-    cluster_descriptor_with_schema_source
-      ~keeper_model_projection:Internal_name
-      ~input_schema_source:Canonical_registry
-      ~input_schema:schema.input_schema
-      ~id:"masc.surface.audit"
-      ~name:schema.name
-      ~description:schema.description
-      ~handler:Tool_masc_surface_audit
-      ~readonly:true
-      ~inline_safe:false
-      ()
   ]
   @ masc_board_descriptors
   @ masc_library_descriptors

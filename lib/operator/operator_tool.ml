@@ -35,11 +35,6 @@ let chat_recovery_tool_name =
   operator_tool_name Operator_name.Operator_chat_recovery_resolve
 ;;
 
-let surface_audit_tool_name =
-  operator_remote_tool_name Operator_remote_name.Surface_audit
-;;
-
-
 (* RFC-0189 PR-1b.11 — typed result.
 
    [result_of_json] projects [Operator_control.*_json :
@@ -154,8 +149,6 @@ let digest_schema ~remote =
               ] );
         ];
   }
-
-let surface_audit_schema = Tool_schemas_misc.surface_audit_schema
 
 let chat_recovery_decision_schema =
   `Assoc
@@ -451,13 +444,6 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.confirm_json control_ctx args))
-  | "masc_surface_audit" ->
-      let surface_id = get_string_opt args "surface_id" in
-      Some
-        (json_ok
-           ~tool_name:name
-           ~start_time:start
-           (Dashboard_surface_readiness.json ?surface_id ()))
   | "masc_operator_judgment_write" ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
@@ -473,7 +459,6 @@ let schemas : tool_schema list =
     action_schema ~remote:false;
     chat_recovery_schema;
     confirm_schema;
-    surface_audit_schema ~remote:false;
     judgment_write_schema;
   ]
 
@@ -484,7 +469,6 @@ let remote_schemas : tool_schema list =
     action_schema ~remote:true;
     chat_recovery_schema;
     confirm_schema;
-    surface_audit_schema ~remote:true;
   ]
 
 let remote_tool_names : string list = Operator_remote_name.all_strings
@@ -497,12 +481,10 @@ let tool_spec_read_only =
   [
     operator_tool_name Operator_name.Operator_snapshot;
     operator_tool_name Operator_name.Operator_digest;
-    surface_audit_tool_name;
   ]
 
 (* Tools with explicit catalog metadata that must be preserved. *)
-let tool_spec_hidden =
-  [ "masc_operator_judgment_write"; surface_audit_tool_name; chat_recovery_tool_name ]
+let tool_spec_hidden = [ "masc_operator_judgment_write"; chat_recovery_tool_name ]
 ;;
 
 let tool_spec_hidden_actions = [ operator_tool_name Operator_name.Operator_action ]

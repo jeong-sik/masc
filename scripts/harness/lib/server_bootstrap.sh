@@ -134,52 +134,19 @@ protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.smoke]
-# Borrow a real repo catalog id for strict capability lookup. The transport
-# harness never reaches the provider endpoint, but Runtime.init_default_strict
-# must still see model capability metadata instead of falling back to provider
-# defaults.
-api-name = "deepseek-v4-flash"
+# Harness-local opaque runtime alias. The adjacent typed capability block is
+# the sole declaration used when no exact OAS catalog row exists.
+api-name = "transport-harness-smoke"
 max-context = 32768
 tools-support = true
 streaming = true
 
+[models.smoke.capabilities]
+supports-tool-choice = true
+
 [deepseek.smoke]
 is-default = true
 max-concurrent = 1
-EOF
-  fi
-
-  # OAS capability catalog overlay for the runtime.toml above (RFC-0342 / #24592
-  # embedded-overlay wiring, #24647 SSOT). Runtime.init_default_strict resolves each
-  # configured model against embedded (pinned OAS) catalog ⊕ this deployment overlay;
-  # a harness workspace lives under a mktemp dir, so the parent-directory walk never
-  # reaches the repo catalog and the embedded catalog alone lacks the deployment
-  # deepseek-v4-flash capability row -> "all configured runtime models are absent from
-  # the OAS capability catalog" boot FATAL (transport harness 6/7 fail).
-  #
-  # Pinned OAS (v0.212.x) lookup identity: a provider-scoped row keys on
-  # (provider_name, bare id_prefix). The contract harness installs its own overlay
-  # (scripts/harness/contract/run_all.sh); this default covers the shared runtime.toml
-  # so every harness_start_server workspace boots. Guarded so a caller that installs
-  # its own overlay first is never overwritten.
-  if [[ ! -f "$config_dir/oas-models-overlay.toml" ]]; then
-    cat >"$config_dir/oas-models-overlay.toml" <<'EOF'
-[[providers]]
-id = "deepseek"
-kind = "openai_compat"
-base_url = "http://127.0.0.1:9/v1"
-request_path = "/chat/completions"
-default_model = "deepseek-v4-flash"
-capabilities_base = "openai_chat"
-
-[[models]]
-id_prefix = "deepseek-v4-flash"
-base = "openai_chat"
-provider_name = "deepseek"
-max_context_tokens = 32768
-max_output_tokens = 1024
-supports_tools = true
-supports_tool_choice = true
 EOF
   fi
 }

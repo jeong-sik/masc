@@ -13,49 +13,35 @@ let make_msg ?(channel = "discord") ?(content = "hello") ?(keeper_name = "luna")
     metadata = [];
   }
 
-let no_dedup _ = false
-let always_dedup _ = true
-
 (* ── Validation tests (pure, no Eio) ────────────────────────── *)
 
 let test_validate_ok () =
-  match Gate_protocol.validate ~max_content_length:4000 ~dedup_check:no_dedup (make_msg ()) with
+  match Gate_protocol.validate (make_msg ()) with
   | Ok () -> ()
   | Error _ -> fail "expected valid message"
 
 let test_validate_empty_content () =
-  match Gate_protocol.validate ~max_content_length:4000 ~dedup_check:no_dedup (make_msg ~content:"  " ()) with
+  match Gate_protocol.validate (make_msg ~content:"  " ()) with
   | Error Gate_protocol.Empty_content -> ()
   | _ -> fail "expected Empty_content"
 
-let test_validate_content_too_long () =
-  let long = String.make 101 'x' in
-  match Gate_protocol.validate ~max_content_length:100 ~dedup_check:no_dedup (make_msg ~content:long ()) with
-  | Error (Gate_protocol.Content_too_long 101) -> ()
-  | _ -> fail "expected Content_too_long"
-
 let test_validate_empty_keeper_name () =
-  match Gate_protocol.validate ~max_content_length:4000 ~dedup_check:no_dedup (make_msg ~keeper_name:"" ()) with
+  match Gate_protocol.validate (make_msg ~keeper_name:"" ()) with
   | Error Gate_protocol.Empty_keeper_name -> ()
   | _ -> fail "expected Empty_keeper_name"
 
 let test_validate_empty_user_id () =
-  match Gate_protocol.validate ~max_content_length:4000 ~dedup_check:no_dedup (make_msg ~channel_user_id:"" ()) with
+  match Gate_protocol.validate (make_msg ~channel_user_id:"" ()) with
   | Error Gate_protocol.Empty_channel_user_id -> ()
   | _ -> fail "expected Empty_channel_user_id"
 
 let test_validate_empty_idempotency_key () =
-  match Gate_protocol.validate ~max_content_length:4000 ~dedup_check:no_dedup (make_msg ~idempotency_key:"" ()) with
+  match Gate_protocol.validate (make_msg ~idempotency_key:"" ()) with
   | Error Gate_protocol.Empty_idempotency_key -> ()
   | _ -> fail "expected Empty_idempotency_key"
 
-let test_validate_duplicate () =
-  match Gate_protocol.validate ~max_content_length:4000 ~dedup_check:always_dedup (make_msg ()) with
-  | Error (Gate_protocol.Duplicate_message "key-1") -> ()
-  | _ -> fail "expected Duplicate_message"
-
 let test_validate_keeper_name_checked_before_content () =
-  match Gate_protocol.validate ~max_content_length:4000 ~dedup_check:no_dedup
+  match Gate_protocol.validate
     (make_msg ~keeper_name:"" ~content:"  " ()) with
   | Error Gate_protocol.Empty_keeper_name -> ()
   | _ -> fail "keeper_name should be checked before content"
@@ -170,7 +156,7 @@ let test_inbound_of_json_rejects_keeper_name_only () =
   | Ok msg ->
       check string "keeper_name is not a destination" "" msg.keeper_name;
       (match
-         Gate_protocol.validate ~max_content_length:4000 ~dedup_check:no_dedup msg
+         Gate_protocol.validate msg
        with
        | Error Gate_protocol.Empty_keeper_name -> ()
        | Ok () -> fail "keeper_name-only payload should not validate"
@@ -253,9 +239,7 @@ let test_validation_error_strings () =
   check string "empty content" "content is required"
     (Gate_protocol.validation_error_to_string Gate_protocol.Empty_content);
   check string "empty keeper" "keeper_name is required"
-    (Gate_protocol.validation_error_to_string Gate_protocol.Empty_keeper_name);
-  check string "duplicate" "duplicate message (idempotency_key=k)"
-    (Gate_protocol.validation_error_to_string (Gate_protocol.Duplicate_message "k"))
+    (Gate_protocol.validation_error_to_string Gate_protocol.Empty_keeper_name)
 
 let test_gate_error_strings () =
   check string "keeper error" "keeper error: boom"
@@ -292,11 +276,9 @@ let () =
         [
           test_case "accepts valid" `Quick test_validate_ok;
           test_case "rejects empty content" `Quick test_validate_empty_content;
-          test_case "rejects too-long content" `Quick test_validate_content_too_long;
           test_case "rejects empty keeper" `Quick test_validate_empty_keeper_name;
           test_case "rejects empty user_id" `Quick test_validate_empty_user_id;
           test_case "rejects empty idempotency_key" `Quick test_validate_empty_idempotency_key;
-          test_case "rejects duplicate" `Quick test_validate_duplicate;
           test_case "keeper checked before content" `Quick test_validate_keeper_name_checked_before_content;
         ] );
       ( "json",

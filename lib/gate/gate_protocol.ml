@@ -99,23 +99,17 @@ type outbound_message = {
 
 type validation_error =
   | Empty_content
-  | Content_too_long of int
   | Empty_keeper_name
   | Empty_channel_user_id
   | Empty_idempotency_key
-  | Duplicate_message of string
 
 let validation_error_to_string = function
   | Empty_content -> "content is required"
-  | Content_too_long len ->
-      Printf.sprintf "content too long: %d chars" len
   | Empty_keeper_name -> "keeper_name is required"
   | Empty_channel_user_id -> "channel_user_id is required"
   | Empty_idempotency_key -> "idempotency_key is required"
-  | Duplicate_message key ->
-      Printf.sprintf "duplicate message (idempotency_key=%s)" key
 
-let validate ~max_content_length ~dedup_check (msg : inbound_message) =
+let validate (msg : inbound_message) =
   let name = String.trim msg.keeper_name in
   if name = "" then Error Empty_keeper_name
   else if String.trim msg.channel_user_id = "" then Error Empty_channel_user_id
@@ -123,12 +117,7 @@ let validate ~max_content_length ~dedup_check (msg : inbound_message) =
   else
     let content = String.trim msg.content in
     if content = "" then Error Empty_content
-    else
-      let len = String.length content in
-      if len > max_content_length then Error (Content_too_long len)
-      else if dedup_check msg.idempotency_key then
-        Error (Duplicate_message msg.idempotency_key)
-      else Ok ()
+    else Ok ()
 
 (* ── Errors ──────────────────────────────────────────────────── *)
 

@@ -188,8 +188,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
   let neo4j_interval = Env_config_runtime_services.Timeouts.neo4j_timeout_sec in
   Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
   let zombie_consumer = make_zero_zombie_consumer ~sw ~workspace_config in
-  let dedup_consumer = Channel_gate.make_dedup_cleanup_consumer () in
-  let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Always_on ~consumers:[zombie_consumer; dedup_consumer] in
+  let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Always_on ~consumers:[zombie_consumer] in
   with_pulse_rw (fun () -> zombie_pulse := Some zp);
   Eio.Fiber.fork ~sw (fun () ->
     try Pulse.run ~sw zp

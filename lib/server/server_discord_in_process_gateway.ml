@@ -565,13 +565,6 @@ let handle_ambient ~resolved_keeper_name ~base_dir
     if String.equal trimmed "" then
       Discord_observability.record_ambient
         Discord_observability.Ambient_dropped_empty
-    else if String.length trimmed > Channel_gate.max_content_length () then
-      (* Same inbound bound the turn path enforces
-         ([Channel_gate.handle_inbound] validation): a message this
-         size cannot become a turn either; it is rejected, not
-         truncated. *)
-      Discord_observability.record_ambient
-        Discord_observability.Ambient_dropped_too_long
     else begin
       let parent_channel_id = State.parent_channel_of_thread ~channel_id in
       let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in

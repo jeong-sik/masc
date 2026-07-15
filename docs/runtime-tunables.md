@@ -274,8 +274,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 570 |  |
 | `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 572 |  |
 | `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 184 |  |
-| `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 270 |  |
-| `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 272 |  |
 | `MASC_DASHBOARD_CACHE_MAX_ENTRIES` | string_literal | n/a | n/a | 186 |  |
 | `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` | string_literal | n/a | n/a | 194 |  |
 | `MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S` | string_literal | n/a | n/a | 234 |  |

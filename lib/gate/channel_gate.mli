@@ -46,38 +46,14 @@ type outbound_message = Gate_protocol.outbound_message = {
 
 type validation_error = Gate_protocol.validation_error =
   | Empty_content
-  | Content_too_long of int
   | Empty_keeper_name
   | Empty_channel_user_id
   | Empty_idempotency_key
-  | Duplicate_message of string
 
 val validate : inbound_message -> (unit, validation_error) result
-(** Validation plus idempotency gate.  Returns [Ok ()] when the message can proceed.
-    Duplicate detection consumes the idempotency key on first success. *)
+(** Structural validation. Idempotency is owned by the durable dispatch sink. *)
 
 val validation_error_to_string : validation_error -> string
-
-(** {1 Deduplication} *)
-
-val dedup_check : string -> bool
-(** [dedup_check key] returns [true] if [key] was already seen
-    within the TTL window ([MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default
-    3600 s).  Thread-safe. *)
-
-val dedup_cleanup : now:float -> unit
-(** Evict expired entries.  Called periodically by the Pulse consumer
-    returned by {!make_dedup_cleanup_consumer}. *)
-
-val dedup_table_size : unit -> int
-(** Current number of entries in the dedup table.  For metrics. *)
-
-val make_dedup_cleanup_consumer : unit -> (module Pulse.Consumer)
-(** Pulse consumer that sweeps TTL-expired entries on every beat.
-    Wire into an existing Pulse engine (e.g. the orchestrator zombie
-    pulse) during server startup.  Without this, stale entries only
-    leave the table once it hits [dedup_max_entries] and the O(n)
-    evict-one-oldest branch takes over on every subsequent insert. *)
 
 (** {1 Dispatch} *)
 
@@ -122,7 +98,7 @@ val handle_inbound :
   dispatch:dispatch_fn ->
   inbound_message ->
   (outbound_message, gate_error) result
-(** Validate, dedup, dispatch to keeper, return response.
+(** Validate and dispatch to keeper, then return the response.
     The only non-deterministic step is the keeper turn itself
     (which is on the other side of the [dispatch] boundary). *)
 
@@ -131,7 +107,7 @@ val handle_inbound_streaming :
   on_text_snapshot:(string -> unit) ->
   inbound_message ->
   (outbound_message, gate_error) result
-(** Streaming variant of {!handle_inbound}. Validation, deduplication,
+(** Streaming variant of {!handle_inbound}. Validation,
     metrics, and result mapping are identical; only the injected dispatch
     receives [on_text_snapshot]. Validation failures never invoke the
     streaming callback. *)
@@ -146,11 +122,3 @@ val outbound_to_json : outbound_message -> Yojson.Safe.t
 
 val error_json : string -> Yojson.Safe.t
 (** [{ok: false, error: "<msg>"}] *)
-
-(** {1 Configuration} *)
-
-val max_content_length : unit -> int
-(** [MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH], default 4000. *)
-
-val dedup_ttl_sec : unit -> float
-(** [MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default 3600.0. *)

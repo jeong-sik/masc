@@ -78,7 +78,7 @@ val metric_discord_inbound_dispatch : string
 
 (** Ambient Discord messages that did not trigger a turn.
     Labels: [outcome] =
-    [recorded | dropped_unbound | dropped_empty | dropped_too_long]. *)
+    [recorded | dropped_unbound | dropped_empty]. *)
 val metric_discord_ambient_record : string
 
 (** Discord REST replies attempted by the gateway reply path.

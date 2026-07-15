@@ -1,7 +1,7 @@
 (** Channel_gate -- deterministic router for external chat platforms.
     See [channel_gate.mli] for the full contract.
 
-    This module owns dedup state and metrics recording.
+    This module owns structural validation and metrics recording.
     Types come from {!Gate_protocol}.
     Keeper dispatch is injected via [dispatch_fn]. *)
 
@@ -34,11 +34,9 @@ type outbound_message = Gate_protocol.outbound_message = {
 
 type validation_error = Gate_protocol.validation_error =
   | Empty_content
-  | Content_too_long of int
   | Empty_keeper_name
   | Empty_channel_user_id
   | Empty_idempotency_key
-  | Duplicate_message of string
 
 type gate_error = Gate_protocol.gate_error =
   | Validation of validation_error
@@ -69,92 +67,6 @@ type streaming_dispatch_fn =
   content:string ->
   Gate_protocol.dispatch_result
 
-(* ── Configuration ──────────────────────────────────────────── *)
-
-let max_content_length () = 4000
-
-let dedup_ttl_sec () =
-  Env_config_core.get_int ~default:3600 "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
-  |> max 1
-  |> float_of_int
-
-(* ── Deduplication (TTL hashtable, Eio-guarded mutex) ───────── *)
-
-let dedup_table : (string, float) Hashtbl.t = Hashtbl.create 256
-
-let dedup_mutex = Eio.Mutex.create ()
-
-let dedup_max_entries = 10_000
-
-let with_dedup_lock f = Eio_guard.with_mutex dedup_mutex f
-
-let dedup_check key =
-  with_dedup_lock (fun () ->
-    let now = Unix.gettimeofday () in
-    let result =
-      match Hashtbl.find_opt dedup_table key with
-      | Some ts when now -. ts < dedup_ttl_sec () -> true
-      | Some _ ->
-          Hashtbl.remove dedup_table key;
-          false
-      | None -> false
-    in
-    if not result then begin
-      if Hashtbl.length dedup_table >= dedup_max_entries then begin
-        let oldest_key = ref "" in
-        let oldest_ts = ref Float.max_float in
-        Hashtbl.iter (fun k ts ->
-          if ts < !oldest_ts then begin oldest_key := k; oldest_ts := ts end
-        ) dedup_table;
-        if !oldest_key <> "" then Hashtbl.remove dedup_table !oldest_key
-      end;
-      Hashtbl.replace dedup_table key now
-    end;
-    result)
-
-let dedup_cleanup ~now =
-  with_dedup_lock (fun () ->
-    let ttl = dedup_ttl_sec () in
-    let to_remove =
-      Hashtbl.fold
-        (fun k ts acc -> if now -. ts >= ttl then k :: acc else acc)
-        dedup_table []
-    in
-    List.iter (Hashtbl.remove dedup_table) to_remove)
-
-let dedup_table_size () =
-  with_dedup_lock (fun () -> Hashtbl.length dedup_table)
-
-(* Register dedup_table_size callback to break cycle *)
-let () = Channel_gate_metrics.register_dedup_size_fn dedup_table_size
-
-(* ── Pulse consumer for periodic dedup cleanup ─────────────── *)
-
-(* [dedup_cleanup] exists in the .mli and is documented as "Called
-   periodically", but no production code path wired it to a timer
-   or Pulse consumer — only the test suite invoked it. Without a
-   periodic sweep, TTL-expired entries never leave the table until
-   it hits [dedup_max_entries] (default 10_000), at which point
-   every subsequent insert falls into the O(n) "evict the oldest"
-   branch in [dedup_check] while holding the lock. This consumer
-   restores the intended behavior: each beat calls [dedup_cleanup]
-   so stale entries are reclaimed before the cap is reached. *)
-let make_dedup_cleanup_consumer () : (module Pulse.Consumer) =
-  (module struct
-    let name = "channel-gate-dedup-cleanup"
-    let should_act _beat = true
-    let on_beat _beat =
-      try
-        dedup_cleanup ~now:(Unix.gettimeofday ());
-        Ok ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          Error
-            (Printf.sprintf "dedup_cleanup failed: %s"
-               (Printexc.to_string exn))
-  end)
-
 (* ── Delegated helpers ───────────────────────────────────────── *)
 
 let validation_error_to_string = Gate_protocol.validation_error_to_string
@@ -163,13 +75,9 @@ let inbound_of_json = Gate_protocol.inbound_of_json
 let outbound_to_json = Gate_protocol.outbound_to_json
 let error_json = Gate_protocol.error_json
 
-(* ── Validation (uses local dedup) ───────────────────────────── *)
+(* Validation *)
 
-let validate (msg : inbound_message) =
-  Gate_protocol.validate
-    ~max_content_length:(max_content_length ())
-    ~dedup_check
-    msg
+let validate (msg : inbound_message) = Gate_protocol.validate msg
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
@@ -183,9 +91,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
         ~keeper:(String.trim msg.keeper_name)
         ~duration_ms:0
         (match e with
-         | Duplicate_message _ -> Channel_gate_metrics.Duplicate
          | Empty_content
-         | Content_too_long _
          | Empty_keeper_name
          | Empty_channel_user_id
          | Empty_idempotency_key ->

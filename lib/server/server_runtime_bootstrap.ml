@@ -327,6 +327,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   in
   Fusion_completion_outbox.set_global
     (Fusion_completion_outbox.replay completion_outbox_path);
+  ignore (Fusion_wake_route.drain_all ~base_dir:base_path);
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
   Eio_context.set_switch sw;

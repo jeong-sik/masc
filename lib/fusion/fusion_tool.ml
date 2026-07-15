@@ -165,13 +165,22 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
              , `String (Fusion_run_registry.persistence_error_to_string error) )
            ]
        | Ok () ->
-      (* Reply route: captured next to [register_running] so route lifetime
-         tracks the run. [register] drops [Unrouted] itself; the completion
-         wake ([Fusion_sink.wake_keeper_on_fusion_completion], success AND
-         failure paths) consumes it exactly once. *)
-      Option.iter
-        (fun channel -> Fusion_wake_route.register ~run_id channel)
-        continuation_channel;
+      let channel =
+        Option.value continuation_channel
+          ~default:(Keeper_continuation_channel.unrouted "no originating connector")
+      in
+      (match Fusion_wake_route.register ~operation_id:run_id ~owner:keeper ~channel with
+       | Error error ->
+         let reason = Fusion_wake_route.error_to_string error in
+         record_completion ~keeper ~run_id ~failure:reason
+           ~failure_code:"completion_address_persistence_failed" ~ok:false ();
+         Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+         status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:false
+           [ ("status", `String "persistence_failed")
+           ; ("run_id", `String run_id)
+           ; ("error", `String reason)
+           ]
+       | Ok _ ->
       (* RFC-0266 §7 Phase 4: push the new [Running] card to the dashboard panel
          (no polling). wake-free, broadcast-failure-safe; see
          Fusion_sink.broadcast_run_status. *)
@@ -204,12 +213,20 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
              취소/셧다운 캐스케이드를 deadlock시킬 위험이 있으므로 이 경로에선 생략한다 —
              registry가 정확해 다음 HTTP fetch / tab-refresh가 패널을 self-heal한다.
              그 뒤 구조적 취소는 흡수하지 않고 재전파한다 (Eio 규약). *)
-          record_completion ~keeper ~run_id
-            ~failure:"cancelled: structural cancellation (shutdown or sibling switch failure)"
+          let cancellation =
+            "cancelled: structural cancellation (shutdown or sibling switch failure)"
+          in
+          record_completion ~keeper ~run_id ~failure:cancellation
             ~failure_code:"cancelled" ~ok:false ();
-          (* No completion wake fires on this path, so drop the reply route
-             here or it leaks for the process lifetime. *)
-          Fusion_wake_route.discard ~run_id;
+          (match
+             Fusion_wake_route.queue_completion ~operation_id:run_id ~ok:false
+               ~content:cancellation ~evidence_ref:None
+           with
+           | Ok _ -> ()
+           | Error error ->
+             Log.Keeper.error ~keeper_name:keeper
+               "fusion cancellation completion queue failed run_id=%s: %s" run_id
+               (Fusion_wake_route.error_to_string error));
           raise exn
         | exception exn ->
           append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
@@ -230,7 +247,7 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
               "async: you will be woken with the result when deliberation \
                completes; the conclusion (or failure reason) also lands on \
                your chat lane. No need to poll masc_fusion_status." )
-        ])
+        ]))
 
 let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy
       ?continuation_channel ~args () =

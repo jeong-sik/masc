@@ -295,56 +295,21 @@ let record_completion ~keeper ~run_id ?failure ?failure_code ~ok () =
       (Fusion_run_registry.completion_error_to_string error)
 ;;
 
-(* Fail-closed durable wake. The reply route is the sole in-memory carrier of
-   the originating channel, so it must not be destroyed before the stimulus that
-   carries it is durably persisted. [peek] reads the route WITHOUT removing it;
-   the completion stimulus is committed through the shared fail-closed durable
-   path ([enqueue_durable_result] — the same commit boundary HITL uses for its
-   sole-carrier resolution); only on [Ok] is the route consumed ([take]) and the
-   best-effort wake hint flipped. A failed commit leaves the route intact for a
-   later retry and returns [Error] to the caller instead of swallowing the loss.
-   The wake hint (Running-gated) is best-effort AFTER a committed payload — its
-   failure is logged, not raised, because the keeper replays the durable
-   stimulus on its next admitted turn (mirrors HITL's post-commit signal).
-   Eio structural cancellation (Cancelled) is always re-raised. *)
+(* Queue in the Fusion outbox, commit to the addressed owner lane, then ack.
+   A failed lane commit leaves the item pending for restart replay. *)
 let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id :
     (unit, string) result =
-  (* A run started outside a connector conversation has no route; the wake then
-     says so explicitly instead of inventing a destination. *)
-  let channel =
-    match Fusion_wake_route.peek ~run_id with
-    | Some channel -> channel
-    | None -> Keeper_continuation_channel.unrouted "no originating connector"
-  in
-  let fusion_completion =
-    Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id; channel }
-  in
-  let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
-  let stimulus : Keeper_event_queue.stimulus =
-    { Keeper_event_queue.post_id
-    ; urgency = Keeper_event_queue.Normal
-    ; arrived_at = Time_compat.now ()
-    ; payload = Keeper_event_queue.Fusion_completed fusion_completion
-    }
-  in
   match
-    try
-      Keeper_registry_event_queue.enqueue_durable_result
-        ~base_path:base_dir keeper stimulus
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
+    Fusion_wake_route.complete_and_deliver ~base_dir ~operation_id:run_id ~ok
+      ~content:resolved_answer ~evidence_ref:(Some board_post_id)
   with
-  | Error reason ->
-    (* Route left intact (peek, not take): the reply channel survives the
-       failed write so a later retry can still deliver it. *)
+  | Error error ->
+    let reason = Fusion_wake_route.error_to_string error in
     Log.Keeper.error ~keeper_name:keeper
       "fusion completion wake durable-commit failed run_id=%s: %s" run_id reason;
     Error reason
-  | Ok () ->
-    (* RFC-0266: [take] removes the route now that its channel is durably committed above; the discarded value is exactly that already-committed channel, so this is pure route cleanup, not a dropped contract. *)
-    ignore (Fusion_wake_route.take ~run_id);
+  | Ok (Fusion_wake_route.Delivered | Fusion_wake_route.Already_delivered) ->
     Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
     (* Best-effort wake hint: the payload is already durable, so a withheld or
        failed hint only defers pickup to the keeper's next turn. The typed outcome

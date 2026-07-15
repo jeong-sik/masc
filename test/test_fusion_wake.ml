@@ -127,9 +127,11 @@ let with_isolated_eio_base_path prefix f =
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let old_registry = Fusion_run_registry.global () in
+  let old_outbox = Fusion_completion_outbox.global () in
   Fun.protect
     ~finally:(fun () ->
       Fusion_run_registry.set_global old_registry;
+      Fusion_completion_outbox.set_global old_outbox;
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       restore_env "MASC_BASE_PATH" old_base;
@@ -138,7 +140,11 @@ let with_isolated_eio_base_path prefix f =
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base_dir;
       Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
+      Unix.mkdir base_dir 0o755;
       Fusion_run_registry.set_global (Fusion_run_registry.create ());
+      Fusion_completion_outbox.set_global
+        (Fusion_completion_outbox.create
+           ~path:(Filename.concat base_dir "fusion-completion-outbox.jsonl") ());
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       Eio_main.run @@ fun env ->
@@ -550,9 +556,6 @@ let test_emit_success_projects_board_chat_and_registry () =
     | None -> fail "fusion run should remain visible")
 ;;
 
-(* Fusion_wake_route contract: the reply route registered at masc_fusion call
-   time is consumed exactly once by the completion wake. Pure map semantics
-   plus the registration edge inside [handle_with_runner]. *)
 let discord_channel =
   Keeper_continuation_channel.Discord
     { guild_id = Some "g-1"
@@ -563,58 +566,26 @@ let discord_channel =
     }
 ;;
 
-let test_wake_route_register_take_discard () =
-  let run_id = Printf.sprintf "fus-route-%d" (Random.bits ()) in
-  Fusion_wake_route.register ~run_id discord_channel;
-  (match Fusion_wake_route.take ~run_id with
-   | Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ }) -> ()
-   | Some other ->
-     fail
-       (Printf.sprintf "unexpected route: %s"
-          (Keeper_continuation_channel.describe other))
-   | None -> fail "registered route must be takeable");
-  check bool "take removes the route" true (Fusion_wake_route.take ~run_id = None);
-  (* Unrouted is never stored: the wake-side default already says so. *)
-  Fusion_wake_route.register ~run_id
-    (Keeper_continuation_channel.unrouted "not a connector turn");
-  check bool "unrouted is not registered" true (Fusion_wake_route.take ~run_id = None);
-  Fusion_wake_route.register ~run_id discord_channel;
-  Fusion_wake_route.discard ~run_id;
-  check bool "discard drops the route" true (Fusion_wake_route.take ~run_id = None)
+let register_route_exn ~operation_id ~owner channel =
+  match Fusion_wake_route.register ~operation_id ~owner ~channel with
+  | Ok
+      ( Fusion_completion_outbox.Registered
+      | Fusion_completion_outbox.Already_registered ) -> ()
+  | Error error -> fail (Fusion_wake_route.error_to_string error)
 ;;
 
-(* P1-A: [peek] reads the route without consuming it, so the completion wake can
-   build+commit the stimulus before the destructive [take]. *)
-let test_wake_route_peek_is_non_destructive () =
-  let run_id = Printf.sprintf "fus-peek-%d" (Random.bits ()) in
-  Fusion_wake_route.register ~run_id discord_channel;
-  let is_chan9 = function
-    | Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ }) -> true
-    | _ -> false
-  in
-  check bool "peek returns the registered route" true (is_chan9 (Fusion_wake_route.peek ~run_id));
-  check bool "peek is non-destructive (second peek still sees it)" true
-    (is_chan9 (Fusion_wake_route.peek ~run_id));
-  check bool "take still consumes after peeks" true (is_chan9 (Fusion_wake_route.take ~run_id));
-  check bool "route gone after take" true (Fusion_wake_route.peek ~run_id = None)
-;;
-
-(* P1-A: the completion wake commits the channel-carrying stimulus through the
-   fail-closed durable path BEFORE consuming the route, so the durable snapshot
-   holds the real Discord route and the in-memory route is consumed only after a
-   successful commit. *)
-let test_wake_durable_commit_carries_channel_and_consumes_route () =
+let test_wake_durable_commit_carries_channel_and_acks_outbox () =
   with_isolated_base_path "fusion-wake-durable" (fun base_dir ->
     let keeper = Printf.sprintf "fusion-wake-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-%d" (Random.bits ()) in
-    Fusion_wake_route.register ~run_id discord_channel;
+    register_route_exn ~operation_id:run_id ~owner:keeper discord_channel;
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
         ~resolved_answer:"WAKE-DURABLE-ANSWER" ~board_post_id:"post-wake-1"
     in
     check bool "wake commits durably" true (Result.is_ok result);
-    check bool "route consumed only after the durable commit" true
-      (Fusion_wake_route.peek ~run_id = None);
+    check int "lane commit acknowledges outbox" 0
+      (List.length (Fusion_completion_outbox.pending (Fusion_completion_outbox.global ())));
     match
       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
       |> Keeper_event_queue.dequeue
@@ -631,11 +602,7 @@ let test_wake_durable_commit_carries_channel_and_consumes_route () =
     | None -> fail "completion stimulus must be durably persisted with its channel")
 ;;
 
-(* P1-A fail-closed: when the durable commit fails (here a conflicting durable
-   row already occupies the post_id), the wake returns [Error] AND leaves the
-   route intact — the sole in-memory carrier of the reply channel is not
-   destroyed on a failed write, so a retry can still deliver it. *)
-let test_wake_fail_closed_preserves_route () =
+let test_wake_fail_closed_preserves_pending_completion () =
   with_isolated_base_path "fusion-wake-failclosed" (fun base_dir ->
     let keeper = Printf.sprintf "fusion-wake-fc-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-fc-%d" (Random.bits ()) in
@@ -654,15 +621,18 @@ let test_wake_fail_closed_preserves_route () =
      with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "seeding the conflicting durable row should commit: %s" e));
-    Fusion_wake_route.register ~run_id discord_channel;
+    register_route_exn ~operation_id:run_id ~owner:keeper discord_channel;
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
         ~resolved_answer:"REAL-ANSWER" ~board_post_id
     in
     check bool "conflicting durable commit fails the wake" true (Result.is_error result);
-    match Fusion_wake_route.peek ~run_id with
-    | Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ }) -> ()
-    | _ -> fail "route must survive a failed durable commit (peek, not take)")
+    Fusion_completion_outbox.set_global
+      (Fusion_completion_outbox.replay
+         (Filename.concat base_dir "fusion-completion-outbox.jsonl"));
+    match Fusion_completion_outbox.pending (Fusion_completion_outbox.global ()) with
+    | [ item ] -> check string "pending identity survives" run_id item.operation_id
+    | items -> failf "expected one pending completion, got %d" (List.length items))
 ;;
 
 let test_completion_stimulus_persists_without_live_registry () =
@@ -915,21 +885,13 @@ let () =
             `Quick
             test_emit_success_projects_board_chat_and_registry
         ; test_case
-            "wake route: register/take/discard, unrouted never stored"
+            "wake durably commits the channel and acknowledges outbox"
             `Quick
-            test_wake_route_register_take_discard
+            test_wake_durable_commit_carries_channel_and_acks_outbox
         ; test_case
-            "wake route: peek is non-destructive"
+            "wake fail-closed: failed lane commit preserves pending completion"
             `Quick
-            test_wake_route_peek_is_non_destructive
-        ; test_case
-            "wake durably commits the channel and consumes the route on Ok"
-            `Quick
-            test_wake_durable_commit_carries_channel_and_consumes_route
-        ; test_case
-            "wake fail-closed: a failed durable commit preserves the route"
-            `Quick
-            test_wake_fail_closed_preserves_route
+            test_wake_fail_closed_preserves_pending_completion
         ; test_case
             "completion stimulus persists without live registry"
             `Quick

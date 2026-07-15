@@ -76,13 +76,10 @@ val emit
     [board_post_id = ""]). 실패 경로는 fusion_tool의 append_chat_failure가
     호출한다(completion 타입당 단일 wake로 중복 방지).
 
-    Fail-closed durable delivery: 원 채널을 나르는 route는 in-memory 유일 carrier
-    이므로, 먼저 [Fusion_wake_route.peek]로 route를 소비하지 않고 읽어 stimulus를
-    만들고 공유 fail-closed 경로([enqueue_durable_result])로 durable 커밋한 뒤에만
-    route를 [take]하고 Running 키퍼에 best-effort wake hint를 flip한다. durable 커밋
-    실패 시 route를 남겨 재시도를 보존하고 [Error]를 반환한다(silent drop 아님).
-    커밋 성공 후의 wake hint 실패는 로깅만 한다(키퍼가 durable stimulus를 다음 턴에
-    replay). [Eio.Cancel.Cancelled]는 항상 재전파. *)
+    Fail-closed durable delivery: [Fusion_wake_route]가 completion을 먼저
+    Fusion-owned outbox에 queue하고 opaque address가 지정한 owner lane에 durable
+    커밋한 뒤에만 acknowledge한다. 커밋 실패나 재시작 시 pending item이 남아 replay되며,
+    커밋 성공 후의 wake hint 실패는 로깅만 한다. *)
 val wake_keeper_on_fusion_completion :
      base_dir:string
   -> keeper:string

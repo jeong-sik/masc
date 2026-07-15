@@ -17,7 +17,6 @@ type tool_result = Keeper_types_profile.tool_result
 val schemas : Masc_domain.tool_schema list
 
 val dispatch :
-  ?continuation_channel:Keeper_continuation_channel.t ->
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
 (** Internal async-message entry point for adapters whose authenticated
@@ -38,27 +37,26 @@ module For_testing : sig
     key:string -> ttl_s:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 end
 
-(** Streaming dispatch: handles keeper_msg with real-time text delta callback.
+(** Private direct-delivery stream with real-time text delta callback.
     The [on_text_delta] callback receives each text fragment from the MODEL
-    as it arrives. Returns [None] for tool names other than [masc_keeper_msg].
+    as it arrives. This is not a registered tool-name dispatch surface.
 
     @since 2.110.0 *)
-val dispatch_stream :
+val dispatch_keeper_msg_stream :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
   ?on_admitted:(unit -> (unit, string) result) ->
-  _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
+  _ context -> args:Yojson.Safe.t -> tool_result option
 
 (** Non-blocking streaming dispatch for direct chat admission. The Keeper turn
     slot performs the authoritative post-lock durable-queue recheck; [`Busy]
     callers must route the accepted message to their deferred transport. *)
-val dispatch_stream_if_free :
+val dispatch_keeper_msg_stream_if_free :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ context ->
-  name:string ->
   args:Yojson.Safe.t ->
   [ `Ran of tool_result option | `Busy of Keeper_turn_admission.rejection ]

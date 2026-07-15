@@ -20,14 +20,14 @@ module TR = Masc.Keeper_tool_resolution
 let names_to_probe =
   [ "tool_execute"
   ; "tool_edit_file"
-  ; "masc_keeper_msg"
+  ; "masc_keeper_delegate"
   ; "masc_keeper_sandbox_start"
   ; "masc_status"
   ; "masc_add_task"
   ; "mcp__masc__tool_execute"
   ; "mcp__masc__masc_status"
   ; "mcp__masc__masc_broadcast"
-  ; "mcp__masc__masc_keeper_msg"
+  ; "mcp__masc__masc_keeper_delegate"
   ; "_definitely_unknown_tool_zzz"
   ; ""
   ]

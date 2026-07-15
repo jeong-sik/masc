@@ -377,18 +377,21 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
           board_context_inference_surface_context post comments );
       ]
   in
-  match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
-  | None -> Error (`Internal_server_error "masc_keeper_msg tool is unavailable")
-  | Some result ->
-      if Tool_result.is_success result
-      then
-        (match
-           board_context_inference_submission_json ~post_id ~target_source
-             (Tool_result.data result)
-         with
-         | Ok json -> Ok json
-         | Error msg -> Error (`Internal_server_error msg))
-      else Error (`Bad_request (Tool_result.message result))
+  let result =
+    Keeper_tool_surface.dispatch_keeper_msg
+      ~submitted_by:agent_name
+      keeper_ctx
+      ~args
+  in
+  if Tool_result.is_success result
+  then
+    (match
+       board_context_inference_submission_json ~post_id ~target_source
+         (Tool_result.data result)
+     with
+     | Ok json -> Ok json
+     | Error msg -> Error (`Internal_server_error msg))
+  else Error (`Bad_request (Tool_result.message result))
 
 let respond_board_context_inference_error request reqd ~status ~message =
   respond_json_value_with_cors ~status request reqd
@@ -722,7 +725,7 @@ let add_routes ~sw ~clock router =
        respond_board_json reqd (board_sub_boards_json ()))
 
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg"
+       with_tool_auth ~tool_name:"masc_keeper_delegate"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd
            (handle_board_context_inference_request ~state ~sw ~clock ~request

@@ -15,10 +15,19 @@ type error =
       { expected : int
       ; actual : int
       }
+  | Supersession_phase_mismatch of Keeper_shutdown_types.t
+  | Supersession_intent_mismatch of Keeper_shutdown_types.t
+  | Invalid_supersession_actor of string
 
 type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
   | Blocked_persisted of Keeper_shutdown_types.t
+
+type supersede_blocked_result =
+  | Superseded_persisted of Keeper_shutdown_types.t
+  | Superseded_already_persisted of Keeper_shutdown_types.t
+
+type operator_metadata_supersession_token
 
 type corrupt_record =
   { keeper_name : string
@@ -40,9 +49,10 @@ val path :
   (string, error) result
 
 val to_json : Keeper_shutdown_types.t -> Yojson.Safe.t
-(** Decode the current schema and deterministically upgrade schema 4 lifecycle
-    records and schema 3 shutdown records emitted by preceding deployments.
-    Unknown versions remain explicit decode failures. *)
+(** Decode the current schema and deterministically upgrade schema 5 blocked
+    records, schema 4 lifecycle records, and schema 3 shutdown records emitted
+    by preceding deployments. Unknown versions remain explicit decode
+    failures. *)
 val of_json : Yojson.Safe.t -> (Keeper_shutdown_types.t, error) result
 
 val persist_new :
@@ -55,6 +65,30 @@ val replace :
   expected_revision:int ->
   Keeper_shutdown_types.t ->
   (unit, error) result
+
+(** Bind the exact admission-owned operation identity and durable revision
+    eligible for an explicit operator metadata update. Only [Blocked] with
+    [Operator_stop_retain_meta], or an idempotent prior metadata supersession,
+    can produce a token. *)
+val prepare_operator_metadata_supersession :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  actor:string ->
+  (operator_metadata_supersession_token, error) result
+
+val supersession_token_operation_id :
+  operator_metadata_supersession_token ->
+  Keeper_shutdown_types.Operation_id.t
+
+(** After the operator metadata write has durably committed, CAS the token's
+    exact [Blocked] revision to [Superseded]. Concurrent progress fails with a
+    typed revision conflict. A prior metadata supersession is idempotent. *)
+val supersede_blocked_operator_stop :
+  config:Workspace.config ->
+  token:operator_metadata_supersession_token ->
+  now:(unit -> string) ->
+  (supersede_blocked_result, error) result
 
 (** Read the latest durable revision and persist [Blocked failure] while
     holding the operation's write lock. Existing [Finalized], [Blocked], and

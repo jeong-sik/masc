@@ -22,15 +22,7 @@ let active_operation ~config keeper_name =
   | Ok operations ->
     let active =
       List.filter
-        (fun operation ->
-           match operation.Keeper_shutdown_types.phase with
-           | Keeper_shutdown_types.Finalized _ -> false
-           | Keeper_shutdown_types.Prepared
-           | Keeper_shutdown_types.Joined_idle
-           | Keeper_shutdown_types.Finalizing_tasks _
-           | Keeper_shutdown_types.Cleanup_ready _
-           | Keeper_shutdown_types.Reconciliation_required _
-           | Keeper_shutdown_types.Blocked _ -> true)
+        Keeper_shutdown_types.requires_admission_fence
         operations
     in
     (match active with

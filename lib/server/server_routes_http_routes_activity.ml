@@ -323,31 +323,52 @@ let non_empty_json_string_member field json =
       if value = "" then None else Some value
   | _ -> None
 
-let board_context_inference_submission_json ~post_id ~target_source tool_data =
+let board_context_inference_submission_json ~post_id ~target_keeper ~target_source
+    tool_data =
   match
-    ( non_empty_json_string_member "request_id" tool_data,
-      non_empty_json_string_member "keeper_name" tool_data,
-      non_empty_json_string_member "status" tool_data )
+    json_assoc_member "run_ref" tool_data,
+    json_assoc_member "result_contract" tool_data
   with
-  | Some request_id, Some keeper_name, Some status ->
-      let fields =
-        [
-          ("ok", `Bool true);
-          ("request_id", `String request_id);
-          ("keeper_name", `String keeper_name);
-          ("post_id", `String post_id);
-          ("status", `String status);
-          ( "target_source",
-            `String (board_context_inference_target_source_to_string target_source) );
-        ]
+  | Some run_ref_json, Some (`String result_contract_raw) ->
+    (match
+       Keeper_invocation_contract.run_ref_of_json run_ref_json,
+       Keeper_invocation_contract.result_contract_of_string result_contract_raw
+     with
+     | Ok run_ref, Some result_contract ->
+      let actual_target =
+        Keeper_invocation_contract.run_ref_target_name run_ref
       in
-      let fields =
-        match non_empty_json_string_member "message" tool_data with
-        | Some message -> fields @ [ ("message", `String message) ]
-        | None -> fields
-      in
-      Ok (`Assoc fields)
-  | _ -> Error "masc_keeper_msg returned a malformed queue submission"
+      if not (String.equal actual_target target_keeper)
+      then
+        Error
+          (Printf.sprintf
+             "Keeper invocation target %S does not match board target %S"
+             actual_target
+             target_keeper)
+      else
+        let fields =
+          [ "ok", `Bool true
+          ; "run_ref", Keeper_invocation_contract.run_ref_to_json run_ref
+          ; "post_id", `String post_id
+          ; ( "result_contract"
+            , `String
+                (Keeper_invocation_contract.result_contract_to_string
+                   result_contract) )
+          ; ( "target_source"
+            , `String
+                (board_context_inference_target_source_to_string target_source) )
+          ]
+        in
+        let fields =
+          match non_empty_json_string_member "message" tool_data with
+          | Some message -> fields @ [ ("message", `String message) ]
+          | None -> fields
+        in
+        Ok (`Assoc fields)
+     | Error error, _ ->
+       Error (Keeper_invocation_contract.request_error_to_string error)
+     | Ok _, None -> Error "invalid Keeper invocation result_contract")
+  | _ -> Error "typed Keeper invocation submission is missing tracking fields"
 
 let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
     ~target_source ~(post : Board.post) ~comments =
@@ -386,7 +407,7 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
   if Tool_result.is_success result
   then
     (match
-       board_context_inference_submission_json ~post_id ~target_source
+       board_context_inference_submission_json ~post_id ~target_keeper ~target_source
          (Tool_result.data result)
      with
      | Ok json -> Ok json

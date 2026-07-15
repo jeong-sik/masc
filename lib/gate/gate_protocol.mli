@@ -35,41 +35,32 @@ type turn_stats = {
   tokens_used : int;
 }
 
-(** Durable MASC message request envelope.
+(** Durable MASC message tracking envelope.
 
     This is the layer shared by dashboard chat, Connectors, and future
-    MASC<->MASC peers: a producer submits a request, receives a
-    [request_id], then observes live projections and reconciles terminal
-    state by id.  [modalities] is intentionally open-string JSON so the
+    MASC<->MASC peers. Keeper invocations carry the exact typed [run_ref] and
+    result contract; chat-queue deferrals carry their distinct typed receipt.
+    [modalities] is intentionally open-string JSON so the
     text-only dashboard path can grow into image/audio/file parts without
     another route shape. *)
-type message_request_status =
-  | Accepted
-  | Acceptance_uncertain
-  | Queued
-  | Running
-  | Done
-  | Failed
-  | Lost
-  | Cancelled
+type message_request_tracking =
+  | Keeper_run of
+      { run_ref : Keeper_invocation_types.run_ref
+      ; result_contract : Keeper_invocation_types.result_contract
+      }
+  | Chat_receipt of { receipt_id : string }
 
 type message_request = {
-  request_id : string;
+  tracking : message_request_tracking;
   destination_type : string;
   destination_id : string;
   channel : string;
   actor_id : string option;
-  status : message_request_status;
   modalities : string list;
   transport : string option;
   metadata : (string * string) list;
 }
 
-val message_request_status_to_string : message_request_status -> string
-(** Parse the canonical status labels emitted by [keeper_msg_async].
-    Unknown labels return [None] so callers fail closed instead of silently
-    treating protocol drift as acceptance. *)
-val message_request_status_of_string : string -> message_request_status option
 val message_request_to_json : message_request -> Yojson.Safe.t
 
 (** Successful response to send back to the consumer. *)

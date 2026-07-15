@@ -2699,45 +2699,54 @@ let expect_error expected actual =
 
 let test_extract_message_request_ack_accepts_well_formed_envelope () =
   let body =
-    {|{"request_id":"req-1","status":"queued","keeper_name":"luna"}|}
+    {|{"run_ref":{"run_id":"run-1","target":{"kind":"keeper","name":"luna"},"capability":"invoke_turn"},"result_contract":"awaiting_execution"}|}
   in
   match
     Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
   with
   | Ok request ->
-      check string "request_id" "req-1" request.request_id;
       check string "destination_id" "luna" request.destination_id;
       check string "channel" "discord" request.channel;
-      (match request.status with
-       | Gate_protocol.Queued -> ()
-       | _ -> fail "expected Queued status")
+      (match request.tracking with
+       | Gate_protocol.Keeper_run { run_ref; result_contract } ->
+         check string "run id" "run-1"
+           (Keeper_invocation_contract.run_id run_ref);
+         check bool "awaiting execution contract" true
+           (result_contract = Keeper_invocation_contract.Awaiting_execution)
+       | Gate_protocol.Chat_receipt _ -> fail "expected Keeper run tracking")
   | Error failure ->
       fail
         ("expected Ok request: "
          ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
 
-let test_extract_message_request_ack_rejects_missing_request_id () =
-  let body = {|{"status":"queued"}|} in
-  expect_error "missing request_id"
+let test_extract_message_request_ack_rejects_missing_run_ref () =
+  let body = {|{"result_contract":"awaiting_execution"}|} in
+  expect_error "missing run_ref"
     (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
        ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
 
-let test_extract_message_request_ack_rejects_empty_request_id () =
-  let body = {|{"request_id":"   ","status":"queued"}|} in
-  expect_error "empty request_id"
+let test_extract_message_request_ack_rejects_target_mismatch () =
+  let body =
+    {|{"run_ref":{"run_id":"run-1","target":{"kind":"keeper","name":"other"},"capability":"invoke_turn"},"result_contract":"awaiting_execution"}|}
+  in
+  expect_error "does not match expected Keeper"
     (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
        ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
 
-let test_extract_message_request_ack_rejects_missing_status () =
-  let body = {|{"request_id":"req-1"}|} in
-  expect_error "missing status"
+let test_extract_message_request_ack_rejects_missing_result_contract () =
+  let body =
+    {|{"run_ref":{"run_id":"run-1","target":{"kind":"keeper","name":"luna"},"capability":"invoke_turn"}}|}
+  in
+  expect_error "missing result_contract"
     (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
        ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
 
-let test_extract_message_request_ack_rejects_unknown_status () =
-  let body = {|{"request_id":"req-1","status":"frobnicated"}|} in
-  expect_error "unknown status"
+let test_extract_message_request_ack_rejects_unknown_result_contract () =
+  let body =
+    {|{"run_ref":{"run_id":"run-1","target":{"kind":"keeper","name":"luna"},"capability":"invoke_turn"},"result_contract":"frobnicated"}|}
+  in
+  expect_error "unknown result_contract"
     (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
        ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
 
@@ -2746,38 +2755,6 @@ let test_extract_message_request_ack_rejects_invalid_json () =
   expect_error "invalid json"
     (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
        ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
-
-let test_extract_message_request_ack_normalizes_status_case () =
-  (* The wire contract lowercases the status before consulting the closed
-     sum. A mixed-case envelope from a future keeper should still be
-     accepted, not rejected as unknown. *)
-  let body = {|{"request_id":"req-1","status":"Running"}|} in
-  match
-    Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-      ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
-  with
-  | Ok request ->
-      (match request.status with
-       | Gate_protocol.Running -> ()
-       | _ -> fail "expected Running status after case normalization")
-  | Error failure ->
-      fail
-        ("expected Ok after case normalization: "
-         ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
-
-let test_extract_message_request_ack_falls_back_to_keeper_name () =
-  let body = {|{"request_id":"req-1","status":"done"}|} in
-  match
-    Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-      ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
-  with
-  | Ok request ->
-      check string "destination_id falls back to keeper_name" "luna"
-        request.destination_id
-  | Error failure ->
-      fail
-        ("expected Ok with fallback keeper_name: "
-         ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
 
 (* ── RFC-connector-deferred-reply-via-chat-queue connector deferred-reply routing ───────────────── *)
 
@@ -3028,19 +3005,15 @@ let () =
         [
           test_case "accepts well-formed envelope" `Quick
             test_extract_message_request_ack_accepts_well_formed_envelope;
-          test_case "rejects missing request_id" `Quick
-            test_extract_message_request_ack_rejects_missing_request_id;
-          test_case "rejects empty request_id" `Quick
-            test_extract_message_request_ack_rejects_empty_request_id;
-          test_case "rejects missing status" `Quick
-            test_extract_message_request_ack_rejects_missing_status;
-          test_case "rejects unknown status" `Quick
-            test_extract_message_request_ack_rejects_unknown_status;
+          test_case "rejects missing run_ref" `Quick
+            test_extract_message_request_ack_rejects_missing_run_ref;
+          test_case "rejects target mismatch" `Quick
+            test_extract_message_request_ack_rejects_target_mismatch;
+          test_case "rejects missing result contract" `Quick
+            test_extract_message_request_ack_rejects_missing_result_contract;
+          test_case "rejects unknown result contract" `Quick
+            test_extract_message_request_ack_rejects_unknown_result_contract;
           test_case "rejects invalid json" `Quick
             test_extract_message_request_ack_rejects_invalid_json;
-          test_case "normalizes status case" `Quick
-            test_extract_message_request_ack_normalizes_status_case;
-          test_case "falls back to keeper_name" `Quick
-            test_extract_message_request_ack_falls_back_to_keeper_name;
         ] );
     ]

@@ -1,6 +1,5 @@
-type capability = Invoke_turn
-
-type target = Keeper of Keeper_id.Keeper_name.t
+type capability = Keeper_invocation_types.capability = Invoke_turn
+type target = Keeper_invocation_types.target = Keeper of Keeper_id.Keeper_name.t
 
 type request =
   { target : target
@@ -8,7 +7,7 @@ type request =
   ; prompt : string
   }
 
-type run_ref =
+type run_ref = Keeper_invocation_types.run_ref =
   { run_id : string
   ; target : target
   ; capability : capability
@@ -21,7 +20,7 @@ type submission_receipt =
       ; reason : string
       }
 
-type result_contract =
+type result_contract = Keeper_invocation_types.result_contract =
   | Awaiting_execution
   | Publication_uncertain
   | Running
@@ -34,7 +33,6 @@ type result_contract =
 type request_error =
   | Invalid_target of string
   | Empty_prompt
-  | Invalid_entry_projection
   | Invalid_wire_value of
       { field : string
       ; expected : string
@@ -126,15 +124,12 @@ let request_of_json json =
 let request_error_to_string = function
   | Invalid_target reason -> reason
   | Empty_prompt -> "message is required"
-  | Invalid_entry_projection -> "Keeper invocation entry projection is not an object"
   | Invalid_wire_value { field; expected } ->
     Printf.sprintf "%s must be %s" field expected
   | Run_ref_mismatch -> "run_ref does not identify the stored Keeper invocation"
 ;;
 
-let target_name_of_target = function
-  | Keeper name -> Keeper_id.Keeper_name.to_string name
-;;
+let target_name_of_target = Keeper_invocation_types.target_name
 
 let target_name (request : request) =
   target_name_of_target request.target
@@ -181,25 +176,8 @@ let result_contract_of_status = function
 
 let result_contract entry = result_contract_of_status entry.Keeper_msg_async.status
 
-let capability_to_string = function
-  | Invoke_turn -> "invoke_turn"
-;;
-
-let target_to_json = function
-  | Keeper name ->
-    `Assoc
-      [ "kind", `String "keeper"
-      ; "name", `String (Keeper_id.Keeper_name.to_string name)
-      ]
-;;
-
-let run_ref_to_json reference =
-  `Assoc
-    [ "run_id", `String reference.run_id
-    ; "target", target_to_json reference.target
-    ; "capability", `String (capability_to_string reference.capability)
-    ]
-;;
+let target_to_json = Keeper_invocation_types.target_to_json
+let run_ref_to_json = Keeper_invocation_types.run_ref_to_json
 
 let run_ref_of_json json =
   let* fields = object_fields ~field:"run_ref" json in
@@ -220,7 +198,8 @@ let run_ref_of_json json =
   else Ok { run_id; target; capability }
 ;;
 
-let run_id reference = reference.run_id
+let run_id = Keeper_invocation_types.run_id
+let run_ref_target_name = Keeper_invocation_types.run_ref_target_name
 
 let run_ref_matches_entry reference (entry : Keeper_msg_async.entry) =
   String.equal reference.run_id entry.Keeper_msg_async.request_id
@@ -229,43 +208,8 @@ let run_ref_matches_entry reference (entry : Keeper_msg_async.entry) =
        entry.Keeper_msg_async.keeper_name
 ;;
 
-let result_contract_to_string = function
-  | Awaiting_execution -> "awaiting_execution"
-  | Publication_uncertain -> "publication_uncertain"
-  | Running -> "running"
-  | Yielded -> "yielded"
-  | Cancellation_requested -> "cancellation_requested"
-  | Cancelled -> "cancelled"
-  | Completed -> "completed"
-  | Failed -> "failed"
-;;
-
-let submission_to_json (request : request) outcome =
-  let common reference status contract =
-    [ "request_id", `String outcome.Keeper_msg_async.request_id
-    ; "keeper_name", `String (target_name request)
-    ; "status", `String status
-    ; "run_ref", run_ref_to_json reference
-    ; "result_contract", `String (result_contract_to_string contract)
-    ]
-  in
-  match submission_receipt request outcome with
-  | Durable_run reference ->
-    `Assoc
-      (common reference "queued" Awaiting_execution
-       @ [ ( "message"
-           , `String
-               "Keeper turn accepted. The caller lane may continue; query masc_keeper_msg_result with run_ref.run_id." )
-         ])
-  | Reconciliation_required { run_ref = reference; reason } ->
-    `Assoc
-      (common reference "reconciliation_required" Publication_uncertain
-       @ [ "reason", `String reason
-         ; ( "operator_instruction"
-           , `String
-               "Request publication is uncertain. Query masc_keeper_msg_result with this exact run_ref.run_id; do not resubmit." )
-         ])
-;;
+let result_contract_to_string = Keeper_invocation_types.result_contract_to_string
+let result_contract_of_string = Keeper_invocation_types.result_contract_of_string
 
 let delegate_submission_to_json (request : request) outcome =
   let common reference result_contract =
@@ -375,29 +319,6 @@ let delegate_entry_to_json (entry : Keeper_msg_async.entry) =
         ]
         @ timing
         @ entry_result entry.status))
-;;
-
-let entry_to_json entry =
-  let contract = result_contract entry in
-  let* target_name =
-    Keeper_id.Keeper_name.of_string entry.Keeper_msg_async.keeper_name
-    |> Result.map_error (fun reason -> Invalid_target reason)
-  in
-  let reference =
-    { run_id = entry.request_id
-    ; target = Keeper target_name
-    ; capability = Invoke_turn
-    }
-  in
-  match Keeper_msg_async.entry_to_json entry with
-  | `Assoc fields ->
-    Ok
-      (`Assoc
-         (fields
-          @ [ "run_ref", run_ref_to_json reference
-            ; "result_contract", `String (result_contract_to_string contract)
-            ]))
-  | _ -> Error Invalid_entry_projection
 ;;
 
 let delegate_cancellation_to_json reference result =

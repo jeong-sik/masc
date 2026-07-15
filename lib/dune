@@ -89,6 +89,7 @@
   ;; RFC-0056 Phase 1N — Keeper_state_* deterministic FSM cluster extracted to
   ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
   masc.keeper_registry
+  masc.keeper_invocation_types
   ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
   masc.keeper_contract
   masc.keeper_hooks_oas_types

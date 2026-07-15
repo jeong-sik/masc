@@ -324,63 +324,7 @@ let require_unique_assoc label = function
   | _ -> Alcotest.fail (label ^ " must be a JSON object")
 ;;
 
-let test_keeper_msg_submission_projection_has_unique_keys () =
-  let reason = "directory fsync could not confirm publication" in
-  let outcome : Kmsg.submit_outcome =
-    { request_id = "kmsg-reconciliation-projection"
-    ; acceptance = Kmsg.Reconciliation_required { reason }
-    }
-  in
-  let request =
-    match
-      Invocation.request
-        ~keeper_name:"projection-keeper"
-        ~prompt:"inspect this request"
-    with
-    | Ok request -> request
-    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  let core_fields =
-    Kmsg.submit_outcome_to_json outcome
-    |> require_unique_assoc "core reconciliation outcome"
-  in
-  check
-    (option string)
-    "uncertainty reason has a dedicated field"
-    (Some reason)
-    (Option.bind
-       (List.assoc_opt "reason" core_fields)
-       (function `String value -> Some value | _ -> None));
-  let tool_fields =
-    Ops.For_testing.submit_outcome_with_keeper_json
-      ~request
-      outcome
-    |> require_unique_assoc "tool reconciliation outcome"
-  in
-  check bool "operator instruction is explicit" true
-    (List.mem_assoc "operator_instruction" tool_fields);
-  check bool "typed run reference is present" true
-    (List.mem_assoc "run_ref" tool_fields);
-  check
-    (option string)
-    "uncertain publication is not reported as queued"
-    (Some "publication_uncertain")
-    (match List.assoc_opt "result_contract" tool_fields with
-     | Some (`String value) -> Some value
-     | _ -> None);
-  let durable_fields =
-    Ops.For_testing.submit_outcome_with_keeper_json
-      ~request
-      { outcome with acceptance = Kmsg.Durably_accepted }
-    |> require_unique_assoc "durable tool submission outcome"
-  in
-  check
-    (option string)
-    "durable submission is queued"
-    (Some "queued")
-    (match List.assoc_opt "status" durable_fields with
-     | Some (`String value) -> Some value
-     | _ -> None);
+let test_keeper_invocation_result_contracts () =
   let entry : Kmsg.entry =
     { request_id = "kmsg-entry-projection"
     ; keeper_name = "projection-keeper"
@@ -391,19 +335,6 @@ let test_keeper_msg_submission_projection_has_unique_keys () =
     ; completed_at = None
     }
   in
-  let entry_json =
-    match Invocation.entry_to_json entry with
-    | Ok json -> json
-    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  let entry_fields =
-    entry_json |> require_unique_assoc "request entry projection"
-  in
-  check int "entry status is projected exactly once" 1
-    (List.fold_left
-       (fun count (key, _) -> if String.equal key "status" then count + 1 else count)
-       0
-       entry_fields);
   check bool "running contract is typed" true
     (Invocation.result_contract entry = Invocation.Running);
   let yielded_entry =
@@ -609,8 +540,8 @@ let () =
             test_turn_event_bus_prefers_injected_bus_over_fallback
         ; test_case "keeper msg async submit uses captured event bus" `Quick
             test_keeper_msg_async_submit_uses_captured_event_bus
-        ; test_case "keeper msg submission JSON keys are unique" `Quick
-            test_keeper_msg_submission_projection_has_unique_keys
+        ; test_case "Keeper invocation result contracts" `Quick
+            test_keeper_invocation_result_contracts
         ; test_case "typed Keeper invocation wire contract" `Quick
             test_typed_keeper_invocation_wire_contract
         ] )

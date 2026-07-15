@@ -211,22 +211,35 @@ let test_outbound_to_json_roundtrip () =
   check int "duration" 100 (stats |> member "duration_ms" |> to_int)
 
 let test_outbound_to_json_includes_message_request () =
+  let run_ref =
+    match
+      Keeper_invocation_contract.run_ref_of_json
+        (`Assoc
+           [ "run_id", `String "run-123"
+           ; "target", `Assoc [ "kind", `String "keeper"; "name", `String "luna" ]
+           ; "capability", `String "invoke_turn"
+           ])
+    with
+    | Ok run_ref -> run_ref
+    | Error error -> fail (Keeper_invocation_contract.request_error_to_string error)
+  in
   let request : Gate_protocol.message_request =
     {
-      request_id = "req-123";
+      tracking =
+        Gate_protocol.Keeper_run
+          { run_ref; result_contract = Keeper_invocation_contract.Awaiting_execution };
       destination_type = "keeper";
       destination_id = "luna";
       channel = "slack";
       actor_id = Some "U123";
-      status = Gate_protocol.Queued;
       modalities = [ "text" ];
       transport = Some "slack";
-      metadata = [ ("status_source", "keeper_msg_async") ];
+      metadata = [ ("tracking_source", "keeper_invocation") ];
     }
   in
   let out : Gate_protocol.outbound_message = {
     keeper_name = "luna";
-    content = "luna is busy; your message is queued (request_id=req-123).";
+    content = "luna is busy; preserve the returned tracking value.";
     structured = None;
     turn_stats = None;
     message_request = Some request;
@@ -234,10 +247,17 @@ let test_outbound_to_json_includes_message_request () =
   let json = Gate_protocol.outbound_to_json out in
   let open Yojson.Safe.Util in
   let request_json = json |> member "message_request" in
-  check string "request id" "req-123"
-    (request_json |> member "request_id" |> to_string);
-  check string "status" "queued"
-    (request_json |> member "status" |> to_string);
+  let tracking = request_json |> member "tracking" in
+  check string "tracking kind" "keeper_run"
+    (tracking |> member "kind" |> to_string);
+  check string "run id" "run-123"
+    (tracking |> member "run_ref" |> member "run_id" |> to_string);
+  check string "result contract" "awaiting_execution"
+    (tracking |> member "result_contract" |> to_string);
+  check bool "raw request id omitted" true
+    (request_json |> member "request_id" = `Null);
+  check bool "legacy status omitted" true
+    (request_json |> member "status" = `Null);
   check string "destination id" "luna"
     (request_json |> member "destination_id" |> to_string)
 
@@ -264,26 +284,6 @@ let test_gate_error_strings () =
     (Gate_protocol.gate_error_to_string Gate_protocol.Dispatch_unavailable);
   check string "internal" "internal error"
     (Gate_protocol.gate_error_to_string (Gate_protocol.Internal "details"))
-
-let check_status_parse label raw expected =
-  check
-    (option string)
-    label
-    (Option.map Gate_protocol.message_request_status_to_string expected)
-    (Option.map Gate_protocol.message_request_status_to_string
-       (Gate_protocol.message_request_status_of_string raw))
-
-let test_message_request_status_of_string () =
-  check_status_parse "accepted" "accepted" (Some Gate_protocol.Accepted);
-  check_status_parse "acceptance uncertain" "acceptance_uncertain"
-    (Some Gate_protocol.Acceptance_uncertain);
-  check_status_parse "queued" "queued" (Some Gate_protocol.Queued);
-  check_status_parse "running" "running" (Some Gate_protocol.Running);
-  check_status_parse "done" "done" (Some Gate_protocol.Done);
-  check_status_parse "error" "error" (Some Gate_protocol.Failed);
-  check_status_parse "lost" "lost" (Some Gate_protocol.Lost);
-  check_status_parse "cancelled" "cancelled" (Some Gate_protocol.Cancelled);
-  check_status_parse "unknown fails closed" "finished" None
 
 let () =
   Alcotest.run "Gate_protocol"
@@ -320,7 +320,5 @@ let () =
         [
           test_case "validation error strings" `Quick test_validation_error_strings;
           test_case "gate error strings" `Quick test_gate_error_strings;
-          test_case "message request status parse" `Quick
-            test_message_request_status_of_string;
         ] );
     ]

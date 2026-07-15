@@ -328,31 +328,41 @@ let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
   check bool "retired runtime.json absent" false (Sys.file_exists path)
 
-let with_repo_oas_model_catalog f =
-  let path = Filename.concat (repo_root ()) "oas-models.toml" in
-  check bool "repo oas-models.toml present" true (Sys.file_exists path);
-  match Llm_provider.Model_catalog.load_file path with
-  | Error msg -> failf "repo oas-models.toml should load: %s" msg
-  | Ok catalog ->
+let with_deployment_oas_model_catalog f =
+  let overlay_path = Filename.concat (repo_root ()) "config/oas-models-overlay.toml" in
+  check bool "deployment catalog overlay present" true (Sys.file_exists overlay_path);
+  match Llm_provider.Model_catalog.load_file overlay_path with
+  | Error msg -> failf "deployment catalog overlay should load: %s" msg
+  | Ok overlay ->
     Fun.protect
       ~finally:Llm_provider.Model_catalog.clear_global
       (fun () ->
-         Llm_provider.Model_catalog.set_global catalog;
-         f catalog)
+         Llm_provider.Model_catalog.clear_global ();
+         Llm_provider.Model_catalog.set_global_overlay overlay;
+         match Llm_provider.Model_catalog.global () with
+         | None -> fail "embedded plus deployment overlay catalog should load"
+         | Some catalog -> f catalog)
 
-let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
-  with_repo_oas_model_catalog @@ fun catalog ->
+let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
+  with_deployment_oas_model_catalog @@ fun catalog ->
   let runpod_model_id = "qwen36-35b-a3b-mtp" in
-  let provider_model_ids =
-    [ "runpod_mtp/" ^ runpod_model_id; "openai_compat/" ^ runpod_model_id ]
-  in
-  let expect_lookup model_id =
-    match Llm_provider.Model_catalog.lookup catalog model_id with
-    | None -> failf "expected repo OAS catalog row for %s" model_id
+  let provider_labels = [ "runpod_mtp"; "vllm-qwen3-mtp" ] in
+  let expect_provider_lookup provider_name =
+    match
+      Llm_provider.Model_catalog.lookup_for_provider
+        catalog
+        ~provider_name
+        ~model_id:runpod_model_id
+    with
+    | None ->
+      failf
+        "expected deployment OAS catalog row for provider=%s model=%s"
+        provider_name
+        runpod_model_id
     | Some entry ->
-      check (option string) (model_id ^ " base") (Some "openai_chat")
+      check (option string) (provider_name ^ " base") (Some "openai_chat")
         entry.base_label;
-      check (option int) (model_id ^ " context") (Some 131072)
+      check (option int) (provider_name ^ " context") (Some 131072)
         entry.max_context_tokens
   in
   let expect_runpod_caps
@@ -367,22 +377,21 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_kwargs))
   in
-  List.iter expect_lookup provider_model_ids;
-  expect_lookup runpod_model_id;
+  List.iter expect_provider_lookup provider_labels;
   List.iter
-    (fun provider_model_id ->
+    (fun provider_label ->
        match
-         Llm_provider.Capabilities.for_model_id_catalog provider_model_id
+         Llm_provider.Capabilities.for_provider_model_id
+           ~allow_bare_fallback:false
+           ~provider_label
+           ~model_id:runpod_model_id
        with
        | None ->
-         failf "expected RunPod qwen3.6 capability lookup for %s"
-           provider_model_id
-       | Some caps -> expect_runpod_caps provider_model_id caps)
-    provider_model_ids;
-  (* Verify the actual boot gate path without bare fallback. current pinned OAS
-     emits openai_compat for RunPod proxy URLs; jeong-sik/oas#2374 emits
-     runpod_mtp after the pin bump. Both labels must resolve during the
-     transition window. *)
+         failf "expected RunPod qwen3.6 capability lookup for %s" provider_label
+       | Some caps -> expect_runpod_caps provider_label caps)
+    provider_labels;
+  (* Verify both the deployment transport alias and the upstream serving
+     contract without bare fallback. *)
   List.iter
     (fun provider_label ->
        let name = "RunPod qwen3.6 gate " ^ provider_label in
@@ -396,29 +405,35 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
          failf "RunPod qwen3.6 must resolve via gate path (%s)"
            provider_label
        | Some gate_caps -> expect_runpod_caps name gate_caps)
-    [ "runpod_mtp"; "openai_compat" ]
+    provider_labels
 
-let test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
-  with_repo_oas_model_catalog @@ fun catalog ->
+let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
+  with_deployment_oas_model_catalog @@ fun catalog ->
   let model_id = "gemma4-coder-fable5-q4km" in
-  let provider_model_id = "openai_compat/" ^ model_id in
-  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
-   | None -> failf "expected repo OAS catalog row for %s" provider_model_id
+  let provider_name = "runpod_rtxa6000" in
+  (match
+     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+   with
+   | None ->
+     failf
+       "expected deployment OAS catalog row for provider=%s model=%s"
+       provider_name
+       model_id
    | Some entry ->
-     check (option string) (provider_model_id ^ " base") (Some "openai_chat")
+     check (option string) (provider_name ^ " base") (Some "openai_chat")
        entry.base_label;
-     check (option int) (provider_model_id ^ " context") (Some 262144)
+     check (option int) (provider_name ^ " context") (Some 262144)
        entry.max_context_tokens);
   match
     Llm_provider.Capabilities.for_provider_model_id
       ~allow_bare_fallback:false
-      ~provider_label:"openai_compat"
+      ~provider_label:"runpod_rtxa6000"
       ~model_id
   with
   | None ->
     failf
       "live RunPod RTX A6000 Gemma runtime must resolve via raw \
-       OpenAI-compatible gate path"
+       deployment provider gate path"
   | Some caps ->
     check bool "RunPod RTX A6000 Gemma tools" true caps.supports_tools;
     check bool "RunPod RTX A6000 Gemma tool choice" true
@@ -431,25 +446,28 @@ let test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_token "<|think|>"))
 
-let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
-  with_repo_oas_model_catalog @@ fun catalog ->
+let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
+  with_deployment_oas_model_catalog @@ fun catalog ->
   let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
-  let provider_model_id = "ollama/" ^ model_id in
-  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
-   | None -> failf "expected repo OAS catalog row for %s" provider_model_id
+  let provider_name = "ollama" in
+  (match
+     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+   with
+   | None ->
+     failf
+       "expected deployment OAS catalog row for provider=%s model=%s"
+       provider_name
+       model_id
    | Some entry ->
-     check (option string) (provider_model_id ^ " base") (Some "ollama")
+     check (option string) (provider_name ^ " base") (Some "ollama")
        entry.base_label;
-     check (option int) (provider_model_id ^ " context") (Some 131072)
+     check (option int) (provider_name ^ " context") (Some 131072)
        entry.max_context_tokens;
-     check
-       (option bool)
-       (provider_model_id ^ " audio input")
-       (Some true)
+     check (option bool) (provider_name ^ " audio input") (Some true)
        entry.supports_audio_input;
      check
        (option string)
-       (provider_model_id ^ " thinking token")
+       (provider_name ^ " thinking token")
        (Some "<|think|>")
        (match entry.thinking_control_format with
         | Some (Llm_provider.Capabilities.Chat_template_token token) ->
@@ -481,45 +499,71 @@ let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
          ~provider_label:"ollama"
          ~model_id)
 
-let test_repo_oas_model_catalog_preserve_axes_resolve () =
-  with_repo_oas_model_catalog @@ fun catalog ->
-  let expect_catalog_field ~field_name ~get model_id expected =
-    match Llm_provider.Model_catalog.lookup catalog model_id with
-    | None -> failf "expected repo OAS catalog row for %s" model_id
+let test_deployment_oas_model_catalog_preserve_axes_resolve () =
+  with_deployment_oas_model_catalog @@ fun catalog ->
+  let expect_provider_catalog_field
+        ~field_name
+        ~get
+        ~provider_name
+        ~model_id
+        expected
+    =
+    match
+      Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+    with
+    | None ->
+      failf
+        "expected deployment OAS catalog row for provider=%s model=%s"
+        provider_name
+        model_id
     | Some entry ->
-      check (option string) (model_id ^ " " ^ field_name) (Some expected)
+      check (option string) (provider_name ^ " " ^ field_name) (Some expected)
         (get entry)
   in
-  let expect_request_side_preserve model_id =
-    expect_catalog_field
+  let expect_request_side_preserve ~provider_name ~model_id =
+    expect_provider_catalog_field
       ~field_name:"preserve_thinking_control_format"
       ~get:(fun entry -> entry.preserve_thinking_control_format)
-      model_id
+      ~provider_name
+      ~model_id
       "chat_template_kwargs_preserve_thinking";
-    match Llm_provider.Capabilities.for_model_id model_id with
-    | None -> failf "expected OAS capabilities for %s" model_id
+    match
+      Llm_provider.Capabilities.for_provider_model_id
+        ~allow_bare_fallback:false
+        ~provider_label:provider_name
+        ~model_id
+    with
+    | None ->
+      failf "expected OAS capabilities for provider=%s model=%s" provider_name model_id
     | Some caps ->
-      check bool (model_id ^ " request-side preserve capability") true
+      check bool (provider_name ^ " request-side preserve capability") true
         (Llm_provider.Capabilities.(
            caps.preserve_thinking_control_format
            = Chat_template_kwargs_preserve_thinking))
   in
-  let expect_preserve_always_replay model_id =
-    expect_catalog_field
+  let expect_preserve_always_replay ~provider_name ~model_id =
+    expect_provider_catalog_field
       ~field_name:"reasoning_replay"
       ~get:(fun entry -> entry.reasoning_replay)
-      model_id
+      ~provider_name
+      ~model_id
       "preserve_always";
-    match Llm_provider.Capabilities.for_model_id model_id with
-    | None -> failf "expected OAS capabilities for %s" model_id
+    match
+      Llm_provider.Capabilities.for_provider_model_id
+        ~allow_bare_fallback:false
+        ~provider_label:provider_name
+        ~model_id
+    with
+    | None ->
+      failf "expected OAS capabilities for provider=%s model=%s" provider_name model_id
     | Some caps ->
-      check bool (model_id ^ " reasoning replay override") true
+      check bool (provider_name ^ " reasoning replay override") true
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
   let expect_bare_kimi_k27_wire_semantics model_id =
     (match Llm_provider.Model_catalog.lookup catalog model_id with
-     | None -> failf "expected repo OAS catalog row for %s" model_id
+     | None -> failf "expected deployment OAS catalog row for %s" model_id
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
          entry.base_label;
@@ -545,13 +589,26 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
-  expect_request_side_preserve "runpod_mtp/qwen36-35b-a3b-mtp";
-  expect_request_side_preserve "qwen36-35b-a3b-mtp";
-  expect_preserve_always_replay "ollama_cloud/kimi-k2.7-code";
+  expect_request_side_preserve
+    ~provider_name:"runpod_mtp"
+    ~model_id:"qwen36-35b-a3b-mtp";
+  expect_preserve_always_replay
+    ~provider_name:"ollama_cloud"
+    ~model_id:"kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
-let test_repo_runtime_bindings_resolve_through_oas_catalog () =
-  with_repo_oas_model_catalog @@ fun _catalog ->
+let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
+  with_deployment_oas_model_catalog @@ fun catalog ->
+  check
+    (option string)
+    "runtime-local alias is not promoted to the OAS catalog"
+    None
+    (Option.map
+       (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+       (Llm_provider.Model_catalog.lookup_for_provider
+          catalog
+          ~provider_name:"ollama_cloud"
+          ~model_id:"rnj-1:8b"));
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
@@ -573,24 +630,31 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
          with
          | None ->
            failf
-             "runtime binding %s provider/model %s/%s must resolve through repo \
-              OAS catalog"
+             "runtime binding %s provider/model %s/%s must resolve through its \
+              OAS Provider_config"
              runtime.id
              (Llm_provider.Provider_config.capability_provider_label
                 runtime.provider_config)
              runtime.provider_config.model_id
-         | Some _ -> ())
+         | Some _ ->
+           if String.equal runtime.id "ollama_cloud.ollama-cloud-rnj-1-8b"
+           then
+             check
+               bool
+               "runtime-local alias uses the typed Provider_config override"
+               true
+               (Option.is_some runtime.provider_config.model_capabilities_override))
       runtimes
 
-let test_repo_oas_model_catalog_modality_priorities_resolve () =
-  with_repo_oas_model_catalog @@ fun catalog ->
+let test_deployment_oas_model_catalog_modality_priorities_resolve () =
+  with_deployment_oas_model_catalog @@ fun catalog ->
   let rows =
     List.filter
       (fun (entry : Llm_provider.Model_catalog.model_entry) ->
          Option.is_some entry.modality_priority)
       (Llm_provider.Model_catalog.model_entries catalog)
   in
-  check bool "repo OAS catalog has modality priority rows" true (rows <> []);
+  check bool "deployment OAS catalog has modality priority rows" true (rows <> []);
   List.iter
     (fun (entry : Llm_provider.Model_catalog.model_entry) ->
        match entry.modality_priority with
@@ -608,12 +672,20 @@ let test_repo_oas_model_catalog_modality_priorities_resolve () =
                normalized
                entry.id_prefix
          in
-         (match
-            Llm_provider.Capabilities.for_model_id_catalog entry.id_prefix
-          with
+         let capabilities =
+           match entry.provider_name with
+           | None ->
+             Llm_provider.Capabilities.for_model_id_catalog entry.id_prefix
+           | Some provider_label ->
+             Llm_provider.Capabilities.for_provider_model_id
+               ~allow_bare_fallback:false
+               ~provider_label
+               ~model_id:entry.id_prefix
+         in
+         (match capabilities with
           | None ->
             failf
-              "modality_priority row %s must resolve through repo OAS catalog"
+              "modality_priority row %s must resolve through deployment OAS catalog"
               entry.id_prefix
           | Some caps ->
             check
@@ -624,7 +696,7 @@ let test_repo_oas_model_catalog_modality_priorities_resolve () =
     rows
 
 let test_repo_runtime_toml_loads () =
-  with_repo_oas_model_catalog @@ fun _catalog ->
+  with_deployment_oas_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
   match Runtime.load_list ~config_path:path with
@@ -1312,7 +1384,8 @@ let test_runtime_locality_uses_provider_schema () =
 let test_runtime_capability_gate_uses_provider_qualified_catalog () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/shared-thinking\"\n\
+     id_prefix = \"shared-thinking\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 1024\n\
      supports_tools = true\n\
@@ -1479,7 +1552,7 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
                  (Runtime.Missing_catalog_models report))
-              "oas-models.toml");
+              "oas-models-overlay.toml");
          check bool "diagnostic reports provider label" true
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
@@ -2131,7 +2204,8 @@ let test_deprecated_capability_notice_warns_once_per_process () =
 let test_runtime_max_context_capability_only_uses_catalog_cap () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/cap-only-model\"\n\
+     id_prefix = \"cap-only-model\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 4096\n"
   in
@@ -2169,7 +2243,8 @@ let test_runtime_max_context_capability_only_uses_catalog_cap () =
 let test_runtime_max_context_override_below_cap_wins_as_override () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/override-under-cap\"\n\
+     id_prefix = \"override-under-cap\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"
   in
@@ -2208,7 +2283,8 @@ let test_runtime_max_context_override_below_cap_wins_as_override () =
 let test_runtime_max_context_override_above_cap_is_clamped () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/override-over-cap\"\n\
+     id_prefix = \"override-over-cap\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"
   in
@@ -2314,23 +2390,23 @@ let () =
     [ ( "runtime TOML gate",
         [ test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
-          test_case "repo OAS catalog covers live RunPod MTP runtime" `Quick
-            test_repo_oas_model_catalog_covers_live_runpod_mtp;
+          test_case "deployment OAS catalog covers live RunPod MTP runtime" `Quick
+            test_deployment_oas_model_catalog_covers_live_runpod_mtp;
           test_case
-            "repo OAS catalog covers live RunPod RTX A6000 Gemma runtime"
-            `Quick test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
+            "deployment OAS catalog covers live RunPod RTX A6000 Gemma runtime"
+            `Quick test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
           test_case
-            "repo OAS catalog covers local Gemma4 E2B QAT runtime"
-            `Quick test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat;
+            "deployment OAS catalog covers local Gemma4 E2B QAT runtime"
+            `Quick test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat;
           test_case
-            "repo OAS catalog preserves typed thinking/replay axes"
-            `Quick test_repo_oas_model_catalog_preserve_axes_resolve;
+            "deployment OAS catalog preserves typed thinking/replay axes"
+            `Quick test_deployment_oas_model_catalog_preserve_axes_resolve;
           test_case
-            "repo runtime bindings resolve through the OAS catalog"
-            `Quick test_repo_runtime_bindings_resolve_through_oas_catalog;
+            "repo runtime bindings resolve through OAS provider configs"
+            `Quick test_repo_runtime_bindings_resolve_through_oas_provider_config;
           test_case
-            "repo OAS catalog modality priority strings resolve"
-            `Quick test_repo_oas_model_catalog_modality_priorities_resolve;
+            "deployment OAS catalog modality priority strings resolve"
+            `Quick test_deployment_oas_model_catalog_modality_priorities_resolve;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case

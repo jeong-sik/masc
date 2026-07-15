@@ -80,7 +80,7 @@ is-default = true
 max-concurrent = 1
 EOF
 
-  cat >"$config_dir/oas-models.toml" <<EOF
+  cat >"$config_dir/oas-models-overlay.toml" <<EOF
 [[providers]]
 id = "contract_verifier"
 kind = "openai_compat"
@@ -91,7 +91,7 @@ default_model = "contract-verifier"
 capabilities_base = "openai_chat"
 
 [[models]]
-id_prefix = "contract_verifier/contract-verifier"
+id_prefix = "contract-verifier"
 base = "openai_chat"
 provider_name = "contract_verifier"
 max_context_tokens = 32768

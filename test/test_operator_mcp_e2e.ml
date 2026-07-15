@@ -259,8 +259,8 @@ let wait_pid_exit ~pid ~timeout_s =
   in
   loop ()
 
-let merge_env_overrides overrides =
-  let override_keys = List.map fst overrides in
+let merge_env_overrides ?(remove = []) overrides =
+  let override_keys = remove @ List.map fst overrides in
   let is_override_key entry =
     match String.index_opt entry '=' with
     | None -> false
@@ -367,9 +367,6 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let project_root = Masc_test_deps.find_project_root () in
   let config_dir = Filename.concat project_root "config" in
   let personas_dir = Filename.concat config_dir "personas" in
-  let oas_model_catalog = Filename.concat project_root "oas-models.toml" in
-  if not (Sys.file_exists oas_model_catalog) then
-    fail "oas-models.toml fixture not found";
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc.Workspace.default_config base_path in
@@ -434,7 +431,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
     Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
   in
   let env =
-    merge_env_overrides
+    merge_env_overrides ~remove:[ "OAS_MODEL_CATALOG" ]
       [
         ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
@@ -443,7 +440,6 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         ("MASC_CONFIG_DIR", config_dir);
         ("MASC_PERSONAS_DIR", personas_dir);
         ("MASC_BOARD_BACKEND", "jsonl");
-        ("OAS_MODEL_CATALOG", oas_model_catalog);
       ]
   in
   let argv =

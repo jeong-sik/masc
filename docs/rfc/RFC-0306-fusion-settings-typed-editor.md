@@ -88,7 +88,7 @@ in Phase 0. This RFC covers the remaining editability work.
    the same source the default-runtime select already uses. `runtime_id` is
    `provider.model`.
 5. **MASC → OAS stays one-way.** Model resolution uses the existing MASC→OAS
-   catalog path (`oas-models.toml` seed projection; `Runtime_oas_runner`,
+   catalog path (OAS embedded catalog plus deployment overlay; `Runtime_oas_runner`,
    `Fusion_oas`). No new coupling; OAS remains unaware of fusion.
 6. **No silent failure.** Every write step returns `result`; failures produce a
    JSON error body plus an audit `Failure` record, mirroring

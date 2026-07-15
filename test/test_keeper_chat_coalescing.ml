@@ -637,6 +637,65 @@ let test_restart_requires_explicit_recovery_without_journal () =
    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
      check "explicit requeue preserves receipt identity" false)
 
+let test_recovery_evidence_does_not_occupy_execution_lease () =
+  Printf.printf
+    "Test: unresolved recovery evidence does not occupy the execution lease\n%!";
+  with_base "keeper-chat-recovery-boundary" @@ fun base_path ->
+  let keeper_name = "recovery-boundary" in
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let first = enqueue_exn ~keeper_name (message "first") in
+  ignore (lease_exn ~keeper_name : Keeper_chat_queue.lease);
+  Keeper_chat_queue.For_testing.reset ();
+  let first_recovery = configure base_path in
+  check "first crash preserves one recovery evidence"
+    (first_recovery.load_errors = []
+     && first_recovery.recovery_required_receipt_count = 1);
+  let second = enqueue_exn ~keeper_name (message "second") in
+  (match Keeper_chat_queue.lane_status ~keeper_name with
+   | Ok { health = Ready; has_active = true; _ } ->
+     check "pending work remains ready across a recovery boundary" true
+   | Ok _ | Error _ ->
+     check "pending work remains ready across a recovery boundary" false);
+  let second_lease = lease_exn ~keeper_name in
+  check "later pending receipt crosses the exact recovery boundary"
+    (Keeper_chat_queue.Receipt_id.equal
+       second_lease.item.receipt_id
+       second.receipt_id);
+  Keeper_chat_queue.For_testing.reset ();
+  let second_recovery = configure base_path in
+  check "a second crash preserves both recovery receipts"
+    (second_recovery.load_errors = []
+     && second_recovery.recovery_required_receipt_count = 2);
+  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  check "recovery evidence keeps original FIFO identity order"
+    (active_ids snapshot.recovery_required
+     = [ receipt_wire first.receipt_id; receipt_wire second.receipt_id ]);
+  let third = enqueue_exn ~keeper_name (message "third") in
+  let third_lease = lease_exn ~keeper_name in
+  check "multiple recoveries still leave one execution lease available"
+    (Keeper_chat_queue.Receipt_id.equal
+       third_lease.item.receipt_id
+       third.receipt_id);
+  (match
+     Keeper_chat_queue.finalize
+       ~keeper_name
+       ~lease_id:third_lease.lease_id
+       ~outcome:
+         (Mark_delivered
+            { completed_at = Time_compat.now (); outcome_ref = Some "third" })
+   with
+   | `Finalized receipt_id ->
+     check "later receipt finalizes independently"
+       (Keeper_chat_queue.Receipt_id.equal receipt_id third.receipt_id)
+   | `Unknown_lease | `Error _ ->
+     check "later receipt finalizes independently" false);
+  (match Keeper_chat_queue.lease_next ~keeper_name with
+   | `Recovery_required evidence ->
+     check "idle lane reports the earliest unresolved recovery evidence"
+       (Keeper_chat_queue.Receipt_id.equal evidence.receipt_id first.receipt_id)
+   | `Leased _ | `Empty | `Already_leased _ | `Error _ ->
+     check "idle lane reports the earliest unresolved recovery evidence" false)
+
 let test_legacy_json_is_not_a_queue_authority () =
   Printf.printf "Test: removed legacy JSON is never inspected as queue state\n%!";
   with_base "keeper-chat-legacy-hard-cut" @@ fun base_path ->
@@ -867,6 +926,7 @@ let () =
   test_transition_observer_outside_lock_exactly_once ();
   test_uncertain_lease_compensates_and_other_transitions_reconcile ();
   test_restart_requires_explicit_recovery_without_journal ();
+  test_recovery_evidence_does_not_occupy_execution_lease ();
   test_legacy_json_is_not_a_queue_authority ();
   test_runtime_root_typed_filename_authority ();
   test_corrupt_dotted_metadata_authority_does_not_disappear ();

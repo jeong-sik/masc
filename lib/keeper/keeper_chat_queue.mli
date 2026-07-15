@@ -4,13 +4,17 @@
     write.  The receipt then follows exactly one closed lifecycle:
     [Pending -> Inflight -> Delivered | Failed]. On restart, [Inflight] becomes
     [Recovery_required] in the same SQLite store. From there only an explicit
-    operator decision can produce [Pending] or [Failed]. No external journal
-    participates in this lifecycle.
+    operator decision can produce [Pending] or [Failed]. Recovery evidence is
+    immutable with respect to later receipts and does not occupy the lane's
+    single execution lease. A later [Pending] receipt may therefore cross an
+    unresolved recovery boundary while the exact earlier receipt and lease
+    remain observable. No external journal participates in this lifecycle.
 
     Each lease contains exactly one receipt, so message, multimodal block,
     attachment, timestamp, provenance, and connector identity boundaries are
     preserved without delimiter-based coalescing. A crashed lease is never
-    automatically redispatched because its external effect is unproven.
+    automatically redispatched because its external effect is unproven, and
+    it never prevents a later receipt from being leased explicitly.
 
     @since 2.145.0 *)
 
@@ -246,6 +250,10 @@ val enqueue_with_receipt :
     An existing terminal receipt returns [Receipt_already_terminal]; terminal
     rows never retain message bodies and are never overwritten or redispatched. *)
 
+(** Lease the earliest pending receipt even when older recovery evidence is
+    unresolved. [`Recovery_required evidence] is returned only when no pending
+    or inflight receipt exists; [evidence] is the earliest unresolved recovery
+    boundary. *)
 val lease_next :
   keeper_name:string ->
   [ `Leased of lease

@@ -487,7 +487,7 @@ type queue_entry = {
   mutable pending : stored_row Sequence_map.t;
   mutable pending_count : int;
   mutable inflight : stored_row option;
-  mutable recovery_required : stored_row option;
+  mutable recovery_required : stored_row Sequence_map.t;
   mutable terminal_count : int64;
   mutable load_errors : snapshot_load_error list;
   mutable reconciliation_plan : reconciliation_plan option;
@@ -499,8 +499,8 @@ type persistence_configuration =
   | Configured of string
   | Configuration_failed of snapshot_load_error
 
-let database_schema = "keeper_chat_queue.sqlite.v2"
-let database_user_version = 2L
+let database_schema = "keeper_chat_queue.sqlite.v3"
+let database_user_version = 3L
 let database_application_id = 0x4d435151L
 let max_revision = Int64.max_int
 let database_file = "chat-queue.sqlite3"
@@ -1276,7 +1276,7 @@ let active_fifo_index_sql =
   "CREATE INDEX receipts_active_fifo ON receipts (fifo_sequence) WHERE state_kind IN ('pending', 'inflight', 'recovery_required')"
 
 let active_lease_index_sql =
-  "CREATE UNIQUE INDEX receipts_single_active_lease ON receipts ((CASE WHEN state_kind IN ('inflight', 'recovery_required') THEN 1 END))"
+  "CREATE UNIQUE INDEX receipts_single_active_lease ON receipts ((CASE WHEN state_kind = 'inflight' THEN 1 END))"
 
 let expected_schema_objects =
   [ "index", "receipts_active_fifo", active_fifo_index_sql
@@ -1629,7 +1629,7 @@ type loaded_database = {
   loaded_next_sequence : int64;
   loaded_pending : stored_row Sequence_map.t;
   loaded_inflight : stored_row option;
-  loaded_recovery_required : stored_row option;
+  loaded_recovery_required : stored_row Sequence_map.t;
   loaded_terminal_count : int64;
 }
 
@@ -1642,8 +1642,8 @@ let read_active_rows db =
         | Sqlite3.Rc.DONE -> Ok (pending, inflight, recovery_required)
         | Sqlite3.Rc.ROW ->
           let* row = decode_row_columns stmt in
-          (match row.receipt.state, inflight, recovery_required with
-           | Stored_pending _, _, _ ->
+          (match row.receipt.state, inflight with
+           | Stored_pending _, _ ->
              if Sequence_map.mem row.fifo_sequence pending
              then Error "chat queue contains duplicate FIFO positions"
              else
@@ -1651,16 +1651,19 @@ let read_active_rows db =
                  (Sequence_map.add row.fifo_sequence row pending)
                  inflight
                  recovery_required
-           | Stored_inflight _, None, None -> loop pending (Some row) None
-           | Stored_recovery_required _, None, None ->
-             loop pending None (Some row)
-           | (Stored_inflight _ | Stored_recovery_required _), _, _ ->
-             Error "chat queue contains more than one active lease receipt"
-           | (Stored_delivered _ | Stored_failed _), _, _ ->
+           | Stored_inflight _, None -> loop pending (Some row) recovery_required
+           | Stored_inflight _, Some _ ->
+             Error "chat queue contains more than one inflight receipt"
+           | Stored_recovery_required _, _ ->
+             loop
+               pending
+               inflight
+               (Sequence_map.add row.fifo_sequence row recovery_required)
+           | (Stored_delivered _ | Stored_failed _), _ ->
              Error "chat queue active index returned a terminal receipt")
         | rc -> Error (sqlite_error ~operation:"read active receipts" db rc)
       in
-      loop Sequence_map.empty None None)
+      loop Sequence_map.empty None Sequence_map.empty)
 
 let read_last_sequence db =
   with_statement db
@@ -1691,7 +1694,7 @@ let read_loaded_database db =
     let active_count =
       Sequence_map.cardinal loaded_pending
       + (if Option.is_some loaded_inflight then 1 else 0)
-      + (if Option.is_some loaded_recovery_required then 1 else 0)
+      + Sequence_map.cardinal loaded_recovery_required
     in
     let projected_row_count =
       Int64.add loaded_terminal_count (Int64.of_int active_count)
@@ -2079,7 +2082,7 @@ let create_entry
     ?(pending = Sequence_map.empty)
     ?pending_count
     ?inflight
-    ?recovery_required
+    ?(recovery_required = Sequence_map.empty)
     ?(terminal_count = 0L)
     ?(load_errors = [])
     ?reconciliation_plan
@@ -2162,11 +2165,8 @@ let remove_active_row entry row =
      entry.inflight <- None
    | None | Some _ -> ())
   ;
-  (match entry.recovery_required with
-   | Some current
-     when Receipt_id.equal current.receipt.receipt_id row.receipt.receipt_id ->
-     entry.recovery_required <- None
-   | None | Some _ -> ())
+  entry.recovery_required <-
+    Sequence_map.remove row.fifo_sequence entry.recovery_required
 
 let add_active_row entry row =
   match row.receipt.state with
@@ -2175,7 +2175,9 @@ let add_active_row entry row =
     then entry.pending_count <- entry.pending_count + 1;
     entry.pending <- Sequence_map.add row.fifo_sequence row entry.pending
   | Stored_inflight _ -> entry.inflight <- Some row
-  | Stored_recovery_required _ -> entry.recovery_required <- Some row
+  | Stored_recovery_required _ ->
+    entry.recovery_required <-
+      Sequence_map.add row.fifo_sequence row entry.recovery_required
   | Stored_delivered _ | Stored_failed _ -> ()
 
 let set_entry_projection entry ~from_row ~to_row ~revision ~next_sequence
@@ -2281,7 +2283,7 @@ let check_entry_store ~base_path ~path entry ~allow_absent =
             && Int64.equal entry.next_sequence 0L
             && entry.pending_count = 0
             && Option.is_none entry.inflight
-            && Option.is_none entry.recovery_required
+            && Sequence_map.is_empty entry.recovery_required
             && Int64.equal entry.terminal_count 0L ->
        Ok Store_absent
      | Ok Store_absent ->
@@ -2388,9 +2390,7 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
                                  ; inflight_count =
                                      (if Option.is_some entry.inflight then 1 else 0)
                                  ; recovery_required_count =
-                                     (if Option.is_some entry.recovery_required
-                                      then 1
-                                      else 0)
+                                     Sequence_map.cardinal entry.recovery_required
                                  }
                                , false )
                            | Ok _, Ok _ ->
@@ -2437,9 +2437,7 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
                                     ; inflight_count =
                                         (if Option.is_some entry.inflight then 1 else 0)
                                     ; recovery_required_count =
-                                        (if Option.is_some entry.recovery_required
-                                         then 1
-                                         else 0)
+                                        Sequence_map.cardinal entry.recovery_required
                                     }
                                   , true ))
                                (apply_transaction_result ~path entry plan execution))))))
@@ -2460,6 +2458,18 @@ let enqueue ~keeper_name message =
 
 let lease_id () = Random_id.prefixed ~prefix:"lease_" ~bytes:16
 
+let recovery_evidence_of_row row =
+  match row.receipt.state with
+  | Stored_recovery_required { lease_id; started_at; _ } ->
+    Ok
+      ({ receipt_id = row.receipt.receipt_id; lease_id; started_at }
+       : recovery_evidence)
+  | Stored_pending _
+  | Stored_inflight _
+  | Stored_delivered _
+  | Stored_failed _ ->
+    Error "recovery evidence index contains a non-recovery receipt"
+
 let lease_next ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error error -> `Error error
@@ -2478,34 +2488,26 @@ let lease_next ~keeper_name =
                  (load_error Read_failed ~path
                     "chat queue database is absent during lease"))
           | Ok Store_present ->
-            (match entry.recovery_required, entry.inflight with
-             | ( Some
-                   { receipt =
-                       { receipt_id
-                       ; state =
-                           Stored_recovery_required
-                             { lease_id; started_at; _ }
-                       }
-                   ; _
-                   }
-               , None ) ->
-               `Recovery_required
-                 ({ receipt_id; lease_id; started_at } : recovery_evidence)
-             | Some _, _ ->
-               `Error
-                 (Snapshot_unavailable
-                    (load_error Parse_failed ~path
-                       "in-memory recovery index contains an invalid active lease"))
-             | None, Some { receipt = { state = Stored_inflight { lease_id; _ }; _ }; _ } ->
+            (match entry.inflight with
+             | Some { receipt = { state = Stored_inflight { lease_id; _ }; _ }; _ } ->
                `Already_leased lease_id
-             | None, Some _ ->
+             | Some _ ->
                `Error
                  (Snapshot_unavailable
                     (load_error Parse_failed ~path
                        "in-memory inflight index contains a non-inflight receipt"))
-             | None, None ->
+             | None ->
                (match Sequence_map.min_binding_opt entry.pending with
-                | None -> `Empty
+                | None ->
+                  (match Sequence_map.min_binding_opt entry.recovery_required with
+                   | None -> `Empty
+                   | Some (_, row) ->
+                     (match recovery_evidence_of_row row with
+                      | Ok evidence -> `Recovery_required evidence
+                      | Error detail ->
+                        `Error
+                          (Snapshot_unavailable
+                             (load_error Parse_failed ~path detail))))
                 | Some (_, row) ->
                   (match row.receipt.state with
                    | Stored_pending message ->
@@ -2765,7 +2767,7 @@ let has_active_receipts ~keeper_name =
           Ok
             (entry.pending_count > 0
              || Option.is_some entry.inflight
-             || Option.is_some entry.recovery_required))
+             || not (Sequence_map.is_empty entry.recovery_required)))
 
 type lane_health =
   | Ready
@@ -2791,37 +2793,28 @@ let lane_status ~keeper_name =
   | Ok (_, _, Some entry) ->
     with_entry_lock keeper_name entry (fun () ->
         let health =
-          match
-            entry.reconciliation_plan,
-            entry.load_errors,
-            entry.recovery_required
-          with
-          | Some _, _, _ -> Persistence_reconciliation_required
-          | None, error :: _, _ -> Unavailable error
-          | ( None
-            , []
-            , Some
-                { receipt =
-                    { receipt_id
-                    ; state =
-                        Stored_recovery_required
-                          { lease_id; started_at; _ }
-                    }
-                ; _
-                } ) ->
-            Delivery_recovery_required { receipt_id; lease_id; started_at }
-          | None, [], None -> Ready
-          | None, [], Some _ ->
-            Unavailable
-              (load_error Parse_failed
-                 "recovery index contains a non-recovery receipt")
+          match entry.reconciliation_plan, entry.load_errors with
+          | Some _, _ -> Persistence_reconciliation_required
+          | None, error :: _ -> Unavailable error
+          | None, [] ->
+            if entry.pending_count > 0 || Option.is_some entry.inflight
+            then Ready
+            else
+              (match Sequence_map.min_binding_opt entry.recovery_required with
+               | None -> Ready
+               | Some (_, row) ->
+                 (match recovery_evidence_of_row row with
+                  | Ok { receipt_id; lease_id; started_at } ->
+                    Delivery_recovery_required { receipt_id; lease_id; started_at }
+                  | Error detail ->
+                    Unavailable (load_error Parse_failed detail)))
         in
         Ok
           { revision = entry.revision
           ; has_active =
               entry.pending_count > 0
               || Option.is_some entry.inflight
-              || Option.is_some entry.recovery_required
+              || not (Sequence_map.is_empty entry.recovery_required)
           ; health
           })
 
@@ -2879,13 +2872,15 @@ let snapshot ~keeper_name =
              | Error detail -> [], [ detail ])
         in
         let recovery_required, recovery_errors =
-          match entry.recovery_required with
-          | None -> [], []
-          | Some row ->
-            (match active_receipt_of_row row with
-             | Ok receipt -> [ receipt ], []
-             | Error detail -> [], [ detail ])
+          Sequence_map.bindings entry.recovery_required
+          |> List.fold_left
+               (fun (receipts, errors) (_, row) ->
+                  match active_receipt_of_row row with
+                  | Ok receipt -> receipt :: receipts, errors
+                  | Error detail -> receipts, detail :: errors)
+               ([], [])
         in
+        let recovery_required = List.rev recovery_required in
         let projection_errors =
           List.concat [ pending_errors; inflight_errors; recovery_errors ]
           |> List.map (fun detail ->
@@ -3243,6 +3238,16 @@ let receipt_not_recovery_required
                  row
            })
 
+let find_recovery_row entry receipt_id =
+  Sequence_map.fold
+    (fun _ row found ->
+       match found with
+       | Some _ -> found
+       | None when Receipt_id.equal row.receipt.receipt_id receipt_id -> Some row
+       | None -> None)
+    entry.recovery_required
+    None
+
 let resolve_recovery_required
     ~keeper_name
     ~receipt_id
@@ -3284,7 +3289,7 @@ let resolve_recovery_required
                         ; observed_revision = entry.revision
                         })
                  else
-                   match entry.recovery_required with
+                   match find_recovery_row entry receipt_id with
                    | Some
                        ({ receipt =
                             { receipt_id = observed_receipt_id
@@ -3353,7 +3358,7 @@ let resolve_recovery_required
                                  })
                               (apply_transaction_result
                                  ~path entry plan execution))
-                   | Some _ | None ->
+                   | None ->
                      receipt_not_recovery_required
                        ~base_path ~path entry ~receipt_id)
          in
@@ -3394,7 +3399,7 @@ let entry_of_loaded_database loaded =
     ~next_sequence:loaded.loaded_next_sequence
     ~pending:loaded.loaded_pending
     ?inflight:loaded.loaded_inflight
-    ?recovery_required:loaded.loaded_recovery_required
+    ~recovery_required:loaded.loaded_recovery_required
     ~terminal_count:loaded.loaded_terminal_count
     ()
 
@@ -3410,31 +3415,15 @@ let load_keeper_lane ~base_path ~path =
   | Error detail -> Error (load_error Parse_failed ~path detail)
   | Ok loaded ->
     let entry = entry_of_loaded_database loaded in
-    (match loaded.loaded_inflight, loaded.loaded_recovery_required with
-     | None, None ->
+    (match loaded.loaded_inflight with
+     | None ->
        Ok
          { entry
-         ; recovery_required_count = 0
+         ; recovery_required_count =
+             Sequence_map.cardinal loaded.loaded_recovery_required
          ; recovery_revision = None
          }
-     | None, Some _ ->
-       Ok
-         { entry
-         ; recovery_required_count = 1
-         ; recovery_revision = None
-         }
-     | Some _, Some _ ->
-       let error =
-         load_error Recovery_failed ~path
-           "chat queue contains both inflight and recovery-required receipts"
-       in
-       entry.load_errors <- [ error ];
-       Ok
-         { entry
-         ; recovery_required_count = 1
-         ; recovery_revision = None
-         }
-     | Some before_row, None ->
+     | Some before_row ->
        (match recovery_required_state before_row with
         | Error detail ->
           let error =
@@ -3444,7 +3433,8 @@ let load_keeper_lane ~base_path ~path =
           entry.load_errors <- [ error ];
           Ok
             { entry
-            ; recovery_required_count = 0
+            ; recovery_required_count =
+                Sequence_map.cardinal entry.recovery_required
             ; recovery_revision = None
             }
         | Ok (target_state, lease_id) ->
@@ -3457,7 +3447,8 @@ let load_keeper_lane ~base_path ~path =
             entry.load_errors <- [ error ];
             Ok
               { entry
-              ; recovery_required_count = 0
+              ; recovery_required_count =
+                  Sequence_map.cardinal entry.recovery_required
               ; recovery_revision = None
               })
           else
@@ -3494,14 +3485,16 @@ let load_keeper_lane ~base_path ~path =
              | Ok revision ->
                Ok
                  { entry
-                 ; recovery_required_count = 1
+                 ; recovery_required_count =
+                     Sequence_map.cardinal entry.recovery_required
                  ; recovery_revision = Some revision
                  }
              | Error (Persist_failed { publication; _ })
                when Option.is_some (publication_evidence publication) ->
                Ok
                  { entry
-                 ; recovery_required_count = 1
+                 ; recovery_required_count =
+                     Sequence_map.cardinal entry.recovery_required
                  ; recovery_revision = Some plan.target_revision
                  }
              | Error (Persist_failed { publication = Not_published; detail }) ->
@@ -3513,7 +3506,8 @@ let load_keeper_lane ~base_path ~path =
                entry.reconciliation_plan <- Some plan;
                Ok
                  { entry
-                 ; recovery_required_count = 0
+                 ; recovery_required_count =
+                     Sequence_map.cardinal entry.recovery_required
                  ; recovery_revision = None
                  }
              | Error error ->
@@ -3525,7 +3519,8 @@ let load_keeper_lane ~base_path ~path =
                entry.reconciliation_plan <- Some plan;
                Ok
                  { entry
-                 ; recovery_required_count = 0
+                 ; recovery_required_count =
+                     Sequence_map.cardinal entry.recovery_required
                  ; recovery_revision = None
                  })))
 

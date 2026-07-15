@@ -187,6 +187,7 @@ let test_unbind_removes_existing_binding () =
 let test_connectors_json_advertises_gate_connector_descriptor () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
+    Discord_state.set_trigger_policy Discord_gateway_state.All;
     ignore
       (Discord_state.bind ~channel_id:"1234567890" ~keeper_name:"luna"
          ~actor_name:"dashboard");
@@ -231,6 +232,13 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
       (connector |> U.member "connector_id" |> U.to_string);
     check string "display name" "Discord"
       (connector |> U.member "display_name" |> U.to_string);
+    check string "leaf trigger policy" "all"
+      (connector |> U.member "trigger_policy" |> U.to_string);
+    (match json with
+     | `Assoc fields ->
+       check bool "aggregate has no Discord-specific field" false
+         (List.mem_assoc "discord_trigger_policy" fields)
+     | _ -> fail "expected connector aggregate object");
     check bool "bindings capability exposed" true
       (connector |> U.member "capabilities" |> U.to_list
        |> List.exists (function

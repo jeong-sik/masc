@@ -155,7 +155,6 @@ async function runBulk(
 interface OverviewProps {
   connectors: GateConnectorInfo[]
   keeperCount: number
-  discordTriggerPolicy?: string
   selectedConnectorId?: KnownConnectorId | null
   onSelectConnector?: (connectorId: KnownConnectorId) => void
   onOpenConfig?: (connectorId: KnownConnectorId) => void
@@ -758,7 +757,6 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
 export function ConnectorOverviewStrip({
   connectors,
   keeperCount,
-  discordTriggerPolicy,
   selectedConnectorId = null,
   onSelectConnector,
   onOpenConfig,
@@ -787,13 +785,14 @@ export function ConnectorOverviewStrip({
 
   const droppedIds = detectRecentDrops(stripMemory.value, connectors, Date.now())
   const summary = summarizeConnectorStrip(connectors, keeperCount)
+  const discordTriggerPolicy = findConnector(connectors, 'discord')?.trigger_policy
   return html`
     <${SurfaceCard} class="mb-4 !p-3 v2-connector-overview-strip" data-overview-strip-root>
       <${IncidentBanner} droppedIds=${droppedIds} />
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div class="flex flex-wrap items-center gap-2">
           <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
-          ${discordTriggerPolicy && discordTriggerPolicy !== 'unknown'
+          ${discordTriggerPolicy
             ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-secondary)]">trigger: ${discordTriggerPolicy}</span>`
             : null
           }

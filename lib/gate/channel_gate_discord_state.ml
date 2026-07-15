@@ -96,8 +96,8 @@ let unregister_thread ~thread_id =
 
 (* ── Trigger policy registry ──────────────────────────────────────
    Set once at gateway startup by [set_trigger_policy]. Read by
-   [connectors_json] for dashboard display. Same mutable-ref pattern
-   as [record_ready]. *)
+   this connector's status projection for dashboard display. Same
+   mutable-ref pattern as [record_ready]. *)
 
 let trigger_policy_ref : Discord_gateway_state.trigger_policy option ref =
   ref None
@@ -106,6 +106,12 @@ let set_trigger_policy (policy : Discord_gateway_state.trigger_policy) =
   trigger_policy_ref := Some policy
 
 let get_trigger_policy () = !trigger_policy_ref
+
+let trigger_policy_json () =
+  match get_trigger_policy () with
+  | None -> `Null
+  | Some policy ->
+    `String (Discord_gateway_state.trigger_policy_to_string policy)
 
 let string_member json key =
   Json_util.get_string_with_default json ~key ~default:""
@@ -207,6 +213,7 @@ let status_json ?(audit_limit = 10) () =
       ("error", `String error);
       ("status_source", `String "in_process_gateway");
       ("gateway_state", `String (gateway_state_label gateway_state));
+      ("trigger_policy", trigger_policy_json ());
       ("status_path", `String status_path);
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
@@ -331,6 +338,7 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("display_name", `String display_name);
       ("channel", `String channel);
       ("capabilities", Channel_gate_connector_capability.all_json);
+      ("trigger_policy", status |> U.member "trigger_policy");
       ("status", `String (string_member status "status"));
       ("available", `Bool (bool_member status "available"));
       ("connected", `Bool (bool_member status "connected"));

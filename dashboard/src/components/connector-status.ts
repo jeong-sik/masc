@@ -386,6 +386,7 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
     display_name: CONNECTOR_DISPLAY_NAMES[connectorId],
     channel: connectorId,
     capabilities: ['bindings'],
+    trigger_policy: null,
     status: 'offline',
     available: false,
     connected: false,
@@ -2259,7 +2260,6 @@ export function ConnectorStatusPanel() {
                 <${ConnectorOverviewStrip}
                   connectors=${allConnectors}
                   keeperCount=${snapshot.keepers.length}
-                  discordTriggerPolicy=${snapshot.connectors?.discord_trigger_policy}
                   selectedConnectorId=${focusedConnectorId}
                   onSelectConnector=${(connectorId: KnownConnectorId) => { selectedConnectorId.value = connectorId }}
                   onOpenConfig=${(connectorId: KnownConnectorId) => {

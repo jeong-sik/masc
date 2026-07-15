@@ -1,6 +1,5 @@
 type lease_kind =
   | Single
-  | Board_batch
   | Legacy_inflight
 
 type requeue_reason =
@@ -203,14 +202,6 @@ let claim_when ~claimed_at ~ready state =
       { state with pending }
 ;;
 
-let claim_board ~claimed_at state =
-  if lease_admission_blocked state
-  then Ok (state, None)
-  else (
-    let stimuli, pending = Keeper_event_queue.drain_board_all state.pending in
-    make_lease ~kind:Board_batch ~claimed_at:(Some claimed_at) stimuli { state with pending })
-;;
-
 let add_legacy_inflight stimuli state =
   if lease_admission_blocked state
   then Error "event queue cannot migrate legacy inflight work while a lease or outbox exists"
@@ -222,13 +213,11 @@ let add_legacy_inflight stimuli state =
 
 let lease_kind_label = function
   | Single -> "single"
-  | Board_batch -> "board_batch"
   | Legacy_inflight -> "legacy_inflight"
 ;;
 
 let lease_kind_of_label = function
   | "single" -> Ok Single
-  | "board_batch" -> Ok Board_batch
   | "legacy_inflight" -> Ok Legacy_inflight
   | label -> Error (Printf.sprintf "unknown event queue lease kind: %s" label)
 ;;
@@ -674,14 +663,6 @@ let lease_of_yojson json =
   then Error "event queue lease must contain at least one stimulus"
   else if kind = Single && List.length stimuli <> 1
   then Error "single event queue lease must contain exactly one stimulus"
-  else if
-    kind = Board_batch
-    && not
-         (List.for_all
-            (fun (stimulus : Keeper_event_queue.stimulus) ->
-               Keeper_event_queue.is_board_signal stimulus.payload)
-            stimuli)
-  then Error "board event queue lease contains a non-board stimulus"
   else if not (String.equal lease_id (lease_id_of_sequence sequence))
   then Error (Printf.sprintf "event queue lease id/sequence mismatch: %s" lease_id)
   else Ok { lease_id; sequence; kind; claimed_at; stimuli }

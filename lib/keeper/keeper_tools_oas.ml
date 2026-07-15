@@ -68,16 +68,21 @@ let normalize_tool_result
   let raw = execution.Keeper_tool_execution.raw_output in
   let data = execution.data in
   let disposition = Tool_result.string_of_disposition execution.disposition in
+  let result =
+    match data with
+    | Some data -> data
+    | None -> `String raw
+  in
   match execution.disposition with
   | Tool_result.Completed () ->
     `Assoc
       [ "disposition", `String disposition
-      ; "result", Option.value ~default:(`String raw) data
+      ; "result", result
       ]
   | Tool_result.Deferred () ->
     `Assoc
       [ "disposition", `String disposition
-      ; "result", Option.value ~default:(`String raw) data
+      ; "result", result
       ]
   | Tool_result.Failed class_ ->
     `Assoc

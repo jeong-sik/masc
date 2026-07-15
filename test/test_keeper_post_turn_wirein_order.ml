@@ -341,12 +341,13 @@ let test_stale_compaction_is_not_applied () =
               ~args:(`Assoc [ "name", `String meta.name ]))
       in
       (match result with
-       | Some (Error failure) ->
+       | Some (Tool_result.Failed failure) ->
          check string "typed conflict" "conflict"
            Yojson.Safe.Util.(failure.data |> member "error_code" |> to_string);
          check string "stale cause" "checkpoint_superseded"
            Yojson.Safe.Util.(failure.data |> member "compaction_error" |> to_string)
-       | Some (Ok _) -> fail "stale compaction reported tool success"
+       | Some (Tool_result.Completed _) -> fail "stale compaction reported tool success"
+       | Some (Tool_result.Deferred _) -> fail "stale compaction reported tool deferral"
        | None -> fail "masc_keeper_compact is not registered");
       check (float 0.) "applied counter unchanged" before (compactions ());
       check int "newer checkpoint retained" 9

@@ -135,6 +135,7 @@ type health_snapshot =
   ; discovery_row_count : int
   ; discovered_owner_count : int
   ; invalid_owner_name_count : int
+  ; retryable_lane_failure_count : int
   ; owners : owner_health_counts
   }
 
@@ -149,6 +150,7 @@ type health_counter =
   | Ready_without_obligation_counter
   | Ready_counter
   | Blocked_counter
+  | Retryable_lane_failure_counter
 
 type health_counter_change =
   | Increment_health_counter
@@ -283,6 +285,16 @@ val with_core_store_for_testing
   -> (Capability_recovery_obligation.store -> 'a)
   -> ('a, lane_open_error) result
 
+type lane_release_failure =
+  Capability_recovery_obligation.resource_release_failure
+
+type 'a lane_outcome =
+  | Lane_released of 'a
+  | Lane_release_failed of
+      { value : 'a
+      ; release_failure : lane_release_failure
+      }
+
 (** Validate [owner], pin its recovery store, and call [f]. The store remains
     pinned until [f] has returned or raised and every already-started
     [with_store] callback has completed. No timeout, retry budget, or polling
@@ -293,7 +305,7 @@ val with_lane
   :  registry:registry
   -> owner:string
   -> (t -> 'a)
-  -> ('a, lane_open_error) result
+  -> ('a lane_outcome, lane_open_error) result
 
 (** Borrow the lane store for one publication. The callback runs outside the
     lifetime mutex. Once lane closing begins, new borrows return
@@ -306,6 +318,7 @@ val with_store
 
 val access_error_to_string : access_error -> string
 val lane_open_error_to_string : lane_open_error -> string
+val lane_release_failure_to_string : lane_release_failure -> string
 
 val owner_inventory_row_to_string : owner_inventory_row -> string
 val owner_discovery_row_to_string : owner_discovery_row -> string
@@ -356,6 +369,31 @@ module For_testing : sig
         }
     | Cancellation_primary of observed_failure
     | Cleanup_boundary_raised of observed_failure
+
+  val lane_release_failure
+    :  owner:string
+    -> exception_:exn
+    -> backtrace:Printexc.raw_backtrace
+    -> (lane_release_failure,
+        Capability_recovery_obligation.validation_error)
+         result
+  (** Construct exact typed lane-release evidence for product-boundary tests.
+      Production lane failures always originate from the resource scope. *)
+
+  val record_lane_store_open_failure
+    :  registry:registry
+    -> owner:string
+    -> exception_:exn
+    -> backtrace:Printexc.raw_backtrace
+    -> (unit, Capability_recovery_obligation.validation_error) result
+
+  val record_lane_store_open_success
+    :  registry:registry
+    -> owner:string
+    -> (unit, Capability_recovery_obligation.validation_error) result
+  (** Deterministic injection boundary for the maintained retryable lane-store
+      health aggregate. Both functions use the same attempt transition as
+      production [with_lane]; they perform no filesystem operation. *)
 
   type single_borrow_evidence =
     | Single_borrow_balance of

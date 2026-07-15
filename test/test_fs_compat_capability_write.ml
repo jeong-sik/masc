@@ -62,7 +62,9 @@ let with_publication_recovery_access ~fs f =
             ~owner:"capability-write-test"
             f
         with
-        | Ok value -> value
+        | Ok (Fs_compat.Publication_recovery.Lane_released value) -> value
+        | Ok (Fs_compat.Publication_recovery.Lane_release_failed _) ->
+          fail "publication recovery lane release failed"
         | Error error ->
           fail
             (Fs_compat.publication_recovery_lane_open_error_to_string

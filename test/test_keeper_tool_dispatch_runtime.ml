@@ -582,6 +582,10 @@ let check_publication_write_rejected label result =
     (label ^ " exact state")
     "initializing"
     Yojson.Safe.Util.(member "state" json |> to_string);
+  check string
+    (label ^ " stable category")
+    "registry_initializing"
+    Yojson.Safe.Util.(member "category" json |> to_string);
   check bool
     (label ^ " write not executed")
     false
@@ -590,6 +594,65 @@ let check_publication_write_rejected label result =
     (label ^ " keeper remains active")
     true
     Yojson.Safe.Util.(member "keeper_active" json |> to_bool)
+;;
+
+let check_publication_recovery_failure
+      ~label
+      ~expected_message
+      ~state
+      ~category
+      ~sentinels
+      ~target
+      result
+  =
+  check string (label ^ " outcome") "failure" (outcome_label result.KET.outcome);
+  (match result.outcome with
+   | `Failure Tool_result.Runtime_failure -> ()
+   | `Failure failure_class ->
+     failf
+       "%s returned wrong failure class: %s"
+       label
+       (Tool_result.tool_failure_class_to_string failure_class)
+   | `Success -> fail (label ^ " unexpectedly wrote a file"));
+  check string (label ^ " stable message") expected_message result.raw_output;
+  let data =
+    match result.data with
+    | Some data -> data
+    | None -> fail (label ^ " omitted typed failure data")
+  in
+  check string
+    (label ^ " typed error")
+    "publication_recovery_unavailable"
+    Yojson.Safe.Util.(member "error" data |> to_string);
+  check string
+    (label ^ " data failure class")
+    "runtime_failure"
+    Yojson.Safe.Util.(member "failure_class" data |> to_string);
+  check string
+    (label ^ " state")
+    state
+    Yojson.Safe.Util.(member "state" data |> to_string);
+  check string
+    (label ^ " category")
+    category
+    Yojson.Safe.Util.(member "category" data |> to_string);
+  check bool
+    (label ^ " write not executed")
+    false
+    Yojson.Safe.Util.(member "write_executed" data |> to_bool);
+  check bool
+    (label ^ " keeper remains active")
+    true
+    Yojson.Safe.Util.(member "keeper_active" data |> to_bool);
+  let public_output = result.raw_output ^ Yojson.Safe.to_string data in
+  List.iter
+    (fun (sentinel_label, sentinel) ->
+       check bool
+         (label ^ " " ^ sentinel_label ^ " is absent from tool output")
+         false
+         (contains_substring public_output sentinel))
+    sentinels;
+  check bool (label ^ " created no file") false (Sys.file_exists target)
 ;;
 
 let test_initializing_recovery_isolates_only_publication_writes () =
@@ -853,6 +916,7 @@ let test_publication_initialization_crash_is_redacted () =
             [ "error", `String "publication_recovery_unavailable"
             ; "failure_class", `String "runtime_failure"
             ; "state", `String "initialization_crashed"
+            ; "category", `String "registry_initialization_crashed"
             ; ( "detail"
               , `String "publication recovery registry initialization crashed" )
             ; "write_executed", `Bool false
@@ -882,6 +946,145 @@ let test_publication_initialization_crash_is_redacted () =
            (contains_substring rendered_data backtrace_text));
        check bool "crashed initialization created no file" false
          (Sys.file_exists path))
+;;
+
+let test_publication_reconciliation_evidence_is_redacted () =
+  with_exec_fixture
+    ~always_allow:true
+    "keeper_tool_dispatch_recovery_evidence_redaction"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let registry =
+         match publication_recovery.provider () with
+         | Publication_availability.Available registry -> registry
+         | Publication_availability.Initializing
+         | Publication_availability.Registry_unavailable _
+         | Publication_availability.Initialization_crashed _
+         | Publication_availability.Non_runtime ->
+           fail "fixture did not provide its exact recovery registry"
+       in
+       let fs =
+         match Fs_compat.get_fs_opt () with
+         | Some fs -> fs
+         | None -> fail "fixture did not install its Eio filesystem"
+       in
+       let workspace_stat =
+         Eio.Path.stat ~follow:true Eio.Path.(fs / config.base_path)
+       in
+       let operation_id_text = "c3f1589a-e8d4-4a91-aad2-5b6bc54528a7" in
+       let operation_id =
+         match Uuidm.of_string operation_id_text with
+         | Some operation_id -> operation_id
+         | None -> fail "test operation ID is not a UUID"
+       in
+       let allowed_root_sentinel =
+         Filename.concat config.base_path "private-allowed-root-path-sentinel"
+       in
+       (match
+          Fs_compat.Capability_write_for_testing
+          .seed_prepared_publication_recovery
+            ~registry
+            ~owner:meta.name
+            ~operation_id
+            ~allowed_root_path:allowed_root_sentinel
+            ~allowed_root_device:workspace_stat.dev
+            ~allowed_root_inode:workspace_stat.ino
+            ~parent_components:[]
+            ~parent_device:workspace_stat.dev
+            ~parent_inode:workspace_stat.ino
+            ~target_leaf:"redaction-target.txt"
+            ~permissions:0o600
+        with
+        | Ok () -> ()
+        | Error error ->
+          fail
+            (Fs_compat.publication_recovery_fixture_error_to_string error));
+       let target = Filename.concat config.base_path "must-not-write.txt" in
+       let result =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String target
+                ; "content", `String "must not be published"
+                ])
+           ()
+       in
+       check_publication_recovery_failure
+         ~label:"blocked recovery"
+         ~expected_message:
+           "publication recovery lane is blocked by reconciliation"
+         ~state:"lane_unavailable"
+         ~category:"lane_reconciliation_blocked"
+         ~sentinels:
+           [ "allowed-root path", allowed_root_sentinel
+           ; "operation ID", operation_id_text
+           ]
+         ~target
+         result)
+;;
+
+let test_publication_registry_evidence_is_redacted () =
+  with_exec_fixture
+    ~always_allow:true
+    "keeper_tool_dispatch_registry_evidence_redaction"
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work ->
+       let fs =
+         match Fs_compat.get_fs_opt () with
+         | Some fs -> fs
+         | None -> fail "fixture did not install its Eio filesystem"
+       in
+       let registry_path_sentinel =
+         Filename.concat
+           config.base_path
+           "private-registry-exception-path-sentinel"
+       in
+       let registry_error =
+         Eio.Switch.run @@ fun sw ->
+         match
+           Fs_compat.open_publication_recovery_registry
+             ~sw
+             ~fs
+             ~registry_root:Eio.Path.(fs / registry_path_sentinel)
+         with
+         | Error error -> error
+         | Ok _ -> fail "missing registry root unexpectedly opened"
+       in
+       let publication_recovery =
+         { Publication_availability.provider =
+             Publication_availability.constant
+               (Publication_availability.Registry_unavailable registry_error)
+         ; keeper_name = meta.name
+         }
+       in
+       let target = Filename.concat config.base_path "registry-must-not-write.txt" in
+       let result =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~exec_cache:None
+           ~name:"Write"
+           ~input:
+             (`Assoc
+                [ "file_path", `String target
+                ; "content", `String "must not be published"
+                ])
+           ()
+       in
+       check_publication_recovery_failure
+         ~label:"unavailable registry"
+         ~expected_message:"publication recovery registry is unavailable"
+         ~state:"registry_unavailable"
+         ~category:"registry_unavailable"
+         ~sentinels:[ "registry path evidence", registry_path_sentinel ]
+         ~target
+         result)
 ;;
 
 let test_publication_write_rereads_live_provider_after_initialization () =
@@ -1049,9 +1252,14 @@ let test_publication_write_cancellation_releases_exact_lane () =
         | Error unavailable ->
           fail
             (Publication_availability.unavailable_to_string unavailable)
-        | Ok (Error error) ->
+        | Ok
+            (Fs_compat.Publication_recovery.Lane_released
+              (Error error)) ->
           fail (Fs_compat.capability_write_error_to_string error)
-        | Ok (Ok ()) -> fail "cancelled publication write returned normally");
+        | Ok
+            (Fs_compat.Publication_recovery.Lane_released (Ok ()))
+        | Ok (Fs_compat.Publication_recovery.Lane_release_failed _) ->
+          fail "cancelled publication write returned normally");
        check bool "cancellation occurred inside the real store borrow" true
          (Atomic.get cancellation_hook_observed);
        check int "cancelled write reads provider exactly once" 1
@@ -1067,9 +1275,15 @@ let test_publication_write_cancellation_releases_exact_lane () =
                  ~target:recovery_target
                  "recovered")
         with
-        | Ok (Ok ()) -> ()
-        | Ok (Error error) ->
+        | Ok
+            (Fs_compat.Publication_recovery.Lane_released (Ok ())) ->
+          ()
+        | Ok
+            (Fs_compat.Publication_recovery.Lane_released
+              (Error error)) ->
           fail (Fs_compat.capability_write_error_to_string error)
+        | Ok (Fs_compat.Publication_recovery.Lane_release_failed _) ->
+          fail "successful publication failed to release its lane"
         | Error unavailable ->
           fail
             (Publication_availability.unavailable_to_string unavailable));
@@ -1077,6 +1291,69 @@ let test_publication_write_cancellation_releases_exact_lane () =
          (Atomic.get provider_reads);
        check string "next write succeeds after cancellation cleanup" "recovered"
          (read_file target_path))
+;;
+
+let test_committed_publication_release_failure_preserves_effect_truth () =
+  let exception Injected_release_failure of string in
+  let exception_ =
+    Injected_release_failure "private-release-failure-evidence"
+  in
+  let backtrace =
+    try raise exception_ with
+    | observed ->
+      check bool "exact injected release failure" true (observed == exception_);
+      Printexc.get_raw_backtrace ()
+  in
+  let release_failure =
+    match
+      Fs_compat.Publication_recovery.For_testing.lane_release_failure
+        ~owner:"committed-publication"
+        ~exception_
+        ~backtrace
+    with
+    | Ok failure -> failure
+    | Error error ->
+      fail
+        (Fs_compat.Publication_recovery.validation_error_to_string error)
+  in
+  let execution =
+    Masc.Keeper_tool_filesystem_runtime.For_testing
+    .committed_publication_release_failure
+      ~keeper_name:"committed-publication"
+      ~release_failure
+  in
+  (match execution.outcome with
+   | `Failure Tool_result.Runtime_failure -> ()
+   | `Failure failure_class ->
+     failf
+       "cleanup failure received wrong class: %s"
+       (Tool_result.tool_failure_class_to_string failure_class)
+   | `Success -> fail "cleanup failure was reported as success");
+  check string
+    "committed effect and cleanup failure are both explicit"
+    "filesystem publication committed, but publication recovery lane cleanup failed"
+    execution.raw_output;
+  let data =
+    match execution.data with
+    | Some data -> data
+    | None -> fail "cleanup failure omitted typed data"
+  in
+  check string
+    "typed cleanup error"
+    "publication_recovery_cleanup_failed"
+    Yojson.Safe.Util.(member "error" data |> to_string);
+  check string
+    "release phase is explicit"
+    "lane_release_failed"
+    Yojson.Safe.Util.(member "state" data |> to_string);
+  check bool
+    "committed write is never relabelled as unexecuted"
+    true
+    Yojson.Safe.Util.(member "write_executed" data |> to_bool);
+  check bool
+    "Keeper remains active after lane cleanup failure"
+    true
+    Yojson.Safe.Util.(member "keeper_active" data |> to_bool)
 ;;
 
 let test_tool_search_without_session_searcher_is_unavailable () =
@@ -2032,10 +2309,16 @@ let () =
         test_manual_gate_defers_publication_writes_before_recovery;
       test_case "initialization crash is redacted from tool output" `Quick
         test_publication_initialization_crash_is_redacted;
+      test_case "reconciliation evidence is redacted from tool output" `Quick
+        test_publication_reconciliation_evidence_is_redacted;
+      test_case "registry evidence is redacted from tool output" `Quick
+        test_publication_registry_evidence_is_redacted;
       test_case "publication Write rereads provider after initialization" `Quick
         test_publication_write_rereads_live_provider_after_initialization;
       test_case "publication Write cancellation releases exact lane" `Quick
         test_publication_write_cancellation_releases_exact_lane;
+      test_case "committed publication preserves cleanup failure truth" `Quick
+        test_committed_publication_release_failure_preserves_effect_truth;
       test_case "tool search without session searcher is unavailable" `Quick
         test_tool_search_without_session_searcher_is_unavailable;
       test_case "tool search uses injected session searcher" `Quick

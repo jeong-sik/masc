@@ -1439,6 +1439,102 @@ let publication_recovery_unavailable_attempt unavailable =
     }
 ;;
 
+type publication_write_execution =
+  | Publication_write_committed
+  | Publication_write_indeterminate
+
+let file_write_attempt_to_yojson = function
+  | Write_succeeded _ -> `Assoc [ "outcome", `String "success" ]
+  | Write_failed { class_; _ }
+  | Write_failed_data { class_; _ } ->
+    `Assoc
+      [ "outcome", `String "failure"
+      ; "failure_class"
+      , `String (Tool_result.tool_failure_class_to_string class_)
+      ]
+;;
+
+let publication_recovery_cleanup_failed_attempt
+      ~keeper_name
+      ~target
+      ~execution
+      ~publication_result
+      release_failure
+  =
+  Log.Keeper.error
+    ~keeper_name
+    "WRITE_AUDIT: publication recovery lane release failed after callback path=%s write_execution=%s failure=%s error=%s backtrace=%s"
+    target
+    (match execution with
+     | Publication_write_committed -> "committed"
+     | Publication_write_indeterminate -> "indeterminate")
+    (Fs_compat.Publication_recovery.lane_release_failure_to_string
+       release_failure)
+    (Printexc.to_string release_failure.exception_)
+    (Printexc.raw_backtrace_to_string release_failure.backtrace);
+  let message, write_executed =
+    match execution with
+    | Publication_write_committed ->
+      ( "filesystem publication committed, but publication recovery lane cleanup failed"
+      , `Bool true )
+    | Publication_write_indeterminate ->
+      ( "filesystem publication callback and publication recovery lane cleanup both failed"
+      , `Null )
+  in
+  Write_failed_data
+    { message
+    ; data =
+        `Assoc
+          [ "error", `String "publication_recovery_cleanup_failed"
+          ; "failure_class", `String "runtime_failure"
+          ; "state", `String "lane_release_failed"
+          ; "detail"
+          , `String "publication recovery lane cleanup failed after the publication callback returned"
+          ; "write_executed", write_executed
+          ; "keeper_active", `Bool true
+          ; "publication_result", publication_result
+          ]
+    ; class_ = Tool_result.Runtime_failure
+    }
+;;
+
+let finish_recovery_guarded_write
+      ~keeper_name
+      ~target
+      ~execution_of_result
+      ~finish
+      outcome
+  =
+  match outcome with
+  | Fs_compat.Publication_recovery.Lane_released result -> finish result
+  | Fs_compat.Publication_recovery.Lane_release_failed
+      { value; release_failure } ->
+    let execution = execution_of_result value in
+    let publication_result =
+      match finish value with
+      | Ok attempt -> file_write_attempt_to_yojson attempt
+      | Error message ->
+        Log.Keeper.error
+          ~keeper_name
+          "WRITE_AUDIT: publication callback result projection failed before lane release evidence path=%s error=%s"
+          target
+          message;
+        `Assoc [ "outcome", `String "projection_failure" ]
+    in
+    Ok
+      (publication_recovery_cleanup_failed_attempt
+         ~keeper_name
+         ~target
+         ~execution
+         ~publication_result
+         release_failure)
+;;
+
+let content_write_execution = function
+  | Ok () -> Publication_write_committed
+  | Error _ -> Publication_write_indeterminate
+;;
+
 let handle_file_write_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -1666,7 +1762,13 @@ let handle_file_write_with_outcome
            publication_recovery
            operation
        with
-       | Ok result -> finish_write_result result
+       | Ok outcome ->
+         finish_recovery_guarded_write
+           ~keeper_name:meta.name
+           ~target
+           ~execution_of_result:content_write_execution
+           ~finish:finish_write_result
+           outcome
        | Error unavailable ->
          Ok (publication_recovery_unavailable_attempt unavailable))
   in
@@ -2006,7 +2108,13 @@ let handle_file_write_with_outcome
                     (fun publication_recovery_access ->
                        write publication_recovery_access updated)
                 with
-                | Ok result -> finish_write_result result
+                | Ok outcome ->
+                  finish_recovery_guarded_write
+                    ~keeper_name:meta.name
+                    ~target
+                    ~execution_of_result:content_write_execution
+                    ~finish:finish_write_result
+                    outcome
                 | Error unavailable ->
                   Ok (publication_recovery_unavailable_attempt unavailable)
               in
@@ -2157,3 +2265,30 @@ let handle_file_write
      ~args
      ()).raw_output
 ;;
+
+module For_testing = struct
+  let committed_publication_release_failure
+        ~keeper_name
+        ~release_failure
+    =
+    let outcome =
+      Fs_compat.Publication_recovery.Lane_release_failed
+        { value = ()
+        ; release_failure
+        }
+    in
+    match
+      finish_recovery_guarded_write
+        ~keeper_name
+        ~target:"product-contract-fixture"
+        ~execution_of_result:(fun () -> Publication_write_committed)
+        ~finish:(fun () ->
+          Ok
+            (Write_succeeded
+               (Yojson.Safe.to_string (`Assoc [ "ok", `Bool true ]))))
+        outcome
+    with
+    | Ok attempt -> file_write_attempt_to_execution attempt
+    | Error message -> Keeper_tool_execution.failure (error_json message)
+  ;;
+end

@@ -230,9 +230,10 @@ val publication_recovery_snapshot_to_health_yojson :
   publication_recovery_runtime_snapshot -> Yojson.Safe.t
 (** Public-health projection. It exposes only typed aggregate counts and
     status categories. A failed discovery, invalid historical owner, or blocked
-    exact owner is [degraded], never a global [blocked] gate. Owner identities,
-    filesystem paths, exceptions, backtraces, and nested reconciliation
-    evidence remain internal. *)
+    exact owner is [degraded], never a global [blocked] gate. The maintained
+    retryable lane-store failure count also degrades health without traversing
+    owners. Owner identities, filesystem paths, exceptions, backtraces, and
+    nested reconciliation evidence remain internal. *)
 
 type workspace_switch_error =
   | Workspace_masc_root_mismatch of

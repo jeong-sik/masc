@@ -93,3 +93,12 @@ val handle_file_write_with_outcome :
     boundary. An explicit allowed root outside the project likewise requires
     an operator-owned parent; Keeper-writable components must begin below the
     opened root capability. *)
+
+module For_testing : sig
+  val committed_publication_release_failure
+    :  keeper_name:string
+    -> release_failure:Fs_compat.Publication_recovery.lane_release_failure
+    -> Keeper_tool_execution.t
+  (** Inject a post-callback lane release failure through the same public tool
+      result projection used after a committed production publication. *)
+end

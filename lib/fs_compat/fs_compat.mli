@@ -240,6 +240,11 @@ type publication_recovery_lane_open_error = Publication_recovery.lane_open_error
 type publication_recovery_reconciliation_report = Capability_recovery_reconciler.report
 type publication_recovery_owner = Publication_recovery.owner
 
+type publication_recovery_lane_open_error_kind =
+  | Publication_recovery_invalid_owner
+  | Publication_recovery_reconciliation_blocked
+  | Publication_recovery_store_failed
+
 type publication_recovery_record_area =
   | Publication_recovery_active
   | Publication_recovery_owned
@@ -330,11 +335,19 @@ val with_publication_recovery_lane
   :  registry:publication_recovery_registry
   -> owner:string
   -> (publication_recovery_access -> 'a)
-  -> ('a, publication_recovery_lane_open_error) result
+  -> ('a Publication_recovery.lane_outcome,
+      publication_recovery_lane_open_error)
+       result
 
 val publication_recovery_lane_open_error_to_string
   :  publication_recovery_lane_open_error
   -> string
+
+(** Constructor-directed public classification. The category never contains
+    owner names, recovery records, paths, operation IDs, or exception text. *)
+val publication_recovery_lane_open_error_kind
+  :  publication_recovery_lane_open_error
+  -> publication_recovery_lane_open_error_kind
 
 (** Build the immutable recovery locator projection used by
     {!replace_capability_file}. *)

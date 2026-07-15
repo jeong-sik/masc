@@ -132,7 +132,9 @@ val with_publication_recovery_lane
   :  registry:publication_recovery_registry
   -> owner:string
   -> (publication_recovery_access -> 'a)
-  -> ('a, publication_recovery_lane_open_error) result
+  -> ('a Publication_recovery_access.lane_outcome,
+      publication_recovery_lane_open_error)
+       result
 
 (** Build the immutable recovery locator projection used by
     [replace_capability_file]. The allowed-root identity is caller-certified;

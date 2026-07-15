@@ -263,6 +263,11 @@ type publication_recovery_lane_open_error = Publication_recovery.lane_open_error
 type publication_recovery_reconciliation_report = Capability_recovery_reconciler.report
 type publication_recovery_owner = Publication_recovery.owner
 
+type publication_recovery_lane_open_error_kind =
+  | Publication_recovery_invalid_owner
+  | Publication_recovery_reconciliation_blocked
+  | Publication_recovery_store_failed
+
 type publication_recovery_record_area =
   Atomic_write.publication_recovery_record_area =
   | Publication_recovery_active
@@ -345,6 +350,13 @@ let with_publication_recovery_lane = Publication_recovery.with_lane
 
 let publication_recovery_lane_open_error_to_string =
   Publication_recovery.lane_open_error_to_string
+;;
+
+let publication_recovery_lane_open_error_kind = function
+  | Publication_recovery.Invalid_owner _ -> Publication_recovery_invalid_owner
+  | Publication_recovery.Reconciliation_blocked _ ->
+    Publication_recovery_reconciliation_blocked
+  | Publication_recovery.Store_failed _ -> Publication_recovery_store_failed
 ;;
 
 let atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target

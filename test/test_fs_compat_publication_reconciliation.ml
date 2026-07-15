@@ -92,7 +92,9 @@ let inspect_valid ~registry ~owner =
 
 let with_lane_ok registry owner =
   match Recovery.with_lane ~registry ~owner (fun _ -> ()) with
-  | Ok () -> ()
+  | Ok (Recovery.Lane_released ()) -> ()
+  | Ok (Recovery.Lane_release_failed _) ->
+    fail "publication recovery lane release failed"
   | Error error -> fail (Recovery.lane_open_error_to_string error)
 ;;
 
@@ -307,7 +309,7 @@ let test_corrupt_and_invalid_rows_block_only_owner () =
   (match Recovery.with_lane ~registry ~owner:owner_name (fun _ -> ()) with
    | Error (Recovery.Reconciliation_blocked _) -> ()
    | Error error -> fail (Recovery.lane_open_error_to_string error)
-   | Ok () -> fail "blocked owner was admitted");
+   | Ok _ -> fail "blocked owner was admitted");
   with_lane_ok registry "unrelated-owner"
 ;;
 
@@ -788,7 +790,7 @@ let test_suspended_owner_does_not_block_unrelated_owner () =
           (Recovery.Owner_inventory_crashed { exception_; _ }))) ->
     check bool "blocked owner retains crash" true (exception_ == crash)
   | Error error -> fail (Recovery.lane_open_error_to_string error)
-  | Ok () -> fail "crashed owner was admitted"
+  | Ok _ -> fail "crashed owner was admitted"
 ;;
 
 let test_discovery_failure_is_degraded_and_demand_independent () =
@@ -878,7 +880,7 @@ let test_non_current_inventory_cancellation_is_owner_local () =
            (Recovery.Owner_inventory_cancelled { reason = observed; _ }))) ->
      check bool "exact blocked reason retained" true (observed == reason)
    | Error error -> fail (Recovery.lane_open_error_to_string error)
-   | Ok () -> fail "inventory-cancelled owner was admitted");
+   | Ok _ -> fail "inventory-cancelled owner was admitted");
   with_lane_ok registry "unrelated-after-inventory-cancel"
 ;;
 
@@ -921,7 +923,7 @@ let test_non_current_reconciliation_cancellation_is_typed () =
            { reason = observed; _ })) ->
      check bool "lane block retains reason" true (observed == reason)
    | Error error -> fail (Recovery.lane_open_error_to_string error)
-   | Ok () -> fail "cancelled owner was admitted");
+   | Ok _ -> fail "cancelled owner was admitted");
   with_lane_ok registry "unrelated-after-reconciliation-cancel"
 ;;
 
@@ -962,7 +964,7 @@ let test_reconciliation_crash_is_typed_and_owner_local () =
          (Recovery.Owner_reconciliation_crash { exception_; _ })) ->
      check bool "lane block retains crash" true (exception_ == crash)
    | Error error -> fail (Recovery.lane_open_error_to_string error)
-   | Ok () -> fail "crashed owner was admitted");
+   | Ok _ -> fail "crashed owner was admitted");
   with_lane_ok registry "unrelated-after-reconciliation-crash"
 ;;
 
@@ -1574,6 +1576,55 @@ let test_health_counter_transitions_are_checked () =
   | Error _ -> fail "ordinary checked increment failed"
 ;;
 
+let test_retryable_lane_store_health_tracks_exact_owner () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let registry_root = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_root 0o700;
+  with_registry ~fs ~registry_root @@ fun registry ->
+  let owner = "retryable-lane-store-health" in
+  let exception_ = Failure "deterministic lane store failure" in
+  let backtrace =
+    try raise exception_ with
+    | observed ->
+      check bool "exact injected store failure" true (observed == exception_);
+      Printexc.get_raw_backtrace ()
+  in
+  let record_failure () =
+    match
+      Recovery.For_testing.record_lane_store_open_failure
+        ~registry
+        ~owner
+        ~exception_
+        ~backtrace
+    with
+    | Ok () -> ()
+    | Error error -> fail (Recovery.validation_error_to_string error)
+  in
+  record_failure ();
+  check int
+    "one exact owner failure is aggregated"
+    1
+    (Recovery.health_snapshot registry).retryable_lane_failure_count;
+  record_failure ();
+  check int
+    "retrying the same owner does not double count"
+    1
+    (Recovery.health_snapshot registry).retryable_lane_failure_count;
+  (match
+     Recovery.For_testing.record_lane_store_open_success
+       ~registry
+       ~owner
+   with
+   | Ok () -> ()
+   | Error error -> fail (Recovery.validation_error_to_string error));
+  check int
+    "successful exact lane open clears its retained failure"
+    0
+    (Recovery.health_snapshot registry).retryable_lane_failure_count
+;;
+
 let test_single_borrow_drains_exactly_once () =
   with_tmp_dir @@ fun temp_root ->
   Eio_main.run @@ fun env ->
@@ -1712,6 +1763,10 @@ let () =
             "health aggregate counter transitions are checked"
             `Quick
             test_health_counter_transitions_are_checked
+        ; test_case
+            "retryable lane store health tracks exact owner"
+            `Quick
+            test_retryable_lane_store_health_tracks_exact_owner
         ; test_case
             "single borrow drains exactly once"
             `Quick

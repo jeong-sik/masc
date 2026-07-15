@@ -32,10 +32,17 @@ val non_runtime_provider : provider
 val with_access
   :  turn_context
   -> (Fs_compat.publication_recovery_access -> 'a)
-  -> ('a, unavailable) result
+  -> ('a Fs_compat.Publication_recovery.lane_outcome, unavailable) result
 (** Reads the live provider once and, only when available, borrows the exact
     owner lane for the dynamic extent of [use]. Callback exceptions and
-    cancellation propagate only after the lane access is released. *)
+    cancellation propagate only after the lane access is released. A callback
+    value returned before lane-scope release fails remains available in the
+    typed [Lane_release_failed] outcome. *)
 
+(** Stable tool-facing category detail. Embedded recovery evidence remains in
+    the typed [unavailable] value and is never rendered here. *)
 val unavailable_to_string : unavailable -> string
+
+(** Stable tool-facing failure projection. It contains state/category and
+    no owner, path, operation ID, exception, or backtrace evidence. *)
 val unavailable_to_yojson : unavailable -> Yojson.Safe.t

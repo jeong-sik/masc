@@ -639,6 +639,7 @@ let publication_recovery_available_snapshot_to_health_yojson
      ; discovery_row_count
      ; discovered_owner_count
      ; invalid_owner_name_count
+     ; retryable_lane_failure_count
      ; owners
      } : Fs_compat.Publication_recovery.health_snapshot)
   =
@@ -703,6 +704,7 @@ let publication_recovery_available_snapshot_to_health_yojson
       ; invalid_owner_name_count
       ; owner_identity_rejected_count
       ; owners.blocked
+      ; retryable_lane_failure_count
       ]
   in
   let status =
@@ -718,6 +720,7 @@ let publication_recovery_available_snapshot_to_health_yojson
     ; invalid_owner_name_count, "invalid_owner_name"
     ; owner_identity_rejected_count, "owner_identity_rejected"
     ; owners.blocked, "owner_blocked"
+    ; retryable_lane_failure_count, "owner_lane_store_failure"
     ]
   in
   let status_reasons =
@@ -731,7 +734,7 @@ let publication_recovery_available_snapshot_to_health_yojson
     else status_reasons
   in
   `Assoc
-    [ "schema", `String "masc.publication_recovery_activation.v3"
+    [ "schema", `String "masc.publication_recovery_activation.v4"
     ; "status", `String (Health_status.to_string status)
     ; "global_blocking", `Bool false
     ; "operator_action_required", `Bool (attention_count > 0)
@@ -756,6 +759,8 @@ let publication_recovery_available_snapshot_to_health_yojson
           ; ( "owner_ready_without_obligation"
             , `Int owners.ready_without_obligation )
           ; "owner_blocked", `Int owners.blocked
+          ; "owner_lane_store_failure"
+          , `Int retryable_lane_failure_count
           ] )
     ]
 ;;
@@ -763,7 +768,7 @@ let publication_recovery_available_snapshot_to_health_yojson
 let publication_recovery_snapshot_to_health_yojson = function
   | Publication_recovery_initializing_snapshot ->
     `Assoc
-      [ "schema", `String "masc.publication_recovery_activation.v3"
+      [ "schema", `String "masc.publication_recovery_activation.v4"
       ; "status", `String (Health_status.to_string Health_status.Warming)
       ; "global_blocking", `Bool false
       ; "operator_action_required", `Bool false
@@ -781,7 +786,7 @@ let publication_recovery_snapshot_to_health_yojson = function
       health
   | Publication_recovery_unavailable_snapshot _ ->
     `Assoc
-      [ "schema", `String "masc.publication_recovery_activation.v3"
+      [ "schema", `String "masc.publication_recovery_activation.v4"
       ; "status", `String (Health_status.to_string Health_status.Degraded)
       ; "global_blocking", `Bool false
       ; "operator_action_required", `Bool true
@@ -794,7 +799,7 @@ let publication_recovery_snapshot_to_health_yojson = function
       ]
   | Publication_recovery_initialization_crashed_snapshot ->
     `Assoc
-      [ "schema", `String "masc.publication_recovery_activation.v3"
+      [ "schema", `String "masc.publication_recovery_activation.v4"
       ; "status", `String (Health_status.to_string Health_status.Degraded)
       ; "global_blocking", `Bool false
       ; "operator_action_required", `Bool true
@@ -807,7 +812,7 @@ let publication_recovery_snapshot_to_health_yojson = function
       ]
   | Publication_recovery_non_runtime_snapshot ->
     `Assoc
-      [ "schema", `String "masc.publication_recovery_activation.v3"
+      [ "schema", `String "masc.publication_recovery_activation.v4"
       ; "status", `String "unavailable"
       ; "global_blocking", `Bool false
       ; "operator_action_required", `Bool false
@@ -1092,6 +1097,7 @@ module For_testing = struct
       ; discovery_row_count = 0
       ; discovered_owner_count = 0
       ; invalid_owner_name_count = 0
+      ; retryable_lane_failure_count = 0
       ; owners =
           { Fs_compat.Publication_recovery.inspection_pending = 0
           ; inspection_running = 0

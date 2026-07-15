@@ -328,6 +328,19 @@ val inspect_owner
   -> owner
   -> owner_inspection
 
+type resource_release_failure =
+  { failure : failure
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type 'a store_scope_outcome =
+  | Store_scope_released of 'a
+  | Store_scope_release_failed of
+      { value : 'a
+      ; release_failure : resource_release_failure
+      }
+
 (** Idempotently complete and pin one owner's fixed three-store layout inside
     a module-owned switch, then call [f]. The intermediate lane capability is
     short-scoped; the active, owned, and forensic capabilities remain pinned
@@ -335,20 +348,16 @@ val inspect_owner
     cancellation, and partial layout failure all close every capability owned
     by that switch. Trusted callers must not return or otherwise retain [store]
     beyond [f]. Layout failures are returned; callback exceptions and
-    cancellation propagate unchanged. A Keeper should run its whole lane
-    lifetime inside one callback rather than reopening the store per
-    publication. *)
+    cancellation propagate unchanged. When [f] returns before scope release
+    fails, [Store_scope_release_failed] preserves both the returned value and
+    exact release evidence. A Keeper should run its whole lane lifetime inside
+    one callback rather than reopening the store per publication. *)
 val with_store
   :  registry:registry
   -> owner:owner
+  -> on_release_failure:(resource_release_failure -> unit)
   -> (store -> 'a)
-  -> ('a, transition_error) result
-
-type resource_release_failure =
-  { failure : failure
-  ; exception_ : exn
-  ; backtrace : Printexc.raw_backtrace
-  }
+  -> ('a store_scope_outcome, transition_error) result
 
 type 'a existing_store_scope_outcome =
   | Existing_store_scope_released of 'a

@@ -198,6 +198,16 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
       Eio.Switch.run
       @@ fun sw ->
       let state = create_runtime env sw ~base_path in
+      let publication_recovery_provider =
+        Mcp_server.publication_recovery_availability_provider state
+      in
+      (match publication_recovery_provider () with
+       | Keeper_publication_recovery_availability.Initializing -> ()
+       | Keeper_publication_recovery_availability.Available _
+       | Keeper_publication_recovery_availability.Registry_unavailable _
+       | Keeper_publication_recovery_availability.Initialization_crashed _
+       | Keeper_publication_recovery_availability.Non_runtime ->
+         Alcotest.fail "live provider did not expose initial runtime state");
       (match
          Mcp_server.For_testing.publication_recovery_runtime_observation state
        with
@@ -238,6 +248,13 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
        | Mcp_server.For_testing.Runtime_initialization_crashed
        | Mcp_server.For_testing.Runtime_non_runtime ->
          Alcotest.fail "registry initialization did not become available");
+      (match publication_recovery_provider () with
+       | Keeper_publication_recovery_availability.Available _ -> ()
+       | Keeper_publication_recovery_availability.Initializing
+       | Keeper_publication_recovery_availability.Registry_unavailable _
+       | Keeper_publication_recovery_availability.Initialization_crashed _
+       | Keeper_publication_recovery_availability.Non_runtime ->
+         Alcotest.fail "same live provider did not observe availability");
       let initialized_scope = Mcp_server.workspace_scope state in
       Alcotest.(check bool)
         "config replacement preserves the live recovery handle"
@@ -284,7 +301,9 @@ let test_runtime_publishes_before_open_and_discovers_without_owner_fanout () =
            ~owner:first_owner
            (fun _ -> ())
        with
-       | Ok () -> ()
+       | Ok (Fs_compat.Publication_recovery.Lane_released ()) -> ()
+       | Ok (Fs_compat.Publication_recovery.Lane_release_failed _) ->
+         Alcotest.fail "publication recovery lane release failed"
        | Error error ->
          Alcotest.fail
            (Fs_compat.publication_recovery_lane_open_error_to_string error));
@@ -328,6 +347,9 @@ let test_registry_unavailable_keeps_server_state_live () =
       Eio.Switch.run
       @@ fun sw ->
       let state = create_runtime env sw ~base_path in
+      let publication_recovery_provider =
+        Mcp_server.publication_recovery_availability_provider state
+      in
       Alcotest.(check string)
         "unrelated workspace state is immediately available"
         config.base_path
@@ -342,6 +364,13 @@ let test_registry_unavailable_keeps_server_state_live () =
        | Mcp_server.For_testing.Runtime_initialization_crashed
        | Mcp_server.For_testing.Runtime_non_runtime ->
          Alcotest.fail "invalid registry layout was not typed unavailable");
+      (match publication_recovery_provider () with
+       | Keeper_publication_recovery_availability.Registry_unavailable _ -> ()
+       | Keeper_publication_recovery_availability.Initializing
+       | Keeper_publication_recovery_availability.Available _
+       | Keeper_publication_recovery_availability.Initialization_crashed _
+       | Keeper_publication_recovery_availability.Non_runtime ->
+         Alcotest.fail "live provider collapsed registry-unavailable state");
       Alcotest.(check bool)
         "publication registry is fail-closed"
         true
@@ -376,6 +405,90 @@ let test_registry_unavailable_keeps_server_state_live () =
         (Mcp_server.workspace_config state).workspace_path)
 ;;
 
+let test_lane_store_failure_degrades_and_success_recovers_health () =
+  Eio_main.run
+  @@ fun env ->
+  let base_path = Cases.temp_dir "mcp-recovery-lane-store-health-" in
+  Fun.protect
+    ~finally:(fun () -> Cases.cleanup_dir base_path)
+    (fun () ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let state = create_runtime env sw ~base_path in
+      Mcp_server.For_testing.await_publication_recovery_initialization state;
+      let registry = require_registry state in
+      Mcp_server.For_testing.await_publication_recovery_discovery registry;
+      let owner = "lane-store-health" in
+      let exception_ = Failure "deterministic lane store open failure" in
+      let backtrace =
+        try raise exception_ with
+        | observed ->
+          Alcotest.(check bool)
+            "exact injected store failure"
+            true
+            (observed == exception_);
+          Printexc.get_raw_backtrace ()
+      in
+      (match
+         Fs_compat.Publication_recovery.For_testing
+         .record_lane_store_open_failure
+           ~registry
+           ~owner
+           ~exception_
+           ~backtrace
+       with
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.fail
+           (Fs_compat.Publication_recovery.validation_error_to_string
+              error));
+      let failed = health state in
+      Alcotest.(check string)
+        "retryable lane-store failure degrades health"
+        "degraded"
+        Yojson.Safe.Util.(failed |> member "status" |> to_string);
+      Alcotest.(check int)
+        "one exact failing owner is aggregated"
+        1
+        Yojson.Safe.Util.
+          (failed
+           |> member "row_counts"
+           |> member "owner_lane_store_failure"
+           |> to_int);
+      Alcotest.(check (list string))
+        "retryable store reason is explicit without owner/path evidence"
+        [ "owner_lane_store_failure" ]
+        Yojson.Safe.Util.
+          (failed
+           |> member "status_reasons"
+           |> to_list
+           |> List.map to_string);
+      (match
+         Fs_compat.Publication_recovery.For_testing
+         .record_lane_store_open_success
+           ~registry
+           ~owner
+       with
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.fail
+           (Fs_compat.Publication_recovery.validation_error_to_string
+              error));
+      let recovered = health state in
+      Alcotest.(check string)
+        "successful exact lane open clears degraded health"
+        "ok"
+        Yojson.Safe.Util.(recovered |> member "status" |> to_string);
+      Alcotest.(check int)
+        "retryable lane-store aggregate clears"
+        0
+        Yojson.Safe.Util.
+          (recovered
+           |> member "row_counts"
+           |> member "owner_lane_store_failure"
+           |> to_int))
+;;
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   Alcotest.run
@@ -401,6 +514,10 @@ let () =
             "keeps server state live when publication registry is unavailable"
             `Quick
             test_registry_unavailable_keeps_server_state_live
+        ; Alcotest.test_case
+            "degrades and recovers retryable lane-store health"
+            `Quick
+            test_lane_store_failure_degrades_and_success_recovers_health
         ] )
     ]
 ;;

@@ -124,8 +124,13 @@ type health_snapshot =
   ; discovery_row_count : int
   ; discovered_owner_count : int
   ; invalid_owner_name_count : int
+  ; retryable_lane_failure_count : int
   ; owners : owner_health_counts
   }
+
+type lane_store_failure =
+  | Lane_store_open_failed of Core.transition_error
+  | Lane_store_release_failed of Core.resource_release_failure
 
 type registry =
   { core : Core.registry
@@ -135,6 +140,7 @@ type registry =
   ; resolve_discovery_settled : unit Eio.Promise.u
   ; mutable registry_phase : registry_phase
   ; mutable readiness : readiness_entry Owner_map.t
+  ; mutable lane_store_failures : lane_store_failure Owner_map.t
   ; mutable health : health_snapshot
   }
 
@@ -144,6 +150,15 @@ type lane_open_error =
   | Invalid_owner of Core.validation_error
   | Reconciliation_blocked of owner_block
   | Store_failed of Core.transition_error
+
+type lane_release_failure = Core.resource_release_failure
+
+type 'a lane_outcome =
+  | Lane_released of 'a
+  | Lane_release_failed of
+      { value : 'a
+      ; release_failure : lane_release_failure
+      }
 
 type discovery_snapshot =
   | Snapshot_discovery_required
@@ -176,6 +191,7 @@ type health_counter =
   | Ready_without_obligation_counter
   | Ready_counter
   | Blocked_counter
+  | Retryable_lane_failure_counter
 
 type health_counter_change =
   | Increment_health_counter
@@ -399,6 +415,12 @@ let lane_open_error_to_string = function
   | Store_failed error -> Core.transition_error_to_string error
 ;;
 
+let lane_release_failure_to_string
+      (failure : lane_release_failure)
+  =
+  Core.failure_to_string failure.failure
+;;
+
 let empty_owner_health_counts =
   { inspection_pending = 0
   ; inspection_running = 0
@@ -415,6 +437,7 @@ let initial_health_snapshot =
   ; discovery_row_count = 0
   ; discovered_owner_count = 0
   ; invalid_owner_name_count = 0
+  ; retryable_lane_failure_count = 0
   ; owners = empty_owner_health_counts
   }
 ;;
@@ -510,6 +533,47 @@ let set_readiness_entry
   registry.readiness <- Owner_map.add key entry registry.readiness
 ;;
 
+let lane_failure_count_after_transition
+      ~previous
+      ~next
+      count
+  =
+  match previous, next with
+  | None, None
+  | Some _, Some _ -> count
+  | None, Some _ ->
+    change_counter
+      ~counter:Retryable_lane_failure_counter
+      ~change:Increment_health_counter
+      count
+  | Some _, None ->
+    change_counter
+      ~counter:Retryable_lane_failure_counter
+      ~change:Decrement_health_counter
+      count
+;;
+
+let set_lane_store_failure registry key failure =
+  Eio.Cancel.protect (fun () ->
+    Eio.Mutex.use_rw ~protect:true registry.readiness_mutex (fun () ->
+      let previous =
+        Owner_map.find_opt key registry.lane_store_failures
+      in
+      let retryable_lane_failure_count =
+        lane_failure_count_after_transition
+          ~previous
+          ~next:failure
+          registry.health.retryable_lane_failure_count
+      in
+      registry.lane_store_failures <-
+        (match failure with
+         | None -> Owner_map.remove key registry.lane_store_failures
+         | Some failure ->
+           Owner_map.add key failure registry.lane_store_failures);
+      registry.health <-
+        { registry.health with retryable_lane_failure_count }))
+;;
+
 let open_registry ~sw ~fs ~registry_root =
   match Core.open_registry ~sw ~registry_root with
   | Error _ as error -> error
@@ -523,6 +587,7 @@ let open_registry ~sw ~fs ~registry_root =
       ; resolve_discovery_settled
       ; registry_phase = Discovery_required_state
       ; readiness = Owner_map.empty
+      ; lane_store_failures = Owner_map.empty
       ; health = initial_health_snapshot
       }
 ;;
@@ -1284,8 +1349,21 @@ let with_core_store_for_testing ~registry ~owner f =
   match Core.owner_of_string owner with
   | Error error -> Error (Invalid_owner error)
   | Ok owner ->
-    (match Core.with_store ~registry:registry.core ~owner f with
-     | Ok value -> Ok value
+    (match
+       Core.with_store
+         ~registry:registry.core
+         ~owner
+         ~on_release_failure:(fun _ -> ())
+         f
+     with
+     | Ok (Core.Store_scope_released value) -> Ok value
+     | Ok (Core.Store_scope_release_failed { release_failure; _ }) ->
+       Error
+         (Store_failed
+            { Core.store_effect = Core.No_record_change
+            ; failure = release_failure.failure
+            ; cleanup_failures = []
+            })
      | Error error -> Error (Store_failed error))
 ;;
 
@@ -1457,15 +1535,35 @@ let with_lane ~registry ~owner f =
     (match Core.owner_of_string owner with
      | Error error -> Error (Invalid_owner error)
      | Ok owner ->
+       let key = owner_to_string owner in
        (match
-          Core.with_store ~registry:registry.core ~owner (fun store ->
+          Core.with_store
+            ~registry:registry.core
+            ~owner
+            ~on_release_failure:(fun release_failure ->
+              set_lane_store_failure
+                registry
+                key
+                (Some (Lane_store_release_failed release_failure)))
+            (fun store ->
+            set_lane_store_failure registry key None;
             let access = create store in
             run_with_cleanup
               ~cleanup:(fun () -> close_and_drain access)
               (fun () -> f access))
         with
-        | Ok value -> Ok value
-        | Error error -> Error (Store_failed error)))
+        | Ok (Core.Store_scope_released value) ->
+          Ok (Lane_released value)
+        | Ok
+            (Core.Store_scope_release_failed
+              { value; release_failure }) ->
+          Ok (Lane_release_failed { value; release_failure })
+        | Error error ->
+          set_lane_store_failure
+            registry
+            key
+            (Some (Lane_store_open_failed error));
+          Error (Store_failed error)))
 ;;
 
 module For_testing = struct
@@ -1500,6 +1598,57 @@ module For_testing = struct
         }
     | Cancellation_primary of observed_failure
     | Cleanup_boundary_raised of observed_failure
+
+  let lane_release_failure ~owner ~exception_ ~backtrace =
+    match Core.owner_of_string owner with
+    | Error _ as error -> error
+    | Ok owner ->
+      Ok
+        { Core.failure =
+            { operation = Core.Close_directory
+            ; subject = Core.Lane_root owner
+            ; cause = Core.Io_failed { exception_; backtrace }
+            }
+        ; exception_
+        ; backtrace
+        }
+  ;;
+
+  let record_lane_store_open_failure
+        ~registry
+        ~owner
+        ~exception_
+        ~backtrace
+    =
+    match Core.owner_of_string owner with
+    | Error _ as error -> error
+    | Ok owner ->
+      let key = owner_to_string owner in
+      let failure =
+        { Core.store_effect = Core.No_record_change
+        ; failure =
+            { operation = Core.Open_directory
+            ; subject = Core.Lane_root owner
+            ; cause = Core.Io_failed { exception_; backtrace }
+            }
+        ; cleanup_failures = []
+        }
+      in
+      set_lane_store_failure
+        registry
+        key
+        (Some (Lane_store_open_failed failure));
+      Ok ()
+  ;;
+
+  let record_lane_store_open_success ~registry ~owner =
+    match Core.owner_of_string owner with
+    | Error _ as error -> error
+    | Ok owner ->
+      let key = owner_to_string owner in
+      set_lane_store_failure registry key None;
+      Ok ()
+  ;;
 
   type single_borrow_evidence =
     | Single_borrow_balance of

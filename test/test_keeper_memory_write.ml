@@ -56,7 +56,6 @@ let make_meta name =
       (`Assoc
         [ "name", `String name
         ; "trace_id", `String ("trace-" ^ name)
-        ; "goal", `String "memory contract test"
         ])
   with
   | Error error -> Alcotest.fail ("meta fixture failed: " ^ error)
@@ -321,6 +320,102 @@ let test_memory_work_store_exact_fifo () =
     | Ok _ -> Alcotest.fail "duplicate durable request was accepted")
 ;;
 
+let test_memory_work_store_claim_settle_recovery () =
+  with_temp_dir (fun base_path ->
+    let meta = make_meta "durable-memory-claim" in
+    let make_request turn =
+      Work_request.make
+        ~keeper_name:meta.name
+        ~generation:meta.runtime.generation
+        ~turn
+        ~runtime_id:(Printf.sprintf "runtime.claim.%d" turn)
+        ~meta
+        ~tool_results:[ `Assoc [ "turn", `Int turn ] ]
+        ~librarian_messages:[]
+        ~deliberation_execution:None
+      |> Result.get_ok
+    in
+    let first, second, third = make_request 1, make_request 2, make_request 3 in
+    List.iter
+      (fun request ->
+         Work_store.enqueue ~base_path request
+         |> Result.map_error Work_store.error_to_string
+         |> Result.get_ok
+         |> ignore)
+      [ first; second; third ];
+    let claim () =
+      Work_store.claim_next ~base_path ~keeper_name:meta.name
+      |> Result.map_error Work_store.error_to_string
+      |> Result.get_ok
+    in
+    (match claim () with
+     | Work_store.Claimed request ->
+       Alcotest.(check string)
+         "first claimed"
+         (Work_request.request_id first)
+         (Work_request.request_id request)
+     | Work_store.Queue_empty | Work_store.Claim_busy _ ->
+       Alcotest.fail "first request was not claimed");
+    Alcotest.(check bool)
+      "second claim cannot duplicate in-flight work"
+      true
+      (claim () = Work_store.Claim_busy (Work_request.request_id first));
+    let recovered =
+      Work_store.recover_in_flight ~base_path ~keeper_name:meta.name
+      |> Result.map_error Work_store.error_to_string
+      |> Result.get_ok
+      |> Option.get
+    in
+    Alcotest.(check string)
+      "restart recovery keeps exact claim"
+      (Work_request.request_id first)
+      (Work_request.request_id recovered);
+    let settle request outcome =
+      Work_store.settle
+        ~base_path
+        ~keeper_name:meta.name
+        ~request_id:(Work_request.request_id request)
+        outcome
+      |> Result.map_error Work_store.error_to_string
+      |> Result.get_ok
+    in
+    Alcotest.(check bool)
+      "first settled"
+      true
+      (settle first Work_store.Completed = Work_store.Settled);
+    Alcotest.(check bool)
+      "settlement replay is idempotent"
+      true
+      (settle first Work_store.Completed = Work_store.Already_settled);
+    (match
+       Work_store.settle
+         ~base_path
+         ~keeper_name:meta.name
+         ~request_id:(Work_request.request_id first)
+         (Work_store.Failed "conflicting replay")
+     with
+     | Error (Work_store.Settlement_conflict _) -> ()
+     | Error error -> Alcotest.fail (Work_store.error_to_string error)
+     | Ok _ -> Alcotest.fail "conflicting settlement was accepted");
+    (match claim () with
+     | Work_store.Claimed request ->
+       Alcotest.(check string)
+         "second claimed"
+         (Work_request.request_id second)
+         (Work_request.request_id request)
+     | Work_store.Queue_empty | Work_store.Claim_busy _ ->
+       Alcotest.fail "second request was not claimed");
+    ignore (settle second (Work_store.Failed "provider unavailable") : Work_store.settle_result);
+    match claim () with
+    | Work_store.Claimed request ->
+      Alcotest.(check string)
+        "failed unit does not block the next unit"
+        (Work_request.request_id third)
+        (Work_request.request_id request)
+    | Work_store.Queue_empty | Work_store.Claim_busy _ ->
+      Alcotest.fail "third request did not progress after failure")
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -349,6 +444,10 @@ let () =
             "durable work store exact FIFO"
             `Quick
             test_memory_work_store_exact_fifo
+        ; Alcotest.test_case
+            "durable work store claim settle recovery"
+            `Quick
+            test_memory_work_store_claim_settle_recovery
         ] )
     ]
 ;;

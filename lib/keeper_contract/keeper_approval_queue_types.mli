@@ -58,29 +58,6 @@ type decision_source =
   | Auto_judge
   | Human_operator
 
-(** An immutable exact Always Allowed rule. Its identity is the workspace-local
-    Keeper, opaque operation identity, and complete normalized effect input;
-    only JSON object-field order is canonicalized. Match observations belong in
-    the append-only Gate audit log, so reading a rule never rewrites it. *)
-type approval_rule =
-  { id : string
-  ; keeper_name : string
-  ; tool_name : string
-  ; request_fingerprint : string
-  ; created_at : float
-  ; created_by : string option
-  ; source_approval_id : string option
-  }
-
-type rule_match = { rule_id : string }
-
-type rule_store_error =
-  { path : string
-  ; reason : string
-  }
-
-type resolution_result = { remembered_rule : approval_rule option }
-
 val advisory_judgment_to_string : advisory_judgment -> string
 val advisory_judgment_values : string list
 val advisory_judgment_of_string : string -> advisory_judgment option
@@ -89,9 +66,6 @@ val decision_source_to_string : decision_source -> string
 val decision_source_of_string : string -> decision_source option
 val string_opt_of_json : Yojson.Safe.t -> string option
 val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
-val rule_match_to_yojson : rule_match -> Yojson.Safe.t
-val rule_store_error_to_string : rule_store_error -> string
-val approval_rule_to_yojson : approval_rule -> Yojson.Safe.t
 val hitl_context_summary_to_yojson : hitl_context_summary -> Yojson.Safe.t
 val summary_status_to_yojson : summary_status -> Yojson.Safe.t
 
@@ -100,9 +74,3 @@ val hitl_context_summary_of_yojson_with_error :
 
 val summary_status_of_yojson_with_error :
   Yojson.Safe.t -> (summary_status, string) Stdlib.result
-
-val approval_rule_of_yojson_with_error :
-  Yojson.Safe.t -> (approval_rule, string) Stdlib.result
-(** Parse an approval rule, returning the first validation failure reason. *)
-
-val approval_rule_of_yojson : Yojson.Safe.t -> approval_rule option

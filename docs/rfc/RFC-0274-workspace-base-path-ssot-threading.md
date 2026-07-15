@@ -43,7 +43,7 @@ Retire `Env_config_core.base_path ()` as a **runtime** read. Thread `Workspace.c
 
 | Pattern | Sites | Threading cost |
 |---|---|---|
-| `\| None -> base_path ()` (caller already has `?base_path` option) | `dashboard_verification.ml:163`, `keeper_runtime_contract.ml:206`, `keeper_approval_queue_rules.ml:107`, `keeper_approval_queue.ml:109` | Low — the `None` arm already implies an explicit-path option exists; replace the env fallback with a required `~base_path` from the caller's `Workspace.config`. |
+| `\| None -> base_path ()` (caller already has `?base_path` option) | `dashboard_verification.ml:163`, `keeper_runtime_contract.ml:206`, `keeper_approval_queue.ml:109` | Low — the `None` arm already implies an explicit-path option exists; replace the env fallback with a required `~base_path` from the caller's `Workspace.config`. |
 | `Filename.concat (base_path ()) "..."` (absolute path resolve) | `eval_calibration.ml:103`, `channel_gate_discord_names.ml:22`, `channel_gate_imessage_state.ml:31`, `channel_gate_sidecar_state.ml:43` | Medium — thread `~base_path` into the resolver; callers (gate init, eval harness) obtain it from `Workspace.config`. |
 | `let base_path = base_path () in` (local binding in runtime modules) | `runtime_transport.ml:189`, `runtime_transport_authorization.ml:58`, `runtime_observation.ml:473`, `runtime_transport_runtime_mcp_policy_of_tool_names.ml:42,99` | Medium — these modules already hold per-request context; thread `~base_path` from the request `Workspace.config`. |
 | Single-call helpers | `board_paths.ml:6` (`board_base_path`), `thompson_sampling.ml:100`, `keeper_transition_audit.ml:79` | Low–Medium — add `~base_path` param, update callers. |
@@ -62,7 +62,7 @@ Comments/docstrings referencing `Env_config_core.base_path` (not calls): `env_co
 
 Phased so the tree stays green:
 
-1. **Wave A — fallback sites** (lowest cost, caller already has `?base_path`): `dashboard_verification`, `keeper_runtime_contract`, `keeper_approval_queue_rules`, `keeper_approval_queue`. Add a required `~base_path` where the `None` arm currently calls env; callers pass `config.base_path`.
+1. **Wave A — fallback sites** (lowest cost, caller already has `?base_path`): `dashboard_verification`, `keeper_runtime_contract`, `keeper_approval_queue`. Add a required `~base_path` where the `None` arm currently calls env; callers pass `config.base_path`.
 2. **Wave B — absolute-path resolvers**: gate modules, `eval_calibration`. Thread `~base_path`.
 3. **Wave C — runtime transport/observation modules**: thread `~base_path` from per-request `Workspace.config`.
 4. **Wave D — direct `Sys.getenv_opt` leaks**: `shutdown_hooks`, `tool_library`.

@@ -36,10 +36,10 @@ What you can do:
   `masc_deliver`, and `masc_schedule_list` manage workspace planning and
   scheduled automation. Eventual external effects use the ordinary configured
   Gate at execution time.
-- **Keeper-to-keeper work**: if visible, `masc_keeper_list`,
-  `masc_keeper_status`, `masc_keeper_msg`, `masc_keeper_msg_result`,
-  `masc_keeper_msg_queue`, and `masc_keeper_msg_cancel` inspect or contact other
-  keepers. Use `keeper_broadcast` for workspace-wide notices.
+- **Keeper-to-keeper work**: use the visible typed fleet tools to discover
+  keepers, inspect status, delegate work directly, and observe or cancel an
+  asynchronous delegation. Use the visible broadcast tool for workspace-wide
+  notices. Tool names and availability come from the active schema.
 - **Deliberation and media**: if visible, `masc_fusion` starts an out-of-band
   panel+judge deliberation and wakes you later with the result; `analyze_image`
   reads stored image artifacts through a vision sub-call; voice tools are
@@ -168,8 +168,8 @@ A PR you opened is open work assigned to you. It is not done when you push; it i
 - Recall past context (`keeper_memory_search`, if available) before repeating past work, including your own open PRs
 - Read or reply to the current connected surface (`keeper_surface_read` /
   `keeper_surface_post`, if available)
-- Inspect or contact another keeper (`masc_keeper_status`, `masc_keeper_msg`, or
-  the async `masc_keeper_msg_result` / queue / cancel tools, if available)
+- Inspect or contact another keeper with the visible typed fleet tools; use the
+  corresponding status, list, or cancel operation for asynchronous delegation
 - Start advisory panel deliberation (`masc_fusion`, if available) for bounded
   high-impact decisions; wait for its completion wake instead of polling unless
   `masc_fusion_status` is explicitly needed

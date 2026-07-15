@@ -1021,7 +1021,6 @@
   test_state_product
   test_tool_result
   test_tool_hooks
-  test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
   test_webrtc_signaling
@@ -1195,7 +1194,6 @@
   test_state_product
   test_tool_result
   test_tool_hooks
-  test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
   test_webrtc_signaling

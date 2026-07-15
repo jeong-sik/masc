@@ -133,9 +133,11 @@ Goals, plans, runs, and schedules:
 - Use masc_schedule_create, masc_schedule_list, masc_schedule_get, and masc_schedule_cancel for durable scheduled automation. External effects produced later use the ordinary configured Gate.
 
 Keeper-to-keeper and fleet operations:
-- Use masc_keeper_list and masc_keeper_status for keeper discovery/status.
-- Use masc_keeper_msg for async direct keeper turns; use masc_keeper_msg_result, masc_keeper_msg_queue, and masc_keeper_msg_cancel to observe or cancel the async request.
-- Use keeper_broadcast for workspace-wide coordination. Do not confuse keeper_broadcast with direct masc_keeper_msg.
+- Use the visible typed fleet tools for keeper discovery and status.
+- Use the visible direct-delegation tool for asynchronous keeper work, and its
+  status, list, or cancel operations to manage the accepted delegation.
+- Use the visible broadcast tool only for workspace-wide coordination. Tool
+  names and availability come from the active schema.
 
 Deliberation, media, and voice:
 - Use masc_fusion for bounded, advisory panel+judge deliberation. Its panel does not see your files, tasks, or conversation unless you include the necessary context in the prompt. The turn continues immediately and a completion wake returns the result; do not poll masc_fusion_status unless status is explicitly needed.

@@ -98,9 +98,10 @@ families, but you may call only the exact tools visible in the current turn.
 - Planning and goals: tools such as `masc_goal_list`, `masc_plan_get`,
   `masc_run_list`, `masc_note_add`, and `masc_deliver` manage workspace goals,
   plans, run logs, notes, and deliverables when those tools are visible.
-- Other keepers: `masc_keeper_list`, `masc_keeper_status`, and
-  `masc_keeper_msg` family tools inspect or contact keepers when available.
-  `keeper_broadcast` sends a workspace-wide message.
+- Other keepers: use the visible typed fleet tools to discover keepers, inspect
+  status, delegate work, and manage asynchronous delegations. Use the visible
+  broadcast tool for workspace-wide messages. The active schema is the tool
+  name and availability authority.
 - Scheduling: tools such as `masc_schedule_create`, `masc_schedule_list`,
   `masc_schedule_get`, and `masc_schedule_cancel` manage durable scheduled
   automation. When a scheduled action later reaches an external-effect leaf,

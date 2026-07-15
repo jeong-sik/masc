@@ -866,28 +866,10 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let user_message =
     "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
-  (* The registry is the sole tool-token SSOT for instruction-owned prompt
-     surfaces. The deleted hardcoded sanitizer removed valid prose such as
-     "Grep"/"Bash". The structured world-state user message is different: its
-     board/task/connector values are observations, not tool instructions, so a
-     [keeper_*]/[masc_*] substring there must remain byte-for-byte intact. *)
-  (* P0-3: rendered prompt token integrity ratchet. Scan the prompt surfaces
-     *before* the registry-driven strip so stale tokens that are about to be
-     replaced still increment [PromptUnknownToolTokens] and are logged. The
-     strip pass additionally emits [PromptTokenStripped] per removed token, but
-     running the ratchet first preserves the producer-side alarm signal that
-     would otherwise be silently dropped after removal. *)
-  let (_ : string list) =
-    Keeper_prompt_token_integrity.scan_instruction_surfaces
-      ~keeper_name:meta.name
-      ~system_prompt
-  in
-  let sanitized_system =
-    system_prompt
-    |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
-         ~keeper_name:meta.name
-  in
-  let sanitized_user = user_message in
+  (* Tool names and availability come exclusively from the typed schemas sent
+     with this turn. Prompt markdown describes behaviour rather than attempting
+     to mirror that catalog. World-state observations remain byte-for-byte
+     intact; unknown calls are rejected explicitly by typed dispatch. *)
   (* set_gauge only: a stray inc_counter here used to create this
      (name, labels) cell as Counter first, so the system_prompt series
      kept Counter kind, carried a non-monotonic byte length, and exported
@@ -897,17 +879,17 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   Otel_metric_store.set_gauge
     (Keeper_metrics.to_string PromptSegmentBytes)
     ~labels:[("keeper", meta.name); ("segment", "system_prompt")]
-    (Float.of_int (String.length sanitized_system));
+    (Float.of_int (String.length system_prompt));
   Otel_metric_store.set_gauge
     (Keeper_metrics.to_string PromptSegmentBytes)
     ~labels:[("keeper", meta.name); ("segment", "user_message")]
-    (Float.of_int (String.length sanitized_user));
+    (Float.of_int (String.length user_message));
   (* Instruction hash: emit a stable numeric fingerprint of the full prompt
      composition (system + user) so Grafana can detect when the instruction
      changes between turns without storing the prompt content itself.
      Uses first 8 hex chars of SHA-256 as an integer (32-bit). *)
   let prompt_hash =
-    let combined = sanitized_system ^ sanitized_user in
+    let combined = system_prompt ^ user_message in
     let hex =
       Digestif.SHA256.(to_hex (digest_string combined))
     in
@@ -917,4 +899,4 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (Keeper_metrics.to_string KeeperTurnInstructionHash)
     ~labels:[("keeper", meta.name)]
     prompt_hash;
-  ( sanitized_system, sanitized_user )
+  system_prompt, user_message

@@ -65,7 +65,7 @@ vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
 vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard }))
 
 import {
-  _resetLiveSendRequestOwnersForTests,
+  _resetLiveSendRunOwnersForTests,
   activeStreamEntryId,
   activeKeeperName,
   keeperActionErrors,
@@ -77,10 +77,10 @@ import {
   keeperStreamLastEventAt,
   keeperStreamStartedAt,
   keeperThreads,
-  activeStreamRequestId,
+  activeStreamRunRef,
 } from './keeper-state'
 import {
-  _resetCancelledKeeperThreadRequestsForTests,
+  _resetKeeperRunCancelsForTests,
   _resetKeeperThreadMessageSendGuardsForTests,
   _resetChatHydrationForTests,
   cancelActiveKeeperThreadMessage,
@@ -898,8 +898,8 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     keeperStreamLastEventAt.value = {}
     _clearPendingKeeperChatRequestsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
-    _resetLiveSendRequestOwnersForTests()
-    _resetCancelledKeeperThreadRequestsForTests()
+    _resetLiveSendRunOwnersForTests()
+    _resetKeeperRunCancelsForTests()
     streamKeeperMessage.mockReset()
     cancelQueuedKeeperMessage.mockReset()
     cancelQueuedKeeperMessage.mockImplementation(async (requestId: string) => ({
@@ -1416,7 +1416,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     const err = await sendPromise
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
-    expect(activeStreamRequestId('echo')).toBeNull()
+    expect(activeStreamRunRef('echo')).toBeNull()
   })
 
   it('aborts the local stream before backend cancel settles', async () => {

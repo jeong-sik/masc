@@ -20,9 +20,9 @@ import {
   markAssistantToolTraceEnded,
   markAssistantToolTraceErrored,
   clearActiveStream,
-  releaseActiveStreamRequestId,
+  releaseLiveSendRun,
   activeStreamEntryId,
-  activeStreamRequestId,
+  activeStreamRunRef,
   getStreamController,
   keeperClientObservedSseStreamContract,
   keeperThreads,
@@ -39,8 +39,9 @@ import {
   isTerminalKeeperRunResult,
   parseKeeperRunTerminal,
   parseKeeperRunTracking,
+  sameKeeperRunRef,
 } from './lib/keeper-run-ref'
-import type { KeeperRunTracking } from './lib/keeper-run-ref'
+import type { KeeperRunRef, KeeperRunTracking } from './lib/keeper-run-ref'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
@@ -85,12 +86,12 @@ function fullPendingThinkingText(pending: PendingThinkingState): string {
 }
 
 function persistActiveAssistantDraft(keeperName: string, assistantEntryId: string): void {
-  const requestId = activeStreamRequestId(keeperName)
-  if (!requestId) return
+  const runRef = activeStreamRunRef(keeperName)
+  if (!runRef) return
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updatePendingKeeperChatAssistantDraft(requestId, entry)
+  updatePendingKeeperChatAssistantDraft(runRef.runId, entry)
 }
 
 function flushPendingThinkingDeltas(
@@ -192,7 +193,7 @@ export function _resetKeeperStreamBuffersForTests(): void {
 export interface KeeperThreadAbortResult {
   readonly keeperName: string
   readonly entryId: string | null
-  readonly requestId: string | null
+  readonly runRef: KeeperRunRef | null
   readonly controllerAborted: boolean
 }
 
@@ -346,8 +347,8 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   if (!keeperName) return null
   const controller = getStreamController(keeperName)
   const entryId = activeStreamEntryId(keeperName)
-  const requestId = activeStreamRequestId(keeperName)
-  console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${requestId ? ` request=${requestId}` : ''}`)
+  const runRef = activeStreamRunRef(keeperName)
+  console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${runRef ? ` run=${runRef.runId}` : ''}`)
   if (controller) controller.abort()
   if (entryId) {
     dropPendingThinkingDeltas(keeperName, entryId)
@@ -368,7 +369,7 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   return {
     keeperName,
     entryId,
-    requestId,
+    runRef,
     controllerAborted: Boolean(controller),
   }
 }
@@ -781,14 +782,14 @@ export function applyKeeperStreamEvent(
           const detail = error instanceof Error ? error.message : String(error)
           return `Keeper run terminal has invalid typed identity: ${detail}`
         }
-        const terminalRequestId = terminal.runRef.runId
         if (terminal.runRef.target.name !== keeperName) {
           return 'Keeper run terminal target does not match the active Keeper'
         }
-        const currentRequestId = activeStreamRequestId(keeperName)
-        if (currentRequestId && terminalRequestId !== currentRequestId) {
+        const currentRunRef = activeStreamRunRef(keeperName)
+        if (currentRunRef && !sameKeeperRunRef(terminal.runRef, currentRunRef)) {
           return null
         }
+        const terminalRequestId = terminal.runRef.runId
         if (terminal.resultContract === 'publication_uncertain') {
           const message = isRecord(event.value)
             ? asString(event.value.message, '').trim()
@@ -815,7 +816,7 @@ export function applyKeeperStreamEvent(
           return `Keeper run terminal has nonterminal result_contract: ${terminal.resultContract}`
         }
         clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-        releaseActiveStreamRequestId(terminalRequestId)
+        releaseLiveSendRun(terminal.runRef)
         const terminalValue = isRecord(event.value) ? event.value : null
         if (terminal.resultContract === 'cancelled') {
           const message =

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  _resetLiveSendRequestOwnersForTests,
-  activeStreamRequestId,
+  _resetLiveSendRunOwnersForTests,
+  activeStreamRunRef,
   appendThreadEntry,
+  claimLiveSendRun,
   setActiveStream,
-  setActiveStreamRequestId,
 } from './keeper-state'
 import { keeperThreads } from './keeper-state'
 import {
@@ -39,6 +39,14 @@ function keeperRunWire(runId: string) {
   } as const
 }
 
+function keeperRunRef(runId: string) {
+  return {
+    runId,
+    target: { kind: 'keeper', name: 'sangsu' },
+    capability: 'invoke_turn',
+  } as const
+}
+
 function keeperQueueValue(runId: string) {
   return {
     tracking: {
@@ -67,7 +75,7 @@ describe('applyKeeperStreamEvent', () => {
   beforeEach(() => {
     _resetKeeperStreamBuffersForTests()
     keeperThreads.value = {}
-    _resetLiveSendRequestOwnersForTests()
+    _resetLiveSendRunOwnersForTests()
   })
 
   it('appends content for TEXT_MESSAGE_CONTENT', () => {
@@ -272,7 +280,7 @@ describe('applyKeeperStreamEvent', () => {
 
   it('finalizes successful request terminal events after streamed thinking', () => {
     assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    claimLiveSendRun(keeperRunRef('kmsg_current'))
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_THINKING_DELTA',
@@ -303,12 +311,12 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBeNull()
     expect(entry?.error).toBeNull()
     expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
-    expect(activeStreamRequestId('sangsu')).toBeNull()
+    expect(activeStreamRunRef('sangsu')).toBeNull()
   })
 
   it('finalizes queued visible replies when a successful terminal follows reply details', () => {
     assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    claimLiveSendRun(keeperRunRef('kmsg_current'))
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_QUEUE_REQUEST',
@@ -338,12 +346,12 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.delivery).toBe('delivered')
     expect(entry?.streamState).toBeNull()
     expect(entry?.error).toBeNull()
-    expect(activeStreamRequestId('sangsu')).toBeNull()
+    expect(activeStreamRunRef('sangsu')).toBeNull()
   })
 
   it('keeps explicit continuation checkpoints queued when a successful terminal follows', () => {
     assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    claimLiveSendRun(keeperRunRef('kmsg_current'))
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_CONTINUATION_CHECKPOINT',
@@ -366,12 +374,12 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.delivery).toBe('queued')
     expect(entry?.streamState).toBeNull()
     expect(entry?.details?.turnOutcome).toBe('continuation_checkpoint')
-    expect(activeStreamRequestId('sangsu')).toBeNull()
+    expect(activeStreamRunRef('sangsu')).toBeNull()
   })
 
   it('does not leave successful terminal events in a live thinking state without reply details', () => {
     assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    claimLiveSendRun(keeperRunRef('kmsg_current'))
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_THINKING_DELTA',
@@ -393,12 +401,12 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.traceSteps).toEqual([
       { kind: 'think', text: 'checking state', ts: expect.any(String) },
     ])
-    expect(activeStreamRequestId('sangsu')).toBeNull()
+    expect(activeStreamRunRef('sangsu')).toBeNull()
   })
 
   it('ignores terminal events for a different active request id', () => {
     assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    claimLiveSendRun(keeperRunRef('kmsg_current'))
 
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -413,7 +421,7 @@ describe('applyKeeperStreamEvent', () => {
 
   it('rejects raw terminal events while a request id is active', () => {
     assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    claimLiveSendRun(keeperRunRef('kmsg_current'))
 
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -428,12 +436,12 @@ describe('applyKeeperStreamEvent', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('sending')
     expect(entry?.streamState).toBe('opening')
-    expect(activeStreamRequestId('sangsu')).toBe('kmsg_current')
+    expect(activeStreamRunRef('sangsu')).toEqual(keeperRunRef('kmsg_current'))
   })
 
   it('rejects non-terminal result contracts on terminal events', () => {
     assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    claimLiveSendRun(keeperRunRef('kmsg_current'))
 
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -785,7 +793,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {
     _resetKeeperStreamBuffersForTests()
     keeperThreads.value = {}
-    _resetLiveSendRequestOwnersForTests()
+    _resetLiveSendRunOwnersForTests()
   })
 
   it('streams a live tool-call entry above the assistant bubble', () => {

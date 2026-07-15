@@ -26,10 +26,13 @@ import { isAbortError } from './lib/async-state'
 import { compareKeeperQueueRevisions } from './lib/keeper-chat-receipt'
 import {
   isTerminalKeeperRunResult,
+  keeperRunRefKey,
   parseKeeperRunRef,
   parseKeeperRunTerminal,
   parseKeeperRunTracking,
+  sameKeeperRunRef,
 } from './lib/keeper-run-ref'
+import type { KeeperRunRef } from './lib/keeper-run-ref'
 import type {
   ChatBlock,
   KeeperConversationAttachment,
@@ -51,25 +54,23 @@ import {
   keeperStreamLastEventAt,
   keeperThreads,
   activeStreamEntryId,
-  activeStreamRequestId,
+  activeStreamRunRef,
   appendThreadEntry,
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
-  clearActiveStreamRequestId,
   finalizeAssistantEntry,
   keeperClientObservedSseStreamContract,
   keeperStreamContract,
-  releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
   removeThreadEntries,
-  liveSendOwnsRequest,
-  releaseLiveSendRequest,
+  liveSendOwnsRun,
+  releaseLiveSendRun,
   setActiveStream,
-  setActiveStreamRequestId,
+  claimLiveSendRun,
   setRecordValue,
   setStatusDetail,
 } from './keeper-state'
@@ -95,11 +96,11 @@ type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
 const EMPTY_VISIBLE_REPLY_TEXT =
   'Keeper가 thinking만 반환하고 표시할 답변을 만들지 못했습니다. 다시 보내주세요.'
-type KeeperThreadCancelOutcome = 'cancelling'
+type KeeperRunCancelOutcome = 'cancelling'
 
-const pendingKeeperThreadCancels = new Map<
+const pendingKeeperRunCancels = new Map<
   string,
-  Promise<KeeperThreadCancelOutcome | null>
+  Promise<KeeperRunCancelOutcome | null>
 >()
 const KEEPER_STREAM_SIGNAL_THROTTLE_MS = 1_000
 const keeperStreamSignalWrites = new Map<string, number>()
@@ -122,18 +123,18 @@ async function refreshDashboardState(): Promise<void> {
   }
 }
 
-function keeperThreadCancelFailureMessage(keeperName: string, requestId: string, err: unknown): string {
+function keeperRunCancelFailureMessage(reference: KeeperRunRef, err: unknown): string {
   const cause = err instanceof Error ? err.message : String(err)
-  return `Keeper request cancel failed for ${keeperName} (${requestId}): ${cause}`
+  return `Keeper request cancel failed for ${reference.target.name} (${reference.runId}): ${cause}`
 }
 
-export function _resetCancelledKeeperThreadRequestsForTests(): void {
-  pendingKeeperThreadCancels.clear()
+export function _resetKeeperRunCancelsForTests(): void {
+  pendingKeeperRunCancels.clear()
   keeperStreamSignalWrites.clear()
 }
 
-function releaseKeeperThreadCancelTracking(requestId: string): void {
-  pendingKeeperThreadCancels.delete(requestId)
+function releaseKeeperRunCancelTracking(reference: KeeperRunRef): void {
+  pendingKeeperRunCancels.delete(keeperRunRefKey(reference))
 }
 
 function keeperRunRef(keeperName: string, runId: string) {
@@ -168,17 +169,14 @@ function clearKeeperStreamSignal(keeperName: string): void {
   setRecordValue(keeperStreamLastEventAt, name, null)
 }
 
-export function cancelKeeperThreadRequest(
-  keeperName: string,
-  requestId: string,
+export function cancelKeeperRun(
+  reference: KeeperRunRef,
   opts: { signal?: AbortSignal } = {},
-): Promise<KeeperThreadCancelOutcome | null> {
-  const name = keeperName.trim()
-  const id = requestId.trim()
-  if (!name || !id) return Promise.resolve(null)
-  const existing = pendingKeeperThreadCancels.get(id)
+): Promise<KeeperRunCancelOutcome | null> {
+  const name = reference.target.name
+  const key = keeperRunRefKey(reference)
+  const existing = pendingKeeperRunCancels.get(key)
   if (existing) return existing
-  const reference = keeperRunRef(name, id)
   const promise = (opts.signal
     ? cancelQueuedKeeperMessage(reference, { signal: opts.signal })
     : cancelQueuedKeeperMessage(reference))
@@ -187,29 +185,29 @@ export function cancelKeeperThreadRequest(
       return 'cancelling' as const
     })
     .catch((err) => {
-      const message = keeperThreadCancelFailureMessage(name, id, err)
+      const message = keeperRunCancelFailureMessage(reference, err)
       console.warn('[keeper] server cancel failed', message)
       setRecordValue(keeperActionErrors, name, message)
       return null
     })
     .finally(() => {
-      pendingKeeperThreadCancels.delete(id)
+      pendingKeeperRunCancels.delete(key)
     })
-  pendingKeeperThreadCancels.set(id, promise)
+  pendingKeeperRunCancels.set(key, promise)
   return promise
 }
 
 export async function cancelActiveKeeperThreadMessage(name: string): Promise<boolean> {
   const keeperName = name.trim()
   if (!keeperName) return false
-  const requestIdBeforeAbort = activeStreamRequestId(keeperName)
+  const runRefBeforeAbort = activeStreamRunRef(keeperName)
   const abortResult = abortKeeperThreadMessage(keeperName)
-  const requestId = requestIdBeforeAbort ?? abortResult?.requestId ?? null
+  const runRef = runRefBeforeAbort ?? abortResult?.runRef ?? null
   const locallyAborted = Boolean(abortResult?.controllerAborted || abortResult?.entryId)
-  if (requestId) {
-    void cancelKeeperThreadRequest(keeperName, requestId)
+  if (runRef) {
+    void cancelKeeperRun(runRef)
   }
-  if (!requestIdBeforeAbort && !requestId && !locallyAborted) {
+  if (!runRefBeforeAbort && !runRef && !locallyAborted) {
     // Nothing was in flight; treat as a successful no-op.
     return true
   }
@@ -620,12 +618,13 @@ export function isKeeperThreadMessageSendInFlight(
 }
 
 async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
+  const runRef = keeperRunRef(request.keeperName, request.requestId)
   // A live in-session send stream still owns this request (e.g. the panel
   // remounted on an SPA route change while the reply was pending). Defer to
   // it rather than minting a duplicate pending entry + a second poll loop.
   // After a full page reload this map is empty, so cold-start resume runs.
-  if (liveSendOwnsRequest(request.requestId)) return
-  const key = `${request.keeperName}:${request.requestId}`
+  if (liveSendOwnsRun(runRef)) return
+  const key = keeperRunRefKey(runRef)
   if (resumingKeeperChatRequests.has(key)) return
   resumingKeeperChatRequests.add(key)
   const assistantId = ensurePendingThreadEntries(request)
@@ -636,7 +635,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
   try {
     for (;;) {
       const result = await fetchQueuedKeeperMessageResult(
-        keeperRunRef(request.keeperName, request.requestId),
+        runRef,
       )
       markKeeperStreamSignal(request.keeperName)
       if (!isTerminalQueuedKeeperMessage(result)) {
@@ -786,8 +785,8 @@ async function handoffCancelledStreamToRequestPoll(
   localEntryIds: readonly string[],
 ): Promise<void> {
   removeThreadEntries(request.keeperName, localEntryIds)
-  releaseLiveSendRequest(request.requestId)
-  releaseActiveStreamRequestId(request.requestId)
+  const runRef = keeperRunRef(request.keeperName, request.requestId)
+  releaseLiveSendRun(runRef)
   await resumePendingKeeperChatRequest(request)
 }
 
@@ -1237,7 +1236,7 @@ export async function sendKeeperThreadMessage(
   if (sendKeys.some(key => sendingKeeperThreadMessages.has(key))) return
   sendKeys.forEach(key => sendingKeeperThreadMessages.add(key))
   const hadActiveStream =
-    activeStreamEntryId(keeperName) !== null || activeStreamRequestId(keeperName) !== null
+    activeStreamEntryId(keeperName) !== null || activeStreamRunRef(keeperName) !== null
   let previousCancelled = false
   try {
     previousCancelled = await cancelActiveKeeperThreadMessage(keeperName)
@@ -1287,7 +1286,7 @@ export async function sendKeeperThreadMessage(
   setRecordValue(keeperStreamStartedAt, keeperName, Date.now())
   const controller = new AbortController()
   setActiveStream(keeperName, assistantId, controller)
-  let requestId: string | null = null
+  const acceptedRun = { current: null as KeeperRunRef | null }
   let requestTerminalSeen = false
   let requestNeedsReconciliation = false
   let toolCallEnded = false
@@ -1301,7 +1300,7 @@ export async function sendKeeperThreadMessage(
       onEvent: event => {
         markKeeperStreamSignal(keeperName)
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST') {
-          let nextRequestId = ''
+          let nextRunRef: KeeperRunRef | null = null
           try {
             const tracking = parseKeeperRunTracking(event.value)
             if (tracking.resultContract !== 'awaiting_execution') {
@@ -1310,24 +1309,24 @@ export async function sendKeeperThreadMessage(
             if (tracking.runRef.target.name !== keeperName) {
               throw new Error('Keeper queue tracking target does not match the active Keeper')
             }
-            nextRequestId = tracking.runRef.runId
+            nextRunRef = tracking.runRef
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)
             const message = `Keeper queue event has invalid typed run tracking: ${detail}`
             console.warn(`[keeper] ${message}`)
             setRecordValue(keeperActionErrors, keeperName, message)
           }
-          if (nextRequestId && controller.signal.aborted) {
-            requestId = nextRequestId
+          if (nextRunRef && controller.signal.aborted) {
+            acceptedRun.current = nextRunRef
             const pendingRequest: PendingKeeperChatRequest = {
-              requestId: nextRequestId,
+              requestId: nextRunRef.runId,
               keeperName,
               message,
               submittedAt: Date.now(),
               ...(attachments ? { attachments } : {}),
             }
             upsertPendingKeeperChatRequest(pendingRequest)
-            void cancelKeeperThreadRequest(keeperName, nextRequestId).then(outcome => {
+            void cancelKeeperRun(nextRunRef).then(outcome => {
               if (outcome === 'cancelling') {
                 return handoffCancelledStreamToRequestPoll(
                   pendingRequest,
@@ -1336,13 +1335,13 @@ export async function sendKeeperThreadMessage(
               }
               return undefined
             })
-          } else if (nextRequestId) {
-            requestId = nextRequestId
+          } else if (nextRunRef) {
+            acceptedRun.current = nextRunRef
             // This live send now owns the request; resume must defer to it
             // (and not mint a duplicate pending entry) until handoff/finally.
-            setActiveStreamRequestId(keeperName, requestId)
+            claimLiveSendRun(nextRunRef)
             upsertPendingKeeperChatRequest({
-              requestId,
+              requestId: nextRunRef.runId,
               keeperName,
               message,
               submittedAt: Date.now(),
@@ -1355,16 +1354,16 @@ export async function sendKeeperThreadMessage(
           if (terminal.runRef.target.name !== keeperName) {
             throw new Error('Keeper run terminal target does not match the active Keeper')
           }
-          const terminalRequestId = terminal.runRef.runId
           const matchesActiveRequest =
-            requestId !== null && terminalRequestId === requestId
+            acceptedRun.current !== null
+            && sameKeeperRunRef(terminal.runRef, acceptedRun.current)
           if (matchesActiveRequest) {
             if (terminal.resultContract === 'publication_uncertain') {
               requestNeedsReconciliation = true
             } else if (isTerminalKeeperRunResult(terminal.resultContract)) {
               requestNeedsReconciliation = false
               requestTerminalSeen = true
-              removePendingKeeperChatRequest(terminalRequestId)
+              removePendingKeeperChatRequest(terminal.runRef.runId)
             } else {
               throw new Error(
                 `Keeper run terminal has nonterminal result_contract: ${terminal.resultContract}`,
@@ -1376,7 +1375,7 @@ export async function sendKeeperThreadMessage(
         if (error) {
           throw new Error(error)
         }
-        persistPendingAssistantDraft(keeperName, requestId, assistantId)
+        persistPendingAssistantDraft(keeperName, acceptedRun.current?.runId ?? null, assistantId)
         if (event.type === 'TOOL_CALL_END') {
           toolCallEnded = true
           void hydrateKeeperToolOutputs(keeperName)
@@ -1384,20 +1383,20 @@ export async function sendKeeperThreadMessage(
       },
     })
 
+    const runRef = acceptedRun.current
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     const finalEntry =
       (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
     const finalText = finalEntry?.text.trim() ?? ''
 
     if (!outcome.terminal || requestNeedsReconciliation) {
-      if (requestId) {
+      if (runRef) {
         removeThreadEntries(keeperName, [localId, assistantId])
         // Hand off to resume: release ownership FIRST so our own resume
         // call below is not blocked by the guard we just set.
-        releaseLiveSendRequest(requestId)
-        releaseActiveStreamRequestId(requestId)
+        releaseLiveSendRun(runRef)
         await resumePendingKeeperChatRequest({
-          requestId,
+          requestId: runRef.runId,
           keeperName,
           message,
           submittedAt: Date.now(),
@@ -1422,7 +1421,6 @@ export async function sendKeeperThreadMessage(
       })
       setRecordValue(keeperActionErrors, keeperName, cutMessage)
       if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
-      clearActiveStreamRequestId(keeperName)
       return
     }
 
@@ -1444,9 +1442,9 @@ export async function sendKeeperThreadMessage(
         }),
       })
       setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
-      if (requestId) {
-        removePendingKeeperChatRequest(requestId)
-        releaseActiveStreamRequestId(requestId)
+      if (runRef) {
+        removePendingKeeperChatRequest(runRef.runId)
+        releaseLiveSendRun(runRef)
       }
       return
     }
@@ -1466,38 +1464,39 @@ export async function sendKeeperThreadMessage(
       }),
     })
     if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
-    if (requestId) {
-      removePendingKeeperChatRequest(requestId)
-      releaseActiveStreamRequestId(requestId)
+    if (runRef) {
+      removePendingKeeperChatRequest(runRef.runId)
+      releaseLiveSendRun(runRef)
     }
     if (finalDelivery === 'queued') {
       void reconcileKeeperChatReceipts(keeperName)
     }
   } catch (err) {
+    const runRef = acceptedRun.current
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     if (isAbortError(err)) {
       const hasDurablePendingRequest = Boolean(
-        requestId
+        runRef
         && pendingKeeperChatRequestsForKeeper(keeperName)
-          .some(candidate => candidate.requestId === requestId),
+          .some(candidate => candidate.requestId === runRef?.runId),
       )
       const shouldAttemptServerCancel = Boolean(
-        requestId && (liveSendOwnsRequest(requestId) || hasDurablePendingRequest),
+        runRef && (liveSendOwnsRun(runRef) || hasDurablePendingRequest),
       )
       const serverCancelAlreadyFinalized = Boolean(
-        requestId
-        && !liveSendOwnsRequest(requestId)
+        runRef
+        && !liveSendOwnsRun(runRef)
         && !hasDurablePendingRequest,
       )
-      if (shouldAttemptServerCancel && requestId) {
+      if (shouldAttemptServerCancel && runRef) {
         const pendingRequest: PendingKeeperChatRequest = {
-          requestId,
+          requestId: runRef.runId,
           keeperName,
           message,
           submittedAt: Date.now(),
           ...(attachments ? { attachments } : {}),
         }
-        void cancelKeeperThreadRequest(keeperName, requestId).then(outcome => {
+        void cancelKeeperRun(runRef).then(outcome => {
           if (outcome === 'cancelling') {
             return handoffCancelledStreamToRequestPoll(
               pendingRequest,
@@ -1512,7 +1511,7 @@ export async function sendKeeperThreadMessage(
         error: null,
         streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
           deliveryReceipt: 'no_delivery_receipt',
-          requestId: requestId ?? undefined,
+          requestId: runRef?.runId,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })
@@ -1525,7 +1524,7 @@ export async function sendKeeperThreadMessage(
         timestamp: new Date().toISOString(),
         streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
           deliveryReceipt: 'no_delivery_receipt',
-          requestId: requestId ?? undefined,
+          requestId: runRef?.runId,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })
@@ -1542,7 +1541,7 @@ export async function sendKeeperThreadMessage(
       timestamp: new Date().toISOString(),
       streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
         deliveryReceipt: 'no_delivery_receipt',
-        requestId: requestId ?? undefined,
+        requestId: runRef?.runId,
         reason: errorMessage,
       }),
     })
@@ -1551,13 +1550,13 @@ export async function sendKeeperThreadMessage(
       error: errorMessage,
       streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
         deliveryReceipt: 'no_delivery_receipt',
-        requestId: requestId ?? undefined,
+        requestId: runRef?.runId,
         reason: errorMessage,
       }),
     })
-    if (requestTerminalSeen && requestId) {
-      removePendingKeeperChatRequest(requestId)
-      releaseActiveStreamRequestId(requestId)
+    if (requestTerminalSeen && runRef) {
+      removePendingKeeperChatRequest(runRef.runId)
+      releaseLiveSendRun(runRef)
     }
     try {
       const reconciled = await reconcileStreamFailureFromServerHistory(
@@ -1579,12 +1578,13 @@ export async function sendKeeperThreadMessage(
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
+    const runRef = acceptedRun.current
     // Release ownership on every exit (success/abort/error). Idempotent:
     // the non-terminal handoff above already released, so this is a no-op
     // there; Map.delete of an absent key is harmless.
-    if (requestId) {
-      releaseLiveSendRequest(requestId)
-      releaseKeeperThreadCancelTracking(requestId)
+    if (runRef) {
+      releaseLiveSendRun(runRef)
+      releaseKeeperRunCancelTracking(runRef)
     }
     sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
     if (activeStreamEntryId(keeperName) === assistantId) {

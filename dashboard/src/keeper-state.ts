@@ -2,6 +2,8 @@ import { signal } from '@preact/signals'
 import { formatKeeperVisibleReply } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
+import { keeperRunRefKey } from './lib/keeper-run-ref'
+import type { KeeperRunRef } from './lib/keeper-run-ref'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
 import { toolEntryIdFromCallId } from './tool-call-output-store'
 import type {
@@ -51,14 +53,12 @@ export const THREAD_ENTRY_CAP = 200
 
 const keeperStreamControllers = new Map<string, AbortController>()
 const keeperStreamEntryIds = new Map<string, string>()
-// requestId -> keeperName: which queued requests a live in-session send
-// stream currently owns. Resume defers to this so an SPA remount does not
-// spin up a second handler/entry for a request the live send already drives.
-// Active stream request lookup is derived from this map to avoid maintaining
-// a second inverse keeperName -> requestId structure in lockstep.
+// Full Keeper run identity -> immutable run reference. Resume defers to this
+// so an SPA remount does not spin up a second handler/entry for a run the live
+// send already drives. Active lookup is derived from this single map.
 // Module state, so it survives unmount/remount exactly like the controller
 // maps above; a full page reload resets it, leaving cold-start resume intact.
-const liveSendRequestOwners = new Map<string, string>()
+const liveSendRunOwners = new Map<string, KeeperRunRef>()
 
 // --- Helpers ---
 
@@ -1584,7 +1584,7 @@ export function setActiveStream(name: string, entryId: string, controller: Abort
 export function clearActiveStream(name: string): void {
   keeperStreamEntryIds.delete(name)
   keeperStreamControllers.delete(name)
-  clearActiveStreamRequestId(name)
+  clearActiveStreamRunRef(name)
 }
 
 export function activeStreamEntryId(name: string): string | null {
@@ -1595,55 +1595,40 @@ export function getStreamController(name: string): AbortController | undefined {
   return keeperStreamControllers.get(name)
 }
 
-export function setActiveStreamRequestId(name: string, requestId: string): void {
-  claimLiveSendRequest(requestId, name)
-}
-
-export function activeStreamRequestId(name: string): string | null {
+export function activeStreamRunRef(name: string): KeeperRunRef | null {
   const keeperName = name.trim()
   if (!keeperName) return null
-  for (const [requestId, owner] of liveSendRequestOwners) {
-    if (owner === keeperName) return requestId
+  for (const reference of liveSendRunOwners.values()) {
+    if (reference.target.name === keeperName) return reference
   }
   return null
 }
 
-export function clearActiveStreamRequestId(name: string): void {
+function clearActiveStreamRunRef(name: string): void {
   const keeperName = name.trim()
   if (!keeperName) return
-  for (const [requestId, owner] of liveSendRequestOwners) {
-    if (owner === keeperName) liveSendRequestOwners.delete(requestId)
+  for (const [key, reference] of liveSendRunOwners) {
+    if (reference.target.name === keeperName) liveSendRunOwners.delete(key)
   }
 }
 
-/** Release a specific request id from live-send ownership. Returns true if
- *  the id was owned. Use this for race-free cleanup after a confirmed server
- *  cancel so a stale cleanup cannot wipe a newer request id claimed for the
- *  same keeper. */
-export function releaseActiveStreamRequestId(requestId: string): boolean {
-  const id = requestId.trim()
-  if (!id) return false
-  return liveSendRequestOwners.delete(id)
+// --- Live send ownership (in-session, full Keeper run identity) ---
+
+export function claimLiveSendRun(reference: KeeperRunRef): void {
+  clearActiveStreamRunRef(reference.target.name)
+  liveSendRunOwners.set(keeperRunRefKey(reference), reference)
 }
 
-// --- Live send ownership (in-session, requestId-keyed) ---
-
-export function claimLiveSendRequest(requestId: string, name: string): void {
-  const id = requestId.trim()
-  const keeperName = name.trim()
-  if (!id || !keeperName) return
-  clearActiveStreamRequestId(keeperName)
-  liveSendRequestOwners.set(id, keeperName)
+/** Release one exact run. Full identity prevents stale cleanup from wiping a
+ *  newer or differently targeted run. */
+export function releaseLiveSendRun(reference: KeeperRunRef): boolean {
+  return liveSendRunOwners.delete(keeperRunRefKey(reference))
 }
 
-export function releaseLiveSendRequest(requestId: string): void {
-  liveSendRequestOwners.delete(requestId.trim())
+export function liveSendOwnsRun(reference: KeeperRunRef): boolean {
+  return liveSendRunOwners.has(keeperRunRefKey(reference))
 }
 
-export function liveSendOwnsRequest(requestId: string): boolean {
-  return liveSendRequestOwners.has(requestId.trim())
-}
-
-export function _resetLiveSendRequestOwnersForTests(): void {
-  liveSendRequestOwners.clear()
+export function _resetLiveSendRunOwnersForTests(): void {
+  liveSendRunOwners.clear()
 }

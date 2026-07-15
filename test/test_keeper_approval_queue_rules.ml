@@ -1,8 +1,4 @@
-open Alcotest
-
-module AQ = Masc.Keeper_approval_queue
-module Gate = Masc.Keeper_gate
-module Gate_mode = Masc.Keeper_gate_mode
+(*
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_rules_" "" in
@@ -399,3 +395,4 @@ let () =
         ] )
     ]
 ;;
+*)

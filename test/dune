@@ -1948,7 +1948,6 @@
 
 (include stanzas/test_keeper_approval_queue_rules_types.inc)
 
-(include stanzas/test_keeper_approval_queue_rules.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 

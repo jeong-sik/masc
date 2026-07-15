@@ -89,38 +89,6 @@ val consume_approved_resolution :
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
 
-(** {1 Exact Always Allowed rules} *)
-
-val list_rules :
-  base_path:string -> unit -> (approval_rule list, rule_store_error) result
-
-val list_rules_dashboard_json :
-  base_path:string -> unit -> (Yojson.Safe.t, rule_store_error) result
-
-(** Insert or fetch the rule for the exact
-    [(keeper_name, tool_name, canonical complete input)] identity. *)
-val upsert_rule :
-  base_path:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  ?created_by:string ->
-  ?source_approval_id:string ->
-  unit ->
-  (approval_rule * bool, rule_store_error) result
-
-val delete_rule :
-  base_path:string -> id:string -> unit -> (approval_rule, rule_store_error) result
-
-(** Find the exact remembered request and atomically update its match audit. *)
-val find_matching_rule :
-  base_path:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  unit ->
-  (rule_match option, rule_store_error) result
-
 (** {1 Audit log} *)
 
 val audit_approval_event :
@@ -133,16 +101,12 @@ val audit_approval_event :
   ?task_id:string ->
   ?goal_id:string ->
   ?goal_ids:string list ->
-  ?rule_match:rule_match ->
   ?source_approval_id:string ->
   ?actor:string ->
   ?decision_source:decision_source ->
   ?decision:decision ->
   unit ->
   unit
-
-val audit_rule_event :
-  base_path:string -> event_type:string -> approval_rule -> unit
 
 val approval_audit_pending_event : string
 val approval_audit_resolved_event : string

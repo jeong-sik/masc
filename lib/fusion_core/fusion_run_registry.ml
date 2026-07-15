@@ -17,11 +17,14 @@
 
 type recovery_reason = Worker_process_restarted
 
+module Claim_id = Fusion_run_registry_event.Claim_id
+
 type persistence_error =
   | Append_failed of
       { path : string
       ; detail : string
       }
+  | Operation_already_registered of string
 
 type completion_receipt =
   | Durable
@@ -44,15 +47,22 @@ type run_status =
       receipt : completion_receipt;
     }
 
+type worker_state =
+  | Registered
+  | Claimed of Claim_id.t
+  | Started of Claim_id.t
+
 type run = {
   operation : Fusion_types.fusion_operation;
   started_at : float;  (* unix seconds from the keeper clock at fork start *)
+  worker_state : worker_state;
   status : run_status;
 }
 
 type t = {
   runs : run list Atomic.t;
   path : string option;
+  lock : Mutex.t;
 }
 
 (* Recent-history retention for [Completed] runs. Active and recovery-required
@@ -60,7 +70,7 @@ type t = {
    execution or invocation rate. *)
 let max_completed_retained = 64
 
-let create ?path () : t = { runs = Atomic.make []; path }
+let create ?path () : t = { runs = Atomic.make []; path; lock = Mutex.create () }
 
 let is_unresolved (r : run) =
   match r.status with
@@ -90,6 +100,8 @@ let rec update (t : t) (f : run list -> run list) =
 let persistence_error_to_string = function
   | Append_failed { path; detail } ->
     Printf.sprintf "fusion registry append failed for %s: %s" path detail
+  | Operation_already_registered operation_id ->
+    Printf.sprintf "fusion operation %s is already registered" operation_id
 ;;
 
 let completion_error_to_string = function
@@ -119,25 +131,19 @@ let append_event t event =
 
 let register_running t ~operation ~started_at =
   let id = Fusion_types.fusion_operation_id operation in
-  match
-    append_event
-      t
-      (Fusion_run_registry_event.Register { operation; started_at })
-  with
-  | Error _ as error -> error
-  | Ok () ->
-    update t (fun runs ->
-      let run = { operation; started_at; status = Running } in
-      (* defensive: a re-registered operation id replaces its prior entry *)
-      let without_dup =
-        List.filter
-          (fun run ->
-             not
-               (String.equal (run_operation_id run) id))
-          runs
-      in
-      prune (run :: without_dup));
-    Ok ()
+  Mutex.protect t.lock (fun () ->
+    if List.exists (fun run -> String.equal (run_operation_id run) id) (Atomic.get t.runs)
+    then Error (Operation_already_registered id)
+    else
+      (match
+         append_event t
+           (Fusion_run_registry_event.Register { operation; started_at })
+       with
+       | Error _ as error -> error
+       | Ok () ->
+         update t (fun runs ->
+           prune ({ operation; started_at; worker_state = Registered; status = Running } :: runs));
+         Ok ()))
 ;;
 
 let list_runs (t : t) : run list =
@@ -150,8 +156,92 @@ let get (t : t) ~operation_id:expected : run option =
     (Atomic.get t.runs)
 ;;
 
+type claim =
+  { operation_id : string
+  ; claim_id : Claim_id.t
+  }
+
+type claim_error =
+  | Claim_unknown_operation of string
+  | Claim_terminal_operation of string
+  | Claim_already_owned of Claim_id.t
+  | Claim_persistence_failed of persistence_error
+
+type start_error =
+  | Start_unknown_operation of string
+  | Start_terminal_operation of string
+  | Start_not_claimed of string
+  | Start_claim_mismatch of string
+  | Start_already_started of Claim_id.t
+  | Start_persistence_failed of persistence_error
+
+let claim_error_to_string = function
+  | Claim_unknown_operation id -> Printf.sprintf "unknown fusion operation %s" id
+  | Claim_terminal_operation id -> Printf.sprintf "fusion operation %s is terminal" id
+  | Claim_already_owned id ->
+    Printf.sprintf "fusion operation is already claimed by %s" (Claim_id.to_string id)
+  | Claim_persistence_failed error -> persistence_error_to_string error
+;;
+
+let start_error_to_string = function
+  | Start_unknown_operation id -> Printf.sprintf "unknown fusion operation %s" id
+  | Start_terminal_operation id -> Printf.sprintf "fusion operation %s is terminal" id
+  | Start_not_claimed id -> Printf.sprintf "fusion operation %s is not claimed" id
+  | Start_claim_mismatch id -> Printf.sprintf "fusion operation %s claim is stale" id
+  | Start_already_started claim_id ->
+    Printf.sprintf "fusion claim %s already started" (Claim_id.to_string claim_id)
+  | Start_persistence_failed error -> persistence_error_to_string error
+;;
+
+let claim_operation t ~operation_id =
+  Mutex.protect t.lock (fun () ->
+    match get t ~operation_id with
+    | None -> Error (Claim_unknown_operation operation_id)
+    | Some { status = Completed _; _ } -> Error (Claim_terminal_operation operation_id)
+    | Some { status = Running; worker_state = (Claimed id | Started id); _ } ->
+      Error (Claim_already_owned id)
+    | Some ({ status = Running; worker_state = Registered; _ } | { status = Recovery_required _; _ }) ->
+      let claim_id = Claim_id.create () in
+      (match
+         append_event t (Fusion_run_registry_event.Claim { operation_id; claim_id })
+       with
+       | Error error -> Error (Claim_persistence_failed error)
+       | Ok () ->
+         update t (List.map (fun run ->
+           if String.equal (run_operation_id run) operation_id
+           then { run with worker_state = Claimed claim_id; status = Running }
+           else run));
+         Ok { operation_id; claim_id }))
+;;
+
+let start_claimed t claim =
+  Mutex.protect t.lock (fun () ->
+    match get t ~operation_id:claim.operation_id with
+    | None -> Error (Start_unknown_operation claim.operation_id)
+    | Some { status = Completed _; _ } -> Error (Start_terminal_operation claim.operation_id)
+    | Some { worker_state = Registered; _ } -> Error (Start_not_claimed claim.operation_id)
+    | Some { worker_state = Started current; _ } when Claim_id.equal current claim.claim_id ->
+      Error (Start_already_started current)
+    | Some { worker_state = (Claimed current | Started current); _ }
+      when not (Claim_id.equal current claim.claim_id) ->
+      Error (Start_claim_mismatch claim.operation_id)
+    | Some run ->
+      (match
+         append_event t
+           (Fusion_run_registry_event.Start
+              { operation_id = claim.operation_id; claim_id = claim.claim_id })
+       with
+       | Error error -> Error (Start_persistence_failed error)
+       | Ok () ->
+         update t (List.map (fun current ->
+           if String.equal (run_operation_id current) claim.operation_id
+           then { current with worker_state = Started claim.claim_id; status = Running }
+           else current));
+         Ok run.operation))
+;;
+
 let mark_completed (t : t) ~operation_id ?failure ?failure_code ~ok () =
-  match get t ~operation_id with
+  Mutex.protect t.lock (fun () -> match get t ~operation_id with
   | None -> Error (Unknown_run operation_id)
   | Some _ ->
     let persisted =
@@ -172,7 +262,7 @@ let mark_completed (t : t) ~operation_id ?failure ?failure_code ~ok () =
       |> prune);
     (match persisted with
      | Ok () -> Ok ()
-     | Error error -> Error (Completion_persistence_failed error))
+     | Error error -> Error (Completion_persistence_failed error)))
 ;;
 
 (* Stable status vocabulary shared by every fusion-run surface (Phase 3 keeper
@@ -201,6 +291,14 @@ let run_to_yojson (r : run) : Yojson.Safe.t =
     ; ("status", `String (status_label r.status))
     ]
   in
+  let worker_fields =
+    match r.worker_state with
+    | Registered -> [ "worker_state", `String "registered" ]
+    | Claimed claim_id ->
+      [ ("worker_state", `String "claimed"); ("claim_id", `String (Claim_id.to_string claim_id)) ]
+    | Started claim_id ->
+      [ ("worker_state", `String "started"); ("claim_id", `String (Claim_id.to_string claim_id)) ]
+  in
   (* 실패 사유는 additive 필드로만 싣는다 — 기존 소비자(tool/HTTP/SSE/프론트)의
      필드 집합은 그대로 유지된다. *)
   let failure_fields =
@@ -224,20 +322,30 @@ let run_to_yojson (r : run) : Yojson.Safe.t =
       ; ("receipt_error", `String (persistence_error_to_string error))
       ]
   in
-  `Assoc (base @ failure_fields @ receipt_fields)
+  `Assoc (base @ worker_fields @ failure_fields @ receipt_fields)
 ;;
 
 (* Replay helpers — used to hydrate the in-memory table from disk at boot. *)
 let apply_event runs = function
   | Fusion_run_registry_event.Register { operation; started_at } ->
     let id = Fusion_types.fusion_operation_id operation in
-    let run = { operation; started_at; status = Running } in
+    let run = { operation; started_at; worker_state = Registered; status = Running } in
     let without_dup =
       List.filter
         (fun run -> not (String.equal (run_operation_id run) id))
         runs
     in
     run :: without_dup
+  | Fusion_run_registry_event.Claim { operation_id; claim_id } ->
+    List.map (fun run ->
+      if String.equal (run_operation_id run) operation_id
+      then { run with worker_state = Claimed claim_id }
+      else run) runs
+  | Fusion_run_registry_event.Start { operation_id; claim_id } ->
+    List.map (fun run ->
+      if String.equal (run_operation_id run) operation_id
+      then { run with worker_state = Started claim_id }
+      else run) runs
   | Fusion_run_registry_event.Complete { operation_id = completed_id; ok; failure; failure_code } ->
     List.map
       (fun r ->
@@ -301,12 +409,26 @@ let events_of_run (run : run) =
       ; started_at = run.started_at
       }
   in
+  let worker_events =
+    match run.worker_state with
+    | Registered -> []
+    | Claimed claim_id ->
+      [ Fusion_run_registry_event.Claim
+          { operation_id = run_operation_id run; claim_id }
+      ]
+    | Started claim_id ->
+      [ Fusion_run_registry_event.Claim
+          { operation_id = run_operation_id run; claim_id }
+      ; Fusion_run_registry_event.Start
+          { operation_id = run_operation_id run; claim_id }
+      ]
+  in
   match run.status with
-  | Running | Recovery_required _ -> [ register ]
-  | Completed { receipt = Persistence_failed _; _ } -> [ register ]
+  | Running | Recovery_required _ -> register :: worker_events
+  | Completed { receipt = Persistence_failed _; _ } -> register :: worker_events
   | Completed { ok; failure; failure_code; receipt = Durable } ->
-    [ register
-    ; Fusion_run_registry_event.Complete
+    register :: worker_events
+    @ [ Fusion_run_registry_event.Complete
         { operation_id = run_operation_id run; ok; failure; failure_code }
     ]
 ;;
@@ -324,7 +446,7 @@ let compact_replay_log path runs =
   in
   try
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
+    | Ok () -> Fs_compat.invalidate_cached_writer path
     | Error msg ->
       Log.Misc.warn "fusion_run_registry: replay compaction failed for %s: %s" path msg
   with
@@ -391,7 +513,7 @@ let replay path : t =
     |> prune
   in
   if should_compact then compact_replay_log path runs;
-  { runs = Atomic.make runs; path = Some path }
+  { runs = Atomic.make runs; path = Some path; lock = Mutex.create () }
 ;;
 
 (* Process-wide registry the fusion tool/sink write to (server-lifetime). Tests

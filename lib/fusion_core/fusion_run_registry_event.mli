@@ -4,10 +4,25 @@
     event line to disk. On server boot the log is replayed to restore recent
     run history. *)
 
+module Claim_id : sig
+  type t [@@deriving yojson, show, eq]
+
+  val create : unit -> t
+  val to_string : t -> string
+end
+
 type t =
   | Register of
       { operation : Fusion_types.fusion_operation
       ; started_at : float
+      }
+  | Claim of
+      { operation_id : string
+      ; claim_id : Claim_id.t
+      }
+  | Start of
+      { operation_id : string
+      ; claim_id : Claim_id.t
       }
   | Complete of
       { operation_id : string

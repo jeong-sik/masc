@@ -1,12 +1,32 @@
 (* JSONL event type for fusion run registry persistence (RFC-0266 §7 Phase D).
-   Each [register_running] / [mark_completed] appends one line so run history
+   Each lifecycle transition appends one line so run history
    survives server restart. [Register] contains the complete canonical operation;
    replay never reconstructs an execution request from metadata or defaults. *)
+
+module Claim_id = struct
+  type t = Claim_id of string [@@deriving yojson, show, eq]
+
+  let create () =
+    (* NDT-OK: entropy is identity only; decisions never inspect its contents. *)
+    Claim_id
+      (Uuidm.v4_gen (Random.State.make_self_init ()) () |> Uuidm.to_string)
+  ;;
+
+  let to_string (Claim_id value) = value
+end
 
 type t =
   | Register of
       { operation : Fusion_types.fusion_operation
       ; started_at : float
+      }
+  | Claim of
+      { operation_id : string
+      ; claim_id : Claim_id.t
+      }
+  | Start of
+      { operation_id : string
+      ; claim_id : Claim_id.t
       }
   | Complete of
       { operation_id : string
@@ -21,6 +41,18 @@ let to_yojson = function
       [ ("event", `String "register")
       ; ("operation", Fusion_types.fusion_operation_to_yojson operation)
       ; ("started_at", `Float started_at)
+      ]
+  | Claim { operation_id; claim_id } ->
+    `Assoc
+      [ ("event", `String "claim")
+      ; ("operation_id", `String operation_id)
+      ; ("claim_id", Claim_id.to_yojson claim_id)
+      ]
+  | Start { operation_id; claim_id } ->
+    `Assoc
+      [ ("event", `String "start")
+      ; ("operation_id", `String operation_id)
+      ; ("claim_id", Claim_id.to_yojson claim_id)
       ]
   | Complete { operation_id; ok; failure; failure_code } ->
     `Assoc
@@ -86,6 +118,12 @@ let operation_field fields =
   Fusion_types.fusion_operation_of_yojson json
 ;;
 
+let claim_id_field fields =
+  let ( let* ) = Result.bind in
+  let* json = field "claim_id" fields in
+  Claim_id.of_yojson json
+;;
+
 let of_yojson json =
   let ( let* ) = Result.bind in
   let* fields = object_fields json in
@@ -95,6 +133,14 @@ let of_yojson json =
     let* operation = operation_field fields in
     let* started_at = float_field "started_at" fields in
     Ok (Register { operation; started_at })
+  | "claim" ->
+    let* operation_id = string_field "operation_id" fields in
+    let* claim_id = claim_id_field fields in
+    Ok (Claim { operation_id; claim_id })
+  | "start" ->
+    let* operation_id = string_field "operation_id" fields in
+    let* claim_id = claim_id_field fields in
+    Ok (Start { operation_id; claim_id })
   | "complete" ->
     let* operation_id = string_field "operation_id" fields in
     let* ok = bool_field "ok" fields in

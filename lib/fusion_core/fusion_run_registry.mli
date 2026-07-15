@@ -11,11 +11,14 @@
 
 type recovery_reason = Worker_process_restarted
 
+module Claim_id = Fusion_run_registry_event.Claim_id
+
 type persistence_error =
   | Append_failed of
       { path : string
       ; detail : string
       }
+  | Operation_already_registered of string
 
 val persistence_error_to_string : persistence_error -> string
 
@@ -45,9 +48,15 @@ type run_status =
       receipt : completion_receipt;
     }
 
+type worker_state =
+  | Registered
+  | Claimed of Claim_id.t
+  | Started of Claim_id.t
+
 type run = {
   operation : Fusion_types.fusion_operation;
   started_at : float;  (** unix seconds from the keeper clock at fork start *)
+  worker_state : worker_state;
   status : run_status;
 }
 
@@ -79,6 +88,31 @@ val register_running :
     When the registry was created with a path, the durable [Register] event is
     committed before publishing in-memory state. An append failure returns
     [Error] and the run is not registered. *)
+
+type claim
+
+type claim_error =
+  | Claim_unknown_operation of string
+  | Claim_terminal_operation of string
+  | Claim_already_owned of Claim_id.t
+  | Claim_persistence_failed of persistence_error
+
+type start_error =
+  | Start_unknown_operation of string
+  | Start_terminal_operation of string
+  | Start_not_claimed of string
+  | Start_claim_mismatch of string
+  | Start_already_started of Claim_id.t
+  | Start_persistence_failed of persistence_error
+
+val claim_error_to_string : claim_error -> string
+val start_error_to_string : start_error -> string
+val claim_operation : t -> operation_id:string -> (claim, claim_error) result
+val start_claimed : t -> claim -> (Fusion_types.fusion_operation, start_error) result
+(** The durable execution handshake. [claim_operation] appends exact ownership
+    before exposing an opaque affine claim; [start_claimed] appends start before
+    returning the canonical operation. A live claim cannot be superseded.
+    Replayed unfinished work is explicitly reclaimable without a timeout. *)
 
 val mark_completed
   :  t

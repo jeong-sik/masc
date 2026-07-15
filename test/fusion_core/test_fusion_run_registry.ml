@@ -93,7 +93,56 @@ let test_register_persistence_failure_is_not_published () =
        | Error (R.Append_failed { path = failed_path; _ }) ->
          check string "failed path" path failed_path;
          check bool "failed durable register is not published" true
-           (Option.is_none (R.get t ~run_id:"r-no-receipt")))
+           (Option.is_none (R.get t ~run_id:"r-no-receipt"))
+       | Error (R.Operation_already_registered id) -> fail ("unexpected duplicate " ^ id))
+;;
+
+let test_claim_start_replay_is_affine () =
+  let path = Filename.temp_file "fusion-claim-start" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       let t = R.create ~path () in
+       let operation = R.operation ~run_id:"r-claim" ~keeper:"k" ~preset:"deep" in
+       (match Registry.register_running t ~operation ~started_at:1.0 with
+        | Ok () -> ()
+        | Error error -> fail (R.persistence_error_to_string error));
+       let claim =
+         match R.claim_operation t ~operation_id:"r-claim" with
+         | Ok claim -> claim
+         | Error error -> fail (R.claim_error_to_string error)
+       in
+       (match R.start_claimed t claim with
+        | Ok started ->
+          check bool "start returns exact canonical operation" true
+            (Fusion_types.equal_fusion_operation operation started)
+        | Error error -> fail (R.start_error_to_string error));
+       (match R.claim_operation t ~operation_id:"r-claim" with
+        | Error (R.Claim_already_owned _) -> ()
+        | Error error -> fail (R.claim_error_to_string error)
+        | Ok _ -> fail "a live claim cannot be superseded");
+       (match R.start_claimed t claim with
+        | Error (R.Start_already_started _) -> ()
+        | Error error -> fail (R.start_error_to_string error)
+        | Ok _ -> fail "one durable claim cannot start twice");
+       let recovered = R.replay path in
+       (match R.get recovered ~run_id:"r-claim" with
+        | Some { status = R.Recovery_required _; worker_state = R.Started _; _ } -> ()
+        | Some _ -> fail "started work must replay as owned recovery"
+        | None -> fail "recovery must retain the canonical operation");
+       let recovery_claim =
+         match R.claim_operation recovered ~operation_id:"r-claim" with
+         | Ok claim -> claim
+         | Error error -> fail (R.claim_error_to_string error)
+       in
+       (match R.start_claimed recovered recovery_claim with
+        | Ok _ -> ()
+        | Error error -> fail (R.start_error_to_string error));
+       R.mark_completed recovered ~run_id:"r-claim" ~ok:true ();
+       match R.get (R.replay path) ~run_id:"r-claim" with
+       | Some { status = R.Completed { ok = true; _ }; _ } -> ()
+       | Some _ -> fail "terminal completion must replay without recovery"
+       | None -> fail "terminal operation must remain observable")
 ;;
 
 let test_mark_completed () =
@@ -210,6 +259,7 @@ let test_status_label () =
           { ok = false
           ; failure = Some "judge failed"
           ; failure_code = Some "parse_error"
+          ; receipt = R.Durable
           }))
 ;;
 
@@ -285,6 +335,8 @@ let () =
         ; test_case "mark completed (ok true/false)" `Quick test_mark_completed
         ; test_case "durable register failure is not published" `Quick
             test_register_persistence_failure_is_not_published
+        ; test_case "claim/start is affine across recovery and terminal replay" `Quick
+            test_claim_start_replay_is_affine
         ; test_case
             "finalize before suspend keeps Completed (buggy order leaks Running)"
             `Quick

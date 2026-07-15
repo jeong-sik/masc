@@ -90,6 +90,25 @@ type orchestrator_runner =
   -> unit
   -> Fusion_orchestrator.outcome
 
+type execution_start_error =
+  | Claim_failed of Fusion_run_registry.claim_error
+  | Start_failed of Fusion_run_registry.start_error
+
+let execution_start_error_to_string = function
+  | Claim_failed error -> Fusion_run_registry.claim_error_to_string error
+  | Start_failed error -> Fusion_run_registry.start_error_to_string error
+;;
+
+let claim_and_start registry operation_id =
+  let ( let* ) = Result.bind in
+  let* claim =
+    Fusion_run_registry.claim_operation registry ~operation_id
+    |> Result.map_error (fun error -> Claim_failed error)
+  in
+  Fusion_run_registry.start_claimed registry claim
+  |> Result.map_error (fun error -> Start_failed error)
+;;
+
 let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~run_id
       ~policy ?continuation_channel ~args () : Tool_result.result =
   let tool_name = "masc_fusion" in
@@ -181,6 +200,19 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
            ; ("error", `String reason)
            ]
        | Ok _ ->
+      (match claim_and_start (Fusion_run_registry.global ()) run_id with
+       | Error error ->
+         let reason = execution_start_error_to_string error in
+         record_completion ~keeper ~run_id ~failure:reason
+           ~failure_code:"worker_start_persistence_failed" ~ok:false ();
+         status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:false
+           [ ("status", `String "persistence_failed")
+           ; ("run_id", `String run_id)
+           ; ("error", `String reason)
+           ]
+       | Ok operation ->
+      let allowed = operation.Fusion_types.request in
+      let topology = operation.topology in
       (* RFC-0266 §7 Phase 4: push the new [Running] card to the dashboard panel
          (no polling). wake-free, broadcast-failure-safe; see
          Fusion_sink.broadcast_run_status. *)
@@ -202,31 +234,8 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
           append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
             (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id msg)
         | exception (Eio.Cancel.Cancelled _ as exn) ->
-          (* RFC-0266 §7: 취소도 종료 상태다. register_running(위 line 73)으로 [Running]
-             으로 등록된 run을 [Completed{ok=false}]로 갱신하지 않으면, in-memory registry
-             ([global], 서버 수명)에 영구 "running"으로 남아 dashboard fusion-runs 패널과
-             masc_fusion_status가 거짓 "심의중"을 보인다(prune는 [Running]을 evict하지 않음 —
-             fusion_run_registry.ml). 다른 종료 분기(Denied/Sink_failed/exception)는
-             append_chat_failure 경유로 이미 mark_completed 하는데 이 분기만 빠져 있었다.
-             completion receipt 실패도 registry에 typed state로 남는다. broadcast는
-             [Sse.broadcast]가 mailbox에서 suspend/block할 수 있어
-             취소/셧다운 캐스케이드를 deadlock시킬 위험이 있으므로 이 경로에선 생략한다 —
-             registry가 정확해 다음 HTTP fetch / tab-refresh가 패널을 self-heal한다.
-             그 뒤 구조적 취소는 흡수하지 않고 재전파한다 (Eio 규약). *)
-          let cancellation =
-            "cancelled: structural cancellation (shutdown or sibling switch failure)"
-          in
-          record_completion ~keeper ~run_id ~failure:cancellation
-            ~failure_code:"cancelled" ~ok:false ();
-          (match
-             Fusion_wake_route.queue_completion ~operation_id:run_id ~ok:false
-               ~content:cancellation ~evidence_ref:None
-           with
-           | Ok _ -> ()
-           | Error error ->
-             Log.Keeper.error ~keeper_name:keeper
-               "fusion cancellation completion queue failed run_id=%s: %s" run_id
-               (Fusion_wake_route.error_to_string error));
+          (* Root-switch cancellation is not a terminal Fusion outcome. The
+             durable Started claim remains replayable by the next process. *)
           raise exn
         | exception exn ->
           append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
@@ -247,7 +256,7 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
               "async: you will be woken with the result when deliberation \
                completes; the conclusion (or failure reason) also lands on \
                your chat lane. No need to poll masc_fusion_status." )
-        ]))
+        ])))
 
 let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy
       ?continuation_channel ~args () =

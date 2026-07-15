@@ -69,6 +69,11 @@ val apply
   -> Agent_sdk.Types.message list
 
 module For_testing : sig
+  val with_make_override
+    :  (runtime_id:string -> keeper_name:string -> unit -> summarizer option)
+    -> (unit -> 'a)
+    -> 'a
+
   (** Apply the compaction request policy while preserving the input provider
       config's exact temperature, including omission. *)
   val provider_for_plan

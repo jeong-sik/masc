@@ -308,7 +308,10 @@ let candidates_for_assignment ~keeper_name assignment_id =
   | `Lane lane ->
     resolve_lane [] (Runtime_lane.ordered_candidates lane)
 
-let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
+type make_fn = runtime_id:string -> keeper_name:string -> unit -> summarizer option
+let make_override : make_fn option Atomic.t = Atomic.make None
+
+let make_resolved ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
   : summarizer option
   =
   match candidates_for_assignment ~keeper_name runtime_id with
@@ -351,10 +354,19 @@ let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) (
              "compaction LLM candidate skipped runtime=%s assignment=%s: Eio \
               context unavailable"
              candidate.runtime_id runtime_id)
-         candidates;
+       candidates;
        None)
 
+let make ?complete ?timeout_sec ~runtime_id ~keeper_name () =
+  match Atomic.get make_override with
+  | Some override -> override ~runtime_id ~keeper_name ()
+  | None -> make_resolved ?complete ?timeout_sec ~runtime_id ~keeper_name ()
+
 module For_testing = struct
+  let with_make_override override f =
+    let previous = Atomic.exchange make_override (Some override) in
+    Fun.protect ~finally:(fun () -> Atomic.set make_override previous) f
+
   let provider_for_plan = provider_for_plan
 
   let candidate_runtime_ids_for_assignment ~keeper_name ~runtime_id =

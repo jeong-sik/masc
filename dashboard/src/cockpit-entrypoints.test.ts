@@ -73,7 +73,7 @@ describe('cockpit entrypoint registry', () => {
       'keeper-cognition',
       'source',
     ])
-    expect(new Set(aliases).size).toBe(10)
+    expect(new Set(aliases).size).toBe(9)
     expect(aliases).not.toContain('ct-lat')
     expect(aliases).not.toContain('cs-deep')
     expect(aliases).not.toContain('pr-thread')

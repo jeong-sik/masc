@@ -274,9 +274,9 @@ describe('navigate', () => {
 
     expect(route.value.tab).toBe('workspace')
     expect(route.value.params.section).toBe('planning')
-    expect(route.value.params.view).toBe('default')
+    expect(route.value.params.view).toBeUndefined()
     expect(window.location.search).toBe('?theme=paper')
-    expect(window.location.hash).toBe('#workspace?section=planning&view=default')
+    expect(window.location.hash).toBe('#workspace?section=planning')
   })
 
   it('replaceRoute dispatches hashchange for existing listeners', () => {

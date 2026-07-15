@@ -25,7 +25,7 @@ describe('Cockpit command map', () => {
     expect(screen.getByTestId('cockpit-command-map')).toBeInTheDocument()
     expect(screen.getByTestId('cockpit-disclosure')).toBeInTheDocument()
     expect(document.querySelectorAll('[data-cockpit-plane]')).toHaveLength(5)
-    expect(document.querySelector('[data-cockpit-plane="work"]')).toHaveTextContent('2 covered')
+    expect(document.querySelector('[data-cockpit-plane="work"]')).toHaveTextContent('1 covered')
     expect(document.querySelector('[data-cockpit-plane="ide"]')).toHaveTextContent('Source')
 
     expect(document.querySelector('.cp-body')).not.toBeNull()
@@ -43,7 +43,7 @@ describe('Cockpit command map', () => {
     expect(disclosure.querySelector('[data-cockpit-disclosure-level="perceive"]')).toHaveTextContent('Route coverage')
     expect(disclosure.querySelector('[data-cockpit-disclosure-level="comprehend"]')).toHaveTextContent('Plane grouping')
     expect(disclosure.querySelector('[data-cockpit-disclosure-level="project"]')).toHaveTextContent('Route gaps')
-    expect(disclosure).toHaveTextContent('10 routes')
+    expect(disclosure).toHaveTextContent('9 routes')
     expect(disclosure).toHaveTextContent('No backend-blocked routes')
   })
 

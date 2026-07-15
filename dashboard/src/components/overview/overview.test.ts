@@ -865,7 +865,7 @@ describe('Overview prototype surface', () => {
       '실행 중 keeper',
       '주의 필요',
       '열린 Gate',
-      '최우선 목표',
+      '배정 태스크',
       '활성 커넥터',
       '예약 HITL',
       '진행 심의',
@@ -892,7 +892,7 @@ describe('Overview prototype surface', () => {
     expect(cards).toHaveLength(7)
     const titles = [...cards].map(c => c.querySelector('.ov-dcard-h h3')?.textContent)
     expect(titles).toEqual([
-      '작업 · 목표',
+      '작업',
       'Gate · HITL',
       '예약 · 자동화',
       'Fusion 심의',

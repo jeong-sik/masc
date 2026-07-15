@@ -654,7 +654,7 @@ describe('IdeEditor', () => {
     await waitFor(() => {
       expect(container.querySelector('[data-testid="ide-context-focus-status"]')?.textContent)
         .toContain('Focused L2')
-      expect(container.querySelectorAll('.ide-editor-context-route-link')).toHaveLength(10)
+      expect(container.querySelectorAll('.ide-editor-context-route-link')).toHaveLength(9)
     })
   })
 

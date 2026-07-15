@@ -384,7 +384,7 @@ describe('IdeShell', () => {
 
     const toolbarFocus = container.querySelector('[data-testid="ide-toolbar-context-focus"]')
     expect(toolbarFocus?.getAttribute('aria-label')).toBe(
-      'Current IDE context: PR line 42, Runtime review, keeper sangsu, 10 route links',
+      'Current IDE context: PR line 42, Runtime review, keeper sangsu, 9 route links',
     )
 
     const routeButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
@@ -400,7 +400,7 @@ describe('IdeShell', () => {
       'Open Keeper sangsu',
     ])
 
-    fireEvent.click(routeButtons[8]!)
+    fireEvent.click(routeButtons[7]!)
     expect(window.location.hash).toBe(
       '#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-42',
     )

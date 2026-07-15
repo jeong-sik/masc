@@ -1699,7 +1699,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       >설정 › 프롬프트 열기 →</button>
     `}>시스템 프롬프트</${SectionHeader}>
     <div class="text-3xs text-text-dim mb-2">
-      헌법·세계관·능력 블록은 <span class="font-mono">전역 프롬프트</span>입니다 (read-only) — 편집은 설정 › 프롬프트. 아래 지시사항은 이 keeper 고유값이며 목표 연결은 배정 목표 탭에서 관리합니다.
+      헌법·세계관·능력 블록은 <span class="font-mono">전역 프롬프트</span>입니다 (read-only) — 편집은 설정 › 프롬프트. 아래 지시사항은 이 keeper 고유값입니다.
     </div>
     <div class="flex gap-2 mb-2 v2-monitoring-toolbar">
       <button

@@ -233,6 +233,7 @@ describe('keeper-trace-store', () => {
       semanticOutcome: 'success',
       filePath: 'runtime.ts',
       line: 12,
+      taskId: 'task-runtime',
     })
     pushTrace({
       id: 'decision-2',
@@ -243,6 +244,7 @@ describe('keeper-trace-store', () => {
       semanticOutcome: 'success',
       filePath: 'runtime.ts',
       line: 13,
+      taskId: 'task-runtime',
     })
     pushTrace({
       id: 'decision-3',
@@ -253,6 +255,7 @@ describe('keeper-trace-store', () => {
       semanticOutcome: 'success',
       filePath: 'runtime.ts',
       line: 12,
+      taskId: 'task-other',
     })
 
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual([

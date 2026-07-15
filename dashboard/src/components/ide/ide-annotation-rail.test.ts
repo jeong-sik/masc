@@ -43,7 +43,7 @@ describe('IdeAnnotationRail', () => {
     expect(container.textContent).toContain('Move compact outside the round lock.')
     expect(container.textContent).toContain('evidence: urn:review:7741')
     expect(container.textContent).toContain('source: opaque-main')
-    expect(container.textContent).toContain('CTX 4')
+    expect(container.textContent).toContain('CTX 3')
     expect(container.querySelectorAll('[data-testid="ide-annotation-reference"]')).toHaveLength(2)
 
     fireEvent.click(container.querySelector<HTMLButtonElement>('.ide-annotation-rail-card-main')!)

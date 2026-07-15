@@ -346,7 +346,7 @@ describe('IdeActivityPanel', () => {
 
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
     expect(activityRouteLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
-    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
+    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 9')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
       'Task',
@@ -564,7 +564,7 @@ describe('IdeActivityPanel', () => {
     })
 
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
-    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
+    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 9')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
       'Task',

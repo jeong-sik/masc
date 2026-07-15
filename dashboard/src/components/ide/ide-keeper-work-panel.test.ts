@@ -179,7 +179,7 @@ describe('IdeKeeperWorkPanel', () => {
     ])
 
     fireEvent.click(queueButtons.find(button => button.title === 'Task task-next')!)
-    expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-next')
+    expect(window.location.hash).toBe('#workspace?section=planning&task=task-next')
   })
 })
 

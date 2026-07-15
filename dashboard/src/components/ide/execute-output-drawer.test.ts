@@ -261,7 +261,7 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Terminal&label=Execute+output+task-123&source_id=execute-output%3Asangsu%3Atask-123&keeper=sangsu')
 
     fireEvent.click(routeLinks.find(link => link.textContent === 'Task')!)
-    expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-123')
+    expect(window.location.hash).toBe('#workspace?section=planning&task=task-123')
   })
 
   it('does not auto-scroll when reduced motion is preferred', async () => {

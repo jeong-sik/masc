@@ -632,22 +632,6 @@ let test_keeper_sandbox_args_allowed_for_dashboard_patch () =
   | Error msg -> Alcotest.failf "dashboard config patch should accept sandbox posture args: %s" msg
   | Ok () -> ()
 
-let test_masc_keeper_msg_schema () =
-  match find_registered_tool "masc_keeper_msg" with
-  | None -> Alcotest.fail "masc_keeper_msg not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "omits new_goal" false
-            (List.mem_assoc "new_goal" props);
-          Alcotest.(check bool) "omits required_tools" false
-            (List.mem_assoc "required_tools" props);
-          Alcotest.(check bool) "omits required_tool_names" false
-            (List.mem_assoc "required_tool_names" props);
-          Alcotest.(check bool) "omits request-level timeout_sec" false
-            (List.mem_assoc "timeout_sec" props)
-      | None -> Alcotest.fail "masc_keeper_msg missing properties"
-
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
 (* ============================================================ *)
@@ -873,8 +857,6 @@ let () =
         test_keeper_sandbox_args_rejected;
       Alcotest.test_case "keeper-sandbox-args-dashboard-allowed" `Quick
         test_keeper_sandbox_args_allowed_for_dashboard_patch;
-      Alcotest.test_case "keeper-msg" `Quick
-        test_masc_keeper_msg_schema;
     ];
     "legacy_swarm_removed", [
       Alcotest.test_case "removed_from_public_schemas" `Quick

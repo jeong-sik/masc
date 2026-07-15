@@ -39,7 +39,6 @@ type dashboard_purge_artifact =
   | Keeper_policy_log_artifact
   | Keeper_decision_log_artifact
   | Keeper_feedback_log_artifact
-  | Keeper_dataset_export_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_configuration_artifact
   | Agent_artifact_bundle of string list
@@ -124,6 +123,9 @@ type finalization_evidence =
   ; completion : completion_receipt
   }
 
+type supersession =
+  | Operator_metadata_update of { actor : string }
+
 type phase =
   | Prepared
   | Joined_idle
@@ -132,6 +134,7 @@ type phase =
   | Reconciliation_required of active_turn
   | Finalized of finalization_evidence
   | Blocked of failure
+  | Superseded of supersession
 
 type t =
   { schema_version : int
@@ -167,8 +170,11 @@ type invariant_error =
       }
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
+  | Superseded_cleanup_reason_mismatch of cleanup_reason
 
 val schema_version : int
+val requires_admission_fence : t -> bool
+val cleanup_reason_label : cleanup_reason -> string
 val meta_disposition_to_string : meta_disposition -> string
 val meta_disposition_of_string : string -> (meta_disposition, string) result
 val meta_disposition_of_cleanup_reason : cleanup_reason -> meta_disposition

@@ -26,12 +26,7 @@ val version_conflict_re : Re.re
 val read_meta_file_path :
   string -> (Keeper_meta_contract.keeper_meta option, string) result
 
-(** Sidecar stem suffixes (without the trailing [.json]). Files
-    matching [<name><suffix>.json] are filtered out of the keeper
-    discovery scan (e.g. [<name>.dataset.json]). *)
-val keeper_sidecar_stem_suffixes : string list
-
-(** [true] iff [f] is a [.json] file whose stem is not a sidecar. *)
+(** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
 val is_keeper_meta_file : string -> bool
 
 (** List keeper names with persisted JSON in [.masc/keepers/].

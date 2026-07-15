@@ -532,7 +532,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
      connector user lines. Recording happens here — post
      validation/dedup ([Channel_gate.handle_inbound]), pre turn — so a
      failed or silent turn cannot drop the inbound message. The final
-     connector reply is appended below after [dispatch_stream] returns
+     connector reply is appended below after the direct-delivery stream returns
      the keeper's direct reply. The user line carries the raw [content];
      the contextualized wrapper below is turn input, not conversation
      history. *)
@@ -674,8 +674,8 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
     (* The admission boundary, not a route-level peek, owns the FIFO decision.
        It rechecks the durable queue after acquiring the Keeper turn slot. *)
     match
-      Keeper_tool_surface.dispatch_stream_if_free ~on_text_delta keeper_ctx
-        ~name:"masc_keeper_msg" ~args
+      Keeper_tool_surface.dispatch_keeper_msg_stream_if_free
+        ~on_text_delta keeper_ctx ~args
     with
     | `Ran result -> `Streaming result
     | `Busy admission_rejection ->

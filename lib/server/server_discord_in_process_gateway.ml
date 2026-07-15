@@ -354,7 +354,7 @@ let handle_message_create ?resolved_binding ~dispatch
       ~(explicit_mentions_bot : bool)
       ~(message_reference_channel_id : string option)
       ~(message_reference_message_id : string option)
-      ~(referenced_message_author_id : string option) =
+      ~(referenced_message_author_id : string option) () =
   let binding =
     match resolved_binding with
     | Some binding -> Some binding
@@ -546,7 +546,7 @@ let on_event ?resolved_binding ~dispatch ~clock ~base_dir
       ~message_id ~author_id
       ~guild_id ~base_dir ~author_name ~content ~mentions_bot ~explicit_mentions_bot
       ~message_reference_channel_id ~message_reference_message_id
-      ~referenced_message_author_id
+      ~referenced_message_author_id ()
   | Gw.Reaction_add _ ->
     (* The previous Python sidecar used a configurable emoji
        trigger to drain pending messages. That feature is dropped in
@@ -579,7 +579,7 @@ let on_event ?resolved_binding ~dispatch ~clock ~base_dir
    on the dispatch path. *)
 let handle_ambient ?resolved_keeper_name ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
-      ~(author_id : string) ~(author_name : string option) ~(content : string) =
+      ~(author_id : string) ~(author_name : string option) ~(content : string) () =
   let keeper_name =
     match resolved_keeper_name with
     | Some keeper_name -> Some keeper_name
@@ -714,7 +714,7 @@ let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
       { channel_id; guild_id; message_id; author_id; author_name; content; _ }
     ->
     handle_ambient ?resolved_keeper_name ~base_dir ~channel_id ~guild_id
-      ~message_id ~author_id ~author_name ~content
+      ~message_id ~author_id ~author_name ~content ()
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
 let submit_triggered_event ingress ~dispatch ~clock ~base_dir

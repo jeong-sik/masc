@@ -15,7 +15,7 @@ let message role content =
 
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
   Agent_sdk.Checkpoint.
-    { version = 4
+    { version = checkpoint_version
     ; session_id = "old-session"
     ; agent_name = "test-agent"
     ; model = "test-model"

@@ -1,33 +1,7 @@
-(** Property-based tests for context overflow detection and boundary handling.
-
-    Verifies structural invariants of the compaction-budget fix:
-
-    Property 1 (Detector coverage):
-      is_context_overflow(TokenBudgetExceeded {kind="Input"}) = true
-      for ALL positive used/limit values.
-
-    Property 2 (Detector exclusion):
-      is_context_overflow(TokenBudgetExceeded {kind≠"Input"}) = false
-      for ALL non-"Input" kind strings.
-
-    Property 3 (Limit attribution):
-      Every error accepted by is_context_overflow has a positive
-      structured or fallback limit for blocker attribution.
-
-    Property 4 (Structural absence):
-      keeper_agent_run source does NOT contain ~max_input_tokens.
-
-    Property 5 (No local budget authority):
-      keeper_run_tools_hooks does not cap messages by an estimated token
-      budget before dispatching to OAS.
-
-    Property 6 (Reducer hardening):
-      keeper_run_tools_hooks source uses the keeper-local repair path and does
-      not call OAS repair_dangling_tool_calls, which fabricates synthetic
-      ToolResult messages for dangling tool uses. *)
+(** Property-based tests for typed context overflow propagation and MASC-owned
+    tool-call pair repair. *)
 
 module UT = Masc.Keeper_unified_turn
-module EC = Masc.Keeper_error_classify
 module KC = Masc.Keeper_context_core
 
 (* ── Generators ──────────────────────────────────────────── *)
@@ -36,164 +10,29 @@ let gen_positive_int =
   QCheck.Gen.int_range 1 1_000_000
 
 let gen_context_overflow_error =
-  QCheck.Gen.(oneof [
-    map (fun limit ->
+  QCheck.Gen.(
+    map
+      (fun limit ->
       Agent_sdk.Error.Api
-        (ContextOverflow { message = "exceeded"; limit = Some limit }))
-      gen_positive_int;
-    return (Agent_sdk.Error.Api
-      (ContextOverflow { message = "exceeded"; limit = None }));
-  ])
+        (ContextOverflow { message = "exceeded"; limit }))
+      (option gen_positive_int))
 
 (* ── Properties ──────────────────────────────────────────── *)
 
-(* Context overflow is now signalled solely by [Api (ContextOverflow _)]
-   (provider-rejected prompt); the removed token-budget cap no longer
-   participates. *)
-let prop_overflow_attribution_yields_positive_limit =
+let prop_overflow_preserves_provider_limit =
   QCheck.Test.make ~count:200
-    ~name:"every overflow error yields positive limit for attribution"
+    ~name:"overflow event preserves the provider-declared optional limit"
     (QCheck.make gen_context_overflow_error)
     (fun err ->
-      let limit = match err with
-        | Agent_sdk.Error.Api
-            (ContextOverflow { limit = Some limit; _ }) -> limit
-        | _ -> 4096  (* fallback path *)
+      let expected_limit =
+        match err with
+        | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) -> limit
+        | _ -> assert false
       in
-      limit > 0)
-
-(* ── Property 4: structural absence of max_input_tokens ── *)
-
-let test_structural_absence () =
-  let has_prompt_root path =
-    Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
-  in
-  let repo_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root when has_prompt_root root -> root
-    | _ ->
-        let rec ascend path =
-          if has_prompt_root path then path
-          else
-            let parent = Filename.dirname path in
-            if String.equal parent path then Sys.getcwd () else ascend parent
-        in
-        ascend (Sys.getcwd ())
-  in
-  let target = Filename.concat repo_root "lib/keeper/keeper_agent_run.ml" in
-  if not (Sys.file_exists target) then
-    (* CI or non-standard layout — skip gracefully *)
-    ()
-  else begin
-    let ic = open_in target in
-    let content = Fun.protect
-      ~finally:(fun () -> close_in ic)
-      (fun () ->
-        let len = in_channel_length ic in
-        let buf = Bytes.create len in
-        really_input ic buf 0 len;
-        Bytes.to_string buf)
-    in
-    let has_max_input_tokens =
-      let re = Re.(compile (seq [str "~max_input_tokens"])) in
-      Re.execp re content
-    in
-    Alcotest.(check bool)
-      "keeper_agent_run.ml must NOT contain ~max_input_tokens"
-      false has_max_input_tokens
-  end
-
-let test_cap_message_tokens_integration () =
-  let has_prompt_root path =
-    Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
-  in
-  let repo_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root when has_prompt_root root -> root
-    | _ ->
-        let rec ascend path =
-          if has_prompt_root path then path
-          else
-            let parent = Filename.dirname path in
-            if String.equal parent path then Sys.getcwd () else ascend parent
-        in
-        ascend (Sys.getcwd ())
-  in
-  let target = Filename.concat repo_root "lib/keeper/keeper_run_tools_hooks.ml" in
-  if not (Sys.file_exists target) then
-    ()
-  else begin
-    let ic = open_in target in
-    let content = Fun.protect
-      ~finally:(fun () -> close_in ic)
-      (fun () ->
-        let len = in_channel_length ic in
-        let buf = Bytes.create len in
-        really_input ic buf 0 len;
-        Bytes.to_string buf)
-    in
-    Alcotest.(check bool)
-      "keeper_run_tools_hooks.ml must not impose a local message-token cap"
-      false
-      (Re.execp
-         Re.(compile (str "Agent_sdk.Context_reducer.cap_message_tokens"))
-         content)
-  end
-
-let test_pair_repair_integration () =
-  let find_substring ?(start = 0) haystack needle =
-    let hlen = String.length haystack in
-    let nlen = String.length needle in
-    let rec loop i =
-      if i + nlen > hlen then None
-      else if String.sub haystack i nlen = needle then Some i
-      else loop (i + 1)
-    in
-    if nlen = 0 then Some start else loop start
-  in
-  let has_prompt_root path =
-    Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
-  in
-  let repo_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root when has_prompt_root root -> root
-    | _ ->
-        let rec ascend path =
-          if has_prompt_root path then path
-          else
-            let parent = Filename.dirname path in
-            if String.equal parent path then Sys.getcwd () else ascend parent
-        in
-        ascend (Sys.getcwd ())
-  in
-  let target = Filename.concat repo_root "lib/keeper/keeper_run_tools_hooks.ml" in
-  if not (Sys.file_exists target) then
-    ()
-  else begin
-    let ic = open_in target in
-    let content = Fun.protect
-      ~finally:(fun () -> close_in ic)
-      (fun () ->
-        let len = in_channel_length ic in
-        let buf = Bytes.create len in
-        really_input ic buf 0 len;
-        Bytes.to_string buf)
-    in
-    let oas_repair_pos =
-      find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
-    in
-    let local_pos =
-      find_substring content "Keeper_context_core.repair_broken_tool_call_pairs"
-    in
-    Alcotest.(check bool)
-      "keeper_run_tools_hooks.ml must not invoke OAS synthetic repair_dangling_tool_calls"
-      true
-      (Option.is_none oas_repair_pos);
-    Alcotest.(check bool)
-      "keeper_run_tools_hooks.ml must integrate local non-fabricating pair repair"
-      true
-      (Option.is_some local_pos)
-  end
+      match UT.context_overflow_event_of_error err with
+      | Some (Keeper_state_machine.Context_overflow_detected { limit_tokens }) ->
+          Option.equal Int.equal expected_limit limit_tokens
+      | _ -> false)
 
 let user_text text : Agent_sdk.Types.message =
   { role = Agent_sdk.Types.User
@@ -884,12 +723,10 @@ let test_pair_repair_caps_diagnostic_sample_strings () =
    (*@ b = is_context_overflow err
        ensures b = match err with
          | Api (ContextOverflow _) -> true
-         | Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
          | _ -> false *)
 
-   Keeper turns leave compact+retry to OAS. MASC may classify a structured
-   overflow as a typed blocker, but it must not recover an OAS checkpoint and
-   re-dispatch the same agent turn from the keeper layer.
+   MASC owns keeper context maintenance. OAS reports provider overflow as a
+   typed error and does not invent a missing provider limit.
 *)
 
 (* ── Runner ──────────────────────────────────────────────── *)
@@ -897,18 +734,12 @@ let test_pair_repair_caps_diagnostic_sample_strings () =
 let () =
   let qcheck_tests =
     List.map QCheck_alcotest.to_alcotest [
-      prop_overflow_attribution_yields_positive_limit;
+      prop_overflow_preserves_provider_limit;
     ]
   in
   Alcotest.run "pbt_context_overflow" [
     ("properties", qcheck_tests);
-    ("structural", [
-      Alcotest.test_case "absence of max_input_tokens" `Quick
-        test_structural_absence;
-      Alcotest.test_case "local message-token cap absent" `Quick
-        test_cap_message_tokens_integration;
-      Alcotest.test_case "local pair repair integrated in reducer chain" `Quick
-        test_pair_repair_integration;
+    ("typed contracts", [
       Alcotest.test_case "pair repair stats count drops" `Quick
         test_pair_repair_stats_count_drops;
       Alcotest.test_case "pair repair drops dangling tool-use details" `Quick

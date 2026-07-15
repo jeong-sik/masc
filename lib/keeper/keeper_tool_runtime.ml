@@ -13,6 +13,8 @@ open Keeper_tool_descriptor
 type context =
   { config : Workspace.config
   ; meta : Keeper_meta_contract.keeper_meta
+  ; publication_recovery_registry : Fs_compat.publication_recovery_registry
+  ; publication_recovery_access : Fs_compat.publication_recovery_access
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
@@ -48,14 +50,15 @@ let handle_filesystem ctx descriptor args =
       (Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
-         ~keeper_name:ctx.meta.name
+         ~meta:ctx.meta
          ~args)
   | Tool_edit_file | Tool_write_file ->
     Some
       (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
-         ~keeper_name:ctx.meta.name
+         ~meta:ctx.meta
+         ~publication_recovery_access:ctx.publication_recovery_access
          ?continuation_channel:ctx.continuation_channel
          ?gate_context:ctx.gate_context
          ?gate_grant:ctx.gate_grant
@@ -349,6 +352,7 @@ let handle_in_process ctx descriptor args =
   | Tool_masc_keeper_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
+         ~publication_recovery_registry:ctx.publication_recovery_registry
          ?sw:ctx.sw
          ?clock:ctx.clock
          ?proc_mgr:ctx.proc_mgr

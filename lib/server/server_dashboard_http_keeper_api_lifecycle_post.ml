@@ -117,7 +117,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = (Mcp_server.workspace_config state) in
+    let workspace_scope = Mcp_server.workspace_scope state in
+    let config = workspace_scope.config in
     let resolve_keeper_agent_name () =
       match Keeper_registry_lookup.find_by_name name with
       | Some entry -> Some entry.meta.agent_name
@@ -232,6 +233,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         clock;
         proc_mgr = state.Mcp_server.proc_mgr;
         net = state.Mcp_server.net;
+        publication_recovery_registry = (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
       }
     in
     let args_result =

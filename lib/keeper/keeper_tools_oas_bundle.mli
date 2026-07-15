@@ -7,6 +7,8 @@
 val make_tool_bundle
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery_registry:Fs_compat.publication_recovery_registry
+  -> publication_recovery_access:Fs_compat.publication_recovery_access
   -> ctx_snapshot:Keeper_types.working_context
   -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -20,6 +22,8 @@ val make_tool_bundle
 val make_tools
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery_registry:Fs_compat.publication_recovery_registry
+  -> publication_recovery_access:Fs_compat.publication_recovery_access
   -> ctx_snapshot:Keeper_types.working_context
   -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

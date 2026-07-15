@@ -189,7 +189,7 @@ let test_dashboard_briefing_http_full_contract () =
          Both dashboard-level and operator snapshot caches must be invalidated. *)
       Dashboard_cache.invalidate_all ();
       Operator_control.invalidate_snapshot_cache ();
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       let json =
         Server_dashboard_http.dashboard_briefing_http_json
           ~state
@@ -214,7 +214,7 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
       let config = Workspace_utils.default_config dir in
       let session_id = "ts-mission-http-default-001" in
       seed_workspace config session_id;
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       let json =
         Server_dashboard_http.dashboard_briefing_http_json
           ~state
@@ -248,7 +248,7 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
       seed_workspace config session_id;
       Dashboard_cache.invalidate_all ();
       Operator_control.invalidate_snapshot_cache ();
-      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       let json =
         Server_dashboard_http.dashboard_briefing_http_json
           ~state
@@ -288,10 +288,10 @@ let test_dashboard_briefing_http_cache_isolation () =
       seed_workspace config_a session_a;
       seed_workspace config_b session_b;
       let state_a =
-        Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_a ()
+        Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir_a ()
       in
       let state_b =
-        Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_b ()
+        Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir_b ()
       in
       let request =
         request ("/api/v1/dashboard/briefing?agent_name=" ^ actor)

@@ -97,6 +97,10 @@ type lifecycle_reservation_snapshot =
   ; purpose : lifecycle_transaction_purpose
   }
 
+type publication_recovery_lane_state =
+  | Publication_recovery_detached
+  | Publication_recovery_attached of Fs_compat.publication_recovery_access
+
 type registry_entry =
   { base_path : string
   ; name : string
@@ -111,6 +115,8 @@ type registry_entry =
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
   ; lane : Keeper_lane.t
+  ; publication_recovery_lane_state :
+      publication_recovery_lane_state Atomic.t
   ; done_p : done_resolution Eio.Promise.t
   ; done_r : done_resolution Eio.Promise.u
   ; restart_count : int

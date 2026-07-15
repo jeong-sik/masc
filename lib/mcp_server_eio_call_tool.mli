@@ -109,6 +109,7 @@ val handle_call_tool_eio :
   execute_tool_eio:
     (sw:'sw ->
      clock:([> float Eio.Time.clock_ty ] as 'clk) Eio.Resource.t ->
+     workspace_scope:Mcp_server.workspace_scope ->
      ?profile:Mcp_server_eio_types.tool_profile ->
      ?mcp_session_id:string ->
      ?auth_token:'auth ->
@@ -141,8 +142,12 @@ val handle_call_tool_eio :
     when the call is known to alter the tool catalogue
     (long-running mutations, etc).
 
-    The dispatcher invokes the concrete tool exactly once, times that
-    execution for telemetry, and on the keeper-runtime path threads
+    The handler captures one immutable {!Mcp_server.workspace_scope} at
+    admission.  The dispatcher and all post-execution workspace-scoped
+    observations use that exact generation even when the tool changes the
+    server's current workspace.  The dispatcher invokes the concrete tool
+    exactly once, times that execution for telemetry, and on the
+    keeper-runtime path threads
     {!record_runtime_mcp_keeper_tool_trace} into the
     success / failure branches.
 

@@ -82,6 +82,7 @@ let with_exec_fixture ?(process = false) ?(always_allow = false) name fn =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio.Switch.run @@ fun sw ->
       if process
       then
         Process_eio.init
@@ -97,7 +98,19 @@ let with_exec_fixture ?(process = false) ?(always_allow = false) name fn =
       Fun.protect
         ~finally:(fun () ->
           Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
-        (fun () -> fn ~config ~meta ~ctx_work:(make_ctx ())))
+        (fun () ->
+          Masc_test_deps.with_publication_recovery_lane
+            ~sw
+            ~fs:(Eio.Stdenv.fs env)
+            ~registry_root:dir
+            ~owner:meta.name
+            (fun ~publication_recovery_registry ~publication_recovery_access ->
+               fn
+                 ~config
+                 ~meta
+                 ~publication_recovery_registry
+                 ~publication_recovery_access
+                 ~ctx_work:(make_ctx ()))))
 
 let contains_substring text needle =
   let text_len = String.length text in
@@ -181,11 +194,14 @@ let check_success_result label result =
 let test_public_read_rejects_unsupported_range_fields () =
   with_exec_fixture
     "keeper_tool_dispatch_runtime_read_rejects_range_fields"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
+          ~publication_recovery_registry
+          ~publication_recovery_access
           ~ctx_work
           ~exec_cache:None
           ~name:"Read"
@@ -198,7 +214,11 @@ let test_public_read_rejects_unsupported_range_fields () =
       in
       check string "runtime outcome" "failure"
         (match result.outcome with `Success -> "success" | `Failure _ -> "failure");
-      let json = Yojson.Safe.from_string result.raw_output in
+      let json =
+        match result.data with
+        | Some data -> data
+        | None -> fail "validation rejection omitted typed data"
+      in
       let error =
         Yojson.Safe.Util.(member "error" json |> to_string_option)
         |> Option.value ~default:""
@@ -221,11 +241,14 @@ let test_public_read_rejects_unsupported_range_fields () =
 let test_public_read_rejects_offset_without_enrichment () =
   with_exec_fixture
     "keeper_tool_dispatch_runtime_read_rejects_offset"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
+          ~publication_recovery_registry
+          ~publication_recovery_access
           ~ctx_work
           ~exec_cache:None
           ~name:"Read"
@@ -237,7 +260,11 @@ let test_public_read_rejects_offset_without_enrichment () =
           ()
       in
       check string "runtime outcome" "failure" (outcome_label result.outcome);
-      let json = Yojson.Safe.from_string result.raw_output in
+      let json =
+        match result.data with
+        | Some data -> data
+        | None -> fail "validation rejection omitted typed data"
+      in
       check bool "dispatch does not add a tutor" true
         Yojson.Safe.Util.(member "tool_tutor" json = `Null);
       check bool "validation names exact field" true
@@ -506,7 +533,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
 
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let repo_dir =
         Filename.concat
           (Filename.concat (KES.keeper_playground_root ~config ~meta) "repos")
@@ -515,7 +543,8 @@ let test_execute_with_outcome_missing_file_is_failure () =
       mkdir_p (Filename.concat repo_dir ".git");
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery_registry
+          ~publication_recovery_access ~ctx_work ~exec_cache:None
           ~name:"Read"
           ~input:(`Assoc [ ("file_path", `String "config/runtime.toml") ])
           ()
@@ -534,10 +563,12 @@ let test_execute_with_outcome_missing_file_is_failure () =
 
 let test_tool_search_without_session_searcher_is_unavailable () =
   with_exec_fixture "keeper_tool_dispatch_runtime_search_unavailable"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery_registry
+          ~publication_recovery_access ~ctx_work ~exec_cache:None
           ~name:"keeper_tool_search"
           ~input:(`Assoc [])
           ()
@@ -553,7 +584,8 @@ let test_tool_search_without_session_searcher_is_unavailable () =
 
 let test_tool_search_uses_exact_injected_searcher () =
   with_exec_fixture "keeper_tool_dispatch_runtime_injected_search"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let observed = ref false in
       let search_fn () =
         observed := true;
@@ -566,7 +598,8 @@ let test_tool_search_uses_exact_injected_searcher () =
       in
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work ~exec_cache:None ~search_fn
+          ~config ~meta ~publication_recovery_registry
+          ~publication_recovery_access ~ctx_work ~exec_cache:None ~search_fn
           ~name:"keeper_tool_search"
           ~input:(`Assoc [])
           ()
@@ -583,7 +616,8 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
     ~process:true
     ~always_allow:true
     "keeper_tool_dispatch_runtime_model_tools"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let playground = KES.keeper_default_write_root ~config ~meta in
       let visible_file_path = "model-visible.txt" in
       let file_path = Filename.concat playground visible_file_path in
@@ -591,6 +625,8 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
+          ~publication_recovery_registry
+          ~publication_recovery_access
           ~ctx_work
           ~exec_cache:None
           ~name
@@ -657,7 +693,8 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
 
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
       ignore
         (Workspace.add_task config ~title:"higher priority task" ~priority:1
@@ -669,6 +706,8 @@ let test_keeper_task_claim_accepts_specific_task_id () =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
+          ~publication_recovery_registry
+          ~publication_recovery_access
           ~ctx_work
           ~exec_cache:None
           ~name:"keeper_task_claim"
@@ -701,11 +740,14 @@ let test_keeper_task_claim_accepts_specific_task_id () =
 
 let test_unknown_tool_returns_exact_error () =
   with_exec_fixture "keeper_tool_dispatch_runtime_unknown_tool"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
+          ~publication_recovery_registry
+          ~publication_recovery_access
           ~ctx_work
           ~exec_cache:None
           ~name:"Glob"
@@ -725,7 +767,8 @@ let test_unknown_tool_returns_exact_error () =
 
 let test_model_visible_web_search_dispatches_to_misc_runtime () =
   with_exec_fixture ~always_allow:true "keeper_tool_dispatch_web_search"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
           [
@@ -743,6 +786,8 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
             KET.execute_keeper_tool_call_with_outcome
               ~config
               ~meta
+              ~publication_recovery_registry
+              ~publication_recovery_access
               ~ctx_work
               ~exec_cache:None
               ~name:"WebSearch"
@@ -778,7 +823,8 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
 
 let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
   with_exec_fixture ~always_allow:true "keeper_tool_dispatch_web_fetch"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let requested_url = "https://example.com/model-web-fetch" in
       let html =
         {|
@@ -811,6 +857,8 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
             KET.execute_keeper_tool_call_with_outcome
               ~config
               ~meta
+              ~publication_recovery_registry
+              ~publication_recovery_access
               ~ctx_work
               ~exec_cache:None
               ~name:"WebFetch"
@@ -854,7 +902,8 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
   with_exec_fixture
     ~always_allow:true
     "keeper_tool_dispatch_web_fetch_reaches_localhost"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       Masc.Tool_misc.with_web_fetch_http_get_for_test
         (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
           check string "local url forwarded" "http://127.0.0.1:8935/health" url;
@@ -864,6 +913,8 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
             KET.execute_keeper_tool_call_with_outcome
               ~config
               ~meta
+              ~publication_recovery_registry
+              ~publication_recovery_access
               ~ctx_work
               ~exec_cache:None
               ~name:"WebFetch"
@@ -876,7 +927,8 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
 
 let test_manual_gate_defers_web_tools_before_network () =
   with_exec_fixture "keeper_tool_dispatch_manual_web_gate"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       (match
          Masc.Keeper_gate_mode.set
            config
@@ -901,6 +953,8 @@ let test_manual_gate_defers_web_tools_before_network () =
                 KET.execute_keeper_tool_call_with_outcome
                   ~config
                   ~meta
+                  ~publication_recovery_registry
+                  ~publication_recovery_access
                   ~ctx_work
                   ~exec_cache:None
                   ~name:"WebSearch"
@@ -911,6 +965,8 @@ let test_manual_gate_defers_web_tools_before_network () =
                 KET.execute_keeper_tool_call_with_outcome
                   ~config
                   ~meta
+                  ~publication_recovery_registry
+                  ~publication_recovery_access
                   ~ctx_work
                   ~exec_cache:None
                   ~name:"WebFetch"
@@ -962,7 +1018,8 @@ let test_tool_result_or_error_preserves_failure_class () =
 
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
-    (fun ~config ~meta ~ctx_work ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
       let input =
         `Assoc
           [ ( "cmd"
@@ -971,7 +1028,8 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       in
       let run () =
         KET.execute_keeper_tool_call
-          ~config ~meta ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery_registry
+          ~publication_recovery_access ~ctx_work ~exec_cache:None
           ~name:"tool_execute" ~input ()
       in
       let outputs = List.init 4 (fun _ -> run ()) in
@@ -1016,22 +1074,35 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
       let config = Workspace.default_config dir in
       let meta = make_meta () in
       ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      Masc_test_deps.with_publication_recovery_lane
+        ~sw:root_sw
+        ~fs:(Eio.Stdenv.fs env)
+        ~registry_root:dir
+        ~owner:meta.name
+        (fun ~publication_recovery_registry ~publication_recovery_access ->
       let previous_dispatch = !(Masc.Keeper_dispatch_ref.dispatch) in
       let saw_turn_sw = Atomic.make false in
       let saw_clock = Atomic.make false in
+      let saw_registry = Atomic.make false in
       Fun.protect
         ~finally:(fun () ->
           Masc.Keeper_dispatch_ref.dispatch := previous_dispatch;
           Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
         (fun () ->
           Masc.Keeper_dispatch_ref.dispatch :=
-            (fun ~config:_ ~agent_name:_ ?sw ?clock ?proc_mgr:_ ?net:_ ?mcp_session_id:_
+            (fun ~config:_ ~agent_name:_
+                 ~publication_recovery_registry:observed_registry
+                 ?sw ?clock ?proc_mgr:_ ?net:_ ?mcp_session_id:_
                  ?authorize_external_effect:_
                  ~name ~args:_ () ->
               check string "keeper dispatch tool" "masc_keeper_msg" name;
               Atomic.set saw_turn_sw
                 (match sw with Some sw -> sw == turn_sw | None -> false);
               Atomic.set saw_clock (Option.is_some clock);
+              Atomic.set saw_registry
+                (match observed_registry with
+                 | Some registry -> registry == publication_recovery_registry
+                 | None -> false);
               Some
                 (Tool_result.ok ~tool_name:name ~start_time:0.0
                    "{\"ok\":true,\"request_id\":\"test-request\"}"));
@@ -1041,6 +1112,8 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
               ~input_schema:(keeper_msg_input_schema ())
               ~config
               ~meta
+              ~publication_recovery_registry
+              ~publication_recovery_access
               ~ctx_snapshot:(make_ctx ())
               ~exec_cache:None
               ()
@@ -1055,7 +1128,8 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
           in
           check bool "handler succeeds" true (Tool_result.is_success result);
           check bool "turn switch reaches keeper dispatch" true (Atomic.get saw_turn_sw);
-          check bool "clock reaches keeper dispatch" true (Atomic.get saw_clock)))
+          check bool "clock reaches keeper dispatch" true (Atomic.get saw_clock);
+          check bool "registry reaches keeper dispatch" true (Atomic.get saw_registry))))
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
@@ -1110,10 +1184,14 @@ let register_typed_outcome_probe name make_result =
 
 let execute_registered_probe ~fixture ~name ~make_result =
   register_typed_outcome_probe name make_result;
-  with_exec_fixture fixture (fun ~config ~meta ~ctx_work ->
+  with_exec_fixture fixture
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work ->
     KET.execute_keeper_tool_call_with_outcome
       ~config
       ~meta
+      ~publication_recovery_registry
+      ~publication_recovery_access
       ~ctx_work
       ~exec_cache:None
       ~name
@@ -1186,7 +1264,8 @@ let test_registered_tool_dispatch_without_masc_prefix () =
   check bool "probe has no masc_ prefix" false
     (String.starts_with ~prefix:"masc_" registered_dispatch_probe_tool);
   with_exec_fixture "keeper_tool_dispatch_registered_dispatch"
-    (fun ~config ~meta ~ctx_work:_ ->
+    (fun ~config ~meta ~publication_recovery_registry:_
+         ~publication_recovery_access:_ ~ctx_work:_ ->
       match
         Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
           ~config
@@ -1205,7 +1284,8 @@ let test_registered_tool_dispatch_without_masc_prefix () =
 let test_registered_dispatch_preserves_workflow_failure_class () =
   register_workflow_rejection_probe ();
   with_exec_fixture "keeper_tool_dispatch_registered_workflow_rejection"
-    (fun ~config ~meta ~ctx_work:_ ->
+    (fun ~config ~meta ~publication_recovery_registry:_
+         ~publication_recovery_access:_ ~ctx_work:_ ->
       match
         Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
           ~config
@@ -1310,11 +1390,14 @@ let check_bundle_has_no_inferred_descriptor ~msg tools name =
 let test_model_visible_tools_do_not_infer_oas_descriptors () =
   with_exec_fixture
     "model_visible_oas_descriptors"
-    (fun ~config ~meta ~ctx_work:_ ->
+    (fun ~config ~meta ~publication_recovery_registry
+         ~publication_recovery_access ~ctx_work:_ ->
        let tools =
          Masc.Keeper_tools_oas_bundle.make_tools
            ~config
            ~meta
+           ~publication_recovery_registry
+           ~publication_recovery_access
            ~ctx_snapshot:(make_ctx ())
            ()
        in

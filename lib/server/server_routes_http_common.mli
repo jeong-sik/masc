@@ -16,7 +16,7 @@
 
     The module aliases at the top of the .ml are reached
     unqualified by the indirect consumers
-    (e.g. [Mcp_eio.create_state] in
+    (e.g. [Mcp_eio.create_state_eio] in
     [server_runtime_bootstrap], [Sse.X] across many
     modules). *)
 

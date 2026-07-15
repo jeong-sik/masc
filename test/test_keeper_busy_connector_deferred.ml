@@ -100,7 +100,8 @@ let test_busy_discord_enqueues () =
             Gate_keeper_backend.dispatch
               ~connector_kind:Gate_keeper_backend.Discord
               ~submission_owner:Gate_keeper_backend.Channel_actor
-              ~sw ~clock ~proc_mgr:None ~net:None ~config
+              ~sw ~clock ~proc_mgr:None ~net:None
+              ~publication_recovery_registry:None ~config
               ~channel:"discord" ~channel_user_id:"user-42"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
               ~keeper_name ~idempotency_key:"discord-msg-777"
@@ -215,7 +216,8 @@ let test_unpublished_busy_slot_queues_without_resolved_meta () =
             Gate_keeper_backend.dispatch
               ~connector_kind:Gate_keeper_backend.Discord
               ~submission_owner:Gate_keeper_backend.Channel_actor
-              ~sw ~clock ~proc_mgr:None ~net:None ~config
+              ~sw ~clock ~proc_mgr:None ~net:None
+              ~publication_recovery_registry:None ~config
               ~channel:"discord" ~channel_user_id:"user-unpublished"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-unpublished"
               ~keeper_name ~idempotency_key:"discord-msg-unpublished"
@@ -262,7 +264,8 @@ let test_busy_discord_persist_failure_is_explicit () =
             Gate_keeper_backend.dispatch
               ~connector_kind:Gate_keeper_backend.Discord
               ~submission_owner:Gate_keeper_backend.Channel_actor
-              ~sw ~clock ~proc_mgr:None ~net:None ~config
+              ~sw ~clock ~proc_mgr:None ~net:None
+              ~publication_recovery_registry:None ~config
               ~channel:"discord" ~channel_user_id:"user-42"
               ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
               ~keeper_name ~idempotency_key:"discord-msg-persist-fail"
@@ -315,7 +318,8 @@ let test_pending_receipt_prevents_direct_overtake () =
         Gate_keeper_backend.dispatch
           ~connector_kind:Gate_keeper_backend.Discord
           ~submission_owner:Gate_keeper_backend.Channel_actor
-          ~sw ~clock ~proc_mgr:None ~net:None ~config
+          ~sw ~clock ~proc_mgr:None ~net:None
+          ~publication_recovery_registry:None ~config
           ~channel:"discord" ~channel_user_id:"user-42"
           ~channel_user_name:"Tester" ~channel_workspace_id:"chan-777"
           ~keeper_name ~idempotency_key:"discord-msg-778"
@@ -355,7 +359,8 @@ let test_busy_slack_preserves_thread_context () =
           Gate_keeper_backend.dispatch
             ~connector_kind:Gate_keeper_backend.Slack
             ~submission_owner:Gate_keeper_backend.Channel_actor
-            ~sw ~clock ~proc_mgr:None ~net:None ~config
+            ~sw ~clock ~proc_mgr:None ~net:None
+            ~publication_recovery_registry:None ~config
             ~channel:"slack" ~channel_user_id:"U-42"
             ~channel_user_name:"Slack User" ~channel_workspace_id:"C-777"
             ~keeper_name ~idempotency_key:"slack-msg-171.001"
@@ -427,7 +432,8 @@ let test_shutdown_fenced_connector_ack
           Gate_keeper_backend.dispatch
             ~connector_kind
             ~submission_owner:Gate_keeper_backend.Channel_actor
-            ~sw ~clock ~proc_mgr:None ~net:None ~config
+            ~sw ~clock ~proc_mgr:None ~net:None
+            ~publication_recovery_registry:None ~config
             ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
             ~keeper_name
             ~idempotency_key:("shutdown-fenced-" ^ String.lowercase_ascii label)

@@ -1132,7 +1132,7 @@ let test_board_curation_submit_roundtrips_to_read () =
     Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
 
 let mcp_runtime_board_dispatch ~sw ~clock name args =
-  let state = Mcp_server.create_state ~base_path:_test_base_path in
+  let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
   Mcp_tool_runtime_board.dispatch ~config:(Mcp_server.workspace_config state)
     ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~sw ~clock ~name
     ~start_time:(Unix.gettimeofday ())

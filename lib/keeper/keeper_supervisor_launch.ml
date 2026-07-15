@@ -119,6 +119,10 @@ let launch_supervised_fiber_body
         Keeper_lane.fork
           ~sw:ctx.sw
           reg.lane
+          ~with_run_scope:
+            (Keeper_publication_recovery_scope.with_lane_scope
+               ~registry:ctx.publication_recovery_registry
+               ~entry:reg)
           ~run:body
           ~cleanup:(fun _ -> Ok ())
       with
@@ -212,17 +216,12 @@ let launch_supervised_fiber_body
     fork_body (fun lane_sw ->
       let ctx = { ctx with sw = lane_sw } in
       let resolved = Atomic.make false in
-      (* Issue #18901 follow-up: distinguish parent-cancellation from
-         genuine missed-resolution in the finally branch. The body's
-         try/with re-raises [Eio.Cancel.Cancelled] (line 281 area)
-         which then propagates to the surrounding switch, leaving the
-         finally to fire with [resolved=false]. Without this flag the
-         finally cannot tell whether the unresolved drop was a parent
-         cancel (supervisor restart, sibling failure) or a real
-         missed-resolution bug — both collapsed into [Unexpected].
-         Setting the flag from the cancel handler keeps the typed
-         [fiber_drop_cause] payload accurate. *)
+      (* Preserve the exact typed cancellation origin after the supervised
+         body consumes [Eio.Cancel.Cancelled]. The finally branch can then
+         distinguish an operator lane shutdown from parent cancellation and
+         from a genuine missed-resolution bug. *)
       let cancelled_by_parent = Atomic.make false in
+      let cancelled_by_shutdown_request = Atomic.make false in
       let resolve_done ~source value =
         if not (Atomic.get resolved) then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
@@ -294,8 +293,11 @@ let launch_supervised_fiber_body
                    "normal exit"
                    ()
            with
-           | Eio.Cancel.Cancelled _ ->
-             Atomic.set cancelled_by_parent true;
+           | Eio.Cancel.Cancelled cause ->
+             (match Keeper_lane.classify_cancellation_cause cause with
+              | Keeper_lane.Shutdown_request ->
+                Atomic.set cancelled_by_shutdown_request true
+              | Keeper_lane.External_cancel _ -> Atomic.set cancelled_by_parent true);
              (* Do NOT re-raise Cancelled in a forked fiber, as it cancels the parent switch. *)
              ()
            | exn ->
@@ -394,18 +396,12 @@ let launch_supervised_fiber_body
                   (resolve_done
                      ~source:"supervisor_shutdown_cleanup"
                      (`Crashed "shutdown")))
-              else if Keeper_lane.shutdown_requested reg.lane
+              else if Atomic.get cancelled_by_shutdown_request
               then (
-                (* Codex #24135 finding 1: operator-sanctioned shutdown of this
-                   supervised keeper. [Keeper_shutdown_prepare_join] called
-                   [Keeper_lane.request_cancel], which failed the lane switch
-                   with [Shutdown_cancel]; the body caught the resulting
-                   cancellation and set [cancelled_by_parent]. Global shutdown
-                   is not in progress, so without this branch the keeper would
-                   fall through to the parent-cancel path and be
-                   crashed/tombstoned. A requested shutdown is a graceful stop:
-                   record it as [Stopped] exactly like the normal-exit path so
-                   the operator observes a joined stop, not a crash. *)
+                (* Exact exception identity distinguishes an operator lane
+                   shutdown from parent cancellation. A requested shutdown is
+                   a graceful stop, so the operator observes a joined stop
+                   rather than a crash/tombstone. *)
                 Log.Keeper.info
                   "%s: fiber stopped by shutdown request (graceful, not a crash)"
                   meta.name;

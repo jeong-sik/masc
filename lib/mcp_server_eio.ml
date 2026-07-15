@@ -40,12 +40,13 @@ let tool_schema_component_bytes ~name ~description ~input_schema =
   + String.length (Yojson.Safe.to_string input_schema)
 ;;
 
-let create_state ?test_mode ~base_path () =
-  let state = Mcp_server.create_state ~base_path in
-  (match test_mode with
-   | Some true -> Auth.disable_auth base_path
-   | _ -> ());
-  state
+module For_testing = struct
+  let create_state ~base_path () =
+    let state = Mcp_server.For_testing.create_state ~base_path in
+    Auth.disable_auth base_path;
+    state
+  ;;
+end
 
 let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   Mcp_server.create_state_eio

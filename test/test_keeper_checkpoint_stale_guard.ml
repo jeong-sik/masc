@@ -44,7 +44,7 @@ let make_checkpoint ~session_id ~turn_count ~marker =
                       tool_call_id = None; metadata = [] };
   ] in
   Agent_sdk.Checkpoint.{
-    version = 4;
+    version = checkpoint_version;
     session_id;
     agent_name = "test-agent";
     model = "test-model";

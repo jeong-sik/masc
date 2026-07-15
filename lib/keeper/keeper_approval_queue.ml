@@ -1934,7 +1934,6 @@ module For_testing = struct
   ;;
 
   let pending_store_path = pending_store_path
-  let always_allowed_store_path ~base_path = rules_path ~base_path ()
 end
 
 let resolve_with_policy

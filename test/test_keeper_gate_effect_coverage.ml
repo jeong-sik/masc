@@ -352,6 +352,11 @@ let test_ollama_probe_leaf_requests_exact_authorization () =
   | calls -> failf "expected one authorization request, got %d" (List.length calls)
 ;;
 
+(* The pending-store mutex is an Eio.Mutex (see keeper_approval_queue.ml);
+   its sections need an Eio scheduler even uncontended, so every case runs
+   inside its own event loop. *)
+let in_eio f () = Eio_main.run @@ fun _env -> f ()
+
 let () =
   run
     "keeper_gate_effect_coverage"
@@ -359,35 +364,35 @@ let () =
       , [ test_case
             "second tool snapshot contains first tool result"
             `Quick
-            test_second_tool_snapshot_contains_first_tool_result
+            (in_eio test_second_tool_snapshot_contains_first_tool_result)
         ] )
     ; ( "keeper_effects"
       , [ test_case
             "Deferred executes no sandbox/lifecycle effect"
             `Quick
-            test_keeper_effects_defer_without_dispatch
+            (in_eio test_keeper_effects_defer_without_dispatch)
         ; test_case
             "Unavailable executes no sandbox/lifecycle effect"
             `Quick
-            test_keeper_effects_unavailable_without_dispatch
+            (in_eio test_keeper_effects_unavailable_without_dispatch)
         ; test_case
             "Allow dispatches exact sandbox/lifecycle effect"
             `Quick
-            test_keeper_effects_allow_exact_dispatch
+            (in_eio test_keeper_effects_allow_exact_dispatch)
         ] )
     ; ( "network_probe"
       , [ test_case
             "Deferred and Unavailable execute no network probe"
             `Quick
-            test_ollama_probe_defer_and_unavailable_do_not_dispatch
+            (in_eio test_ollama_probe_defer_and_unavailable_do_not_dispatch)
         ; test_case
             "Allow dispatches exact network probe"
             `Quick
-            test_ollama_probe_allow_dispatches_exact_input
+            (in_eio test_ollama_probe_allow_dispatches_exact_input)
         ; test_case
             "effect leaf requests exact authorization"
             `Quick
-            test_ollama_probe_leaf_requests_exact_authorization
+            (in_eio test_ollama_probe_leaf_requests_exact_authorization)
         ] )
     ]
 ;;

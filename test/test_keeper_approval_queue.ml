@@ -1168,6 +1168,11 @@ let test_nonapproved_resolution_payload_is_delivered () =
        drop_resolution ~base_path ~keeper_name edited)
 ;;
 
+(* The pending-store mutex is an Eio.Mutex (see keeper_approval_queue.ml);
+   its sections need an Eio scheduler even uncontended, so every case runs
+   inside its own event loop. *)
+let in_eio f () = Eio_main.run @@ fun _env -> f ()
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
@@ -1175,67 +1180,67 @@ let () =
       , [ Alcotest.test_case
             "submit is nonblocking and exact"
             `Quick
-            test_submit_is_nonblocking_and_exactly_deduplicated
+            (in_eio test_submit_is_nonblocking_and_exactly_deduplicated)
         ; Alcotest.test_case
             "dedup keeps distinct origins"
             `Quick
-            test_dedup_never_merges_distinct_origins
+            (in_eio test_dedup_never_merges_distinct_origins)
         ; Alcotest.test_case
             "resolution wakes only origin"
             `Quick
-            test_resolution_is_durable_and_origin_scoped
+            (in_eio test_resolution_is_durable_and_origin_scoped)
         ; Alcotest.test_case
             "cycle grant binds origin and is consumed once"
             `Quick
-            test_cycle_grant_uses_exact_effect_and_is_consumed_once
+            (in_eio test_cycle_grant_uses_exact_effect_and_is_consumed_once)
         ; Alcotest.test_case
             "summary is advisory"
             `Quick
-            test_summary_updates_never_resolve_pending_request
+            (in_eio test_summary_updates_never_resolve_pending_request)
         ; Alcotest.test_case
             "only retryable summary failure restarts"
             `Quick
-            test_only_retryable_summary_failure_restarts
+            (in_eio test_only_retryable_summary_failure_restarts)
         ; Alcotest.test_case
             "retryable Auto Judge recovery is lane-local"
             `Quick
-            test_retryable_auto_judge_recovery_is_lane_local
+            (in_eio test_retryable_auto_judge_recovery_is_lane_local)
         ; Alcotest.test_case
             "decisive summary finalizes after restart"
             `Quick
-            test_decisive_summary_finalizes_after_restart
+            (in_eio test_decisive_summary_finalizes_after_restart)
         ; Alcotest.test_case
             "interrupted judge keeps restart marker"
             `Quick
-            test_inflight_auto_judge_preserves_durable_restart_marker
+            (in_eio test_inflight_auto_judge_preserves_durable_restart_marker)
         ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick
-            test_malformed_snapshot_fails_install_and_is_observed
+            (in_eio test_malformed_snapshot_fails_install_and_is_observed)
         ; Alcotest.test_case
             "delivery journal replays"
             `Quick
-            test_persisted_delivery_replays_before_origin_wake
+            (in_eio test_persisted_delivery_replays_before_origin_wake)
         ; Alcotest.test_case
             "one replay failure does not stop others"
             `Quick
-            test_one_delivery_replay_failure_does_not_stop_others
+            (in_eio test_one_delivery_replay_failure_does_not_stop_others)
         ; Alcotest.test_case
             "storage failure is returned"
             `Quick
-            test_submit_surfaces_storage_failure
+            (in_eio test_submit_surfaces_storage_failure)
         ; Alcotest.test_case
             "default Auto Judge defers without blocking"
             `Quick
-            test_default_auto_judge_defers_without_blocking
+            (in_eio test_default_auto_judge_defers_without_blocking)
         ; Alcotest.test_case
             "unavailable grant never falls through"
             `Quick
-            test_unavailable_cycle_grant_never_falls_through
+            (in_eio test_unavailable_cycle_grant_never_falls_through)
         ; Alcotest.test_case
             "non-approved resolution payload is delivered"
             `Quick
-            test_nonapproved_resolution_payload_is_delivered
+            (in_eio test_nonapproved_resolution_payload_is_delivered)
         ] )
     ]
 ;;

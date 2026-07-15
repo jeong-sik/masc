@@ -355,6 +355,11 @@ let test_workspace_always_allow_does_not_depend_on_rule_store () =
        | Gate.Unavailable reason -> fail (Gate.unavailable_reason_to_string reason))
 ;;
 
+(* The pending-store mutex is an Eio.Mutex (see keeper_approval_queue.ml);
+   its sections need an Eio scheduler even uncontended, so every case runs
+   inside its own event loop. *)
+let in_eio f () = Eio_main.run @@ fun _env -> f ()
+
 let () =
   run
     "Keeper_approval_queue_rules"
@@ -362,40 +367,40 @@ let () =
       , [ test_case
             "matches only complete exact request"
             `Quick
-            test_rule_matches_only_complete_exact_request
+            (in_eio test_rule_matches_only_complete_exact_request)
         ; test_case "idempotent upsert" `Quick test_equivalent_upsert_is_idempotent
         ; test_case
             "Gate consumes exact persisted rule"
             `Quick
-            test_gate_allows_only_the_exact_persisted_rule
+            (in_eio test_gate_allows_only_the_exact_persisted_rule)
         ; test_case
             "unsupported persisted shape is explicit"
             `Quick
-            test_unknown_persisted_shape_is_reported_and_rejected
+            (in_eio test_unknown_persisted_shape_is_reported_and_rejected)
         ; test_case
             "duplicate persisted rules reject whole store"
             `Quick
-            test_duplicate_persisted_rules_reject_whole_store
+            (in_eio test_duplicate_persisted_rules_reject_whole_store)
         ; test_case
             "Manual mode survives exact-rule storage failure"
             `Quick
-            test_manual_mode_continues_when_rule_store_is_unavailable
+            (in_eio test_manual_mode_continues_when_rule_store_is_unavailable)
         ; test_case
             "Auto Judge survives exact-rule storage failure"
             `Quick
-            test_auto_judge_continues_when_rule_store_is_unavailable
+            (in_eio test_auto_judge_continues_when_rule_store_is_unavailable)
         ; test_case
             "invalid mode remains an explicit defer after rule storage failure"
             `Quick
-            test_invalid_mode_continues_to_explicit_defer_when_rule_store_is_unavailable
+            (in_eio test_invalid_mode_continues_to_explicit_defer_when_rule_store_is_unavailable)
         ; test_case
             "Keeper Always Allowed is independent of rule storage"
             `Quick
-            test_keeper_always_allow_does_not_depend_on_rule_store
+            (in_eio test_keeper_always_allow_does_not_depend_on_rule_store)
         ; test_case
             "workspace Always Allowed is independent of rule storage"
             `Quick
-            test_workspace_always_allow_does_not_depend_on_rule_store
+            (in_eio test_workspace_always_allow_does_not_depend_on_rule_store)
         ] )
     ]
 ;;

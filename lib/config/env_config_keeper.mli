@@ -69,7 +69,6 @@ module KeeperMemoryOs : sig
   val librarian_timeout_sec_env_key : string
   val librarian_max_tokens_env_key : string
   val librarian_runtime_id_env_key : string
-  val librarian_global_slot_env_key : string
   val gc_env_key : string
   val consolidation_env_key : string
   val consolidation_runtime_id_env_key : string
@@ -81,7 +80,6 @@ module KeeperMemoryOs : sig
   val librarian_timeout_sec_default : float
   val librarian_max_tokens_default : int
   val librarian_runtime_id_default : string option
-  val librarian_global_slot_default : int
   val gc_enabled_default : bool
   val consolidation_enabled_default : bool
   val consolidation_runtime_id_default : string option
@@ -101,7 +99,6 @@ module KeeperMemoryOs : sig
       provider max_tokens. Default: 4096, floored to 1. *)
 
   val librarian_runtime_id : unit -> string option
-  val librarian_global_slot : unit -> int
   val gc_enabled : unit -> bool
   val consolidation_enabled : unit -> bool
   val consolidation_runtime_id : unit -> string option

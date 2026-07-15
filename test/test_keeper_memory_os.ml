@@ -1020,8 +1020,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
   ; ( Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
     , fun () ->
         ignore (Env_config.KeeperMemoryOs.librarian_runtime_id () : string option) )
-  ; ( Env_config.KeeperMemoryOs.librarian_global_slot_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_global_slot () : int) )
   ; ( Env_config.KeeperMemoryOs.gc_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
   ; ( Env_config.KeeperMemoryOs.consolidation_env_key

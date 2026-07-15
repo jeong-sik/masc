@@ -84,11 +84,6 @@ val cadence_counter_entries : unit -> int
     Uses [Eio_guard.with_mutex_ro] so runtime fibers take a cooperative mutex
     while focused pre-Eio tests keep a direct single-threaded path. *)
 
-val memory_os_librarian_provider_slot_site : string
-(** OTel [site] label used when the fleet-wide librarian provider slot is busy.
-    The producer and dashboard health reader share this value so label drift
-    cannot silently hide provider-slot-busy alerts. *)
-
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
     effective prompt window is this value scaled by [cadence_turns] so skipped
@@ -184,24 +179,6 @@ val run_with_parse_retries
     retry. Pure given a pure [attempt] — the provider side effect lives in the
     [attempt] supplied by {!extract_with_provider}. *)
 
-val per_keeper_slot_capacity : unit -> int
-(** Per-keeper librarian provider slot capacity from
-    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT] (default 1, 0 disables the
-    gate). The capacity is applied per keeper, not fleet-wide. *)
-
-val with_provider_slot
-  :  keeper_id:string
-  -> clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> (unit -> 'a)
-  -> 'a option
-(** Run [f] under the per-keeper librarian provider slot — the #21230/P0-4
-    storm guard. At capacity N per keeper, the (N+1)-th concurrent entrant for
-    the same keeper returns [None] after [provider_slot_wait_sec] (drop, not
-    block); capacity 0 disables the gate so [f] always runs ([Some]). The
-    provider slot registry is guarded through [Eio_guard.with_mutex], avoiding
-    blocking stdlib locks on keeper runtime fibers. Exposed for storm-guard
-    regression coverage (#21376). *)
-
 val librarian_provider_clock_unavailable_error : string
 (** Stable error returned before provider I/O when provider-backed librarian
     extraction is called without a clock. Exposed so callers/tests do not
@@ -274,7 +251,6 @@ type operation_error =
   | Eio_context_unavailable
   | Runtime_resolution_failed of string
   | Direct_completion_unsupported
-  | Provider_slot_busy of { capacity : int }
   | Extraction_failed of extraction_error
   | Unexpected_failure of string
 
@@ -289,5 +265,6 @@ val execute_operation
 
     This boundary does not consult the retired enable/cadence policy and never
     converts failure into [unit]. Cancellation propagates; every other outcome
-    is returned to its caller. Durable owner-lane settlement is a separate
-    orchestration boundary and must not infer success from this call returning. *)
+    is returned to its caller. Production execution is claimed by the durable
+    per-Keeper owner drain before entering this function; no provider-slot drop
+    or replacement concurrency heuristic exists here. *)

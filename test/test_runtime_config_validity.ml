@@ -347,16 +347,23 @@ let with_deployment_oas_model_catalog f =
 let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
   with_deployment_oas_model_catalog @@ fun catalog ->
   let runpod_model_id = "qwen36-35b-a3b-mtp" in
-  let provider_model_ids =
-    [ "runpod_mtp/" ^ runpod_model_id; "vllm-qwen3-mtp/" ^ runpod_model_id ]
-  in
-  let expect_lookup model_id =
-    match Llm_provider.Model_catalog.lookup catalog model_id with
-    | None -> failf "expected deployment OAS catalog row for %s" model_id
+  let provider_labels = [ "runpod_mtp"; "vllm-qwen3-mtp" ] in
+  let expect_provider_lookup provider_name =
+    match
+      Llm_provider.Model_catalog.lookup_for_provider
+        catalog
+        ~provider_name
+        ~model_id:runpod_model_id
+    with
+    | None ->
+      failf
+        "expected deployment OAS catalog row for provider=%s model=%s"
+        provider_name
+        runpod_model_id
     | Some entry ->
-      check (option string) (model_id ^ " base") (Some "openai_chat")
+      check (option string) (provider_name ^ " base") (Some "openai_chat")
         entry.base_label;
-      check (option int) (model_id ^ " context") (Some 131072)
+      check (option int) (provider_name ^ " context") (Some 131072)
         entry.max_context_tokens
   in
   let expect_runpod_caps
@@ -371,18 +378,19 @@ let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_kwargs))
   in
-  List.iter expect_lookup provider_model_ids;
-  expect_lookup runpod_model_id;
+  List.iter expect_provider_lookup provider_labels;
   List.iter
-    (fun provider_model_id ->
+    (fun provider_label ->
        match
-         Llm_provider.Capabilities.for_model_id_catalog provider_model_id
+         Llm_provider.Capabilities.for_provider_model_id
+           ~allow_bare_fallback:false
+           ~provider_label
+           ~model_id:runpod_model_id
        with
        | None ->
-         failf "expected RunPod qwen3.6 capability lookup for %s"
-           provider_model_id
-       | Some caps -> expect_runpod_caps provider_model_id caps)
-    provider_model_ids;
+         failf "expected RunPod qwen3.6 capability lookup for %s" provider_label
+       | Some caps -> expect_runpod_caps provider_label caps)
+    provider_labels;
   (* Verify both the deployment transport alias and the upstream serving
      contract without bare fallback. *)
   List.iter
@@ -398,18 +406,24 @@ let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
          failf "RunPod qwen3.6 must resolve via gate path (%s)"
            provider_label
        | Some gate_caps -> expect_runpod_caps name gate_caps)
-    [ "runpod_mtp"; "vllm-qwen3-mtp" ]
+    provider_labels
 
 let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
   with_deployment_oas_model_catalog @@ fun catalog ->
   let model_id = "gemma4-coder-fable5-q4km" in
-  let provider_model_id = "runpod_rtxa6000/" ^ model_id in
-  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
-   | None -> failf "expected deployment OAS catalog row for %s" provider_model_id
+  let provider_name = "runpod_rtxa6000" in
+  (match
+     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+   with
+   | None ->
+     failf
+       "expected deployment OAS catalog row for provider=%s model=%s"
+       provider_name
+       model_id
    | Some entry ->
-     check (option string) (provider_model_id ^ " base") (Some "openai_chat")
+     check (option string) (provider_name ^ " base") (Some "openai_chat")
        entry.base_label;
-     check (option int) (provider_model_id ^ " context") (Some 262144)
+     check (option int) (provider_name ^ " context") (Some 262144)
        entry.max_context_tokens);
   match
     Llm_provider.Capabilities.for_provider_model_id
@@ -436,19 +450,25 @@ let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
 let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
   with_deployment_oas_model_catalog @@ fun catalog ->
   let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
-  let provider_model_id = "ollama/" ^ model_id in
-  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
-   | None -> failf "expected deployment OAS catalog row for %s" provider_model_id
+  let provider_name = "ollama" in
+  (match
+     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+   with
+   | None ->
+     failf
+       "expected deployment OAS catalog row for provider=%s model=%s"
+       provider_name
+       model_id
    | Some entry ->
-     check (option string) (provider_model_id ^ " base") (Some "ollama")
+     check (option string) (provider_name ^ " base") (Some "ollama")
        entry.base_label;
-     check (option int) (provider_model_id ^ " context") (Some 131072)
+     check (option int) (provider_name ^ " context") (Some 131072)
        entry.max_context_tokens;
-     check (option bool) (provider_model_id ^ " audio input") None
+     check (option bool) (provider_name ^ " audio input") None
        entry.supports_audio_input;
      check
        (option string)
-       (provider_model_id ^ " thinking token")
+       (provider_name ^ " thinking token")
        (Some "<|think|>")
        (match entry.thinking_control_format with
         | Some (Llm_provider.Capabilities.Chat_template_token token) ->
@@ -482,37 +502,63 @@ let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
 
 let test_deployment_oas_model_catalog_preserve_axes_resolve () =
   with_deployment_oas_model_catalog @@ fun catalog ->
-  let expect_catalog_field ~field_name ~get model_id expected =
-    match Llm_provider.Model_catalog.lookup catalog model_id with
-    | None -> failf "expected deployment OAS catalog row for %s" model_id
+  let expect_provider_catalog_field
+        ~field_name
+        ~get
+        ~provider_name
+        ~model_id
+        expected
+    =
+    match
+      Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+    with
+    | None ->
+      failf
+        "expected deployment OAS catalog row for provider=%s model=%s"
+        provider_name
+        model_id
     | Some entry ->
-      check (option string) (model_id ^ " " ^ field_name) (Some expected)
+      check (option string) (provider_name ^ " " ^ field_name) (Some expected)
         (get entry)
   in
-  let expect_request_side_preserve model_id =
-    expect_catalog_field
+  let expect_request_side_preserve ~provider_name ~model_id =
+    expect_provider_catalog_field
       ~field_name:"preserve_thinking_control_format"
       ~get:(fun entry -> entry.preserve_thinking_control_format)
-      model_id
+      ~provider_name
+      ~model_id
       "chat_template_kwargs_preserve_thinking";
-    match Llm_provider.Capabilities.for_model_id model_id with
-    | None -> failf "expected OAS capabilities for %s" model_id
+    match
+      Llm_provider.Capabilities.for_provider_model_id
+        ~allow_bare_fallback:false
+        ~provider_label:provider_name
+        ~model_id
+    with
+    | None ->
+      failf "expected OAS capabilities for provider=%s model=%s" provider_name model_id
     | Some caps ->
-      check bool (model_id ^ " request-side preserve capability") true
+      check bool (provider_name ^ " request-side preserve capability") true
         (Llm_provider.Capabilities.(
            caps.preserve_thinking_control_format
            = Chat_template_kwargs_preserve_thinking))
   in
-  let expect_preserve_always_replay model_id =
-    expect_catalog_field
+  let expect_preserve_always_replay ~provider_name ~model_id =
+    expect_provider_catalog_field
       ~field_name:"reasoning_replay"
       ~get:(fun entry -> entry.reasoning_replay)
-      model_id
+      ~provider_name
+      ~model_id
       "preserve_always";
-    match Llm_provider.Capabilities.for_model_id model_id with
-    | None -> failf "expected OAS capabilities for %s" model_id
+    match
+      Llm_provider.Capabilities.for_provider_model_id
+        ~allow_bare_fallback:false
+        ~provider_label:provider_name
+        ~model_id
+    with
+    | None ->
+      failf "expected OAS capabilities for provider=%s model=%s" provider_name model_id
     | Some caps ->
-      check bool (model_id ^ " reasoning replay override") true
+      check bool (provider_name ^ " reasoning replay override") true
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
@@ -544,9 +590,12 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
-  expect_request_side_preserve "runpod_mtp/qwen36-35b-a3b-mtp";
-  expect_request_side_preserve "qwen36-35b-a3b-mtp";
-  expect_preserve_always_replay "ollama_cloud/kimi-k2.7-code";
+  expect_request_side_preserve
+    ~provider_name:"runpod_mtp"
+    ~model_id:"qwen36-35b-a3b-mtp";
+  expect_preserve_always_replay
+    ~provider_name:"ollama_cloud"
+    ~model_id:"kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
 let test_repo_runtime_bindings_resolve_through_oas_catalog () =
@@ -1311,7 +1360,7 @@ let test_runtime_locality_uses_provider_schema () =
 let test_runtime_capability_gate_uses_provider_qualified_catalog () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/shared-thinking\"\n\
+     id_prefix = \"shared-thinking\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 1024\n\
@@ -2131,7 +2180,7 @@ let test_deprecated_capability_notice_warns_once_per_process () =
 let test_runtime_max_context_capability_only_uses_catalog_cap () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/cap-only-model\"\n\
+     id_prefix = \"cap-only-model\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 4096\n"
@@ -2170,7 +2219,7 @@ let test_runtime_max_context_capability_only_uses_catalog_cap () =
 let test_runtime_max_context_override_below_cap_wins_as_override () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/override-under-cap\"\n\
+     id_prefix = \"override-under-cap\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"
@@ -2210,7 +2259,7 @@ let test_runtime_max_context_override_below_cap_wins_as_override () =
 let test_runtime_max_context_override_above_cap_is_clamped () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/override-over-cap\"\n\
+     id_prefix = \"override-over-cap\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"

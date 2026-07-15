@@ -697,6 +697,7 @@
 (test
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
+ (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
  (libraries masc_test_deps))
 
 (test

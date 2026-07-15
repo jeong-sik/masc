@@ -340,147 +340,6 @@ let with_repo_oas_model_catalog f =
          Llm_provider.Model_catalog.set_global catalog;
          f catalog)
 
-let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
-  with_repo_oas_model_catalog @@ fun catalog ->
-  let runpod_model_id = "qwen36-35b-a3b-mtp" in
-  let provider_model_ids =
-    [ "runpod_mtp/" ^ runpod_model_id; "openai_compat/" ^ runpod_model_id ]
-  in
-  let expect_lookup model_id =
-    match Llm_provider.Model_catalog.lookup catalog model_id with
-    | None -> failf "expected repo OAS catalog row for %s" model_id
-    | Some entry ->
-      check (option string) (model_id ^ " base") (Some "openai_chat")
-        entry.base_label;
-      check (option int) (model_id ^ " context") (Some 131072)
-        entry.max_context_tokens
-  in
-  let expect_runpod_caps
-        name
-      (caps : Llm_provider.Capabilities.capabilities)
-    =
-    check bool (name ^ " tools") true caps.supports_tools;
-    check bool (name ^ " tool choice") true caps.supports_tool_choice;
-    check bool (name ^ " extended thinking") true
-      caps.supports_extended_thinking;
-    check bool (name ^ " chat-template thinking") true
-      (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_kwargs))
-  in
-  List.iter expect_lookup provider_model_ids;
-  expect_lookup runpod_model_id;
-  List.iter
-    (fun provider_model_id ->
-       match
-         Llm_provider.Capabilities.for_model_id_catalog provider_model_id
-       with
-       | None ->
-         failf "expected RunPod qwen3.6 capability lookup for %s"
-           provider_model_id
-       | Some caps -> expect_runpod_caps provider_model_id caps)
-    provider_model_ids;
-  (* Verify the actual boot gate path without bare fallback. current pinned OAS
-     emits openai_compat for RunPod proxy URLs; jeong-sik/oas#2374 emits
-     runpod_mtp after the pin bump. Both labels must resolve during the
-     transition window. *)
-  List.iter
-    (fun provider_label ->
-       let name = "RunPod qwen3.6 gate " ^ provider_label in
-       match
-         Llm_provider.Capabilities.for_provider_model_id
-           ~allow_bare_fallback:false
-           ~provider_label
-           ~model_id:runpod_model_id
-       with
-       | None ->
-         failf "RunPod qwen3.6 must resolve via gate path (%s)"
-           provider_label
-       | Some gate_caps -> expect_runpod_caps name gate_caps)
-    [ "runpod_mtp"; "openai_compat" ]
-
-let test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
-  with_repo_oas_model_catalog @@ fun catalog ->
-  let model_id = "gemma4-coder-fable5-q4km" in
-  let provider_model_id = "openai_compat/" ^ model_id in
-  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
-   | None -> failf "expected repo OAS catalog row for %s" provider_model_id
-   | Some entry ->
-     check (option string) (provider_model_id ^ " base") (Some "openai_chat")
-       entry.base_label;
-     check (option int) (provider_model_id ^ " context") (Some 262144)
-       entry.max_context_tokens);
-  match
-    Llm_provider.Capabilities.for_provider_model_id
-      ~allow_bare_fallback:false
-      ~provider_label:"openai_compat"
-      ~model_id
-  with
-  | None ->
-    failf
-      "live RunPod RTX A6000 Gemma runtime must resolve via raw \
-       OpenAI-compatible gate path"
-  | Some caps ->
-    check bool "RunPod RTX A6000 Gemma tools" true caps.supports_tools;
-    check bool "RunPod RTX A6000 Gemma tool choice" true
-      caps.supports_tool_choice;
-    check bool "RunPod RTX A6000 Gemma extended thinking" true
-      caps.supports_extended_thinking;
-    check bool "RunPod RTX A6000 Gemma top_k" true caps.supports_top_k;
-    check bool "RunPod RTX A6000 Gemma seed" true caps.supports_seed;
-    check bool "RunPod RTX A6000 Gemma chat-template token thinking" true
-      (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_token "<|think|>"))
-
-let test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat () =
-  with_repo_oas_model_catalog @@ fun catalog ->
-  let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
-  let provider_model_id = "ollama/" ^ model_id in
-  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
-   | None -> failf "expected repo OAS catalog row for %s" provider_model_id
-   | Some entry ->
-     check (option string) (provider_model_id ^ " base") (Some "ollama")
-       entry.base_label;
-     check (option int) (provider_model_id ^ " context") (Some 131072)
-       entry.max_context_tokens;
-     check
-       (option bool)
-       (provider_model_id ^ " audio input")
-       (Some true)
-       entry.supports_audio_input;
-     check
-       (option string)
-       (provider_model_id ^ " thinking token")
-       (Some "<|think|>")
-       (match entry.thinking_control_format with
-        | Some (Llm_provider.Capabilities.Chat_template_token token) ->
-          Some token
-        | Some _ | None -> None));
-  match
-    Llm_provider.Capabilities.for_provider_model_id
-      ~allow_bare_fallback:false
-      ~provider_label:"ollama"
-      ~model_id
-  with
-  | None -> failf "local Gemma4 E2B QAT must resolve via strict Ollama gate path"
-  | Some caps ->
-    check (option int) "Local Gemma4 E2B context" (Some 131072)
-      caps.max_context_tokens;
-    check bool "Local Gemma4 E2B tools" true caps.supports_tools;
-    check bool "Local Gemma4 E2B forced tool_choice disabled" false
-      caps.supports_tool_choice;
-    check bool "Local Gemma4 E2B image input" true caps.supports_image_input;
-    check bool "Local Gemma4 E2B audio input" true caps.supports_audio_input;
-    check bool "Local Gemma4 E2B chat-template token thinking" true
-      (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_token "<|think|>"));
-    check
-      (option string)
-      "Local Gemma4 E2B thinking token"
-      (Some "<|think|>")
-      (Llm_provider.Capabilities.thinking_control_token_for_provider_model_id
-         ~provider_label:"ollama"
-         ~model_id)
-
 let test_repo_oas_model_catalog_preserve_axes_resolve () =
   with_repo_oas_model_catalog @@ fun catalog ->
   let expect_catalog_field ~field_name ~get model_id expected =
@@ -489,20 +348,6 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
     | Some entry ->
       check (option string) (model_id ^ " " ^ field_name) (Some expected)
         (get entry)
-  in
-  let expect_request_side_preserve model_id =
-    expect_catalog_field
-      ~field_name:"preserve_thinking_control_format"
-      ~get:(fun entry -> entry.preserve_thinking_control_format)
-      model_id
-      "chat_template_kwargs_preserve_thinking";
-    match Llm_provider.Capabilities.for_model_id model_id with
-    | None -> failf "expected OAS capabilities for %s" model_id
-    | Some caps ->
-      check bool (model_id ^ " request-side preserve capability") true
-        (Llm_provider.Capabilities.(
-           caps.preserve_thinking_control_format
-           = Chat_template_kwargs_preserve_thinking))
   in
   let expect_preserve_always_replay model_id =
     expect_catalog_field
@@ -545,8 +390,6 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
-  expect_request_side_preserve "runpod_mtp/qwen36-35b-a3b-mtp";
-  expect_request_side_preserve "qwen36-35b-a3b-mtp";
   expect_preserve_always_replay "ollama_cloud/kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
@@ -649,10 +492,7 @@ let test_repo_runtime_toml_loads () =
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
       default.provider_config.connect_timeout_s;
-    check int "one local Gemma canary pin in seed" 1 (List.length assignments);
-    check (option string) "nick0cave Gemma canary pin"
-      (Some "ollama.gemma4-26b-a4b-qat")
-      (List.assoc_opt "nick0cave" assignments);
+    check int "no local Gemma canary pin in seed" 0 (List.length assignments);
     check int "Ollama Cloud canonical seed count"
       (List.length ollama_cloud_seed_cases)
       (List.length
@@ -663,58 +503,6 @@ let test_repo_runtime_toml_loads () =
     List.iter
       (assert_ollama_cloud_seed_runtime runtimes)
       ollama_cloud_seed_cases;
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "ollama.gemma4-26b-a4b-qat")
-         runtimes
-     with
-     | None -> fail "expected Gemma4 Ollama runtime in seed"
-     | Some runtime ->
-       check bool "Gemma4 thinking enabled" true runtime.model.thinking_support;
-       check (option bool) "Gemma4 thinking not preserved" (Some false)
-         runtime.model.preserve_thinking;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "Gemma4 chat-template-token thinking control" true
-            (Runtime_schema.equal_thinking_control_format
-               caps.thinking_control_format
-               (Runtime_schema.Chat_template_token "<|think|>"));
-          (* Native Ollama /api/chat never serializes tool_choice
-             (oas backend_ollama.ml:24); declaring true here would override
-             oas models.toml false while the transport drops forced tool
-             choice. *)
-          check bool "Gemma4 forced tool_choice disabled" false
-            caps.supports_tool_choice
-        | None -> fail "expected Gemma4 capabilities"));
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "ollama.gemma4-e2b-it-qat")
-         runtimes
-     with
-     | None -> fail "expected Gemma4 E2B Ollama runtime in seed"
-     | Some runtime ->
-       check string
-         "Gemma4 E2B model api name"
-         "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
-         runtime.model.api_name;
-       check (option int) "Gemma4 E2B context" (Some 131072) runtime.model.max_context;
-       check bool "Gemma4 E2B thinking enabled" true
-         runtime.model.thinking_support;
-       check (option bool) "Gemma4 E2B thinking not preserved" (Some false)
-         runtime.model.preserve_thinking;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "Gemma4 E2B chat-template-token thinking control" true
-            (Runtime_schema.equal_thinking_control_format
-               caps.thinking_control_format
-               (Runtime_schema.Chat_template_token "<|think|>"));
-          check bool "Gemma4 E2B forced tool_choice disabled" false
-            caps.supports_tool_choice;
-          check bool "Gemma4 E2B image input" true caps.supports_image_input;
-          check bool "Gemma4 E2B audio input" true caps.supports_audio_input
-        | None -> fail "expected Gemma4 E2B capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1071,10 +859,12 @@ let test_runtime_atomic_getters_are_consistent_after_init () =
     let ids1 = Runtime.get_runtime_ids () in
     let ids2 = Runtime.get_runtime_ids () in
     check (list string) "get_runtime_ids is stable" ids1 ids2;
-    check bool "runtime_id_for_keeper resolves through atomic cache"
+    (* The public seed ships no keeper assignments, so probe the atomic cache
+       through the default runtime id instead of a pinned keeper. *)
+    check bool "default runtime id resolves through atomic cache"
       true
-      (match Runtime.runtime_id_for_keeper "nick0cave" with
-       | Some id -> Option.is_some (Runtime.get_runtime_by_id id)
+      (match Runtime.get_default_runtime () with
+       | Some rt -> Option.is_some (Runtime.get_runtime_by_id rt.id)
        | None -> false)
 
 let test_runtime_toml_parses_optional_max_concurrent () =
@@ -1312,7 +1102,8 @@ let test_runtime_locality_uses_provider_schema () =
 let test_runtime_capability_gate_uses_provider_qualified_catalog () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/shared-thinking\"\n\
+     id_prefix = \"shared-thinking\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 1024\n\
      supports_tools = true\n\
@@ -2131,7 +1922,8 @@ let test_deprecated_capability_notice_warns_once_per_process () =
 let test_runtime_max_context_capability_only_uses_catalog_cap () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/cap-only-model\"\n\
+     id_prefix = \"cap-only-model\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 4096\n"
   in
@@ -2208,7 +2000,8 @@ let test_runtime_max_context_override_below_cap_wins_as_override () =
 let test_runtime_max_context_override_above_cap_is_clamped () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"ollama_cloud/override-over-cap\"\n\
+     id_prefix = \"override-over-cap\"\n\
+     provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"
   in
@@ -2314,14 +2107,6 @@ let () =
     [ ( "runtime TOML gate",
         [ test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
-          test_case "repo OAS catalog covers live RunPod MTP runtime" `Quick
-            test_repo_oas_model_catalog_covers_live_runpod_mtp;
-          test_case
-            "repo OAS catalog covers live RunPod RTX A6000 Gemma runtime"
-            `Quick test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
-          test_case
-            "repo OAS catalog covers local Gemma4 E2B QAT runtime"
-            `Quick test_repo_oas_model_catalog_covers_local_gemma4_e2b_qat;
           test_case
             "repo OAS catalog preserves typed thinking/replay axes"
             `Quick test_repo_oas_model_catalog_preserve_axes_resolve;

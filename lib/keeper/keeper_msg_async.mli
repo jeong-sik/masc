@@ -2,7 +2,7 @@
 
     Background fibers run [keeper_msg] turns. MCP tool returns
     immediately with a [request_id]; clients poll via
-    [masc_keeper_msg_result] for completion. Process memory owns only active
+    [masc_keeper_delegate_status] for completion. Process memory owns only active
     [Queued]/[Running]/[Cancelling] workers. Terminal state is removed from memory after its
     durable record moves into the terminal partition and remains queryable by
     exact request id; no hidden age-based cleanup can erase an unobserved

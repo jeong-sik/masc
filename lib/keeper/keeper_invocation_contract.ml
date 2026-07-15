@@ -255,7 +255,7 @@ let submission_to_json (request : request) outcome =
       (common reference "queued" Awaiting_execution
        @ [ ( "message"
            , `String
-               "Keeper turn accepted. The caller lane may continue; query masc_keeper_msg_result with run_ref.run_id." )
+               "Keeper turn accepted. The caller lane may continue; query masc_keeper_delegate_status with run_ref.run_id." )
          ])
   | Reconciliation_required { run_ref = reference; reason } ->
     `Assoc
@@ -263,7 +263,7 @@ let submission_to_json (request : request) outcome =
        @ [ "reason", `String reason
          ; ( "operator_instruction"
            , `String
-               "Request publication is uncertain. Query masc_keeper_msg_result with this exact run_ref.run_id; do not resubmit." )
+               "Request publication is uncertain. Query masc_keeper_delegate_status with this exact run_ref.run_id; do not resubmit." )
          ])
 ;;
 

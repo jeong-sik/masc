@@ -548,8 +548,12 @@ let test_base_path_or_cwd_anchors_relative_env_to_cwd () =
           Unix.chdir saved_cwd;
           Config_dir_resolver.reset ())
         (fun () ->
+          (* The resolver anchors relative base_path to [Sys.getcwd ()],
+             which returns the symlink-canonical cwd (on macOS the temp dir
+             [/var/…] resolves to [/private/var/…]). Canonicalize the known
+             cwd so the expected value matches the resolver's real anchor. *)
           check string "base_path_or_cwd anchors relative env under cwd"
-            (Filename.concat cwd "relative-root")
+            (Filename.concat (Unix.realpath cwd) "relative-root")
             (Config_dir_resolver.base_path_or_cwd ()))))
 
 let test_base_path_or_cwd_falls_back_to_cwd () =

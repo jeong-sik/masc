@@ -79,8 +79,8 @@ val registered_handler_schema_names : unit -> string list
 val execute_keeper_tool_call_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> publication_recovery_registry:Fs_compat.publication_recovery_registry
-  -> publication_recovery_access:Fs_compat.publication_recovery_access
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
@@ -99,14 +99,15 @@ val execute_keeper_tool_call_with_outcome
   -> executed_tool_result
 (** [meta] is the immutable metadata of the exact registry entry admitted at
     the turn-resource boundary. Dispatch never resolves the Keeper name again;
-    callers preserve the entry, recovery registry, and lane access as one
-    physical resource snapshot. *)
+    [publication_recovery] preserves that entry's exact owner identity while
+    carrying the live runtime provider. File edit/write dispatch reads the
+    provider only at the effect boundary. *)
 
 val execute_keeper_tool_call
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> publication_recovery_registry:Fs_compat.publication_recovery_registry
-  -> publication_recovery_access:Fs_compat.publication_recovery_access
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option

@@ -49,16 +49,23 @@ let with_clean_gate_runtime f =
     f
 ;;
 
-let with_publication_recovery_registry ~registry_root ~owner f =
+let with_publication_recovery ~registry_root ~meta f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  Masc_test_deps.with_publication_recovery_lane
+  Masc_test_deps.with_publication_recovery_registry
     ~sw
     ~fs:(Eio.Stdenv.fs env)
     ~registry_root
-    ~owner
-    (fun ~publication_recovery_registry ~publication_recovery_access:_ ->
-       f publication_recovery_registry)
+    (fun publication_recovery_registry ->
+       let publication_recovery =
+         Keeper_publication_recovery_availability.
+           { provider =
+               Masc_test_deps.publication_recovery_provider
+                 publication_recovery_registry
+           ; keeper_name = meta.name
+           }
+       in
+       f publication_recovery)
 ;;
 
 let with_keeper_dispatch_probe f =
@@ -67,7 +74,7 @@ let with_keeper_dispatch_probe f =
   let dispatch
         ~config:_
         ~agent_name:_
-        ~publication_recovery_registry:_
+        ~publication_recovery_provider:_
         ?sw:_
         ?clock:_
         ?proc_mgr:_
@@ -152,17 +159,17 @@ let test_keeper_effects_defer_without_dispatch () =
    | Ok _ -> ()
    | Error error -> fail ("failed to select manual Gate mode: " ^ error));
   let meta = make_meta "gate-deferred-keeper" in
-  with_publication_recovery_registry
+  with_publication_recovery
     ~registry_root:base_path
-    ~owner:meta.name
-  @@ fun publication_recovery_registry ->
+    ~meta
+  @@ fun publication_recovery ->
   with_keeper_dispatch_probe @@ fun calls ->
   List.iter
     (fun name ->
        let args = `Assoc [ "opaque", `String name ] in
-       let raw =
-         Keeper_tool_in_process_runtime.handle_masc_keeper
-           ~publication_recovery_registry
+         let raw =
+           Keeper_tool_in_process_runtime.handle_masc_keeper
+           ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta
            ~name
@@ -180,16 +187,16 @@ let test_keeper_effects_unavailable_without_dispatch () =
   let meta = make_meta "gate-unavailable-keeper" in
   let registry_root = temp_dir "keeper-gate-unavailable-registry" in
   Fun.protect ~finally:(fun () -> remove_tree registry_root) @@ fun () ->
-  with_publication_recovery_registry
+  with_publication_recovery
     ~registry_root
-    ~owner:meta.name
-  @@ fun publication_recovery_registry ->
+    ~meta
+  @@ fun publication_recovery ->
   with_keeper_dispatch_probe @@ fun calls ->
   List.iter
     (fun name ->
-       let raw =
-         Keeper_tool_in_process_runtime.handle_masc_keeper
-           ~publication_recovery_registry
+         let raw =
+           Keeper_tool_in_process_runtime.handle_masc_keeper
+           ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta
            ~name
@@ -207,17 +214,17 @@ let test_keeper_effects_allow_exact_dispatch () =
   Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
   let config = Workspace.default_config base_path in
   let meta = make_meta ~always_allow:true "gate-allow-keeper" in
-  with_publication_recovery_registry
+  with_publication_recovery
     ~registry_root:base_path
-    ~owner:meta.name
-  @@ fun publication_recovery_registry ->
+    ~meta
+  @@ fun publication_recovery ->
   with_keeper_dispatch_probe @@ fun calls ->
   List.iter
     (fun name ->
        let args = `Assoc [ "opaque", `String name ] in
-       let raw =
-         Keeper_tool_in_process_runtime.handle_masc_keeper
-           ~publication_recovery_registry
+         let raw =
+           Keeper_tool_in_process_runtime.handle_masc_keeper
+           ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta
            ~name

@@ -11,9 +11,8 @@ open Keeper_agent_prompt_metrics
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry)
-      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
       ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(ctx_work : working_context)
       ~(session : Keeper_types.session_context)
@@ -91,8 +90,7 @@ let prepare_agent_setup
     Keeper_tools_oas_bundle.make_tool_bundle
       ~config
       ~meta
-      ~publication_recovery_registry
-      ~publication_recovery_access
+      ~publication_recovery
       ~ctx_snapshot
       ~search_fn:(fun () -> !local_search_fn_ref ())
       ?continuation_channel

@@ -162,8 +162,8 @@ let make_fixture
       ~mono_clock
       clock
       ~base_path
-      ~publication_recovery_registry
-      ~publication_recovery_access
+      ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+      ~publication_recovery
       init_mode
   =
   init_keeper_bridge ();
@@ -180,7 +180,6 @@ let make_fixture
       (Agent_sdk.Types.user_msg "tool matrix memory needle")
   in
   let ctx_snapshot = ctx in
-  let meta = make_meta () in
   Masc.Keeper_registry.clear ();
   ignore (Masc.Keeper_registry.register ~base_path meta.name meta);
   ignore (Masc.Keeper_registry.register ~base_path "tool-matrix" meta);
@@ -188,8 +187,7 @@ let make_fixture
     KTO.make_tools
       ~config
       ~meta
-      ~publication_recovery_registry
-      ~publication_recovery_access
+      ~publication_recovery
       ~ctx_snapshot
       ()
   in
@@ -655,12 +653,20 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
         Unix.putenv "HOME" base_path;
         try
           let case = case_for_name schema.Masc_domain.name in
-          Masc_test_deps.with_publication_recovery_lane
+          let meta = make_meta () in
+          Masc_test_deps.with_publication_recovery_registry
             ~sw
             ~fs
             ~registry_root:base_path
-            ~owner:keeper_matrix_owner
-          @@ fun ~publication_recovery_registry ~publication_recovery_access ->
+          @@ fun publication_recovery_registry ->
+          let publication_recovery =
+            Masc.Keeper_publication_recovery_availability.
+              { provider =
+                  Masc_test_deps.publication_recovery_provider
+                    publication_recovery_registry
+              ; keeper_name = meta.name
+              }
+          in
           let fixture =
             make_fixture
               sw
@@ -670,8 +676,8 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
               ~mono_clock
               clock
               ~base_path
-              ~publication_recovery_registry
-              ~publication_recovery_access
+              ~meta
+              ~publication_recovery
               case.init_mode
           in
           case.prepare fixture;

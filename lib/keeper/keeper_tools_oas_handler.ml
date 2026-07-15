@@ -14,9 +14,8 @@ let make_keeper_tool_handler
       ~(input_schema : Yojson.Safe.t)
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry)
-      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -141,8 +140,7 @@ let make_keeper_tool_handler
               ~name
               ~config
               ~meta
-              ~publication_recovery_registry
-              ~publication_recovery_access
+              ~publication_recovery
               ~ctx_snapshot
               ?turn_sandbox_factory
               ~exec_cache

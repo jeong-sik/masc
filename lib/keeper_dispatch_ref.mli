@@ -19,10 +19,10 @@
     [?sw] / [?clock] / [?proc_mgr] / [?net] / [?mcp_session_id] for
     Eio-bound tools (masc_keeper_msg, masc_keeper_up,
     masc_keeper_sandbox_status, masc_keeper_create_from_persona).
-    [publication_recovery_registry] is an explicit process-bound capability:
-    [None] is valid only for context-free/test dispatch, while live Eio server
-    paths provide the process registry. Existing registrations accept and
-    ignore the optional Eio resources. The trailing
+    [publication_recovery_provider] is a read-only projection of the runtime's
+    live publication-recovery SSOT. Nested Keeper turns re-read it rather than
+    inheriting the caller turn's capability snapshot. Existing registrations
+    accept and ignore the optional Eio resources. The trailing
     [unit] argument is required so the OCaml compiler can determine
     when the optional defaults apply. *)
 
@@ -38,8 +38,8 @@ type external_effect_authorizer =
 val dispatch
   : (config:Workspace.config
      -> agent_name:string
-     -> publication_recovery_registry:
-          Fs_compat.publication_recovery_registry option
+     -> publication_recovery_provider:
+          Keeper_publication_recovery_availability.provider
      -> ?sw:Eio.Switch.t
      -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
      -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t

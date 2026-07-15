@@ -61,8 +61,8 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
              ; clock
              ; proc_mgr
              ; net = None
-             ; publication_recovery_registry =
-                 (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+             ; publication_recovery_provider =
+                 Mcp_server.publication_recovery_availability_provider state
              ; mcp_session_id = None
              }
            in

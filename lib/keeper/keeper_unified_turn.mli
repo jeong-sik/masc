@@ -164,8 +164,8 @@ type turn_success =
 val run_keeper_cycle
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
-  -> publication_recovery_registry:
-       Fs_compat.publication_recovery_registry option
+  -> publication_recovery_provider:
+       Keeper_publication_recovery_availability.provider
   -> observation:Keeper_world_observation.world_observation
   -> generation:int
   -> wake:Keeper_registry.wake_reason

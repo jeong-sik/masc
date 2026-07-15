@@ -1,11 +1,9 @@
 (** One structured-concurrency lane owned by one Keeper registry entry.
 
-    A cancellation context is attached as soon as the forked fiber starts,
-    before the run-scope admission boundary can wait. The child-owning lane
-    switch is nested inside that run scope. [exited] therefore resolves only
-    after every child has joined and every full-lane resource has been
-    released, while an individual cancellation can also interrupt a blocked
-    admission. *)
+    A cancellation context is attached as soon as the forked fiber starts and
+    before its child-owning lane switch is entered. [exited] therefore resolves
+    only after every child has joined and lane cleanup has completed, while an
+    individual cancellation can also interrupt the lane before [run] begins. *)
 
 type t
 
@@ -60,18 +58,16 @@ val id : t -> Id.t
 val fork :
   sw:Eio.Switch.t ->
   t ->
-  with_run_scope:((unit -> unit) -> unit) ->
   run:(Eio.Switch.t -> unit) ->
   cleanup:(outcome -> (unit, string) result) ->
   (unit, start_error) result
 (** A fork rejected by an already-cancelling Eio switch returns
     [Error (Fork_failed _)] and resolves [exited]. Cleanup and exit resolution
-    are exact-once even if switch cancellation races the child start.
-    [with_run_scope] must own every resource whose lifetime is the full Keeper
-    lane; it wraps the child-owning lane switch itself, so it returns only
-    after all lane children have joined. The separately attached cancellation
-    context makes cancellation total before admission completes without
-    recording a competing switch failure that could erase release evidence. *)
+    are exact-once even if switch cancellation races the child start. The
+    child-owning lane switch joins every lane child before cleanup. The
+    separately attached cancellation context makes cancellation total before
+    admission completes without recording a competing switch failure that
+    could erase release evidence. *)
 
 (** Resolve a lane for which the launch gate rejected the fiber before it
     started.  This keeps the join contract total for every registry entry. *)

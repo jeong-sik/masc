@@ -27,7 +27,12 @@ let publication_recovery_registry env sw config =
   let registry_root =
     Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
   in
-  match Fs_compat.open_publication_recovery_registry ~sw ~registry_root with
+  match
+    Fs_compat.open_publication_recovery_registry
+      ~sw
+      ~fs:(Eio.Stdenv.fs env)
+      ~registry_root
+  with
   | Ok registry -> registry
   | Error error ->
     Alcotest.fail
@@ -59,8 +64,9 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
     clock = Eio.Stdenv.clock env;
     proc_mgr = Some (Eio.Stdenv.process_mgr env);
     net = Some (Eio.Stdenv.net env);
-    publication_recovery_registry =
-      Some (publication_recovery_registry env sw config);
+    publication_recovery_provider =
+      Masc_test_deps.publication_recovery_provider
+        (publication_recovery_registry env sw config);
     mcp_session_id;
   }
 

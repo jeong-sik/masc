@@ -225,7 +225,7 @@ let rec request_cancel t =
   | Finalizing | Exited -> Cancel_already_exiting
 ;;
 
-let fork ~sw t ~with_run_scope ~run ~cleanup =
+let fork ~sw t ~run ~cleanup =
   match claim_start t with
   | Error _ as error -> error
   | Ok () ->
@@ -235,10 +235,9 @@ let fork ~sw t ~with_run_scope ~run ~cleanup =
          Atomic.set started true;
          let outcome =
            try
-             (* Attach a cancellation scope before [with_run_scope] can wait
-                for an external readiness promise. The actual lane switch is
-                nested inside the run scope so every lane child still joins
-                before that scope releases its resources. *)
+             (* Attach cancellation before entering the child-owning lane
+                switch. Publication resources are borrowed by each admitted
+                turn and therefore do not participate in this lifetime. *)
              Eio.Cancel.sub (fun control ->
                try
                  match attach_control t control with
@@ -247,8 +246,7 @@ let fork ~sw t ~with_run_scope ~run ~cleanup =
                    Eio.Cancel.check control
                  | Scope_attached ->
                    Eio.Cancel.check control;
-                   with_run_scope (fun () ->
-                     Eio.Switch.run (fun lane_sw -> run lane_sw));
+                   Eio.Switch.run (fun lane_sw -> run lane_sw);
                    Eio.Cancel.check control
                with
                | exn ->

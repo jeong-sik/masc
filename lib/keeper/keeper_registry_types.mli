@@ -417,10 +417,6 @@ type lifecycle_reservation_snapshot =
   ; purpose : lifecycle_transaction_purpose
   }
 
-type publication_recovery_lane_state =
-  | Publication_recovery_detached
-  | Publication_recovery_attached of Fs_compat.publication_recovery_access
-
 type registry_entry = {
   base_path : string;
       (** Canonical workspace identity from
@@ -445,10 +441,6 @@ type registry_entry = {
   lane : Keeper_lane.t;
       (** Structured-concurrency scope owned by this exact registry entry.
           Its exit promise is the authoritative lane join signal. *)
-  publication_recovery_lane_state : publication_recovery_lane_state Atomic.t;
-      (** Exact lane-lifetime recovery capability. It is attached before the
-          lane switch starts and detached only after that switch has joined
-          every child. Reads never reopen a store. *)
   done_p : done_resolution Eio.Promise.t;
   done_r : done_resolution Eio.Promise.u;
       (** Completion resolver owned by {!resolve_done}. Runtime callers must

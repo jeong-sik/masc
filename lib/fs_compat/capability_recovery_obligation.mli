@@ -296,31 +296,50 @@ val open_registry
   -> registry_root:Eio.Fs.dir_ty Eio.Path.t
   -> (registry, transition_error) result
 
-type owner_inventory_row =
-  | Valid_owner of owner
+type owner_discovery_row =
+  | Discovered_owner of owner
   | Invalid_owner_name of string
+
+type owner_inspection =
+  | Valid_owner
   | Unexpected_owner_kind of
-      { owner : owner
-      ; kind : Eio.File.Stat.kind
-      }
-  | Missing_owner_entry of owner
-  | Owner_entry_unavailable of
-      { owner : owner
-      ; error : transition_error
-      }
+      Eio.File.Stat.kind
+  | Missing_owner_entry
+  | Owner_entry_unavailable of transition_error
 
-type owner_inventory = owner_inventory_row list
-
-(** Strict, non-recursive inventory of [lanes]. [Invalid_owner_name] means the
-    entry fails the generic exact [Capability_leaf] grammar; MASC must still
-    parse every [Valid_owner] through its stricter [Keeper_name] type. Invalid
-    names, non-directory entries, disappearance races, and per-entry inspection
-    failures are preserved as rows and enumeration continues. Only failure to
-    read [lanes] itself returns [Error]. Row order is the deterministic lexical
-    order guaranteed by [Eio.Path.read_dir]. *)
-val inventory_owners
+(** Strict, non-recursive discovery of the names directly below [lanes].
+    [Invalid_owner_name] means the entry fails the generic exact
+    [Capability_leaf] grammar; MASC must still parse every [Discovered_owner]
+    through its stricter [Keeper_name] type. This operation deliberately does
+    not inspect an entry's kind, so one slow or faulty entry cannot delay
+    discovery of another. Only failure to read [lanes] itself returns [Error].
+    Row order is the deterministic lexical order guaranteed by
+    [Eio.Path.read_dir]. *)
+val discover_owners
   :  registry
-  -> (owner_inventory, transition_error) result
+  -> (owner_discovery_row list, transition_error) result
+
+(** Inspect exactly one already-discovered owner with a no-follow [Path.kind].
+    Disappearance races, unexpected kinds, and expected I/O failures are
+    returned as typed evidence for this owner only. Cancellation and truly
+    unexpected exceptions propagate with their original backtraces. *)
+val inspect_owner
+  :  registry
+  -> owner
+  -> owner_inspection
+
+type resource_release_failure =
+  { failure : failure
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type 'a store_scope_outcome =
+  | Store_scope_released of 'a
+  | Store_scope_release_failed of
+      { value : 'a
+      ; release_failure : resource_release_failure
+      }
 
 (** Idempotently complete and pin one owner's fixed three-store layout inside
     a module-owned switch, then call [f]. The intermediate lane capability is
@@ -329,20 +348,16 @@ val inventory_owners
     cancellation, and partial layout failure all close every capability owned
     by that switch. Trusted callers must not return or otherwise retain [store]
     beyond [f]. Layout failures are returned; callback exceptions and
-    cancellation propagate unchanged. A Keeper should run its whole lane
-    lifetime inside one callback rather than reopening the store per
-    publication. *)
+    cancellation propagate unchanged. When [f] returns before scope release
+    fails, [Store_scope_release_failed] preserves both the returned value and
+    exact release evidence. A Keeper should run its whole lane lifetime inside
+    one callback rather than reopening the store per publication. *)
 val with_store
   :  registry:registry
   -> owner:owner
+  -> on_release_failure:(resource_release_failure -> unit)
   -> (store -> 'a)
-  -> ('a, transition_error) result
-
-type resource_release_failure =
-  { failure : failure
-  ; exception_ : exn
-  ; backtrace : Printexc.raw_backtrace
-  }
+  -> ('a store_scope_outcome, transition_error) result
 
 type 'a existing_store_scope_outcome =
   | Existing_store_scope_released of 'a

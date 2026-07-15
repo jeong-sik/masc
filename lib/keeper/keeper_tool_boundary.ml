@@ -7,7 +7,8 @@ type 'a context = {
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
-  publication_recovery_registry : Fs_compat.publication_recovery_registry option;
+  publication_recovery_provider :
+    Keeper_publication_recovery_availability.provider;
 }
 
 let create
@@ -17,7 +18,7 @@ let create
       ~clock
       ~proc_mgr
       ~net
-      ~publication_recovery_registry
+      ~publication_recovery_provider
   =
   { config
   ; agent_name
@@ -25,7 +26,7 @@ let create
   ; clock
   ; proc_mgr
   ; net
-  ; publication_recovery_registry
+  ; publication_recovery_provider
   }
 
 let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
@@ -36,7 +37,7 @@ let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
     clock = ctx.clock;
     proc_mgr = ctx.proc_mgr;
     net = ctx.net;
-    publication_recovery_registry = ctx.publication_recovery_registry;
+    publication_recovery_provider = ctx.publication_recovery_provider;
   }
 
 let dispatch ctx ~name ~args =

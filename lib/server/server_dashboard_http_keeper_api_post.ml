@@ -712,8 +712,8 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                           clock;
                           proc_mgr = state.Mcp_server.proc_mgr;
                           net = state.Mcp_server.net;
-                          publication_recovery_registry =
-                            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
+                          publication_recovery_provider =
+                            Mcp_server.publication_recovery_availability_provider state;
                         }
                       in
                       (match
@@ -904,7 +904,8 @@ let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
     clock;
     proc_mgr = state.Mcp_server.proc_mgr;
     net = state.Mcp_server.net;
-    publication_recovery_registry = (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
+    publication_recovery_provider =
+      Mcp_server.publication_recovery_availability_provider state;
   }
 
 let meta_with_directive_paused_state

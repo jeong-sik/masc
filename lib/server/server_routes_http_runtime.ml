@@ -543,19 +543,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
             ]
         | Some state ->
           let workspace_scope = Mcp_server.workspace_scope state in
-          (match
-             Mcp_server.workspace_scope_publication_recovery_report
-               workspace_scope
-           with
-           | None ->
-             `Assoc
-               [ "status", `String "unavailable"
-               ; "operator_action_required", `Bool false
-               ; "reason", `String "non_runtime_state"
-               ]
-           | Some report ->
-             Mcp_server.publication_recovery_activation_report_to_health_yojson
-               report))
+          workspace_scope
+          |> Mcp_server.workspace_scope_publication_recovery_snapshot
+          |> Mcp_server.publication_recovery_snapshot_to_health_yojson)
   in
   let paused_keepers_json =
     compute_section ~name:"paused_keepers" ?section_timings_ref

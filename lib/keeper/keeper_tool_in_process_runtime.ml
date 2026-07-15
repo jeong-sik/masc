@@ -939,8 +939,8 @@ let handle_masc_local_runtime
    [Keeper_tool_surface] / [Keeper_tool_surface_ops] / [Keeper_status_detail] handlers
    that the registered ref delegates to. *)
 let handle_masc_keeper_with_outcome
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_provider :
+          Keeper_publication_recovery_availability.provider)
       ?sw
       ?clock
       ?proc_mgr
@@ -969,7 +969,7 @@ let handle_masc_keeper_with_outcome
   !Keeper_dispatch_ref.dispatch
       ~config
       ~agent_name:meta.agent_name
-      ~publication_recovery_registry:(Some publication_recovery_registry)
+      ~publication_recovery_provider
       ?sw
       ?clock
       ?proc_mgr
@@ -983,8 +983,8 @@ let handle_masc_keeper_with_outcome
 ;;
 
 let handle_masc_keeper
-      ~(publication_recovery_registry :
-          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_provider :
+          Keeper_publication_recovery_availability.provider)
       ?sw
       ?clock
       ?proc_mgr
@@ -1000,7 +1000,7 @@ let handle_masc_keeper
       ()
   =
   (handle_masc_keeper_with_outcome
-     ~publication_recovery_registry
+     ~publication_recovery_provider
      ?sw
      ?clock
      ?proc_mgr

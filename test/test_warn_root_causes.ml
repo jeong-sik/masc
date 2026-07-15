@@ -44,15 +44,21 @@ let require_write_ok label = function
   | Ok () -> ()
   | Error msg -> failf "%s: %s" label msg
 
-let with_publication_recovery_lane ~registry_root ~owner f =
+let with_publication_recovery_registry ~registry_root f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  Masc_test_deps.with_publication_recovery_lane
+  Masc_test_deps.with_publication_recovery_registry
     ~sw
     ~fs:(Eio.Stdenv.fs env)
     ~registry_root
-    ~owner
     f
+
+let publication_recovery_turn_context ~registry ~keeper_name =
+  Keeper_publication_recovery_availability.
+    { provider = Masc_test_deps.publication_recovery_provider registry
+    ; keeper_name
+    }
+;;
 
 let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
@@ -82,12 +88,16 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
           ~max_tokens:4000
       in
-      with_publication_recovery_lane ~registry_root:dir ~owner:meta.name
-      @@ fun ~publication_recovery_registry ~publication_recovery_access ->
+      with_publication_recovery_registry ~registry_root:dir
+      @@ fun publication_recovery_registry ->
+      let publication_recovery =
+        publication_recovery_turn_context
+          ~registry:publication_recovery_registry
+          ~keeper_name:meta.name
+      in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_snapshot ()
+          ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
         ~finally:bundle.cleanup
@@ -130,12 +140,16 @@ let test_fusion_default_descriptor_is_bundle_visible () =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
           ~max_tokens:4000
       in
-      with_publication_recovery_lane ~registry_root:dir ~owner:meta.name
-      @@ fun ~publication_recovery_registry ~publication_recovery_access ->
+      with_publication_recovery_registry ~registry_root:dir
+      @@ fun publication_recovery_registry ->
+      let publication_recovery =
+        publication_recovery_turn_context
+          ~registry:publication_recovery_registry
+          ~keeper_name:meta.name
+      in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_snapshot ()
+          ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
         ~finally:bundle.cleanup
@@ -163,12 +177,16 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test" ~max_tokens:4000
       in
-      with_publication_recovery_lane ~registry_root:dir ~owner:meta.name
-      @@ fun ~publication_recovery_registry ~publication_recovery_access ->
+      with_publication_recovery_registry ~registry_root:dir
+      @@ fun publication_recovery_registry ->
+      let publication_recovery =
+        publication_recovery_turn_context
+          ~registry:publication_recovery_registry
+          ~keeper_name:meta.name
+      in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_snapshot ()
+          ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
         ~finally:bundle.cleanup
@@ -218,12 +236,16 @@ let test_missing_current_task_reconciled_before_transition_hint () =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
           ~max_tokens:4000
       in
-      with_publication_recovery_lane ~registry_root:dir ~owner:meta.name
-      @@ fun ~publication_recovery_registry ~publication_recovery_access ->
+      with_publication_recovery_registry ~registry_root:dir
+      @@ fun publication_recovery_registry ->
+      let publication_recovery =
+        publication_recovery_turn_context
+          ~registry:publication_recovery_registry
+          ~keeper_name:meta.name
+      in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_snapshot ()
+          ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
         ~finally:bundle.cleanup
@@ -261,12 +283,16 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
           ~max_tokens:4000
       in
-      with_publication_recovery_lane ~registry_root:dir ~owner:meta.name
-      @@ fun ~publication_recovery_registry ~publication_recovery_access ->
+      with_publication_recovery_registry ~registry_root:dir
+      @@ fun publication_recovery_registry ->
+      let publication_recovery =
+        publication_recovery_turn_context
+          ~registry:publication_recovery_registry
+          ~keeper_name:meta.name
+      in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
-          ~config ~meta ~publication_recovery_registry
-          ~publication_recovery_access ~ctx_snapshot ()
+          ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
         ~finally:bundle.cleanup

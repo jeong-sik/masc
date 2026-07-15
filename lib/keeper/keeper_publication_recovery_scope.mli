@@ -1,49 +1,28 @@
-(** Binds one durable publication-recovery store to one Keeper lane lifetime. *)
+(** Resolves the exact Keeper entry and carries a live publication provider
+    into one admitted turn without opening a recovery store. *)
 
 type failure =
-  | Registry_not_provided
   | Registry_entry_not_found of
       { base_path : string
       ; keeper_name : string
       }
   | Registry_entry_unhealthy of Keeper_registry.registry_entry_health
-  | Lane_open_failed of Fs_compat.publication_recovery_lane_open_error
-  | Access_already_attached
-  | Access_not_attached
-  | Body_and_detach_failed of
-      { body : exn
-      ; body_backtrace : Printexc.raw_backtrace
-      ; detach : failure
-      }
-
-exception Scope_failed of failure
-exception Scope_detach_failed_on_cancellation of exn * failure
 
 val failure_to_string : failure -> string
 
 type turn_resources =
   { entry : Keeper_registry.registry_entry
-  ; registry : Fs_compat.publication_recovery_registry
-  ; access : Fs_compat.publication_recovery_access
+  ; publication_recovery :
+      Keeper_publication_recovery_availability.turn_context
   }
 
 val resolve_turn_resources
-  :  registry:Fs_compat.publication_recovery_registry option
+  :  provider:Keeper_publication_recovery_availability.provider
   -> base_path:string
   -> keeper_name:string
   -> (turn_resources, failure) result
-(** Performs one exact registry-entry lookup at the admitted turn boundary.
-    The returned immutable capabilities are then threaded through the turn;
-    individual tools neither repeat the lookup nor reopen the lane store. *)
-
-val with_lane_scope :
-  registry:Fs_compat.publication_recovery_registry option ->
-  entry:Keeper_registry.registry_entry ->
-  (unit -> 'a) ->
-  'a
-(** [with_lane_scope] first awaits exactly [entry.name]'s one-shot
-    reconciliation settlement, then opens that lane store, publishes its opaque
-    access on the exact registry entry, runs [body], detaches the access, and
-    only then allows the store to close. It never waits on another owner, a
-    timeout, or a global activation barrier. Cancellation and a simultaneous
-    detach invariant failure retain both causes. *)
+(** Performs only the exact in-memory Keeper registry lookup. The provider is
+    not read here. File edit/write dispatch re-reads it at the moment of the
+    effect and executes the write inside [with_publication_recovery_lane]'s
+    callback. Consequently an idle, read-only, or non-file turn performs no
+    publication-recovery filesystem acquisition. *)

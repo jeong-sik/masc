@@ -476,8 +476,6 @@ let register_with_state_result
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; lane = Keeper_lane.create ()
-    ; publication_recovery_lane_state =
-        Atomic.make Publication_recovery_detached
     ; done_p
     ; done_r
     ; restart_count = 0
@@ -685,8 +683,6 @@ let register_restarting ~base_path name meta
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; lane = Keeper_lane.create ()
-    ; publication_recovery_lane_state =
-        Atomic.make Publication_recovery_detached
     ; done_p
     ; done_r
     ; restart_count = 0

@@ -11,10 +11,25 @@ type error =
       { expected : int
       ; actual : int
       }
+  | Supersession_phase_mismatch of Keeper_shutdown_types.t
+  | Supersession_intent_mismatch of Keeper_shutdown_types.t
+  | Invalid_supersession_actor of string
 
 type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
   | Blocked_persisted of Keeper_shutdown_types.t
+
+type supersede_blocked_result =
+  | Superseded_persisted of Keeper_shutdown_types.t
+  | Superseded_already_persisted of Keeper_shutdown_types.t
+
+type operator_metadata_supersession_token =
+  { base_path : string
+  ; keeper_name : string
+  ; operation_id : Operation_id.t
+  ; expected_revision : int
+  ; actor : string
+  }
 
 type corrupt_record =
   { keeper_name : string
@@ -43,6 +58,19 @@ let error_to_string = function
       "shutdown operation revision conflict: expected %d, actual %d"
       expected
       actual
+  | Supersession_phase_mismatch operation ->
+    Printf.sprintf
+      "shutdown operation is not an operator-supersedable blocked operation: keeper=%s operation=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+  | Supersession_intent_mismatch operation ->
+    Printf.sprintf
+      "shutdown operation cleanup intent cannot be superseded by metadata update: keeper=%s operation=%s reason=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+      (cleanup_reason_label operation.cleanup_intent.reason)
+  | Invalid_supersession_actor detail ->
+    Printf.sprintf "shutdown supersession actor is invalid: %s" detail
 ;;
 
 type operation_lock =
@@ -240,6 +268,14 @@ let finalization_evidence_to_json evidence =
     ]
 ;;
 
+let supersession_to_json = function
+  | Operator_metadata_update { actor } ->
+    `Assoc
+      [ "kind", `String "operator_metadata_update"
+      ; "actor", `String actor
+      ]
+;;
+
 let lane_ownership_to_json = function
   | Registered_lane lane_id ->
     `Assoc
@@ -292,6 +328,11 @@ let phase_to_json = function
     `Assoc
       [ "kind", `String "blocked"
       ; "failure", failure_to_json failure
+      ]
+  | Superseded supersession ->
+    `Assoc
+      [ "kind", `String "superseded"
+      ; "supersession", supersession_to_json supersession
       ]
 ;;
 
@@ -511,14 +552,17 @@ let completion_receipt_of_json json =
 
 type wire_schema =
   | Current_schema
+  | Shutdown_schema_v5
   | Lifecycle_schema_v4
   | Shutdown_schema_v3
 
+let shutdown_schema_v5 = 5
 let lifecycle_schema_v4 = 4
 let shutdown_schema_v3 = 3
 
 let wire_schema_of_version = function
   | version when Int.equal version schema_version -> Ok Current_schema
+  | version when Int.equal version shutdown_schema_v5 -> Ok Shutdown_schema_v5
   | version when Int.equal version lifecycle_schema_v4 -> Ok Lifecycle_schema_v4
   | version when Int.equal version shutdown_schema_v3 -> Ok Shutdown_schema_v3
   | version ->
@@ -529,7 +573,8 @@ let wire_schema_of_version = function
 
 let completion_action_supported_by_wire_schema wire_schema action =
   match wire_schema, action with
-  | Current_schema, (Dead_tombstone_reaped | Dashboard_keeper_purged) ->
+  | (Current_schema | Shutdown_schema_v5),
+    (Dead_tombstone_reaped | Dashboard_keeper_purged) ->
     true
   | Lifecycle_schema_v4, Dead_tombstone_reaped -> true
   | Shutdown_schema_v3, Dead_tombstone_reaped -> true
@@ -560,6 +605,7 @@ let finalization_evidence_of_json ~wire_schema json =
   let* accumulator_dropped =
     match wire_schema with
     | Current_schema
+    | Shutdown_schema_v5
     | Lifecycle_schema_v4 -> bool "accumulator_dropped" json
     | Shutdown_schema_v3 ->
       (* Schema 3 dropped the in-memory accumulator exactly when its
@@ -578,6 +624,18 @@ let finalization_evidence_of_json ~wire_schema json =
     ; accumulator_dropped
     ; completion
     }
+;;
+
+let supersession_of_json json =
+  let* kind = string "kind" json in
+  match kind with
+  | "operator_metadata_update" ->
+    let* actor = string "actor" json in
+    Ok (Operator_metadata_update { actor })
+  | value ->
+    Error
+      (Decode_error
+         (Printf.sprintf "unknown shutdown supersession: %S" value))
 ;;
 
 let phase_of_json ~wire_schema json =
@@ -606,6 +664,18 @@ let phase_of_json ~wire_schema json =
     let* failure_json = assoc "failure" json in
     let* failure = failure_of_json failure_json in
     Ok (Blocked failure)
+  | "superseded" ->
+    (match wire_schema with
+     | Current_schema ->
+       let* supersession_json = assoc "supersession" json in
+       let* supersession = supersession_of_json supersession_json in
+       Ok (Superseded supersession)
+     | Shutdown_schema_v5
+     | Lifecycle_schema_v4
+     | Shutdown_schema_v3 ->
+       Error
+         (Decode_error
+            "shutdown supersession is not valid before shutdown schema 6"))
   | value -> Error (Decode_error (Printf.sprintf "unknown shutdown phase: %S" value))
 ;;
 
@@ -683,6 +753,7 @@ let cleanup_reason_of_json json =
 let lane_ownership_of_versioned_json ~wire_schema json =
   match wire_schema with
   | Current_schema
+  | Shutdown_schema_v5
   | Lifecycle_schema_v4 ->
     let* lane_ownership_json = assoc "lane_ownership" json in
     lane_ownership_of_json lane_ownership_json
@@ -695,7 +766,8 @@ let lane_ownership_of_versioned_json ~wire_schema json =
 
 let cleanup_reason_of_versioned_json ~wire_schema cleanup_json =
   match wire_schema with
-  | Current_schema ->
+  | Current_schema
+  | Shutdown_schema_v5 ->
     let* cleanup_reason_json = assoc "reason" cleanup_json in
     cleanup_reason_of_json cleanup_reason_json
   | Lifecycle_schema_v4 ->
@@ -784,7 +856,13 @@ let contextualize_error operation_path = function
   | Io_error detail -> Io_error (Printf.sprintf "%s: %s" operation_path detail)
   | Identity_mismatch detail ->
     Identity_mismatch (Printf.sprintf "%s: %s" operation_path detail)
-  | (Already_exists _ | Not_found _ | Invalid_operation _ | Revision_conflict _) as error ->
+  | ( Already_exists _
+    | Not_found _
+    | Invalid_operation _
+    | Revision_conflict _
+    | Supersession_phase_mismatch _
+    | Supersession_intent_mismatch _
+    | Invalid_supersession_actor _ ) as error ->
     error
 ;;
 
@@ -875,6 +953,103 @@ let replace ~config ~expected_revision operation =
                 (Operation_id.to_string operation.operation_id))))
 ;;
 
+let prepare_operator_metadata_supersession
+      ~config
+      ~keeper_name
+      ~operation_id
+      ~actor
+  =
+  let base_path =
+    Keeper_registry_types.canonical_base_path_exn config.Workspace.base_path
+  in
+  let* actor =
+    Workspace.validate_agent_name actor
+    |> Result.map_error (fun detail -> Invalid_supersession_actor detail)
+  in
+  let* operation_path = path ~config ~keeper_name operation_id in
+  match
+    with_operation_lock ~access:Read operation_path (fun () ->
+      load_path_unlocked ~operation_path ~keeper_name ~operation_id)
+  with
+  | Error _ as error -> error
+  | Ok
+      ({ phase = Blocked _
+       ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
+       ; revision
+       ; _ } as _operation) ->
+    Ok { base_path; keeper_name; operation_id; expected_revision = revision; actor }
+  | Ok
+      ({ phase = Superseded (Operator_metadata_update _)
+       ; revision
+       ; _ } as _operation) ->
+    Ok { base_path; keeper_name; operation_id; expected_revision = revision; actor }
+  | Ok ({ phase = Blocked _; _ } as operation) ->
+    Error (Supersession_intent_mismatch operation)
+  | Ok operation -> Error (Supersession_phase_mismatch operation)
+;;
+
+let supersession_token_operation_id token = token.operation_id
+
+let supersede_blocked_operator_stop ~config ~token ~now =
+  let config_base_path =
+    Keeper_registry_types.canonical_base_path_exn config.Workspace.base_path
+  in
+  if not (String.equal config_base_path token.base_path)
+  then
+    Error
+      (Identity_mismatch
+         (Printf.sprintf
+            "supersession token BasePath mismatch: expected=%s actual=%s"
+            token.base_path
+            config_base_path))
+  else
+  let operation_path =
+    path
+      ~config
+      ~keeper_name:token.keeper_name
+      token.operation_id
+  in
+  let* operation_path = operation_path in
+  with_keeper_inventory_lock
+    ~access:Write
+    ~config
+    ~keeper_name:token.keeper_name
+    (fun () ->
+       with_operation_lock ~access:Write operation_path (fun () ->
+         match
+           load_path_unlocked
+             ~operation_path
+             ~keeper_name:token.keeper_name
+             ~operation_id:token.operation_id
+         with
+         | Error _ as error -> error
+         | Ok ({ phase = Superseded (Operator_metadata_update _); _ } as existing) ->
+           Ok (Superseded_already_persisted existing)
+         | Ok
+             ({ phase = Blocked _
+              ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
+              ; _ } as existing) ->
+           if not (Int.equal existing.revision token.expected_revision)
+           then
+             Error
+               (Revision_conflict
+                  { expected = token.expected_revision; actual = existing.revision })
+           else
+             let superseded =
+               { existing with
+                 revision = existing.revision + 1
+               ; phase = Superseded (Operator_metadata_update { actor = token.actor })
+               ; updated_at = now ()
+               }
+             in
+             Keeper_fs.save_json_atomic operation_path (to_json superseded)
+             |> Result.map_error (fun detail -> Io_error detail)
+             |> Result.map (fun () -> Superseded_persisted superseded)
+         | Ok ({ phase = Blocked _; _ } as existing) ->
+           Error (Supersession_intent_mismatch existing)
+         | Ok existing -> Error (Supersession_phase_mismatch existing)))
+;;
+
 let persist_blocked_latest ~config ~identity ~failure ~now =
   let* () = validate_operation identity in
   let* operation_path = path_for_operation ~config identity in
@@ -897,7 +1072,7 @@ let persist_blocked_latest ~config ~identity ~failure ~now =
            Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
          | Ok existing ->
            (match existing.phase with
-            | Finalized _ | Blocked _ | Reconciliation_required _ ->
+            | Finalized _ | Blocked _ | Reconciliation_required _ | Superseded _ ->
               Ok (State_preserved existing)
             | Prepared | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
               let blocked =

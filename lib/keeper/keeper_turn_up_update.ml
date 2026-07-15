@@ -268,18 +268,39 @@ let update_keeper ?(preserve_prompt_defaults = false)
                lifecycle action, so it owns pause/resume fields while taking
                cumulative counters as [max latest caller]. *)
             (match
-               write_meta_with_merge
-                 ~merge:Keeper_meta_merge.monotonic_usage_counters
-                 ctx.config
-                 updated
+               Keeper_shutdown_supersession.preflight
+                 ~config:ctx.config
+                 ~keeper_name:updated.name
+                 ~actor:ctx.agent_name
              with
-             | Error e ->
-                 Otel_metric_store.inc_counter
-                   Keeper_metrics.(to_string WriteMetaFailures)
-                   ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
-                   ();
-                 tool_result_error e
-             | Ok () ->
+             | Error error ->
+               tool_result_error
+                 (Keeper_shutdown_supersession.error_to_string error)
+             | Ok supersession ->
+               (match
+                  write_meta_with_merge
+                    ~merge:Keeper_meta_merge.monotonic_usage_counters
+                    ctx.config
+                    updated
+                with
+                | Error e ->
+                    Otel_metric_store.inc_counter
+                      Keeper_metrics.(to_string WriteMetaFailures)
+                      ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
+                      ();
+                    tool_result_error e
+                | Ok () ->
+                  (match
+                     Keeper_shutdown_supersession.commit_after_metadata_update
+                       ~config:ctx.config
+                       supersession
+                   with
+                   | Error error ->
+                     tool_result_error
+                       (Keeper_shutdown_supersession.error_to_string error)
+                   | Ok
+                       ( Keeper_shutdown_supersession.No_shutdown_admission
+                       | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
                (* RFC-0315 P3 W0: goals that newly entered active_goal_ids
                   wake the keeper once at the assignment edge. Enqueue is
                   durable, so the keepalive restart below delivers it on the
@@ -315,4 +336,4 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   tool_result_error
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected)))))
+                       (start_keepalive_outcome_to_string rejected)))))))

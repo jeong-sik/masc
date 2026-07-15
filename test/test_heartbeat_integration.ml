@@ -15,6 +15,7 @@ open Alcotest
 module R = Masc.Keeper_registry
 module Workspace = Masc.Workspace
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_profile_defaults = Masc.Keeper_types_profile_defaults
 module Sup = Masc.Keeper_supervisor
 module KT = Keeper_types
 module KSM = Keeper_state_machine
@@ -29,6 +30,9 @@ module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_runtime = Masc.Keeper_shutdown_runtime
+module Shutdown_supersession = Masc.Keeper_shutdown_supersession
+module Turn_up_args = Masc.Keeper_turn_up_args
+module Turn_up_update = Masc.Keeper_turn_up_update
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_types_support = Masc.Keeper_types_support
@@ -234,6 +238,13 @@ let shutdown_schema4_fixture (operation : Shutdown_types.t) =
   match Shutdown_store.to_json operation with
   | `Assoc fields ->
     `Assoc (replace_assoc_field "schema_version" (`Int 4) fields)
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
+let shutdown_schema5_fixture (operation : Shutdown_types.t) =
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    `Assoc (replace_assoc_field "schema_version" (`Int 5) fields)
   | _ -> fail "shutdown JSON codec did not return an object"
 ;;
 
@@ -1124,7 +1135,8 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
-       | Shutdown_types.Blocked _ ->
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Superseded _ ->
          fail "unhandled worker failure did not persist typed blocked evidence");
       Shutdown_runtime.For_testing.persist_unhandled_failure
         ~now:Masc_domain.now_iso
@@ -1164,6 +1176,378 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       | Error (Shutdown_store.Decode_error _) -> ()
       | Error error -> fail (Shutdown_store.error_to_string error)
       | Ok _ -> fail "unsupported shutdown schema was accepted")
+
+let test_operator_update_supersedes_exact_blocked_shutdown () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir "shutdown-supersession" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let operation ~name ~reason ~phase =
+        let meta = make_meta name in
+        let now = Masc_domain.now_iso () in
+        { Shutdown_types.schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id = Shutdown_types.Operation_id.generate ()
+        ; keeper_name = name
+        ; lane_ownership = Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "tester"
+        ; cleanup_intent = { reason; remove_session = false }
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase
+        ; created_at = now
+        ; updated_at = now
+        }
+      in
+      let blocked_phase =
+        Shutdown_types.Blocked
+          { stage = Shutdown_types.Record_update
+          ; detail = "operator repair required"
+          }
+      in
+      let blocked =
+        operation
+          ~name:"superseded-keeper"
+          ~reason:Shutdown_types.Operator_stop_retain_meta
+          ~phase:blocked_phase
+      in
+      (match Shutdown_store.persist_new ~config blocked with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let blocked_path =
+        match
+          Shutdown_store.path
+            ~config
+            ~keeper_name:blocked.keeper_name
+            blocked.operation_id
+        with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match
+         Keeper_fs.save_json_atomic
+           blocked_path
+           (shutdown_schema5_fixture blocked)
+       with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let migrated_v5 =
+        match
+          Shutdown_store.load
+            ~config
+            ~keeper_name:blocked.keeper_name
+            blocked.operation_id
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check int
+        "schema 5 blocked record decodes at current schema"
+        Shutdown_types.schema_version
+        migrated_v5.schema_version;
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:blocked.keeper_name
+           ~operation_id:blocked.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "fixture admission was already reserved");
+      let token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:blocked.keeper_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      let superseded =
+        match Shutdown_supersession.commit_after_metadata_update ~config token with
+        | Ok (Shutdown_supersession.Shutdown_superseded operation) -> operation
+        | Ok Shutdown_supersession.No_shutdown_admission ->
+          fail "blocked admission was not superseded"
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      check int
+        "schema 5 CAS write upgrades the durable record to schema 6"
+        6
+        superseded.schema_version;
+      (match superseded.phase with
+       | Shutdown_types.Superseded
+           (Shutdown_types.Operator_metadata_update { actor }) ->
+         check string "supersession preserves validated operator actor" "tester" actor
+       | _ -> fail "blocked shutdown did not reach typed Superseded");
+      let released =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:blocked.keeper_name
+      in
+      check (option string)
+        "exact superseded admission is released"
+        None
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           released.snapshot_shutdown_operation_id);
+      let persisted_json =
+        Fs_compat.load_file blocked_path |> Yojson.Safe.from_string
+      in
+      let persisted_schema =
+        match persisted_json with
+        | `Assoc fields ->
+          (match List.assoc_opt "schema_version" fields with
+           | Some (`Int version) -> version
+           | _ -> fail "persisted supersession omitted schema_version")
+        | _ -> fail "persisted supersession is not an object"
+      in
+      check int "supersession wire schema is upgraded" 6 persisted_schema;
+      let invalid_superseded =
+        { superseded with
+          operation_id = Shutdown_types.Operation_id.generate ()
+        ; cleanup_intent =
+            { reason = Shutdown_types.Operator_stop_remove_meta
+            ; remove_session = false
+            }
+        }
+      in
+      (match Shutdown_store.persist_new ~config invalid_superseded with
+       | Error
+           (Shutdown_store.Invalid_operation
+             (Shutdown_types.Superseded_cleanup_reason_mismatch _)) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "Superseded accepted a non-retained cleanup intent");
+      (match
+         superseded
+         |> shutdown_schema5_fixture
+         |> Shutdown_store.of_json
+       with
+       | Error (Shutdown_store.Decode_error _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok _ -> fail "schema 5 accepted the schema 6 superseded phase");
+      (match
+         Masc.Keeper_turn_admission.restore_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:blocked.keeper_name
+           ~operation_id:blocked.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_restored
+       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
+         fail "crash-window admission fixture could not be restored");
+      let retry_token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:blocked.keeper_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      (match
+         Shutdown_supersession.commit_after_metadata_update
+           ~config
+           retry_token
+       with
+       | Ok (Shutdown_supersession.Shutdown_superseded _) -> ()
+       | Ok Shutdown_supersession.No_shutdown_admission ->
+         fail "idempotent supersession lost the exact admission owner"
+       | Error error -> fail (Shutdown_supersession.error_to_string error));
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      let inventory =
+        match Shutdown_store.scan_inventory ~config with
+        | Ok inventory -> inventory
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match Shutdown_runtime.restore_inventory_admission ~config inventory with
+       | Ok { blocked_keeper_names = []; _ } -> ()
+       | Ok restored ->
+         failf
+           "Superseded boot restore fenced keepers: %s"
+           (String.concat "," restored.blocked_keeper_names)
+       | Error detail -> fail detail);
+
+      let conflict =
+        operation
+          ~name:"supersession-conflict"
+          ~reason:Shutdown_types.Operator_stop_retain_meta
+          ~phase:blocked_phase
+      in
+      (match Shutdown_store.persist_new ~config conflict with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      ignore
+        (Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:conflict.keeper_name
+           ~operation_id:conflict.operation_id
+          : Masc.Keeper_turn_admission.begin_shutdown_result);
+      let conflict_token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:conflict.keeper_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      let concurrently_advanced =
+        { conflict with
+          revision = conflict.revision + 1
+        ; phase =
+            Shutdown_types.Blocked
+              { stage = Shutdown_types.Meta_update
+              ; detail = "new durable failure"
+              }
+        }
+      in
+      (match
+         Shutdown_store.replace
+           ~config
+           ~expected_revision:conflict.revision
+           concurrently_advanced
+       with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Shutdown_supersession.commit_after_metadata_update
+           ~config
+           conflict_token
+       with
+       | Error
+           (Shutdown_supersession.Metadata_committed_supersession_failed
+             (Shutdown_store.Revision_conflict _)) -> ()
+       | Error error -> fail (Shutdown_supersession.error_to_string error)
+       | Ok _ -> fail "stale preflight token superseded a newer revision");
+      let still_fenced =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:conflict.keeper_name
+      in
+      check (option string)
+        "failed supersession leaves exact admission fenced"
+        (Some (Shutdown_types.Operation_id.to_string conflict.operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           still_fenced.snapshot_shutdown_operation_id);
+
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      let live_name = "update-blocked-admission" in
+      let live_meta = { (make_meta live_name) with paused = true } in
+      (match Keeper_meta_store.write_meta config live_meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let live_blocked =
+        { (operation
+             ~name:live_name
+             ~reason:Shutdown_types.Operator_stop_retain_meta
+             ~phase:blocked_phase) with
+          trace_id = live_meta.runtime.trace_id
+        ; generation = live_meta.runtime.generation
+        }
+      in
+      (match Shutdown_store.persist_new ~config live_blocked with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      ignore
+        (Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:live_name
+           ~operation_id:live_blocked.operation_id
+          : Masc.Keeper_turn_admission.begin_shutdown_result);
+      let profile_defaults =
+        { Keeper_profile_defaults.empty_keeper_profile_defaults with
+          sandbox_profile = Some live_meta.sandbox_profile
+        }
+      in
+      let parsed : Turn_up_args.parsed_args =
+        { name = live_name
+        ; compaction_profile_opt = None
+        ; runtime_id_opt = None
+        ; allowed_paths_opt = None
+        ; autoboot_enabled_opt = None
+        ; mention_targets_opt = None
+        ; active_goal_ids_opt = None
+        ; max_context_override_opt = None
+        ; max_context_override_present = false
+        ; proactive_enabled_opt = None
+        ; compaction_ratio_gate_opt = None
+        ; compaction_message_gate_opt = None
+        ; compaction_token_gate_opt = None
+        ; compaction_cooldown_sec_opt = None
+        ; sandbox_profile_opt = None
+        ; network_mode_opt = None
+        ; auto_handoff_opt = None
+        ; handoff_threshold_opt = None
+        ; handoff_cooldown_sec_opt = None
+        ; instructions_arg = Some "new operator intent"
+        ; profile_defaults
+        ; instructions_opt = profile_defaults.instructions
+        }
+      in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      let result = Turn_up_update.update_keeper ctx parsed live_meta in
+      check bool
+        "keeper_up restarts despite the stale blocked admission"
+        true
+        (Keeper_types_profile.tool_result_success result);
+      let live_operation =
+        match
+          Shutdown_store.load
+            ~config
+            ~keeper_name:live_name
+            live_blocked.operation_id
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match live_operation.phase with
+       | Shutdown_types.Superseded
+           (Shutdown_types.Operator_metadata_update { actor = "tester" }) -> ()
+       | _ -> fail "update_keeper did not supersede the blocked operator stop");
+      let live_after =
+        match Keeper_meta_store.read_meta config live_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "update_keeper removed retained metadata"
+        | Error detail -> fail detail
+      in
+      check bool "update_keeper persisted the new resume intent" false live_after.paused;
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           live_name
+          : Masc.Keeper_keepalive.joined_stop_result))
 
 let test_keeper_shutdown_store_isolates_corrupt_owner () =
   Eio_main.run @@ fun env ->
@@ -1508,7 +1892,8 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
-       | Shutdown_types.Blocked _ -> fail "idle lane did not reach Joined_idle");
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Superseded _ -> fail "idle lane did not reach Joined_idle");
       check bool
         "shutdown operation records lane join evidence"
         true
@@ -1569,7 +1954,8 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
-       | Shutdown_types.Blocked _ -> fail "not-started lane did not reach Joined_idle");
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Superseded _ -> fail "not-started lane did not reach Joined_idle");
       (match Lane.peek_exit entry.lane with
        | Some { outcome = Lane.Shutdown_before_start; cleanup_error = None } -> ()
        | Some _ -> fail "not-started lane recorded the wrong exit evidence"
@@ -1712,7 +2098,8 @@ let test_keeper_shutdown_finalizes_idle_operation () =
        | Shutdown_types.Finalizing_tasks _
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
-       | Shutdown_types.Blocked _ -> fail "shutdown did not reach Finalized");
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Superseded _ -> fail "shutdown did not reach Finalized");
       (match
          Masc.Keeper_turn_admission.begin_shutdown
            ~base_path:config.base_path
@@ -1859,7 +2246,8 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Blocked _
-       | Shutdown_types.Finalized _ ->
+       | Shutdown_types.Finalized _
+       | Shutdown_types.Superseded _ ->
          fail "completion outage did not retain a pending durable receipt");
       check int "pending receipt did not fire hook" 0 !hook_deliveries;
       (match
@@ -1927,7 +2315,8 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Blocked _
-       | Shutdown_types.Finalized _ ->
+       | Shutdown_types.Finalized _
+       | Shutdown_types.Superseded _ ->
           fail "dead tombstone completion receipt was not delivered");
       check int "Tombstone_reaped delivered once" 1 !hook_deliveries;
       (match Masc.Agent_sdk_metrics_bridge.drain completion_subscription with
@@ -2870,6 +3259,8 @@ let () =
         test_lane_cancel_before_start_is_joinable;
       test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
+      test_case "operator update supersedes exact blocked shutdown" `Quick
+        test_operator_update_supersedes_exact_blocked_shutdown;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
       test_case "dashboard purge resolution is fail closed" `Quick

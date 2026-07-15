@@ -340,6 +340,86 @@ let test_regular_post_turn_does_not_auto_compact () =
     check bool "checkpoint messages retained exactly" true
       (retained.messages = checkpoint.messages)
 
+let test_configured_compaction_wakes_only_owner_and_preserves_ready_work () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let owner = make_meta ~name:"configured-owner" ~trace_id:"configured-owner" () in
+  let owner =
+    { owner with
+      compaction =
+        { owner.compaction with
+          ratio_gate = 2.0
+        ; message_gate = 2
+        ; token_gate = 0
+        ; cooldown_sec = 0
+        }
+    }
+  in
+  let peer = make_meta ~name:"configured-peer" ~trace_id:"configured-peer" () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.unregister ~base_path owner.name;
+      Masc.Keeper_registry.unregister ~base_path peer.name;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let owner_entry = Masc.Keeper_registry.register ~base_path owner.name owner in
+      let peer_entry = Masc.Keeper_registry.register ~base_path peer.name peer in
+      Atomic.set owner_entry.fiber_wakeup false;
+      Atomic.set peer_entry.fiber_wakeup false;
+      (match
+         Masc.Keeper_unified_turn_success.For_testing.enqueue_configured_compaction
+           ~base_path
+           ~meta:owner
+           ~message_count:3
+           ~context_tokens:None
+           ~max_context:8192
+           ~now:100.0
+       with
+       | Ok (Some (Compaction_trigger.Message_count { count = 3; threshold = 2 })) -> ()
+       | Ok _ -> fail "configured message gate did not preserve its exact trigger"
+       | Error detail -> failf "configured compaction enqueue failed: %s" detail);
+      check bool "owner lane wakes" true (Atomic.get owner_entry.fiber_wakeup);
+      check bool "peer lane stays asleep" false (Atomic.get peer_entry.fiber_wakeup);
+      let ready : Queue.stimulus =
+        { post_id = "ready-behind-configured-compaction"
+        ; urgency = Immediate
+        ; arrived_at = 101.0
+        ; payload = Bootstrap
+        }
+      in
+      (match Registry_queue.enqueue_stimulus_durable_result ~base_path owner.name ready with
+       | Stimulus_enqueued -> ()
+       | Stimulus_already_present -> fail "fresh ready stimulus was deduplicated"
+       | Stimulus_storage_error detail -> fail detail);
+      let lease =
+        Registry_queue.claim_when_result
+          ~base_path
+          owner.name
+          ~claimed_at:102.0
+          ~ready:(fun stimulus ->
+            match stimulus.Queue.payload with
+            | Bootstrap -> true
+            | _ -> false)
+        |> Result.get_ok
+        |> Option.get
+      in
+      (match Registry_queue.lease_stimuli lease with
+       | [ { Queue.payload = Bootstrap; _ } ] -> ()
+       | _ -> fail "configured compaction blocked unrelated ready work");
+      Registry_queue.settle_result
+        ~base_path
+        owner.name
+        ~settled_at:103.0
+        ~lease
+        ~settlement:Ack
+      |> Result.get_ok
+      |> ignore;
+      match Registry_queue.snapshot ~base_path owner.name |> Queue.to_list with
+      | [ { Queue.payload = Configured_compaction_requested _; _ } ] -> ()
+      | _ -> fail "ready claim consumed or lost configured compaction")
+
 let only_compaction_manifest config meta =
   let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
@@ -569,6 +649,8 @@ let () =
         `Quick test_compaction_receipt_is_exact_and_immutable;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
+      test_case "configured compaction wakes only owner and preserves ready work"
+        `Quick test_configured_compaction_wakes_only_owner_and_preserves_ready_work;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
     ];

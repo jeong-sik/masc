@@ -403,23 +403,6 @@ let dashboard_gate_resolve_http_json ~(args : Yojson.Safe.t)
           Error (Gone err)))
 ;;
 
-let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
-  : (Yojson.Safe.t, string) result
-  =
-  match Safe_ops.json_string_opt "id" args with
-  | None -> Error "id is required"
-  | Some id ->
-    (match Keeper_approval_queue.delete_rule ~base_path ~id () with
-     | Ok deleted ->
-         Keeper_approval_queue.audit_rule_event
-           ~base_path
-           ~event_type:"rule_deleted"
-           deleted;
-         Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
-       | Error error ->
-         Error (Keeper_approval_queue.rule_store_error_to_string error))
-;;
-
 let dashboard_schedule_prune_http_json
       ~config
       ~operator_name

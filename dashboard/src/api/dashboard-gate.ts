@@ -6,7 +6,6 @@ import { isRecord, asBoolean, asInt, asNullableString, asString } from '../compo
 import { asNullableIsoTimestamp, normalizeKeeperApprovalQueueItem } from './board'
 import { normalizeKeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
 import type {
-  KeeperApprovalRule,
   DashboardGateResponse,
   KeeperApprovalQueueItem,
   KeeperResolvedApprovalItem,
@@ -18,23 +17,6 @@ import type { AbortableRequestOptions } from './core'
 
 export interface FetchDashboardGateOptions extends AbortableRequestOptions {
   force?: boolean
-}
-
-function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id, '').trim()
-  const keeperName = asString(raw.keeper_name, '').trim()
-  const toolName = asString(raw.tool_name, '').trim()
-  if (!id || !keeperName || !toolName) return null
-  return {
-    id,
-    keeper_name: keeperName,
-    tool_name: toolName,
-    request_fingerprint: asNullableString(raw.request_fingerprint) ?? undefined,
-    created_at: asNullableIsoTimestamp(raw.created_at),
-    created_by: asNullableString(raw.created_by),
-    source_approval_id: asNullableString(raw.source_approval_id),
-  }
 }
 
 function normalizeGateModeValue(raw: unknown): GateMode | null {
@@ -78,11 +60,6 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
   if (!id || !keeperName || !toolName) return null
-  const ruleMatch = isRecord(raw.rule_match)
-    ? {
-        rule_id: asNullableString(raw.rule_match.rule_id),
-      }
-    : null
   const decisionRaw = asNullableString(raw.decision)
   const decisionKind = asNullableString(raw.decision_kind)
   const decisionReason = asNullableString(raw.decision_reason)
@@ -101,7 +78,6 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
       ? raw.goal_ids.filter((value): value is string => typeof value === 'string')
       : [],
     decision_source: normalizeGateDecisionSource(raw.decision_source),
-    rule_match: ruleMatch,
   }
 }
 
@@ -123,26 +99,14 @@ export function fetchDashboardGate(
           .map(item => normalizeKeeperResolvedApprovalItem(item))
           .filter((item): item is KeeperResolvedApprovalItem => item !== null)
       : []
-    const approvalRules = Array.isArray(raw.approval_rules)
-      ? raw.approval_rules
-          .map(item => normalizeKeeperApprovalRule(item))
-          .filter((item): item is KeeperApprovalRule => item !== null)
-      : []
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
       note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
       approval_queue: approvalQueue,
       recent_resolved: recentResolved,
-      approval_rules: approvalRules,
       hitl: normalizeHitlStatus(raw.hitl),
     }
   })
-}
-
-export function deleteGateApprovalRule(
-  id: string,
-): Promise<{ ok: boolean; id: string }> {
-  return post('/api/v1/dashboard/gate/rules/delete', { id })
 }
 
 export function resolveGateApproval(

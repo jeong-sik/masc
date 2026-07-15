@@ -1,7 +1,7 @@
 (** Dashboard projection of the Keeper external-effect Gate.
 
     This module exposes only the non-hierarchical Gate mode, durable HITL
-    queue, inert legacy rule records, and recent request-local decisions. It derives no
+    queue, explicit mode, and recent request-local decisions. It derives no
     product policy or execution authority. *)
 
 let hitl_status_json ~base_path =
@@ -16,16 +16,6 @@ let dashboard_json ~base_path ~limit:_ ~offset:_ ~status_filter:_ =
       ~n:Keeper_approval_queue.recent_resolved_history_limit
       ()
   in
-  let approval_rules, approval_rules_state =
-    match Keeper_approval_queue.list_rules_dashboard_json ~base_path () with
-    | Ok json -> json, `Assoc [ "state", `String "ready" ]
-    | Error error ->
-      ( `List []
-      , `Assoc
-          [ "state", `String "unavailable"
-          ; "error", `String (Keeper_approval_queue.rule_store_error_to_string error)
-          ] )
-  in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; ( "note"
@@ -33,8 +23,6 @@ let dashboard_json ~base_path ~limit:_ ~offset:_ ~status_filter:_ =
           "External effects use explicit Always Allow, Auto Judge, or nonblocking human HITL." )
     ; "approval_queue", approval_queue
     ; "recent_resolved", `List recent_resolved
-    ; "approval_rules", approval_rules
-    ; "approval_rules_state", approval_rules_state
     ; "hitl", hitl_status_json ~base_path
     ]
 ;;

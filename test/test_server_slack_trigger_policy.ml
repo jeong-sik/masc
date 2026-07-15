@@ -202,7 +202,7 @@ let test_startup_error_is_operator_visible () =
 ;;
 
 let slack_message ~ts =
-  Slack_socket_client.Message_create
+  Slack_gateway_state.Message_create
     { channel_id = "C123"
     ; thread_ts = None
     ; user_id = "U123"
@@ -230,14 +230,27 @@ let test_bound_message_queues_exact_slack_ts () =
             Eio.Promise.resolve resolve_observed failure)
           ()
       in
-      let dispatch ~on_text_snapshot:_ ~channel:_ ~channel_user_id:_
-          ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
-          ~idempotency_key:_ ~metadata:_ ~content:_ =
-        failwith "observe Slack ingress identity"
+      let accepted_before_delivery = ref false in
+      let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+          ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+          ~content:_ =
+        accepted_before_delivery := true;
+        Gate_protocol.Reply
+          { content = "queued"
+          ; structured = None
+          ; stats = None
+          ; message_request = None
+          }
       in
-      G.For_testing.submit_event ingress ~dispatch
+      G.For_testing.submit_event
+        ~deliver:(fun () ->
+          if not !accepted_before_delivery then
+            failwith "delivery ran before durable accept";
+          failwith "observe Slack ingress identity")
+        ingress ~dispatch
         ~clock:(Eio.Stdenv.clock env)
         (slack_message ~ts:"1710000000.123456");
+      check bool "accept completed before handoff" true !accepted_before_delivery;
       let failure = Eio.Promise.await observed in
       check string "exact Slack event ts" "1710000000.123456"
         failure.Connector_ingress_lane.event_id.opaque_id;
@@ -270,13 +283,15 @@ let test_binding_store_failure_does_not_enqueue () =
         ~on_failure:(fun _ -> fail "binding failure must not enqueue")
         ()
     in
-    let dispatch ~on_text_snapshot:_ ~channel:_ ~channel_user_id:_
-        ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
-        ~idempotency_key:_ ~metadata:_ ~content:_ =
+    let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+        ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+        ~content:_ =
       dispatch_called := true;
       Gate_protocol.Unavailable_result
     in
-    G.For_testing.submit_event ingress ~dispatch
+    G.For_testing.submit_event
+      ~deliver:(fun () -> fail "binding failure must not schedule delivery")
+      ingress ~dispatch
       ~clock:(Eio.Stdenv.clock env)
       (slack_message ~ts:"1710000000.654321");
     Eio.Fiber.yield ();

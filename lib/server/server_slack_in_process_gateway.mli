@@ -7,11 +7,10 @@
     1. Resolves the bot identity via [auth.test] (non-fatal) and connects to
        Slack Socket Mode ({!Slack_socket_client.run}).
     2. For each triggered [Message_create] / [App_mention] event, looks up the
-       channel→keeper binding
-       ({!Channel_gate_slack_state.resolve_keeper_for_channel}), runs the keeper
-       turn through {!Channel_gate.handle_inbound_streaming}, and projects
-       redacted text snapshots by posting/editing one threaded reply via
-       {!Channel_gate_slack_state.send_message} / [edit_message].
+       channel→keeper binding and durably accepts the exact source event before
+       the socket callback returns. Network ACK delivery then runs on the
+       Keeper-scoped connector lane; the durable chat-queue consumer owns the
+       eventual Keeper turn and connector reply.
 
     Off by default: if [SLACK_APP_TOKEN] is unset the gateway logs a
     warning and skips startup; the server still boots normally. A message
@@ -58,8 +57,9 @@ val trigger_policy_load_error_to_string : trigger_policy_load_error -> string
 
 module For_testing : sig
   val submit_event :
+    ?deliver:(unit -> unit) ->
     Connector_ingress_lane.t ->
-    dispatch:Channel_gate.streaming_dispatch_fn ->
+    dispatch:Channel_gate.dispatch_fn ->
     clock:_ Eio.Time.clock ->
     Slack_socket_client.slack_event ->
     unit

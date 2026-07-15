@@ -42,24 +42,6 @@ type connector_delivery =
   ; external_message_id : string option
   }
 
-(* [route_busy_connector] decides where a connector message goes when the keeper
-   is already in flight. Pure and exhaustive over [connector_kind] so a new
-   connector forces a routing decision at compile time (no catch-all). [Discord]
-   projects onto the chat queue, whose serial consumer drains it after the slot
-   frees and delivers the reply through the connector's outbound adapter
-   ([Keeper_chat_discord.adapter_loop]); [Generic] has no such adapter and falls
-   back to the async poll store. *)
-let route_busy_connector (kind : connector_kind) ~channel_id ~user_id ~user_name
-    ~team_id ~thread_ts :
-    [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ] =
-  match kind with
-  | Discord -> `Enqueue_chat_queue (Keeper_chat_queue.Discord { channel_id; user_id })
-  | Slack ->
-    `Enqueue_chat_queue
-      (Keeper_chat_queue.Slack
-         { channel_id; user_id; user_name; team_id; thread_ts })
-  | Generic -> `Async_poll
-
 (* ── Keeper response parsing ─────────────────────────────────── *)
 
 let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
@@ -804,49 +786,13 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
                  "channel gate text snapshot callback failed (keeper=%s): %s"
                  keeper_name (Printexc.to_string exn))
   in
-  let slack_reply_thread_ts =
-    match slack_thread_ts metadata with
-    | Some thread_ts -> Some thread_ts
-    | None -> metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
-  in
   let defer_to_existing_work
       (admission_rejection : Keeper_turn_admission.rejection) =
-    match
-      route_busy_connector connector_kind
-        ~channel_id:channel_workspace_id ~user_id:channel_user_id
-        ~user_name:channel_user_name ~team_id:(slack_team_id metadata)
-        ~thread_ts:slack_reply_thread_ts
-    with
-    | `Enqueue_chat_queue source ->
-      (* RFC-connector-deferred-reply-via-chat-queue: route accepted connector
-         input onto the durable queue whenever the authoritative if-free
-         admission reports Busy. This includes a receipt committed or leased
-         after any outer observation but before the turn slot was acquired. *)
-      (match
-         Keeper_chat_queue.enqueue ~keeper_name
-           { Keeper_chat_queue.content = String.trim content
-           ; user_blocks = []
-           ; attachments = []
-           ; timestamp = Eio.Time.now clock
-           ; source
-           ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
-           }
-       with
-       | Ok receipt -> `Queued_to_chat_lane (admission_rejection, receipt)
-       | Error error ->
-         Log.Server.error
-           "channel gate durable chat enqueue failed (keeper=%s, lane=%s): %s"
-           keeper_name lane
-           (Keeper_chat_queue.mutation_error_to_string error);
-         `Chat_queue_error error)
-    | `Async_poll ->
-      `Async_ack
-        ( admission_rejection.in_flight
-        , Some
-            (Keeper_tool_surface.dispatch_keeper_msg
-               ~submitted_by
-               keeper_ctx
-               ~args) )
+    `Async_ack
+      ( admission_rejection.in_flight
+      , Some
+          (Keeper_tool_surface.dispatch_keeper_msg ~submitted_by keeper_ctx
+             ~args) )
   in
   let dispatch_result =
     (* The admission boundary, not a route-level peek, owns the FIFO decision.
@@ -913,43 +859,6 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
           }
       in
       Gate_protocol.Reply { content = reply; structured; stats; message_request }
-  | `Queued_to_chat_lane (admission_rejection, receipt) ->
-      (* RFC-connector-deferred-reply-via-chat-queue: the message was enqueued onto [Keeper_chat_queue]; the
-         connector gets a busy ACK now and the deferred reply later via the
-         serial consumer's outbound adapter. The existing [message_request]
-         envelope carries the durable receipt id and queue revision so the
-         connector can correlate that later delivery. *)
-      let duration_ms =
-        Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
-        |> Int64.div 1_000_000L
-        |> Int64.to_int
-      in
-      let message_request =
-        chat_queue_message_request ~channel ~channel_user_id ~keeper_name
-          ~admission_rejection ~metadata receipt
-      in
-      let reply =
-        redact_text
-          (busy_ack_reply_text_queued ~admission_rejection ~keeper_name
-             ~receipt_id:message_request.request_id
-             ~recovery_required_count:receipt.recovery_required_count)
-      in
-      let stats =
-        Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
-      in
-      Gate_protocol.Reply
-        { content = reply
-        ; structured = None
-        ; stats
-        ; message_request = Some message_request
-        }
-  | `Chat_queue_error error ->
-      Gate_protocol.Keeper_error_result
-        (redact_text
-           (Printf.sprintf
-              "%s is busy; your message was not queued because the durable chat queue rejected it: %s"
-              keeper_name
-              (Keeper_chat_queue.mutation_error_to_string error)))
   | `Streaming (Some result) when Tool_result.is_success result ->
       let body = Tool_result.message result in
       let duration_ms =

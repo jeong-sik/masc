@@ -60,21 +60,6 @@ val accept_connector :
     queue receipt and transcript delivery key; retries converge without a
     derived hash namespace. *)
 
-val route_busy_connector :
-  connector_kind ->
-  channel_id:string ->
-  user_id:string ->
-  user_name:string ->
-  team_id:string option ->
-  thread_ts:string option ->
-  [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ]
-(** Pure routing decision for a connector message that arrives while the keeper
-    has an in-flight turn. Exhaustive over {!connector_kind}: [Discord] and
-    [Slack] return [`Enqueue_chat_queue] with the typed source so the serial
-    {!Keeper_chat_consumer} drains and delivers it after the slot frees;
-    [Generic] returns [`Async_poll]. Exposed for unit testing the decision in
-    isolation. *)
-
 val dispatch :
   connector_kind:connector_kind ->
   submission_owner:submission_owner ->

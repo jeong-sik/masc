@@ -111,6 +111,35 @@ let save_text path content =
   | Ok () -> ()
   | Error detail -> failwith detail
 
+let test_first_enqueue_with_runtime_eio_guard () =
+  Printf.printf "Test: first SQLite enqueue preserves the live Eio boundary\n%!";
+  with_base "keeper-chat-first-enqueue-eio" @@ fun base_path ->
+  let keeper_name = "first-enqueue-eio" in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio_guard.enable ();
+  Eio.Switch.on_release sw Eio_guard.disable;
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let path = database_path ~base_path ~keeper_name in
+  check "first enqueue starts without a SQLite store" (not (Sys.file_exists path));
+  match Keeper_chat_queue.enqueue ~keeper_name (message "persist me") with
+  | Error error ->
+    fail
+      "first enqueue succeeds with the runtime Eio guard"
+      (Keeper_chat_queue.mutation_error_to_string error)
+  | Ok receipt ->
+    check "first enqueue publishes the SQLite store" (Sys.file_exists path);
+    (match
+       Keeper_chat_queue.lookup_receipt
+         ~keeper_name
+         ~receipt_id:receipt.receipt_id
+     with
+     | Ok { receipt = Some { state = Pending; _ }; revision } ->
+       check "published receipt is durably readable"
+         (Int64.equal revision receipt.revision)
+     | Ok _ | Error _ ->
+       check "published receipt is durably readable" false)
+
 let test_lifecycle_fifo_terminal_pk_and_restart () =
   Printf.printf "Test: one SQLite SSOT owns FIFO, active, and terminal rows\n%!";
   with_base "keeper-chat-sqlite-lifecycle" @@ fun base_path ->
@@ -696,6 +725,7 @@ let test_reconcile_absent_lane_and_stage_order () =
 
 let () =
   Eio_main.run @@ fun _environment ->
+  test_first_enqueue_with_runtime_eio_guard ();
   test_lifecycle_fifo_terminal_pk_and_restart ();
   test_preallocated_receipt_convergence ();
   test_transaction_publication_boundaries ();

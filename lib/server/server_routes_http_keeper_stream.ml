@@ -160,6 +160,65 @@ let args_of_request payload : Yojson.Safe.t =
        ("attachments", Keeper_multimodal_input.attachments_to_yojson payload.attachments)
        :: fields)
 
+let durable_direct_delivery ~continuation_channel ~surface ~speaker payload =
+  let attachment (value : Keeper_chat_store.attachment) :
+      Keeper_direct_invocation.attachment =
+    { id = value.id
+    ; attachment_type = value.att_type
+    ; name = value.name
+    ; size = value.size
+    ; mime_type = value.mime_type
+    ; data = value.data
+    }
+  in
+  let media (value : user_media_block) : Keeper_direct_invocation.user_media_block =
+    { attachment_id = value.attachment_id
+    ; name = value.name
+    ; mime_type = value.mime_type
+    ; size = value.size
+    }
+  in
+  let user_block = function
+    | User_text text -> Keeper_direct_invocation.User_text text
+    | User_image value -> Keeper_direct_invocation.User_image (media value)
+    | User_document value -> Keeper_direct_invocation.User_document (media value)
+    | User_audio value -> Keeper_direct_invocation.User_audio (media value)
+  in
+  let speaker_authority =
+    match speaker.Keeper_chat_store.speaker_authority with
+    | Keeper_chat_store.Owner -> Keeper_direct_invocation.Owner
+    | Keeper_chat_store.External -> Keeper_direct_invocation.External
+  in
+  let connector_context =
+    if has_connector_context payload
+    then
+      Some
+        { Keeper_direct_invocation.connector = payload.channel
+        ; workspace_id = payload.channel_workspace_id
+        ; actor_id = String_util.trim_to_option payload.channel_user_id
+        ; actor_name = String_util.trim_to_option payload.channel_user_name
+        }
+    else None
+  in
+  { Keeper_direct_invocation.execution_prompt = message_for_request payload
+  ; attachments = List.map attachment payload.attachments
+  ; user_blocks = List.map user_block payload.user_blocks
+  ; turn_instructions = turn_instructions_for_request payload
+  ; connector_context
+  ; continuation_channel
+  ; projection =
+      { user_content = payload.message
+      ; surface
+      ; conversation_id = None
+      ; external_message_id = None
+      ; speaker =
+          { speaker_id = speaker.speaker_id
+          ; speaker_name = speaker.speaker_name
+          ; speaker_authority
+          }
+      }
+  }
+
 let modalities_for_request payload =
   match Keeper_multimodal_input.modalities payload.user_blocks with
   | [] -> [ "text" ]
@@ -1655,6 +1714,15 @@ let process_single_turn ~user_row_origin ~queued_turn
      still an authenticated dashboard operator, so it keeps Owner authority
      while recording the Gate surface label. *)
   let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
+  let invocation_request =
+    Keeper_invocation_types.direct_turn
+      ~keeper_name:payload.name
+      (durable_direct_delivery
+         ~continuation_channel
+         ~surface:chat_surface
+         ~speaker:chat_speaker
+         payload)
+  in
   let dashboard_direct_stream =
     (not queued_turn)
     && (match user_row_origin with
@@ -1942,15 +2010,12 @@ let process_single_turn ~user_row_origin ~queued_turn
   let submit_result =
     match
       ( Keeper_msg_async.server_background_switch ()
-      , Keeper_invocation_contract.request
-          ~keeper_name:payload.name
-          ~prompt:payload.message )
+      , invocation_request )
     with
     | Error error, _ ->
         Error
           (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-    | _, Error error ->
-        Error (Keeper_invocation_contract.request_error_to_string error)
+    | _, Error error -> Error error
     | Ok background_sw, Ok request ->
       let on_accepted =
         if dashboard_direct_stream
@@ -2410,11 +2475,7 @@ let process_single_turn ~user_row_origin ~queued_turn
     match submit_result with
     | Error _ -> None
     | Ok outcome ->
-      (match
-         Keeper_invocation_contract.request
-           ~keeper_name:payload.name
-           ~prompt:payload.message
-       with
+      (match invocation_request with
        | Ok request ->
          Some
            (match Keeper_invocation_contract.submission_receipt request outcome with
@@ -2425,7 +2486,7 @@ let process_single_turn ~user_row_origin ~queued_turn
          Log.Keeper.error
            "keeper_stream: accepted request has invalid typed identity keeper=%s error=%s"
            payload.name
-           (Keeper_invocation_contract.request_error_to_string error);
+           error;
          None)
   in
   (match client_disconnects, request_id with

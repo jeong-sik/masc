@@ -1,7 +1,10 @@
 type capability = Invoke_turn
 type target = Keeper of Keeper_id.Keeper_name.t
 
-type input = Prompt of string
+type input =
+  | Delegated_turn of string
+  | Direct_delivery of Keeper_direct_invocation.t
+[@@deriving yojson, eq]
 
 type request =
   { target : target
@@ -36,27 +39,44 @@ let keeper_turn ~keeper_name ~prompt =
       Ok
         { target = Keeper target_name
         ; capability = Invoke_turn
-        ; input = Prompt prompt
+        ; input = Delegated_turn prompt
         }
 ;;
 
-let request_target request = request.target
-let request_capability request = request.capability
-let request_target_name request = target_name request.target
-let request_prompt request = match request.input with Prompt prompt -> prompt
+let direct_turn ~keeper_name payload =
+  let ( let* ) = Result.bind in
+  let* () = Keeper_direct_invocation.validate payload in
+  let* target_name = Keeper_id.Keeper_name.of_string keeper_name in
+  Ok { target = Keeper target_name; capability = Invoke_turn; input = Direct_delivery payload }
+;;
 
-let request_equal left right =
+let request_target (request : request) = request.target
+let request_capability (request : request) = request.capability
+let request_target_name (request : request) = target_name request.target
+let request_prompt (request : request) =
+  match request.input with
+  | Delegated_turn prompt -> prompt
+  | Direct_delivery payload -> payload.execution_prompt
+;;
+
+let request_direct_delivery (request : request) =
+  match request.input with
+  | Delegated_turn _ -> None
+  | Direct_delivery payload -> Some payload
+;;
+
+let request_equal (left : request) (right : request) =
   match left.target, right.target, left.capability, right.capability with
   | Keeper left_name, Keeper right_name, Invoke_turn, Invoke_turn ->
     Keeper_id.Keeper_name.equal left_name right_name
-    && String.equal (request_prompt left) (request_prompt right)
+    && equal_input left.input right.input
 ;;
 
-let request_to_json request =
+let request_to_json (request : request) =
   `Assoc
     [ "target", target_to_json request.target
     ; "capability", `String "invoke_turn"
-    ; "input", `Assoc [ "prompt", `String (request_prompt request) ]
+    ; "input", input_to_yojson request.input
     ]
 ;;
 
@@ -100,15 +120,23 @@ let request_of_json json =
     | Some value -> Ok value
     | None -> Error "request.input is required"
   in
-  let* input_fields =
-    exact_object ~field:"request.input" ~expected:[ "prompt" ] input_json
+  let* input =
+    input_of_yojson input_json
+    |> Result.map_error (fun detail -> "request.input: " ^ detail)
   in
-  let* prompt = required_string ~field:"request.input" "prompt" input_fields in
+  let* () =
+    if input_to_yojson input = input_json
+    then Ok ()
+    else Error "request.input is not in canonical persisted form"
+  in
   if not (String.equal kind "keeper")
   then Error "request.target.kind must be keeper"
   else if not (String.equal capability "invoke_turn")
   then Error "request.capability must be invoke_turn"
-  else keeper_turn ~keeper_name ~prompt
+  else
+    match input with
+    | Delegated_turn prompt -> keeper_turn ~keeper_name ~prompt
+    | Direct_delivery payload -> direct_turn ~keeper_name payload
 ;;
 
 let run_id reference = reference.run_id

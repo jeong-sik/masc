@@ -147,3 +147,6 @@ let of_json json =
       let* address = address in
       Ok (Gate { label; address })
   | other -> Error (Printf.sprintf "unknown surface kind %s" other)
+
+let to_yojson = to_json
+let of_yojson = of_json

@@ -16,6 +16,7 @@ type t =
   | Unrouted of { reason : string }
 
 let unrouted reason = Unrouted { reason }
+let equal (left : t) right = left = right
 
 let is_routable = function
   | Unrouted _ -> false

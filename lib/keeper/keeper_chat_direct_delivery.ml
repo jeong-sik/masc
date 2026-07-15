@@ -1532,7 +1532,10 @@ let request_matches_payload request payload =
   String.equal
     (Keeper_invocation_types.request_target_name request)
     payload.keeper_name
-  && String.equal (Keeper_invocation_types.request_prompt request) payload.user_content
+  &&
+  match Keeper_invocation_types.request_direct_delivery request with
+  | Some direct -> String.equal direct.projection.user_content payload.user_content
+  | None -> String.equal (Keeper_invocation_types.request_prompt request) payload.user_content
 ;;
 
 let observe_async_terminal ~base_path ~(identity : t) =

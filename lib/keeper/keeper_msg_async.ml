@@ -511,7 +511,8 @@ let with_keeper_persistence_lock ~base_path ~keeper_name f =
 exception CancelledByOperator
 exception Worker_preempted of string
 exception Worker_already_settled of request_status
-let record_schema_version = 4
+(* v5 hard-cuts prompt-only records: executor identity and direct replay input are durable. *)
+let record_schema_version = 5
 
 let entry_keeper_name_id (entry : entry) =
   match Keeper_invocation_types.request_target entry.request with

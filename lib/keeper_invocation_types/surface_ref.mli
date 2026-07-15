@@ -44,7 +44,9 @@ val lane_label : t -> string
     derivation site — writers no longer invent label strings. *)
 
 val to_json : t -> Yojson.Safe.t
+val to_yojson : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, string) result
+val of_yojson : Yojson.Safe.t -> (t, string) result
 (** Total decode: unknown [kind] labels are an [Error], never a
     default. *)

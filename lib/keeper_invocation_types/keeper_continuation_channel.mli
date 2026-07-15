@@ -31,6 +31,8 @@ type t =
     }
   | Unrouted of { reason : string }
 
+val equal : t -> t -> bool
+
 (** [unrouted reason] is the fail-closed channel carrying a diagnostic
     [reason] explaining why no connector could be determined. *)
 val unrouted : string -> t

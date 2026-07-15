@@ -10,6 +10,47 @@ let keeper_request ?(prompt = "test invocation") keeper_name =
   | Error reason -> Alcotest.fail reason
 ;;
 
+let test_direct_invocation_request_roundtrip () =
+  let payload : Keeper_direct_invocation.t =
+    { execution_prompt = "inspect the attached context"
+    ; attachments = []
+    ; user_blocks = [ Keeper_direct_invocation.User_text "inspect this" ]
+    ; turn_instructions = Some "reply on the captured route"
+    ; connector_context = None
+    ; continuation_channel = Keeper_continuation_channel.Dashboard { thread_id = "keeper:k" }
+    ; projection =
+        { user_content = "inspect this"
+        ; surface = Surface_ref.Dashboard { session_id = Some "session" }
+        ; conversation_id = None
+        ; external_message_id = None
+        ; speaker =
+            { speaker_id = None
+            ; speaker_name = None
+            ; speaker_authority = Keeper_direct_invocation.Owner
+            }
+        }
+    }
+  in
+  let request =
+    match Keeper_invocation_types.direct_turn ~keeper_name:"k" payload with
+    | Ok request -> request
+    | Error detail -> fail detail
+  in
+  let decoded =
+    match
+      request
+      |> Keeper_invocation_types.request_to_json
+      |> Keeper_invocation_types.request_of_json
+    with
+    | Ok request -> request
+    | Error detail -> fail detail
+  in
+  check bool "direct request roundtrips exactly" true
+    (Keeper_invocation_types.request_equal request decoded);
+  check bool "direct request retains its executor payload" true
+    (Option.is_some (Keeper_invocation_types.request_direct_delivery decoded))
+;;
+
 let accepted_request_id = function
   | Ok
       ({ acceptance = Keeper_msg_async.Durably_accepted; request_id }
@@ -2549,6 +2590,10 @@ let () =
     "keeper_mutex_coverage"
     [ ( "keeper_msg_async"
       , [ test_case
+            "typed direct invocation roundtrips"
+            `Quick
+            test_direct_invocation_request_roundtrip
+        ; test_case
             "persistence lane direct samples are unique"
             `Quick
             test_keeper_msg_async_persistence_lane_samples_are_unique

@@ -160,7 +160,7 @@ Replace the read-only preset view with an editing form matching the approved
 layout: enabled checkbox; default_preset select (from preset names); panel roster
 multi-select (add/remove from catalog); meta judge select; JoJ first-round judges
 list (add/remove; each: model select + system-prompt textarea + timeout);
-timeouts and `max_tool_calls_per_panel`; concurrency knobs. Populated from §3.1,
+timeouts and web-tool flags. Populated from §3.1,
 submitted to §3.3, errors rendered from §3.4. Model options come from the shared
 runtime catalog resource (Principle 4).
 

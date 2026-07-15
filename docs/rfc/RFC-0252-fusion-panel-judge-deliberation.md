@@ -41,7 +41,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
 |---|---|---|
 | 패널 | 1–8 모델 병렬, 각자 web 도구 | 비어 있지 않은 typed 모델 집합 전체를 `Async_agent.all`로 실행, web 도구는 MASC가 주입 |
 | 심판 구조화 | JSON `{consensus, contradictions, partial_coverage, unique_insights, blind_spots}` | 동일 5필드 + `resolved_answer` + `decision`, **`Structured.extract` provider-native JSON schema 강제**(닫힌 타입, substring 파싱 아님) |
-| 발동 | 모델이 `openrouter:fusion` 자가 호출(비결정) | **결정론적 게이트 우선**(§6), 모델 요청은 budget cap에 종속 |
+| 발동 | 모델이 `openrouter:fusion` 자가 호출(비결정) | Keeper의 LLM 판단으로 도구 호출, 게이트는 typed 구조 적격성만 확인(§6) |
 | 재귀 | depth 헤더로 1단계 차단 | 타입드 `Fusion_depth.t` (`Top`/`Nested`, descend가 2단계 거부) |
 | 비용 | 추상화(개별 완성 합산) | MASC가 패널 N + 심판 1 토큰/비용 명시 회계(§10) |
 | 가시성 | (없음) | **사용자 요구**: 키퍼 chat lane + 대시보드 board에 패널/심판 메시지 증명·표시(§8) |
@@ -89,9 +89,10 @@ end
 (* 패널 한 명의 결과 — 실패도 닫힌 합, silent default 없음 *)
 type panel_failure =
   | Timeout
+  | Bridge_error of string
   | Provider_error of string
+  | Invalid_structured_response of string
   | Empty_response of string
-  | Budget_exhausted
 
 type panel_outcome =
   | Answered of { model : string; answer : string; confidence : float option; usage : Usage.t }
@@ -140,15 +141,12 @@ type fusion_request =
 (* 게이트 출력 *)
 type deny_reason =
   | Disabled | Preset_unknown of string | Depth_exceeded
-  | Over_hourly_budget
 
 type gate_decision = Allow of fusion_request | Deny of deny_reason
 ```
 
-> 비용 *제약*(cost cap / per-call USD 상한)은 v1에서 제외한다 — 모델별 가격
-> 추정기가 없으면 inert한 결정론 게이트가 되기 때문(괴상한 제약 제거 원칙).
-> 비용은 *관측*만 한다: panel 응답의 `usage`(실측 토큰)를 sink가 합산·표시한다.
-> 발동 통제는 `per_hour_budget`(실측 카운터)가 담당한다.
+> 비용·토큰·호출 횟수는 실행 제약이 아니라 관측이다. panel/judge 응답의
+> `usage`를 sink가 합산·표시하지만 허용/중단 판단에는 사용하지 않는다.
 
 > `Usage.t`는 기존 MASC usage 타입 재사용(없으면 `{ input_tokens:int; output_tokens:int }` 최소 정의).
 
@@ -156,11 +154,11 @@ type gate_decision = Allow of fusion_request | Deny of deny_reason
 
 ## 6. 게이트 (`fusion_policy`) — 구조는 결정론, 판단은 LLM
 
-게이트는 **구조/자원 안전**만 결정론적으로 본다. "이 턴이 심의할 가치가 있나"라는 *판단*은 게이트가 score 임계값(`score < low_confidence_threshold`)이나 task_kind 문자열 매칭(`task_kind ∈ high_stakes_task_kinds`)으로 대신 내리지 않는다 — 그건 memory-os 점수머신과 같은 안티패턴(가치 미입증 수치 판정)이다. 심의 가치는 키퍼(이미 LLM)가 스스로 판단해 `masc_fusion`을 호출하는 것으로 표현되고, 발동 남용은 결정론적 `per_hour_budget` cap이 막는다. **판단=LLM, 억제=구조적 cap.**
+게이트는 **typed 구조 안전**만 결정론적으로 본다. "이 턴이 심의할 가치가 있나"라는 *판단*은 score 임계값이나 task-kind 문자열 매칭으로 대신하지 않는다. 심의 가치는 Keeper가 LLM 판단으로 `masc_fusion`을 호출하는 것으로 표현된다. 비용·턴·호출 횟수는 관측만 하며 실행을 억제하지 않는다.
 
 ```ocaml
 val decide
-  :  policy:Fusion_policy.t          (* runtime.toml [fusion] + [fusion.gate]에서 로드 *)
+  :  policy:Fusion_policy.t          (* runtime.toml [fusion]에서 로드 *)
   -> fusion_request
   -> gate_decision
 ```
@@ -168,13 +166,11 @@ val decide
 판정 규칙(순수 함수, side-effect 없음 — 구조/자원만):
 
 1. `policy.enabled = false` → `Deny Disabled`.
-2. `preset`이 `policy.presets`에 없음/크기 위반 → `Deny (Preset_unknown name)`. (fail-fast, silent default 금지)
+2. `preset`이 `policy.presets`에 없음 → `Deny (Preset_unknown name)`. (fail-fast, silent default 금지)
 3. `depth = Nested` → `Deny Depth_exceeded`.
 4. 그 외 → `Allow request`.
 
-`trigger`는 "왜 발동했나"의 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다 (board meta·로그용). `per_hour_budget` 초과는 호출자가 `Fusion_budget.try_incr_if_under`로 원자적으로 강제해 `Deny Over_hourly_budget`을 낸다 (TOCTOU 회피, §10).
-
-키퍼가 `masc_fusion`을 호출하는 것 자체가 "심의가 필요하다"는 LLM 판단이다. 게이트는 그 판단을 score로 재판정하지 않고 구조적 안전과 시간당 cap만 강제한다. (MEMORY: 키퍼 wake-cascade thrash는 score 게이트가 아니라 `per_hour_budget` cap으로 막는다.)
+`trigger`는 "왜 발동했나"의 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다 (board meta·로그용). Keeper가 `masc_fusion`을 호출하는 것 자체가 "심의가 필요하다"는 LLM 판단이며, 게이트가 이를 휴리스틱이나 예산으로 재판정하지 않는다.
 
 ---
 
@@ -242,36 +238,28 @@ judge 결론만 키퍼 **메인** conversation에 남긴다. 패널 트랜스크
 ```toml
 [fusion]
 enabled = false                       # opt-in. 기본 OFF (fail-safe)
-default_preset = "budget"
+default_preset = "trio"
 
-[fusion.gate]
-low_confidence_threshold = 0.55
-high_stakes_task_kinds = ["goal_decision", "architecture"]
-per_hour_budget = 20                  # 시간당 발동 상한 (유일한 비-disabled deny 노브)
-
-[fusion.presets.budget]
+[fusion.presets.trio]
 panel = ["deepseek.v4-flash", "glm.5-turbo", "ollama.gemma4-26b"]
 judge = "deepseek.v4-flash"
 panel_system_prompt = "..."           # 행동 정의 — 코드 default 없음, 비면 Missing_prompt
 judge_system_prompt = "..."
 panel_timeout_s = 120.0               # 생략 시 default_timeout_s
 judge_timeout_s = 120.0
-max_output_tokens_per_panel = 4096    # 생략 시 Runtime_agent 기본 출력 예산
-judge_max_output_tokens = 4096        # 생략 시 Runtime_agent 기본 출력 예산
 ```
 
 - panel/judge 모델 식별자는 기존 `provider.model` opaque 문자열(runtime.toml bindings와 동일 컨벤션). 미존재 모델 → parse/resolve 에러(fail-fast).
 - 패널 모델 집합은 비어 있지 않아야 한다. 알 수 없는 preset/모델은 silent default로 압축하지 않는다(CLAUDE.md §Unknown→Permissive 회피).
-- `max_output_tokens_per_panel`, `judge_max_output_tokens`, `[[...judges]].max_output_tokens`는 optional positive int다. 생략하면 기존 Runtime_agent 기본값을 보존하고, 0 이하 값은 config load에서 fail-fast한다.
+- preset/panel/judge의 알 수 없는 키는 `Unexpected_field`로 fail-loud한다.
 - `Runtime_toml` 파서 확장(또는 별도 `Fusion_config` 파서)로 `[fusion.*]` 로드 → `Fusion_policy.t`.
 
 ---
 
-## 10. 재귀 가드 · 발동 예산 · 비용 관측
+## 10. 재귀 가드 · 비용 관측
 
 - **재귀**: 패널/심판 `Agent.t`는 fusion 도구를 주입받지 않는다(도구 목록에서 배제). 추가로 `request.depth = Nested`면 게이트가 `Deny Depth_exceeded`. 이중 차단.
-- **발동 예산**: `per_hour_budget`(UTC hour bucket 카운터, `Fusion_budget` CAS)가 시간당 발동 수를 제한. 유일한 비-disabled deny 노브.
-- **비용 관측(제약 아님)**: 패널 응답의 `usage`(실측 input/output 토큰)를 sink가 합산해 심의 메시지에 표시한다. v1은 비용을 *제약*하지 않는다 — 모델별 가격 추정기가 없으면 cost cap은 inert 게이트(괴상한 제약)가 되기 때문. 가격 추정기 도입 시 별도 RFC로 cost cap을 다시 추가한다.
+- **비용 관측(제약 아님)**: 패널·심판 응답의 `usage`(실측 input/output 토큰)를 sink가 합산해 심의 메시지에 표시한다. 이 값은 허용·중단·fallback 판단에 사용하지 않는다.
 
 ---
 

@@ -113,7 +113,7 @@ Fusion_sink.emit (완료, 성공/실패 공통 종료 직후)
 **왜 board post가 아니라 registry인가**: start-time board post를 만들면 *다른* 키퍼들이 board_signal로 "fusion 진행중"에 깨어난다(self-author만 게이트, 피어는 explicit_mention/stigmergy로 wake). 이는 진행중 표시의 부작용으로 부적절하다. board post는 완료 전용으로 유지하고, in-progress는 비-waking registry로 분리한다.
 
 ```ocaml
-(* lib/fusion/fusion_run_registry.ml — in-memory Atomic 테이블 *)
+(* lib/fusion/fusion_run_registry.ml — Atomic snapshot + append-only JSONL *)
 type run_status = Running | Completed of { ok : bool } 
 type run = { run_id : string; keeper : string; preset : string;
              started_at : float; status : run_status }
@@ -123,16 +123,15 @@ type run = { run_id : string; keeper : string; preset : string;
 
 - **`masc_fusion_status` 도구** (신규): 인자 없으면 active runs 목록, `run_id` 주면 단건. run_id로 결정론적 polling 가능(현재는 polling surface 자체가 없음). task-1432 흡수.
 - **대시보드 fusion-runs 패널**: registry 스냅샷을 SSE로 반영, running/completed 카드. task-1433 흡수. (대시보드 새 surface 추가 시 nav-event parity 체크리스트 준수 — `dashboard_nav_event.ml:valid_surfaces` 등.)
-- registry는 in-memory(서버 수명). 영속이 필요하면 후속(board post가 이미 완료 영속 기록).
+- registry는 append-only JSONL로 완료 이력을 복원한다. 현재 restart replay가 `Running`을 drop하므로 durable request/receipt 기반 join/recovery는 잔여 P0다.
 
 ## 8. 재진입 / 루프 안전성
 
 wake → 새 턴 → 키퍼가 fusion 재호출 → 완료 → 또 wake … 순환 가능성. 기존 경계로 막힌다:
 - `Fusion_depth.Nested` 거부(RFC-0252 §5, descend가 2단계 거부) — fusion 안에서 fusion 불가.
-- `per_hour_budget`(RFC-0252 §10) — 시간당 발동 cap. wake-유발 재호출도 동일 budget 소비.
 - `Fusion_completed` stimulus는 dequeue 1회 소비(재주입 없음).
 
-→ wake가 새 fusion을 *자동* 유발하지 않는다(키퍼의 의도적 도구 호출만 fusion을 시작). 따라서 무한 루프 없음. 단 키퍼가 매 결과마다 다시 fusion을 거는 정책을 학습하면 budget까지 반복할 수 있다 — 이는 budget이 의도대로 막는 정상 backpressure이며 §10 오픈 퀘스천에 기록.
+→ wake가 새 fusion을 *자동* 유발하지 않는다. 새 실행은 Keeper의 다음 LLM 판단이 명시적으로 도구를 호출할 때만 시작하며, 재진입은 해당 Keeper lane의 독립 work item이다.
 
 ## 9. 단계별 롤아웃
 
@@ -148,9 +147,9 @@ Phase 1만으로 폴링 증상 해소. 2–4는 가시성 요구 충족.
 ## 10. 리스크 · 오픈 퀘스천
 
 1. **wake 빈도**: 다중 키퍼가 동시 fusion 시 완료 wake가 몰릴 수 있음 → 각 키퍼당 자기 run에만 wake되므로 fan-in은 키퍼 단위. 문제 시 stimulus 합류(coalesce)는 후속.
-2. **재호출 정책 학습**: 키퍼가 매 결과마다 fusion을 다시 거는 패턴 → budget이 막지만 budget 소진 자체가 빈번하면 정책 튜닝 필요(별도).
+2. **재호출 정책 학습**: 키퍼가 매 결과마다 fusion을 다시 거는 패턴은 turn/tool 관측으로 드러내고 LLM 정책을 교정한다. 숫자 cap으로 전체 실행을 중단하지 않는다.
 3. **intake 주입 형식**: `resolved_answer`를 턴 프롬프트에 '방금 도착한 fusion 결과'로 렌더하는 정확한 형식(Board_signal 렌더와 대칭) — 구현 시 `keeper_heartbeat_stimulus_intake.ml` + observation 주입 지점 확정 필요.
-4. **registry 영속성**: in-memory라 서버 재시작 시 active runs 유실 → fork도 함께 죽으므로 일관(고아 run 없음). 영속 필요 시 후속.
+4. **registry restart recovery**: 현재 replay는 active `Running`을 drop한다. durable request + execution receipt가 없으면 안전한 재실행/조인이 불가능하므로, 임의 replay 대신 typed recovery inventory와 exact adapter를 추가해야 한다.
 5. **RFC-0233(Turn_ref) 상호작용**: 완료 wake가 새 턴을 시작하면 chat↔board turn-identity 상관에 영향 가능 → 구현 시 교차 확인.
 
 ## 11. CLAUDE.md 준수 self-audit (워크어라운드 시그니처)
@@ -161,7 +160,7 @@ Phase 1만으로 폴링 증상 해소. 2–4는 가시성 요구 충족.
 | string/substring 분류기 | **회피** — `Fusion_completed`는 닫힌 합타입 variant, surface-string 분류 없음 |
 | N-of-M 패치 | **회피** — 단일 abstraction(typed stimulus 하나가 모든 완료/실패 경로 처리) |
 | catch-all `_ ->` 추가 | **회피** — intake exhaustive match에 명시 가지 추가, 컴파일러가 누락 강제 |
-| cap/cooldown/dedup/repair | per_hour_budget은 기존 *기능적* 게이트(RFC-0252). 본 RFC는 증상 억제 cap 추가 없음 |
+| cap/cooldown/dedup/repair | 실행 cap 없음. 중복 effect는 typed occurrence/run identity로 판별하고 lane별로 격리 |
 | test backdoor | 없음 |
 | Unknown→Permissive | **회피** — `ok=false` 명시 실패 경로, silent default 없음 |
 

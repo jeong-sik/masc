@@ -3278,7 +3278,7 @@ describe('fusion chat card', () => {
     expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('PANEL ONE ANSWER')
   })
 
-  it('normalizes live fusion failure reasons and renders judge errors', async () => {
+  it('renders structured fusion failure details and judge errors verbatim', async () => {
     vi.mocked(fetchBoardPost).mockResolvedValue({
       meta: {
         source: 'fusion',
@@ -3286,18 +3286,20 @@ describe('fusion chat card', () => {
           {
             model: 'ollama_cloud.kimi-k2-6',
             status: 'failed',
-            reason_detail: "Provider 'unknown' timeout phase=http_operation",
+            reason_detail: 'timeout phase=http_operation',
             reason_code: 'provider_error',
           },
           {
             model: 'ollama_cloud.minimax-m3',
             status: 'failed',
-            reason: "(Fusion_types.Provider_error \"Provider 'unknown' bad gateway\")",
+            reason_detail: 'bad gateway',
+            reason_code: 'provider_error',
           },
           {
             model: 'ollama_cloud.deepseek-v4-flash',
             status: 'failed',
-            reason: 'Fusion_types.Timeout',
+            reason_detail: 'timeout',
+            reason_code: 'timeout',
           },
         ],
         judge: { status: 'failed', decision: 'blocked', error: 'judge failed hard' },
@@ -3309,12 +3311,10 @@ describe('fusion chat card', () => {
     await flushUi()
 
     const detail = container.querySelector('[data-fusion-detail]')
-    expect(detail?.textContent).toContain("Provider 'ollama_cloud.kimi-k2-6' timeout phase=http_operation")
-    expect(detail?.textContent).toContain("Provider 'ollama_cloud.minimax-m3' bad gateway")
+    expect(detail?.textContent).toContain('timeout phase=http_operation')
+    expect(detail?.textContent).toContain('bad gateway')
     expect(detail?.textContent).toContain('timeout')
     expect(detail?.textContent).toContain('judge failed hard')
-    expect(detail?.textContent).not.toContain('Fusion_types.Provider_error')
-    expect(detail?.textContent).not.toContain("Provider 'unknown'")
   })
 
   it('shows an error message when the board post fetch fails', async () => {

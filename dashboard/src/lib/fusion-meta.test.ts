@@ -14,46 +14,18 @@ import {
 
 describe('normalizeFusionPanelReason', () => {
   it('returns undefined for empty reason', () => {
-    expect(normalizeFusionPanelReason('gpt-5', undefined)).toBeUndefined()
-    expect(normalizeFusionPanelReason('gpt-5', '')).toBeUndefined()
+    expect(normalizeFusionPanelReason(undefined)).toBeUndefined()
+    expect(normalizeFusionPanelReason('')).toBeUndefined()
   })
 
-  it('decodes OCaml Provider_error literals', () => {
-    expect(
-      normalizeFusionPanelReason('gpt-5', 'Fusion_types.Provider_error "quota exceeded"'),
-    ).toBe('quota exceeded')
-  })
-
-  it('re-attributions Provider unknown errors to the real model id', () => {
-    expect(
-      normalizeFusionPanelReason(
-        'gpt-5',
-        "Fusion_types.Provider_error \"Provider 'unknown': rate limit\"",
-      ),
-    ).toBe("Provider 'gpt-5': rate limit")
-  })
-
-  it('normalizes Timeout and Empty_response constructors', () => {
-    expect(normalizeFusionPanelReason('gpt-5', 'Fusion_types.Timeout')).toBe('timeout')
-    expect(normalizeFusionPanelReason('gpt-5', '( Fusion_types.Empty_response )')).toBe(
-      'empty response',
+  it('preserves structured detail without semantic string rewriting', () => {
+    expect(normalizeFusionPanelReason("Provider 'unknown': rate limit")).toBe(
+      "Provider 'unknown': rate limit",
     )
-    expect(
-      normalizeFusionPanelReason(
-        'gpt-5',
-        'Fusion_types.Empty_response "empty response (stop_reason=max_tokens)"',
-      ),
-    ).toBe('empty response (stop_reason=max_tokens)')
-  })
-
-  it('normalizes Invalid_max_output_tokens without provider attribution', () => {
-    expect(
-      normalizeFusionPanelReason('gpt-5', '( Fusion_types.Invalid_max_output_tokens 0 )'),
-    ).toBe('invalid max_output_tokens 0')
   })
 
   it('passes through plain reasons', () => {
-    expect(normalizeFusionPanelReason('gpt-5', 'context too long')).toBe('context too long')
+    expect(normalizeFusionPanelReason('context too long')).toBe('context too long')
   })
 })
 
@@ -97,7 +69,7 @@ describe('normalizeFusionPanel', () => {
         model: 'gpt-5',
         status: 'answered',
         answer: 'canary',
-        reason_detail: 'Fusion_types.Provider_error "quota"',
+        reason_detail: 'quota',
         reason_code: 'provider_error',
         input_tokens: 100,
         output_tokens: '200',

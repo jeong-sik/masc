@@ -548,7 +548,7 @@ let test_take_drain_cancel_clears_active_without_spin () =
     (match get_drain_cancel t with Closed -> true | _ -> false)
 ;;
 
-let test_background_drain_continues_after_first_poll () =
+let test_background_drain_continues_across_multiple_polls () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Eio_context.with_test_env
@@ -580,7 +580,9 @@ let test_background_drain_continues_after_first_poll () =
        EB.start_background_drain ~clock:env#clock t;
        check bool "first event drained" true (wait_for_event_count 1 20);
        Agent_sdk.Event_bus.publish bus (tool_called "second");
-       check bool "background drain keeps polling" true (wait_for_event_count 2 20))
+       check bool "second event drained" true (wait_for_event_count 2 20);
+       Agent_sdk.Event_bus.publish bus (tool_called "third");
+       check bool "background drain keeps polling" true (wait_for_event_count 3 20))
 ;;
 
 let () =
@@ -615,8 +617,8 @@ let () =
             test_typed_keeper_invocation_wire_contract
         ] )
     ; ( "background-drain"
-      , [ test_case "continues after first poll" `Quick
-            test_background_drain_continues_after_first_poll
+      , [ test_case "continues across multiple polls" `Quick
+            test_background_drain_continues_across_multiple_polls
         ] )
     ]
 ;;

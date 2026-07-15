@@ -257,55 +257,66 @@ let append_provider_overflow_manifest
         ~session_dir:(Filename.concat base_dir session_id)
         ~session_id
     in
-    let turn_state =
-      Keeper_unified_turn_manifest.append_manifest
-        ~config
-        ~runtime_manifest_context
-        ~turn_start
-        ~turn_state
-        ~site:"provider_overflow_compaction"
-        ~status
-        ?runtime_id:evidence.selected_runtime_id
-        ~compaction_source:"provider_overflow"
-        ~checkpoint_path
-        ~decision:
-          (Keeper_runtime_manifest.with_payload_role
-             ~payload_role:Checkpoint
-             (`Assoc
-               [ "operation_id", `String recovery.operation_id
-               ; "trigger", `String (Compaction_trigger.to_label trigger)
-               ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "owner_lane_resume_requested", `Bool true
-               ; "error", error
-               ; ( "exact_evidence"
-                 , Keeper_compact_policy.compaction_evidence_to_json evidence )
-               ]))
-        Keeper_runtime_manifest.Context_compacted
-    in
-    turn_state
+    Keeper_unified_turn_manifest.append_manifest_once
+      ~operation_id:recovery.operation_id
+      ~config
+      ~runtime_manifest_context
+      ~turn_start
+      ~turn_state
+      ~status
+      ?runtime_id:evidence.selected_runtime_id
+      ~compaction_source:"provider_overflow"
+      ~checkpoint_path
+      ~decision:
+        (Keeper_runtime_manifest.with_payload_role
+           ~payload_role:Checkpoint
+           (`Assoc
+             [ "operation_id", `String recovery.operation_id
+             ; "trigger", `String (Compaction_trigger.to_label trigger)
+             ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+             ; "owner_lane_resume_requested", `Bool true
+             ; "error", error
+             ; ( "exact_evidence"
+               , Keeper_compact_policy.compaction_evidence_to_json evidence )
+             ]))
+      Keeper_runtime_manifest.Context_compacted
+  in
+  let projection_result ~operation_id = function
+    | Ok turn_state -> Requeue_after_context_compaction, turn_state
+    | Error detail ->
+      Log.Keeper.error
+        ~keeper_name:runtime_manifest_context.manifest_keeper_name
+        "provider overflow compaction manifest projection failed \
+         operation_id=%s: %s"
+        operation_id
+        detail;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string WriteMetaFailures)
+        ~labels:
+          [ "keeper", runtime_manifest_context.manifest_keeper_name
+          ; "phase", "provider_overflow_manifest"
+          ]
+        ();
+      Defer_after_context_compaction_failure, turn_state
   in
   match outcome with
   | Not_provider_overflow -> Follow_failure_route, turn_state
   | Provider_overflow_applied { trigger; recovery } ->
-    let turn_state =
-      append_recovery
-        ~status:"compacted"
-        ~error:`Null
-        ~trigger
-        ~recovery
-        turn_state
-    in
-    Requeue_after_context_compaction, turn_state
+    append_recovery
+      ~status:"compacted"
+      ~error:`Null
+      ~trigger
+      ~recovery
+      turn_state
+    |> projection_result ~operation_id:recovery.operation_id
   | Provider_overflow_retry { trigger; reason; recovery = Some recovery } ->
-    let turn_state =
-      append_recovery
-        ~status:"retryable_failure"
-        ~error:(`String reason)
-        ~trigger
-        ~recovery
-        turn_state
-    in
-    Requeue_after_context_compaction, turn_state
+    append_recovery
+      ~status:"retryable_failure"
+      ~error:(`String reason)
+      ~trigger
+      ~recovery
+      turn_state
+    |> projection_result ~operation_id:recovery.operation_id
   | Provider_overflow_retry { trigger; reason; recovery = None } ->
     let turn_state =
       Keeper_unified_turn_manifest.append_manifest

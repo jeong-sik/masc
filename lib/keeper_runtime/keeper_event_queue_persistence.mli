@@ -177,6 +177,19 @@ val update_checked_result :
   (Keeper_event_queue.t -> (Keeper_event_queue.t, string) result) ->
   (unit, string) result
 
+type enqueue_stimulus_result =
+  | Enqueued
+  | Already_present
+
+val enqueue_stimulus_if_absent_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  Keeper_event_queue.stimulus ->
+  (enqueue_stimulus_result, string) result
+(** Atomically enqueue only when the same typed stimulus is absent from the
+    full durable state: pending, active leases, and transition outbox. *)
+
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
 

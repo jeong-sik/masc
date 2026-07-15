@@ -117,11 +117,12 @@ val enqueue_stimulus_durable_result :
   -> string
   -> Keeper_event_queue.stimulus
   -> enqueue_stimulus_durable_result
-(** Durably enqueue an already-typed deterministic stimulus by
-    {!Keeper_event_queue.stimulus_identity_equal}. This explicit-result path is
-    for structurally addressed signals whose delivery must commit before a
-    wake hint. Board-attention judgments use the stricter opaque-event-id API
-    above. *)
+(** Durably enqueue an already-typed deterministic stimulus only when its
+    {!Keeper_event_queue.stimulus_identity_equal} identity is absent from
+    pending, active leases, and the transition outbox. This explicit-result
+    path is for structurally addressed signals whose delivery must commit
+    before a wake hint. Board-attention judgments use the stricter
+    opaque-event-id API above. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

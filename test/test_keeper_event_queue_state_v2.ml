@@ -409,7 +409,6 @@ let cycle_meta () =
         [ "name", `String "queue-outcome"
         ; "agent_name", `String "agent-queue-outcome"
         ; "trace_id", `String "trace-queue-outcome"
-        ; "goal", `String "verify typed event queue outcomes"
         ])
   with
   | Ok meta -> meta
@@ -701,6 +700,13 @@ let test_transition_outbox_projects_with_stable_identity () =
       |> require_ok "claim projection source"
       |> require_some "projection lease"
     in
+    (match
+       Persistence.enqueue_stimulus_if_absent_result
+         ~base_path ~keeper_name source
+       |> require_ok "dedupe active lease"
+     with
+     | Persistence.Already_present -> ()
+     | Persistence.Enqueued -> Alcotest.fail "active lease was duplicated");
     let receipt =
       match
         Persistence.settle_result
@@ -716,6 +722,13 @@ let test_transition_outbox_projects_with_stable_identity () =
       | Persistence.Already_settled _ ->
         Alcotest.fail "first projection settlement was already settled"
     in
+    (match
+       Persistence.enqueue_stimulus_if_absent_result
+         ~base_path ~keeper_name source
+       |> require_ok "dedupe transition outbox"
+     with
+     | Persistence.Already_present -> ()
+     | Persistence.Enqueued -> Alcotest.fail "outbox stimulus was duplicated");
     Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
     |> require_ok "project transition outbox";
     let state =

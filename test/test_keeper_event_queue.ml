@@ -368,8 +368,8 @@ let () =
          })
       "bg-run:bg-2");
 
-  (* Scheduled wake is a non-board stimulus with a stable schedule-derived
-     post id and a codec round-trip for restart replay. *)
+  (* Scheduled wake is a non-board stimulus whose enclosing occurrence id and
+     payload both survive restart replay. *)
   let scheduled_wake =
     { schedule_id = "sched-1"
     ; due_at = 200.0
@@ -381,17 +381,17 @@ let () =
   let schedule_payload () = Schedule_due scheduled_wake in
   assert (not (is_board_signal (schedule_payload ())));
   assert (String.equal (payload_kind_label (schedule_payload ())) "schedule_due");
-  assert (String.equal (schedule_due_post_id scheduled_wake) "schedule-due:sched-1");
   (match
      stimulus_of_yojson
        (stimulus_to_yojson
-          { post_id = schedule_due_post_id scheduled_wake
+          { post_id = "schedule-occurrence:codec"
           ; urgency = Immediate
           ; arrived_at = 5.0
           ; payload = Schedule_due scheduled_wake
           })
    with
    | Ok s ->
+     assert (String.equal s.post_id "schedule-occurrence:codec");
      (match s.payload with
       | Schedule_due wake ->
         assert (String.equal wake.schedule_id "sched-1");

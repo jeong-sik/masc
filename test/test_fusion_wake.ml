@@ -253,7 +253,7 @@ let schedule_stimulus ?schedule_id ?due_at ?payload_digest ?title ?message ()
   : Keeper_event_queue.stimulus
   =
   let wake = scheduled_wake ?schedule_id ?due_at ?payload_digest ?title ?message () in
-  { post_id = Keeper_event_queue.schedule_due_post_id wake
+  { post_id = "schedule-occurrence:test"
   ; urgency = Keeper_event_queue.Normal
   ; arrived_at = 3000.0
   ; payload = Keeper_event_queue.Schedule_due wake
@@ -374,10 +374,11 @@ let test_scheduled_wake_is_actionable () =
   let ev : Keeper_world_observation.pending_board_event =
     Keeper_world_observation.pending_board_event_of_scheduled_wake
       ~meta
+      ~post_id:"schedule-occurrence:actionable"
       ~arrived_at:3000.0
       wake
   in
-  check string "post_id correlates to schedule" "schedule-due:sched-1" ev.post_id;
+  check string "post_id preserves occurrence" "schedule-occurrence:actionable" ev.post_id;
   check bool "preview carries schedule message" true
     (contains ~needle:"SCHEDULE-ANSWER-TOKEN" ev.preview);
   check string "schedule actor remains context" "scheduled_automation" ev.author;

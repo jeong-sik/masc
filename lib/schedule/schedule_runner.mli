@@ -43,6 +43,7 @@ type consumer =
   ; dispatch :
       Workspace_utils.config ->
       now:float ->
+      wake_signal ->
       Schedule_domain.schedule_request ->
       (Yojson.Safe.t, string) result
   }

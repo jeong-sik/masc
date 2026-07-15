@@ -477,6 +477,7 @@ let scheduled_automation_actor = "scheduled_automation"
 
 let pending_board_event_of_scheduled_wake
       ~meta:(_ : keeper_meta)
+      ~post_id
       ~(arrived_at : float)
       (sw : Keeper_event_queue.scheduled_wake)
   : pending_board_event
@@ -487,7 +488,7 @@ let pending_board_event_of_scheduled_wake
     | None -> Printf.sprintf "Scheduled keeper wake due (schedule %s)" sw.schedule_id
   in
   { event_kind = Schedule_due
-  ; post_id = Keeper_event_queue.schedule_due_post_id sw
+  ; post_id
   ; author = scheduled_automation_actor
   ; title
   ; preview = short_preview ~max_len:fusion_result_preview_max_len sw.message
@@ -694,7 +695,12 @@ let pending_board_event_of_stimulus
     Some
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
   | Keeper_event_queue.Schedule_due sw ->
-    Some (pending_board_event_of_scheduled_wake ~meta ~arrived_at:stimulus.arrived_at sw)
+    Some
+      (pending_board_event_of_scheduled_wake
+         ~meta
+         ~post_id:stimulus.post_id
+         ~arrived_at:stimulus.arrived_at
+         sw)
   | Keeper_event_queue.Failure_judgment fj ->
     Some (pending_board_event_of_failure_judgment ~meta ~arrived_at:stimulus.arrived_at fj)
   | Keeper_event_queue.Goal_assigned ga ->

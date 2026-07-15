@@ -122,6 +122,7 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
     "board-attention:" ^ attention.candidate_id
   | Keeper_event_queue.Board_signal _, Board_signal ->
     board_stimulus_id ~post_id:stimulus.post_id
+  | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
   | _, kind ->
     digest_id
       "stimulus"

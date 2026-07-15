@@ -53,7 +53,8 @@ val board_stimulus_id : post_id:string -> string
 (** Stable id for board-originated stimuli. *)
 
 val stimulus_id_of_event_queue : Keeper_event_queue.stimulus -> string
-(** Stable id derived from the event queue stimulus payload. *)
+(** Stable id derived from the event queue stimulus payload. Scheduled wakes
+    preserve the enclosing schedule occurrence [post_id] exactly. *)
 
 val record_event_queue_stimulus :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit

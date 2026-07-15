@@ -218,7 +218,13 @@ let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
          (Printexc.to_string exn))
 ;;
 
-let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request) payload =
+let dispatch_keeper_wake
+      config
+      ~now
+      (signal : Schedule_runner.wake_signal)
+      (request : Schedule_domain.schedule_request)
+      payload
+  =
   let* keeper_name = body_keeper_name payload in
   let* message = Schedule_payload_projection.body_required_string payload "message" in
   let* title = Schedule_payload_projection.body_optional_string payload "title" in
@@ -239,7 +245,7 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
     }
   in
   let stimulus : Keeper_event_queue.stimulus =
-    { post_id = Keeper_event_queue.schedule_due_post_id wake
+    { post_id = signal.signal_id
     ; urgency
     ; arrived_at = now
     ; payload = Keeper_event_queue.Schedule_due wake
@@ -311,14 +317,14 @@ let dispatch_keeper_wake config ~now (request : Schedule_domain.schedule_request
        @ keeper_wake_reaction_ledger_status_json_fields (Some reaction_ledger_status)))
 ;;
 
-let dispatch config ~now request =
+let dispatch config ~now signal request =
   match Schedule_payload_projection.dispatch_view_detailed request with
   | Error rejection ->
     Error (Schedule_payload_projection.dispatch_rejection_message rejection)
   | Ok (kind, payload) ->
     (match kind with
      | Schedule_payload_projection.Keeper_wake ->
-       dispatch_keeper_wake config ~now request payload)
+       dispatch_keeper_wake config ~now signal request payload)
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch }

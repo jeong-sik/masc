@@ -673,10 +673,129 @@ let test_runtime_files_are_not_queue_lane_directories () =
   save_text (Filename.concat keepers_dir "executor.json") "{}";
   save_text (Filename.concat keepers_dir "executor.memory.jsonl") "";
   save_text (Filename.concat keepers_dir "executor.decisions.jsonl") "";
+  save_text (Filename.concat keepers_dir "executor.decisions.jsonl.1") "";
+  save_text (Filename.concat keepers_dir "_alerts.deadletter.jsonl") "";
   let report = configure base_path in
   check "runtime files produce no queue recovery failures"
     (report.load_errors = []);
   check "runtime files restore no queue lanes"
+    (report.restored_keeper_count = 0)
+
+let test_runtime_root_typed_filename_authority () =
+  Printf.printf "Test: Keeper runtime root filenames round-trip canonically\n%!";
+  let open Keeper_runtime_root_entry in
+  let dotted_metadata = keeper_basename ~keeper_name:"dot.dataset" Metadata in
+  let dotted_interpretations = classify_basename dotted_metadata in
+  check "dotted metadata has one injective authority"
+    (match dotted_interpretations with
+     | [ Keeper
+           { keeper_name = "dot.dataset"; artifact = Metadata; rotation = None }
+       ] ->
+       true
+     | _ -> false);
+  check "exact metadata authority preserves arbitrary dotted suffixes"
+    (metadata_keeper_name dotted_metadata = Some "dot.dataset");
+  check "every typed interpretation renders to the observed basename"
+    (List.for_all
+       (fun interpretation -> String.equal (basename interpretation) dotted_metadata)
+       dotted_interpretations);
+  check "noncanonical rotated filename is rejected"
+    (classify_basename "executor.decisions.jsonl.01" = []);
+  check "TLA trace writer rotation is owned"
+    (match classify_basename "executor.tla-trace.jsonl.1" with
+     | [ Keeper
+           { keeper_name = "executor"; artifact = Tla_trace_log; rotation = Some 1 }
+       ] ->
+       true
+     | _ -> false);
+  check "metadata migration root backup is not an owned runtime artifact"
+    (classify_basename "executor.json.bak" = [])
+
+let test_corrupt_dotted_metadata_authority_does_not_disappear () =
+  Printf.printf
+    "Test: corrupt dotted metadata remains in persisted Keeper inventory\n%!";
+  with_base "keeper-chat-corrupt-dotted-meta" @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  save_text (Filename.concat keepers_dir "corrupt.dataset.json") "not-json";
+  check "corrupt dotted metadata name remains discoverable"
+    (match Keeper_meta_store.persisted_keeper_names_result config with
+     | Ok names -> List.mem "corrupt.dataset" names
+     | Error _ -> false)
+
+let test_unowned_regular_runtime_entry_is_reported () =
+  Printf.printf
+    "Test: unowned regular Keeper runtime entries are never silently accepted\n%!";
+  with_base "keeper-chat-unowned-runtime-entry" @@ fun base_path ->
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let entry_name = "unexpected-queue-authority" in
+  let entry_path = Filename.concat keepers_dir entry_name in
+  save_text entry_path "not a declared Keeper runtime artifact";
+  let report = configure base_path in
+  check "unowned regular entry is reported exactly once"
+    (match report.load_errors with
+     | [ Some observed_name, error ] ->
+       String.equal observed_name entry_name
+       && error.kind = Keeper_chat_queue.Invalid_path
+       && error.path = Some entry_path
+       && String.equal error.message
+            "Keeper chat queue inventory found an unowned regular entry"
+     | _ -> false);
+  check "unowned regular entry restores no queue lane"
+    (report.restored_keeper_count = 0);
+  check "unowned root entry does not block an unrelated Keeper lane"
+    (Result.is_ok
+       (Keeper_chat_queue.enqueue ~keeper_name:"unrelated" (message "works")))
+
+let test_runtime_root_replacement_during_inventory_is_rejected () =
+  Printf.printf
+    "Test: Keeper runtime root replacement during inventory is rejected\n%!";
+  with_base "keeper-chat-runtime-root-replacement" @@ fun base_path ->
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let displaced_dir = keepers_dir ^ ".displaced" in
+  Fs_compat.mkdir_p keepers_dir;
+  save_text (Filename.concat keepers_dir "executor.json") "{}";
+  Keeper_chat_queue.For_testing.set_inventory_classified_observer
+    (Some (fun () ->
+       Unix.rename keepers_dir displaced_dir;
+       Unix.mkdir keepers_dir 0o755));
+  let report = configure base_path in
+  check "runtime root replacement reports one registry error"
+    (match report.load_errors with
+     | [ None, error ] ->
+       error.kind = Keeper_chat_queue.Read_failed
+       && error.path = Some keepers_dir
+       && String.equal error.message
+            "failed to discover Keeper chat queue databases: Keeper runtime root entries changed during queue inventory"
+     | _ -> false);
+  check "runtime root replacement restores no queue lane"
+    (report.restored_keeper_count = 0)
+
+let test_runtime_root_child_replacement_during_inventory_is_rejected () =
+  Printf.printf
+    "Test: Keeper runtime root child replacement during inventory is rejected\n%!";
+  with_base "keeper-chat-runtime-root-child-replacement" @@ fun base_path ->
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let metadata_path = Filename.concat keepers_dir "executor.json" in
+  save_text metadata_path "{}";
+  Keeper_chat_queue.For_testing.set_inventory_classified_observer
+    (Some (fun () ->
+       Sys.remove metadata_path;
+       Unix.mkdir metadata_path 0o755));
+  let report = configure base_path in
+  check "runtime root child replacement reports one registry error"
+    (match report.load_errors with
+     | [ None, error ] ->
+       error.kind = Keeper_chat_queue.Read_failed
+       && error.path = Some keepers_dir
+       && String.equal error.message
+            ("failed to discover Keeper chat queue databases: Keeper runtime root entry identity changed during queue inventory: "
+             ^ metadata_path)
+     | _ -> false);
+  check "runtime root child replacement restores no queue lane"
     (report.restored_keeper_count = 0)
 
 let test_foreign_database_and_symlink_are_quarantined () =
@@ -749,7 +868,12 @@ let () =
   test_uncertain_lease_compensates_and_other_transitions_reconcile ();
   test_restart_requires_explicit_recovery_without_journal ();
   test_legacy_json_is_not_a_queue_authority ();
+  test_runtime_root_typed_filename_authority ();
+  test_corrupt_dotted_metadata_authority_does_not_disappear ();
   test_runtime_files_are_not_queue_lane_directories ();
+  test_unowned_regular_runtime_entry_is_reported ();
+  test_runtime_root_replacement_during_inventory_is_rejected ();
+  test_runtime_root_child_replacement_during_inventory_is_rejected ();
   test_foreign_database_and_symlink_are_quarantined ();
   test_reconcile_absent_lane_and_stage_order ();
   if !failures > 0

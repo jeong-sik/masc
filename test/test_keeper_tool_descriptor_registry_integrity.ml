@@ -1206,9 +1206,9 @@ let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
    [internal_descriptors]. *)
 let cluster_projection_table =
   [ "masc_keeper_list", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_msg_result", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_msg_cancel", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_msg_queue", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_delegate_status", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_delegate_cancel", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_delegate_list", "tool_masc_keeper_dispatch"
   ; "masc_keeper_compact", "tool_masc_keeper_dispatch"
   ; "masc_keeper_clear", "tool_masc_keeper_dispatch"
   ; "masc_keeper_sandbox_start", "tool_masc_keeper_dispatch"
@@ -1217,7 +1217,7 @@ let cluster_projection_table =
   ; "masc_keeper_persona_audit", "tool_masc_keeper_dispatch"
   ; "masc_keeper_status", "tool_masc_keeper_dispatch"
   ; "masc_keeper_down", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_msg", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_delegate", "tool_masc_keeper_dispatch"
   ; "masc_keeper_up", "tool_masc_keeper_dispatch"
   ]
 ;;

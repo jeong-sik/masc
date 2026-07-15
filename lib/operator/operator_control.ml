@@ -220,36 +220,24 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | None -> Error "payload.message is required"
       in
       let* () =
-        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg"
+        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_delegate"
           request.payload
-      in
-      let direct_reply =
-        Json_util.get_bool request.payload "direct_reply" |> Option.value ~default:false
-      in
-      let timeout_sec =
-        Json_util.get_float request.payload "timeout_sec"
-        |> Option.map (fun f -> int_of_float (Float.ceil f))
-        |> (fun o -> match o with Some n when n > 0 -> Some n | _ -> None)
       in
       let args =
         `Assoc
-          (([
-              ("name", `String name);
-              ("message", `String message);
-            ]
-            @ if direct_reply then [ ("direct_reply", `Bool true) ] else [])
-           @
-           match timeout_sec with
-           | Some value -> [ ("timeout_sec", `Int value) ]
-           | None -> [])
+          [ ( "target"
+            , `Assoc [ "kind", `String "keeper"; "name", `String name ] )
+          ; "capability", `String "invoke_turn"
+          ; "prompt", `String message
+          ]
       in
       let* result =
-        dispatch_keeper_json ctx ~tool_name:"masc_keeper_msg" ~args
+        dispatch_keeper_json ctx ~tool_name:"masc_keeper_delegate" ~args
       in
       Ok
         (`Assoc
           [
-            ("tool_name", `String "masc_keeper_msg");
+            ("tool_name", `String "masc_keeper_delegate");
             ("result", result);
           ])
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)

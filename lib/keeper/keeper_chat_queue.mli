@@ -378,6 +378,7 @@ module For_testing : sig
   val set_transaction_stage_observer :
     (transaction_stage -> unit) option -> unit
   val set_before_entry_lock_observer : (string -> unit) option -> unit
+  val set_inventory_classified_observer : (unit -> unit) option -> unit
   val failure_kind_of_string : string -> (failure_kind, string) result
   val snapshot_path : base_path:string -> keeper_name:string -> (string, string) result
   val receipt_json :

@@ -277,10 +277,10 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_sandbox_start", broadcast_tool);
     ("masc_keeper_sandbox_stop", mutating_tool);
     ("masc_keeper_create_from_persona", broadcast_tool);
-    ("masc_keeper_msg", broadcast_tool);
-    ("masc_keeper_msg_result", read_state_tool);
-    ("masc_keeper_msg_cancel", broadcast_tool);
-    ("masc_keeper_msg_queue", read_state_tool);
+    ("masc_keeper_delegate", broadcast_tool);
+    ("masc_keeper_delegate_status", read_state_tool);
+    ("masc_keeper_delegate_cancel", broadcast_tool);
+    ("masc_keeper_delegate_list", read_state_tool);
     ("masc_keeper_persona_audit", read_state_tool);
     ("masc_keeper_sandbox_status", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);

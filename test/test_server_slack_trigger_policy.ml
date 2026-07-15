@@ -202,7 +202,7 @@ let test_startup_error_is_operator_visible () =
 ;;
 
 let slack_message ~ts =
-  Slack_socket_client.Message_create
+  Slack_gateway_state.Message_create
     { channel_id = "C123"
     ; thread_ts = None
     ; user_id = "U123"

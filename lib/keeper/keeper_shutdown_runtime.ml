@@ -40,16 +40,7 @@ let submit_error_to_string = function
 ;;
 
 let operation_requires_fence (operation : Keeper_shutdown_types.t) =
-  match operation.phase with
-  | Finalized { completion = Completion_pending _; _ } -> true
-  | Finalized
-      { completion = (Completion_not_requested | Completion_delivered _); _ } -> false
-  | Prepared
-  | Joined_idle
-  | Finalizing_tasks _
-  | Cleanup_ready _
-  | Reconciliation_required _
-  | Blocked _ -> true
+  Keeper_shutdown_types.requires_admission_fence operation
 ;;
 
 let restore_admission ~config ~keeper_name ~operation_id =
@@ -192,7 +183,8 @@ let finalize_if_ready ~config ~entry operation =
          (Keeper_shutdown_finalize.error_to_string error))
   | Prepared
   | Reconciliation_required _
-  | Blocked _ -> ()
+  | Blocked _
+  | Superseded _ -> ()
 ;;
 
 let run_worker ~config ~entry operation =
@@ -224,7 +216,8 @@ let run_worker ~config ~entry operation =
   | Cleanup_ready _
   | Finalized _ -> finalize_if_ready ~config ~entry operation
   | Reconciliation_required _
-  | Blocked _ -> ()
+  | Blocked _
+  | Superseded _ -> ()
 ;;
 
 type worker_start_result =
@@ -358,7 +351,8 @@ let recover_operation ~config operation =
     | Cleanup_ready _
     | Reconciliation_required _
     | Finalized _
-    | Blocked _ -> Ok operation
+    | Blocked _
+    | Superseded _ -> Ok operation
   in
   match operation_result with
   | Error _ as error -> error
@@ -372,7 +366,8 @@ let recover_operation ~config operation =
        |> Result.map_error Keeper_shutdown_finalize.error_to_string
      | Prepared
      | Reconciliation_required _
-     | Blocked _ -> Ok recovered)
+     | Blocked _
+     | Superseded _ -> Ok recovered)
 ;;
 
 let recover_at_boot ~config =

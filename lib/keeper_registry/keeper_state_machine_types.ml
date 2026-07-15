@@ -286,14 +286,13 @@ let can_transition ~from_phase ~to_phase =
   | ( Overflowed
     , (Offline | Failing | Overflowed | HandingOff | Stopped | Restarting) ) ->
     false
-  (* Compacting -> Running (done, overflow cleared)
-     | Overflowed (Compaction_failed leaves context_overflow=true; the keeper
-     re-enters Overflowed and remains available for a later recovery attempt)
+  (* Compacting -> Running (done or failed; the durable Keeper Lane owns any
+     exact-source retry after failure)
      | Paused (operator pause during compaction)
      | Failing (hb fail / guardrail during)
      | Crashed (fatal) | Draining (operator stop during). *)
-  | Compacting, (Running | Overflowed | Failing | Crashed | Draining | Paused) -> true
-  | Compacting, (Offline | Compacting | HandingOff | Stopped | Restarting) -> false
+  | Compacting, (Running | Failing | Crashed | Draining | Paused) -> true
+  | Compacting, (Offline | Overflowed | Compacting | HandingOff | Stopped | Restarting) -> false
   (* HandingOff -> Running (done) | Failing | Crashed
      | Draining (operator stop during handoff)
      | Paused (operator pause during handoff) *)

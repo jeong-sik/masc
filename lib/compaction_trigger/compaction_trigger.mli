@@ -2,7 +2,7 @@
 
     Replaces the prior [string] / [string option] representation in
     [compaction_event.trigger] and [pre_compact_event.trigger] so the
-    Otel_metric_store [trigger] label has bounded cardinality (4 values) while
+    Otel_metric_store [trigger] label has bounded cardinality (5 values) while
     structured numerical detail (ratio, counts, thresholds) is preserved
     in the JSON receipt via [to_detail_json]. *)
 
@@ -19,9 +19,12 @@ type t =
       { count : int
       ; threshold : int
       }
+  | Provider_overflow of { limit_tokens : int option }
+      (** Typed provider context-window overflow. [limit_tokens] is the
+          provider-declared limit when present, never an estimated count. *)
   | Manual
 
-(** Closed label set (4 values) for Otel_metric_store / SSE [trigger] label.
+(** Closed label set (5 values) for Otel_metric_store / SSE [trigger] label.
     Use this anywhere cardinality matters. *)
 val to_label : t -> string
 

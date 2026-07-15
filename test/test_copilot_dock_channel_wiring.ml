@@ -1,7 +1,7 @@
 (* Tests for dashboard Copilot Dock -> keeper chat stream wiring.
 
    Verifies the shared contract from the HTTP parser down to the
-   [masc_keeper_msg] args that [Keeper_tool_surface.dispatch_stream]
+   private direct-message args that the direct-delivery stream
    receives:
    - copilot channel label + operator workspace id parse without requiring
      an external user id;

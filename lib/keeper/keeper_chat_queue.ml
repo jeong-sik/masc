@@ -515,6 +515,8 @@ let transaction_observer_for_testing :
   Atomic.make None
 let before_entry_lock_observer_for_testing : (string -> unit) option Atomic.t =
   Atomic.make None
+let inventory_classified_observer_for_testing : (unit -> unit) option Atomic.t =
+  Atomic.make None
 let transition_observer : transition_observer option Atomic.t = Atomic.make None
 
 let registry_mutex = Eio.Mutex.create ()
@@ -549,14 +551,7 @@ let notify_transition ~keeper_name ~revision =
          keeper_name revision (Printexc.to_string exn))
 
 let valid_keeper_name name =
-  let valid_char = function
-    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true
-    | _ -> false
-  in
-  (not (String.equal name ""))
-  && not (String.equal name ".")
-  && not (String.equal name "..")
-  && String.for_all valid_char name
+  Safe_identifier.is_portable_name name
 
 let keeper_directory ~base_path ~keeper_name =
   Filename.concat
@@ -3566,31 +3561,10 @@ let same_directory_identity left right =
   && left.Unix.st_dev = right.Unix.st_dev
   && left.Unix.st_ino = right.Unix.st_ino
 
-let read_owned_directory_blocking ~ownership_root path =
-  match inspect_owned_directory ~ownership_root path with
-  | Error _ as error -> error
-  | Ok Fs_compat.Owned_directory_missing -> Ok None
-  | Ok (Fs_compat.Owned_directory before) ->
-    let entries =
-      try Ok (Fs_compat.read_dir path) with
-      | exn -> Error (load_error Read_failed ~path (Printexc.to_string exn))
-    in
-    (match entries with
-     | Error _ as error -> error
-     | Ok entries ->
-       (match inspect_owned_directory ~ownership_root path with
-        | Ok (Fs_compat.Owned_directory after)
-          when same_directory_identity before after ->
-          Ok (Some entries)
-        | Ok (Fs_compat.Owned_directory _ | Fs_compat.Owned_directory_missing) ->
-          Error
-            (load_error Read_failed ~path
-               "owned Keeper directory identity changed during queue inventory")
-        | Error _ as error -> error))
-
 type keeper_directory_inventory =
   { keeper_names : string list
   ; rejected_entries : (string * snapshot_load_error) list
+  ; observed_entries : (string * Unix.stats) list
   }
 
 let classify_keeper_directory_entries_blocking entries_path entries =
@@ -3598,14 +3572,28 @@ let classify_keeper_directory_entries_blocking entries_path entries =
     (fun inventory entry_name ->
        let entry_path = Filename.concat entries_path entry_name in
        match Unix.lstat entry_path with
-       | { Unix.st_kind = Unix.S_DIR; _ } ->
-         { inventory with keeper_names = entry_name :: inventory.keeper_names }
-       | { Unix.st_kind = Unix.S_REG; _ } ->
-         (* The Keeper runtime root also owns meta JSON, decision JSONL,
-            memory JSONL, and backup files.  They are not chat queue lanes and
-            must not be interpreted as directory names. *)
-         inventory
-       | { Unix.st_kind = st_kind; _ } ->
+       | ({ Unix.st_kind = Unix.S_DIR; _ } as stats) ->
+         { inventory with
+           keeper_names = entry_name :: inventory.keeper_names
+         ; observed_entries = (entry_name, stats) :: inventory.observed_entries
+         }
+       | ({ Unix.st_kind = Unix.S_REG; _ } as stats) ->
+         (match Keeper_runtime_root_entry.classify_basename entry_name with
+          | _ :: _ ->
+            { inventory with
+              observed_entries = (entry_name, stats) :: inventory.observed_entries
+            }
+          | [] ->
+            { inventory with
+              rejected_entries =
+                ( entry_name
+                , load_error Invalid_path ~path:entry_path
+                    "Keeper chat queue inventory found an unowned regular entry"
+                )
+                :: inventory.rejected_entries
+            ; observed_entries = (entry_name, stats) :: inventory.observed_entries
+            })
+       | ({ Unix.st_kind = st_kind; _ } as stats) ->
          { inventory with
            rejected_entries =
              ( entry_name
@@ -3614,6 +3602,7 @@ let classify_keeper_directory_entries_blocking entries_path entries =
                     "Keeper chat queue inventory entry has unsupported kind %s"
                     (unix_file_kind_to_string st_kind)) )
              :: inventory.rejected_entries
+         ; observed_entries = (entry_name, stats) :: inventory.observed_entries
          }
        | exception exn ->
          { inventory with
@@ -3622,21 +3611,89 @@ let classify_keeper_directory_entries_blocking entries_path entries =
              , load_error Read_failed ~path:entry_path (Printexc.to_string exn) )
              :: inventory.rejected_entries
          })
-    { keeper_names = []; rejected_entries = [] }
+    { keeper_names = []; rejected_entries = []; observed_entries = [] }
     entries
   |> fun inventory ->
   { keeper_names = List.rev inventory.keeper_names
   ; rejected_entries = List.rev inventory.rejected_entries
+  ; observed_entries = List.rev inventory.observed_entries
   }
+;;
+
+let same_entry_identity before after =
+  before.Unix.st_kind = after.Unix.st_kind
+  && before.Unix.st_dev = after.Unix.st_dev
+  && before.Unix.st_ino = after.Unix.st_ino
+;;
+
+let validate_keeper_directory_inventory_blocking path ~initial_entries inventory =
+  let final_entries = Fs_compat.read_dir path in
+  if
+    not
+      (List.equal
+         String.equal
+         (List.sort String.compare initial_entries)
+         (List.sort String.compare final_entries))
+  then Error "Keeper runtime root entries changed during queue inventory"
+  else
+    inventory.observed_entries
+    |> List.find_map (fun (entry_name, before) ->
+      let entry_path = Filename.concat path entry_name in
+      match Unix.lstat entry_path with
+      | after when same_entry_identity before after -> None
+      | _ -> Some entry_path
+      | exception _ -> Some entry_path)
+    |> function
+    | None -> Ok ()
+    | Some entry_path ->
+      Error
+        (Printf.sprintf
+           "Keeper runtime root entry identity changed during queue inventory: %s"
+           entry_path)
 ;;
 
 let read_keeper_directory_inventory ~ownership_root path =
   Eio_guard.run_in_systhread (fun () ->
-    match read_owned_directory_blocking ~ownership_root path with
+    match inspect_owned_directory ~ownership_root path with
     | Error _ as error -> error
-    | Ok None -> Ok None
-    | Ok (Some entries) ->
-      Ok (Some (classify_keeper_directory_entries_blocking path entries)))
+    | Ok Fs_compat.Owned_directory_missing -> Ok None
+    | Ok (Fs_compat.Owned_directory before) ->
+      let inventory =
+        try
+          let entries = Fs_compat.read_dir path in
+          Ok (entries, classify_keeper_directory_entries_blocking path entries)
+        with
+        | exn -> Error (load_error Read_failed ~path (Printexc.to_string exn))
+      in
+      (match inventory with
+       | Error _ as error -> error
+       | Ok (initial_entries, inventory) ->
+         Option.iter (fun observer -> observer ())
+           (Atomic.get inventory_classified_observer_for_testing);
+         let snapshot_validation =
+           try
+             validate_keeper_directory_inventory_blocking
+               path
+               ~initial_entries
+               inventory
+           with
+           | exn -> Error (Printexc.to_string exn)
+         in
+         (match snapshot_validation with
+          | Error detail -> Error (load_error Read_failed ~path detail)
+          | Ok () ->
+            (* Root identity is checked last, after the final entry-set and
+               child inode/type validation. Per-lane database loading then
+               performs its own owned-chain and regular-file identity checks. *)
+            (match inspect_owned_directory ~ownership_root path with
+             | Ok (Fs_compat.Owned_directory after)
+               when same_directory_identity before after ->
+               Ok (Some inventory)
+             | Ok (Fs_compat.Owned_directory _ | Fs_compat.Owned_directory_missing) ->
+               Error
+                 (load_error Read_failed ~path
+                    "owned Keeper directory identity changed during queue inventory")
+             | Error _ as error -> error))))
 
 let configure_persistence ~base_path =
   let claimed =
@@ -3784,6 +3841,7 @@ module For_testing = struct
     Atomic.set commit_failure_for_testing None;
     Atomic.set transaction_observer_for_testing None;
     Atomic.set before_entry_lock_observer_for_testing None;
+    Atomic.set inventory_classified_observer_for_testing None;
     Atomic.set persistence_configuration Unconfigured;
     Atomic.set global_load_errors [];
     Atomic.set transition_observer None;
@@ -3800,6 +3858,9 @@ module For_testing = struct
 
   let set_before_entry_lock_observer observer =
     Atomic.set before_entry_lock_observer_for_testing observer
+
+  let set_inventory_classified_observer observer =
+    Atomic.set inventory_classified_observer_for_testing observer
 
   let failure_kind_of_string = failure_kind_of_string
   let snapshot_path = snapshot_path

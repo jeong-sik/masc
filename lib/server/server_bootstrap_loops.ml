@@ -543,22 +543,20 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       queue_recovery.restored_keeper_count
       queue_recovery.recovery_required_receipt_count
       (List.length queue_recovery.load_errors);
-  (* Request status is recovered only after queue receipts converge: a poller
-     must never observe a final Lost status while its durable terminal row is
-     still absent. Direct transcript checkpoints are exact request-local state,
-     never a global startup scan. [server_runtime_bootstrap] calls this entire
-     boundary before publishing [server_state], so no poll/cancel route can
-     race a disk-only transition. *)
+  (* Inspect request records only after queue receipts converge. This boundary
+     preserves non-terminal restart provenance; it neither executes requests
+     nor launders interrupted work into a terminal failure. *)
   set_phase Recovering_requests;
   let request_started = preparation_stage_started () in
   let keeper_msg_recovery =
-    Keeper_msg_async.recover_lost_disk_records ~base_path ()
+    Keeper_msg_async.recover_request_records ~base_path ()
   in
+  let candidates = keeper_msg_recovery.candidates in
   observe_preparation_stage
     ~stage:"request"
     ~started:request_started
     ~examined:
-      (keeper_msg_recovery.lost
+      (List.length candidates
        + keeper_msg_recovery.finalized
        + keeper_msg_recovery.cleaned
        + keeper_msg_recovery.staging_files_inspected
@@ -569,7 +567,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
        + keeper_msg_recovery.failed
        + List.length keeper_msg_recovery.store_errors);
   if
-    keeper_msg_recovery.lost > 0
+    candidates <> []
     || keeper_msg_recovery.finalized > 0
     || keeper_msg_recovery.cleaned > 0
     || keeper_msg_recovery.staging_files_inspected > 0
@@ -577,8 +575,8 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
     || keeper_msg_recovery.failed > 0
   then
     Log.Keeper.warn
-      "keeper_msg_async: recovery lost=%d finalized=%d cleaned=%d staging_files_inspected=%d staging_files_deleted=%d staging_files_preserved=%d unreadable=%d failed=%d"
-      keeper_msg_recovery.lost
+      "keeper_msg_async: recovery pending=%d finalized=%d cleaned=%d staging_files_inspected=%d staging_files_deleted=%d staging_files_preserved=%d unreadable=%d failed=%d"
+      (List.length candidates)
       keeper_msg_recovery.finalized
       keeper_msg_recovery.cleaned
       keeper_msg_recovery.staging_files_inspected
@@ -586,6 +584,17 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       keeper_msg_recovery.staging_files_preserved
       keeper_msg_recovery.unreadable
       keeper_msg_recovery.failed;
+  List.iter
+    (fun (candidate : Keeper_msg_async.recovery_candidate) ->
+       Log.Keeper.warn
+         "keeper_msg_async: restart candidate request_id=%s keeper=%s provenance=%s"
+         candidate.entry.request_id
+         (Keeper_invocation_types.request_target_name candidate.entry.request)
+         (match candidate.provenance with
+          | Keeper_msg_async.Queued_before_restart -> "queued"
+          | Keeper_msg_async.Running_before_restart -> "running"
+          | Keeper_msg_async.Cancelling_before_restart _ -> "cancelling"))
+    candidates;
   let prepared =
     { base_path = base_path_identity
     ; config

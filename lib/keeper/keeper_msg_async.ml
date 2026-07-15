@@ -76,8 +76,21 @@ type canonical_terminal_error =
   | Canonical_terminal_nonterminal of request_status
   | Canonical_terminal_noncanonical_location of request_status
 
+type recovery_provenance =
+  | Queued_before_restart
+  | Running_before_restart
+  | Cancelling_before_restart of
+      { reason : string
+      ; cancelled_by : string
+      }
+
+type recovery_candidate =
+  { entry : entry
+  ; provenance : recovery_provenance
+  }
+
 type recovery_report =
-  { lost : int
+  { candidates : recovery_candidate list
   ; finalized : int
   ; cleaned : int
   ; staging_files_inspected : int
@@ -113,6 +126,7 @@ and recovery_record_error_kind =
   | Recovery_record_not_file
   | Recovery_record_rejected of access_rejection
   | Recovery_terminal_integrity of string
+  | Recovery_candidate_invariant of string
   | Recovery_persistence_failed of string
   | Recovery_source_cleanup_failed
   | Recovery_entry_exception of string
@@ -1300,22 +1314,6 @@ let rollback_rejected_record_file_unlocked ~ops ~ownership_root path =
     Error error
 ;;
 
-let mark_lost_after_recovery ?source_path (entry : entry) =
-  let reason =
-    "keeper_msg request was accepted but no live worker owns it; the server may have \
-     restarted or evicted the request before terminal result"
-  in
-  let lost =
-    { entry with status = Lost { reason }; completed_at = Some (Time_compat.now ()) }
-  in
-  match
-    persist_entry ~ops:production_request_ops ?source_path lost
-    |> observe_persist_error ~operation:"recovery" lost
-  with
-  | Ok () -> Ok lost
-  | Error error -> Error (persist_error_to_string error)
-;;
-
 let request_has_live_worker ~base_path ~submitted_by request_id =
   let key = request_key ~base_path ~submitted_by ~request_id in
   Eio.Mutex.use_ro mu (fun () -> Request_table.mem pending key)
@@ -1368,7 +1366,7 @@ let finalize_existing_terminal_source ~(entry : entry) source_path =
 ;;
 
 let empty_recovery_report =
-  { lost = 0
+  { candidates = []
   ; finalized = 0
   ; cleaned = 0
   ; staging_files_inspected = 0
@@ -1389,6 +1387,7 @@ let recovery_record_error_kind_to_string = function
     "record identity rejected: "
     ^ (access_rejection_to_json rejection |> Yojson.Safe.to_string)
   | Recovery_terminal_integrity reason -> "terminal integrity: " ^ reason
+  | Recovery_candidate_invariant reason -> "candidate invariant: " ^ reason
   | Recovery_persistence_failed reason -> "persistence failed: " ^ reason
   | Recovery_source_cleanup_failed -> "source cleanup failed"
   | Recovery_entry_exception reason -> "entry exception: " ^ reason
@@ -1413,6 +1412,18 @@ let record_error ~store ~path ~request_id ?keeper_name kind report =
     record_errors =
       { store; path; request_id; keeper_name; kind } :: report.record_errors
   }
+;;
+
+let recovery_candidate_of_entry (entry : entry) =
+  match entry.status with
+  | Queued -> Some { entry; provenance = Queued_before_restart }
+  | Running -> Some { entry; provenance = Running_before_restart }
+  | Cancelling { reason; cancelled_by } ->
+    Some
+      { entry
+      ; provenance = Cancelling_before_restart { reason; cancelled_by }
+      }
+  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ -> None
 ;;
 
 let recover_record_path ~base_path ~request_id path report =
@@ -1511,19 +1522,21 @@ let recover_record_path ~base_path ~request_id path report =
            ~submitted_by:entry.submitted_by
            request_id
        then report
-       else (
-         match mark_lost_after_recovery ~source_path:path entry with
-         | Ok _ -> { report with lost = report.lost + 1 }
-         | Error reason ->
-           { (record_error
-                ~store:Active_store
-                ~path
-                ~request_id
-                ~keeper_name:(entry_keeper_name entry)
-                (Recovery_persistence_failed reason)
-                report) with
-             failed = report.failed + 1
-           }))
+       else
+         (match recovery_candidate_of_entry entry with
+          | Some candidate ->
+            { report with candidates = candidate :: report.candidates }
+          | None ->
+            { (record_error
+                 ~store:Active_store
+                 ~path
+                 ~request_id
+                 ~keeper_name:(entry_keeper_name entry)
+                 (Recovery_candidate_invariant
+                    "non-terminal record has no recovery provenance")
+                 report) with
+              failed = report.failed + 1
+            })
   | Unreadable reason ->
     { (record_error
          ~store:Active_store
@@ -1697,21 +1710,37 @@ let recover_active_record_directory ~base_path dir report =
     store_error ~store:Active_store ~path:dir (Printexc.to_string exn) report
 ;;
 
-let recover_lost_disk_records_canonical ~base_path =
+let compare_recovery_candidate left right =
+  let by_keeper =
+    String.compare
+      (entry_keeper_name left.entry)
+      (entry_keeper_name right.entry)
+  in
+  if by_keeper <> 0
+  then by_keeper
+  else
+    let by_submission = Float.compare left.entry.submitted_at right.entry.submitted_at in
+    if by_submission <> 0
+    then by_submission
+    else String.compare left.entry.request_id right.entry.request_id
+;;
+
+let recover_request_records_canonical ~base_path =
   let active_dir = active_request_dir ~base_path in
   let report =
     sweep_request_staging_files ~base_path empty_recovery_report
     |> recover_active_record_directory ~base_path active_dir
   in
   { report with
-    store_errors = List.rev report.store_errors
+    candidates = List.sort compare_recovery_candidate report.candidates
+  ; store_errors = List.rev report.store_errors
   ; record_errors = List.rev report.record_errors
   }
 ;;
 
-let recover_lost_disk_records ~base_path () =
+let recover_request_records ~base_path () =
   match canonical_base_path base_path with
-  | Ok base_path -> recover_lost_disk_records_canonical ~base_path
+  | Ok base_path -> recover_request_records_canonical ~base_path
   | Error rejection ->
     Log.Keeper.error
       "keeper_msg_async: recovery rejected base_path error=%s"
@@ -2666,7 +2695,7 @@ module For_testing = struct
   let terminal_record_path = terminal_record_path
   let atomic_staging_dir = atomic_staging_dir
   let load_record = load_record
-  let recover_lost_disk_records = recover_lost_disk_records
+  let recover_request_records = recover_request_records
   let submit = submit_with_ops
   let cancel = cancel_with_ops
   let reserved_request_id_count () =

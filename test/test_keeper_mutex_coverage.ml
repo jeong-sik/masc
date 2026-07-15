@@ -78,19 +78,6 @@ let wait_for_running ~base_path request_id =
   loop 200
 ;;
 
-let wait_for_lost ~base_path request_id =
-  let rec loop remaining =
-    match Keeper_msg_async.poll ~base_path ~caller request_id with
-    | Keeper_msg_async.Found ({ status = Lost _; _ } as entry) -> entry
-    | _ when remaining <= 0 ->
-      failwith (Printf.sprintf "request %s did not become lost" request_id)
-    | _ ->
-      Eio.Fiber.yield ();
-      loop (remaining - 1)
-  in
-  loop 200
-;;
-
 let wait_for_cancelled ~base_path request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll ~base_path ~caller request_id with
@@ -627,6 +614,13 @@ let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
            "uncertain request keeps only its own id reserved"
            1
            (Keeper_msg_async.For_testing.reserved_request_id_count ());
+         Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
+         (match
+            (Keeper_msg_async.For_testing.recover_request_records ~base_path ())
+              .candidates
+          with
+          | [ { provenance = Queued_before_restart; _ } ] -> ()
+          | _ -> Alcotest.fail "queued restart provenance was not preserved");
          let subsequent_request_id =
            Keeper_msg_async.submit
              ~background_sw
@@ -784,7 +778,7 @@ let test_keeper_msg_async_running_write_failure_projects_durable_marker_once () 
        | _ -> Alcotest.fail "durable failure marker is not polling truth")
 ;;
 
-let test_keeper_msg_async_marks_recovered_inflight_lost () =
+let test_keeper_msg_async_inventories_recovered_running () =
   with_eio_env
   @@ fun _env ->
   Eio.Switch.run
@@ -816,27 +810,31 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
   (match Keeper_msg_async.poll ~base_path ~caller request_id with
    | Keeper_msg_async.Found { status = Running; _ } -> ()
    | _ -> Alcotest.fail "poller incorrectly stole a disk-only worker");
-  Alcotest.(check int)
-    "exclusive recovery marks the disk-only worker lost"
-    1
-    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()).lost;
+  let report =
+    Keeper_msg_async.For_testing.recover_request_records ~base_path ()
+  in
+  Alcotest.(check int) "exclusive recovery inventories the disk-only worker" 1
+    (List.length report.candidates);
+  (match report.candidates with
+   | [ { entry; provenance = Running_before_restart } ] ->
+     Alcotest.(check string) "candidate preserves request id" request_id entry.request_id
+   | _ -> Alcotest.fail "expected one running restart candidate");
   match Keeper_msg_async.poll ~base_path ~caller request_id with
-  | Keeper_msg_async.Found { Keeper_msg_async.status = Lost { reason }; _ } ->
-    Alcotest.(check bool) "lost reason retained" true (String.length reason > 0);
+  | Keeper_msg_async.Found { Keeper_msg_async.status = Running; _ } ->
     Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
     (match Keeper_msg_async.poll ~base_path ~caller request_id with
-     | Keeper_msg_async.Found { Keeper_msg_async.status = Lost _; _ } -> ()
+     | Keeper_msg_async.Found { Keeper_msg_async.status = Running; _ } -> ()
      | Keeper_msg_async.Found entry ->
        Alcotest.failf
-         "expected persisted lost, got %s"
+         "expected persisted running, got %s"
          (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
      | Keeper_msg_async.Absent
      | Keeper_msg_async.Unreadable _
      | Keeper_msg_async.Rejected _ ->
-       Alcotest.fail "expected persisted lost request")
+       Alcotest.fail "expected persisted running request")
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
-      "expected recovered lost, got %s"
+      "expected inventoried running, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
   | Keeper_msg_async.Absent
   | Keeper_msg_async.Unreadable _
@@ -844,7 +842,7 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
     Alcotest.fail "expected persisted request"
 ;;
 
-let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
+let test_keeper_msg_async_inventory_excludes_live_worker () =
   with_eio_env
   @@ fun _env ->
   Eio.Switch.run
@@ -865,9 +863,10 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
   in
   ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
   Alcotest.(check int)
-    "live in-memory worker is not recovered as lost"
+    "live in-memory worker is not a restart candidate"
     0
-    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()).lost;
+    (List.length
+       (Keeper_msg_async.For_testing.recover_request_records ~base_path ()).candidates);
   (match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
    | Keeper_msg_async.Found { Keeper_msg_async.status = Running; _ } -> ()
    | Keeper_msg_async.Found entry ->
@@ -885,30 +884,30 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
    | None -> Alcotest.fail "expected safe active record path");
   Keeper_msg_async.For_testing.forget ~base_path ~caller ~request_id;
   Alcotest.(check int)
-    "disk-only in-flight request is recovered as lost"
+    "disk-only in-flight request becomes a restart candidate"
     1
-    (Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()).lost;
+    (List.length
+       (Keeper_msg_async.For_testing.recover_request_records ~base_path ()).candidates);
   match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
-  | Keeper_msg_async.Found { Keeper_msg_async.status = Lost { reason }; _ } ->
-    Alcotest.(check bool) "lost reason retained" true (String.length reason > 0);
+  | Keeper_msg_async.Found { Keeper_msg_async.status = Running; _ } ->
     (match
        Keeper_msg_async.For_testing.active_record_path ~base_path ~request_id,
        Keeper_msg_async.For_testing.terminal_record_path ~base_path ~request_id
      with
      | Some active_path, Some terminal_path ->
-       Alcotest.(check bool) "recovery removes active namespace entry" false
+       Alcotest.(check bool) "inventory preserves active namespace entry" true
          (Sys.file_exists active_path);
-       Alcotest.(check bool) "recovery commits terminal namespace entry" true
+       Alcotest.(check bool) "inventory does not fabricate terminal state" false
          (Sys.file_exists terminal_path)
      | _ -> Alcotest.fail "expected safe partitioned record paths")
   | Keeper_msg_async.Found entry ->
     Alcotest.failf
-      "expected recovered lost request, got %s"
+      "expected inventoried running request, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
   | Keeper_msg_async.Absent
   | Keeper_msg_async.Unreadable _
   | Keeper_msg_async.Rejected _ ->
-    Alcotest.fail "expected persisted lost request"
+    Alcotest.fail "expected persisted running request"
 ;;
 
 let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
@@ -1371,7 +1370,7 @@ let test_keeper_msg_async_finalizes_active_terminal_destination_first () =
         | Keeper_msg_async.Found { status = Done { ok = true; _ }; _ } -> ()
         | _ -> Alcotest.fail "active terminal row was not readable before recovery");
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check int) "one active terminal finalized" 1 report.finalized;
        let active_path =
@@ -1386,7 +1385,7 @@ let test_keeper_msg_async_finalizes_active_terminal_destination_first () =
          (Sys.file_exists active_path))
 ;;
 
-let test_keeper_msg_async_recovers_active_running_to_terminal_lost () =
+let test_keeper_msg_async_inventories_active_running_without_mutation () =
   with_eio_env
   @@ fun _env ->
   let base_path = temp_dir "keeper-msg-active-running-" in
@@ -1401,22 +1400,23 @@ let test_keeper_msg_async_recovers_active_running_to_terminal_lost () =
          ~status_fields:[]
          ();
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
-       Alcotest.(check int) "one active in-flight row became lost" 1 report.lost;
+       Alcotest.(check int) "one active in-flight row was inventoried" 1
+         (List.length report.candidates);
        let active_path =
          require_record_path ~location:Active_record ~base_path ~request_id
        in
        let terminal_path =
          require_record_path ~location:Terminal_record ~base_path ~request_id
        in
-       Alcotest.(check bool) "lost terminal committed" true
+       Alcotest.(check bool) "no terminal state fabricated" false
          (Sys.file_exists terminal_path);
-       Alcotest.(check bool) "running active source removed" false
+       Alcotest.(check bool) "running active source preserved" true
          (Sys.file_exists active_path);
        match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
-       | Keeper_msg_async.Found { status = Lost _; _ } -> ()
-       | _ -> Alcotest.fail "recovered active request did not decode as Lost")
+       | Keeper_msg_async.Found { status = Running; _ } -> ()
+       | _ -> Alcotest.fail "inventoried active request did not remain Running")
 ;;
 
 let test_keeper_msg_async_terminal_precedence_cleans_stale_active () =
@@ -1446,7 +1446,7 @@ let test_keeper_msg_async_terminal_precedence_cleans_stale_active () =
          ~status_fields:[]
          ();
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check int) "stale active source cleaned" 1 report.cleaned;
        let active_path =
@@ -1483,7 +1483,7 @@ let test_keeper_msg_async_preserves_conflicting_terminal_source () =
        write_done Terminal_record "canonical";
        write_done Active_record "conflicting";
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check int) "conflict is explicit" 1 report.failed;
        let active_path =
@@ -1737,7 +1737,7 @@ let test_keeper_msg_async_preserves_mismatched_nonterminal_source_identity () =
         | Keeper_msg_async.Unreadable _ -> ()
         | _ -> Alcotest.fail "mismatched request identity was hidden by terminal precedence");
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check int) "identity conflict is explicit" 1 report.failed;
        let active_path =
@@ -1760,7 +1760,7 @@ let test_keeper_msg_async_reports_json_directory_as_record_error () =
        in
        mkdir_p path;
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check int) "non-file record fails recovery" 1 report.failed;
        (match report.record_errors with
@@ -1830,10 +1830,11 @@ let test_keeper_msg_async_recovery_excludes_terminal_history () =
        in
        Fs_compat.save_file terminal_artifact "terminal evidence";
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check int) "terminal history is not scanned" 0
-         (report.lost + report.finalized + report.cleaned + report.unreadable + report.failed);
+         (List.length report.candidates
+          + report.finalized + report.cleaned + report.unreadable + report.failed);
        Alcotest.(check int) "terminal staging inventory is not scanned" 0
          (report.staging_files_deleted + report.staging_files_preserved);
        Alcotest.(check bool) "terminal history row is untouched" true
@@ -1858,7 +1859,7 @@ let test_keeper_msg_async_recovers_current_staging_files () =
          (Filename.concat staging ".atomic_evidence.tmp")
          "unpublished v3 evidence";
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check int) "two current staging files inspected" 2
          report.staging_files_inspected;
@@ -1913,7 +1914,7 @@ let test_keeper_msg_async_recovery_rejects_linked_request_root () =
          require_record_path ~location:Terminal_record ~base_path ~request_id
        in
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check bool)
          "linked request root is a typed store failure"
@@ -1966,11 +1967,11 @@ let test_keeper_persistence_preparation_configures_queue_before_request_recovery
        let report =
          Server_bootstrap_loops.keeper_persistence_report prepared
        in
-       Alcotest.(check int) "request recovery completed inside preparation" 1
-         report.requests.lost;
+       Alcotest.(check int) "request inventory completed inside preparation" 1
+         (List.length report.requests.candidates);
        match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
-       | Keeper_msg_async.Found { status = Lost _; _ } -> ()
-       | _ -> Alcotest.fail "prepared request was published before recovery")
+       | Keeper_msg_async.Found { status = Running; _ } -> ()
+       | _ -> Alcotest.fail "prepared request was mutated during inventory")
 ;;
 
 let test_keeper_persistence_preparation_observes_structural_request_store () =
@@ -2337,7 +2338,7 @@ let test_keeper_msg_async_rejects_v3_record_without_compatibility () =
         | Keeper_msg_async.Rejected _ ->
           Alcotest.fail "unsupported persisted schema was classified as caller input");
        let report =
-         Keeper_msg_async.For_testing.recover_lost_disk_records ~base_path ()
+         Keeper_msg_async.For_testing.recover_request_records ~base_path ()
        in
        Alcotest.(check int) "unsupported v3 is reported unreadable" 1
          report.unreadable;
@@ -2593,13 +2594,13 @@ let () =
             `Quick
             test_keeper_msg_async_running_write_failure_projects_durable_marker_once
         ; test_case
-            "recover in-flight request as lost"
+            "inventory disk-only running request"
             `Quick
-            test_keeper_msg_async_marks_recovered_inflight_lost
+            test_keeper_msg_async_inventories_recovered_running
         ; test_case
-            "recovery sweep marks only disk-only in-flight lost"
+            "restart inventory excludes live worker"
             `Quick
-            test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost
+            test_keeper_msg_async_inventory_excludes_live_worker
         ; test_case
             "cancelled worker is terminal cancelled"
             `Quick
@@ -2625,9 +2626,9 @@ let () =
             `Quick
             test_keeper_msg_async_finalizes_active_terminal_destination_first
         ; test_case
-            "active running recovers to terminal lost"
+            "active running inventory is non-mutating"
             `Quick
-            test_keeper_msg_async_recovers_active_running_to_terminal_lost
+            test_keeper_msg_async_inventories_active_running_without_mutation
         ; test_case
             "terminal precedence cleans stale active"
             `Quick

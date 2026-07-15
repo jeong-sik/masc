@@ -91,13 +91,28 @@ val durable_terminal_entry : durable_terminal_proof -> entry
 (** Read-only identity/status carried by a proof.  The proof constructor stays
     private to this module. *)
 
-(** Recovery observations for canonical v4 storage only. [finalized] counts
+type recovery_provenance =
+  | Queued_before_restart
+  | Running_before_restart
+  | Cancelling_before_restart of
+      { reason : string
+      ; cancelled_by : string
+      }
+
+type recovery_candidate =
+  { entry : entry
+  ; provenance : recovery_provenance
+  }
+
+(** Recovery observations for canonical v4 storage only. [candidates] retain
+    exact non-terminal restart provenance without mutating accepted work into
+    a terminal failure. [finalized] counts
     terminal states moved from the active partition after a crash; [cleaned]
     counts duplicate active sources removed after terminal durability was
     established. Staging counters cover only the current dedicated atomic
     staging directory. *)
 type recovery_report =
-  { lost : int
+  { candidates : recovery_candidate list
   ; finalized : int
   ; cleaned : int
   ; staging_files_inspected : int
@@ -133,6 +148,7 @@ and recovery_record_error_kind =
   | Recovery_record_not_file
   | Recovery_record_rejected of access_rejection
   | Recovery_terminal_integrity of string
+  | Recovery_candidate_invariant of string
   | Recovery_persistence_failed of string
   | Recovery_source_cleanup_failed
   | Recovery_entry_exception of string
@@ -276,12 +292,12 @@ val submit
     record exists but cannot be decoded. [Rejected reason] means the request
     exists outside the exact canonical base-path/caller lane. A disk-only
     non-terminal record is returned unchanged: a poller cannot infer that a
-    different process does not own its worker. Only the exclusive startup
-    recovery boundary may transition such records to [Lost]. *)
+    different process does not own its worker. Startup inventory preserves
+    that status until an exact executor adapter claims the record. *)
 val poll : base_path:string -> caller:string -> string -> load_result
 
 (** Exact O(1) canonical-disk lookup for a durably committed terminal request.
-    It checks only the request's terminal/active/legacy filenames; it never
+    It checks only the request's terminal and active filenames; it never
     inventories a partition.  Process-local nonterminal ownership and a visible
     but unconfirmed terminal publication are distinct typed failures, so neither
     can be mistaken for durable truth.  Corrupt, conflicting, nonterminal, and
@@ -292,15 +308,14 @@ val load_canonical_durable_terminal :
   string ->
   (durable_terminal_proof, canonical_terminal_error) result
 
-(** Mark persisted non-terminal request records that have no live in-memory
-    worker as [Lost], returning the number of records transitioned. This is
-    intended for server startup/recovery sweeps. Only the canonical active
+(** Inventory persisted non-terminal request records that have no live
+    in-memory worker. This is intended for server startup recovery. It does not
+    execute, reclassify, or rewrite those records. Only the canonical active
     partition and its dedicated atomic staging directory are scanned; the
     terminal partition is excluded. Current-process workers remain protected
-    by the in-memory active table, while disk-only
-    [Queued]/[Running]/[Cancelling]
-    records from a previous process stop looking indefinitely active. *)
-val recover_lost_disk_records :
+    by the in-memory active table; disk-only [Queued]/[Running]/[Cancelling]
+    records are returned as typed candidates for the later executor boundary. *)
+val recover_request_records :
   base_path:string -> unit -> recovery_report
 
 (** [cancel ~base_path ~caller request_id] validates exact request ownership,
@@ -378,7 +393,7 @@ module For_testing : sig
   val terminal_record_path : base_path:string -> request_id:string -> string option
   val atomic_staging_dir : base_path:string -> string
   val load_record : base_path:string -> request_id:string -> load_result
-  val recover_lost_disk_records :
+  val recover_request_records :
     base_path:string -> unit -> recovery_report
   val reserved_request_id_count : unit -> int
   val active_switch_count : unit -> int

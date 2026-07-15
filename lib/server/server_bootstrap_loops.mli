@@ -84,8 +84,8 @@ val prepare_keeper_persistence :
   config:Workspace.config ->
   unit ->
   (prepared_keeper_persistence, keeper_persistence_prepare_error) result
-(** Synchronously configure/restore the durable queue, then recover keeper
-    message requests against one canonical BasePath identity captured at entry.
+(** Synchronously configure/restore the durable queue, then inventory Keeper
+    message restart candidates against one canonical BasePath identity captured at entry.
     Direct chat checkpoints are request-local and deliberately excluded from a
     global startup inventory. Only an idle process lifecycle may prepare; ready
     state cannot be replaced by a second preparation. Per-record failures remain

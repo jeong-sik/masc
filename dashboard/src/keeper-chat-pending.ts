@@ -6,6 +6,12 @@ import type {
   KeeperConversationStreamState,
 } from './types'
 import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
+import {
+  keeperRunRefKey,
+  keeperRunRefToWire,
+  parseKeeperRunRef,
+} from './lib/keeper-run-ref'
+import type { KeeperRunRef } from './lib/keeper-run-ref'
 
 export interface PendingKeeperChatAssistantDraft {
   text: string
@@ -18,15 +24,21 @@ export interface PendingKeeperChatAssistantDraft {
 }
 
 export interface PendingKeeperChatRequest {
-  requestId: string
-  keeperName: string
+  runRef: KeeperRunRef
   message: string
   submittedAt: number
   attachments?: KeeperConversationAttachment[]
   assistantDraft?: PendingKeeperChatAssistantDraft
 }
 
-const STORAGE_KEY = 'masc_keeper_chat_pending_requests_v1'
+const STORAGE_KEY = 'masc_keeper_chat_pending_requests_v2'
+const PENDING_REQUEST_FIELDS = [
+  'run_ref',
+  'message',
+  'submittedAt',
+  'attachments',
+  'assistantDraft',
+] as const
 const KEEPER_STREAM_STATES = [
   'opening',
   'thinking',
@@ -189,21 +201,24 @@ function assistantDraftFromEntry(entry: KeeperConversationEntry): PendingKeeperC
 
 function normalizePendingRequest(raw: unknown): PendingKeeperChatRequest | null {
   if (!isRecord(raw)) return null
-  const requestId = stringField(raw, 'requestId')
-  const keeperName = stringField(raw, 'keeperName')
+  if (Object.keys(raw).some(field => !PENDING_REQUEST_FIELDS.includes(
+    field as (typeof PENDING_REQUEST_FIELDS)[number],
+  ))) return null
+  let runRef: KeeperRunRef
+  try {
+    runRef = parseKeeperRunRef(raw.run_ref)
+  } catch {
+    return null
+  }
   const message = stringField(raw, 'message')
-  const submittedAt =
-    typeof raw.submittedAt === 'number' && Number.isFinite(raw.submittedAt)
-      ? raw.submittedAt
-      : Date.now()
-  if (!requestId || !keeperName || !message) return null
+  const submittedAt = numberValue(raw.submittedAt)
+  if (!message || submittedAt === undefined) return null
   const attachments = Array.isArray(raw.attachments)
     ? raw.attachments.map(normalizeAttachment).filter((att): att is KeeperConversationAttachment => att !== null)
     : []
   const assistantDraft = normalizeAssistantDraft(raw.assistantDraft)
   return {
-    requestId,
-    keeperName,
+    runRef,
     message,
     submittedAt,
     ...(attachments.length > 0 ? { attachments } : {}),
@@ -218,10 +233,20 @@ function readAll(): PendingKeeperChatRequest[] {
     const raw = store.getItem(STORAGE_KEY)
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map(normalizePendingRequest)
-      .filter((request): request is PendingKeeperChatRequest => request !== null)
+    if (!Array.isArray(parsed)) {
+      console.warn('[keeper-chat-pending] pending request store must be an array')
+      return []
+    }
+    const requests: PendingKeeperChatRequest[] = []
+    parsed.forEach((candidate, index) => {
+      const request = normalizePendingRequest(candidate)
+      if (request) {
+        requests.push(request)
+      } else {
+        console.warn(`[keeper-chat-pending] rejected invalid pending request at index ${index}`)
+      }
+    })
+    return requests
   } catch (err) {
     console.warn('[keeper-chat-pending] failed to read pending requests', err instanceof Error ? err.message : err)
     return []
@@ -235,7 +260,13 @@ function writeAll(requests: PendingKeeperChatRequest[]): void {
     if (requests.length === 0) {
       store.removeItem(STORAGE_KEY)
     } else {
-      store.setItem(STORAGE_KEY, JSON.stringify(requests))
+      store.setItem(STORAGE_KEY, JSON.stringify(requests.map(request => ({
+        run_ref: keeperRunRefToWire(request.runRef),
+        message: request.message,
+        submittedAt: request.submittedAt,
+        ...(request.attachments ? { attachments: request.attachments } : {}),
+        ...(request.assistantDraft ? { assistantDraft: request.assistantDraft } : {}),
+      }))))
     }
   } catch (err) {
     console.warn('[keeper-chat-pending] failed to write pending requests', err instanceof Error ? err.message : err)
@@ -245,39 +276,37 @@ function writeAll(requests: PendingKeeperChatRequest[]): void {
 export function pendingKeeperChatRequestsForKeeper(keeperName: string): PendingKeeperChatRequest[] {
   const name = keeperName.trim()
   if (!name) return []
-  return readAll().filter(request => request.keeperName === name)
+  return readAll().filter(request => request.runRef.target.name === name)
 }
 
 export function upsertPendingKeeperChatRequest(request: PendingKeeperChatRequest): void {
-  const requestId = request.requestId.trim()
-  const keeperName = request.keeperName.trim()
   const message = request.message.trim()
-  if (!requestId || !keeperName || !message) return
+  if (!message) return
   const assistantDraft = normalizeAssistantDraft(request.assistantDraft)
   const normalized: PendingKeeperChatRequest = {
-    requestId,
-    keeperName,
+    runRef: request.runRef,
     message,
     submittedAt: request.submittedAt,
     ...(request.attachments && request.attachments.length > 0 ? { attachments: request.attachments } : {}),
     ...(assistantDraft ? { assistantDraft } : {}),
   }
-  const next = readAll().filter(existing => existing.requestId !== requestId)
+  const key = keeperRunRefKey(request.runRef)
+  const next = readAll().filter(existing => keeperRunRefKey(existing.runRef) !== key)
   next.push(normalized)
   writeAll(next)
 }
 
 export function updatePendingKeeperChatAssistantDraft(
-  requestId: string,
+  reference: KeeperRunRef,
   entry: KeeperConversationEntry,
 ): void {
-  const id = requestId.trim()
   const assistantDraft = assistantDraftFromEntry(entry)
-  if (!id || !assistantDraft) return
+  if (!assistantDraft) return
+  const key = keeperRunRefKey(reference)
   const requests = readAll()
   let found = false
   const next = requests.map(request => {
-    if (request.requestId !== id) return request
+    if (keeperRunRefKey(request.runRef) !== key) return request
     found = true
     return { ...request, assistantDraft }
   })
@@ -285,10 +314,9 @@ export function updatePendingKeeperChatAssistantDraft(
   writeAll(next)
 }
 
-export function removePendingKeeperChatRequest(requestId: string): void {
-  const id = requestId.trim()
-  if (!id) return
-  writeAll(readAll().filter(request => request.requestId !== id))
+export function removePendingKeeperChatRequest(reference: KeeperRunRef): void {
+  const key = keeperRunRefKey(reference)
+  writeAll(readAll().filter(request => keeperRunRefKey(request.runRef) !== key))
 }
 
 export function hasPendingKeeperChatRequest(keeperName: string): boolean {

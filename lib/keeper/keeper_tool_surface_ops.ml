@@ -687,7 +687,9 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result
 let handle_keeper_delegate ~submitted_by ctx args =
   match
     let* request =
-      Keeper_invocation_contract.request_of_json args |> message_error
+      Keeper_invocation_contract.request_of_json args
+      |> Result.map_error Keeper_invocation_contract.request_error_to_string
+      |> message_error
     in
     let* request = message_error (Turn.preflight_keeper_delegate ctx request) in
     Ok

@@ -1236,7 +1236,7 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json message)
        ) request reqd)
   |> Http.Router.post "/api/v1/operator/action" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_operator_action" (fun state authorized_actor req reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state authorized_actor req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
@@ -1258,7 +1258,7 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
   |> Http.Router.post "/api/v1/operator/confirm" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_operator_confirm" (fun state authorized_actor req reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state authorized_actor req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in

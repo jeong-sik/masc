@@ -959,7 +959,7 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
                 }))
     | Some token ->
         let* cred = Auth.find_credential_by_token base_path ~token in
-        if Masc_domain.has_permission cred.role permission then
+        if Masc_domain.has_permission (Auth.effective_credential_role cred) permission then
           Ok cred.agent_name
         else
           Error

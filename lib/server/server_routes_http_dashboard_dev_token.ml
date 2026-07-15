@@ -4,8 +4,6 @@
     missing, and exposes the high-level [ensure_dashboard_dev_token]
     that the dashboard route handlers depend on. *)
 
-let dashboard_dev_actor_name = "dashboard"
-
 type request_error =
   | Non_loopback_request_host of string
   | Token_operation_failed of string
@@ -34,8 +32,19 @@ let dashboard_dev_token_path base_path =
     "dashboard.token"
 
 type dashboard_dev_token_candidate =
-  | Reusable of string
+  | Reusable_worker of string
+  | Reusable_legacy_admin of string
   | Rotate
+
+type dashboard_dev_token_state =
+  | Reused_worker_credential
+  | Reused_legacy_admin_credential
+  | Minted_worker_credential
+
+type ensured_dashboard_dev_token = {
+  token : string;
+  state : dashboard_dev_token_state;
+}
 
 let default_dashboard_dev_token_load path = Fs_compat.load_file path
 let dashboard_dev_token_load = Atomic.make default_dashboard_dev_token_load
@@ -52,25 +61,41 @@ let classify_dashboard_dev_token_candidate ~base_path raw :
   if String.equal trimmed "" then
     Ok Rotate
   else
-    match Auth.resolve_agent_from_token base_path ~token:trimmed with
-    | Ok owner when String.equal owner dashboard_dev_actor_name ->
-        Ok (Reusable trimmed)
-    | Ok _owner ->
-        Ok Rotate
+    match
+      Auth.verify_token base_path
+        ~agent_name:Auth.dashboard_dev_actor_name
+        ~token:trimmed
+    with
+    | Ok credential ->
+      (match Auth.find_credential_by_token base_path ~token:trimmed with
+       | Error error -> Error (Masc_domain.masc_error_to_string error)
+       | Ok owner when not (String.equal owner.agent_name Auth.dashboard_dev_actor_name) ->
+         Error
+           (Printf.sprintf
+              "dashboard dev-token resolved to a different credential owner: %s"
+              owner.agent_name)
+       | Ok _ ->
+         (match (Auth.credential_authority credential).state with
+          | Auth.Persisted_authority -> Ok (Reusable_worker trimmed)
+          | Auth.Legacy_dashboard_admin_capped ->
+            Ok (Reusable_legacy_admin trimmed)))
     | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _ | Masc_domain.Auth_error.TokenExpired _ | Masc_domain.Auth_error.Unauthorized _)) ->
         Ok Rotate
     | Error err ->
         Error (Masc_domain.masc_error_to_string err)
 
 let read_reusable_dashboard_dev_token ~base_path path :
-    (string option, string) result =
+    (ensured_dashboard_dev_token option, string) result =
   if not (Fs_compat.file_exists path) then
     Ok None
   else
     try
       match classify_dashboard_dev_token_candidate ~base_path
               ((Atomic.get dashboard_dev_token_load) path) with
-      | Ok (Reusable raw) -> Ok (Some raw)
+      | Ok (Reusable_worker token) ->
+        Ok (Some { token; state = Reused_worker_credential })
+      | Ok (Reusable_legacy_admin token) ->
+        Ok (Some { token; state = Reused_legacy_admin_credential })
       | Ok Rotate -> Ok None
       | Error msg -> Error msg
     with
@@ -90,24 +115,40 @@ let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
   | exn ->
       Error (Printf.sprintf "persist dev-token: %s" (Printexc.to_string exn))
 
-let mint_dashboard_dev_token base_path : (string, string) result =
+let mint_dashboard_dev_token base_path :
+    (ensured_dashboard_dev_token, string) result =
   match
     Auth.create_token base_path
-      ~agent_name:dashboard_dev_actor_name ~role:Masc_domain.Admin
+      ~agent_name:Auth.dashboard_dev_actor_name ~role:Masc_domain.Worker
   with
   | Ok (raw, _cred) ->
       (match persist_dashboard_dev_token ~base_path raw with
-       | Ok () -> Ok raw
+       | Ok () -> Ok { token = raw; state = Minted_worker_credential }
        | Error msg -> Error msg)
   | Error err ->
       Error (Masc_domain.masc_error_to_string err)
 
-let ensure_dashboard_dev_token base_path : (string, string) result =
+let observe_dashboard_dev_token_state = function
+  | Reused_legacy_admin_credential ->
+    Log.Auth.warn
+      "dashboard dev-token reused a legacy persisted Admin credential with Worker effective authority; persisted credential and raw token remain unchanged (migration_state=legacy_admin_capped)"
+  | Reused_worker_credential | Minted_worker_credential -> ()
+;;
+
+let ensure_dashboard_dev_token_with_state base_path :
+    (ensured_dashboard_dev_token, string) result =
   let token_path = dashboard_dev_token_path base_path in
   match read_reusable_dashboard_dev_token ~base_path token_path with
   | Error msg -> Error msg
-  | Ok (Some raw) -> Ok raw
+  | Ok (Some ensured) ->
+    observe_dashboard_dev_token_state ensured.state;
+    Ok ensured
   | Ok None -> mint_dashboard_dev_token base_path
+;;
+
+let ensure_dashboard_dev_token base_path : (string, string) result =
+  ensure_dashboard_dev_token_with_state base_path
+  |> Result.map (fun ensured -> ensured.token)
 
 let ensure_dashboard_dev_token_for_authority ~request_authority ~base_path =
   let host = Server_request_authority.host request_authority in

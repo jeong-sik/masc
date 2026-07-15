@@ -48,6 +48,7 @@ type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
   implementation_status : implementation_status;
+  required_permission : Masc_domain.permission;
   canonical_name : string option;
   replacement : string option;
   reason : string option;
@@ -121,6 +122,7 @@ let default_metadata =
     visibility = Default;
     lifecycle = Active;
     implementation_status = Real;
+    required_permission = Masc_domain.CanBroadcast;
     canonical_name = None;
     replacement = None;
     reason = None;
@@ -145,6 +147,7 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     visibility = Hidden;
     lifecycle = Active;
     implementation_status;
+    required_permission = Masc_domain.CanBroadcast;
     canonical_name;
     replacement;
     reason = Some reason;
@@ -180,6 +183,10 @@ let with_execution_policy
     meta
 ;;
 
+let with_required_permission required_permission meta =
+  { meta with required_permission }
+;;
+
 let readonly_tool =
   with_execution_policy
     ~readonly:true
@@ -203,7 +210,7 @@ let broadcast_tool = masc_workspace_tool
 let add_task_tool = masc_workspace_tool
 let claim_task_tool = masc_workspace_tool
 let complete_task_tool = masc_workspace_tool
-let reset_tool = mutating_tool
+let admin_tool = with_required_permission Masc_domain.CanAdmin mutating_tool
 
 let hidden_runtime_tool reason meta =
   {
@@ -248,7 +255,10 @@ let explicit_metadata : (string * metadata) list =
        masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_unbind,
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
-      hidden_active "Internal operator-action route; hidden from the public tool surface." );
+      with_required_permission
+        Masc_domain.CanAdmin
+        (hidden_active
+           "Internal operator-action route; hidden from the public tool surface.") );
     ( "masc_operator_chat_recovery_resolve",
       with_execution_policy
         ~readonly:false
@@ -257,10 +267,12 @@ let explicit_metadata : (string * metadata) list =
            ~allow_direct_call_when_hidden:false
            "Operator-profile-only exact recovery of one crash-ambiguous Keeper chat receipt.") );
     ( "masc_set_param",
-      hidden_active
-        "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface." );
+      with_required_permission
+        Masc_domain.CanAdmin
+        (hidden_active
+           "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface.") );
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
-    ("masc_reset", reset_tool);
+    ("masc_reset", admin_tool);
     ("masc_start", with_semantic_flags ~mcp_context_required:true broadcast_tool);
     ("masc_task_history", read_state_tool);
     ("masc_add_task", add_task_tool);
@@ -284,11 +296,11 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_persona_audit", read_state_tool);
     ("masc_keeper_sandbox_status", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);
-    ("masc_keeper_up", broadcast_tool);
-    ("masc_keeper_down", mutating_tool);
+    ("masc_keeper_up", admin_tool);
+    ("masc_keeper_down", admin_tool);
     ("masc_keeper_compact", broadcast_tool);
-    ("masc_keeper_clear", mutating_tool);
-    ("masc_keeper_reset", mutating_tool);
+    ("masc_keeper_clear", admin_tool);
+    ("masc_keeper_reset", admin_tool);
     ("masc_plan_get_task", read_state_tool);
     ("masc_plan_clear_task", broadcast_tool);
     ("masc_note_add", broadcast_tool);
@@ -302,7 +314,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_get_metrics", read_state_tool);
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
-    ("masc_operator_confirm", broadcast_tool);
+    ("masc_operator_confirm", admin_tool);
     ("masc_persona_list", read_state_tool);
     ("masc_persona_create", broadcast_tool);
     ("masc_persona_update", broadcast_tool);
@@ -324,7 +336,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_create", broadcast_tool);
     ("masc_board_sub_board_update", broadcast_tool);
     ("masc_board_sub_board_delete", broadcast_tool);
-    ("masc_board_cleanup", mutating_tool);
+    ("masc_board_cleanup", admin_tool);
     ("masc_board_delete", mutating_tool);
     ("masc_tool_stats", read_state_tool);
     ("masc_pause", broadcast_tool);
@@ -434,6 +446,10 @@ let metadata name =
       ; reason = Some "Not on the external MCP discovery surface."
       }
 
+let required_permission name =
+  (metadata name).required_permission
+;;
+
 let implementation_status name =
   let meta = metadata name in
   meta.implementation_status
@@ -477,6 +493,8 @@ let metadata_to_fields name =
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
       ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
+      ( "requiredPermission",
+        `String (Masc_domain.permission_to_string meta.required_permission) );
     ]
   in
   let with_canonical =
@@ -507,6 +525,8 @@ let public_contract_fields name =
     [
       ( "implementationStatus",
         `String (implementation_status_to_string meta.implementation_status) );
+      ( "requiredPermission",
+        `String (Masc_domain.permission_to_string meta.required_permission) );
     ]
   in
   let with_mcp_context_required =

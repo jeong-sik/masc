@@ -454,9 +454,23 @@ let main_eio_auth_header = "Authorization: Bearer " ^ main_eio_test_admin_token
 
 let main_eio_env_overrides overrides =
   merge_env_overrides
-    (("MASC_ADMIN_TOKEN", main_eio_test_admin_token)
-     :: ("MASC_INTERNAL_MCP_TOKEN", "")
+    (("MASC_INTERNAL_MCP_TOKEN", "")
      :: overrides)
+
+let seed_main_eio_admin base_path =
+  ignore
+    (Auth.enable_auth base_path ~require_token:true
+       ~agent_name:Auth.dashboard_dev_actor_name);
+  match
+    Auth.save_raw_token_credential base_path
+      ~agent_name:Auth.dashboard_dev_actor_name
+      ~role:Masc_domain.Admin
+      ~raw_token:main_eio_test_admin_token
+  with
+  | Ok _ -> ()
+  | Error error ->
+      Alcotest.failf "failed to seed main_eio admin credential: %s"
+        (Masc_domain.masc_error_to_string error)
 
 let find_main_eio_exe () =
   let root = project_root () in
@@ -3945,6 +3959,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
       with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      seed_main_eio_admin dir;
       let expected_config = Filename.concat dir ".masc/config" in
       let env =
         main_eio_env_overrides
@@ -4225,6 +4240,43 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
       | Error err ->
           Alcotest.failf "bootable keeper token should verify exactly: %s"
             (Masc_domain.masc_error_to_string err))
+
+let test_startup_credential_sync_does_not_bind_admin_env () =
+  with_temp_dir "startup-admin-env-authority" (fun dir ->
+      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_env "MASC_INTERNAL_MCP_TOKEN" None @@ fun () ->
+      with_env "MASC_ADMIN_TOKEN" (Some "untrusted-startup-admin-token") @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      seed_main_eio_admin dir;
+      let before =
+        match Auth.load_credential dir Auth.dashboard_dev_actor_name with
+        | Some credential -> credential
+        | None -> Alcotest.fail "missing seeded dashboard credential"
+      in
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      Eio.Switch.run @@ fun sw ->
+      let state =
+        Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
+          ~mono_clock ~net ~proc_mgr ~fs ()
+      in
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      Server_runtime_bootstrap.sync_startup_credentials state;
+      let after =
+        match Auth.load_credential dir Auth.dashboard_dev_actor_name with
+        | Some credential -> credential
+        | None -> Alcotest.fail "startup removed the dashboard credential"
+      in
+      Alcotest.(check string) "startup preserves dashboard token hash"
+        before.token after.token;
+      Alcotest.(check bool) "startup preserves persisted dashboard role" true
+        (before.role = after.role))
 
 let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
   with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
@@ -4860,6 +4912,9 @@ let () =
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
             `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;
+          Alcotest.test_case
+            "startup credential sync does not bind MASC_ADMIN_TOKEN"
+            `Quick test_startup_credential_sync_does_not_bind_admin_env;
           Alcotest.test_case
             "startup sync rotates shared bootable keeper tokens"
             `Quick

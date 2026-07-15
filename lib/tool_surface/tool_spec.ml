@@ -101,10 +101,12 @@ let register (spec : t) =
     ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;
   (* 2. Catalog metadata. Registration preserves the typed declaration;
      product-name membership must not override visibility. *)
+  let required_permission = Tool_catalog.required_permission spec.name in
   Tool_catalog.register_metadata spec.name
     { Tool_catalog.visibility = spec.visibility;
       lifecycle = Tool_catalog.Active;
       implementation_status = spec.implementation_status;
+      required_permission;
       canonical_name = spec.canonical_name;
       replacement = spec.replacement;
       reason = spec.reason;

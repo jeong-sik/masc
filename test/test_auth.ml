@@ -1080,6 +1080,45 @@ let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
+let test_authorize_tool_v2_enforces_catalog_admin_permissions () =
+  [ "masc_operator_action"
+  ; "masc_operator_confirm"
+  ; "masc_reset"
+  ; "masc_set_param"
+  ; "masc_keeper_up"
+  ; "masc_keeper_down"
+  ; "masc_keeper_reset"
+  ; "masc_keeper_clear"
+  ; "masc_board_cleanup"
+  ]
+  |> List.iter (fun tool_name ->
+    (match
+       Auth.authorize_tool_for_role
+         ~agent_name:"dashboard"
+         ~role:Masc_domain.Worker
+         ~tool_name
+     with
+     | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+     | Error error ->
+       failf
+         "%s returned the wrong Worker denial: %s"
+         tool_name
+         (Masc_domain.masc_error_to_string error)
+     | Ok () -> failf "%s admitted Worker authority" tool_name);
+    match
+      Auth.authorize_tool_for_role
+        ~agent_name:"operator"
+        ~role:Masc_domain.Admin
+        ~tool_name
+    with
+    | Ok () -> ()
+    | Error error ->
+      failf
+        "%s rejected Admin authority: %s"
+        tool_name
+        (Masc_domain.masc_error_to_string error))
+;;
+
 let test_tool_auth_strict_env_cannot_disable_fail_closed () =
   let result =
     with_env "MASC_TOOL_AUTH_STRICT" "0" (fun () ->
@@ -1208,6 +1247,8 @@ let () =
         `Quick test_authorize_tool_v2_unknown_internal_worker_allowed;
       test_case "strict v2 fake keeper prefix denied"
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
+      test_case "strict v2 catalog admin permissions"
+        `Quick test_authorize_tool_v2_enforces_catalog_admin_permissions;
       test_case "tool auth strict env cannot disable fail-closed"
         `Quick test_tool_auth_strict_env_cannot_disable_fail_closed;
     ];

@@ -61,6 +61,33 @@ let () =
             check bool "reason present" true (Option.is_some spec.reason);
             check bool "title present" true (Option.is_some spec.title));
         ] );
+      ( "required permission catalog",
+        [
+          test_case "unknown tool defaults to worker broadcast" `Quick (fun () ->
+            check bool "CanBroadcast" true
+              (Tool_catalog.required_permission "__test_unknown_permission"
+               = Masc_domain.CanBroadcast));
+          test_case "admin tools are typed catalog entries" `Quick (fun () ->
+            [ "masc_operator_action"
+            ; "masc_operator_confirm"
+            ; "masc_reset"
+            ; "masc_set_param"
+            ; "masc_keeper_up"
+            ; "masc_keeper_down"
+            ; "masc_keeper_reset"
+            ; "masc_keeper_clear"
+            ; "masc_board_cleanup"
+            ]
+            |> List.iter (fun name ->
+              check bool name true
+                (Tool_catalog.required_permission name = Masc_domain.CanAdmin)));
+          test_case "permission is published as catalog metadata" `Quick (fun () ->
+            let fields = Tool_catalog.metadata_to_fields "masc_reset" in
+            check (option string) "requiredPermission" (Some "CanAdmin")
+              (match List.assoc_opt "requiredPermission" fields with
+               | Some (`String permission) -> Some permission
+               | Some _ | None -> None));
+        ] );
       ( "register",
         [
           test_case "register populates tag_registry" `Quick (fun () ->
@@ -152,6 +179,25 @@ let () =
             let meta = Tool_catalog.metadata "__test_spec_catalog" in
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);
             check bool "reason" true (meta.reason = Some "test hidden"));
+          test_case "register preserves late catalog admin requirement" `Quick (fun () ->
+            let name = "__test_spec_admin_inherit" in
+            let spec =
+              Tool_spec.create
+                ~name
+                ~description:"catalog permission test"
+                ~module_tag:Tool_dispatch.Mod_operator
+                ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
+                ()
+            in
+            Tool_catalog.register_metadata
+              name
+              { Tool_catalog.default_metadata with
+                required_permission = Masc_domain.CanAdmin
+              };
+            Tool_spec.register spec;
+            check bool "catalog remains admin" true
+              (Tool_catalog.required_permission name = Masc_domain.CanAdmin));
           test_case "empty name rejected" `Quick (fun () ->
             check_raises "invalid_arg"
               (Invalid_argument "Tool_spec.register: name must not be empty")

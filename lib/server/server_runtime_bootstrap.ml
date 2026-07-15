@@ -619,9 +619,7 @@ let initialize_owner_state_blocking
   bootstrap_server_state_blocking state;
   startup_recover_keeper_lifecycle_transactions state;
   startup_migrate_retired_keeper_meta_keys state;
-  sync_admin_token_env state;
-  sync_internal_keeper_token_env state;
-  sync_bootable_keeper_credentials state;
+  sync_startup_credentials state;
   let prepared_keeper_persistence =
     match
       Server_bootstrap_loops.prepare_keeper_persistence

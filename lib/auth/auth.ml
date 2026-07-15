@@ -8,6 +8,36 @@ open Masc_domain
 include Auth_credential_base
 include Auth_credential_token
 
+let dashboard_dev_actor_name = "dashboard"
+
+type credential_authority_state =
+  | Persisted_authority
+  | Legacy_dashboard_admin_capped
+
+type credential_authority = {
+  persisted_role : agent_role;
+  effective_role : agent_role;
+  state : credential_authority_state;
+}
+
+let credential_authority (credential : agent_credential) =
+  match credential.role with
+  | Admin when String.equal credential.agent_name dashboard_dev_actor_name ->
+    { persisted_role = Admin
+    ; effective_role = Worker
+    ; state = Legacy_dashboard_admin_capped
+    }
+  | (Worker | Admin) as persisted_role ->
+    { persisted_role
+    ; effective_role = persisted_role
+    ; state = Persisted_authority
+    }
+;;
+
+let effective_credential_role credential =
+  (credential_authority credential).effective_role
+;;
+
 let ensure_keeper_credential config ~agent_name
   : (string * agent_credential, masc_error) result
   =
@@ -173,7 +203,7 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
     match verify_optional_token config ~agent_name ~token with
     | Error e -> Error e
     | Ok (Some cred) ->
-      if has_permission cred.role permission
+      if has_permission (effective_credential_role cred) permission
       then Ok ()
       else
         Error
@@ -233,7 +263,12 @@ let record_strict_unknown_tool_denial ~agent_name ~tool_name =
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   if is_known_or_internal_tool_name tool_name
-  then check_permission config ~agent_name ~token ~permission:CanBroadcast
+  then
+    check_permission
+      config
+      ~agent_name
+      ~token
+      ~permission:(Tool_catalog.required_permission tool_name)
   else (
     let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
     Error
@@ -267,7 +302,7 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
   else (
     match verify_optional_token config ~agent_name ~token with
     | Error e -> Error e
-    | Ok (Some cred) -> Ok cred.role
+    | Ok (Some cred) -> Ok (effective_credential_role cred)
     | Ok None ->
       if auth_cfg.require_token
       then Error (Auth (Auth_error.Unauthorized
@@ -283,7 +318,8 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
   if is_known_or_internal_tool_name tool_name
   then
-    if has_permission role CanBroadcast
+    let permission = Tool_catalog.required_permission tool_name in
+    if has_permission role permission
     then Ok ()
     else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
   else (
@@ -367,5 +403,3 @@ let is_auth_enabled config : bool =
   let cfg = load_auth_config config in
   cfg.enabled
 ;;
-
-

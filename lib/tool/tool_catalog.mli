@@ -20,6 +20,7 @@ type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
   implementation_status : implementation_status;
+  required_permission : Masc_domain.permission;
   canonical_name : string option;
   replacement : string option;
   reason : string option;
@@ -69,6 +70,10 @@ val is_public_mcp : string -> bool
 (** {1 Metadata lookup} *)
 
 val metadata : string -> metadata
+val required_permission : string -> Masc_domain.permission
+(** Typed authorization requirement for a tool. Unknown tools inherit the
+    catalog default, [CanBroadcast]; callers must still reject unknown tool
+    names before consulting this value. *)
 val execution_policy_of_metadata :
   tool_name:string -> metadata -> (execution_policy, execution_policy_error) result
 val execution_policy_error_to_string : execution_policy_error -> string

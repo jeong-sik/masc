@@ -67,9 +67,13 @@ val create :
   ?title:string ->
   unit -> t
 (** Build a tool spec. The first five arguments are required (compile error
-    if omitted). All optional arguments default to fail-closed values:
-    booleans to [false], options to [None], visibility to [Default],
-    implementation_status to [Real]. *)
+    if omitted). [register] reads the typed catalog permission at registration
+    time, whose default is [CanBroadcast]. This keeps the catalog as the sole
+    permission source even when a split tool module was constructed before
+    catalog metadata was installed. Other
+    optional arguments default to fail-closed values: booleans to [false],
+    options to [None], visibility to [Default], implementation_status to
+    [Real]. *)
 
 (** {1 Registration} *)
 

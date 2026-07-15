@@ -222,14 +222,26 @@ let test_dashboard_dev_token_can_vote_as_credential_owner () =
     with
     | Error message -> fail message
     | Ok token ->
+      (match
+         Server_auth.authorize_token_bound_permission_request
+           ~base_path
+           ~permission:Masc_domain.CanVote
+           (reaction_auth_request ~token ())
+       with
+       | Ok actor -> check string "dashboard credential owner" "dashboard" actor
+       | Error error -> fail (Masc_domain.masc_error_to_string error));
       match
         Server_auth.authorize_token_bound_permission_request
           ~base_path
-          ~permission:Masc_domain.CanVote
+          ~permission:Masc_domain.CanAdmin
           (reaction_auth_request ~token ())
       with
-      | Ok actor -> check string "dashboard credential owner" "dashboard" actor
-      | Error error -> fail (Masc_domain.masc_error_to_string error))
+      | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+      | Error error ->
+        failf
+          "dashboard dev-token admin authority returned unexpected error: %s"
+          (Masc_domain.masc_error_to_string error)
+      | Ok actor -> failf "dashboard dev-token retained admin authority as %s" actor)
 
 let () =
   run

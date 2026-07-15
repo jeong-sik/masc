@@ -93,6 +93,7 @@ val warm_tool_registry_from_telemetry : Mcp_server.server_state -> unit
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 val startup_migrate_keeper_histories : Mcp_server.server_state -> unit
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
+val sync_startup_credentials : Mcp_server.server_state -> unit
 
 type lazy_startup_execution =
   | Parallel

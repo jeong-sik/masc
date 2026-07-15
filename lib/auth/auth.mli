@@ -176,6 +176,29 @@ val rotate_shared_tokens_for_agents :
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 
+(** The dashboard development bearer is a local UI principal, never an
+    operator principal.  Older installations may still persist its credential
+    as [Admin]; authorization must preserve that fact for audit while capping
+    the authority used for permission checks to [Worker]. *)
+type credential_authority_state =
+  | Persisted_authority
+  | Legacy_dashboard_admin_capped
+
+type credential_authority = {
+  persisted_role : agent_role;
+  effective_role : agent_role;
+  state : credential_authority_state;
+}
+
+val dashboard_dev_actor_name : string
+
+val credential_authority : agent_credential -> credential_authority
+(** Project a persisted credential into the role used for authorization.
+    This is the SSOT for the dashboard dev principal's Worker ceiling. *)
+
+val effective_credential_role : agent_credential -> agent_role
+(** Convenience projection of {!credential_authority}. *)
+
 (** Structured description of which credential fields differ between two
     credentials that share the same token hash. *)
 type credential_field_diff =

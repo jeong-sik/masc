@@ -315,10 +315,7 @@ let test_registered_cluster_model_projections_are_explicit () =
   in
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
-    [ "masc_recurring_add"
-    ; "masc_recurring_list"
-    ; "masc_recurring_remove"
-    ; "masc_runtime_verify"
+    [ "masc_runtime_verify"
     ; "masc_runtime_ollama_probe"
     ];
   List.iter

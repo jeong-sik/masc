@@ -97,7 +97,6 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
   | Tool_masc_library_dispatch
-  | Tool_masc_recurring_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> None
 ;;
@@ -161,7 +160,6 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
   | Tool_masc_library_dispatch
-  | Tool_masc_recurring_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> None
 ;;
@@ -382,8 +380,7 @@ let handle_in_process ctx descriptor args =
             ~meta:ctx.meta
             ~args
             ()))
-  | Tool_masc_library_dispatch
-  | Tool_masc_recurring_dispatch ->
+  | Tool_masc_library_dispatch ->
     Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
       ~config:ctx.config
       ~keeper_name:ctx.meta.name

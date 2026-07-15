@@ -14,7 +14,6 @@
   tool_schemas_inline
   tool_schemas_run
   tool_schemas_schedule
-  tool_schemas_recurring
   tool_schemas_library
   tool_schemas_local_runtime
   tools

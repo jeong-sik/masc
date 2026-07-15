@@ -82,7 +82,6 @@ type runtime_handler =
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
   | Tool_masc_library_dispatch
-  | Tool_masc_recurring_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
 
@@ -205,7 +204,6 @@ let runtime_handler_to_string = function
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
   | Tool_masc_library_dispatch -> "tool_masc_library_dispatch"
-  | Tool_masc_recurring_dispatch -> "tool_masc_recurring_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
   | Tool_analyze_image -> "tool_analyze_image"
 ;;
@@ -238,7 +236,6 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_library_search
   | Tool_library_read
   | Tool_masc_library_dispatch -> Memory_group
-  | Tool_masc_recurring_dispatch -> Workspace_group
   | Tool_time_now
   | Tool_tools_list
   | Tool_tool_search
@@ -1483,25 +1480,6 @@ let masc_library_descriptors =
   List.map masc_library_descriptor Tool_schemas_library.definitions
 ;;
 
-let masc_recurring_descriptor (definition : Tool_schemas_recurring.definition) =
-  let schema = definition.schema in
-  cluster_descriptor_with_schema_source
-    ~keeper_model_projection:Internal_name
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
-    ~id:("masc.recurring." ^ Tool_schemas_recurring.operation_id definition.operation)
-    ~name:schema.name
-    ~description:schema.description
-    ~handler:Tool_masc_recurring_dispatch
-    ~readonly:definition.read_only
-    ~inline_safe:false
-    ()
-;;
-
-let masc_recurring_descriptors =
-  List.map masc_recurring_descriptor Tool_schemas_recurring.definitions
-;;
-
 let masc_local_runtime_descriptor
       (definition : Tool_schemas_local_runtime.definition) =
   let schema = definition.schema in
@@ -1971,7 +1949,6 @@ let internal_descriptors : t list =
   ]
   @ masc_board_descriptors
   @ masc_library_descriptors
-  @ masc_recurring_descriptors
   @ masc_local_runtime_descriptors
 ;;
 

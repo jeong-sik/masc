@@ -92,7 +92,6 @@ let tag_of_name name : TD.module_tag option =
   else if prefix "masc_misc_" then Some Mod_misc
   else if prefix "masc_local_runtime_" then Some Mod_local_runtime
   else if prefix "masc_library_" then Some Mod_library
-  else if prefix "masc_recurring_" then Some Mod_recurring
   else if prefix "masc_operator_" then Some Mod_operator
   else if prefix "masc_external_" then Some Mod_external
   else if prefix "masc_inline_" then Some Mod_inline

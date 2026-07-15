@@ -207,6 +207,7 @@ const GateConnectorInfoRawSchema = object({
   display_name: string(),
   channel: string(),
   capabilities: fallback(array(string()), []),
+  trigger_policy: fallback(nullable(string()), null),
   status: fallback(string(), ''),
   available: fallback(boolean(), false),
   connected: fallback(boolean(), false),
@@ -252,6 +253,7 @@ export interface GateConnectorInfo {
   display_name: string
   channel: string
   capabilities: string[]
+  trigger_policy: string | null
   status: string
   available: boolean
   connected: boolean
@@ -361,6 +363,7 @@ function parseGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
     display_name: outer.output.display_name,
     channel: outer.output.channel,
     capabilities: outer.output.capabilities,
+    trigger_policy: outer.output.trigger_policy,
     status: outer.output.status,
     available: outer.output.available,
     connected: outer.output.connected,
@@ -417,7 +420,6 @@ const GateConnectorsOuterSchema = object({
   connectors: optional(unknown()),
   total: fallback(number(), 0),
   active_count: fallback(number(), 0),
-  discord_trigger_policy: fallback(string(), 'unknown'),
   // Empty string is treated as drift — matches prior decoder's
   // `if (!generatedAt) return null` guard. A connectors payload
   // without a timestamp is not a useful one; the null-returning
@@ -429,7 +431,6 @@ export interface GateConnectorsData {
   connectors: GateConnectorInfo[]
   total: number
   active_count: number
-  discord_trigger_policy: string
   generated_at: string
 }
 
@@ -455,7 +456,6 @@ export function parseGateConnectorsData(data: unknown): GateConnectorsData {
     connectors,
     total: outer.total,
     active_count: outer.active_count,
-    discord_trigger_policy: outer.discord_trigger_policy,
     generated_at: outer.generated_at,
   }
 }

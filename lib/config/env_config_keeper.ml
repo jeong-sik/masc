@@ -166,7 +166,6 @@ module KeeperMemoryOs = struct
   let get_float_positive_logged = Env_config_memory.get_float_positive_logged
 
   let recall_enabled_default = true
-  let librarian_max_messages_default = 24
   let librarian_timeout_sec_default = 600.0
   let librarian_max_tokens_default = 4096
   let librarian_runtime_id_default = None
@@ -179,7 +178,6 @@ module KeeperMemoryOs = struct
      constants instead of re-spelling the literals, so a knob rename breaks
      compilation instead of silently drifting into a phantom registry entry. *)
   let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
-  let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
   let librarian_timeout_sec_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
   let librarian_max_tokens_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
   let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
@@ -214,18 +212,6 @@ module KeeperMemoryOs = struct
       ~invalid:Env_config_memory.Fail_closed
       recall_env_key
       ~default:recall_enabled_default
-  ;;
-
-  (** Base recent-message window for librarian extraction. Default: 24,
-      floored to 1.
-      @category Runtime
-      @ops_class operator *)
-  let librarian_max_messages () =
-    max
-      1
-      (get_int_logged
-         librarian_max_messages_env_key
-         ~default:librarian_max_messages_default)
   ;;
 
   (** Provider timeout for librarian extraction. Default: 600 seconds; invalid,

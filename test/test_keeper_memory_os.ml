@@ -860,39 +860,33 @@ let with_memory_os_env name value f =
   Fun.protect ~finally:(fun () -> restore_env name old) f
 ;;
 
-let test_librarian_runtime_uses_exact_message_cap () =
+let test_librarian_runtime_preserves_complete_snapshot () =
   with_prompt_registry (fun () ->
-    with_memory_os_env
-      Env_config.KeeperMemoryOs.librarian_max_messages_env_key
-      "2"
-      (fun () ->
-         let input : Librarian.input =
-           { trace_id = "trace-exact-message-cap"
-           ; generation = 1
-           ; messages =
-               [ text_message "oldest-message-must-be-dropped"
-               ; text_message "recent-message-one"
-               ; text_message "recent-message-two"
-               ]
-           }
-         in
-         match Librarian_runtime.messages_for_librarian input with
-         | Error error -> Alcotest.fail error
-         | Ok [ _system; user ] ->
-           let prompt = message_text user in
+    let input : Librarian.input =
+      { trace_id = "trace-complete-memory-snapshot"
+      ; generation = 1
+      ; messages =
+          [ text_message "oldest-checkpoint-message"
+          ; text_message "middle-checkpoint-message"
+          ; text_message "newest-checkpoint-message"
+          ]
+      }
+    in
+    match Librarian_runtime.messages_for_librarian input with
+    | Error error -> Alcotest.fail error
+    | Ok [ _system; user ] ->
+      let prompt = message_text user in
+      List.iter
+        (fun expected ->
            Alcotest.(check bool)
-             "configured cap drops the oldest message"
-             false
-             (contains "oldest-message-must-be-dropped" prompt);
-           Alcotest.(check bool)
-             "configured cap keeps the first selected message"
+             (expected ^ " is preserved")
              true
-             (contains "recent-message-one" prompt);
-           Alcotest.(check bool)
-             "configured cap keeps the newest message"
-             true
-             (contains "recent-message-two" prompt)
-         | Ok _ -> Alcotest.fail "librarian prompt must contain system and user messages"))
+             (contains expected prompt))
+        [ "oldest-checkpoint-message"
+        ; "middle-checkpoint-message"
+        ; "newest-checkpoint-message"
+        ]
+    | Ok _ -> Alcotest.fail "librarian prompt must contain system and user messages")
 ;;
 
 let with_captured_console_lines f =
@@ -962,14 +956,6 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
     check_log_contains lines Env_config.KeeperMemoryOs.consolidation_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
-    with_memory_os_env Env_config.KeeperMemoryOs.librarian_max_messages_env_key "bogus" (fun () ->
-      Alcotest.(check int)
-        "invalid max messages falls back"
-        24
-        (Env_config.KeeperMemoryOs.librarian_max_messages ()));
-    check_log_contains lines Env_config.KeeperMemoryOs.librarian_max_messages_env_key;
-    check_log_contains lines "using default");
-  with_captured_console_lines (fun lines ->
     with_memory_os_env Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key "nan" (fun () ->
       Alcotest.(check (float 0.001))
         "invalid timeout falls back"
@@ -1029,8 +1015,6 @@ let find_config_env env entries =
 let memory_os_knob_readers : (string * (unit -> unit)) list =
   [ ( Env_config.KeeperMemoryOs.recall_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.recall_enabled () : bool) )
-  ; ( Env_config.KeeperMemoryOs.librarian_max_messages_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_messages () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_timeout_sec () : float) )
   ; ( Env_config.KeeperMemoryOs.librarian_max_tokens_env_key
@@ -4462,9 +4446,9 @@ let () =
             `Quick
             test_librarian_prompt_omits_private_blocks
         ; Alcotest.test_case
-            "librarian runtime uses exact message cap"
+            "librarian runtime preserves complete snapshot"
             `Quick
-            test_librarian_runtime_uses_exact_message_cap
+            test_librarian_runtime_preserves_complete_snapshot
         ; Alcotest.test_case
             "librarian rejects extra confidence field"
             `Quick

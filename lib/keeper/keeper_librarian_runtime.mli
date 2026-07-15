@@ -13,9 +13,6 @@ type complete_fn =
   unit ->
   (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
 
-val max_messages : unit -> int
-(** Exact cap on checkpoint messages sent to one librarian operation. *)
-
 val default_timeout_sec : unit -> float
 (** Provider timeout for post-turn extraction. Defaults to
     [librarian_default_timeout_sec] (600 s, aligned with the keeper turn budget)
@@ -25,14 +22,12 @@ val runtime_id_for_librarian : runtime_id:string -> string
 (** Runtime id after applying the optional
     [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] override. *)
 
-val select_recent_messages
-  :  max_messages:int
-  -> Agent_sdk.Types.message list
-  -> Agent_sdk.Types.message list
-
 val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_sdk.Types.message list, string) result
+(** Render the complete immutable message snapshot carried by the durable
+    Memory request. Context reduction belongs to MASC LLM compaction, not this
+    provider adapter. *)
 
 val provider_for_librarian
   :  Llm_provider.Provider_config.t

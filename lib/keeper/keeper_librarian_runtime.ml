@@ -31,31 +31,12 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 ;;
 
-let max_messages () =
-  Env_config.KeeperMemoryOs.librarian_max_messages ()
-;;
-
 let default_timeout_sec () =
   Env_config.KeeperMemoryOs.librarian_timeout_sec ()
 ;;
 
 let runtime_id_for_librarian ~runtime_id =
   Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
-;;
-
-let select_recent_messages ~max_messages messages =
-  let max_messages = max 0 max_messages in
-  let len = List.length messages in
-  let drop_count = max 0 (len - max_messages) in
-  let rec drop n xs =
-    if n <= 0
-    then xs
-    else (
-      match xs with
-      | [] -> []
-      | _ :: rest -> drop (n - 1) rest)
-  in
-  drop drop_count messages
 ;;
 
 let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
@@ -273,16 +254,13 @@ let render_prompt key variables =
 ;;
 
 let messages_for_librarian (inp : Keeper_librarian.input) =
-  let input =
-    { inp with messages = select_recent_messages ~max_messages:(max_messages ()) inp.messages }
-  in
   match render_prompt Keeper_prompt_names.librarian_system [] with
   | Error _ as e -> e
   | Ok system ->
     (match
        render_prompt
          Keeper_prompt_names.librarian_episode_extraction
-         (Keeper_librarian.prompt_variables input)
+         (Keeper_librarian.prompt_variables inp)
      with
      | Error _ as e -> e
      | Ok user ->

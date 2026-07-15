@@ -462,10 +462,6 @@ let memory_entries =
       Memory_os_defaults.recall_env_key
       "Memory OS recall prompt injection enabled; invalid values fail closed";
     entry
-      ~default:(string_of_int Memory_os_defaults.librarian_max_messages_default)
-      Memory_os_defaults.librarian_max_messages_env_key
-      "Recent-message window for librarian extraction (floor 1)";
-    entry
       ~default:
         (Memory_os_defaults.float_default_to_display Memory_os_defaults.librarian_timeout_sec_default)
       Memory_os_defaults.librarian_timeout_sec_env_key

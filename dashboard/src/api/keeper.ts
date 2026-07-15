@@ -22,10 +22,10 @@ import {
   jsonHeaders,
   post,
   runOperatorAction,
+  fetchControlPlane,
   fetchWithTimeout,
   fetchJsonWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
-  DEFAULT_POST_TIMEOUT_MS,
 } from './core'
 import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
 import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
@@ -258,7 +258,7 @@ export async function interruptKeeperTurn(
   opts: { signal?: AbortSignal } = {},
 ): Promise<KeeperTurnInterruptResult> {
   const path = '/api/v1/keepers/turn/interrupt'
-  const resp = await fetchWithTimeout(
+  const resp = await fetchControlPlane(
     path,
     {
       method: 'POST',
@@ -266,7 +266,6 @@ export async function interruptKeeperTurn(
       body: JSON.stringify({ name: keeperName.trim() }),
       signal: opts.signal,
     },
-    DEFAULT_POST_TIMEOUT_MS,
   )
   if (!resp.ok) {
     throw await apiRequestErrorFromResponse('POST', path, resp)
@@ -385,7 +384,7 @@ export async function cancelQueuedKeeperMessage(
   opts: { signal?: AbortSignal } = {},
 ): Promise<QueuedKeeperMessageCancelResult> {
   const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}/cancel`
-  const resp = await fetchWithTimeout(
+  const resp = await fetchControlPlane(
     path,
     {
       method: 'POST',
@@ -393,7 +392,6 @@ export async function cancelQueuedKeeperMessage(
       body: '{}',
       signal: opts.signal,
     },
-    DEFAULT_POST_TIMEOUT_MS,
   )
   if (!resp.ok) {
     throw await apiRequestErrorFromResponse('POST', path, resp)

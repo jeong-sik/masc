@@ -556,6 +556,8 @@ describe('cancelQueuedKeeperMessage', () => {
       status: 'cancelling',
       message: undefined,
     })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.signal).toBeUndefined()
   })
 })
 

@@ -96,8 +96,6 @@ const pendingKeeperThreadCancels = new Map<
   string,
   Promise<KeeperThreadCancelOutcome | null>
 >()
-const KEEPER_THREAD_CANCEL_TIMEOUT_MS = 5_000
-const KEEPER_THREAD_CANCEL_SETTLE_GRACE_MS = 500
 const KEEPER_STREAM_SIGNAL_THROTTLE_MS = 1_000
 const keeperStreamSignalWrites = new Map<string, number>()
 
@@ -129,10 +127,6 @@ export function _resetCancelledKeeperThreadRequestsForTests(): void {
   keeperStreamSignalWrites.clear()
 }
 
-function keeperThreadCancelSignal(): AbortSignal {
-  return AbortSignal.timeout(KEEPER_THREAD_CANCEL_TIMEOUT_MS)
-}
-
 function releaseKeeperThreadCancelTracking(requestId: string): void {
   pendingKeeperThreadCancels.delete(requestId)
 }
@@ -161,20 +155,6 @@ function clearKeeperStreamSignal(keeperName: string): void {
   setRecordValue(keeperStreamLastEventAt, name, null)
 }
 
-function cancelTrackingTimeoutMs(): number {
-  return KEEPER_THREAD_CANCEL_TIMEOUT_MS + KEEPER_THREAD_CANCEL_SETTLE_GRACE_MS
-}
-
-function withCancelTrackingTimeout<T>(requestId: string, promise: Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`cancel request ${requestId} did not settle within ${cancelTrackingTimeoutMs()}ms`))
-    }, cancelTrackingTimeoutMs()) as ReturnType<typeof setTimeout> & { unref?: () => void }
-    timeout.unref?.()
-    promise.then(resolve, reject).finally(() => clearTimeout(timeout))
-  })
-}
-
 export function cancelKeeperThreadRequest(
   keeperName: string,
   requestId: string,
@@ -185,12 +165,9 @@ export function cancelKeeperThreadRequest(
   if (!name || !id) return Promise.resolve(null)
   const existing = pendingKeeperThreadCancels.get(id)
   if (existing) return existing
-  const promise = withCancelTrackingTimeout(
-    id,
-    opts.signal
-      ? cancelQueuedKeeperMessage(id, { signal: opts.signal })
-      : cancelQueuedKeeperMessage(id),
-  )
+  const promise = (opts.signal
+    ? cancelQueuedKeeperMessage(id, { signal: opts.signal })
+    : cancelQueuedKeeperMessage(id))
     .then(result => {
       if (result.status === 'cancelled') {
         removePendingKeeperChatRequest(id)
@@ -220,9 +197,7 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
   const requestId = requestIdBeforeAbort ?? abortResult?.requestId ?? null
   const locallyAborted = Boolean(abortResult?.controllerAborted || abortResult?.entryId)
   if (requestId) {
-    void cancelKeeperThreadRequest(keeperName, requestId, {
-      signal: keeperThreadCancelSignal(),
-    })
+    void cancelKeeperThreadRequest(keeperName, requestId)
   }
   if (!requestIdBeforeAbort && !requestId && !locallyAborted) {
     // Nothing was in flight; treat as a successful no-op.
@@ -236,7 +211,7 @@ export async function interruptKeeperTurn(keeperName: string): Promise<boolean> 
   if (!name) return false
   await cancelActiveKeeperThreadMessage(name)
   try {
-    const result = await apiInterruptKeeperTurn(name, { signal: keeperThreadCancelSignal() })
+    const result = await apiInterruptKeeperTurn(name)
     setRecordValue(keeperActionErrors, name, null)
     return result.cancelled
   } catch (err) {
@@ -1327,9 +1302,7 @@ export async function sendKeeperThreadMessage(
               ...(attachments ? { attachments } : {}),
             }
             upsertPendingKeeperChatRequest(pendingRequest)
-            void cancelKeeperThreadRequest(keeperName, nextRequestId, {
-              signal: keeperThreadCancelSignal(),
-            }).then(outcome => {
+            void cancelKeeperThreadRequest(keeperName, nextRequestId).then(outcome => {
               if (outcome === 'cancelling') {
                 return handoffCancelledStreamToRequestPoll(
                   pendingRequest,
@@ -1487,9 +1460,7 @@ export async function sendKeeperThreadMessage(
           submittedAt: Date.now(),
           ...(attachments ? { attachments } : {}),
         }
-        void cancelKeeperThreadRequest(keeperName, requestId, {
-          signal: keeperThreadCancelSignal(),
-        }).then(outcome => {
+        void cancelKeeperThreadRequest(keeperName, requestId).then(outcome => {
           if (outcome === 'cancelling') {
             return handoffCancelledStreamToRequestPoll(
               pendingRequest,

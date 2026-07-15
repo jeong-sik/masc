@@ -190,17 +190,19 @@ describe('post', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
+    const controller = new AbortController()
     await runOperatorAction({
       actor: 'dashboard-manual-actor',
       action_type: 'keeper_probe',
       target_type: 'keeper',
       target_id: 'keeper-one',
       payload: {},
-    })
+    }, { signal: controller.signal })
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const headers = init.headers as Record<string, string>
     expect(headers['X-MASC-Agent'] ?? headers['x-masc-agent']).toBe('dashboard-manual-actor')
+    expect(init.signal).toBe(controller.signal)
   })
 
   it('uses the confirmation actor for operator confirm headers when query agent differs', async () => {
@@ -214,11 +216,18 @@ describe('post', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await confirmOperatorAction('dashboard-manual-actor', 'opc_test_token')
+    const controller = new AbortController()
+    await confirmOperatorAction(
+      'dashboard-manual-actor',
+      'opc_test_token',
+      'confirm',
+      { signal: controller.signal },
+    )
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const headers = init.headers as Record<string, string>
     expect(headers['X-MASC-Agent'] ?? headers['x-masc-agent']).toBe('dashboard-manual-actor')
+    expect(init.signal).toBe(controller.signal)
   })
   it('surfaces invalid JSON in 200 operator action responses as ApiRequestError', async () => {
     const fetchMock = vi.fn().mockResolvedValue(

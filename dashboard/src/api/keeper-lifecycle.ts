@@ -1,12 +1,12 @@
 // MASC Dashboard — Keeper lifecycle (boot/shutdown/reset/clear/checkpoints/pause/resume/wake/bulk) (split from keeper.ts)
 
 import { isRecord } from '../components/common/normalize'
+import { isAbortError } from '../lib/async-state'
 import {
+  fetchControlPlane,
   fetchWithTimeout,
   jsonHeaders,
   DEFAULT_GET_TIMEOUT_MS,
-  DEFAULT_POST_TIMEOUT_MS,
-  KEEPER_LIFECYCLE_TIMEOUT_MS,
 } from './core'
 
 // --- Keeper lifecycle (boot / shutdown) ---
@@ -17,6 +17,9 @@ interface KeeperLifecycleResponse {
   name?: string
   detail?: unknown
   error?: string
+}
+interface KeeperControlOptions {
+  signal?: AbortSignal
 }
 async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promise<T> {
   try {
@@ -45,11 +48,11 @@ async function safeKeeperLifecycle(
   init?: RequestInit,
 ): Promise<KeeperLifecycleResponse> {
   try {
-    const resp = await fetchWithTimeout(url, {
+    const resp = await fetchControlPlane(url, {
       method: 'POST',
       headers: jsonHeaders(),
       ...init,
-    }, KEEPER_LIFECYCLE_TIMEOUT_MS)
+    })
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
     if (resp.ok) return payload
 
@@ -66,6 +69,7 @@ async function safeKeeperLifecycle(
 
     return { ok: false, error }
   } catch (err) {
+    if (isAbortError(err)) throw err
     return { ok: false, error: err instanceof Error ? err.message : fallbackError }
   }
 }
@@ -74,13 +78,15 @@ async function safeKeeperPostWithBody(
   url: string,
   body: Record<string, unknown>,
   fallbackError: string,
+  opts: KeeperControlOptions = {},
 ): Promise<KeeperLifecycleResponse> {
   try {
-    const resp = await fetchWithTimeout(url, {
+    const resp = await fetchControlPlane(url, {
       method: 'POST',
       headers: jsonHeaders(),
       body: JSON.stringify(body),
-    }, DEFAULT_POST_TIMEOUT_MS)
+      signal: opts.signal,
+    })
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
     if (resp.ok) return payload
 
@@ -97,28 +103,41 @@ async function safeKeeperPostWithBody(
 
     return { ok: false, error }
   } catch (err) {
+    if (isAbortError(err)) throw err
     return { ok: false, error: err instanceof Error ? err.message : fallbackError }
   }
 }
 
-export function bootKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function bootKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/boot`,
     `Failed to boot ${name}`,
+    { signal: opts.signal },
   )
 }
 
-export function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function shutdownKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/shutdown`,
     `Failed to shut down ${name}`,
+    { signal: opts.signal },
   )
 }
 
-export function resetKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function resetKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/reset`,
     `Failed to reset ${name}`,
+    { signal: opts.signal },
   )
 }
 
@@ -130,12 +149,14 @@ interface KeeperClearRequest {
 export function clearKeeper(
   name: string,
   payload: KeeperClearRequest,
+  opts: KeeperControlOptions = {},
 ): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/clear`,
     `Failed to clear ${name}`,
     {
       body: JSON.stringify(payload),
+      signal: opts.signal,
     },
   )
 }
@@ -213,27 +234,39 @@ export async function deleteKeeperHistorySnapshots(
   return resp.json() as Promise<KeeperCheckpointDeleteResponse>
 }
 
-export function pauseKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function pauseKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperPostWithBody(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
     { action: 'pause' },
     `Failed to pause ${name}`,
+    opts,
   )
 }
 
-export function resumeKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function resumeKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperPostWithBody(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
     { action: 'resume' },
     `Failed to resume ${name}`,
+    opts,
   )
 }
 
-export function wakeKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function wakeKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperPostWithBody(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
     { action: 'wakeup' },
     `Failed to wake ${name}`,
+    opts,
   )
 }
 
@@ -262,17 +295,18 @@ export interface BulkKeeperDirectiveResponse {
 export async function bulkKeeperDirective(
   names: string[],
   action: BulkKeeperDirectiveAction,
+  opts: KeeperControlOptions = {},
 ): Promise<BulkKeeperDirectiveResponse> {
   const fallbackError = `Failed to ${action} ${names.length} keeper(s)`
   try {
-    const resp = await fetchWithTimeout(
+    const resp = await fetchControlPlane(
       '/api/v1/keepers_bulk/directive',
       {
         method: 'POST',
         headers: jsonHeaders(),
         body: JSON.stringify({ names, action }),
+        signal: opts.signal,
       },
-      DEFAULT_POST_TIMEOUT_MS,
     )
     const payload = await safeJsonResponse<BulkKeeperDirectiveResponse>(
       resp,
@@ -289,6 +323,7 @@ export async function bulkKeeperDirective(
       results: names.map(name => ({ name, ok: false, error: fallbackError })),
     }
   } catch (err) {
+    if (isAbortError(err)) throw err
     return {
       ok: false,
       action,

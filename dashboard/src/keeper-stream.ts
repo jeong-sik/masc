@@ -91,7 +91,7 @@ function persistActiveAssistantDraft(keeperName: string, assistantEntryId: strin
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updatePendingKeeperChatAssistantDraft(runRef.runId, entry)
+  updatePendingKeeperChatAssistantDraft(runRef, entry)
 }
 
 function flushPendingThinkingDeltas(

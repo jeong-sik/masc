@@ -27,7 +27,6 @@ import { compareKeeperQueueRevisions } from './lib/keeper-chat-receipt'
 import {
   isTerminalKeeperRunResult,
   keeperRunRefKey,
-  parseKeeperRunRef,
   parseKeeperRunTerminal,
   parseKeeperRunTracking,
   sameKeeperRunRef,
@@ -135,14 +134,6 @@ export function _resetKeeperRunCancelsForTests(): void {
 
 function releaseKeeperRunCancelTracking(reference: KeeperRunRef): void {
   pendingKeeperRunCancels.delete(keeperRunRefKey(reference))
-}
-
-function keeperRunRef(keeperName: string, runId: string) {
-  return parseKeeperRunRef({
-    run_id: runId,
-    target: { kind: 'keeper', name: keeperName },
-    capability: 'invoke_turn',
-  })
 }
 
 function markKeeperStreamSignal(keeperName: string, opts: { force?: boolean } = {}): void {
@@ -520,12 +511,14 @@ function isMissingQueuedKeeperRequestError(err: unknown): boolean {
 }
 
 function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
-  const existing = keeperThreads.value[request.keeperName] ?? []
-  const userId = pendingUserEntryId(request.requestId)
-  const assistantId = pendingAssistantEntryId(request.requestId)
+  const keeperName = request.runRef.target.name
+  const runId = request.runRef.runId
+  const existing = keeperThreads.value[keeperName] ?? []
+  const userId = pendingUserEntryId(runId)
+  const assistantId = pendingAssistantEntryId(runId)
   const assistantDraft = request.assistantDraft
   if (!existing.some(entry => entry.id === userId)) {
-    appendThreadEntry(request.keeperName, {
+    appendThreadEntry(keeperName, {
       id: userId,
       role: 'user',
       source: 'direct_user',
@@ -535,7 +528,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       delivery: 'delivered',
       streamState: null,
       streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
-        requestId: request.requestId,
+        requestId: runId,
         deliveryReceipt: 'no_delivery_receipt',
         reason: 'restored pending queued request from browser storage',
       }),
@@ -544,18 +537,18 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
     })
   }
   if (!existing.some(entry => entry.id === assistantId)) {
-    appendThreadEntry(request.keeperName, {
+    appendThreadEntry(keeperName, {
       id: assistantId,
       role: 'assistant',
       source: 'direct_assistant',
-      label: request.keeperName,
+      label: keeperName,
       text: assistantDraft?.text ?? '',
       rawText: assistantDraft?.rawText ?? '',
       timestamp: assistantDraft?.timestamp ?? null,
       delivery: assistantDraft?.delivery ?? 'queued',
       streamState: assistantDraft ? assistantDraft.streamState : 'opening',
       streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
-        requestId: request.requestId,
+        requestId: runId,
         deliveryReceipt: 'no_delivery_receipt',
         reason: 'awaiting queued request poll result',
       }),
@@ -569,14 +562,14 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
 
 function persistPendingAssistantDraft(
   keeperName: string,
-  requestId: string | null,
+  runRef: KeeperRunRef | null,
   assistantEntryId: string,
 ): void {
-  if (!requestId) return
+  if (!runRef) return
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updatePendingKeeperChatAssistantDraft(requestId, entry)
+  updatePendingKeeperChatAssistantDraft(runRef, entry)
 }
 
 let localIdCounter = 0
@@ -618,7 +611,9 @@ export function isKeeperThreadMessageSendInFlight(
 }
 
 async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
-  const runRef = keeperRunRef(request.keeperName, request.requestId)
+  const runRef = request.runRef
+  const keeperName = runRef.target.name
+  const runId = runRef.runId
   // A live in-session send stream still owns this request (e.g. the panel
   // remounted on an SPA route change while the reply was pending). Defer to
   // it rather than minting a duplicate pending entry + a second poll loop.
@@ -628,16 +623,16 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
   if (resumingKeeperChatRequests.has(key)) return
   resumingKeeperChatRequests.add(key)
   const assistantId = ensurePendingThreadEntries(request)
-  setRecordValue(keeperSending, request.keeperName, true)
-  setRecordValue(keeperActionErrors, request.keeperName, null)
-  setRecordValue(keeperStreamStartedAt, request.keeperName, request.submittedAt)
-  markKeeperStreamSignal(request.keeperName, { force: true })
+  setRecordValue(keeperSending, keeperName, true)
+  setRecordValue(keeperActionErrors, keeperName, null)
+  setRecordValue(keeperStreamStartedAt, keeperName, request.submittedAt)
+  markKeeperStreamSignal(keeperName, { force: true })
   try {
     for (;;) {
       const result = await fetchQueuedKeeperMessageResult(
         runRef,
       )
-      markKeeperStreamSignal(request.keeperName)
+      markKeeperStreamSignal(keeperName)
       if (!isTerminalQueuedKeeperMessage(result)) {
         await sleep(PENDING_KEEPER_CHAT_POLL_MS)
         continue
@@ -672,11 +667,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       } else if (isError) {
         assistantDelivery = 'error'
       }
-      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+      finalizeAssistantEntry(keeperName, pendingUserEntryId(runId), {
         delivery: userDelivery,
         error: errorMessage,
         streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
-          requestId: request.requestId,
+          requestId: runId,
           deliveryReceipt: 'no_delivery_receipt',
           reason: errorMessage,
         }),
@@ -689,7 +684,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       } else if (suppressReply) {
         assistantText = ''
       }
-      finalizeAssistantEntry(request.keeperName, assistantId, {
+      finalizeAssistantEntry(keeperName, assistantId, {
         text: assistantText,
         rawText: assistantRawText,
         delivery: assistantDelivery,
@@ -698,29 +693,29 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         details: reply.details,
         error: errorMessage,
         streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
-          requestId: request.requestId,
+          requestId: runId,
           deliveryReceipt: 'no_delivery_receipt',
           reason: errorMessage,
         }),
       })
-      if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
-      removePendingKeeperChatRequest(request.requestId)
-      await hydrateKeeperChatHistory(request.keeperName, { force: true })
+      if (errorMessage) setRecordValue(keeperActionErrors, keeperName, errorMessage)
+      removePendingKeeperChatRequest(runRef)
+      await hydrateKeeperChatHistory(keeperName, { force: true })
       return
     }
   } catch (err) {
     if (isMissingQueuedKeeperRequestError(err)) {
-      removePendingKeeperChatRequest(request.requestId)
-      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+      removePendingKeeperChatRequest(runRef)
+      finalizeAssistantEntry(keeperName, pendingUserEntryId(runId), {
         delivery: 'error',
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-          requestId: request.requestId,
+          requestId: runId,
           deliveryReceipt: 'no_delivery_receipt',
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
-      finalizeAssistantEntry(request.keeperName, assistantId, {
+      finalizeAssistantEntry(keeperName, assistantId, {
         text: '',
         rawText: '',
         delivery: 'error',
@@ -728,28 +723,28 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         timestamp: new Date().toISOString(),
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-          requestId: request.requestId,
+          requestId: runId,
           deliveryReceipt: 'no_delivery_receipt',
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
-      setRecordValue(keeperActionErrors, request.keeperName, QUEUED_KEEPER_REQUEST_LOST_MESSAGE)
-      await hydrateKeeperChatHistory(request.keeperName, { force: true })
+      setRecordValue(keeperActionErrors, keeperName, QUEUED_KEEPER_REQUEST_LOST_MESSAGE)
+      await hydrateKeeperChatHistory(keeperName, { force: true })
       return
     }
-    const detail = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
+    const detail = err instanceof Error ? err.message : `Failed to resume ${keeperName} chat request`
     const message = `${PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE} (${detail})`
-    removePendingKeeperChatRequest(request.requestId)
-    finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+    removePendingKeeperChatRequest(runRef)
+    finalizeAssistantEntry(keeperName, pendingUserEntryId(runId), {
       delivery: 'error',
       error: message,
       streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-        requestId: request.requestId,
+        requestId: runId,
         deliveryReceipt: 'no_delivery_receipt',
         reason: message,
       }),
     })
-    finalizeAssistantEntry(request.keeperName, assistantId, {
+    finalizeAssistantEntry(keeperName, assistantId, {
       text: '',
       rawText: '',
       delivery: 'error',
@@ -757,19 +752,19 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       timestamp: new Date().toISOString(),
       error: message,
       streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-        requestId: request.requestId,
+        requestId: runId,
         deliveryReceipt: 'no_delivery_receipt',
         reason: message,
       }),
     })
-    setRecordValue(keeperActionErrors, request.keeperName, message)
-    await hydrateKeeperChatHistory(request.keeperName, { force: true })
+    setRecordValue(keeperActionErrors, keeperName, message)
+    await hydrateKeeperChatHistory(keeperName, { force: true })
   } finally {
     resumingKeeperChatRequests.delete(key)
-    if (!hasPendingKeeperChatRequest(request.keeperName)) {
-      setRecordValue(keeperSending, request.keeperName, false)
-      setRecordValue(keeperStreamStartedAt, request.keeperName, null)
-      clearKeeperStreamSignal(request.keeperName)
+    if (!hasPendingKeeperChatRequest(keeperName)) {
+      setRecordValue(keeperSending, keeperName, false)
+      setRecordValue(keeperStreamStartedAt, keeperName, null)
+      clearKeeperStreamSignal(keeperName)
     }
   }
 }
@@ -784,9 +779,8 @@ async function handoffCancelledStreamToRequestPoll(
   request: PendingKeeperChatRequest,
   localEntryIds: readonly string[],
 ): Promise<void> {
-  removeThreadEntries(request.keeperName, localEntryIds)
-  const runRef = keeperRunRef(request.keeperName, request.requestId)
-  releaseLiveSendRun(runRef)
+  removeThreadEntries(request.runRef.target.name, localEntryIds)
+  releaseLiveSendRun(request.runRef)
   await resumePendingKeeperChatRequest(request)
 }
 
@@ -1319,8 +1313,7 @@ export async function sendKeeperThreadMessage(
           if (nextRunRef && controller.signal.aborted) {
             acceptedRun.current = nextRunRef
             const pendingRequest: PendingKeeperChatRequest = {
-              requestId: nextRunRef.runId,
-              keeperName,
+              runRef: nextRunRef,
               message,
               submittedAt: Date.now(),
               ...(attachments ? { attachments } : {}),
@@ -1341,8 +1334,7 @@ export async function sendKeeperThreadMessage(
             // (and not mint a duplicate pending entry) until handoff/finally.
             claimLiveSendRun(nextRunRef)
             upsertPendingKeeperChatRequest({
-              requestId: nextRunRef.runId,
-              keeperName,
+              runRef: nextRunRef,
               message,
               submittedAt: Date.now(),
               ...(attachments ? { attachments } : {}),
@@ -1363,7 +1355,7 @@ export async function sendKeeperThreadMessage(
             } else if (isTerminalKeeperRunResult(terminal.resultContract)) {
               requestNeedsReconciliation = false
               requestTerminalSeen = true
-              removePendingKeeperChatRequest(terminal.runRef.runId)
+              removePendingKeeperChatRequest(terminal.runRef)
             } else {
               throw new Error(
                 `Keeper run terminal has nonterminal result_contract: ${terminal.resultContract}`,
@@ -1375,7 +1367,7 @@ export async function sendKeeperThreadMessage(
         if (error) {
           throw new Error(error)
         }
-        persistPendingAssistantDraft(keeperName, acceptedRun.current?.runId ?? null, assistantId)
+        persistPendingAssistantDraft(keeperName, acceptedRun.current, assistantId)
         if (event.type === 'TOOL_CALL_END') {
           toolCallEnded = true
           void hydrateKeeperToolOutputs(keeperName)
@@ -1396,8 +1388,7 @@ export async function sendKeeperThreadMessage(
         // call below is not blocked by the guard we just set.
         releaseLiveSendRun(runRef)
         await resumePendingKeeperChatRequest({
-          requestId: runRef.runId,
-          keeperName,
+          runRef,
           message,
           submittedAt: Date.now(),
           ...(attachments ? { attachments } : {}),
@@ -1443,7 +1434,7 @@ export async function sendKeeperThreadMessage(
       })
       setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
       if (runRef) {
-        removePendingKeeperChatRequest(runRef.runId)
+        removePendingKeeperChatRequest(runRef)
         releaseLiveSendRun(runRef)
       }
       return
@@ -1465,7 +1456,7 @@ export async function sendKeeperThreadMessage(
     })
     if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
     if (runRef) {
-      removePendingKeeperChatRequest(runRef.runId)
+      removePendingKeeperChatRequest(runRef)
       releaseLiveSendRun(runRef)
     }
     if (finalDelivery === 'queued') {
@@ -1478,7 +1469,7 @@ export async function sendKeeperThreadMessage(
       const hasDurablePendingRequest = Boolean(
         runRef
         && pendingKeeperChatRequestsForKeeper(keeperName)
-          .some(candidate => candidate.requestId === runRef?.runId),
+          .some(candidate => sameKeeperRunRef(candidate.runRef, runRef)),
       )
       const shouldAttemptServerCancel = Boolean(
         runRef && (liveSendOwnsRun(runRef) || hasDurablePendingRequest),
@@ -1490,8 +1481,7 @@ export async function sendKeeperThreadMessage(
       )
       if (shouldAttemptServerCancel && runRef) {
         const pendingRequest: PendingKeeperChatRequest = {
-          requestId: runRef.runId,
-          keeperName,
+          runRef,
           message,
           submittedAt: Date.now(),
           ...(attachments ? { attachments } : {}),
@@ -1555,7 +1545,7 @@ export async function sendKeeperThreadMessage(
       }),
     })
     if (requestTerminalSeen && runRef) {
-      removePendingKeeperChatRequest(runRef.runId)
+      removePendingKeeperChatRequest(runRef)
       releaseLiveSendRun(runRef)
     }
     try {

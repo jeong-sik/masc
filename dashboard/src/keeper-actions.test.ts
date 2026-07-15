@@ -2024,8 +2024,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
   it('resumes a pending request from storage and finalizes the transcript', async () => {
     upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_1',
-      keeperName: 'echo',
+      runRef: keeperRunRef('kmsg_echo_1'),
       message: '어디까지 했어?',
       submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
     })
@@ -2062,8 +2061,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
   it('resumes a no-visible pending request as error instead of blank assistant text', async () => {
     upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_1',
-      keeperName: 'echo',
+      runRef: keeperRunRef('kmsg_echo_1'),
       message: '뭐함',
       submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
     })
@@ -2114,14 +2112,12 @@ describe('sendKeeperThreadMessage stream outcome', () => {
   it('resumes repeated same-message sends as distinct request ids', async () => {
     const submittedAt = Date.UTC(2026, 5, 15, 9, 0, 0)
     upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_1',
-      keeperName: 'echo',
+      runRef: keeperRunRef('kmsg_echo_1'),
       message: 'status?',
       submittedAt,
     })
     upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_2',
-      keeperName: 'echo',
+      runRef: keeperRunRef('kmsg_echo_2'),
       message: 'status?',
       submittedAt,
     })
@@ -2157,8 +2153,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
   it('marks a recovered orphan request as lost instead of polling forever', async () => {
     upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_1',
-      keeperName: 'echo',
+      runRef: keeperRunRef('kmsg_echo_1'),
       message: '어디까지 했어?',
       submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
     })
@@ -2193,8 +2188,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
   it('resumes a cancelled pending request without restoring an error bubble', async () => {
     upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_1',
-      keeperName: 'echo',
+      runRef: keeperRunRef('kmsg_echo_1'),
       message: '뭘 해야하나',
       submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
     })
@@ -2231,8 +2225,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
   it('keeps the user message visible when the server no longer knows request_id', async () => {
     upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_1',
-      keeperName: 'echo',
+      runRef: keeperRunRef('kmsg_echo_1'),
       message: '어디까지 했어?',
       submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
     })
@@ -2270,8 +2263,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
   it('finalizes the pending message as error when the poll request times out', async () => {
     upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_1',
-      keeperName: 'echo',
+      runRef: keeperRunRef('kmsg_echo_1'),
       message: '어디까지 했어?',
       submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
     })
@@ -2300,8 +2292,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       _resetChatHydrationForTests()
       _clearPendingKeeperChatRequestsForTests()
       upsertPendingKeeperChatRequest({
-        requestId: 'kmsg_echo_1',
-        keeperName: 'echo',
+        runRef: keeperRunRef('kmsg_echo_1'),
         message: '진행 상황?',
         submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
       })
@@ -2359,8 +2350,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       _resetChatHydrationForTests()
       _clearPendingKeeperChatRequestsForTests()
       upsertPendingKeeperChatRequest({
-        requestId: 'kmsg_echo_draft',
-        keeperName: 'echo',
+        runRef: keeperRunRef('kmsg_echo_draft'),
         message: '진행 상황?',
         submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
         assistantDraft: {
@@ -2434,8 +2424,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       _resetChatHydrationForTests()
       _clearPendingKeeperChatRequestsForTests()
       upsertPendingKeeperChatRequest({
-        requestId: 'kmsg_echo_2',
-        keeperName: 'echo',
+        runRef: keeperRunRef('kmsg_echo_2'),
         message: '진행 상황?',
         submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
       })

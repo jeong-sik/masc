@@ -2,7 +2,7 @@
 
     Scenarios mirror the five cases in the MASC-1 plan:
     1. Happy path — Running → Overflowed → Compacting → Running
-    2. Compact failed → Overflowed remains active for later recovery
+    2. Compact failed → executable again for durable Lane retry
     3. Operator clear — Overflowed → Running without passing Compacting
     4. Two consecutive overflows in one fiber lifecycle
     5. Heartbeat failure while Overflowed is preserved through recovery *)
@@ -22,6 +22,14 @@ let running_conds : SM.conditions =
 
 let overflow_event ?(limit = Some 200_000) () =
   SM.Context_overflow_detected { limit_tokens = limit }
+
+let test_provider_overflow_trigger_roundtrip () =
+  let trigger = Compaction_trigger.Provider_overflow { limit_tokens = Some 200_000 } in
+  check string "typed trigger label" "provider_overflow" (Compaction_trigger.to_label trigger);
+  match Compaction_trigger.of_detail_json (Compaction_trigger.to_detail_json trigger) with
+  | Some (Compaction_trigger.Provider_overflow { limit_tokens = Some 200_000 }) -> ()
+  | _ -> fail "typed provider overflow trigger did not round-trip"
+;;
 
 let apply_ok phase conds ev =
   match SM.apply_event ~current_phase:phase ~conditions:conds ~event:ev
@@ -68,21 +76,21 @@ let test_happy_path () =
 
 (* ── Scenario 2: compact failure remains recoverable ──────── *)
 
-let test_compact_failure_remains_overflowed () =
+let test_compact_failure_releases_lane () =
   (* Running → overflow → Overflowed *)
   let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
   (* The Lane executor explicitly starts compaction. *)
   let tr2 =
     apply_ok SM.Overflowed tr1.updated_conditions SM.Compaction_started
   in
-  (* Compaction fails — compaction_active cleared but context_overflow keeps *)
+  (* Compaction fails — durable queue settlement owns the exact retry. *)
   let tr3 =
     apply_ok SM.Compacting tr2.updated_conditions
       (SM.Compaction_failed { reason = "oas_error" })
   in
-  check_phase SM.Overflowed tr3.new_phase
-    "compact failed, context still overflowed → Overflowed again";
-  check bool "context_overflow still set" true
+  check_phase SM.Running tr3.new_phase
+    "compact failed, buffer latch released → Running";
+  check bool "context_overflow latch released" false
     tr3.updated_conditions.context_overflow;
   check bool "failure does not synthesize operator pause" false
     tr3.updated_conditions.operator_paused
@@ -160,9 +168,11 @@ let test_heartbeat_failure_preserved_through_overflow () =
 let () =
   run "keeper_overflow_recovery" [
     "overflow-lifecycle",
-    [ test_case "happy path" `Quick test_happy_path;
-      test_case "compact failure remains recoverable" `Quick
-        test_compact_failure_remains_overflowed;
+    [ test_case "provider overflow trigger codec" `Quick
+        test_provider_overflow_trigger_roundtrip;
+      test_case "happy path" `Quick test_happy_path;
+      test_case "compact failure releases Lane" `Quick
+        test_compact_failure_releases_lane;
       test_case "operator clear returns to Running" `Quick
         test_operator_clear_returns_to_running;
       test_case "two consecutive overflows" `Quick

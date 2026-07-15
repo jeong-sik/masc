@@ -399,7 +399,22 @@ let test_failed_cycle_route_mapping () =
        handled_failure
    with
    | Masc.Keeper_registry_event_queue.Ack -> ()
-   | _ -> Alcotest.fail "in-turn handled terminal failure was retried")
+   | _ -> Alcotest.fail "in-turn handled terminal failure was retried");
+  let compacted_failure =
+    { judgment_failure with
+      source_lease_disposition =
+        Masc.Keeper_unified_turn.Requeue_after_context_compaction
+    }
+  in
+  match
+    Masc.Keeper_heartbeat_loop.settlement_of_failure
+      ~settled_at:7.0
+      compacted_failure
+  with
+  | Masc.Keeper_registry_event_queue.Requeue
+      Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+    ()
+  | _ -> Alcotest.fail "context-compacted source stimulus was acknowledged"
 ;;
 
 let cycle_meta () =
@@ -490,6 +505,40 @@ let test_unconsumed_approval_requeues_behind_other_work () =
     [ State.Approval_grant_unconsumed
     ; State.Approval_grant_state_unavailable
     ]
+;;
+
+let test_context_compaction_retry_preserves_source_identity () =
+  let source = stimulus "overflow-source" 1.0 in
+  let peer = stimulus "peer-work" 2.0 in
+  let state = State.with_pending (queue [ source; peer ]) State.empty in
+  let state, lease = claim_head state in
+  let lease = require_some "overflow source lease" lease in
+  let state, _ =
+    State.settle
+      ~settled_at:3.0
+      ~lease
+      ~settlement:(State.Requeue State.Context_compaction_retry)
+      state
+    |> require_ok "settle context-compacted source"
+  in
+  let state =
+    State.of_yojson (State.to_yojson state)
+    |> require_ok "round-trip context-compaction settlement"
+  in
+  match Queue.to_list (State.pending state), State.transition_outbox state with
+  | [ next; retained ], [ outbox ] ->
+    Alcotest.(check string)
+      "peer work remains ahead of the compacted retry"
+      peer.post_id
+      next.post_id;
+    Alcotest.(check bool)
+      "exact leased source identity is retained"
+      true
+      (Queue.stimulus_identity_equal source retained);
+    (match outbox.receipt.settlement with
+     | State.Requeue State.Context_compaction_retry -> ()
+     | _ -> Alcotest.fail "outbox lost context-compaction retry reason")
+  | _ -> Alcotest.fail "context-compaction retry changed queue topology"
 ;;
 
 let rec remove_tree path =
@@ -893,6 +942,10 @@ let () =
             "unconsumed approval yields FIFO"
             `Quick
             test_unconsumed_approval_requeues_behind_other_work
+        ; Alcotest.test_case
+            "context compaction preserves source identity"
+            `Quick
+            test_context_compaction_retry_preserves_source_identity
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case

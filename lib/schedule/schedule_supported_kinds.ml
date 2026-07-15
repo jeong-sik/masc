@@ -15,10 +15,9 @@
     without a validator branch stays rejected at creation as an unsupported
     kind. So a new kind needs both the list entry and a validator branch. *)
 
-let board_post = "masc.board_post"
 let keeper_wake = "masc.keeper_wake"
 
-let supported = [ board_post; keeper_wake ]
+let supported = [ keeper_wake ]
 
 let supported_list_string () = String.concat ", " supported
 

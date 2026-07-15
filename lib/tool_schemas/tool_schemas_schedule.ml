@@ -87,27 +87,15 @@ let create_schema =
         "payload"
     ; string_prop
         ~description:
-          "Payload kind used when payload is omitted. Supported server consumers today: masc.board_post and masc.keeper_wake."
+          "Payload kind used when payload is omitted. The server consumer accepts masc.keeper_wake."
         "payload_kind"
     ; integer_prop
         ~description:"Payload schema version used when payload is omitted."
         "payload_schema_version"
     ; object_prop
         ~description:
-          "Payload body used when payload is omitted. For board posts, prefer the board_* convenience fields unless you need the raw envelope. For masc.keeper_wake use {keeper_name, message, optional title, optional urgency}."
+          "Payload body used when payload is omitted. For masc.keeper_wake use {keeper_name, message, optional title, optional urgency}."
         "payload_body"
-    ; string_prop
-        ~description:
-          "Convenience for scheduling a board post. When payload/payload_body are omitted, this builds payload kind masc.board_post with schema_version=1."
-        "board_content"
-    ; string_prop ~description:"Optional board-post title." "board_title"
-    ; string_prop
-        ~description:"Optional board hearth/destination for the scheduled post."
-        "board_hearth"
-    ; string_prop ~description:"Optional board post author. Defaults at dispatch time." "board_author"
-    ; string_prop ~description:"Optional board thread id." "board_thread_id"
-    ; integer_prop ~description:"Optional board post TTL in hours." "board_ttl_hours"
-    ; object_prop ~description:"Optional board post metadata object." "board_meta"
     ; string_prop ~description:"Optional stable schedule id." "schedule_id"
     ; number_prop ~description:"Optional request timestamp for replay/tests." "requested_at_unix"
     ; number_prop ~description:"Optional expiry timestamp." "expires_at_unix"
@@ -186,7 +174,7 @@ let definition ~action ~id ~name ~description ~input_schema ~read_only =
 let definitions : definition list =
   [ definition ~action:Create_request ~id:"create" ~name:"masc_schedule_create"
       ~description:
-        "Create a durable scheduled internal automation request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For 'post this to board ops every morning', use board_content plus optional board_title/board_hearth. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. Payload effects are authorized by their leaf tool at dispatch time."
+        "Create a durable Keeper wake request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. The due request wakes its Keeper lane; it does not authorize later effects."
       ~input_schema:create_schema ~read_only:false
   ; definition ~action:List_requests ~id:"list" ~name:"masc_schedule_list"
       ~description:"List durable scheduled internal automation requests."

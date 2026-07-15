@@ -103,6 +103,19 @@ let with_busy_slots ~base ~sw keeper_names f =
     f
 ;;
 
+let seed_keeper config =
+  let meta =
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String keeper_name
+         ; "agent_name", `String ("keeper-" ^ keeper_name)
+         ; "trace_id", `String ("trace-" ^ keeper_name)
+         ])
+    |> Result.get_ok
+  in
+  Keeper_meta_store.write_meta config meta |> Result.get_ok
+;;
+
 let test_busy_dashboard_enqueues () =
   Printf.printf "Test: busy dashboard dispatch enqueues onto Keeper_chat_queue\n%!";
   with_env
@@ -379,6 +392,84 @@ let test_stream_surface_preserves_typed_shutdown_rejection () =
     check "stream surface emits a typed shutdown rejection" false
 ;;
 
+let test_delegate_surface_uses_serialized_shutdown_fence () =
+  Printf.printf "Test: typed delegate uses the serialized Keeper lane\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore
+    (Keeper_turn_admission.begin_shutdown ~base_path:base ~keeper_name
+       ~operation_id
+      : Keeper_turn_admission.begin_shutdown_result);
+  Eio.Switch.run
+  @@ fun sw ->
+  let request =
+    Keeper_invocation_contract.request
+      ~keeper_name
+      ~prompt:"typed delegated turn"
+    |> Result.get_ok
+  in
+  let ctx : _ Keeper_types_profile.context =
+    { config = Workspace.default_config base
+    ; agent_name = "delegate-shutdown-test"
+    ; sw
+    ; clock
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  let result = Keeper_turn.handle_keeper_delegate ctx request in
+  let message = Tool_result.message result in
+  check "shutdown-fenced delegate does not run" (not (Tool_result.is_success result));
+  check "delegate observes the exact shutdown owner"
+    (Astring.String.is_infix
+       ~affix:
+         ("stopping under operation "
+          ^ Keeper_shutdown_types.Operation_id.to_string operation_id)
+       message);
+  check "delegate error does not inherit the removed tool name"
+    (not (Astring.String.is_infix ~affix:"masc_keeper_msg" message))
+;;
+
+let test_delegate_resource_error_uses_typed_tool_name () =
+  Printf.printf "Test: typed delegate owns its failure identity\n%!";
+  with_env
+  @@ fun ~base ~clock ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let config = Workspace.default_config base in
+  seed_keeper config;
+  let request =
+    Keeper_invocation_contract.request
+      ~keeper_name
+      ~prompt:"typed prompt remains on the invocation"
+    |> Result.get_ok
+  in
+  let ctx : _ Keeper_types_profile.context =
+    { config
+    ; agent_name = "delegate-resource-test"
+    ; sw
+    ; clock
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  let result = Keeper_turn.handle_keeper_delegate ctx request in
+  check "non-runtime resource boundary fails explicitly"
+    (not (Tool_result.is_success result));
+  check "delegate failure carries the typed tool name"
+    (String.equal "masc_keeper_delegate" (Tool_result.tool_name result));
+  check "typed prompt is not rejected as a missing legacy message"
+    (not
+       (Astring.String.is_infix
+          ~affix:"message is required"
+          (Tool_result.message result)))
+;;
+
 let () =
   test_busy_dashboard_enqueues ();
   test_free_dashboard_not_enqueued ();
@@ -388,6 +479,8 @@ let () =
   test_stream_headers_close_per_turn_response ();
   test_shutdown_fenced_dashboard_ack_preserves_cause ();
   test_stream_surface_preserves_typed_shutdown_rejection ();
+  test_delegate_surface_uses_serialized_shutdown_fence ();
+  test_delegate_resource_error_uses_typed_tool_name ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

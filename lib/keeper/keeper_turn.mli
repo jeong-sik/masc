@@ -27,6 +27,12 @@ val preflight_keeper_msg :
 (** Run synchronous validation for [handle_keeper_msg] before an async wrapper
     accepts the turn for later execution. *)
 
+val preflight_keeper_delegate :
+  _ Keeper_types_profile.context ->
+  Keeper_invocation_contract.request ->
+  (Keeper_invocation_contract.request, string) result
+(** Validate one typed delegated invocation before durable submission. *)
+
 module For_testing : sig
   val direct_owner_conversation_context :
     config:Workspace.config ->
@@ -123,6 +129,13 @@ val handle_keeper_msg :
     background turn. [on_admission_rejected] receives the typed admission
     result before the legacy tool error is rendered; queue consumers use it to
     keep a leased receipt pending without matching diagnostic strings. *)
+
+val handle_keeper_delegate :
+  ?event_bus:Agent_sdk.Event_bus.t ->
+  _ Keeper_types_profile.context ->
+  Keeper_invocation_contract.request ->
+  tool_result
+(** Run a typed delegated invocation through the same serialized Keeper lane. *)
 
 val handle_keeper_msg_if_free :
   ?on_text_delta:(string -> unit) ->

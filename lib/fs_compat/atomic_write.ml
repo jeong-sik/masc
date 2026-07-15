@@ -1668,11 +1668,9 @@ let replace_capability_file_with
                  match !staging_path with
                  | None -> ()
                  | Some path ->
-                   (try
-                      let _present = Eio.Path.stat ~follow:false path in
-                      ()
-                    with
-                    | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+                   (match Eio.Path.stat ~follow:false path with
+                    | _ -> ()
+                    | exception Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
                       absent := true))
           in
           cleanup_failures :=

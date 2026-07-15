@@ -7,7 +7,7 @@
 # team. It copies files from presets/<preset>/ (listed in that preset's
 # manifest.txt) into <base-path>/.masc/config/. The keepers inherit
 # [runtime].default from runtime.toml (ollama_cloud.deepseek-v4-flash), so no
-# model catalog is touched — coherence with runtime.toml/oas-models.toml holds.
+# model catalog is touched — OAS embedded catalog plus deployment overlay stays authoritative.
 #
 # Usage:
 #   scripts/seed-team.sh [--preset classic] --base-path DIR [--force] [--dry-run] [--list]

@@ -3,16 +3,13 @@
 
 type outcome =
   | Success
-  | Duplicate
   | Validation_error of string
   | Keeper_error of string
   | Dispatch_unavailable
   | Internal_error of string
 
-(* Closed sum mirroring the in-module producer surface (5 sites in this
-   file).  [Ek_none] replaces the [Error_kind ""] marker previously
-   used to encode the no-error state for [Success] and [Duplicate]
-   outcomes. *)
+(* Closed sum mirroring the producer surface. [Ek_none] represents
+   the no-error state for [Success]. *)
 type error_kind =
   | Ek_none
   | Ek_validation
@@ -40,7 +37,6 @@ type channel_stats = {
   message_count : int;
   success_count : int;
   error_count : int;
-  duplicate_count : int;
   validation_error_count : int;
   keeper_error_count : int;
   dispatch_unavailable_count : int;
@@ -67,7 +63,6 @@ type binding_stats = {
   message_count : int;
   success_count : int;
   error_count : int;
-  duplicate_count : int;
   last_activity_ts : float;
   last_success_ts : float;
   last_error_ts : float;
@@ -95,7 +90,6 @@ type binding_acc = {
   mutable msg_count : int;
   mutable success_count : int;
   mutable err_count : int;
-  mutable duplicate_count : int;
   mutable last_ts : float;
   mutable last_success_ts : float;
   mutable last_error_ts : float;
@@ -112,7 +106,6 @@ type stats_acc = {
   mutable msg_count : int;
   mutable success_count : int;
   mutable err_count : int;
-  mutable duplicate_count : int;
   mutable validation_error_count : int;
   mutable keeper_error_count : int;
   mutable dispatch_unavailable_count : int;
@@ -145,7 +138,6 @@ let make_binding_acc () =
     msg_count = 0;
     success_count = 0;
     err_count = 0;
-    duplicate_count = 0;
     last_ts = 0.0;
     last_success_ts = 0.0;
     last_error_ts = 0.0;
@@ -163,7 +155,6 @@ let make_acc () =
     msg_count = 0;
     success_count = 0;
     err_count = 0;
-    duplicate_count = 0;
     validation_error_count = 0;
     keeper_error_count = 0;
     dispatch_unavailable_count = 0;
@@ -192,11 +183,6 @@ let start_time = Unix.gettimeofday ()
 let recent_events : gate_event Queue.t = Queue.create ()
 let next_event_seq = ref 0
 
-let dedup_size_fn : (unit -> int) ref = ref (fun () -> 0)
-
-let register_dedup_size_fn f = dedup_size_fn := f
-let dedup_table_size () = !dedup_size_fn ()
-
 let get_or_create_acc channel =
   match Hashtbl.find_opt table channel with
   | Some acc -> acc
@@ -207,7 +193,6 @@ let get_or_create_acc channel =
 
 let outcome_name = function
   | Success -> "success"
-  | Duplicate -> "duplicate"
   | Validation_error _ -> "validation_error"
   | Keeper_error _ -> "keeper_error"
   | Dispatch_unavailable -> "dispatch_unavailable"
@@ -259,7 +244,7 @@ let outcome_error_details = function
   | Dispatch_unavailable ->
       (Ek_dispatch_unavailable, "keeper dispatch unavailable")
   | Internal_error message -> (Ek_internal, message)
-  | Success | Duplicate -> (Ek_none, "")
+  | Success -> (Ek_none, "")
 
 let append_event ~channel ~workspace_id ~keeper ~duration_ms outcome ~timestamp =
   let error_kind, error = outcome_error_details outcome in
@@ -328,11 +313,6 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
                binding.success_count <- binding.success_count + 1;
                binding.last_success_ts <- now
            | None -> ())
-      | Duplicate ->
-          acc.duplicate_count <- acc.duplicate_count + 1;
-          (match binding with
-           | Some binding -> binding.duplicate_count <- binding.duplicate_count + 1
-           | None -> ())
       | Validation_error message ->
           acc.validation_error_count <- acc.validation_error_count + 1;
           update_error_fields acc ~now
@@ -387,7 +367,6 @@ let snapshot () : channel_stats list =
             message_count = acc.msg_count;
             success_count = acc.success_count;
             error_count = acc.err_count;
-            duplicate_count = acc.duplicate_count;
             validation_error_count = acc.validation_error_count;
             keeper_error_count = acc.keeper_error_count;
             dispatch_unavailable_count = acc.dispatch_unavailable_count;
@@ -475,30 +454,23 @@ let percent numerator denominator =
          ((float_of_int numerator *. 100.0) /. float_of_int denominator))
 
 
-let effective_attempt_count_counts ~message_count ~duplicate_count =
-  max 0 (message_count - duplicate_count)
-
-let success_rate_pct_counts ~success_count ~message_count ~duplicate_count =
-  percent success_count
-    (effective_attempt_count_counts ~message_count ~duplicate_count)
+let success_rate_pct_counts ~success_count ~message_count =
+  percent success_count message_count
 
 let success_rate_pct (stats : channel_stats) =
   success_rate_pct_counts ~success_count:stats.success_count
-    ~message_count:stats.message_count ~duplicate_count:stats.duplicate_count
+    ~message_count:stats.message_count
 
 let slow_rate_pct (stats : channel_stats) =
   percent stats.slow_count stats.timed_count
 
-let health_of_counts ~message_count ~error_count ~success_count ~duplicate_count
-    ~timed_count ~slow_count =
+let health_of_counts ~message_count ~error_count ~success_count ~timed_count
+    ~slow_count =
   if message_count = 0 then "idle"
   else if error_count = 0 then "healthy"
   else if success_count = 0 then "failing"
   else
-    let err_rate =
-      percent error_count
-        (effective_attempt_count_counts ~message_count ~duplicate_count)
-    in
+    let err_rate = percent error_count message_count in
     let slow_rate = percent slow_count timed_count in
     if err_rate >= 50 then "failing"
     else if err_rate >= 10 || slow_rate >= 25 then "degraded"
@@ -507,18 +479,16 @@ let health_of_counts ~message_count ~error_count ~success_count ~duplicate_count
 let health_of_stats (stats : channel_stats) =
   health_of_counts ~message_count:stats.message_count
     ~error_count:stats.error_count ~success_count:stats.success_count
-    ~duplicate_count:stats.duplicate_count ~timed_count:stats.timed_count
-    ~slow_count:stats.slow_count
+    ~timed_count:stats.timed_count ~slow_count:stats.slow_count
 
 let binding_success_rate_pct (stats : binding_stats) =
   success_rate_pct_counts ~success_count:stats.success_count
-    ~message_count:stats.message_count ~duplicate_count:stats.duplicate_count
+    ~message_count:stats.message_count
 
 let binding_health (stats : binding_stats) =
   health_of_counts ~message_count:stats.message_count
     ~error_count:stats.error_count ~success_count:stats.success_count
-    ~duplicate_count:stats.duplicate_count ~timed_count:stats.timed_count
-    ~slow_count:0
+    ~timed_count:stats.timed_count ~slow_count:0
 
 let gate_event_to_json (event : gate_event) =
   `Assoc
@@ -543,7 +513,6 @@ let snapshot_locked () =
           message_count = acc.msg_count;
           success_count = acc.success_count;
           error_count = acc.err_count;
-          duplicate_count = acc.duplicate_count;
           validation_error_count = acc.validation_error_count;
           keeper_error_count = acc.keeper_error_count;
           dispatch_unavailable_count = acc.dispatch_unavailable_count;
@@ -581,7 +550,6 @@ let snapshot_locked () =
               message_count = binding.msg_count;
               success_count = binding.success_count;
               error_count = binding.err_count;
-              duplicate_count = binding.duplicate_count;
               last_activity_ts = binding.last_ts;
               last_success_ts = binding.last_success_ts;
               last_error_ts = binding.last_error_ts;
@@ -625,11 +593,6 @@ let snapshot_json () =
       (fun sum (stats : channel_stats) -> sum + stats.error_count)
       0 channels
   in
-  let total_duplicates =
-    List.fold_left
-      (fun sum (stats : channel_stats) -> sum + stats.duplicate_count)
-      0 channels
-  in
   let channel_json (stats : channel_stats) =
     let avg_dur =
       if stats.timed_count > 0 then stats.total_duration_ms / stats.timed_count
@@ -641,7 +604,6 @@ let snapshot_json () =
         ("message_count", `Int stats.message_count);
         ("success_count", `Int stats.success_count);
         ("error_count", `Int stats.error_count);
-        ("duplicate_count", `Int stats.duplicate_count);
         ("validation_error_count", `Int stats.validation_error_count);
         ("keeper_error_count", `Int stats.keeper_error_count);
         ("dispatch_unavailable_count", `Int stats.dispatch_unavailable_count);
@@ -676,7 +638,6 @@ let snapshot_json () =
         ("message_count", `Int stats.message_count);
         ("success_count", `Int stats.success_count);
         ("error_count", `Int stats.error_count);
-        ("duplicate_count", `Int stats.duplicate_count);
         ("last_activity", `String (iso_of_ts stats.last_activity_ts));
         ("last_success", `String (iso_of_ts stats.last_success_ts));
         ("last_error_at", `String (iso_of_ts stats.last_error_ts));
@@ -697,12 +658,7 @@ let snapshot_json () =
       ("total_messages", `Int total);
       ("total_success", `Int total_success);
       ("total_errors", `Int total_errors);
-      ("total_duplicates", `Int total_duplicates);
-      ( "success_rate_pct",
-        `Int
-          (percent total_success
-             (max 0 (total - total_duplicates))) );
-      ("dedup_table_size", `Int (dedup_table_size ()));
+      ("success_rate_pct", `Int (percent total_success total));
       ("uptime_seconds", `Int (int_of_float (Unix.gettimeofday () -. start_time)));
     ]
 

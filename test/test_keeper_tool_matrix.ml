@@ -380,7 +380,7 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
         ~registry_root:marker
       @@ fun publication_recovery_registry ->
       let publication_recovery =
-        Keeper_publication_recovery_availability.
+        Masc.Keeper_publication_recovery_availability.
           { provider =
               Masc_test_deps.publication_recovery_provider
                 publication_recovery_registry

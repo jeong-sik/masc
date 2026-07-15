@@ -324,7 +324,7 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
          Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
            ~max_tokens:4000
        in
-       let original_entry =
+       let _original_entry =
          KR.register ~base_path:config.base_path meta.name meta
        in
        Fun.protect

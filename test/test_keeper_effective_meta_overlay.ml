@@ -436,7 +436,8 @@ sandbox_profile = "docker"
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
-      publication_recovery_registry = None;
+      publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider;
     }
   in
   match Turn_setup.ensure_keeper_exists ~ctx ~name with
@@ -515,7 +516,8 @@ instructions = "missing sandbox profile"
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
-      publication_recovery_registry = None;
+      publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider;
     }
   in
   let result = Turn.handle_keeper_up ctx (`Assoc [ ("name", `String name) ]) in
@@ -543,7 +545,8 @@ let test_keeper_up_rejects_missing_profile_source () =
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
-      publication_recovery_registry = None;
+      publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider;
     }
   in
   let result = Turn.handle_keeper_up ctx (`Assoc [ ("name", `String name) ]) in

@@ -49,7 +49,11 @@ let with_clean_gate_runtime f =
     f
 ;;
 
-let with_publication_recovery ~registry_root ~meta f =
+let with_publication_recovery
+      ~registry_root
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      f
+  =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.with_publication_recovery_registry

@@ -73,6 +73,10 @@ type status =
   | Skipped
   | Other of string
 
+type append_once_result =
+  | Appended
+  | Already_present
+
 (** {1 Own-module vals} *)
 
 val payload_role_to_string : payload_role -> string
@@ -181,6 +185,16 @@ val base_dir : Workspace.config -> keeper_name:string -> string
 val path_for_trace : Workspace.config -> keeper_name:string -> trace_id:string -> string
 
 val append_to_path : string -> t -> (unit, string) result
+
+(** Append one operation-bearing row across all trace files for the Keeper.
+    The exact [operation_id] is checked under a Keeper-local durable lock.
+    Malformed persisted rows are reported instead of skipped. *)
+val append_once_to_path :
+  operation_id:string -> string -> t -> (append_once_result, string) result
+
+val append_once :
+  operation_id:string -> Workspace.config -> t -> (append_once_result, string) result
+
 val append : Workspace.config -> t -> (unit, string) result
 val append_best_effort : ?site:string -> Workspace.config -> t -> unit
 

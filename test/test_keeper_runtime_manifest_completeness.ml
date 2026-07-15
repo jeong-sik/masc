@@ -22,6 +22,18 @@ let links ?receipt_path ?checkpoint_path () =
 
 let clock_refs fields = `Assoc ([ ("clock_refs", `Assoc fields) ] |> List.rev)
 
+let with_temp_dir f =
+  let path = Filename.temp_file "runtime-manifest-once-" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.readdir path
+      |> Array.iter (fun name -> Sys.remove (Filename.concat path name));
+      Unix.rmdir path)
+    (fun () -> f path)
+;;
+
 let test_mandatory_clock_refs () =
   let keys = M.mandatory_clock_refs_for_event M.Turn_started in
   Alcotest.(check (list string))
@@ -151,6 +163,59 @@ let test_compaction_evidence_public_projection () =
      |> member "before_checkpoint_bytes"
      |> to_int)
 
+let compaction_manifest ~trace_id ~operation_id =
+  { (manifest
+       ~event:M.Context_compacted
+       ~decision:(`Assoc [ "operation_id", `String operation_id ])
+       ~links:(links ())) with
+    trace_id
+  }
+;;
+
+let test_append_once_across_trace_files () =
+  with_temp_dir @@ fun dir ->
+  let operation_id = "compaction-operation-1" in
+  let first_path = Filename.concat dir "trace-a.jsonl" in
+  let second_path = Filename.concat dir "trace-b.jsonl" in
+  let first = compaction_manifest ~trace_id:"trace-a" ~operation_id in
+  let replay = compaction_manifest ~trace_id:"trace-b" ~operation_id in
+  Alcotest.(check bool)
+    "first projection appended"
+    true
+    (M.append_once_to_path ~operation_id first_path first = Ok M.Appended);
+  Alcotest.(check bool)
+    "restart trace reuses existing projection"
+    true
+    (M.append_once_to_path ~operation_id second_path replay = Ok M.Already_present);
+  Alcotest.(check int)
+    "one manifest row"
+    1
+    (Fs_compat.load_file first_path
+     |> String.split_on_char '\n'
+     |> List.filter (fun line -> String.trim line <> "")
+     |> List.length);
+  Alcotest.(check bool) "second trace was not written" false
+    (Fs_compat.file_exists second_path)
+;;
+
+let test_append_once_rejects_corrupt_manifest () =
+  with_temp_dir @@ fun dir ->
+  let corrupt_path = Filename.concat dir "corrupt.jsonl" in
+  Fs_compat.save_file corrupt_path "{not-json}\n";
+  let operation_id = "compaction-operation-2" in
+  let target_path = Filename.concat dir "target.jsonl" in
+  let row = compaction_manifest ~trace_id:"target" ~operation_id in
+  match M.append_once_to_path ~operation_id target_path row with
+  | Ok _ -> Alcotest.fail "corrupt durable row must not be skipped"
+  | Error detail ->
+    Alcotest.(check bool)
+      "error identifies corrupt manifest"
+      true
+      (String.length detail > 0);
+    Alcotest.(check bool) "target was not written" false
+      (Fs_compat.file_exists target_path)
+;;
+
 let () =
   Alcotest.run "keeper_runtime_manifest_completeness"
     [ ( "completeness"
@@ -165,5 +230,9 @@ let () =
             test_is_complete_turn
         ; Alcotest.test_case "compaction evidence public projection" `Quick
             test_compaction_evidence_public_projection
+        ; Alcotest.test_case "append once across trace files" `Quick
+            test_append_once_across_trace_files
+        ; Alcotest.test_case "append once rejects corrupt manifest" `Quick
+            test_append_once_rejects_corrupt_manifest
         ] )
     ]

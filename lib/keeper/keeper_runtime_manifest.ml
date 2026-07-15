@@ -70,6 +70,10 @@ type status =
   | Skipped
   | Other of string
 
+type append_once_result =
+  | Appended
+  | Already_present
+
 let skipped_status = "skipped"
 
 let status_of_string value =
@@ -726,6 +730,184 @@ let append_to_path path manifest =
       ~site:"keeper_runtime_manifest.append_to_path"
       exn;
     Error (Printexc.to_string exn)
+
+let exact_field key fields =
+  match
+    List.filter_map
+      (fun (name, value) -> if String.equal name key then Some value else None)
+      fields
+  with
+  | [] -> Ok None
+  | [ value ] -> Ok (Some value)
+  | _ -> Error (Printf.sprintf "duplicate %S field" key)
+;;
+
+let operation_id_of_decision = function
+  | `Assoc fields ->
+    (match exact_field "operation_id" fields with
+     | Ok None -> Ok None
+     | Ok (Some (`String operation_id)) when String.trim operation_id <> "" ->
+       Ok (Some operation_id)
+     | Ok (Some (`String _)) -> Error "operation_id must not be empty"
+     | Ok (Some _) -> Error "operation_id must be a string"
+     | Error _ as error -> error)
+  | _ -> Error "manifest decision must be a JSON object"
+;;
+
+let operation_id_of_persisted_json = function
+  | `Assoc fields ->
+    (match exact_field "decision" fields with
+     | Ok None -> Ok None
+     | Ok (Some decision) -> operation_id_of_decision decision
+     | Error _ as error -> error)
+  | _ -> Error "manifest row must be a JSON object"
+;;
+
+let operation_rows_in_path ~operation_id path =
+  let parse_line line_no line =
+    let json =
+      try Ok (Yojson.Safe.from_string line) with
+      | Yojson.Json_error detail -> Error detail
+    in
+    match json with
+    | Error detail ->
+      Error (Printf.sprintf "%s:%d: invalid JSON: %s" path line_no detail)
+    | Ok json ->
+      (match operation_id_of_persisted_json json with
+       | Error detail -> Error (Printf.sprintf "%s:%d: %s" path line_no detail)
+       | Ok None -> Ok None
+       | Ok (Some persisted_id) when not (String.equal persisted_id operation_id) ->
+         Ok None
+       | Ok (Some _) ->
+         (match decode_persisted_row json with
+          | Ok (Active_row row) -> Ok (Some row)
+          | Ok (Retired_row _) ->
+            Error
+              (Printf.sprintf
+                 "%s:%d: operation_id is attached to a retired manifest event"
+                 path line_no)
+          | Ok (Unsupported_row _) ->
+            Error
+              (Printf.sprintf
+                 "%s:%d: operation_id is attached to an unsupported manifest event"
+                 path line_no)
+          | Error detail -> Error (Printf.sprintf "%s:%d: %s" path line_no detail)))
+  in
+  try
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.mapi (fun index line -> index + 1, line)
+    |> List.fold_left
+         (fun result (line_no, line) ->
+            match result with
+            | Error _ as error -> error
+            | Ok rows when String.trim line = "" -> Ok rows
+            | Ok rows ->
+              (match parse_line line_no line with
+               | Ok None -> Ok rows
+               | Ok (Some row) -> Ok (row :: rows)
+               | Error _ as error -> error))
+         (Ok [])
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "%s: %s" path (Printexc.to_string exn))
+;;
+
+let is_manifest_artifact_name name =
+  if Filename.check_suffix name manifest_file_suffix then
+    true
+  else
+    let extension = Filename.extension name in
+    String.length extension > 1
+    && int_of_string_opt (String.sub extension 1 (String.length extension - 1))
+       <> None
+    && Filename.check_suffix (Filename.chop_extension name) manifest_file_suffix
+;;
+
+let operation_rows_in_dir ~operation_id dir =
+  try
+    Fs_compat.read_dir dir
+    |> List.filter is_manifest_artifact_name
+    |> List.fold_left
+         (fun result name ->
+            match result with
+            | Error _ as error -> error
+            | Ok rows ->
+              (match
+                 operation_rows_in_path
+                   ~operation_id
+                   (Filename.concat dir name)
+               with
+               | Ok found -> Ok (List.rev_append found rows)
+               | Error _ as error -> error))
+         (Ok [])
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "%s: %s" dir (Printexc.to_string exn))
+;;
+
+let append_once_to_path ~operation_id path manifest =
+  match operation_id_of_decision manifest.decision with
+  | Error detail -> Error detail
+  | Ok None -> Error "manifest decision has no operation_id"
+  | Ok (Some actual) when not (String.equal actual operation_id) ->
+    Error
+      (Printf.sprintf
+         "manifest operation_id mismatch: expected %S, received %S"
+         operation_id actual)
+  | Ok (Some _) ->
+    (try
+       let dir = Filename.dirname path in
+       let (_ : string) = Keeper_fs.ensure_dir dir in
+       let lock_path = Filename.concat dir ".operation-id.lock" in
+       match
+         File_lock_eio.with_durable_lock ~lock_path (fun () ->
+           match operation_rows_in_dir ~operation_id dir with
+           | Error _ as error -> error
+           | Ok [] ->
+             (match append_to_path path manifest with
+              | Ok () -> Ok Appended
+              | Error _ as error -> error)
+           | Ok [ existing ]
+             when String.equal existing.keeper_name manifest.keeper_name
+                  && existing.event = manifest.event ->
+             Ok Already_present
+           | Ok [ existing ] ->
+             Error
+               (Printf.sprintf
+                  "operation_id %S already belongs to keeper=%S event=%s"
+                  operation_id
+                  existing.keeper_name
+                  (event_kind_to_string existing.event))
+           | Ok rows ->
+             Error
+               (Printf.sprintf
+                  "operation_id %S occurs in %d manifest rows"
+                  operation_id
+                  (List.length rows)))
+       with
+       | Ok result -> result
+       | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printf.sprintf "%s: %s" path (Printexc.to_string exn)))
+;;
+
+let append_once ~operation_id config manifest =
+  let base_dir = base_dir config ~keeper_name:manifest.keeper_name in
+  match
+    append_once_to_path
+      ~operation_id
+      (Filename.concat base_dir
+         (safe_segment manifest.trace_id ^ manifest_file_suffix))
+      manifest
+  with
+  | Ok Appended as result ->
+    maybe_prune_retention ~base_dir;
+    result
+  | Ok Already_present as result -> result
+  | Error _ as error -> error
+;;
 
 let append config manifest =
   let base_dir = base_dir config ~keeper_name:manifest.keeper_name in

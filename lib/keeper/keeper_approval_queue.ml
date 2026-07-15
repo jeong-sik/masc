@@ -734,7 +734,6 @@ let audit_approval_event
       ?task_id
       ?goal_id
       ?(goal_ids = [])
-      ?rule_match
       ?source_approval_id
       ?actor
       ?decision_source
@@ -769,9 +768,6 @@ let audit_approval_event
              | Some source -> `String (decision_source_to_string source)
              | None -> `Null )
          ]
-         @ (match rule_match with
-            | Some matched -> [ "rule_match", rule_match_to_yojson matched ]
-            | None -> [])
          @ (match source_approval_id with
             | Some approval_id -> [ "source_approval_id", `String approval_id ]
             | None -> [])
@@ -790,17 +786,6 @@ let audit_approval_event
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
-;;
-
-let audit_rule_event ~base_path ~event_type (rule : approval_rule) =
-  audit_approval_event
-    ~base_path
-    ~event_type
-    ~id:rule.id
-    ~keeper_name:rule.keeper_name
-    ~tool_name:rule.tool_name
-    ?source_approval_id:rule.source_approval_id
-    ()
 ;;
 
 let audit_scan_window ?keeper_name n =
@@ -896,7 +881,6 @@ let resolved_approval_json_of_audit_event json =
     ; "goal_ids", json_member_or_null "goal_ids" json
     ; "actor", json_member_or_null "actor" json
     ; "decision_source", json_member_or_null "decision_source" json
-    ; "rule_match", json_member_or_null "rule_match" json
     ]
 ;;
 
@@ -1950,7 +1934,6 @@ module For_testing = struct
   ;;
 
   let pending_store_path = pending_store_path
-  let always_allowed_store_path ~base_path = rules_path ~base_path ()
 end
 
 let resolve_with_policy

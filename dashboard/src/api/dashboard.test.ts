@@ -1345,35 +1345,6 @@ describe('fetchDashboardGate', () => {
     expect(result.recent_resolved?.[0]).not.toHaveProperty('requested_at')
   })
 
-  it('derives the immutable Always rule timestamp from its canonical numeric field', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        approval_queue: [],
-        recent_resolved: [],
-        approval_rules: [{
-          id: 'rule-1',
-          keeper_name: 'keeper-a',
-          tool_name: 'fs_write',
-          request_fingerprint: 'abcdef1234567890',
-          created_at: 1_783_123_200,
-        }],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGate()
-
-    expect(result.approval_rules).toEqual([
-      expect.objectContaining({
-        request_fingerprint: 'abcdef1234567890',
-        created_at: '2026-07-04T00:00:00.000Z',
-      }),
-    ])
-  })
-
   it('does not retry structured computation timeouts', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

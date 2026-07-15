@@ -126,7 +126,6 @@ export type {
 export {
   fetchDashboardGate,
   resolveGateApproval,
-  deleteGateApprovalRule,
   setGateMode,
 } from './dashboard-gate'
 export { pruneSchedules } from './dashboard-schedule'

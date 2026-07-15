@@ -331,18 +331,17 @@ let test_runtime_json_not_in_repo_config () =
 let with_deployment_oas_model_catalog f =
   let overlay_path = Filename.concat (repo_root ()) "config/oas-models-overlay.toml" in
   check bool "deployment catalog overlay present" true (Sys.file_exists overlay_path);
-  match Llm_provider.Model_catalog.load_default () with
-  | Error msg -> failf "packaged OAS models.toml should load: %s" msg
-  | Ok base ->
-    (match Llm_provider.Model_catalog.load_file overlay_path with
-     | Error msg -> failf "deployment catalog overlay should load: %s" msg
-     | Ok overlay ->
-       let catalog = Llm_provider.Model_catalog.merge ~base ~overlay in
-       Fun.protect
-         ~finally:Llm_provider.Model_catalog.clear_global
-         (fun () ->
-            Llm_provider.Model_catalog.set_global catalog;
-            f catalog))
+  match Llm_provider.Model_catalog.load_file overlay_path with
+  | Error msg -> failf "deployment catalog overlay should load: %s" msg
+  | Ok overlay ->
+    Fun.protect
+      ~finally:Llm_provider.Model_catalog.clear_global
+      (fun () ->
+         Llm_provider.Model_catalog.clear_global ();
+         Llm_provider.Model_catalog.set_global_overlay overlay;
+         match Llm_provider.Model_catalog.global () with
+         | None -> fail "embedded plus deployment overlay catalog should load"
+         | Some catalog -> f catalog)
 
 let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
   with_deployment_oas_model_catalog @@ fun catalog ->
@@ -464,7 +463,7 @@ let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
        entry.base_label;
      check (option int) (provider_name ^ " context") (Some 131072)
        entry.max_context_tokens;
-     check (option bool) (provider_name ^ " audio input") (Some false)
+     check (option bool) (provider_name ^ " audio input") (Some true)
        entry.supports_audio_input;
      check
        (option string)
@@ -487,8 +486,8 @@ let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
     check bool "Local Gemma4 E2B tools" true caps.supports_tools;
     check bool "Local Gemma4 E2B forced tool_choice disabled" false
       caps.supports_tool_choice;
-    check bool "Local Gemma4 E2B image input fails closed" false caps.supports_image_input;
-    check bool "Local Gemma4 E2B audio input fails closed" false caps.supports_audio_input;
+    check bool "Local Gemma4 E2B image input" true caps.supports_image_input;
+    check bool "Local Gemma4 E2B audio input" true caps.supports_audio_input;
     check bool "Local Gemma4 E2B chat-template token thinking" true
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_token "<|think|>"));
@@ -598,8 +597,18 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
     ~model_id:"kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
-let test_repo_runtime_bindings_resolve_through_oas_catalog () =
-  with_deployment_oas_model_catalog @@ fun _catalog ->
+let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
+  with_deployment_oas_model_catalog @@ fun catalog ->
+  check
+    (option string)
+    "runtime-local alias is not promoted to the OAS catalog"
+    None
+    (Option.map
+       (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+       (Llm_provider.Model_catalog.lookup_for_provider
+          catalog
+          ~provider_name:"ollama_cloud"
+          ~model_id:"rnj-1:8b"));
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
@@ -621,13 +630,20 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
          with
          | None ->
            failf
-             "runtime binding %s provider/model %s/%s must resolve through the \
-              embedded plus deployment overlay OAS catalog"
+             "runtime binding %s provider/model %s/%s must resolve through its \
+              OAS Provider_config"
              runtime.id
              (Llm_provider.Provider_config.capability_provider_label
                 runtime.provider_config)
              runtime.provider_config.model_id
-         | Some _ -> ())
+         | Some _ ->
+           if String.equal runtime.id "ollama_cloud.ollama-cloud-rnj-1-8b"
+           then
+             check
+               bool
+               "runtime-local alias uses the typed Provider_config override"
+               true
+               (Option.is_some runtime.provider_config.model_capabilities_override))
       runtimes
 
 let test_deployment_oas_model_catalog_modality_priorities_resolve () =
@@ -2386,8 +2402,8 @@ let () =
             "deployment OAS catalog preserves typed thinking/replay axes"
             `Quick test_deployment_oas_model_catalog_preserve_axes_resolve;
           test_case
-            "repo runtime bindings resolve through the OAS catalog"
-            `Quick test_repo_runtime_bindings_resolve_through_oas_catalog;
+            "repo runtime bindings resolve through OAS provider configs"
+            `Quick test_repo_runtime_bindings_resolve_through_oas_provider_config;
           test_case
             "deployment OAS catalog modality priority strings resolve"
             `Quick test_deployment_oas_model_catalog_modality_priorities_resolve;

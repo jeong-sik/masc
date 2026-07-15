@@ -270,16 +270,88 @@ let supports_tool_choice_override_of_model_spec (spec : Runtime_schema.model_spe
   | None -> None
 ;;
 
-(* --- provider × model spec → Provider_config.t ---
+let oas_thinking_control_format = function
+  | Runtime_schema.No_thinking_control ->
+    Llm_provider.Capabilities.No_thinking_control
+  | Runtime_schema.Thinking_object -> Llm_provider.Capabilities.Thinking_object
+  | Runtime_schema.Thinking_object_adaptive ->
+    Llm_provider.Capabilities.Thinking_object_adaptive
+  | Runtime_schema.Thinking_object_only ->
+    Llm_provider.Capabilities.Thinking_object_only
+  | Runtime_schema.Chat_template_kwargs ->
+    Llm_provider.Capabilities.Chat_template_kwargs
+  | Runtime_schema.Chat_template_token token ->
+    Llm_provider.Capabilities.Chat_template_token token
+  | Runtime_schema.Ollama_think -> Llm_provider.Capabilities.Ollama_think
+  | Runtime_schema.Reasoning_effort -> Llm_provider.Capabilities.Reasoning_effort
+  | Runtime_schema.Enable_thinking -> Llm_provider.Capabilities.Enable_thinking
+;;
 
-   v1 drops the [Provider_tool_support.runtime_capabilities_override] that the
-   deleted adapter carried alongside the config (it was paired with the
-   now-removed alias layer); [binding_to_provider_config] never consumed it. *)
+(** A runtime [api-name] is an opaque deployment string, not automatically an
+    OAS catalog model. When OAS has no exact provider/model row, project the
+    complete typed runtime declaration into the Provider_config override that
+    OAS exposes for concrete endpoint contracts. Catalogued models keep the OAS
+    row unchanged; an absent runtime capability block remains absent and is
+    rejected later by the normal startup gate. *)
+let model_capabilities_override_of_model_spec
+      ~(provider_id : string)
+      (spec : Runtime_schema.model_spec)
+  =
+  match
+    Llm_provider.Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:provider_id
+      ~model_id:spec.api_name
+  with
+  | Some _ -> None
+  | None ->
+    Option.map
+      (fun (caps : Runtime_schema.model_capabilities) ->
+         let base = Llm_provider.Capabilities.default_capabilities in
+         { base with
+           max_context_tokens = spec.max_context
+         ; max_output_tokens = caps.max_output_tokens
+         ; supports_tools = spec.tools_support
+         ; supports_tool_choice = caps.supports_tool_choice
+         ; supports_required_tool_choice = caps.supports_required_tool_choice
+         ; supports_named_tool_choice = caps.supports_named_tool_choice
+         ; supports_parallel_tool_calls = caps.supports_parallel_tool_calls
+         ; supports_reasoning = spec.thinking_support
+         ; supports_extended_thinking = caps.supports_extended_thinking
+         ; supports_reasoning_budget = caps.supports_reasoning_budget
+         ; thinking_control_format =
+             oas_thinking_control_format caps.thinking_control_format
+         ; supports_response_format_json = caps.supports_response_format_json
+         ; supports_structured_output = caps.supports_structured_output
+         ; supports_multimodal_inputs = caps.supports_multimodal_inputs
+         ; supports_image_input = caps.supports_image_input
+         ; supports_audio_input = caps.supports_audio_input
+         ; supports_video_input = caps.supports_video_input
+         ; supports_native_streaming = spec.streaming
+         ; supports_system_prompt = caps.supports_system_prompt
+         ; supports_caching = caps.supports_caching
+         ; supports_prompt_caching = caps.supports_prompt_caching
+         ; prompt_cache_alignment = caps.prompt_cache_alignment
+         ; supports_top_k = caps.supports_top_k
+         ; supports_min_p = caps.supports_min_p
+         ; supports_seed = caps.supports_seed
+         ; supports_seed_with_images = caps.supports_seed_with_images
+         ; emits_usage_tokens = caps.emits_usage_tokens
+         ; supports_computer_use = caps.supports_computer_use
+         ; supports_code_execution = caps.supports_code_execution
+         })
+      spec.capabilities
+;;
+
+(* --- provider × model spec → Provider_config.t --- *)
 let provider_config_from_declared_provider ?keep_alive ?num_ctx
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
-    : (Llm_provider.Provider_config.t, string) result =
+  : (Llm_provider.Provider_config.t, string) result =
   let registry_entry = find_registry_entry provider.id in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
+  let model_capabilities_override =
+    model_capabilities_override_of_model_spec ~provider_id:provider.id spec
+  in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
@@ -325,6 +397,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~request_path
             ?max_context:spec.max_context
             ?supports_tool_choice_override
+            ?model_capabilities_override
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p
@@ -347,6 +420,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~headers:(Option.value ~default:[] provider.headers)
             ?max_context:spec.max_context
             ?supports_tool_choice_override
+            ?model_capabilities_override
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p

@@ -62,22 +62,6 @@ supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
 
-# Ollama Cloud model added after the pinned embedded catalog release.
-[[models]]
-id_prefix = "rnj-1:8b"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 32768
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = false
-supports_extended_thinking = false
-supports_reasoning_budget = false
-thinking_control_format = "none"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
 # Kimi Code coding-plan gateway under [providers.kimi_code].
 [[models]]
 id_prefix = "kimi-for-coding"
@@ -127,9 +111,7 @@ supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
 
-# Local Ollama Gemma 4 E2B edge build. Image/audio are explicitly false because
-# only text paths have been probed; omission would inherit permissive Ollama
-# base capabilities.
+# Local Ollama Gemma 4 E2B edge build, probed on 2026-07-06.
 [[models]]
 id_prefix = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
 provider_name = "ollama"
@@ -141,9 +123,10 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 thinking_control_format = "chat_template_token"
 thinking_control_token = "<|think|>"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_audio_input = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
 supports_response_format_json = true
 supports_native_streaming = true
 supports_seed = true

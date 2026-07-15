@@ -240,7 +240,6 @@ let test_system_prompt_includes_continuity_contract () =
       Lib.Keeper_prompt_external.reset_cache ();
       let prompt =
         Lib.Keeper_prompt.build_keeper_system_prompt
-          ~goal:"verify prompt behavior externalization"
           ~instructions:""
           ()
       in
@@ -258,7 +257,6 @@ let test_system_prompt_includes_instructions () =
       let sentinel = "SENTINEL_PERSONA_INSTRUCTIONS_4f1c" in
       let prompt =
         Lib.Keeper_prompt.build_keeper_system_prompt
-          ~goal:"verify instructions propagation"
           ~instructions:sentinel
           ()
       in

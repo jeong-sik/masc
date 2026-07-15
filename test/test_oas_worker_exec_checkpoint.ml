@@ -26,7 +26,7 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
   in
   Masc_event_bus.set bus;
   Fun.protect
-    ~finally:(fun () -> Agent_sdk.Event_bus.unsubscribe bus subscription)
+    ~finally:(fun () -> Agent_sdk_metrics_bridge.unsubscribe bus subscription)
     (fun () ->
       CP.publish_lifecycle
         ~name:"keeper-a"
@@ -40,7 +40,7 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
         ~detail:"explicit"
         ~attrs:(Runtime_max_tokens.telemetry_fields (Some 4096))
         ();
-      match Agent_sdk.Event_bus.drain subscription with
+      match Agent_sdk_metrics_bridge.drain subscription with
       | [ omitted; explicit ] ->
         let omitted_fields =
           custom_payload_fields "masc.oas_worker.build" omitted

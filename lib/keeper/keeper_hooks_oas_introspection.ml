@@ -95,21 +95,6 @@ let hook_introspection_json () : Yojson.Safe.t =
         ~source:"keeper_hooks_oas"
         ~effects:[ "wirein_failure_metric"; "keeper_error_log" ]
         "on_tool_error";
-      slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"compaction is handled by keeper_post_turn"
-        "pre_compact";
-      slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"compaction is handled by keeper_post_turn"
-        "post_compact";
-      slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"compaction is handled by keeper_post_turn"
-        "on_context_compacted";
     ]
   in
   let slot_assoc = List.map (fun (name, _active, json) -> name, json) slot_entries in

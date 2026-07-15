@@ -260,8 +260,8 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 - **경계 계약:** schedule payload/tool 선택은 typed registry가 accept 전 validate (G3). 미지원 side-effecting payload는 생성 시 실패+visible product-gap(`masc_schedule_payload_unsupported_total`), 숨은 terminal data 금지. `keeper_wake`는 `Reminder_only`로 clamp(#23716이 self-wake approval deadlock 종료). at-most-once signal. per-tick crash isolation. tool-surface policy(G4): create/list/get/cancel=public+keeper-standard; approve/reject=operator-only; spawned-agent·local-worker=lane ownership contract 전까지 **EMPTY by policy**. cooperative yield(#20849): reservation은 lane을 globally block 안 함; owner-priority yield(`Yielded_to_chat_waiting`).
 - **불변식:** OTel label은 bounded(kind/status/risk_class/keeper). unbounded id(schedule_id/execution_id/trace_id/payload_digest)는 span attribute/structured log — metric label 금지. occurrence identity + 저장 실패 재시도는 **동일 signal_id**. corrupt/unwritable seen-key ledger는 tick을 loud fail(silent re-fire 금지).
 - **결정론↔LLM:** scheduler decision에 heuristic 없음. cron 5-field + daily fixed-offset은 결정론 구현.
-- **현재 상태:** primary intent(time/condition→keeper wake) 경로는 코드상 배선됨(wired) — 단 **wired ≠ proven**: single-shot terminal(failed/expired) evidence만 있고 recurring operational proof는 없다(G2 live proof 48%: scheduled=0/succeeded=0/failed=2/expired=2). keeper_recurring task는 in-memory Hashtbl만 → 재시작 시 silent 소멸(RFC-0314 §3 open); `masc_recurring_add`가 typed closed action 대신 `Broadcast(label)` 하드코딩(`keeper_recurring.ml:9` `type action = Broadcast of string` 단일 variant); `keeper_wake` dispatch가 target keeper 존재를 hard-reject 안 함 — name **format**만 검증하고 unregistered는 `Deferred_unregistered`(logged) 후 `Ok(keeper_wake_enqueued)` 반환(`server_schedule_consumers.ml:300-380`), 즉 typo가 실패로 안 잡힘. (문서의 옛 "auto-disable+2×interval cooldown 증상억제"는 HEAD `keeper_recurring.ml`에 **부재** — `dispatch_due`는 error 시 `failure_count`만 증가, disable/cooldown 없음.) 배포 diverged runtime(source ≠ server HEAD)이 live proof 차단.
-- **open goals:** Goal 6(legacy recurring 삭제, durable wake만; recurring을 `.masc/keeper/<name>/recurring.json` persist+reload; typed closed action variant; dispatch가 "keeper not registered"를 `Dispatch_failed`로; re-enable을 health signal에 gate), Goal 7(occurrence identity + 동일 signal_id 재시도). standing grant와 digest-equality 승인 우회는 삭제한다.
+- **현재 상태:** primary intent(time/condition→keeper wake) 경로는 코드상 배선됨(wired) — 단 **wired ≠ proven**: single-shot terminal(failed/expired) evidence만 있고 durable recurring operational proof는 없다(G2 live proof 48%: scheduled=0/succeeded=0/failed=2/expired=2). `keeper_wake` dispatch가 target keeper 존재를 hard-reject 안 함 — name **format**만 검증하고 unregistered는 `Deferred_unregistered`(logged) 후 `Ok(keeper_wake_enqueued)` 반환(`server_schedule_consumers.ml:300-380`), 즉 typo가 실패로 안 잡힘. 배포 diverged runtime(source ≠ server HEAD)이 live proof 차단.
+- **open goals:** Goal 6(durable Scheduler recurrence의 live operational proof와 unregistered target의 typed dispatch rejection), Goal 7(occurrence identity + 동일 signal_id 재시도). standing grant와 digest-equality 승인 우회는 삭제한다.
 
 <a name="36-connector"></a>
 ### 3.6 Connector
@@ -424,7 +424,7 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 
 - **문제:** 삭제된 OAS 계약·heuristic estimator·Context_reducer 및 limit·budget 잔재를 stacked PR로 제거.
 - **경계:** **string 분류기 제거지 추가 아님.** unknown→typed Unknown/None (permissive default 금지). N-of-M은 codemod로 일괄(개별 site 패치 금지).
-- **touch:** RFC-0153 saturation signal(flag+variant+docs 삭제 또는 emit 구현); `Runtime_attempt_fsm.decide`(4 keeper driver의 inline try-next 라우팅); voice_bridge(catalog/config-declared voice choice + Result); OAS `pricing_for_model`(unknown→typed Unknown/option, RFC-OAS-018 Phase 2); `deliverable_claims_completion` SSOT 병합; keeper_recurring cap/cooldown 제거; OAS `Context_intent` heuristic classifier는 public owner가 없으면 삭제한다. MASC에는 이를 port하지 않고 MASC-owned explicit compaction request/typed overflow policy만 둔다.
+- **touch:** RFC-0153 saturation signal(flag+variant+docs 삭제 또는 emit 구현); `Runtime_attempt_fsm.decide`(4 keeper driver의 inline try-next 라우팅); voice_bridge(catalog/config-declared voice choice + Result); OAS `pricing_for_model`(unknown→typed Unknown/option, RFC-OAS-018 Phase 2); `deliverable_claims_completion` SSOT 병합; OAS `Context_intent` heuristic classifier는 public owner가 없으면 삭제한다. MASC에는 이를 port하지 않고 MASC-owned explicit compaction request/typed overflow policy만 둔다.
 - **acceptance:** 구현 PR마다 exact identifier·검색 경로·expected count를 명시한다(placeholder `rg <값>` 금지). caller 0인 saturation flag는 삭제; unknown model pricing은 $0 아닌 typed Unknown/None 반환.
 - **DoD:** limit/heuristic purge target 전부 grep-0 또는 typed로 대체; 이미 통합된 것은 DROP.
 
@@ -452,13 +452,13 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 - **acceptance:** panel_group closed-record round-trip; single-group byte-identity derive pinned; JoJ <2 judges fail-closed; staged 9-judges/group-3 → 3×3, ragged fail-closed; usage가 all first-round + meta에 fold; ToolResult 멀티모달 undercount 0; **turn envelope의 각 variant가 runtime 경계에서 정확히 1회 emit(중복/유실 0)**; SSE/AG-UI adapter escaped-fallback downgrade(rich→plain) 카운트가 회귀 테스트에서 감소 assert(현재 값 **측정 필요**).
 - **DoD:** typed receipt로 5종 composition(Model/Agent/Keeper/Tool[]/Heterogeneous[]) 완성; yield/cancel/failure와 정상 completion 구별 가능; turn envelope variant가 SSE와 dashboard 양쪽에서 동일 소스.
 
-### Goal 6 — Scheduler legacy recurring 삭제, durable wake만
+### Goal 6 — Scheduler durable recurrence operational proof
 
-- **문제:** legacy recurring 계층 삭제, durable wake만 남김. effect permission은 Scheduler가 소유하지 않는다.
-- **경계:** typed closed action variant(하드코딩 `Broadcast(label)` 아님). re-enable을 health signal에 gate(fixed cooldown 아님 — cap/cooldown 증상억제 제거).
-- **touch:** recurring persist(`.masc/keeper/<name>/recurring.json` + init reload); `masc_recurring_add`(typed closed action); `keeper_wake` dispatch("keeper not registered" → `Dispatch_failed`); `has_current_approved_grant`와 digest-equality approval bypass 삭제.
-- **acceptance:** 재시작 후 recurring reload; typo'd target이 Succeeded 아닌 Dispatch_failed; approval-required occurrence마다 fresh request-local EffectIntent와 decision record 생성. operator-recorded Always Allowed rule을 쓰면 exact capability/target/argument constraint+expiry+revocation을 typed로 저장하고, 각 occurrence가 rule match와 decision source를 새 audit row로 기록한다. digest equality만으로 승인하지 않는다. execution record가 dashboard에 projection; live-safe reservation smoke(create→due→dispatch→success→board post_id→dashboard/Otel proof, proof_check.sh --require-pass).
-- **DoD:** recurring operational proof(현재 미증명); legacy row는 fake lifecycle event로 synthesize 안 함.
+- **문제:** duplicate in-memory recurring 계층은 삭제됐다. 남은 gap은 durable Scheduler recurrence의 live proof와 잘못된 Keeper target의 명시적 실패다.
+- **경계:** Scheduler는 시간·durable occurrence·lane wake만 소유하고 effect permission은 소유하지 않는다. occurrence별 effect decision은 Gate의 fresh request-local record이며 과거 digest/grant를 재사용하지 않는다.
+- **touch:** `server_schedule_consumers.ml`의 target registration validation; `Schedule_runner`/`Schedule_store` occurrence evidence; `has_current_approved_grant`와 digest-equality approval bypass 삭제.
+- **acceptance:** interval/daily/cron create→due→durable `Schedule_due` enqueue→target lane→execution record/dashboard proof; typo'd target은 Succeeded가 아닌 `Dispatch_failed`; approval-required occurrence마다 fresh EffectIntent와 decision record를 생성한다. operator-recorded Always Allowed rule은 exact capability/target/argument constraint+expiry+revocation을 typed로 저장하고 매 occurrence에 match/source audit row를 기록한다.
+- **DoD:** durable recurring operational proof(현재 미증명); Scheduler가 Gate decision이나 synchronous Keeper work를 대신하지 않는다.
 
 ### Goal 7 — Schedule occurrence identity + 저장 실패 재시도 (동일 signal_id)
 
@@ -629,7 +629,7 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 - **문제:** §3.15 파편화 축 중 **무행동변경 doc 정정**. 코드 SSOT 통합은 RFC-scale(§11 D9)이며 이 DS는 문서만.
 - **결정론↔LLM:** 문서. behavior-only.
 - **touch (grep 확인):** `docs/KEEPER-FILE-MODEL.md`(§3), `docs/runtime-tunables.md`, `lib/keeper/keeper_tool_execute_path.ml`(dead `_docker_playground_cwd`).
-- **acceptance:** (1) `KEEPER-FILE-MODEL.md §3`에서 `autoboot_enabled`(및 `keeper_meta_json.ml`이 emit 안 하는 필드)를 keeper.json 필드 목록에서 제거 — serializer 현실과 정합. (2) `display_name`은 profile.json에만 존재(키는 `name`; 리터럴 `display_name` 키는 아무 loader도 안 읽는 fallback)임을 명시. (3) runtime.toml = assignment 글로벌 SSOT + seed(`config/runtime.toml`) vs live(`<base>/.masc/config/runtime.toml`) 구분 문서화. (4) dead `_docker_playground_cwd` + stale 주석 삭제(runtime surface 0). (5) `allowed_providers`가 현재 미강제임 기록. (6) `recurring.json`은 미구현(RFC-0314 open) — 파일 존재 가정 doc 참조 제거 또는 "미구현" 명시.
+- **acceptance:** (1) `KEEPER-FILE-MODEL.md §3`에서 `autoboot_enabled`(및 `keeper_meta_json.ml`이 emit 안 하는 필드)를 keeper.json 필드 목록에서 제거 — serializer 현실과 정합. (2) `display_name`은 profile.json에만 존재(키는 `name`; 리터럴 `display_name` 키는 아무 loader도 안 읽는 fallback)임을 명시. (3) runtime.toml = assignment 글로벌 SSOT + seed(`config/runtime.toml`) vs live(`<base>/.masc/config/runtime.toml`) 구분 문서화. (4) dead `_docker_playground_cwd` + stale 주석 삭제(runtime surface 0). (5) `allowed_providers`가 현재 미강제임 기록.
 - **DoD:** 위 6 doc 정정 착지; serializer↔doc drift 0.
 
 ---
@@ -760,7 +760,6 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 | Board proactive participation via attention LLM judge | producer-only dead scaffold(load_candidates reader 0); RFC-0334 W3 direction-decided only | 중 | LLM judge consumer 배선 |
 | Image creator axis (keeper image-gen tool + Board image upload) | MISSING(#62/#63); modality catalog에 image-gen provider 없음. Never started | 중 | provider + keeper tool + Board upload |
 | procedural_memory crystallization (decision-log→procedure) | consumer 매 post-turn read(limit=8), production writer 0(save_procedure grep=0); always-empty | 중 | production writer 또는 삭제 |
-| keeper_recurring persistence (recurring.json + reload) | RFC-0314 §3 open question; in-memory Hashtbl 재시작 소멸 | 중 | Goal 6에서 착지 |
 | shared-promotion measured outcome | design-plan only(`is_outcome_positive_for_shared_promotion` 심볼은 lib에 0건 — RFC-0247/purge-plan 문서에만 "temporary category proxy pending #22447"); category proxy가 real outcome evaluator 대체 | 중 | recall-injection ledger outcome을 fact metadata join |
 | RFC-OAS-018 Phase 2 fail-closed pricing (unknown model → option/typed Unknown) | provider.ml 주석 "Phase 2 deferred"; $0 collapse가 production-dead wrapper에 생존 | 중 | Goal 2에서 typed Unknown |
 | Board karma visibility(D5); quality-score ranking은 KILL | Partial(#23933 reactions/mention만). hot/confidence/karma score가 substantive·quality authority가 되는 formula는 heuristic이라 부활 금지 | 중 | visibility는 D5에서만 결정; 표시는 stable declared total order |
@@ -802,7 +801,6 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 | Board admin/janitor resident LLM agent (#64) | MISSING, never started; keeper와 구별되는 resident cleanup agent | 낮음 | 결정 필요 |
 | chronicle_librarian Responder + Proactive Summary (RFC-0035 PR-6+) | CHANGELOG "PR-6+ deferred"; PR-5 lib-only slice stalled(false precedent) | 낮음 | half-wired lib 삭제 또는 완성 |
 | auto_recall (File_context recall, score-based) | `auto_recall.ml` 모듈은 **HEAD 부재**(문서의 "dead scaffold"보다 강한 형태 — 파일 없음); 과거 hand-tuned float score가 RFC-0247 SSOT와 모순됐던 설계 | 낮음 | RFC-respec만(재도입 시 score 금지) |
-| RFC-0314 typed closed 'action' variant | merge 시 scope 축소(Broadcast(label) 하드코딩); RFC Draft | 낮음 | Goal 6 |
 | Voice provider freedom (ElevenLabs 외 typed selection) | TODO/P3; voice_bridge 하드코딩 silent Error-swallow | 낮음 | provider 추상화 |
 | Repo-mapping UI/policy + GitHub App device flow | 결정 권한과 옵션은 **D2만**. 이 inventory 행은 독립 결정이 아님 | 낮음 | D2 참조 |
 | RFC-0303 R2b self-cadence wake-tombstone | 의도적 supersede(Phase2/3 blind cadence 삭제, tombstone input 유실) | 낮음 | design evolution 기록 |

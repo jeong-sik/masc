@@ -410,13 +410,17 @@ let test_config_seed_skips_each_existing_file_without_force () =
     script
     {|seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"|};
   assert_contains
-    "model catalog has config-root destination"
+    "model catalog overlay has config-root destination"
     script
-    {|MODEL_CATALOG_FILE="$CONFIG_DIR/oas-models.toml"|};
+    {|MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/oas-models-overlay.toml"|};
   assert_contains
-    "model catalog uses root release seed"
+    "model catalog overlay uses config release seed"
     script
-    {|seed_raw_if_missing "oas-models.toml" "oas-models.toml" "$MODEL_CATALOG_FILE"|};
+    {|seed_config_if_missing "oas-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"|};
+  assert_not_contains
+    "legacy full model catalog is not seeded"
+    script
+    {|seed_raw_if_missing "oas-models.toml"|};
 ;;
 
 let test_release_requires_advertised_binary_assets () =
@@ -430,15 +434,15 @@ let test_release_requires_advertised_binary_assets () =
     workflow
     "required release asset missing: $asset";
   assert_contains
-    "release hashes seeded model catalog"
+    "release hashes seeded model catalog overlay"
     workflow
-    "(cd .. && sha256sum oas-models.toml) >> SHA256SUMS"
+    "(cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_binary_checks_use_install_environment () =
   let script = install_script () in
-  assert_contains
-    "model catalog file lives under config root"
+  assert_not_contains
+    "config-root full catalog is not an automatic override"
     script
     {|MODEL_CATALOG_FILE="$BASE_PATH/.masc/config/oas-models.toml"|};
   assert_contains
@@ -454,9 +458,13 @@ let test_binary_checks_use_install_environment () =
     script
     {|MASC_BASE_PATH_INPUT="$BASE_PATH"|};
   assert_contains
-    "binary helper exports model catalog"
+    "binary helper preserves explicit model catalog override"
     script
     {|OAS_MODEL_CATALOG="$catalog"|};
+  assert_contains
+    "model catalog helper reads only explicit override"
+    script
+    {|if [ -n "${OAS_MODEL_CATALOG:-}" ]; then|};
   assert_contains
     "binary smoke helper isolates runtime events by default"
     script
@@ -1187,16 +1195,16 @@ wizard-default = true
       check (list string) "no stale atomic tmp files" [] stale_atomic_tmps)
 ;;
 
-let test_release_checksums_include_model_catalog_seed () =
+let test_release_checksums_include_model_catalog_overlay_seed () =
   let workflow = release_workflow () in
   assert_contains
     "release checksum includes runtime config seeds"
     workflow
     "(cd ../config && sha256sum runtime.toml) >> SHA256SUMS";
   assert_contains
-    "release checksum includes model catalog seed"
+    "release checksum includes model catalog overlay seed"
     workflow
-    "(cd .. && sha256sum oas-models.toml) >> SHA256SUMS"
+    "(cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_team_flag_and_seed_exist () =
@@ -1239,9 +1247,9 @@ let () =
             `Quick
             test_force_refreshes_same_version_existing_binary
         ; test_case
-            "release checksums include model catalog seed"
+            "release checksums include model catalog overlay seed"
             `Quick
-            test_release_checksums_include_model_catalog_seed
+            test_release_checksums_include_model_catalog_overlay_seed
         ] )
     ; ( "wizard"
       , [ test_case "wizard flags exist" `Quick test_wizard_flags_exist

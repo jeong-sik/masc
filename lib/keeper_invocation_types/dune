@@ -1,0 +1,5 @@
+(library
+ (name masc_keeper_invocation_types)
+ (public_name masc.keeper_invocation_types)
+ (wrapped false)
+ (libraries masc.keeper_registry yojson))

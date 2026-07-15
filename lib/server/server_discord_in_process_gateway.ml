@@ -698,23 +698,59 @@ let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
       ~message_id ~author_id ~author_name ~content
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
+let discord_event_opaque_id : Gw.gateway_event -> string = function
+  | Gw.Ready { session_id; _ } -> session_id
+  | Gw.Message_create { message_id; _ }
+  | Gw.Reaction_add { message_id; _ } -> message_id
+  | Gw.Thread_tracked { thread_id; _ }
+  | Gw.Thread_removed { thread_id } -> thread_id
+  | Gw.Threads_bulk_tracked { threads } ->
+    `List (List.map (fun (thread_id, _) -> `String thread_id) threads)
+    |> Yojson.Safe.to_string
+  | Gw.Ignored reason -> reason
+;;
+
 let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
       { channel_id; message_id; message_reference_channel_id; _ } ->
+    let event_id =
+      { Connector_ingress_lane.source = "discord_triggered_accept"
+      ; opaque_id = message_id
+      }
+    in
     (match
        resolve_binding_for_message ~channel_id ~message_reference_channel_id
      with
      | None ->
        ignore
-         (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
+         (Connector_ingress_lane.run_isolated
+            ingress
+            ~lane:(Connector_ingress_lane.Connector_lane State.channel)
+            ~event_id
+            (fun () ->
+              accept_event
+                ~resolved_binding:None
+                ~dispatch_for_delivery
+                ~base_dir
+                ev))
      | Some ((resolution, _) as resolved_binding) ->
        (match
-          accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ev
+          Connector_ingress_lane.run_isolated
+            ingress
+            ~lane:
+              (Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
+            ~event_id
+            (fun () ->
+              accept_event
+                ~resolved_binding
+                ~dispatch_for_delivery
+                ~base_dir
+                ev)
         with
-        | None -> ()
-        | Some accepted_delivery ->
+        | Error _ | Ok None -> ()
+        | Ok (Some accepted_delivery) ->
           Connector_ingress_lane.submit
             ingress
             ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
@@ -727,7 +763,19 @@ let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
   | Gw.Thread_removed _
   | Gw.Ignored _ ->
     ignore
-      (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
+      (Connector_ingress_lane.run_isolated
+         ingress
+         ~lane:(Connector_ingress_lane.Connector_lane State.channel)
+         ~event_id:
+           { source = "discord_control"
+           ; opaque_id = discord_event_opaque_id ev
+           }
+         (fun () ->
+           accept_event
+             ~resolved_binding:None
+             ~dispatch_for_delivery
+             ~base_dir
+             ev))
 ;;
 
 module For_testing = struct
@@ -738,7 +786,14 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create { channel_id; message_id; _ } ->
     (match State.keeper_for_channel ~channel_id with
-     | None -> on_ambient ~base_dir ev
+     | None ->
+       ignore
+         (Connector_ingress_lane.run_isolated
+            ingress
+            ~lane:(Connector_ingress_lane.Connector_lane State.channel)
+            ~event_id:
+              { source = "discord_ambient_accept"; opaque_id = message_id }
+            (fun () -> on_ambient ~base_dir ev))
      | Some keeper_name ->
        Connector_ingress_lane.submit
          ingress
@@ -750,7 +805,16 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   | Gw.Thread_tracked _
   | Gw.Threads_bulk_tracked _
   | Gw.Thread_removed _
-  | Gw.Ignored _ -> on_ambient ~base_dir ev
+  | Gw.Ignored _ ->
+    ignore
+      (Connector_ingress_lane.run_isolated
+         ingress
+         ~lane:(Connector_ingress_lane.Connector_lane State.channel)
+         ~event_id:
+           { source = "discord_ambient_control"
+           ; opaque_id = discord_event_opaque_id ev
+           }
+         (fun () -> on_ambient ~base_dir ev))
 ;;
 
 (* ---------------------------------------------------------------- *)

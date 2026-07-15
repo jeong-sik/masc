@@ -55,13 +55,17 @@ let report_failure t failure =
       (Printexc.to_string exn)
 ;;
 
-let run_job t lane job =
-  try job.run () with
+let run_isolated t ~lane ~event_id run =
+  try Ok (run ()) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    report_failure
-      t
-      { lane; event_id = job.event_id; reason = Printexc.to_string exn }
+    let failure = { lane; event_id; reason = Printexc.to_string exn } in
+    report_failure t failure;
+    Error failure
+;;
+
+let run_job t lane job =
+  ignore (run_isolated t ~lane ~event_id:job.event_id job.run : (unit, failure) result)
 ;;
 
 let take_lane_job t lane state =

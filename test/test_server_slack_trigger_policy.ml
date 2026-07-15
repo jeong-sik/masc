@@ -334,6 +334,62 @@ let test_binding_store_failure_does_not_enqueue () =
     check bool "no volatile job accepted" false !dispatch_called)
 ;;
 
+let test_accept_failure_does_not_kill_slack_ingress () =
+  with_temp_base (fun () ->
+    match
+      State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test"
+    with
+    | Error detail -> fail detail
+    | Ok _ ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let observed_failure = ref None in
+      let ingress =
+        Connector_ingress_lane.create
+          ~sw
+          ~on_failure:(fun failure -> observed_failure := Some failure)
+          ()
+      in
+      let accept_count = ref 0 in
+      let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+          ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+          ~content:_ =
+        incr accept_count;
+        if !accept_count = 1
+        then failwith "first Slack accept crashed"
+        else
+          Gate_protocol.Reply
+            { content = "queued"
+            ; structured = None
+            ; stats = None
+            ; message_request = None
+            }
+      in
+      let dispatch_for_delivery _delivery = dispatch in
+      let submit ts =
+        G.For_testing.submit_event
+          ~deliver:(fun () -> ())
+          ingress ~dispatch_for_delivery
+          ~clock:(Eio.Stdenv.clock env)
+          (slack_message ~ts)
+      in
+      submit "slack-accept-failed";
+      submit "slack-accept-next";
+      check int "next event was accepted" 2 !accept_count;
+      match !observed_failure with
+      | None -> fail "Slack accept failure was not observed"
+      | Some failure ->
+        check string "failed source event" "slack-accept-failed"
+          failure.Connector_ingress_lane.event_id.opaque_id;
+        check string "accept phase" "slack_triggered_accept"
+          failure.event_id.source;
+        (match failure.lane with
+         | Connector_ingress_lane.Keeper_lane keeper_name ->
+           check string "failed Keeper lane" "luna" keeper_name
+         | Connector_ingress_lane.Connector_lane connector_id ->
+           failf "expected Keeper lane, got connector:%s" connector_id))
+;;
+
 let () =
   run "server_slack_trigger_policy"
     [ ( "parse_trigger_policy"
@@ -372,5 +428,7 @@ let () =
             test_bound_message_queues_exact_slack_ts
         ; test_case "binding store failure does not enqueue" `Quick
             test_binding_store_failure_does_not_enqueue
+        ; test_case "accept failure preserves next Slack event" `Quick
+            test_accept_failure_does_not_kill_slack_ingress
         ] )
     ]

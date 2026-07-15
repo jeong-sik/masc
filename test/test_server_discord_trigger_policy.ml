@@ -185,6 +185,63 @@ let test_durable_accept_precedes_delivery_handoff () =
     failf "expected Keeper lane, got connector:%s" connector_id
 ;;
 
+let test_accept_failure_does_not_kill_discord_ingress () =
+  with_temp_dir @@ fun base_dir ->
+  with_env "MASC_DISCORD_BINDING_STORE_PATH"
+    (Filename.concat base_dir "bindings.json")
+  @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_AUDIT_PATH"
+    (Filename.concat base_dir "audit.jsonl")
+  @@ fun () ->
+  with_env "MASC_DISCORD_NAMES_PATH" (Filename.concat base_dir "names.json")
+  @@ fun () ->
+  (match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+   | Error detail -> fail detail
+   | Ok _ -> ());
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let observed_failure = ref None in
+  let ingress =
+    Connector_ingress_lane.create
+      ~sw
+      ~on_failure:(fun failure -> observed_failure := Some failure)
+      ()
+  in
+  let accept_count = ref 0 in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+      ~content:_ =
+    incr accept_count;
+    if !accept_count = 1
+    then failwith "first Discord accept crashed"
+    else
+      Gate_protocol.Reply
+        { content = "queued"; structured = None; stats = None; message_request = None }
+  in
+  let dispatch_for_delivery _delivery = dispatch in
+  G.For_testing.submit_triggered_event
+    ~deliver:(fun () -> ())
+    ingress ~dispatch_for_delivery ~base_dir
+    (discord_message ~message_id:"discord-accept-failed");
+  G.For_testing.submit_triggered_event
+    ~deliver:(fun () -> ())
+    ingress ~dispatch_for_delivery ~base_dir
+    (discord_message ~message_id:"discord-accept-next");
+  check int "next event was accepted" 2 !accept_count;
+  match !observed_failure with
+  | None -> fail "Discord accept failure was not observed"
+  | Some failure ->
+    check string "failed source event" "discord-accept-failed"
+      failure.Connector_ingress_lane.event_id.opaque_id;
+    check string "accept phase" "discord_triggered_accept"
+      failure.event_id.source;
+    (match failure.lane with
+     | Connector_ingress_lane.Keeper_lane keeper_name ->
+       check string "failed Keeper lane" "luna" keeper_name
+     | Connector_ingress_lane.Connector_lane connector_id ->
+       failf "expected Keeper lane, got connector:%s" connector_id)
+;;
+
 let () =
   run "server_discord_trigger_policy"
     [ ( "parse_trigger_policy"
@@ -200,5 +257,7 @@ let () =
     ; ( "ingress handoff"
       , [ test_case "durable accept precedes Discord delivery" `Quick
             test_durable_accept_precedes_delivery_handoff
+        ; test_case "accept failure preserves next Discord event" `Quick
+            test_accept_failure_does_not_kill_discord_ingress
         ] )
     ]

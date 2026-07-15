@@ -319,6 +319,13 @@ let accept_event ~resolved_binding ~dispatch_for_delivery
       Slack_observability.Ignored;
     None
 
+let slack_event_opaque_id : Gw.slack_event -> string = function
+  | Gw.Message_create { ts; _ }
+  | Gw.App_mention { ts; _ } -> ts
+  | Gw.Reaction_added { message_ts; _ } -> message_ts
+  | Gw.Ignored_event reason -> reason
+;;
+
 let submit_event ?deliver ingress ~dispatch_for_delivery ~clock
     (ev : Gw.slack_event) =
   let submit ~channel_id ~event_id =
@@ -328,10 +335,24 @@ let submit_event ?deliver ingress ~dispatch_for_delivery ~clock
       Log.Server.error
         "Slack ingress binding unavailable channel=%s event=%s: %s"
         channel_id event_id reason
-    | Ok resolved_binding -> (
-      match accept_event ~resolved_binding ~dispatch_for_delivery ev with
-      | None -> ()
-      | Some accepted ->
+    | Ok resolved_binding ->
+      let lane =
+        match resolved_binding with
+        | Some resolution ->
+          Connector_ingress_lane.Keeper_lane resolution.State.keeper_name
+        | None -> Connector_ingress_lane.Connector_lane State.channel
+      in
+      (match
+         Connector_ingress_lane.run_isolated
+           ingress
+           ~lane
+           ~event_id:
+             { source = "slack_triggered_accept"; opaque_id = event_id }
+           (fun () ->
+             accept_event ~resolved_binding ~dispatch_for_delivery ev)
+       with
+       | Error _ | Ok None -> ()
+       | Ok (Some accepted) ->
         Connector_ingress_lane.submit
           ingress
           ~lane:(Connector_ingress_lane.Keeper_lane accepted.keeper_name)
@@ -342,11 +363,25 @@ let submit_event ?deliver ingress ~dispatch_for_delivery ~clock
   in
   match ev with
   | Gw.Message_create { bot_id = Some _; _ } ->
-    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ev)
+    ignore
+      (Connector_ingress_lane.run_isolated
+         ingress
+         ~lane:(Connector_ingress_lane.Connector_lane State.channel)
+         ~event_id:
+           { source = "slack_control"; opaque_id = slack_event_opaque_id ev }
+         (fun () ->
+           accept_event ~resolved_binding:None ~dispatch_for_delivery ev))
   | Gw.Message_create { channel_id; ts; bot_id = None; _ }
   | Gw.App_mention { channel_id; ts; _ } -> submit ~channel_id ~event_id:ts
   | Gw.Reaction_added _ | Gw.Ignored_event _ ->
-    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ev)
+    ignore
+      (Connector_ingress_lane.run_isolated
+         ingress
+         ~lane:(Connector_ingress_lane.Connector_lane State.channel)
+         ~event_id:
+           { source = "slack_control"; opaque_id = slack_event_opaque_id ev }
+         (fun () ->
+           accept_event ~resolved_binding:None ~dispatch_for_delivery ev))
 ;;
 
 module For_testing = struct

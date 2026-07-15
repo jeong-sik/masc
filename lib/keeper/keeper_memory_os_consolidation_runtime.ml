@@ -28,11 +28,24 @@ type 'a timeout_result =
   | Timed_out
   | Clock_unavailable
 
-let with_timeout ?clock ~timeout_sec f =
+(* Fail-open per RFC-0156 (MASC turn-budget timeout policy withdrawn) / repo-owner
+   directive (mirrors [Keeper_llm_bridge]
+   @151ac9a27f): a wall-clock budget must NOT force-kill a legitimate LLM/agent
+   execution. The old [Eio.Time.with_timeout_exn] kill only produced
+   kill -> error -> retry churn on slow-but-legitimate provider calls, so [f] now
+   runs to natural completion. A genuine INNER transport timeout still raises
+   [Eio.Time.Timeout] (from the provider's own transport/idle deadlines) and is
+   surfaced as [Timed_out]. [Eio.Cancel.Cancelled] is deliberately not caught here
+   so it propagates (re-raises) to the enclosing switch. [timeout_sec] is no longer
+   consulted for a wall deadline (kept in the signature as advisory only).
+   The [None -> Clock_unavailable] fail-closed guard is retained unchanged: without
+   a clock the provider's inner transport cannot enforce its own idle/connect
+   deadlines, so the call is still refused upstream. *)
+let with_timeout ?clock ~timeout_sec:_ f =
   match clock with
   | None -> Clock_unavailable
-  | Some clock ->
-    (try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
+  | Some _clock ->
+    (try Completed (f ()) with
      | Eio.Time.Timeout -> Timed_out)
 ;;
 

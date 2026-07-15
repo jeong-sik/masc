@@ -205,11 +205,22 @@ type 'a timeout_result =
   | Timed_out
   | Clock_unavailable
 
-let with_timeout ?clock ~timeout_sec f =
+let with_timeout ?clock ~timeout_sec:_ f =
   match clock with
   | None -> Clock_unavailable
-  | Some clock ->
-    (try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
+  | Some _clock ->
+    (* No wall-clock budget kill (fail-open; RFC-0156 withdrew the MASC turn-budget
+       timeout policy). [timeout_sec] is NOT used to force-kill the compaction LLM call: a
+       budget that fired while a slow-but-healthy provider was still streaming
+       turned every compaction turn into kill -> None -> retry churn that never
+       produced a plan, so the completion call now runs to natural completion.
+       A genuine inner transport timeout (the provider call's own connect/idle
+       deadline raising [Eio.Time.Timeout]) is still surfaced as [Timed_out];
+       [Eio.Cancel.Cancelled] from server shutdown / parent-fiber cancel is not
+       caught here and propagates so the caller exits immediately without
+       retrying. The no-clock [Clock_unavailable] fail-closed guard (the [None]
+       arm above) is intentionally left in place. *)
+    (try Completed (f ()) with
      | Eio.Time.Timeout -> Timed_out)
 
 let run_plan

@@ -1,10 +1,13 @@
 (* lib/masc_oas_bridge.ml *)
 (** Centralized boundary between MASC subsystems and the OAS Agent SDK.
-    Enforces strict structural timeouts, cancellation safety, and type isolation. *)
+    Enforces cancellation safety and type isolation. Wall-clock budgets are
+    advisory only and do not force-kill execution (fail-open directive). *)
 
 (** Safe execution of a generic OAS operation.
-    Requires a domain-local Eio clock, applies timeout handling, and
-    converts [Eio.Time.Timeout] into an error result.
+    Requires a domain-local Eio clock and runs the operation to natural
+    completion; [timeout_s] is advisory and is not used to force-kill it.
+    A genuine inner transport [Eio.Time.Timeout] is converted into an error
+    result.
     [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency.
 
     [caller] (#10094) is a free-form identifier
@@ -43,8 +46,16 @@ let run_safe ~caller ~timeout_s fn =
   | Some { Masc_eio_env.clock; _ } ->
     let t0 = Eio.Time.now clock in
     let elapsed () = Eio.Time.now clock -. t0 in
+    (* No wall-clock budget kill (fail-open; RFC-0156 withdrew the MASC turn-budget
+       timeout policy — total attempt time is observable, not a kill decision).
+       [timeout_s] is advisory only and is NOT used to force-kill the OAS
+       execution: a wall budget that fired while a provider was legitimately still
+       streaming turned slow-but-healthy calls into kill -> Error -> retry churn.
+       The call runs to natural completion. A genuine inner transport timeout (the
+       provider's own connect/idle deadline raising [Eio.Time.Timeout]) is still
+       surfaced below, and structured cancellation is still re-raised. *)
     try
-      Eio.Time.with_timeout_exn clock timeout_s fn
+      fn ()
     with
   | Eio.Time.Timeout ->
     (* #10094: per-caller timeout counter so the operator can see

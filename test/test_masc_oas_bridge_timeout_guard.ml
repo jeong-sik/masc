@@ -61,7 +61,9 @@ let with_eio_env f =
         f clock)))
 ;;
 
-let test_clocked_env_times_out_sleep () =
+let test_clocked_env_slow_call_not_killed () =
+  (* fail-open directive: a call that overruns [timeout_s] must run to natural
+     completion, not be force-killed by a wall budget. *)
   with_eio_env (fun clock ->
     let called = ref false in
     match
@@ -70,10 +72,10 @@ let test_clocked_env_times_out_sleep () =
         Eio.Time.sleep clock 0.05;
         Ok "late")
     with
-    | Error (Agent_sdk.Error.Api (Timeout _)) ->
-      Alcotest.(check bool) "fn was started" true !called
-    | Error err -> failwith (Agent_sdk.Error.to_string err)
-    | Ok other -> failwith ("unexpected success: " ^ other))
+    | Ok "late" -> Alcotest.(check bool) "fn ran to completion" true !called
+    | Ok other -> failwith ("unexpected success: " ^ other)
+    | Error err ->
+      failwith ("slow call was killed instead of completing: " ^ Agent_sdk.Error.to_string err))
 ;;
 
 let with_env name value f =
@@ -133,9 +135,9 @@ let () =
             `Quick
             test_missing_eio_env_fails_closed_without_calling_fn
         ; Alcotest.test_case
-            "clocked env times out sleep"
+            "clocked env slow call not killed"
             `Quick
-            test_clocked_env_times_out_sleep
+            test_clocked_env_slow_call_not_killed
         ; Alcotest.test_case
             "run_with_caller resolves env timeouts"
             `Quick

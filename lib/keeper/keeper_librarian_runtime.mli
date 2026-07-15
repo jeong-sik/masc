@@ -232,8 +232,12 @@ val extract_with_provider_classified
 (** Provider-backed librarian extraction. [clock] stays optional at the API
     boundary because [run_best_effort] may be called from contexts that cannot
     supply an Eio clock; [None] returns
-    {!librarian_provider_clock_unavailable_error} before provider I/O so
-    production calls cannot silently run without timeout enforcement. *)
+    {!librarian_provider_clock_unavailable_error} before provider I/O because
+    the provider call itself requires the clock. The extraction now runs to
+    completion: [timeout_sec] no longer force-kills a legitimate in-flight
+    provider call (that wall-clock kill produced kill -> retry churn; see
+    RFC-0156, Withdraw MASC turn-budget timeout policy). An inner-transport
+    (connect/idle/HTTP) timeout still surfaces as {!Provider_timeout}. *)
 
 val extract_and_append_with_provider
   :  ?complete:complete_fn

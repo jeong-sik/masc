@@ -1267,7 +1267,10 @@ export interface Keeper {
   k2k_mentions?: Array<{ keeper: string; count: number }>
   handoff_count_total?: number
   compaction_count?: number
-  last_compaction_saved_tokens?: number
+  last_compaction_selected_runtime_id?: string | null
+  last_compaction_before_checkpoint_bytes?: number
+  last_compaction_after_checkpoint_bytes?: number
+  last_compaction_reclaimed_checkpoint_bytes?: number
   metrics_window?: MetricsWindow
   agent?: {
     name?: string

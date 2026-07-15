@@ -650,7 +650,7 @@ let compaction_reinjection_observation_json ~manifest_rows ~row_index row =
   | Some checkpoint_path ->
     let receipts =
       manifest_rows
-      |> List.filter_map (fun (index, candidate) ->
+      |> List.filter_map (fun (index, (candidate : Keeper_runtime_manifest.t)) ->
         if index <= row_index
            || not (String.equal candidate.Keeper_runtime_manifest.trace_id row.trace_id)
            || candidate.links.checkpoint_path <> Some checkpoint_path
@@ -885,8 +885,9 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
     if rt.count <= 0 || rt.last_ts <= 0.0
     then None, []
     else
-      let before_tokens = Some rt.last_before_tokens in
-      let after_tokens = Some rt.last_after_tokens in
+      let exact_evidence =
+        Keeper_compact_policy.compaction_evidence_of_runtime rt
+      in
       ( Some
           (compaction_snapshot_item_json
              { id = "keeper_meta:last_compaction"
@@ -899,15 +900,17 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
              ; trigger =
                  Keeper_meta_contract.compaction_runtime_decision_to_string
                    rt.last_decision
-             ; runtime_id = None
-             ; before_tokens
-             ; after_tokens
-             ; saved_tokens = compaction_saved_tokens before_tokens after_tokens
+             ; runtime_id = exact_evidence.selected_runtime_id
+             ; before_tokens = None
+             ; after_tokens = None
+             ; saved_tokens = None
              ; compaction_id = None
              ; compaction_source = None
              ; status = "latest"
              ; links = `Assoc []
-             ; exact_evidence = None
+             ; exact_evidence =
+                 Some
+                   (Keeper_compact_policy.compaction_evidence_to_json exact_evidence)
              ; reinjection_observation = compaction_not_linked_observation_json
              })
       , [] )

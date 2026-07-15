@@ -41,8 +41,24 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_latency_ms", `Int rt.usage.last_latency_ms
     ; "compaction_count", `Int rt.compaction_rt.count
     ; "last_compaction_ts", `Float rt.compaction_rt.last_ts
-    ; "last_compaction_before_tokens", `Int rt.compaction_rt.last_before_tokens
-    ; "last_compaction_after_tokens", `Int rt.compaction_rt.last_after_tokens
+    ; ( "last_compaction_selected_runtime_id"
+      , Json_util.string_opt_to_json rt.compaction_rt.last_selected_runtime_id )
+    ; ( "last_compaction_before_checkpoint_bytes"
+      , `Int rt.compaction_rt.last_before_checkpoint_bytes )
+    ; ( "last_compaction_after_checkpoint_bytes"
+      , `Int rt.compaction_rt.last_after_checkpoint_bytes )
+    ; "last_compaction_before_message_count", `Int rt.compaction_rt.last_before_message_count
+    ; "last_compaction_after_message_count", `Int rt.compaction_rt.last_after_message_count
+    ; ( "last_compaction_summarized_message_count"
+      , `Int rt.compaction_rt.last_summarized_message_count )
+    ; ( "last_compaction_dropped_message_count"
+      , `Int rt.compaction_rt.last_dropped_message_count )
+    ; "last_compaction_before_tool_use_count", `Int rt.compaction_rt.last_before_tool_use_count
+    ; "last_compaction_after_tool_use_count", `Int rt.compaction_rt.last_after_tool_use_count
+    ; ( "last_compaction_before_tool_result_count"
+      , `Int rt.compaction_rt.last_before_tool_result_count )
+    ; ( "last_compaction_after_tool_result_count"
+      , `Int rt.compaction_rt.last_after_tool_result_count )
     ; ( "last_compaction_operation_id"
       , Json_util.string_opt_to_json rt.compaction_rt.last_operation_id )
     ; "proactive_count_total", `Int rt.proactive_rt.count_total
@@ -130,8 +146,17 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_latency_ms"
   ; "compaction_count"
   ; "last_compaction_ts"
-  ; "last_compaction_before_tokens"
-  ; "last_compaction_after_tokens"
+  ; "last_compaction_selected_runtime_id"
+  ; "last_compaction_before_checkpoint_bytes"
+  ; "last_compaction_after_checkpoint_bytes"
+  ; "last_compaction_before_message_count"
+  ; "last_compaction_after_message_count"
+  ; "last_compaction_summarized_message_count"
+  ; "last_compaction_dropped_message_count"
+  ; "last_compaction_before_tool_use_count"
+  ; "last_compaction_after_tool_use_count"
+  ; "last_compaction_before_tool_result_count"
+  ; "last_compaction_after_tool_result_count"
   ; "last_compaction_operation_id"
   ; "proactive_count_total"
   ; "last_proactive_ts"

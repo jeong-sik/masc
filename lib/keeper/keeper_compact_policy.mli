@@ -52,6 +52,13 @@ type compaction_receipt =
 
 val compaction_evidence_to_json : compaction_evidence -> Yojson.Safe.t
 
+val compaction_evidence_of_runtime :
+  Keeper_meta_contract.compaction_runtime -> compaction_evidence
+
+val reclaimed_checkpoint_bytes : compaction_evidence -> int
+(** Exact serialized checkpoint byte difference. Applied compaction evidence
+    guarantees a positive value; no token estimate or clamp is synthesized. *)
+
 val with_compaction_receipt :
   generation:int ->
   trigger:Compaction_trigger.t ->

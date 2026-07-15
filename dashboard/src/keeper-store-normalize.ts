@@ -773,7 +773,14 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         k2k_count: asNumber(row.k2k_count),
         handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
         compaction_count: asNumber(row.compaction_count),
-        last_compaction_saved_tokens: asNumber(row.last_compaction_saved_tokens),
+        last_compaction_selected_runtime_id:
+          asString(row.last_compaction_selected_runtime_id) ?? null,
+        last_compaction_before_checkpoint_bytes:
+          asNumber(row.last_compaction_before_checkpoint_bytes),
+        last_compaction_after_checkpoint_bytes:
+          asNumber(row.last_compaction_after_checkpoint_bytes),
+        last_compaction_reclaimed_checkpoint_bytes:
+          asNumber(row.last_compaction_reclaimed_checkpoint_bytes),
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
         agent: normalizedAgent,

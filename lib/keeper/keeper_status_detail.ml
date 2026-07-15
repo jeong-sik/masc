@@ -436,8 +436,12 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          in
          let trace_history_count = List.length m.runtime.trace_history in
          let runtime_runtime_metrics = `Null in
-         let last_compaction_saved_tokens =
-           max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
+         let last_compaction_evidence =
+           Keeper_compact_policy.compaction_evidence_of_runtime
+             m.runtime.compaction_rt
+         in
+         let last_compaction_reclaimed_checkpoint_bytes =
+           Keeper_compact_policy.reclaimed_checkpoint_bytes last_compaction_evidence
          in
          let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
            compaction_policy_of_keeper m
@@ -830,7 +834,14 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("runtime_runtime_metrics", runtime_runtime_metrics);
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
-           ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
+           ( "last_compaction_selected_runtime_id"
+           , Json_util.string_opt_to_json last_compaction_evidence.selected_runtime_id );
+           ( "last_compaction_before_checkpoint_bytes"
+           , `Int last_compaction_evidence.before_checkpoint_bytes );
+           ( "last_compaction_after_checkpoint_bytes"
+           , `Int last_compaction_evidence.after_checkpoint_bytes );
+           ( "last_compaction_reclaimed_checkpoint_bytes"
+           , `Int last_compaction_reclaimed_checkpoint_bytes );
            ("sandbox_profile",
              `String (sandbox_profile_to_string m.sandbox_profile));
            ("network_mode",

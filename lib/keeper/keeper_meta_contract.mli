@@ -63,8 +63,17 @@ val compaction_runtime_decision_of_string :
 type compaction_runtime = {
   count : int;
   last_ts : float;
-  last_before_tokens : int;
-  last_after_tokens : int;
+  last_selected_runtime_id : string option;
+  last_before_checkpoint_bytes : int;
+  last_after_checkpoint_bytes : int;
+  last_before_message_count : int;
+  last_after_message_count : int;
+  last_summarized_message_count : int;
+  last_dropped_message_count : int;
+  last_before_tool_use_count : int;
+  last_after_tool_use_count : int;
+  last_before_tool_result_count : int;
+  last_after_tool_result_count : int;
   last_operation_id : string option;
   last_check_ts : float;
   last_decision : compaction_runtime_decision;

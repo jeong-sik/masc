@@ -455,8 +455,12 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              resolver at the other call site below. *)
           let primary_model = Keeper_meta_contract.runtime_id_of_meta m in
           let primary_model_norm = normalize_model_name primary_model in
-          let last_compaction_saved_tokens =
-            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
+          let last_compaction_evidence =
+            Keeper_compact_policy.compaction_evidence_of_runtime
+              m.runtime.compaction_rt
+          in
+          let last_compaction_reclaimed_checkpoint_bytes =
+            Keeper_compact_policy.reclaimed_checkpoint_bytes last_compaction_evidence
           in
 
           let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
@@ -932,7 +936,14 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ]);
               ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
-              ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
+              ( "last_compaction_selected_runtime_id"
+              , Json_util.string_opt_to_json last_compaction_evidence.selected_runtime_id );
+              ( "last_compaction_before_checkpoint_bytes"
+              , `Int last_compaction_evidence.before_checkpoint_bytes );
+              ( "last_compaction_after_checkpoint_bytes"
+              , `Int last_compaction_evidence.after_checkpoint_bytes );
+              ( "last_compaction_reclaimed_checkpoint_bytes"
+              , `Int last_compaction_reclaimed_checkpoint_bytes );
               ("compaction_profile", `String m.compaction.profile);
               ("compaction_ratio_gate", `Float compact_ratio_gate);
               ("compaction_message_gate", `Int compact_message_gate);

@@ -27,7 +27,7 @@ module Compact_policy = Masc.Keeper_compact_policy
 module Post_turn = Masc.Keeper_post_turn
 module Admission = Masc.Keeper_turn_admission
 module Cycle = Masc.Keeper_heartbeat_loop_cycle
-module Queue = Masc.Keeper_event_queue
+module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue
 module WO = Masc.Keeper_world_observation
 
@@ -425,11 +425,26 @@ let test_compaction_runtime_projection_is_operation_idempotent () =
   let trigger =
     Compaction_trigger.Message_count { count = 3; threshold = 2 }
   in
+  let evidence : Compact_policy.compaction_evidence =
+    { selected_runtime_id = Some "runtime-a"
+    ; before_checkpoint_bytes = 4096
+    ; after_checkpoint_bytes = 1024
+    ; before_message_count = 8
+    ; after_message_count = 3
+    ; summarized_message_count = 4
+    ; dropped_message_count = 1
+    ; before_tool_use_count = 2
+    ; after_tool_use_count = 1
+    ; before_tool_result_count = 2
+    ; after_tool_result_count = 1
+    }
+  in
   let project =
     Masc.Keeper_manual_compaction.For_testing.project_compaction_runtime
       ~operation_id:"compaction:exact-operation"
       ~applied_at:123.0
       ~trigger
+      ~evidence
   in
   let first = project meta.runtime.compaction_rt in
   let replay = project first in
@@ -437,10 +452,27 @@ let test_compaction_runtime_projection_is_operation_idempotent () =
   check (option string) "operation identity persisted"
     (Some "compaction:exact-operation")
     first.last_operation_id;
+  check bool "exact evidence projected" true
+    (evidence = Compact_policy.compaction_evidence_of_runtime first);
+  check int "exact reclaimed bytes" 3072
+    (Compact_policy.reclaimed_checkpoint_bytes evidence);
+  let projected_meta =
+    { meta with runtime = { meta.runtime with compaction_rt = first } }
+  in
+  let roundtripped =
+    projected_meta
+    |> Masc.Keeper_meta_json.meta_to_json
+    |> Masc.Keeper_meta_json.meta_of_json
+    |> Result.get_ok
+  in
+  check bool "exact evidence survives meta round-trip" true
+    (evidence
+     = Compact_policy.compaction_evidence_of_runtime
+         roundtripped.runtime.compaction_rt);
   check bool "same operation replay is immutable" true (first = replay)
 
-let only_compaction_manifest config meta =
-  let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
     config
     ~keeper_name:meta.name

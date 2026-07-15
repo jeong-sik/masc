@@ -22,13 +22,23 @@ type failure =
           (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
       }
 
-let project_compaction_runtime ~operation_id ~applied_at ~trigger rt =
+let project_compaction_runtime ~operation_id ~applied_at ~trigger ~evidence rt =
   if Option.equal String.equal rt.last_operation_id (Some operation_id)
   then rt
   else
-    { rt with
-      count = rt.count + 1
+    { count = rt.count + 1
     ; last_ts = applied_at
+    ; last_selected_runtime_id = evidence.Keeper_compact_policy.selected_runtime_id
+    ; last_before_checkpoint_bytes = evidence.before_checkpoint_bytes
+    ; last_after_checkpoint_bytes = evidence.after_checkpoint_bytes
+    ; last_before_message_count = evidence.before_message_count
+    ; last_after_message_count = evidence.after_message_count
+    ; last_summarized_message_count = evidence.summarized_message_count
+    ; last_dropped_message_count = evidence.dropped_message_count
+    ; last_before_tool_use_count = evidence.before_tool_use_count
+    ; last_after_tool_use_count = evidence.after_tool_use_count
+    ; last_before_tool_result_count = evidence.before_tool_result_count
+    ; last_after_tool_result_count = evidence.after_tool_result_count
     ; last_operation_id = Some operation_id
     ; last_check_ts = applied_at
     ; last_decision =
@@ -43,7 +53,11 @@ let persist_compaction_projection ~config ~meta ~trigger recovery =
   let applied_at = Time_compat.now () in
   let project meta =
     map_compaction_rt
-      (project_compaction_runtime ~operation_id ~applied_at ~trigger)
+      (project_compaction_runtime
+         ~operation_id
+         ~applied_at
+         ~trigger
+         ~evidence:recovery.evidence)
       meta
   in
   match

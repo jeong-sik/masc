@@ -32,6 +32,7 @@ module For_testing : sig
     :  operation_id:string
     -> applied_at:float
     -> trigger:Compaction_trigger.t
+    -> evidence:Keeper_compact_policy.compaction_evidence
     -> Keeper_meta_contract.compaction_runtime
     -> Keeper_meta_contract.compaction_runtime
 end

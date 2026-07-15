@@ -33,6 +33,7 @@
   masc.config
   masc.keeper_registry
   masc.keeper_toml
+  masc.compaction_trigger
   masc.config_dir_resolver
   masc.fs_compat
   masc.bounded_event_dedupe

@@ -217,8 +217,28 @@ let parse_usage_metrics (json : Yojson.Safe.t) : usage_metrics =
 let parse_compaction_runtime (json : Yojson.Safe.t) : compaction_runtime =
   { count = Safe_ops.json_int ~default:0 "compaction_count" json
   ; last_ts = Safe_ops.json_float ~default:0.0 "last_compaction_ts" json
-  ; last_before_tokens = Safe_ops.json_int ~default:0 "last_compaction_before_tokens" json
-  ; last_after_tokens = Safe_ops.json_int ~default:0 "last_compaction_after_tokens" json
+  ; last_selected_runtime_id =
+      Safe_ops.json_string_opt "last_compaction_selected_runtime_id" json
+  ; last_before_checkpoint_bytes =
+      Safe_ops.json_int ~default:0 "last_compaction_before_checkpoint_bytes" json
+  ; last_after_checkpoint_bytes =
+      Safe_ops.json_int ~default:0 "last_compaction_after_checkpoint_bytes" json
+  ; last_before_message_count =
+      Safe_ops.json_int ~default:0 "last_compaction_before_message_count" json
+  ; last_after_message_count =
+      Safe_ops.json_int ~default:0 "last_compaction_after_message_count" json
+  ; last_summarized_message_count =
+      Safe_ops.json_int ~default:0 "last_compaction_summarized_message_count" json
+  ; last_dropped_message_count =
+      Safe_ops.json_int ~default:0 "last_compaction_dropped_message_count" json
+  ; last_before_tool_use_count =
+      Safe_ops.json_int ~default:0 "last_compaction_before_tool_use_count" json
+  ; last_after_tool_use_count =
+      Safe_ops.json_int ~default:0 "last_compaction_after_tool_use_count" json
+  ; last_before_tool_result_count =
+      Safe_ops.json_int ~default:0 "last_compaction_before_tool_result_count" json
+  ; last_after_tool_result_count =
+      Safe_ops.json_int ~default:0 "last_compaction_after_tool_result_count" json
   ; last_operation_id = Safe_ops.json_string_opt "last_compaction_operation_id" json
   ; last_check_ts = Safe_ops.json_float ~default:0.0 "last_compaction_check_ts" json
   ; last_decision =

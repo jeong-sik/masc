@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { formatPct, formatTokens } from '../lib/format-number'
+import { formatNumber, formatPct, formatTokens } from '../lib/format-number'
 import { TextInput } from './common/input'
 import type { Keeper } from '../types'
 
@@ -37,7 +37,12 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   if (keeper.conversation_tail_count != null) extras.push({ title: '대화 tail', value: String(keeper.conversation_tail_count) })
   if (keeper.handoff_count_total != null) extras.push({ title: '핸드오프 총합', value: String(keeper.handoff_count_total) })
   if (keeper.compaction_count != null) extras.push({ title: '압축 횟수', value: String(keeper.compaction_count) })
-  if (keeper.last_compaction_saved_tokens != null) extras.push({ title: '마지막 압축 절약', value: formatTokens(keeper.last_compaction_saved_tokens) })
+  if ((keeper.compaction_count ?? 0) > 0) {
+    if (keeper.last_compaction_selected_runtime_id) extras.push({ title: '마지막 압축 런타임', value: keeper.last_compaction_selected_runtime_id, mono: true })
+    if (keeper.last_compaction_before_checkpoint_bytes != null) extras.push({ title: '압축 전 체크포인트', value: `${formatNumber(keeper.last_compaction_before_checkpoint_bytes)} B` })
+    if (keeper.last_compaction_after_checkpoint_bytes != null) extras.push({ title: '압축 후 체크포인트', value: `${formatNumber(keeper.last_compaction_after_checkpoint_bytes)} B` })
+    if (keeper.last_compaction_reclaimed_checkpoint_bytes != null) extras.push({ title: '회수한 체크포인트', value: `${formatNumber(keeper.last_compaction_reclaimed_checkpoint_bytes)} B` })
+  }
   if (keeper.context?.message_count != null) extras.push({ title: '메시지 수', value: String(keeper.context.message_count) })
   if (keeper.context?.has_checkpoint != null) extras.push({ title: '체크포인트 보유', value: keeper.context.has_checkpoint ? '예' : '아니오' })
 

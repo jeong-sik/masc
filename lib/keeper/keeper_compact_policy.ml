@@ -127,6 +127,25 @@ let compaction_evidence_to_json evidence =
     ]
 ;;
 
+let compaction_evidence_of_runtime (rt : Keeper_meta_contract.compaction_runtime) =
+  { selected_runtime_id = rt.last_selected_runtime_id
+  ; before_checkpoint_bytes = rt.last_before_checkpoint_bytes
+  ; after_checkpoint_bytes = rt.last_after_checkpoint_bytes
+  ; before_message_count = rt.last_before_message_count
+  ; after_message_count = rt.last_after_message_count
+  ; summarized_message_count = rt.last_summarized_message_count
+  ; dropped_message_count = rt.last_dropped_message_count
+  ; before_tool_use_count = rt.last_before_tool_use_count
+  ; after_tool_use_count = rt.last_after_tool_use_count
+  ; before_tool_result_count = rt.last_before_tool_result_count
+  ; after_tool_result_count = rt.last_after_tool_result_count
+  }
+;;
+
+let reclaimed_checkpoint_bytes evidence =
+  evidence.before_checkpoint_bytes - evidence.after_checkpoint_bytes
+;;
+
 let compaction_receipt_context_key = "masc_compaction_receipt_v1"
 
 let compaction_operation_id

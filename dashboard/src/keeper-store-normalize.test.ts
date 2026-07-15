@@ -920,6 +920,28 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
   })
 })
 
+describe('exact compaction observation', () => {
+  it('preserves checkpoint bytes without token conversion', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'compacted',
+        status: 'active',
+        last_compaction_selected_runtime_id: 'runtime-a',
+        last_compaction_before_checkpoint_bytes: 4096,
+        last_compaction_after_checkpoint_bytes: 1024,
+        last_compaction_reclaimed_checkpoint_bytes: 3072,
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      last_compaction_selected_runtime_id: 'runtime-a',
+      last_compaction_before_checkpoint_bytes: 4096,
+      last_compaction_after_checkpoint_bytes: 1024,
+      last_compaction_reclaimed_checkpoint_bytes: 3072,
+    })
+  })
+})
+
 describe('keeper profile config error boundary', () => {
   it('normalizes the closed config error schema without losing path or action', () => {
     const [keeper] = normalizeKeepers([

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Q = Keeper_approval_queue_rules_types
+module Q = Keeper_approval_queue_types
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
@@ -43,7 +43,7 @@ let test_summary_json_is_nonhierarchical () =
 
 let () =
   run
-    "Keeper_approval_queue_rules_types"
+    "Keeper_approval_queue_types"
     [ ( "judgment"
       , [ test_case "typed judgment round trip" `Quick test_advisory_judgment_round_trip
         ; test_case "summary has no hierarchy" `Quick test_summary_json_is_nonhierarchical

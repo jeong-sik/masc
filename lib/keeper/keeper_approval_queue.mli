@@ -4,7 +4,7 @@
     tool/product name. It records an exact request, accepts an explicit
     resolution, and wakes only the originating Keeper lane. *)
 
-include module type of Keeper_approval_queue_rules_types
+include module type of Keeper_approval_queue_types
 
 type storage_error =
   { path : string

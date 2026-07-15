@@ -40,7 +40,7 @@ export type GateJudgment = 'approve' | 'deny' | 'require_human'
 
 /** LLM-generated operator briefing attached to a pending approval by the HITL
  *  context-summary worker (`hitl_summary_worker.ml`). Mirrors
- *  `keeper_approval_queue_rules_types.ml:hitl_context_summary`. */
+ *  `keeper_approval_queue_types.ml:hitl_context_summary`. */
 export interface HitlContextSummary {
   summary_version: number
   generated_at: string | null
@@ -52,7 +52,7 @@ export interface HitlContextSummary {
 }
 
 /** Discriminated union mirroring the backend `summary_status` variant
- *  (`keeper_approval_queue_rules_types.ml:summary_status`). `available` carries
+ *  (`keeper_approval_queue_types.ml:summary_status`). `available` carries
  *  the briefing the operator reads before deciding; `pending`/`failed` are
  *  in-flight/error states worth surfacing rather than hiding. */
 export type HitlSummaryStatus =

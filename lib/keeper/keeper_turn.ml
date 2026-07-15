@@ -219,12 +219,33 @@ let user_oas_blocks_of_args args =
       | Ok [] -> Ok None
       | Ok blocks -> Ok (Some blocks)
 
-let turn_resources_error failure =
+type invocation_surface =
+  | Direct_message
+  | Keeper_delegate
+
+let invocation_tool_name = function
+  | Direct_message -> "masc_keeper_msg"
+  | Keeper_delegate -> "masc_keeper_delegate"
+;;
+
+let invocation_turn_type = function
+  | Direct_message -> "direct"
+  | Keeper_delegate -> "delegate"
+;;
+
+let invocation_args request =
+  `Assoc
+    [ "name", `String (Keeper_invocation_contract.target_name request)
+    ; "message", `String (Keeper_invocation_contract.prompt request)
+    ]
+;;
+
+let turn_resources_error ~surface failure =
   let detail =
     Keeper_publication_recovery_scope.failure_to_string failure
   in
   tool_result_error_data
-    ~tool_name:"masc_keeper_msg"
+    ~tool_name:(invocation_tool_name surface)
     (`Assoc
        [ "error", `String "keeper_turn_resources_unavailable"
        ; "failure_class", `String "runtime_failure"
@@ -232,22 +253,17 @@ let turn_resources_error failure =
        ])
 ;;
 
-let preflight_keeper_msg ctx args :
-    (Keeper_invocation_contract.request, string) result =
-  let name = get_string args "name" "" in
-  let message = get_string args "message" "" in
-  match Keeper_invocation_contract.request ~keeper_name:name ~prompt:message with
-  | Error error ->
-    Error (Keeper_invocation_contract.request_error_to_string error)
-  | Ok request ->
+let preflight_keeper_invocation ~surface ctx args request =
+  let name = Keeper_invocation_contract.target_name request in
     let direct_reply = get_bool args "direct_reply" false in
-    match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
+    let tool_name = invocation_tool_name surface in
+    match Keeper_meta_contract.reject_removed_model_args ~tool_name args with
     | Error e -> Error e
     | Ok () ->
-    (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
+    (match reject_removed_keeper_input_keys ~tool_name args with
     | Error e -> Error e
     | Ok () ->
-    (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
+    (match reject_removed_keeper_msg_input_keys ~tool_name args with
     | Error e -> Error e
     | Ok () ->
     (match user_oas_blocks_of_args args with
@@ -272,6 +288,22 @@ let preflight_keeper_msg ctx args :
           Keeper_turn_helpers.ensure_local_discovery_ready effective_models
           |> Result.map (fun () -> request))))
 
+let preflight_keeper_msg ctx args =
+  let name = get_string args "name" "" in
+  let message = get_string args "message" "" in
+  match Keeper_invocation_contract.request ~keeper_name:name ~prompt:message with
+  | Error error -> Error (Keeper_invocation_contract.request_error_to_string error)
+  | Ok request -> preflight_keeper_invocation ~surface:Direct_message ctx args request
+;;
+
+let preflight_keeper_delegate ctx request =
+  preflight_keeper_invocation
+    ~surface:Keeper_delegate
+    ctx
+    (invocation_args request)
+    request
+;;
+
 (* -- Direct-message turn FSM wrapper ---------------------------------------- *)
 
 (** Run a direct [masc_keeper_msg] turn with the same typed FSM transitions
@@ -288,7 +320,7 @@ let preflight_keeper_msg ctx args :
 
     The wrapper is intentionally thin: it does not duplicate metrics,
     receipt, or meta writes — those remain in
-    [run_keeper_msg_turn_admitted].  It only restores FSM observability so
+    [run_keeper_invocation_turn_admitted].  It only restores FSM observability so
     direct and autonomous turns share the same state-machine read model. *)
 let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
   Keeper_turn_fsm.emit_transition
@@ -372,11 +404,12 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    [handle_keeper_msg] calls this directly because the validation guard
    below exits first). Do not add keeper-state mutation ahead of the
    validation guards without moving it behind the slot. *)
-let run_keeper_msg_turn_admitted
+let run_keeper_invocation_turn_admitted
       ?on_text_delta
       ?on_event
       ?event_bus
       ?continuation_channel
+      ~surface
       ctx
       args
   : tool_result
@@ -385,7 +418,7 @@ let run_keeper_msg_turn_admitted
     ~name:"keeper_turn"
     ~attrs:[
       "keeper.name", `String (get_string args "name" "");
-      "masc.turn_type", `String "direct";
+      "masc.turn_type", `String (invocation_turn_type surface);
     ]
     (fun _trace_id ->
   let on_event =
@@ -420,13 +453,14 @@ let run_keeper_msg_turn_admitted
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
     let channel = get_string args "channel" "" in
-    (match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
+    let tool_name = invocation_tool_name surface in
+    (match Keeper_meta_contract.reject_removed_model_args ~tool_name args with
     | Error e -> tool_result_error ("" ^ e)
     | Ok () ->
-    (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
+    (match reject_removed_keeper_input_keys ~tool_name args with
     | Error e -> tool_result_error ("" ^ e)
     | Ok () ->
-    (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
+    (match reject_removed_keeper_msg_input_keys ~tool_name args with
     | Error e -> tool_result_error ("" ^ e)
     | Ok () ->
     (match user_oas_blocks_of_args args with
@@ -443,7 +477,7 @@ let run_keeper_msg_turn_admitted
            ~base_path:ctx.config.base_path
            ~keeper_name:meta0.name
        with
-       | Error failure -> turn_resources_error failure
+       | Error failure -> turn_resources_error ~surface failure
        | Ok { entry; publication_recovery } ->
       let meta = entry.meta in
       (match
@@ -1007,13 +1041,14 @@ let run_keeper_msg_turn_admitted
 
 )))))))))
 
-let handle_keeper_msg
+let handle_keeper_invocation
       ?on_text_delta
       ?on_event
       ?event_bus
       ?continuation_channel
       ?on_admission_rejected
       ?on_admitted
+      ~surface
       ctx
       args
   : tool_result
@@ -1027,11 +1062,12 @@ let handle_keeper_msg
   if not (validate_name name) then
     (* Invalid input cannot reach run_turn; let the admitted body produce
        its precise validation error without holding the slot. *)
-    run_keeper_msg_turn_admitted
+    run_keeper_invocation_turn_admitted
       ?on_text_delta
       ?on_event
       ?event_bus
       ?continuation_channel
+      ~surface
       ctx
       args
   else
@@ -1044,22 +1080,24 @@ let handle_keeper_msg
           | Some notify ->
             (match notify () with
              | Ok () ->
-               run_keeper_msg_turn_admitted
+               run_keeper_invocation_turn_admitted
                  ?on_text_delta
                  ?on_event
                  ?event_bus
                  ?continuation_channel
+                 ~surface
                  ctx
                  args
              | Error detail ->
                tool_result_error
                  ("keeper turn admission persistence failed: " ^ detail))
           | None ->
-            run_keeper_msg_turn_admitted
+            run_keeper_invocation_turn_admitted
               ?on_text_delta
               ?on_event
               ?event_bus
               ?continuation_channel
+              ~surface
               ctx
               args)
     with
@@ -1097,6 +1135,36 @@ let handle_keeper_msg
              waiting
              in_flight_text)
 
+let handle_keeper_msg
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ?on_admission_rejected
+      ?on_admitted
+      ctx
+      args
+  =
+  handle_keeper_invocation
+    ?on_text_delta
+    ?on_event
+    ?event_bus
+    ?continuation_channel
+    ?on_admission_rejected
+    ?on_admitted
+    ~surface:Direct_message
+    ctx
+    args
+;;
+
+let handle_keeper_delegate ?event_bus ctx request =
+  handle_keeper_invocation
+    ?event_bus
+    ~surface:Keeper_delegate
+    ctx
+    (invocation_args request)
+;;
+
 let handle_keeper_msg_if_free
       ?on_text_delta
       ?on_event
@@ -1113,11 +1181,12 @@ let handle_keeper_msg_if_free
   let name = get_string args "name" "" in
   if not (validate_name name) then
     `Ran
-      (run_keeper_msg_turn_admitted
+      (run_keeper_invocation_turn_admitted
          ?on_text_delta
          ?on_event
          ?event_bus
          ?continuation_channel
+         ~surface:Direct_message
          ctx
          args)
   else
@@ -1125,10 +1194,11 @@ let handle_keeper_msg_if_free
       ~base_path:ctx.config.base_path
       ~keeper_name:name
       (fun () ->
-        run_keeper_msg_turn_admitted
+        run_keeper_invocation_turn_admitted
           ?on_text_delta
           ?on_event
           ?event_bus
           ?continuation_channel
+          ~surface:Direct_message
           ctx
           args)

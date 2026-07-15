@@ -137,12 +137,10 @@ let test_keepalive_signal_callbacks () =
       ~keeper_name:_
       ~trace_id:_
       ~turn_index:_
-      ~model_id:_
       ~context_window:_
-      ~approx_body_bytes:_
       ~system_prompt_bytes:_
-      ~tool_defs_bytes:_
-      ~messages_bytes:_
+      ~tool_schema_json_bytes:_
+      ~message_content_bytes:_
       ~message_count:_
       ~role_counts:_
       ~tool_count:_
@@ -152,12 +150,10 @@ let test_keepalive_signal_callbacks () =
     ~keeper_name:"k"
     ~trace_id:"t"
     ~turn_index:0
-    ~model_id:"m"
     ~context_window:4096
-    ~approx_body_bytes:0
     ~system_prompt_bytes:0
-    ~tool_defs_bytes:0
-    ~messages_bytes:0
+    ~tool_schema_json_bytes:0
+    ~message_content_bytes:0
     ~message_count:0
     ~role_counts:[]
     ~tool_count:0
@@ -168,12 +164,10 @@ let test_keepalive_signal_callbacks () =
       ~keeper_name:_
       ~trace_id:_
       ~turn_index:_
-      ~model_id:_
       ~context_window:_
-      ~approx_body_bytes:_
       ~system_prompt_bytes:_
-      ~tool_defs_bytes:_
-      ~messages_bytes:_
+      ~tool_schema_json_bytes:_
+      ~message_content_bytes:_
       ~message_count:_
       ~role_counts:_
       ~tool_count:_

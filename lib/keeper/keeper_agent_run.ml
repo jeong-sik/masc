@@ -530,10 +530,12 @@ let run_turn
          ~turn_system_prompt
          ~tools
          ~history_messages
+         ?user_blocks
          ~user_message
          ~start_turn_count
          ~max_context
-         ~pre_dispatch_compacted;
+         ~pre_dispatch_compacted
+         ();
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let pre_dispatch_error = pre_dispatch_checkpoint_error in
        let turn_result =

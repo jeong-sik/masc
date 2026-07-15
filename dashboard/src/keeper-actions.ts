@@ -24,6 +24,7 @@ import { keeperTurnOutcomeSuppressesReply } from './keeper-message'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import { compareKeeperQueueRevisions } from './lib/keeper-chat-receipt'
+import { parseKeeperRunRef } from './lib/keeper-run-ref'
 import type {
   ChatBlock,
   KeeperConversationAttachment,
@@ -90,7 +91,7 @@ type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
 const EMPTY_VISIBLE_REPLY_TEXT =
   'Keeper가 thinking만 반환하고 표시할 답변을 만들지 못했습니다. 다시 보내주세요.'
-type KeeperThreadCancelOutcome = 'cancelling' | 'cancelled'
+type KeeperThreadCancelOutcome = 'cancelling'
 
 const pendingKeeperThreadCancels = new Map<
   string,
@@ -131,6 +132,14 @@ function releaseKeeperThreadCancelTracking(requestId: string): void {
   pendingKeeperThreadCancels.delete(requestId)
 }
 
+function keeperRunRef(keeperName: string, runId: string) {
+  return parseKeeperRunRef({
+    run_id: runId,
+    target: { kind: 'keeper', name: keeperName },
+    capability: 'invoke_turn',
+  })
+}
+
 function markKeeperStreamSignal(keeperName: string, opts: { force?: boolean } = {}): void {
   const name = keeperName.trim()
   if (!name) return
@@ -165,16 +174,13 @@ export function cancelKeeperThreadRequest(
   if (!name || !id) return Promise.resolve(null)
   const existing = pendingKeeperThreadCancels.get(id)
   if (existing) return existing
+  const reference = keeperRunRef(name, id)
   const promise = (opts.signal
-    ? cancelQueuedKeeperMessage(id, { signal: opts.signal })
-    : cancelQueuedKeeperMessage(id))
-    .then(result => {
-      if (result.status === 'cancelled') {
-        removePendingKeeperChatRequest(id)
-        releaseActiveStreamRequestId(id)
-      }
+    ? cancelQueuedKeeperMessage(reference, { signal: opts.signal })
+    : cancelQueuedKeeperMessage(reference))
+    .then(() => {
       setRecordValue(keeperActionErrors, name, null)
-      return result.status
+      return 'cancelling' as const
     })
     .catch((err) => {
       const message = keeperThreadCancelFailureMessage(name, id, err)
@@ -504,12 +510,11 @@ function isMissingQueuedKeeperRequestError(err: unknown): boolean {
   const method = asString(record?.method, '').trim().toUpperCase()
   const status = typeof record?.status === 'number' ? record.status : null
   const path = asString(record?.path, '').trim()
-  const message = err instanceof Error ? err.message : ''
-  if (method === 'GET' && status === 404 && path.startsWith('/api/v1/gate/message/requests/')) {
-    return message.includes('request_id not found')
-  }
-  return message.includes('/api/v1/gate/message/requests/')
-    && message.includes('request_id not found')
+  const errorCode = asString(record?.errorCode, '').trim()
+  return method === 'POST'
+    && status === 404
+    && path === '/api/v1/gate/message/status'
+    && errorCode === 'run_not_found'
 }
 
 function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
@@ -626,7 +631,9 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
   markKeeperStreamSignal(request.keeperName, { force: true })
   try {
     for (;;) {
-      const result = await fetchQueuedKeeperMessageResult(request.requestId)
+      const result = await fetchQueuedKeeperMessageResult(
+        keeperRunRef(request.keeperName, request.requestId),
+      )
       markKeeperStreamSignal(request.keeperName)
       if (!isTerminalQueuedKeeperMessage(result)) {
         await sleep(PENDING_KEEPER_CHAT_POLL_MS)
@@ -637,8 +644,9 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       const isCheckpoint = reply.details?.turnOutcome === 'continuation_checkpoint'
       const isNoVisibleReply = reply.details?.turnOutcome === 'no_visible_reply'
       const suppressReply = keeperTurnOutcomeSuppressesReply(reply.details?.turnOutcome)
-      const isCancelled = result.status === 'cancelled'
-      const isError = !isCancelled && (isNoVisibleReply || result.status !== 'done' || result.ok === false)
+      const isCancelled = result.resultContract === 'cancelled'
+      const isError = !isCancelled
+        && (isNoVisibleReply || result.resultContract === 'failed')
       let errorMessage: string | null = null
       if (isNoVisibleReply) {
         errorMessage = EMPTY_VISIBLE_REPLY_TEXT
@@ -992,8 +1000,11 @@ async function resolveKeeperChatRecoveryEntry(
       queueState: state.kind,
       queueFailureKind: state.kind === 'failed' ? state.failureKind : null,
     }
+    let delivery: KeeperConversationDelivery = 'queued'
+    if (state.kind === 'failed') delivery = 'error'
+    else if (state.kind === 'delivered') delivery = 'delivered'
     finalizeAssistantEntry(keeperName, entry.id, {
-      delivery: state.kind === 'failed' ? 'error' : state.kind === 'delivered' ? 'delivered' : 'queued',
+      delivery,
       streamState: null,
       details,
       error: state.kind === 'failed' ? state.detail : undefined,

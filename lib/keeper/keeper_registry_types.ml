@@ -265,7 +265,7 @@ let lifecycle_event_origin_to_string = function
 
 let is_paired_lifecycle_event = function
   | Keeper_state_machine.Compaction_started
-  | Keeper_state_machine.Compaction_completed _
+  | Keeper_state_machine.Compaction_completed
   | Keeper_state_machine.Compaction_failed _
   | Keeper_state_machine.Handoff_started
   | Keeper_state_machine.Handoff_completed _
@@ -293,7 +293,7 @@ let origin_allows_paired_lifecycle_event origin event =
          handoff half-events flow through other origins. *)
       (match event with
        | Keeper_state_machine.Compaction_started
-       | Keeper_state_machine.Compaction_completed _
+       | Keeper_state_machine.Compaction_completed
        | Keeper_state_machine.Compaction_failed _ -> true
        | _ -> false)
 ;;
@@ -310,7 +310,7 @@ let compaction_stage_of_event entry event =
   | Keeper_state_machine.Compaction_started
   | Keeper_state_machine.Auto_compact_triggered
   | Keeper_state_machine.Operator_compact_requested -> Packed Compaction_compacting
-  | Keeper_state_machine.Compaction_completed _ -> Packed Compaction_done
+  | Keeper_state_machine.Compaction_completed -> Packed Compaction_done
   | Keeper_state_machine.Compaction_failed _ -> Packed Compaction_accumulating
   | _ -> entry.compaction_stage
 ;;

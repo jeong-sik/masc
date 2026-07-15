@@ -169,12 +169,6 @@ let model_catalog_resolution_source_label
   Server_runtime_bootstrap.model_catalog_env_source_to_string
     resolution.Server_runtime_bootstrap.source
 
-let capability_manifest_resolution_source_label
-    (resolution : Server_runtime_bootstrap.capability_manifest_env_resolution)
-  =
-  Server_runtime_bootstrap.capability_manifest_env_source_to_string
-    resolution.Server_runtime_bootstrap.source
-
 let test_model_catalog_resolution_prefers_explicit_env () =
   let env = function
     | "OAS_MODEL_CATALOG" -> Some "/explicit/oas-models.toml"
@@ -220,69 +214,6 @@ let test_model_catalog_resolution_prefers_explicit_env () =
 	      "/explicit/masc-models.toml"
 	      resolution.Server_runtime_bootstrap.path
 
-let test_capability_manifest_resolution_prefers_explicit_env () =
-  let env = function
-    | "OAS_CAPABILITY_MANIFEST" -> Some "/explicit/capability-manifest.json"
-    | _ -> None
-  in
-  with_temp_dir "capability-manifest-bootstrap-explicit" (fun dir ->
-    match
-      Server_runtime_bootstrap.resolve_oas_capability_manifest_path
-        ~env
-        ~config_root:dir
-        ()
-    with
-    | None -> Alcotest.fail "expected explicit OAS_CAPABILITY_MANIFEST resolution"
-    | Some resolution ->
-      Alcotest.(check string)
-        "source"
-        "OAS_CAPABILITY_MANIFEST"
-        (capability_manifest_resolution_source_label resolution);
-      Alcotest.(check string)
-        "path"
-        "/explicit/capability-manifest.json"
-        resolution.Server_runtime_bootstrap.path)
-
-let test_capability_manifest_configuration_uses_config_root_file () =
-  with_temp_dir "capability-manifest-bootstrap-config-root" (fun config_root ->
-    let manifest = Filename.concat config_root "capability-manifest.json" in
-    write_file manifest {|{"schema_version":1,"models":[]}|};
-    let putenv_calls = ref [] in
-    let clear_calls = ref 0 in
-    let load_calls = ref [] in
-    let set_calls = ref 0 in
-    let env _ = None in
-    let result =
-      Server_runtime_bootstrap.configure_oas_capability_manifest_env
-        ~env
-        ~config_root
-        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~clear_manifest:(fun () -> incr clear_calls)
-        ~load_manifest:(fun path ->
-          load_calls := path :: !load_calls;
-          Some [])
-        ~set_manifest:(fun (_ : Llm_provider.Capability_manifest.t) -> incr set_calls)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected config-root capability manifest resolution"
-     | Some resolution ->
-       Alcotest.(check string)
-         "source"
-         "config-root:capability-manifest.json"
-         (capability_manifest_resolution_source_label resolution);
-       Alcotest.(check string)
-         "path"
-         (canonical_path manifest)
-         (canonical_path resolution.Server_runtime_bootstrap.path));
-    Alcotest.(check (list (pair string string)))
-      "putenv"
-      [ "OAS_CAPABILITY_MANIFEST", manifest ]
-      (List.rev !putenv_calls);
-    Alcotest.(check int) "clear manifest cache" 1 !clear_calls;
-    Alcotest.(check (list string)) "load manifest" [ manifest ] (List.rev !load_calls);
-    Alcotest.(check int) "set manifest override" 1 !set_calls)
-
 let test_model_catalog_configuration_installs_resolved_catalog () =
   with_temp_dir "model-catalog-bootstrap-install" (fun dir ->
     let repo = Filename.concat dir "repo" in
@@ -294,7 +225,6 @@ let test_model_catalog_configuration_installs_resolved_catalog () =
     write_file bin "";
     write_file catalog "[[models]]\nid_prefix = \"example\"\n";
     let putenv_calls = ref [] in
-    let clear_calls = ref 0 in
     let load_calls = ref [] in
     let set_calls = ref 0 in
     let result =
@@ -303,10 +233,9 @@ let test_model_catalog_configuration_installs_resolved_catalog () =
         ~cwd
         ~argv0:bin
         ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~clear_catalog:(fun () -> incr clear_calls)
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Some Llm_provider.Model_catalog.empty)
+          Ok Llm_provider.Model_catalog.empty)
         ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
         ()
     in
@@ -325,7 +254,6 @@ let test_model_catalog_configuration_installs_resolved_catalog () =
       "putenv"
       [ "OAS_MODEL_CATALOG", catalog ]
       (List.rev !putenv_calls);
-    Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
     Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
     Alcotest.(check int) "set catalog override" 1 !set_calls)
 
@@ -338,7 +266,6 @@ let test_model_catalog_configuration_prefers_config_root_catalog () =
     mkdir_p outside;
     write_file catalog "[[models]]\nid_prefix = \"config-root-runtime\"\n";
     let putenv_calls = ref [] in
-    let clear_calls = ref 0 in
     let load_calls = ref [] in
     let set_calls = ref 0 in
     let result =
@@ -348,10 +275,9 @@ let test_model_catalog_configuration_prefers_config_root_catalog () =
         ~cwd:outside
         ~argv0:(Filename.concat outside "main_eio.exe")
         ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~clear_catalog:(fun () -> incr clear_calls)
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Some Llm_provider.Model_catalog.empty)
+          Ok Llm_provider.Model_catalog.empty)
         ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
         ()
     in
@@ -370,7 +296,6 @@ let test_model_catalog_configuration_prefers_config_root_catalog () =
       "putenv"
       [ "OAS_MODEL_CATALOG", catalog ]
       (List.rev !putenv_calls);
-    Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
     Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
     Alcotest.(check int) "set catalog override" 1 !set_calls)
 
@@ -439,7 +364,6 @@ let test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd () =
 let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
   with_temp_dir "model-catalog-bootstrap-agent-sdk" (fun dir ->
     let putenv_calls = ref [] in
-    let preload_calls = ref 0 in
     let env _ = None in
     let result =
       Server_runtime_bootstrap.configure_oas_model_catalog_env
@@ -447,12 +371,10 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
         ~cwd:dir
         ~argv0:(Filename.concat dir "main_eio.exe")
         ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~preload_agent_sdk_catalog:(fun () -> incr preload_calls)
         ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
         ()
     in
     Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result);
-    Alcotest.(check int) "preload called once" 1 !preload_calls;
     Alcotest.(check int) "does not write OAS_MODEL_CATALOG" 0
       (List.length !putenv_calls))
 
@@ -4725,12 +4647,6 @@ let () =
           Alcotest.test_case
             "model catalog resolution prefers explicit env"
             `Quick test_model_catalog_resolution_prefers_explicit_env;
-          Alcotest.test_case
-            "capability manifest resolution prefers explicit env"
-            `Quick test_capability_manifest_resolution_prefers_explicit_env;
-          Alcotest.test_case
-            "capability manifest configuration uses config root"
-            `Quick test_capability_manifest_configuration_uses_config_root_file;
           Alcotest.test_case
             "model catalog configuration installs resolved catalog"
             `Quick test_model_catalog_configuration_installs_resolved_catalog;

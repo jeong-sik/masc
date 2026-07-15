@@ -29,7 +29,7 @@ let total_tokens = Agent_sdk.Types.total_tokens
 
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
 let estimate_tokens (s : string) : int =
-  if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
+  if s = "" then 0 else Text_token_estimate.estimate_char_tokens s
 
 (** Zero usage marker — delegates to OAS [Agent_sdk.Types.zero_api_usage] (F4
     canonical projection consumption: removes re-spelled record literal).

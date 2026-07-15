@@ -583,14 +583,6 @@ let test_background_drain_continues_after_first_poll () =
        check bool "background drain keeps polling" true (wait_for_event_count 2 20))
 ;;
 
-let test_background_drain_loop_is_stack_bounded () =
-  let remaining = ref 1_000_000 in
-  EB.For_testing.run_background_drain_loop (fun () ->
-    decr remaining;
-    !remaining > 0);
-  check int "all immediate cycles complete without stack growth" 0 !remaining
-;;
-
 let () =
   Alcotest.run
     "keeper-unified-turn-event-bus"
@@ -621,8 +613,6 @@ let () =
             test_keeper_msg_submission_projection_has_unique_keys
         ; test_case "typed Keeper invocation wire contract" `Quick
             test_typed_keeper_invocation_wire_contract
-        ; test_case "background drain loop is stack bounded" `Quick
-            test_background_drain_loop_is_stack_bounded
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

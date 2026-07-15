@@ -206,10 +206,11 @@ let drain ?(site = "unspecified") t =
 (* Keep the recursion outside the cycle's exception handler. Calling [loop]
    from inside [try ... with] retains one handler frame per poll and is not a
    tail call, so a long-lived turn grows without bound until GC dominates the
-   server. This helper is shared with the regression test so that the tested
-   loop is the production loop. *)
+   server. The compiler-enforced [@tailcall] annotation prevents this call
+   from moving back under a handler frame. *)
 let rec run_background_drain_loop run_cycle =
-  if run_cycle () then run_background_drain_loop run_cycle
+  if run_cycle () then
+    (run_background_drain_loop [@tailcall]) run_cycle
 ;;
 
 let integrity_error t =
@@ -336,5 +337,4 @@ module For_testing = struct
       returns the displaced background drain handle (if any). Exposed so a
       unit test can assert it terminates and is idempotent on [Active]. *)
   let take_drain_cancel = take_drain_cancel
-  let run_background_drain_loop = run_background_drain_loop
 end

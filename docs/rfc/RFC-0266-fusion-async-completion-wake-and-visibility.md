@@ -123,7 +123,7 @@ type run = { run_id : string; keeper : string; preset : string;
 
 - **`masc_fusion_status` 도구** (신규): 인자 없으면 active runs 목록, `run_id` 주면 단건. run_id로 결정론적 polling 가능(현재는 polling surface 자체가 없음). task-1432 흡수.
 - **대시보드 fusion-runs 패널**: registry 스냅샷을 SSE로 반영, running/completed 카드. task-1433 흡수. (대시보드 새 surface 추가 시 nav-event parity 체크리스트 준수 — `dashboard_nav_event.ml:valid_surfaces` 등.)
-- registry는 append-only JSONL로 완료 이력을 복원한다. restart replay의 미완료 `Running`은 `Recovery_required Worker_process_restarted`로 보존되어 tool/waiting inventory/dashboard에 동일하게 나타난다. 실제 재실행에는 durable request/receipt가 필요하며 잔여 P0다.
+- registry는 append-only JSONL로 완료 이력을 복원한다. 시작 event append가 실패하면 Fusion worker를 시작하지 않는다. restart replay의 미완료 `Running`은 `Recovery_required Worker_process_restarted`로 보존되어 tool/waiting inventory/dashboard에 동일하게 나타난다. 실제 재실행에는 durable canonical request/completion receipt가 필요하며 잔여 P0다.
 
 ## 8. 재진입 / 루프 안전성
 

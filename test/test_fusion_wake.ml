@@ -14,6 +14,14 @@
 open Alcotest
 open Masc
 
+let register_running_exn registry ~run_id ~keeper ~preset ~started_at =
+  match
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset ~started_at
+  with
+  | Ok () -> ()
+  | Error error -> fail (Fusion_run_registry.persistence_error_to_string error)
+;;
+
 (* substring check without pulling in the [str] library *)
 let contains ~needle haystack =
   let nl = String.length needle and hl = String.length haystack in
@@ -420,7 +428,7 @@ let test_emit_success_projects_board_chat_and_registry () =
           { role = Fusion_types.Single; synthesis; usage = judge_usage }
       ]
     in
-    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
+    register_running_exn (Fusion_run_registry.global ()) ~run_id ~keeper
       ~preset:"unit-test" ~started_at:2.0;
     let result =
       Fusion_sink.emit ~base_dir ~keeper ~run_id ~question ~panel
@@ -789,14 +797,46 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       fail "fusion run should complete ok=true"
     | Some { Fusion_run_registry.status = Running; _ } ->
       fail "fusion run should not remain Running after background success"
+    | Some { Fusion_run_registry.status = Recovery_required _; _ } ->
+      fail "same-process success cannot require restart recovery"
     | None -> fail "fusion run should remain visible after background success")
 ;;
+
+let test_tool_handle_does_not_start_without_durable_register () =
+  with_isolated_eio_base_path "fusion-tool-register-failure" (fun env sw base_dir ->
+    let registry_path = Filename.concat base_dir "fusion-registry-directory" in
+    Unix.mkdir registry_path 0o700;
+    Fusion_run_registry.set_global (Fusion_run_registry.create ~path:registry_path ());
+    let called = ref false in
+    let run_orchestrator ~sw:_ ~net:_ ~base_dir:_ ~policy:_ ~topology:_ ~request:_ () =
+      called := true;
+      failwith "runner must not start without a durable register"
+    in
+    let run_id = "fus-register-failure" in
+    let response =
+      Fusion_tool.For_test.handle_with_runner ~run_orchestrator ~sw
+        ~net:(Eio.Stdenv.net env) ~base_dir ~keeper:"fusion-keeper" ~now_unix:4.0
+        ~run_id ~policy:(fusion_tool_policy ())
+        ~args:(`Assoc [ "prompt", `String "must persist before starting" ])
+        ()
+      |> Yojson.Safe.from_string
+      |> assoc_fields "fusion_tool.persistence_failure"
+    in
+    check bool "tool result is explicit failure" false
+      (bool_field "fusion_tool.persistence_failure" response "ok");
+    check string "typed status" "persistence_failed"
+      (string_field "fusion_tool.persistence_failure" response "status");
+    check bool "runner was not called" false !called;
+    check bool "failed run was not published" true
+      (Option.is_none (Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id)))
+;;
+
 let test_emit_board_failure_is_best_effort () =
   with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
     let keeper = "bad/keeper" in
     let run_id = Printf.sprintf "fus-board-fail-%d" (Random.bits ()) in
     let resolved_answer = "BOARD-BEST-EFFORT-ANSWER" in
-    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
+    register_running_exn (Fusion_run_registry.global ()) ~run_id ~keeper
       ~preset:"unit-test" ~started_at:1.0;
     let result =
       Fusion_sink.emit ~base_dir ~keeper ~run_id ~question:"q" ~panel:[]
@@ -880,6 +920,10 @@ let () =
             "tool handle returns Running then async success projects evidence"
             `Quick
             test_tool_handle_async_success_projects_running_then_completed
+        ; test_case
+            "tool handle does not start without durable register"
+            `Quick
+            test_tool_handle_does_not_start_without_durable_register
         ; test_case
             "emit treats board post failure as best-effort"
             `Quick

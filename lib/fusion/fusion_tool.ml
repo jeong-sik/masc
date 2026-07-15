@@ -134,10 +134,24 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
         ]
     | Fusion_types.Allow allowed ->
       (* RFC-0266 §7: 진행중 가시성을 위해 fork 직전 run을 Running으로 등록한다
-         (sink/실패 경로가 Completed로 갱신). 등록은 부수효과 없는 in-memory 기록일
-         뿐, 키퍼를 깨우지 않는다(wake는 별개). *)
-      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
-        ~preset ~started_at:now_unix;
+         (sink/실패 경로가 Completed로 갱신). Durable register가 실패하면 worker를
+         시작하지 않는다. 시작했지만 복구할 receipt가 없는 상태를 만들 수 없기
+         때문이다. *)
+      (match
+         Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+           ~keeper ~preset ~started_at:now_unix
+       with
+       | Error error ->
+         status_result
+           ~tool_name
+           ~class_:Tool_result.Runtime_failure
+           ~ok:false
+           [ ("status", `String "persistence_failed")
+           ; ("run_id", `String run_id)
+           ; ( "error"
+             , `String (Fusion_run_registry.persistence_error_to_string error) )
+           ]
+       | Ok () ->
       (* Reply route: captured next to [register_running] so route lifetime
          tracks the run. [register] drops [Unrouted] itself; the completion
          wake ([Fusion_sink.wake_keeper_on_fusion_completion], success AND
@@ -203,7 +217,7 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
               "async: you will be woken with the result when deliberation \
                completes; the conclusion (or failure reason) also lands on \
                your chat lane. No need to poll masc_fusion_status." )
-        ]
+        ])
 
 let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy
       ?continuation_channel ~args () =

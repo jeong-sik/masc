@@ -6,7 +6,16 @@
    never touched. *)
 
 open Alcotest
-module R = Fusion_run_registry
+module Registry = Fusion_run_registry
+module R = struct
+  include Registry
+
+  let register_running t ~run_id ~keeper ~preset ~started_at =
+    match Registry.register_running t ~run_id ~keeper ~preset ~started_at with
+    | Ok () -> ()
+    | Error error -> fail (Registry.persistence_error_to_string error)
+  ;;
+end
 
 let parse s = Yojson.Safe.from_string s
 

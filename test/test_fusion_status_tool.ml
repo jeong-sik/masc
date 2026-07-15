@@ -14,7 +14,16 @@
 
 open Alcotest
 open Masc
-module R = Fusion_run_registry
+module Registry = Fusion_run_registry
+module R = struct
+  include Registry
+
+  let register_running t ~run_id ~keeper ~preset ~started_at =
+    match Registry.register_running t ~run_id ~keeper ~preset ~started_at with
+    | Ok () -> ()
+    | Error error -> fail (Registry.persistence_error_to_string error)
+  ;;
+end
 module H = Keeper_tool_in_process_runtime
 
 let parse s = Yojson.Safe.from_string s

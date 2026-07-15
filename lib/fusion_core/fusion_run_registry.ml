@@ -17,6 +17,12 @@
 
 type recovery_reason = Worker_process_restarted
 
+type persistence_error =
+  | Append_failed of
+      { path : string
+      ; detail : string
+      }
+
 type run_status =
   | Running
   | Recovery_required of { reason : recovery_reason }
@@ -73,32 +79,45 @@ let rec update (t : t) (f : run list -> run list) =
   if not (Atomic.compare_and_set t.runs cur next) then update t f
 ;;
 
+let persistence_error_to_string = function
+  | Append_failed { path; detail } ->
+    Printf.sprintf "fusion registry append failed for %s: %s" path detail
+;;
+
 let append_event t event =
   match t.path with
-  | None -> ()
+  | None -> Ok ()
   | Some path ->
-    (try Fs_compat.append_jsonl path (Fusion_run_registry_event.to_yojson event) with
+    (try
+       Fs_compat.append_jsonl path (Fusion_run_registry_event.to_yojson event);
+       Ok ()
+     with
      | exn ->
-       Log.Misc.warn
-         "fusion_run_registry: append failed for %s: %s"
-         path
-         (Printexc.to_string exn))
+       let error = Append_failed { path; detail = Printexc.to_string exn } in
+       Log.Misc.warn "%s" (persistence_error_to_string error);
+       Error error)
 ;;
 
 let register_running t ~run_id ~keeper ~preset ~started_at =
-  append_event
-    t
-    (Fusion_run_registry_event.Register { run_id; keeper; preset; started_at });
-  update t (fun runs ->
-    let run = { run_id; keeper; preset; started_at; status = Running } in
-    (* defensive: a re-registered run_id replaces its prior entry *)
-    let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
-    prune (run :: without_dup))
+  match
+    append_event
+      t
+      (Fusion_run_registry_event.Register { run_id; keeper; preset; started_at })
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    update t (fun runs ->
+      let run = { run_id; keeper; preset; started_at; status = Running } in
+      (* defensive: a re-registered run_id replaces its prior entry *)
+      let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
+      prune (run :: without_dup));
+    Ok ()
 ;;
 
 let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
-  append_event t
-    (Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code });
+  ignore
+    (append_event t
+       (Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code }));
   update t (fun runs ->
     runs
     |> List.map (fun r ->

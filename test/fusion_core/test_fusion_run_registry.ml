@@ -2,7 +2,18 @@
    Pure in-memory state; tested on isolated [create ()] instances. *)
 
 open Alcotest
-module R = Fusion_run_registry
+module Registry = Fusion_run_registry
+module R = struct
+  include Registry
+
+  let register_running_result = Registry.register_running
+
+  let register_running t ~run_id ~keeper ~preset ~started_at =
+    match Registry.register_running t ~run_id ~keeper ~preset ~started_at with
+    | Ok () -> ()
+    | Error error -> fail (Registry.persistence_error_to_string error)
+  ;;
+end
 
 let status_running = function
   | R.Running -> true
@@ -36,6 +47,25 @@ let test_register_then_query () =
      check bool "is running" true (status_running run.R.status)
    | None -> fail "registered run must be retrievable");
   check int "one run tracked" 1 (List.length (R.list_runs t))
+;;
+
+let test_register_persistence_failure_is_not_published () =
+  let path = Filename.temp_file "fusion-registry-dir" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir path)
+    (fun () ->
+       let t = R.create ~path () in
+       match
+         R.register_running_result t ~run_id:"r-no-receipt" ~keeper:"k"
+           ~preset:"balanced" ~started_at:10.0
+       with
+       | Ok () -> fail "register must fail when its durable event cannot be appended"
+       | Error (R.Append_failed { path = failed_path; _ }) ->
+         check string "failed path" path failed_path;
+         check bool "failed durable register is not published" true
+           (Option.is_none (R.get t ~run_id:"r-no-receipt")))
 ;;
 
 let test_mark_completed () =
@@ -211,6 +241,8 @@ let () =
     [ ( "rfc-0266-phase2"
       , [ test_case "register then query" `Quick test_register_then_query
         ; test_case "mark completed (ok true/false)" `Quick test_mark_completed
+        ; test_case "durable register failure is not published" `Quick
+            test_register_persistence_failure_is_not_published
         ; test_case
             "finalize before suspend keeps Completed (buggy order leaks Running)"
             `Quick

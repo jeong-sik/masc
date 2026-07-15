@@ -11,6 +11,14 @@
 
 type recovery_reason = Worker_process_restarted
 
+type persistence_error =
+  | Append_failed of
+      { path : string
+      ; detail : string
+      }
+
+val persistence_error_to_string : persistence_error -> string
+
 type run_status =
   | Running
   | Recovery_required of { reason : recovery_reason }
@@ -51,9 +59,12 @@ val replay : string -> t
     the newest {!max_completed_retained}. *)
 
 val register_running :
-  t -> run_id:string -> keeper:string -> preset:string -> started_at:float -> unit
+  t -> run_id:string -> keeper:string -> preset:string -> started_at:float
+  -> (unit, persistence_error) result
 (** Record a run as [Running]. A repeated [run_id] replaces its prior entry.
-    When the registry was created with a path, appends a [Register] event. *)
+    When the registry was created with a path, the durable [Register] event is
+    committed before publishing in-memory state. An append failure returns
+    [Error] and the run is not registered. *)
 
 val mark_completed
   :  t

@@ -650,7 +650,7 @@ let compaction_reinjection_observation_json ~manifest_rows ~row_index row =
   | Some checkpoint_path ->
     let receipts =
       manifest_rows
-      |> List.filter_map (fun (index, candidate) ->
+      |> List.filter_map (fun (index, (candidate : Keeper_runtime_manifest.t)) ->
         if index <= row_index
            || not (String.equal candidate.Keeper_runtime_manifest.trace_id row.trace_id)
            || candidate.links.checkpoint_path <> Some checkpoint_path

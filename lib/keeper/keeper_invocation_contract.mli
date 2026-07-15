@@ -10,11 +10,7 @@ type target = Keeper of Keeper_id.Keeper_name.t
 
 type request
 
-type run_ref =
-  { run_id : string
-  ; target : target
-  ; capability : capability
-  }
+type run_ref
 
 type submission_receipt =
   | Durable_run of run_ref
@@ -37,11 +33,24 @@ type request_error =
   | Invalid_target of string
   | Empty_prompt
   | Invalid_entry_projection
+  | Invalid_wire_value of
+      { field : string
+      ; expected : string
+      }
+  | Run_ref_mismatch
 
 val request : keeper_name:string -> prompt:string -> (request, request_error) result
+val request_of_json : Yojson.Safe.t -> (request, request_error) result
 val request_error_to_string : request_error -> string
 val target_name : request -> string
 val prompt : request -> string
+val target_of_json : Yojson.Safe.t -> (target, request_error) result
+val target_to_json : target -> Yojson.Safe.t
+val target_name_of_target : target -> string
+val run_ref_of_json : Yojson.Safe.t -> (run_ref, request_error) result
+val run_ref_to_json : run_ref -> Yojson.Safe.t
+val run_id : run_ref -> string
+val run_ref_matches_entry : run_ref -> Keeper_msg_async.entry -> bool
 
 val submit
   :  background_sw:Eio.Switch.t
@@ -60,6 +69,19 @@ val result_contract : Keeper_msg_async.entry -> result_contract
 val submission_to_json
   :  request -> Keeper_msg_async.submit_outcome -> Yojson.Safe.t
 
+val delegate_submission_to_json
+  :  request -> Keeper_msg_async.submit_outcome -> Yojson.Safe.t
+
+val delegate_submission_error_to_json
+  :  request -> Keeper_msg_async.submit_error -> Yojson.Safe.t
+
+val delegate_cancellation_to_json
+  :  run_ref -> Keeper_msg_async.cancel_result -> Yojson.Safe.t
+
 val entry_to_json
+  :  Keeper_msg_async.entry
+  -> (Yojson.Safe.t, request_error) result
+
+val delegate_entry_to_json
   :  Keeper_msg_async.entry
   -> (Yojson.Safe.t, request_error) result

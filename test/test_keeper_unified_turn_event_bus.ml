@@ -439,6 +439,95 @@ let test_keeper_msg_submission_projection_has_unique_keys () =
     (Invocation.result_contract failed_entry = Invocation.Failed)
 ;;
 
+let test_typed_keeper_invocation_wire_contract () =
+  let request_json =
+    `Assoc
+      [ ( "target"
+        , `Assoc [ "kind", `String "keeper"; "name", `String "projection-keeper" ] )
+      ; "capability", `String "invoke_turn"
+      ; "prompt", `String "inspect this request"
+      ]
+  in
+  let request =
+    match Invocation.request_of_json request_json with
+    | Ok request -> request
+    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
+  in
+  check string "typed target decoded" "projection-keeper"
+    (Invocation.target_name request);
+  (match
+     Invocation.request_of_json
+       (`Assoc [ "name", `String "projection-keeper"; "message", `String "legacy" ])
+   with
+   | Error (Invocation.Invalid_wire_value _) -> ()
+   | Error error ->
+     Alcotest.failf "unexpected legacy-input rejection: %s"
+       (Invocation.request_error_to_string error)
+   | Ok _ -> Alcotest.fail "legacy name/message input must not decode");
+  let outcome : Kmsg.submit_outcome =
+    { request_id = "typed-run-ref"; acceptance = Kmsg.Durably_accepted }
+  in
+  let submission_fields =
+    Invocation.delegate_submission_to_json request outcome
+    |> require_unique_assoc "typed submission"
+  in
+  check bool "raw request id omitted" false
+    (List.mem_assoc "request_id" submission_fields);
+  check bool "legacy status omitted" false
+    (List.mem_assoc "status" submission_fields);
+  let run_ref_json =
+    match List.assoc_opt "run_ref" submission_fields with
+    | Some value -> value
+    | None -> Alcotest.fail "typed submission missing run_ref"
+  in
+  let run_ref =
+    match Invocation.run_ref_of_json run_ref_json with
+    | Ok reference -> reference
+    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
+  in
+  let entry : Kmsg.entry =
+    { request_id = "typed-run-ref"
+    ; keeper_name = "projection-keeper"
+    ; base_path = "/projection/base"
+    ; submitted_by = "projection-caller"
+    ; status = Kmsg.Running
+    ; submitted_at = 0.0
+    ; completed_at = None
+    }
+  in
+  check bool "run ref binds exact durable entry" true
+    (Invocation.run_ref_matches_entry run_ref entry);
+  let wrong_target_ref =
+    match
+      Invocation.run_ref_of_json
+        (`Assoc
+           [ "run_id", `String "typed-run-ref"
+           ; "target", `Assoc [ "kind", `String "keeper"; "name", `String "other" ]
+           ; "capability", `String "invoke_turn"
+           ])
+    with
+    | Ok reference -> reference
+    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
+  in
+  check bool "same run id cannot retarget invocation" false
+    (Invocation.run_ref_matches_entry wrong_target_ref entry);
+  let entry_fields =
+    match Invocation.delegate_entry_to_json entry with
+    | Ok json -> require_unique_assoc "typed entry" json
+    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
+  in
+  check bool "entry omits raw request id" false
+    (List.mem_assoc "request_id" entry_fields);
+  check bool "entry exposes result contract" true
+    (List.mem_assoc "result_contract" entry_fields);
+  let cancellation_fields =
+    Invocation.delegate_cancellation_to_json run_ref Kmsg.Cancel_not_found
+    |> require_unique_assoc "typed cancellation"
+  in
+  check bool "cancellation omits raw request id" false
+    (List.mem_assoc "request_id" cancellation_fields)
+;;
+
 let test_take_drain_cancel_clears_active_without_spin () =
   let open EB.For_testing in
   let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
@@ -522,6 +611,8 @@ let () =
             test_keeper_msg_async_submit_uses_captured_event_bus
         ; test_case "keeper msg submission JSON keys are unique" `Quick
             test_keeper_msg_submission_projection_has_unique_keys
+        ; test_case "typed Keeper invocation wire contract" `Quick
+            test_typed_keeper_invocation_wire_contract
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

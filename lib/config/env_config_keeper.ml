@@ -530,7 +530,7 @@ end
 module KeeperKeepalive = struct
   (** Heartbeat cycle interval in seconds. Default: 30.
       Range: [5, 300]. This is the foundational timing constant — every
-      keeper cycle (presence, snapshot, board scan, turn, recurring) runs
+      keeper cycle (presence, snapshot, board scan, turn) runs
       at this cadence. *)
   let interval_sec = keepalive_interval_sec_
 

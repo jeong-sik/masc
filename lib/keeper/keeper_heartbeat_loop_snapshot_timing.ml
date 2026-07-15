@@ -13,8 +13,8 @@
       avoid retry storms.
 
     - [record_keepalive_stage_timing] — populates one ring-buffer slot
-      of stage-timing measurements (presence/snapshot/board/turn/
-      recurring in ms) and advances the cursor. [timing_filled] caps
+      of stage-timing measurements (presence/snapshot/board/turn in ms)
+      and advances the cursor. [timing_filled] caps
       at [ring_sz].
 
     Pure helpers (no callback injection). All references reach
@@ -68,8 +68,6 @@ let record_keepalive_stage_timing
       ~(t_board_end : float)
       ~(t_turn_start : float)
       ~(t_turn_end : float)
-      ~(t_recurring_start : float)
-      ~(t_recurring_end : float)
   : unit
   =
   let timing : Keeper_keepalive_signal.stage_timing =
@@ -78,7 +76,6 @@ let record_keepalive_stage_timing
     ; snapshot_ms = (t_snapshot_end -. t_snapshot_start) *. 1000.0
     ; board_ms = (t_board_end -. t_board_start) *. 1000.0
     ; turn_ms = (t_turn_end -. t_turn_start) *. 1000.0
-    ; recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0
     }
   in
   timing_ring.(!timing_cursor) <- timing;

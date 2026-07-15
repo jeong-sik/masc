@@ -24,7 +24,5 @@ val record_keepalive_stage_timing :
   t_board_end:float ->
   t_turn_start:float ->
   t_turn_end:float ->
-  t_recurring_start:float ->
-  t_recurring_end:float ->
   unit
 (** Record one keepalive cycle's stage timing in the ring buffer. *)

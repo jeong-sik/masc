@@ -2,8 +2,19 @@ type lane =
   | Keeper_lane of string
   | Connector_lane of string
 
+type route =
+  | Triggered
+  | Ambient
+  | Control
+
+type phase =
+  | Acceptance
+  | Delivery
+
 type event_id =
   { source : string
+  ; route : route
+  ; phase : phase
   ; opaque_id : string
   }
 
@@ -38,8 +49,25 @@ let lane_to_string = function
   | Connector_lane connector_id -> "connector:" ^ connector_id
 ;;
 
+let route_to_string = function
+  | Triggered -> "triggered"
+  | Ambient -> "ambient"
+  | Control -> "control"
+;;
+
+let phase_to_string = function
+  | Acceptance -> "acceptance"
+  | Delivery -> "delivery"
+;;
+
 let event_id_to_string event_id =
-  event_id.source ^ ":" ^ event_id.opaque_id
+  String.concat
+    ":"
+    [ event_id.source
+    ; route_to_string event_id.route
+    ; phase_to_string event_id.phase
+    ; event_id.opaque_id
+    ]
 ;;
 
 let with_lock t f = Stdlib.Mutex.protect t.mutex f

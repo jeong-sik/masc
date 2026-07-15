@@ -177,7 +177,11 @@ let test_durable_accept_precedes_delivery_handoff () =
   let failure = Eio.Promise.await observed in
   check string "exact Discord message id" "discord-exact-123"
     failure.Connector_ingress_lane.event_id.opaque_id;
-  check string "typed source" "discord_triggered" failure.event_id.source;
+  check string "connector source" State.channel failure.event_id.source;
+  check bool "triggered route" true
+    (failure.event_id.route = Connector_ingress_lane.Triggered);
+  check bool "delivery phase" true
+    (failure.event_id.phase = Connector_ingress_lane.Delivery);
   match failure.lane with
   | Connector_ingress_lane.Keeper_lane keeper_name ->
     check string "resolved Keeper lane" "luna" keeper_name
@@ -233,8 +237,11 @@ let test_accept_failure_does_not_kill_discord_ingress () =
   | Some failure ->
     check string "failed source event" "discord-accept-failed"
       failure.Connector_ingress_lane.event_id.opaque_id;
-    check string "accept phase" "discord_triggered_accept"
-      failure.event_id.source;
+    check string "connector source" State.channel failure.event_id.source;
+    check bool "triggered route" true
+      (failure.event_id.route = Connector_ingress_lane.Triggered);
+    check bool "acceptance phase" true
+      (failure.event_id.phase = Connector_ingress_lane.Acceptance);
     (match failure.lane with
      | Connector_ingress_lane.Keeper_lane keeper_name ->
        check string "failed Keeper lane" "luna" keeper_name

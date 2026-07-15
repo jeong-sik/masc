@@ -716,7 +716,9 @@ let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
   | Gw.Message_create
       { channel_id; message_id; message_reference_channel_id; _ } ->
     let event_id =
-      { Connector_ingress_lane.source = "discord_triggered_accept"
+      { Connector_ingress_lane.source = State.channel
+      ; route = Connector_ingress_lane.Triggered
+      ; phase = Connector_ingress_lane.Acceptance
       ; opaque_id = message_id
       }
     in
@@ -754,7 +756,12 @@ let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
           Connector_ingress_lane.submit
             ingress
             ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
-            ~event_id:{ source = "discord_triggered"; opaque_id = message_id }
+            ~event_id:
+              { source = State.channel
+              ; route = Connector_ingress_lane.Triggered
+              ; phase = Connector_ingress_lane.Delivery
+              ; opaque_id = message_id
+              }
             (Option.value deliver ~default:accepted_delivery)))
   | Gw.Ready _
   | Gw.Reaction_add _
@@ -767,7 +774,9 @@ let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
          ingress
          ~lane:(Connector_ingress_lane.Connector_lane State.channel)
          ~event_id:
-           { source = "discord_control"
+           { source = State.channel
+           ; route = Connector_ingress_lane.Control
+           ; phase = Connector_ingress_lane.Acceptance
            ; opaque_id = discord_event_opaque_id ev
            }
          (fun () ->
@@ -792,13 +801,22 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
             ingress
             ~lane:(Connector_ingress_lane.Connector_lane State.channel)
             ~event_id:
-              { source = "discord_ambient_accept"; opaque_id = message_id }
+              { source = State.channel
+              ; route = Connector_ingress_lane.Ambient
+              ; phase = Connector_ingress_lane.Acceptance
+              ; opaque_id = message_id
+              }
             (fun () -> on_ambient ~base_dir ev))
      | Some keeper_name ->
        Connector_ingress_lane.submit
          ingress
          ~lane:(Connector_ingress_lane.Keeper_lane keeper_name)
-         ~event_id:{ source = "discord_ambient"; opaque_id = message_id }
+         ~event_id:
+           { source = State.channel
+           ; route = Connector_ingress_lane.Ambient
+           ; phase = Connector_ingress_lane.Delivery
+           ; opaque_id = message_id
+           }
          (fun () -> on_ambient ~resolved_keeper_name:keeper_name ~base_dir ev))
   | Gw.Ready _
   | Gw.Reaction_add _
@@ -811,7 +829,9 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
          ingress
          ~lane:(Connector_ingress_lane.Connector_lane State.channel)
          ~event_id:
-           { source = "discord_ambient_control"
+           { source = State.channel
+           ; route = Connector_ingress_lane.Ambient
+           ; phase = Connector_ingress_lane.Acceptance
            ; opaque_id = discord_event_opaque_id ev
            }
          (fun () -> on_ambient ~base_dir ev))

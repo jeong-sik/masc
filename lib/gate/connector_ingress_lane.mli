@@ -4,8 +4,19 @@ type lane =
   | Keeper_lane of string
   | Connector_lane of string
 
+type route =
+  | Triggered
+  | Ambient
+  | Control
+
+type phase =
+  | Acceptance
+  | Delivery
+
 type event_id =
   { source : string
+  ; route : route
+  ; phase : phase
   ; opaque_id : string
   }
 

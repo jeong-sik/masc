@@ -347,7 +347,11 @@ let submit_event ?deliver ingress ~dispatch_for_delivery ~clock
            ingress
            ~lane
            ~event_id:
-             { source = "slack_triggered_accept"; opaque_id = event_id }
+             { source = State.channel
+             ; route = Connector_ingress_lane.Triggered
+             ; phase = Connector_ingress_lane.Acceptance
+             ; opaque_id = event_id
+             }
            (fun () ->
              accept_event ~resolved_binding ~dispatch_for_delivery ev)
        with
@@ -356,7 +360,12 @@ let submit_event ?deliver ingress ~dispatch_for_delivery ~clock
         Connector_ingress_lane.submit
           ingress
           ~lane:(Connector_ingress_lane.Keeper_lane accepted.keeper_name)
-          ~event_id:{ source = "slack_triggered"; opaque_id = event_id }
+          ~event_id:
+            { source = State.channel
+            ; route = Connector_ingress_lane.Triggered
+            ; phase = Connector_ingress_lane.Delivery
+            ; opaque_id = event_id
+            }
           (match deliver with
            | Some deliver -> deliver
            | None -> fun () -> deliver_inbound ~clock accepted))
@@ -368,7 +377,11 @@ let submit_event ?deliver ingress ~dispatch_for_delivery ~clock
          ingress
          ~lane:(Connector_ingress_lane.Connector_lane State.channel)
          ~event_id:
-           { source = "slack_control"; opaque_id = slack_event_opaque_id ev }
+           { source = State.channel
+           ; route = Connector_ingress_lane.Control
+           ; phase = Connector_ingress_lane.Acceptance
+           ; opaque_id = slack_event_opaque_id ev
+           }
          (fun () ->
            accept_event ~resolved_binding:None ~dispatch_for_delivery ev))
   | Gw.Message_create { channel_id; ts; bot_id = None; _ }
@@ -379,7 +392,11 @@ let submit_event ?deliver ingress ~dispatch_for_delivery ~clock
          ingress
          ~lane:(Connector_ingress_lane.Connector_lane State.channel)
          ~event_id:
-           { source = "slack_control"; opaque_id = slack_event_opaque_id ev }
+           { source = State.channel
+           ; route = Connector_ingress_lane.Control
+           ; phase = Connector_ingress_lane.Acceptance
+           ; opaque_id = slack_event_opaque_id ev
+           }
          (fun () ->
            accept_event ~resolved_binding:None ~dispatch_for_delivery ev))
 ;;

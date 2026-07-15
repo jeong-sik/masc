@@ -289,8 +289,11 @@ let test_bound_message_queues_exact_slack_ts () =
       let failure = Eio.Promise.await observed in
       check string "exact Slack event ts" "1710000000.123456"
         failure.Connector_ingress_lane.event_id.opaque_id;
-      check string "typed source" "slack_triggered"
-        failure.event_id.source;
+      check string "connector source" State.channel failure.event_id.source;
+      check bool "triggered route" true
+        (failure.event_id.route = Connector_ingress_lane.Triggered);
+      check bool "delivery phase" true
+        (failure.event_id.phase = Connector_ingress_lane.Delivery);
       match failure.lane with
       | Connector_ingress_lane.Keeper_lane keeper_name ->
         check string "resolved Keeper lane" "luna" keeper_name
@@ -381,8 +384,11 @@ let test_accept_failure_does_not_kill_slack_ingress () =
       | Some failure ->
         check string "failed source event" "slack-accept-failed"
           failure.Connector_ingress_lane.event_id.opaque_id;
-        check string "accept phase" "slack_triggered_accept"
-          failure.event_id.source;
+        check string "connector source" State.channel failure.event_id.source;
+        check bool "triggered route" true
+          (failure.event_id.route = Connector_ingress_lane.Triggered);
+        check bool "acceptance phase" true
+          (failure.event_id.phase = Connector_ingress_lane.Acceptance);
         (match failure.lane with
          | Connector_ingress_lane.Keeper_lane keeper_name ->
            check string "failed Keeper lane" "luna" keeper_name

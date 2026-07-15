@@ -59,7 +59,11 @@ let test_ingress_isolates_lanes_and_preserves_lane_fifo () =
           ()
       in
       let event opaque_id : Ingress.event_id =
-        { source = "test"; opaque_id }
+        { source = "test"
+        ; route = Ingress.Triggered
+        ; phase = Ingress.Delivery
+        ; opaque_id
+        }
       in
       Ingress.submit
         ingress
@@ -120,12 +124,22 @@ let test_ingress_observes_callback_failure_and_continues () =
       Ingress.submit
         ingress
         ~lane
-        ~event_id:{ source = "test"; opaque_id = "failed" }
+        ~event_id:
+          { source = "test"
+          ; route = Ingress.Triggered
+          ; phase = Ingress.Delivery
+          ; opaque_id = "failed"
+          }
         (fun () -> failwith "callback boom");
       Ingress.submit
         ingress
         ~lane
-        ~event_id:{ source = "test"; opaque_id = "later" }
+        ~event_id:
+          { source = "test"
+          ; route = Ingress.Triggered
+          ; phase = Ingress.Delivery
+          ; opaque_id = "later"
+          }
         (fun () -> Eio.Promise.resolve resolve_later_done ());
       Eio.Promise.await failure_seen;
       Eio.Promise.await later_done;
@@ -135,7 +149,7 @@ let test_ingress_observes_callback_failure_and_continues () =
         check
           string
           "failure retains exact event identity"
-          "test:failed"
+          "test:triggered:delivery:failed"
           (Ingress.event_id_to_string failure.event_id);
         check
           string

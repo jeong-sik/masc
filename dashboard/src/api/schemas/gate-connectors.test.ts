@@ -24,6 +24,7 @@ describe('parseGateConnectorsData', () => {
     expect(result.connectors).toHaveLength(1)
     expect(result.connectors[0].connector_id).toBe('c1')
     expect(result.connectors[0].capabilities).toEqual([])
+    expect(result.connectors[0].trigger_policy).toBeNull()
     expect(result.connectors[0].available).toBe(false)
     expect(result.connectors[0].guild_count).toBe(0)
     expect(result.connectors[0].source_health).toEqual({
@@ -36,6 +37,29 @@ describe('parseGateConnectorsData', () => {
     expect(result.total).toBe(1)
     expect(result.active_count).toBe(1)
     expect(result.generated_at).toBe('2024-01-01T00:00:00Z')
+  })
+
+  it('projects leaf trigger policy without retaining the legacy aggregate field', () => {
+    const result = parseGateConnectorsData({
+      ...minimalOuter,
+      connectors: [{ ...minimalConnector, trigger_policy: 'all' }],
+      discord_trigger_policy: 'mention_only',
+    })
+    expect(result.connectors[0].trigger_policy).toBe('all')
+    expect('discord_trigger_policy' in result).toBe(false)
+  })
+
+  it('does not reinterpret an invalid leaf trigger policy as null', () => {
+    const result = parseGateConnectorsData({
+      ...minimalOuter,
+      connectors: [
+        { ...minimalConnector, trigger_policy: 7 },
+        { ...minimalConnector, connector_id: 'c2', trigger_policy: null },
+      ],
+    })
+    expect(result.connectors).toHaveLength(1)
+    expect(result.connectors[0].connector_id).toBe('c2')
+    expect(result.connectors[0].trigger_policy).toBeNull()
   })
 
   it('throws GateConnectorsSchemaDriftError when generated_at is empty', () => {

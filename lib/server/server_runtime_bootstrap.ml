@@ -70,7 +70,7 @@ let warn_ignored_config_root_full_catalogs
     [ "models.toml"; "oas-models.toml" ]
     |> List.iter (fun filename ->
       let path = Filename.concat config_root filename in
-      if existing_file path
+      if Option.is_some (existing_file path)
       then
         Log.Misc.warn
           "model_catalog: ignoring retired config-root full catalog %s; OAS embedded catalog plus oas-models-overlay.toml is the deployment SSOT (set OAS_MODEL_CATALOG explicitly only for a deliberate full replacement)"

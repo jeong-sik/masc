@@ -1946,7 +1946,7 @@
 (include stanzas/test_keeper_path_rejection.inc)
 (include stanzas/test_keeper_path_containment_objective.inc)
 
-(include stanzas/test_keeper_approval_queue_rules_types.inc)
+(include stanzas/test_keeper_approval_queue_types.inc)
 
 
 (include stanzas/test_keeper_approval_queue.inc)

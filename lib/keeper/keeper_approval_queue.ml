@@ -1,6 +1,55 @@
 (** Durable, nonblocking HITL requests for Keeper external effects. *)
 
-include Keeper_approval_queue_rules
+include Keeper_approval_queue_types
+
+let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ApprovalQueueFailures)
+    ~labels:[ "keeper", keeper_name; "site", site ]
+    ();
+  Log.Keeper.warn
+    "approval_queue: %s failed keeper=%s id=%s event=%s err=%s"
+    site
+    keeper_name
+    id
+    event_type
+    (Printexc.to_string exn)
+;;
+
+module SMap = Set_util.StringMap
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then () else atomic_update atomic f
+;;
+
+let pending : pending_approval SMap.t Atomic.t = Atomic.make SMap.empty
+
+let id_rng = Random.State.make_self_init ()
+let id_rng_mu = Stdlib.Mutex.create ()
+
+let make_generated_id prefix =
+  let uuid =
+    Stdlib.Mutex.protect id_rng_mu (fun () -> Uuidm.v4_gen id_rng ())
+  in
+  prefix ^ "_" ^ Uuidm.to_string uuid
+;;
+
+let rec canonical_request_json = function
+  | `Assoc fields ->
+    fields
+    |> List.map (fun (key, value) -> key, canonical_request_json value)
+    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
+    |> fun canonical -> `Assoc canonical
+  | `List items -> `List (List.map canonical_request_json items)
+  | other -> other
+;;
+
+let request_fingerprint (input : Yojson.Safe.t) =
+  let canonical_json = canonical_request_json input |> Yojson.Safe.to_string in
+  Digestif.SHA256.(digest_string canonical_json |> to_hex)
+;;
 
 type storage_error =
   { path : string

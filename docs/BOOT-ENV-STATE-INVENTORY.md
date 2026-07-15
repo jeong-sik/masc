@@ -204,7 +204,7 @@ without mutating the parent environment.
 | Runs | `<runtime_root>/runs/<task_id>/` |
 | Board | `<runtime_root>/board_posts.jsonl`, `board_comments.jsonl`, `board_votes.jsonl` |
 | Goals | `<runtime_root>/goals.json`, `goals_snapshots/`, `goals_scheduler_state.json` |
-| Keeper Gate state | `<runtime_root>/gate/mode.json`, `gate/pending.json`, `gate/always-allowed.json` |
+| Keeper Gate state | `<runtime_root>/gate/mode.json`, `gate/pending.json` |
 | Control plane | `<runtime_root>/control-plane/` |
 | Operator lane | `<runtime_root>/operator/` |
 | Logs | `<runtime_root>/logs/` |
@@ -262,7 +262,6 @@ Goal dispatch and long/mid/short-horizon behavior also depend on model-routing c
 
 - `<runtime_root>/gate/mode.json`
 - `<runtime_root>/gate/pending.json`
-- `<runtime_root>/gate/always-allowed.json`
 - `<runtime_root>/audit-approvals/YYYY-MM/DD.jsonl`
 
 The retired `governance*` trees are not active runtime inputs. Their presence on

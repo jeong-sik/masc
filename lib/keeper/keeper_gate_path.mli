@@ -4,4 +4,3 @@
 val dir : base_path:string -> string
 val mode : base_path:string -> string
 val pending : base_path:string -> string
-val always_allowed : base_path:string -> string

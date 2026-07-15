@@ -76,6 +76,19 @@ let rec meta = function
   | Manual_compaction_applied outcome -> meta outcome
 ;;
 
+let rec turn_failure = function
+  | Failed { failure; _ } -> Some failure
+  | Manual_compaction_applied outcome -> turn_failure outcome
+  | Completed _ | Cancelled _ | Skipped _ | Busy _
+  | Judgment_settled _ | Manual_compaction_failed _ -> None
+;;
+
+let manual_compaction_followup_failure = function
+  | Manual_compaction_applied outcome -> turn_failure outcome
+  | Completed _ | Cancelled _ | Skipped _ | Failed _ | Busy _
+  | Judgment_settled _ | Manual_compaction_failed _ -> None
+;;
+
 let with_manual_compaction applied outcome =
   if applied then Manual_compaction_applied outcome else outcome
 ;;

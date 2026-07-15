@@ -322,7 +322,28 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
          Keeper_registry_event_queue.Approval_grant_state_unavailable)
   | None ->
     (match outcome with
-  | Some (Cycle.Manual_compaction_applied _) -> Keeper_registry_event_queue.Ack
+  | Some (Cycle.Manual_compaction_applied _ as applied) ->
+    (match Cycle.manual_compaction_followup_failure applied with
+     | Some
+         ({ Keeper_unified_turn.source_lease_disposition =
+              Keeper_unified_turn.Follow_failure_route
+          ; route =
+              Keeper_runtime_failure_route.Escalate_judgment
+                { judgment; provenance; detail }
+          ; _
+          } as failure) ->
+       Keeper_registry_event_queue.Escalate
+         { reason = Keeper_registry_event_queue.Failure_judgment_requested
+         ; successor =
+             Some
+               (failure_judgment_successor
+                  ~arrived_at:settled_at
+                  failure
+                  judgment
+                  provenance
+                  detail)
+         }
+     | Some _ | None -> Keeper_registry_event_queue.Ack)
   | Some (Cycle.Completed _) -> Keeper_registry_event_queue.Ack
   | Some (Cycle.Cancelled _) ->
     Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled

@@ -591,7 +591,10 @@ let compaction_snapshot_item_json (item : compaction_snapshot_item) =
     ; "compaction_source", Json_util.string_opt_to_json item.compaction_source
     ; "status", `String item.status
     ; "links", item.links
-    ; "exact_evidence", Option.value ~default:`Null item.exact_evidence
+    ; ( "exact_evidence"
+      , match item.exact_evidence with
+        | Some evidence -> evidence
+        | None -> `Null )
     ; "reinjection_observation", item.reinjection_observation
     ]
 ;;

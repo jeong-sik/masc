@@ -91,7 +91,6 @@ val is_internal_history_source : string -> bool
 val keeper_policy_log_path : Workspace.config -> string -> string
 val keeper_decision_log_path : Workspace.config -> string -> string
 val keeper_feedback_log_path : Workspace.config -> string -> string
-val keeper_dataset_export_path : Workspace.config -> string -> string
 val keeper_alerts_path : Workspace.config -> string
 val keeper_alert_retry_path : Workspace.config -> string
 val keeper_alert_deadletter_path : Workspace.config -> string

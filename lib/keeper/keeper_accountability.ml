@@ -36,7 +36,10 @@ let keeper_decision_log_path (config : Workspace_query.config) name =
   let keepers_dir =
     Common.keepers_runtime_dir_of_base ~base_path:config.base_path
   in
-  Filename.concat keepers_dir (name ^ ".decisions.jsonl")
+  Filename.concat keepers_dir
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Decision_log)
 ;;
 
 let tail_decision_log_lines_or_empty path ~max_bytes ~max_lines =

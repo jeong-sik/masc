@@ -3,10 +3,19 @@
     This layer records schedule intent and generic execution attempts. It
     deliberately does not authorize or execute payload effects. *)
 
+type rejected_schedule_row =
+  { ordinal : int
+  ; raw : Yojson.Safe.t
+  ; error : Schedule_domain.schedule_request_decode_error
+  }
+(** A schedule row rejected by the versioned recurrence decoder. Its raw JSON
+    is preserved across writes, but it never enters eligibility or dispatch. *)
+
 type state =
   { version : int
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
+  ; rejected_schedules : rejected_schedule_row list
   ; executions : Schedule_domain.execution_record list
   }
 

@@ -343,7 +343,7 @@ let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
                     },
                     [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
 
-let handle_message_create ~dispatch
+let handle_message_create ?resolved_binding ~dispatch
       ~clock
       ~(channel_id : string) ~(message_id : string)
       ~(guild_id : string option)
@@ -355,7 +355,13 @@ let handle_message_create ~dispatch
       ~(message_reference_channel_id : string option)
       ~(message_reference_message_id : string option)
       ~(referenced_message_author_id : string option) =
-  match resolve_binding_for_message ~channel_id ~message_reference_channel_id with
+  let binding =
+    match resolved_binding with
+    | Some binding -> Some binding
+    | None ->
+      resolve_binding_for_message ~channel_id ~message_reference_channel_id
+  in
+  match binding with
   | None ->
     (* No binding for this channel — drop quietly. The bot may be in
        channels it isn't bound to (e.g. server-wide guild messages). *)
@@ -514,7 +520,8 @@ let handle_message_create ~dispatch
               Discord_observability.record_reply
                 Discord_observability.Reply_send_failed))
 
-let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
+let on_event ?resolved_binding ~dispatch ~clock ~base_dir
+    (ev : Gw.gateway_event) =
   match ev with
   | Gw.Ready { bot_user_id; _ } ->
     State.record_ready ~bot_user_id;
@@ -535,7 +542,8 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
       } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
-    handle_message_create ~dispatch ~clock ~channel_id ~message_id ~author_id
+    handle_message_create ?resolved_binding ~dispatch ~clock ~channel_id
+      ~message_id ~author_id
       ~guild_id ~base_dir ~author_name ~content ~mentions_bot ~explicit_mentions_bot
       ~message_reference_channel_id ~message_reference_message_id
       ~referenced_message_author_id
@@ -569,10 +577,15 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
    the trigger policy is still conversation the keeper sits in. Persist
    a single user line — no dispatch, no turn. Unbound channels drop, as
    on the dispatch path. *)
-let handle_ambient ~base_dir
+let handle_ambient ?resolved_keeper_name ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
       ~(author_id : string) ~(author_name : string option) ~(content : string) =
-  match State.keeper_for_channel ~channel_id with
+  let keeper_name =
+    match resolved_keeper_name with
+    | Some keeper_name -> Some keeper_name
+    | None -> State.keeper_for_channel ~channel_id
+  in
+  match keeper_name with
   | None ->
     Discord_observability.record_ambient
       Discord_observability.Ambient_dropped_unbound
@@ -695,14 +708,62 @@ let handle_ambient ~base_dir
         Discord_observability.Ambient_recorded
     end
 
-let on_ambient ~base_dir (ev : Gw.gateway_event) =
+let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
       { channel_id; guild_id; message_id; author_id; author_name; content; _ }
     ->
-    handle_ambient ~base_dir ~channel_id ~guild_id ~message_id ~author_id
-      ~author_name ~content
+    handle_ambient ?resolved_keeper_name ~base_dir ~channel_id ~guild_id
+      ~message_id ~author_id ~author_name ~content
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
+
+let submit_triggered_event ingress ~dispatch ~clock ~base_dir
+    (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Message_create
+      { channel_id; message_id; message_reference_channel_id; _ } ->
+    (match
+       resolve_binding_for_message ~channel_id ~message_reference_channel_id
+     with
+     | None -> on_event ~dispatch ~clock ~base_dir ev
+     | Some ((resolution, _) as resolved_binding) ->
+       Connector_ingress_lane.submit
+         ingress
+         ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
+         ~event_id:{ source = "discord_triggered"; opaque_id = message_id }
+         (fun () ->
+            on_event
+              ~resolved_binding
+              ~dispatch
+              ~clock
+              ~base_dir
+              ev))
+  | Gw.Ready _
+  | Gw.Reaction_add _
+  | Gw.Thread_tracked _
+  | Gw.Threads_bulk_tracked _
+  | Gw.Thread_removed _
+  | Gw.Ignored _ -> on_event ~dispatch ~clock ~base_dir ev
+;;
+
+let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Message_create { channel_id; message_id; _ } ->
+    (match State.keeper_for_channel ~channel_id with
+     | None -> on_ambient ~base_dir ev
+     | Some keeper_name ->
+       Connector_ingress_lane.submit
+         ingress
+         ~lane:(Connector_ingress_lane.Keeper_lane keeper_name)
+         ~event_id:{ source = "discord_ambient"; opaque_id = message_id }
+         (fun () -> on_ambient ~resolved_keeper_name:keeper_name ~base_dir ev))
+  | Gw.Ready _
+  | Gw.Reaction_add _
+  | Gw.Thread_tracked _
+  | Gw.Threads_bulk_tracked _
+  | Gw.Thread_removed _
+  | Gw.Ignored _ -> on_ambient ~base_dir ev
+;;
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)
@@ -716,6 +777,17 @@ let start ~sw ~env ~clock ~state =
   | Some token ->
     let policy = resolved_trigger_policy () in
     State.set_trigger_policy policy;
+    let ingress =
+      Connector_ingress_lane.create
+        ~sw
+        ~on_failure:(fun failure ->
+          Log.Server.error
+            "Discord ingress callback failed lane=%s event=%s: %s"
+            (Connector_ingress_lane.lane_to_string failure.lane)
+            (Connector_ingress_lane.event_id_to_string failure.event_id)
+            failure.reason)
+        ()
+    in
     let dispatch_for_config config =
       (* RFC-connector-deferred-reply-via-chat-queue: tag this dispatch as the Discord connector so a message that
          arrives while the keeper is in flight is enqueued onto
@@ -745,14 +817,15 @@ let start ~sw ~env ~clock ~state =
           ~trigger_policy:policy
           ~on_event:(fun ev ->
             let config = Mcp_server.workspace_config state in
-            on_event
+            submit_triggered_event
+              ingress
               ~dispatch:(dispatch_for_config config)
               ~clock
               ~base_dir:config.base_path
               ev)
           ~on_ambient:(fun ev ->
             let config = Mcp_server.workspace_config state in
-            on_ambient ~base_dir:config.base_path ev)
+            submit_ambient_event ingress ~base_dir:config.base_path ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

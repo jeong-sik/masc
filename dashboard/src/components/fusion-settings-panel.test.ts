@@ -6,20 +6,15 @@ const SAMPLE = `[fusion]
 enabled = true
 default_preset = "trio"
 
-[fusion.gate]
-per_hour_budget = 20
-
 [fusion.presets.trio]
 panel = ["a", "b", "c"]
 judge = "j"
-min_answered = 2
 `
 
 const SAMPLE_WITH_DUO = `${SAMPLE}
 [fusion.presets.duo]
 panel = ["a", "b"]
 judge = "j"
-min_answered = 1
 `
 
 const SAMPLE_WITH_RUNTIME_OPTIONS = `${SAMPLE}
@@ -71,24 +66,6 @@ async function mount() {
 }
 
 describe('FusionSettingsPanel', () => {
-  it('loads live config and renders the editor with the current min_answered', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    await mount()
-    const minInput = q('[data-testid="fusion-min-answered"]') as HTMLInputElement
-    expect(minInput.value).toBe('2')
-  })
-
-  it('save posts the applied runtime.toml text (min_answered in the preset table)', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    saveMock.mockResolvedValue(cfg({ ok: true, reloaded: true }))
-    await mount()
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
-    const posted = saveMock.mock.calls[0]?.[0] as string
-    expect(posted.split('[fusion.presets.trio]')[1]).toContain('min_answered = 2')
-    expect(runtimeRefreshMock).toHaveBeenCalledTimes(1)
-  })
-
   it('edits the active flat preset panel runtimes and judge runtime', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE_WITH_RUNTIME_OPTIONS }))
     saveMock.mockImplementation(async (sourceText: string) => cfg({ ok: true, reloaded: true, source_text: sourceText }))
@@ -116,18 +93,18 @@ describe('FusionSettingsPanel', () => {
     saveMock.mockResolvedValue({
       ...cfg({ ok: false }),
       message: 'Runtime config validation failed',
-      reason: 'min_answered exceeds preset panel count',
-      issues: [{ key: 'fusion.presets.trio.min_answered', message: 'must be <= 2' }],
+      reason: 'default preset does not exist',
+      issues: [{ key: 'fusion.default_preset', message: 'unknown preset' }],
     })
     await mount()
     ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('fusion.presets.trio.min_answered')
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('must be <= 2')
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('fusion.default_preset')
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('unknown preset')
     expect(q('[data-testid="fusion-settings-saved"]')).toBeNull()
   })
 
-  it('uses the selected preset existing min_answered when default_preset changes', async () => {
+  it('uses the selected preset composition when default_preset changes', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE_WITH_DUO }))
     saveMock.mockResolvedValue(cfg({
       ok: true,
@@ -136,18 +113,14 @@ describe('FusionSettingsPanel', () => {
     }))
     await mount()
     const presetInput = q('input[type="text"]') as HTMLInputElement
-    const minInput = q('[data-testid="fusion-min-answered"]') as HTMLInputElement
-    expect(minInput.value).toBe('2')
 
     presetInput.value = 'duo'
     await fireEvent.input(presetInput)
 
-    expect(minInput.value).toBe('1')
     ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
     const posted = saveMock.mock.calls[0]?.[0] as string
     expect(posted).toContain('default_preset = "duo"')
-    expect(posted.split('[fusion.presets.duo]')[1]).toContain('min_answered = 1')
   })
 
   it('does not claim reload when backend saved without reload', async () => {
@@ -220,14 +193,12 @@ default_preset = "ghost"
   })
 
   it('omits the preset card when the preset declares no panel models', async () => {
-    // A preset with only min_answered has no composition to display; the card is
-    // gated on panel models so the live writer stays lane-free for such configs.
+    // A preset with no panel models has no composition to display.
     const noPanel = `[fusion]
 enabled = true
 default_preset = "trio"
 
 [fusion.presets.trio]
-min_answered = 2
 `
     fetchMock.mockResolvedValue(cfg({ source_text: noPanel }))
     await mount()
@@ -244,7 +215,6 @@ enabled = true
 default_preset = "trio"
 
 [fusion.presets.trio]
-min_answered = 2
 `
     fetchMock.mockResolvedValue(cfg({ source_text: noPanel }))
     saveMock.mockImplementation(async (sourceText: string) => cfg({ ok: true, reloaded: true, source_text: sourceText }))
@@ -254,7 +224,6 @@ min_answered = 2
     await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
     const posted = saveMock.mock.calls[0]?.[0] as string
     const trio = posted.split('[fusion.presets.trio]')[1] ?? ''
-    expect(trio).toContain('min_answered = 2')
     expect(trio).not.toContain('panel = []')
   })
 

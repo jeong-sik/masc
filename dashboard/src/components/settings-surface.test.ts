@@ -1559,7 +1559,7 @@ describe('SettingsSurface', () => {
       ok: true,
       path: MOCK_RUNTIME_PATH,
       file_name: 'runtime.toml',
-      source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\n\n[fusion.presets.trio]\nmin_answered = 2\n',
+      source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\n\n[fusion.presets.trio]\n',
       reloaded: false,
     })
     render(html`<${SettingsSurface} />`, container)
@@ -1572,7 +1572,6 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="fusion-readonly-no-writer"]')).toBeNull()
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
-    expect(container.textContent).not.toContain('per_hour_budget')
     expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
   })
 

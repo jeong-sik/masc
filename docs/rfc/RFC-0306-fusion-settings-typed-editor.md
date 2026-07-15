@@ -29,7 +29,6 @@ Editable in the panel (frontend line-surgical scalar writer,
 `dashboard/src/lib/fusion-settings.ts:262-277`):
 
 - `[fusion].enabled`, `[fusion].default_preset`
-- `[fusion.presets.<default>].min_answered`
 
 Read-only display only (`dashboard/src/lib/fusion-preset-view.ts`, header comment
 "display-only reader — it never writes back"):

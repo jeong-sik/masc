@@ -203,6 +203,15 @@ let drain ?(site = "unspecified") t =
   update ()
 ;;
 
+(* Keep the recursion outside the cycle's exception handler. Calling [loop]
+   from inside [try ... with] retains one handler frame per poll and is not a
+   tail call, so a long-lived turn grows without bound until GC dominates the
+   server. This helper is shared with the regression test so that the tested
+   loop is the production loop. *)
+let rec run_background_drain_loop run_cycle =
+  if run_cycle () then run_background_drain_loop run_cycle
+;;
+
 let integrity_error t =
   (Atomic.get t.state).tracker
   |> Keeper_unified_turn_types.turn_tool_event_integrity_error
@@ -220,15 +229,15 @@ let start_background_drain ~clock t =
       Eio.Cancel.sub (fun cc ->
         match Atomic.compare_and_set t.drain_cancel Inactive (Active cc) with
         | true ->
-          let rec loop () =
+          let run_cycle () =
             try
               let _summary = drain ~site:"background_poll" t in
               Eio.Time.sleep clock (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
-              loop ()
+              true
             with
             | Eio.Cancel.Cancelled _ ->
               (* [unsubscribe] cancels this background worker as normal teardown. *)
-              ()
+              false
             | exn ->
               Log.Keeper.warn
                 "%s: keeper_turn event-bus drain failed: %s"
@@ -242,10 +251,15 @@ let start_background_drain ~clock t =
                   ; "outcome", "exception"
                   ]
                 ();
-              Eio.Time.sleep clock (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
-              loop ()
+              (try
+                 Eio.Time.sleep
+                   clock
+                   (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
+                 true
+               with
+               | Eio.Cancel.Cancelled _ -> false)
           in
-          loop ()
+          run_background_drain_loop run_cycle
         | false ->
           (* [unsubscribe] has already closed the bus, or another fiber has
              already claimed the active drainer role. Either way this fiber
@@ -322,4 +336,5 @@ module For_testing = struct
       returns the displaced background drain handle (if any). Exposed so a
       unit test can assert it terminates and is idempotent on [Active]. *)
   let take_drain_cancel = take_drain_cancel
+  let run_background_drain_loop = run_background_drain_loop
 end

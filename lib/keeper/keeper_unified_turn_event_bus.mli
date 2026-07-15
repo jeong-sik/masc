@@ -72,4 +72,8 @@ module For_testing : sig
   (** The take-and-close step [unsubscribe] runs: atomically claims [Closed]
       and returns the displaced background drain handle (if any). *)
   val take_drain_cancel : t -> Eio.Cancel.t option
+
+  (** Run the production tail-recursive drain-loop driver. [run_cycle] returns
+      [true] to continue and [false] to stop. *)
+  val run_background_drain_loop : (unit -> bool) -> unit
 end

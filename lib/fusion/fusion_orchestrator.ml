@@ -43,7 +43,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             Fusion_policy.judge_web_tools_of ~req_web_tools:req.Fusion_types.web_tools
               groups
           in
-          let judge_max_tool_calls = Fusion_policy.judge_tool_budget_of groups in
           let run_single_judge () =
             Fusion_judge.run ~sw ~net
               ~timeout_s:preset.Fusion_policy.judge_timeout_s
@@ -106,7 +105,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               ~question:req.Fusion_types.prompt
               ~clock
               ~judge_web_tools
-              ~judge_max_tool_calls
               judges
           in
           let first_judge_nodes =
@@ -137,7 +135,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               ~question:req.Fusion_types.prompt
               ~clock
               ~judge_web_tools
-              ~judge_max_tool_calls
               ()
           in
           let run_judge_of_judges () =

@@ -291,7 +291,10 @@ let setup_git_repo base_path =
   sandbox_dir
 
 let execute_tool fixture ~name ~arguments =
-  Mcp_eio.execute_tool_eio ~sw:fixture.sw ~clock:fixture.clock
+  Mcp_eio.execute_tool_eio
+    ~sw:fixture.sw
+    ~clock:fixture.clock
+    ~workspace_scope:(Mcp_server.workspace_scope fixture.state)
     ~auth_token:fixture.auth_token
     ~mcp_session_id:fixture.sid fixture.state ~name ~arguments
 

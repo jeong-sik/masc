@@ -468,7 +468,7 @@ let start ~sw ~env ~state =
              None)
        in
        State.set_trigger_policy policy;
-       let dispatch =
+       let dispatch_for_scope workspace_scope =
          (* Tag this dispatch as the Slack connector so a message arriving while
             the keeper is in flight enqueues onto [Keeper_chat_queue] (drained
             by the serial consumer, delivered via
@@ -479,7 +479,9 @@ let start ~sw ~env ~state =
            ~submission_owner:Gate_keeper_backend.Channel_actor
            ~sw ~clock
            ~proc_mgr:state.Mcp_server.proc_mgr ~net:state.Mcp_server.net
-           ~config:(Mcp_server.workspace_config state)
+           ~publication_recovery_registry:
+             (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
+           ~config:workspace_scope.config
        in
        let policy_label = Gw.trigger_policy_to_string policy in
        Log.Server.info
@@ -489,7 +491,9 @@ let start ~sw ~env ~state =
          try
            Slack_socket_client.run ~sw ~env ~bot_user_id ~app_token
              ~trigger_policy:policy
-             ~on_event:(fun ev -> on_event ~dispatch ~clock ev)
+             ~on_event:(fun ev ->
+               let workspace_scope = Mcp_server.workspace_scope state in
+               on_event ~dispatch:(dispatch_for_scope workspace_scope) ~clock ev)
              ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e

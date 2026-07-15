@@ -249,18 +249,266 @@ let open_atomic_temp_file ~temp_dir () =
 
 let is_capability_leaf = Capability_leaf.is_valid
 
-type capability_write_intent = Atomic_write.capability_write_intent =
-  | Atomic_replace
-  | Create_exclusive
+type atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+
+type atomic_replace_recovery_target_error =
+  Atomic_write.atomic_replace_recovery_target_error
+
+type publication_recovery_access = Atomic_write.publication_recovery_access
+
+type publication_recovery_registry = Atomic_write.publication_recovery_registry
+type publication_recovery_registry_error = Atomic_write.publication_recovery_registry_error
+
+type publication_recovery_lane_open_error =
+  Atomic_write.publication_recovery_lane_open_error
+
+type publication_recovery_owner = Atomic_write.publication_recovery_owner
+
+type publication_recovery_reconciliation_report =
+  Atomic_write.publication_recovery_reconciliation_report
+
+type publication_recovery_owner_inventory_row =
+  Atomic_write.publication_recovery_owner_inventory_row =
+  | Publication_recovery_valid_owner of publication_recovery_owner
+  | Publication_recovery_invalid_owner_name of string
+  | Publication_recovery_unexpected_owner_kind of
+      { owner : publication_recovery_owner
+      ; kind : Eio.File.Stat.kind
+      }
+  | Publication_recovery_missing_owner_entry of publication_recovery_owner
+  | Publication_recovery_owner_entry_unavailable of
+      { owner : publication_recovery_owner
+      ; error : publication_recovery_registry_error
+      }
+
+type publication_recovery_owner_inventory_error =
+  Atomic_write.publication_recovery_owner_inventory_error =
+  | Publication_recovery_registry_inventory_in_progress
+  | Publication_recovery_registry_inventory_failed of
+      publication_recovery_registry_error
+
+type publication_recovery_owner_block =
+  Atomic_write.publication_recovery_owner_block =
+  | Publication_recovery_owner_inventory_block of
+      publication_recovery_owner_inventory_row
+  | Publication_recovery_owner_report_block of
+      publication_recovery_reconciliation_report
+  | Publication_recovery_owner_crash_block of
+      { owner : publication_recovery_owner
+      ; exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_cancelled_block of
+      { owner : publication_recovery_owner
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_activation_rejected_block of
+      publication_recovery_owner
+
+type publication_recovery_reconciliation_error =
+  Atomic_write.publication_recovery_reconciliation_error =
+  | Publication_recovery_owner_inventory_required of
+      publication_recovery_owner
+  | Publication_recovery_owner_inventory_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_owner_not_in_inventory of
+      publication_recovery_owner
+  | Publication_recovery_owner_reconciliation_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_owner_inventory_prevents_reconciliation of
+      publication_recovery_owner_inventory_row
+  | Publication_recovery_owner_reconciliation_crashed of
+      { owner : publication_recovery_owner
+      ; exception_ : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_reconciliation_cancelled of
+      { owner : publication_recovery_owner
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      }
+  | Publication_recovery_owner_activation_rejected of
+      publication_recovery_owner
+
+type publication_recovery_activation_rejection_error =
+  Atomic_write.publication_recovery_activation_rejection_error =
+  | Publication_recovery_activation_inventory_required of
+      publication_recovery_owner
+  | Publication_recovery_activation_inventory_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_not_in_inventory of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_reconciliation_running of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_already_ready of
+      publication_recovery_owner
+  | Publication_recovery_activation_owner_already_blocked of
+      publication_recovery_owner_block
+
+type publication_recovery_lane_reconciliation_error =
+  Atomic_write.publication_recovery_lane_reconciliation_error =
+  | Publication_recovery_reconciliation_required of
+      publication_recovery_owner
+  | Publication_recovery_reconciliation_in_progress of
+      publication_recovery_owner
+  | Publication_recovery_reconciliation_blocked of
+      publication_recovery_owner_block
+
+type publication_recovery_record_area =
+  Atomic_write.publication_recovery_record_area =
+  | Publication_recovery_active
+  | Publication_recovery_owned
+  | Publication_recovery_forensic
+
+type publication_recovery_source_state =
+  Atomic_write.publication_recovery_source_state =
+  | Publication_recovery_prepared_source
+  | Publication_recovery_bound_source
+
+type publication_recovery_prepared_outcome_kind =
+  Atomic_write.publication_recovery_prepared_outcome_kind =
+  | Publication_recovery_prepared_unmaterialized
+  | Publication_recovery_prepared_allowed_root_mismatch
+  | Publication_recovery_prepared_parent_mismatch
+  | Publication_recovery_prepared_unbound_stage_preserved
+
+type publication_recovery_bound_outcome_kind =
+  Atomic_write.publication_recovery_bound_outcome_kind =
+  | Publication_recovery_bound_stage_absent
+  | Publication_recovery_bound_allowed_root_mismatch
+  | Publication_recovery_bound_parent_mismatch
+  | Publication_recovery_bound_stage_mismatch
+  | Publication_recovery_bound_stage_preserved
+
+type publication_recovery_reconciliation_row_kind =
+  Atomic_write.publication_recovery_reconciliation_row_kind =
+  | Publication_recovery_unexpected_lane_entry
+  | Publication_recovery_missing_lane_entry
+  | Publication_recovery_lane_entry_unavailable
+  | Publication_recovery_area_inventory_unavailable
+  | Publication_recovery_source_transition_capabilities_unavailable
+  | Publication_recovery_prepared_reconciled of
+      publication_recovery_prepared_outcome_kind
+  | Publication_recovery_bound_reconciled of
+      publication_recovery_bound_outcome_kind
+  | Publication_recovery_existing_forensic_record of
+      publication_recovery_source_state
+  | Publication_recovery_conflicting_source_records
+  | Publication_recovery_invalid_record_name
+  | Publication_recovery_unexpected_record_kind
+  | Publication_recovery_missing_record_entry
+  | Publication_recovery_record_entry_unavailable
+  | Publication_recovery_corrupt_record_preserved
+  | Publication_recovery_record_observation_failed
+  | Publication_recovery_record_transition_failed
+  | Publication_recovery_record_scope_release_failed
+  | Publication_recovery_owner_store_release_failed
+  | Publication_recovery_owner_store_unavailable
+  | Publication_recovery_owner_inventory_unavailable
+
+let open_publication_recovery_registry =
+  Atomic_write.open_publication_recovery_registry
+;;
+
+let publication_recovery_registry_error_to_string =
+  Atomic_write.publication_recovery_registry_error_to_string
+;;
+
+let inventory_publication_recovery_owners =
+  Atomic_write.inventory_publication_recovery_owners
+;;
+
+let publication_recovery_owner_to_string =
+  Atomic_write.publication_recovery_owner_to_string
+;;
+
+let reconcile_publication_recovery_owner =
+  Atomic_write.reconcile_publication_recovery_owner
+;;
+
+let reject_publication_recovery_owner_activation =
+  Atomic_write.reject_publication_recovery_owner_activation
+;;
+
+let publication_recovery_reconciliation_report_owner =
+  Atomic_write.publication_recovery_reconciliation_report_owner
+;;
+
+let publication_recovery_reconciliation_report_is_ready =
+  Atomic_write.publication_recovery_reconciliation_report_is_ready
+;;
+
+let publication_recovery_reconciliation_report_row_kinds =
+  Atomic_write.publication_recovery_reconciliation_report_row_kinds
+;;
+
+let publication_recovery_reconciliation_report_to_string =
+  Atomic_write.publication_recovery_reconciliation_report_to_string
+;;
+
+let publication_recovery_reconciliation_report_to_yojson =
+  Atomic_write.publication_recovery_reconciliation_report_to_yojson
+;;
+
+let publication_recovery_owner_inventory_row_to_string =
+  Atomic_write.publication_recovery_owner_inventory_row_to_string
+;;
+
+let publication_recovery_owner_inventory_error_to_string =
+  Atomic_write.publication_recovery_owner_inventory_error_to_string
+;;
+
+let publication_recovery_reconciliation_error_to_string =
+  Atomic_write.publication_recovery_reconciliation_error_to_string
+;;
+
+let publication_recovery_owner_block_to_string =
+  Atomic_write.publication_recovery_owner_block_to_string
+;;
+
+let publication_recovery_activation_rejection_error_to_string =
+  Atomic_write.publication_recovery_activation_rejection_error_to_string
+;;
+
+let with_publication_recovery_lane = Atomic_write.with_publication_recovery_lane
+
+let await_publication_recovery_lane_reconciliation =
+  Atomic_write.await_publication_recovery_lane_reconciliation
+;;
+
+let publication_recovery_lane_open_error_to_string =
+  Atomic_write.publication_recovery_lane_open_error_to_string
+;;
+
+let publication_recovery_lane_reconciliation_error =
+  Atomic_write.publication_recovery_lane_reconciliation_error
+;;
+
+let atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+
+let atomic_replace_recovery_target_error_to_string =
+  Atomic_write.atomic_replace_recovery_target_error_to_string
+;;
+
+type capability_write_operation = Atomic_write.capability_write_operation =
+  | Atomic_replace_operation
+  | Create_exclusive_operation
 
 type capability_write_stage = Atomic_write.capability_write_stage =
   | Validate_leaf
   | Acquire_mutation_lease
+  | Acquire_publication_lease
+  | Inspect_target_entry
+  | Verify_target_binding
+  | Prepare_recovery_obligation
   | Create_staging_directory
   | Inspect_staging_directory
   | Acquire_staging_directory
   | Apply_staging_directory_permissions
   | Verify_staging_directory_identity
+  | Preserve_unbound_recovery_obligation
+  | Bind_recovery_obligation
   | Create_staging_entry
   | Create_target_entry
   | Inspect_open_resource
@@ -274,6 +522,8 @@ type capability_write_stage = Atomic_write.capability_write_stage =
   | Sync_parent
   | Remove_staging_directory
   | Close_staging_directory
+  | Discharge_prepared_recovery_obligation
+  | Discharge_bound_recovery_obligation
   | Cleanup_close
   | Cleanup_verify_identity
   | Cleanup_unlink
@@ -304,6 +554,7 @@ type capability_write_payload_failure = Atomic_write.capability_write_payload_fa
 
 type capability_write_cause = Atomic_write.capability_write_cause =
   | Invalid_leaf of string
+  | Invalid_recovery_target of atomic_replace_recovery_target_error
   | Mutation_contended
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
@@ -317,11 +568,83 @@ type capability_write_failure = Atomic_write.capability_write_failure =
   ; cause : capability_write_cause
   }
 
+type capability_recovery_phase = Atomic_write.capability_recovery_phase =
+  | Recovery_validate_owner
+  | Recovery_open_registry
+  | Recovery_open_store
+  | Recovery_prepare
+  | Recovery_preserve_unbound
+  | Recovery_bind
+  | Recovery_discharge_prepared
+  | Recovery_discharge_bound
+
+type capability_recovery_removal_transition =
+  Atomic_write.capability_recovery_removal_transition =
+  | Recovery_discharge_active
+  | Recovery_discharge_owned
+  | Recovery_active_to_owned
+  | Recovery_active_to_forensic
+  | Recovery_owned_to_forensic
+
+type capability_recovery_effect = Atomic_write.capability_recovery_effect =
+  | Recovery_no_record_change
+  | Recovery_layout_may_be_incomplete
+  | Recovery_layout_ready
+  | Recovery_active_record_state_unknown
+  | Recovery_active_record_durable
+  | Recovery_active_record_discharged
+  | Recovery_owned_record_state_unknown_with_active
+  | Recovery_owned_record_durable_with_active
+  | Recovery_owned_record_durable
+  | Recovery_owned_record_discharged
+  | Recovery_forensic_record_state_unknown_with_source
+  | Recovery_forensic_record_durable_with_source
+  | Recovery_forensic_record_durable
+  | Recovery_source_removal_durability_unknown of
+      capability_recovery_removal_transition
+
+type capability_recovery_failure = Atomic_write.capability_recovery_failure
+
+let capability_recovery_phase_to_string =
+  Atomic_write.capability_recovery_phase_to_string
+;;
+
+let capability_recovery_effect_to_string =
+  Atomic_write.capability_recovery_effect_to_string
+;;
+
+let capability_recovery_failure_phase =
+  Atomic_write.capability_recovery_failure_phase
+;;
+
+let capability_recovery_failure_effect =
+  Atomic_write.capability_recovery_failure_effect
+;;
+
+let capability_recovery_failure_to_string =
+  Atomic_write.capability_recovery_failure_to_string
+;;
+
+type capability_recovery_access_failure =
+  Atomic_write.capability_recovery_access_failure =
+  | Recovery_access_not_available
+
+type capability_write_primary_failure =
+  Atomic_write.capability_write_primary_failure =
+  | Write_primary_failure of capability_write_failure
+  | Recovery_primary_failure of capability_recovery_failure
+  | Recovery_access_primary_failure of capability_recovery_access_failure
+
+type capability_write_cleanup_failure =
+  Atomic_write.capability_write_cleanup_failure =
+  | Write_cleanup_failure of capability_write_failure
+  | Recovery_cleanup_failure of capability_recovery_failure
+
 type capability_write_error = Atomic_write.capability_write_error =
-  { intent : capability_write_intent
+  { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
-  ; failure : capability_write_failure
-  ; cleanup_failures : capability_write_failure list
+  ; primary_failure : capability_write_primary_failure
+  ; cleanup_failures : capability_write_cleanup_failure list
   }
 
 type capability_directory_sync_error = Atomic_write.capability_directory_sync_error =
@@ -329,17 +652,35 @@ type capability_directory_sync_error = Atomic_write.capability_directory_sync_er
   ; cleanup_failures : capability_write_failure list
   }
 
+type publication_recovery_fixture_error =
+  Atomic_write.publication_recovery_fixture_error
+
+let publication_recovery_fixture_error_to_string =
+  Atomic_write.publication_recovery_fixture_error_to_string
+;;
+
 type capability_write_cancellation = Atomic_write.capability_write_cancellation =
-  { intent : capability_write_intent
+  { operation : capability_write_operation
   ; target_effect : capability_write_target_effect
-  ; cleanup_failures : capability_write_failure list
+  ; interrupted_primary_failure : capability_write_primary_failure option
+  ; interrupted_recovery : capability_recovery_failure option
+  ; cleanup_failures : capability_write_cleanup_failure list
   }
 
 exception Capability_write_cancelled = Atomic_write.Capability_write_cancelled
 
-let publish_capability_file = Atomic_write.publish_capability_file
+let replace_capability_file = Atomic_write.replace_capability_file
+
+let create_capability_file_exclusive =
+  Atomic_write.create_capability_file_exclusive
+;;
+
 let capability_write_error_to_string = Atomic_write.capability_write_error_to_string
-let capability_write_intent_to_string = Atomic_write.capability_write_intent_to_string
+
+let capability_write_operation_to_string =
+  Atomic_write.capability_write_operation_to_string
+;;
+
 let capability_write_stage_to_string = Atomic_write.capability_write_stage_to_string
 
 let capability_write_target_effect_to_string =
@@ -355,8 +696,136 @@ let capability_directory_sync_error_to_string =
 ;;
 
 module Capability_write_for_testing = struct
-  let publish_capability_file =
-    Atomic_write.Capability_write_for_testing.publish_capability_file
+  type resource_scope_callback =
+    Atomic_write.Capability_write_for_testing.resource_scope_callback =
+    | Return_completed_rows of string list
+    | Cancel_callback of exn
+
+  type resource_scope_evidence =
+    Atomic_write.Capability_write_for_testing.resource_scope_evidence =
+    | Returned_rows of
+        { completed_rows : string list
+        ; release_failure : exn option
+        }
+    | Cancelled_callback of
+        { reason : exn
+        ; release_failure : exn option
+        }
+    | Raised_callback of
+        { exception_ : exn
+        ; release_failure : exn option
+        }
+
+  type reconciliation_interruption =
+    Atomic_write.Capability_write_for_testing.reconciliation_interruption =
+    | Cancel_reconciliation of exn
+    | Crash_reconciliation of exn
+
+  type cleanup_body =
+    Atomic_write.Capability_write_for_testing.cleanup_body =
+    | Return_cleanup_value of string
+    | Raise_cleanup_body of exn
+    | Cancel_cleanup_body of exn
+
+  type observed_cleanup_failure =
+    Atomic_write.Capability_write_for_testing.observed_cleanup_failure =
+    { exception_ : exn
+    ; backtrace : Printexc.raw_backtrace
+    }
+
+  type cleanup_evidence =
+    Atomic_write.Capability_write_for_testing.cleanup_evidence =
+    | Cleanup_returned of string
+    | Cleanup_failed_without_cancellation of
+        { body : observed_cleanup_failure option
+        ; cleanup : observed_cleanup_failure
+        }
+    | Cancellation_primary_with_cleanup_failure of
+        { body : observed_cleanup_failure option
+        ; cancellation : observed_cleanup_failure
+        ; cleanup : observed_cleanup_failure
+        }
+    | Body_failure_during_cancellation of
+        { body : observed_cleanup_failure
+        ; cancellation : observed_cleanup_failure
+        }
+    | Cancellation_primary of observed_cleanup_failure
+    | Cleanup_boundary_raised of observed_cleanup_failure
+
+  type single_borrow_evidence =
+    Atomic_write.Capability_write_for_testing.single_borrow_evidence =
+    | Single_borrow_balance of
+        { during_borrow : int
+        ; after_release : int
+        ; close_completed : bool
+        }
+    | Single_borrow_rejected
+    | Single_borrow_invariant of invariant_violation
+    | Single_borrow_raised of observed_cleanup_failure
+
+  and invariant_violation =
+    Atomic_write.Capability_write_for_testing.invariant_violation =
+    | Borrow_count_underflow
+    | Borrow_count_overflow
+    | Closing_without_active_borrows
+    | Closed_with_active_borrows of int
+    | Closed_without_drain_signal
+    | Drain_signal_already_resolved
+    | Inventory_finished_outside_running
+    | Reconciliation_finished_before_inventory
+    | Reconciliation_owner_not_running of string
+    | Reconciliation_settled_twice of string
+    | Reconciliation_settled_before_terminal of string
+    | Cleanup_body_outcome_lost
+
+  type owner_settlement =
+    Atomic_write.Capability_write_for_testing.owner_settlement =
+    | Owner_untracked
+    | Owner_unsettled
+    | Owner_settled
+
+  let run_publication_recovery_resource_scope =
+    Atomic_write.Capability_write_for_testing.run_publication_recovery_resource_scope
+  ;;
+
+  let interrupt_publication_recovery_reconciliation =
+    Atomic_write.Capability_write_for_testing.interrupt_publication_recovery_reconciliation
+  ;;
+
+  let run_publication_recovery_cleanup_boundary =
+    Atomic_write.Capability_write_for_testing.run_publication_recovery_cleanup_boundary
+  ;;
+
+  let single_publication_recovery_borrow_balance =
+    Atomic_write.Capability_write_for_testing.single_publication_recovery_borrow_balance
+  ;;
+
+  let publication_recovery_owner_settlement =
+    Atomic_write.Capability_write_for_testing.publication_recovery_owner_settlement
+  ;;
+
+  let publication_recovery_stage_name =
+    Atomic_write.Capability_write_for_testing.publication_recovery_stage_name
+  ;;
+
+  let replace_capability_file =
+    Atomic_write.Capability_write_for_testing.replace_capability_file
+  ;;
+
+  let create_capability_file_exclusive =
+    Atomic_write.Capability_write_for_testing.create_capability_file_exclusive
+  ;;
+
+  let seed_prepared_publication_recovery =
+    Atomic_write.Capability_write_for_testing.seed_prepared_publication_recovery
+  ;;
+
+  let seed_bound_publication_recovery =
+    Atomic_write.Capability_write_for_testing.seed_bound_publication_recovery
+  ;;
+
+  let write_raw_publication_recovery_record =
+    Atomic_write.Capability_write_for_testing.write_raw_publication_recovery_record
   ;;
 
   let sync_directory_capability =
@@ -1288,66 +1757,6 @@ let rec lock_whole_file fd =
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file fd
 ;;
 
-module Append_inode_key = struct
-  type t = int64 * int64
-
-  let equal (left_dev, left_ino) (right_dev, right_ino) =
-    Int64.equal left_dev right_dev && Int64.equal left_ino right_ino
-  ;;
-
-  let hash = Hashtbl.hash
-end
-
-module Append_inode_table = Hashtbl.Make (Append_inode_key)
-
-type append_inode_entry =
-  { held : bool Atomic.t
-  ; mutable users : int
-  }
-
-type append_inode_lease =
-  { key : Append_inode_key.t
-  ; entry : append_inode_entry
-  }
-
-let append_inode_registry_mu = Stdlib.Mutex.create ()
-let append_inode_registry = Append_inode_table.create 0
-
-let release_append_inode_user key entry =
-  Stdlib.Mutex.protect append_inode_registry_mu (fun () ->
-    entry.users <- entry.users - 1;
-    if entry.users = 0
-    then
-      match Append_inode_table.find_opt append_inode_registry key with
-      | Some current when current == entry ->
-        Append_inode_table.remove append_inode_registry key
-      | Some _ | None -> ())
-;;
-
-let try_acquire_append_inode key =
-  let entry =
-    Stdlib.Mutex.protect append_inode_registry_mu (fun () ->
-      match Append_inode_table.find_opt append_inode_registry key with
-      | Some entry ->
-        entry.users <- entry.users + 1;
-        entry
-      | None ->
-        let entry = { held = Atomic.make false; users = 1 } in
-        Append_inode_table.add append_inode_registry key entry;
-        entry)
-  in
-  if Atomic.compare_and_set entry.held false true
-  then Some { key; entry }
-  else (
-    release_append_inode_user key entry;
-    None)
-;;
-
-let release_append_inode { key; entry } =
-  Atomic.set entry.held false;
-  release_append_inode_user key entry
-;;
-
 type capability_append_operation_failure =
   { exception_ : exn
   ; backtrace : Printexc.raw_backtrace
@@ -1355,7 +1764,6 @@ type capability_append_operation_failure =
 
 type capability_append_failure =
   | Capability_append_posix_descriptor_unavailable
-  | Capability_append_inode_contended
   | Capability_append_mutation_contended
   | Capability_append_operation_failed of capability_append_operation_failure
 
@@ -1388,10 +1796,8 @@ type capability_append_file =
 let capability_append_failure_to_string = function
   | Capability_append_posix_descriptor_unavailable ->
     "POSIX descriptor unavailable"
-  | Capability_append_inode_contended ->
-    "append inode is busy in another cooperative writer"
   | Capability_append_mutation_contended ->
-    "append entry is busy in another cooperative writer"
+    "append target identity is busy in another cooperative writer"
   | Capability_append_operation_failed { exception_; _ } ->
     Printexc.to_string exception_
 ;;
@@ -1589,9 +1995,12 @@ let append_capability_observed_with ~after_write file content =
     | Ok parent_stat ->
       (match
          Capability_mutation_lease.try_acquire
-           ~parent_dev:parent_stat.dev
-           ~parent_ino:parent_stat.ino
-           ~leaf
+           (Capability_mutation_lease.Existing_target
+              { target_dev = opened_stat.dev
+              ; target_ino = opened_stat.ino
+              ; parent_dev = parent_stat.dev
+              ; parent_ino = parent_stat.ino
+              })
        with
        | None ->
          capability_append_outcome
@@ -1619,47 +2028,31 @@ let append_capability_observed_with ~after_write file content =
                   ~target_binding:Capability_append_target_verified
                   ()
               | Some fd ->
-                (match
-                   try_acquire_append_inode
-                     (opened_stat.dev, opened_stat.ino)
+                (try
+                   Eio_unix.run_in_systhread
+                     ~label:"fs-compat-open-file-append"
+                     (fun () ->
+                        Eio_unix.Fd.use_exn
+                          "fs-compat-open-file-append"
+                          fd
+                          (fun unix_fd ->
+                             append_fd_observed
+                               ~io:capability_append_unix_io
+                               ~fd:unix_fd
+                               content))
                  with
-                 | None ->
+                 | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+                 | exception_ ->
+                   let backtrace = Printexc.get_raw_backtrace () in
                    capability_append_outcome
                      ~requested_bytes
-                     ~write_failure:Capability_append_inode_contended
+                     ~write_failure:
+                       (Capability_append_operation_failed
+                          (capability_append_operation_failure
+                             exception_
+                             backtrace))
                      ~target_binding:Capability_append_target_verified
-                     ()
-                 | Some lease ->
-                   Fun.protect
-                     ~finally:(fun () -> release_append_inode lease)
-                     (fun () ->
-                        try
-                          Eio_unix.run_in_systhread
-                            ~label:"fs-compat-open-file-append"
-                            (fun () ->
-                               Eio_unix.Fd.use_exn
-                                 "fs-compat-open-file-append"
-                                 fd
-                                 (fun unix_fd ->
-                                    append_fd_observed
-                                      ~io:capability_append_unix_io
-                                      ~fd:unix_fd
-                                      content))
-                        with
-                        | Eio.Cancel.Cancelled _ as cancellation ->
-                          raise cancellation
-                        | exception_ ->
-                          let backtrace = Printexc.get_raw_backtrace () in
-                          capability_append_outcome
-                            ~requested_bytes
-                            ~write_failure:
-                              (Capability_append_operation_failed
-                                 (capability_append_operation_failure
-                                    exception_
-                                    backtrace))
-                            ~target_binding:
-                              Capability_append_target_verified
-                            ()))
+                     ())
             in
             after_write ();
             let target_binding =

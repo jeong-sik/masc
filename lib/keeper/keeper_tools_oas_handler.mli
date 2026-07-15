@@ -22,6 +22,8 @@ val make_keeper_tool_handler
   -> input_schema:Yojson.Safe.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery_registry:Fs_compat.publication_recovery_registry
+  -> publication_recovery_access:Fs_compat.publication_recovery_access
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option

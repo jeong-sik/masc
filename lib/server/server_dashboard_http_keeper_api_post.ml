@@ -666,7 +666,8 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = (Mcp_server.workspace_config state) in
+    let workspace_scope = Mcp_server.workspace_scope state in
+    let config = workspace_scope.config in
     match Keeper_meta_store.read_meta config name with
     | Error msg -> respond_error ~status:`Not_found reqd msg
     | Ok None ->
@@ -711,6 +712,8 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                           clock;
                           proc_mgr = state.Mcp_server.proc_mgr;
                           net = state.Mcp_server.net;
+                          publication_recovery_registry =
+                            (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
                         }
                       in
                       (match
@@ -893,13 +896,15 @@ let directive_action_to_string = function
 
 let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
     _ Keeper_tool_surface.context =
+  let workspace_scope = Mcp_server.workspace_scope state in
   {
-    config = Mcp_server.workspace_config state;
+    config = workspace_scope.config;
     agent_name;
     sw;
     clock;
     proc_mgr = state.Mcp_server.proc_mgr;
     net = state.Mcp_server.net;
+    publication_recovery_registry = (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope);
   }
 
 let meta_with_directive_paused_state

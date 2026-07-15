@@ -8,6 +8,10 @@ let test_messages_are_direct_projections () =
   check string "invalid lexical endpoint"
     "invalid_lexical_endpoint: path must name a file entry other than '.' or '..'"
     (R.rejection_to_user_message R.Invalid_lexical_endpoint);
+  check string "invalid normalized projection"
+    "invalid_normalized_path_projection: normalized path cannot be projected into lexical components: /tmp/../target"
+    (R.rejection_to_user_message
+       (R.Invalid_normalized_path_projection { path = "/tmp/../target" }));
   check string "invalid allowed roots"
     "allowed_paths_normalized_empty: 2 entries provided, none resolved to a valid path"
     (R.rejection_to_user_message (R.Allowed_paths_normalized_empty { count = 2 }));

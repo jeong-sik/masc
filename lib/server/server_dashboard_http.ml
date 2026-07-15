@@ -698,18 +698,21 @@ let dashboard_goal_detail_http_json ~(config : Workspace.config) ~goal_id : Yojs
 ;;
 
 let operator_action_http_json ~state ~sw ~clock request ~args =
+  let workspace_scope = Mcp_server.workspace_scope state in
   let actor =
     Server_auth.dashboard_actor_for_request
-      ~base_path:(Mcp_server.workspace_config state).base_path
+      ~base_path:workspace_scope.config.base_path
       request
   in
   let ctx : _ Operator_control.context =
-    { config = (Mcp_server.workspace_config state)
+    { config = workspace_scope.config
     ; agent_name = Option.value ~default:"dashboard" actor
     ; sw
     ; clock
     ; proc_mgr = state.Mcp_server.proc_mgr
     ; net = state.Mcp_server.net
+    ; publication_recovery_registry =
+        (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
     ; mcp_session_id = None
     }
   in
@@ -717,18 +720,21 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
 ;;
 
 let operator_confirm_http_json ~state ~sw ~clock request ~args =
+  let workspace_scope = Mcp_server.workspace_scope state in
   let actor =
     Server_auth.dashboard_actor_for_request
-      ~base_path:(Mcp_server.workspace_config state).base_path
+      ~base_path:workspace_scope.config.base_path
       request
   in
   let ctx : _ Operator_control.context =
-    { config = (Mcp_server.workspace_config state)
+    { config = workspace_scope.config
     ; agent_name = Option.value ~default:"dashboard" actor
     ; sw
     ; clock
     ; proc_mgr = state.Mcp_server.proc_mgr
     ; net = state.Mcp_server.net
+    ; publication_recovery_registry =
+        (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
     ; mcp_session_id = None
     }
   in

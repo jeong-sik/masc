@@ -32,7 +32,6 @@ type t = {
   token : string option;
   has_explicit_agent_name : bool;
   verified_internal_keeper_runtime : bool;
-  internal_keeper_runtime_tool : bool;
   owner_keeper_identity : owner_keeper_identity option;
   mode_gate_error : string option;
 }

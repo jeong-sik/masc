@@ -68,17 +68,54 @@ type path_effect_parent_scope
     exact lexical directory segments that do not exist yet and may therefore
     be created only after Gate allows the composite operation. *)
 
+type path_effect_projection_error =
+  | Allowed_root_identity_unavailable of { root : string }
+  | Invalid_parent_component of
+      { index : int
+      ; value : string
+      }
+  | Invalid_missing_parent_component of
+      { index : int
+      ; value : string
+      }
+  | Target_has_no_lexical_leaf
+  | Parent_scope_does_not_cover_target of
+      { parent_components : string list
+      ; create_missing_parents : string list
+      ; target_parent_components : string list
+      }
+  | Patch_source_has_no_endpoint
+  | Recovery_target_invalid of Fs_compat.atomic_replace_recovery_target_error
+(** Typed projection failures. In particular, recovery-target validation is
+    retained as the abstract filesystem-layer error rather than flattened to a
+    string and reconstructed by matching text. *)
+
+type atomic_replace_projection
+(** One inseparable Gate/recovery projection for a single atomic replacement.
+    The hidden constructor prevents a Gate effect for one target from being
+    paired with the durable recovery locator for another. *)
+
+val path_effect_projection_error_to_string :
+  path_effect_projection_error -> string
+
 val confined_root : confined_path -> string
 val confined_anchor_root : confined_path -> string
 val confined_root_relative_path : confined_path -> string
+val confined_relative_components : confined_path -> string list
+(** Validated lexical components relative to [confined_root]. This is the
+    component SSOT for capability traversal; callers must not split the string
+    returned by [confined_relative_path] to reconstruct it. *)
 val confined_relative_path : confined_path -> string
 val confined_host_path : confined_path -> string
 val confined_containment_path : confined_path -> string
 (** Canonical containment projection computed exactly once by the resolver
     using the requested endpoint semantics. *)
+val confined_endpoint_components : confined_path -> string list
+(** Validated canonical endpoint components relative to [confined_root]. This
+    is the endpoint SSOT for capability traversal and patch-source identity. *)
 val confined_endpoint_relative_path : confined_path -> string
-(** The same endpoint projection relative to [confined_root], suitable for
-    opening the already-confined referent through the root capability. *)
+(** Display projection derived from [confined_endpoint_components]. Callers
+    must not split this string to reconstruct capability traversal. *)
 
 val verify_confined_root_capability :
   confined_path -> _ Eio.Path.t -> (unit, string) result
@@ -87,34 +124,36 @@ val verify_confined_root_capability :
     is an explicit error; there is no string-path fallback. *)
 
 val path_effect_parent_scope :
-  relative_path:string ->
+  parent_components:string list ->
   resource:Eio.File.Stat.t ->
   create_missing_parents:string list ->
   created_directory_permissions:int ->
-  (path_effect_parent_scope, string) result
-(** Build a checked parent scope. [relative_path] is relative to the selected
-    root capability. [create_missing_parents] contains individual lexical
-    child names, in creation order; absolute paths, separators, [.], and [..]
-    are rejected. [created_directory_permissions] is the exact mode applied to
-    every listed directory and included in the Gate projection. *)
+  (path_effect_parent_scope, path_effect_projection_error) result
+(** Build a checked parent scope. [parent_components] is the already-traversed
+    path relative to the selected root capability; an empty list names the
+    root itself. [create_missing_parents] contains individual lexical child
+    names, in creation order. Both lists are validated as capability leaf
+    components and retained as the scope SSOT; the JSON [relative_path] is
+    derived from [parent_components]. [created_directory_permissions] is the
+    exact mode applied to every listed directory and included in the Gate
+    projection. *)
 
 val atomic_replace_effect :
   parent:path_effect_parent_scope ->
   result_file_permissions:int ->
   confined_path ->
-  (path_effect, string) result
+  (atomic_replace_projection, path_effect_projection_error) result
 val patch_then_atomic_replace_effect :
   parent:path_effect_parent_scope ->
-  source_relative_path:string ->
   source_resource:Eio.File.Stat.t ->
   result_file_permissions:int ->
   confined_path ->
-  (path_effect, string) result
+  (atomic_replace_projection, path_effect_projection_error) result
 val create_entry_exclusive_effect :
   parent:path_effect_parent_scope ->
   result_file_permissions:int ->
   confined_path ->
-  (path_effect, string) result
+  (path_effect, path_effect_projection_error) result
 (** Describe operations whose destination is the lexical directory entry.
     [result_file_permissions] is the exact mode applied to the replacement
     resource before it is renamed. A replaced symlink or missing entry becomes
@@ -122,13 +161,21 @@ val create_entry_exclusive_effect :
     preserve its pre-Gate mode by supplying that value. *)
 
 val append_pinned_resource_effect :
-  confined_path -> Eio.File.Stat.t -> (path_effect, string) result
+  confined_path ->
+  Eio.File.Stat.t ->
+  (path_effect, path_effect_projection_error) result
 (** Describe append on the already-open file resource represented by the
     supplied stat. This is deliberately the only constructor for a pinned
     effect, so append cannot accidentally degrade to a post-Gate path lookup. *)
 
 val path_effect_to_yojson : path_effect -> Yojson.Safe.t
 (** Stable, complete Gate input projection. *)
+
+val atomic_replace_gate_effect : atomic_replace_projection -> path_effect
+val atomic_replace_recovery_target :
+  atomic_replace_projection -> Fs_compat.atomic_replace_recovery_target
+(** Exact paired projections consumed by Gate and the filesystem writer. No
+    equivalent recovery-target accessor exists for append or exclusive create. *)
 
 val resolve_keeper_confined_path :
   config:Workspace.config ->
@@ -137,13 +184,13 @@ val resolve_keeper_confined_path :
   raw_path:string ->
   (confined_path, keeper_path_rejection) result
 (** Resolve a Keeper path to an allowed root plus a path relative to that root.
-    The string projection selects the capability and is not the I/O boundary;
-    callers must open [confined_anchor_root], descend through
-    [confined_root_relative_path] with [Eio.Path.open_dir], and perform all
-    filesystem operations on [confined_relative_path]. [endpoint] makes final
-    leaf containment explicit: atomic replacement uses [Lexical_entry], while
-    operations that read or mutate an existing referent use [Follow_referent].
-    After opening the root, callers must run
+    Target and endpoint string projections are observability views and are not
+    the I/O boundary; capability traversal uses
+    [confined_relative_components] or [confined_endpoint_components]
+    according to the operation. [endpoint]
+    makes final leaf containment explicit: atomic replacement uses
+    [Lexical_entry], while operations that read or mutate an existing referent
+    use [Follow_referent]. After opening the root, callers must run
     [verify_confined_root_capability] before Gate evaluation.
 
     For roots inside the project, the project root is the anchor. The project

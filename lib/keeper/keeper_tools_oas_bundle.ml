@@ -30,6 +30,9 @@ let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.k
 let make_tool_bundle
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(publication_recovery_registry :
+          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?clock
@@ -86,8 +89,10 @@ let make_tool_bundle
                  ~name:internal
                  ~input_schema:descriptor.input_schema
                  ~config
-                   ~meta
-                   ~ctx_snapshot
+                 ~meta
+                 ~publication_recovery_registry
+                 ~publication_recovery_access
+                 ~ctx_snapshot
                    ?turn_sandbox_factory
                  ~exec_cache
                  ?search_fn
@@ -137,12 +142,23 @@ let make_tool_bundle
 let make_tools
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(publication_recovery_registry :
+          Fs_compat.publication_recovery_registry)
+      ~(publication_recovery_access : Fs_compat.publication_recovery_access)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?clock
       ()
   : Agent_sdk.Tool.t list
   =
-  (make_tool_bundle ~config ~meta ~ctx_snapshot ?search_fn ?clock ())
+  (make_tool_bundle
+     ~config
+     ~meta
+     ~publication_recovery_registry
+     ~publication_recovery_access
+     ~ctx_snapshot
+     ?search_fn
+     ?clock
+     ())
     .tools
 ;;

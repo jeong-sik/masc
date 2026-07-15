@@ -117,7 +117,7 @@ let test_code_search_basic () =
   with_eio_context env sw @@ fun () ->
 
   with_code_fixture @@ fun base_path ->
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   prepare_code_surface ~clock ~sw state;
 
   (* Search for "ripgrep" in codebase *)
@@ -196,7 +196,7 @@ let test_code_symbols_basic () =
   with_eio_context env sw @@ fun () ->
 
   with_code_fixture @@ fun base_path ->
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   prepare_code_surface ~clock ~sw state;
 
   (* Extract symbols from a real file *)
@@ -249,7 +249,7 @@ let test_code_read_basic () =
   with_eio_context env sw @@ fun () ->
 
   with_code_fixture @@ fun base_path ->
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   prepare_code_surface ~clock ~sw state;
 
   (* Read first 10 lines of a file *)
@@ -315,7 +315,7 @@ let test_code_read_offset_limit () =
   with_eio_context env sw @@ fun () ->
 
   with_code_fixture @@ fun base_path ->
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   prepare_code_surface ~clock ~sw state;
 
   (* Read lines 10-20 *)

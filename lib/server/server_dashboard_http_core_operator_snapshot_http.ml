@@ -44,7 +44,8 @@ module Core_operator_query = Server_dashboard_http_core_operator_query
 open Server_dashboard_http_runtime_support
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
-  let config = (Mcp_server.workspace_config state) in
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
   let actor =
@@ -77,6 +78,8 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
            ; clock
            ; proc_mgr
            ; net = None
+           ; publication_recovery_registry =
+               (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
            ; mcp_session_id = None
            }
          in
@@ -164,6 +167,8 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
                     ; clock
                     ; proc_mgr
                     ; net = state.Mcp_server.net
+                    ; publication_recovery_registry =
+                        (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
                     ; mcp_session_id = None
                     }
                   in

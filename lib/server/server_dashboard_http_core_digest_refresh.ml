@@ -38,7 +38,8 @@ module Core_operator = Server_dashboard_http_core_operator
 module Core_operator_query = Server_dashboard_http_core_operator_query
 
 let start_operator_digest_refresh_loop ~state ~sw ~clock =
-  let config = (Mcp_server.workspace_config state) in
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
   let compute () =
@@ -60,6 +61,8 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
              ; clock
              ; proc_mgr
              ; net = None
+             ; publication_recovery_registry =
+                 (Mcp_server.workspace_scope_publication_recovery_registry workspace_scope)
              ; mcp_session_id = None
              }
            in

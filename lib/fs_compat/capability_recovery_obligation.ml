@@ -76,16 +76,6 @@ type area =
   | Owned
   | Forensic
 
-type registry =
-  { lanes : Eio.Fs.dir_ty Eio.Path.t }
-
-type store =
-  { owner : owner
-  ; active : Eio.Fs.dir_ty Eio.Path.t
-  ; owned : Eio.Fs.dir_ty Eio.Path.t
-  ; forensic : Eio.Fs.dir_ty Eio.Path.t
-  }
-
 type validation_error =
   | Invalid_owner of string
   | Invalid_operation_id of string
@@ -143,6 +133,7 @@ type subject =
   | Recovery_root
   | Lanes_root
   | Lane_root of owner
+  | Lane_entry of owner * string
   | Area of area * owner
   | Record of area * owner * operation_id
 
@@ -150,6 +141,7 @@ type operation =
   | Inspect_directory
   | Create_directory
   | Open_directory
+  | Close_directory
   | Sync_directory
   | Read_directory
   | Inspect_record
@@ -220,6 +212,60 @@ type transition_error =
   ; cleanup_failures : failure list
   }
 
+type callback_and_release_failure =
+  { store_effect : transition_effect
+  ; callback : Eio.Exn.with_bt
+  ; release : failure
+  }
+
+exception Resource_scope_callback_and_release_failed of
+  callback_and_release_failure
+
+type registry =
+  { lanes : Eio.Fs.dir_ty Eio.Path.t }
+
+type area_capability =
+  | Area_available of Eio.Fs.dir_ty Eio.Path.t
+  | Area_unavailable of transition_error
+
+type lane_residue =
+  | Lane_residue_present of
+      { name : string
+      ; kind : Eio.File.Stat.kind
+      }
+  | Lane_residue_missing of { name : string }
+  | Lane_residue_unavailable of
+      { name : string
+      ; error : transition_error
+      }
+
+type store =
+  { owner : owner
+  ; active : area_capability
+  ; owned : area_capability
+  ; forensic : area_capability
+  ; lane_residues : lane_residue list
+  }
+
+type resource_release_failure =
+  { failure : failure
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type 'a existing_store_scope_outcome =
+  | Existing_store_scope_released of 'a
+  | Existing_store_scope_release_failed of
+      { value : 'a
+      ; release_failure : resource_release_failure
+      }
+  | Existing_store_scope_cancelled of
+      { value : 'a option
+      ; reason : exn
+      ; backtrace : Printexc.raw_backtrace
+      ; release_failure : resource_release_failure option
+      }
+
 exception Recovery_store_cancelled of
   exn * transition_effect * failure list
 
@@ -231,6 +277,7 @@ exception Internal_posix_descriptor_unavailable
 exception Internal_existing_record_does_not_match
 exception Internal_created_record_identity_unavailable
 exception Internal_missing_record
+exception Internal_resource_scope_callback_not_entered
 exception Transition_failed of transition_error
 
 let recovery_directory_leaf = "fs-publication-recovery"
@@ -1100,6 +1147,8 @@ let subject_to_string = function
   | Recovery_root -> "recovery_root"
   | Lanes_root -> "lanes_root"
   | Lane_root owner -> Printf.sprintf "lane(%S)" (owner_to_string owner)
+  | Lane_entry (owner, name) ->
+    Printf.sprintf "lane(%S)/%S" (owner_to_string owner) name
   | Area (area, owner) ->
     Printf.sprintf "%s(%S)" (area_to_string area) (owner_to_string owner)
   | Record (area, owner, operation_id) ->
@@ -1114,6 +1163,7 @@ let operation_to_string = function
   | Inspect_directory -> "inspect_directory"
   | Create_directory -> "create_directory"
   | Open_directory -> "open_directory"
+  | Close_directory -> "close_directory"
   | Sync_directory -> "sync_directory"
   | Read_directory -> "read_directory"
   | Inspect_record -> "inspect_record"
@@ -1248,6 +1298,83 @@ let raise_validation ~operation ~subject validation_error =
 
 let transition_error ~store_effect failure =
   { store_effect; failure; cleanup_failures = [] }
+;;
+
+module Resource_scope = Eio_resource_scope
+
+let resource_scope_failure ~operation ~subject
+      ({ exception_; backtrace } : Resource_scope.raised)
+  =
+  make_failure ~operation ~subject exception_ backtrace
+;;
+
+let append_cleanup_failure error failure =
+  { error with cleanup_failures = error.cleanup_failures @ [ failure ] }
+;;
+
+let cancellation_store_evidence ~default_effect reason =
+  match reason with
+  | Recovery_store_cancelled (original_reason, store_effect, cleanup_failures) ->
+    original_reason, store_effect, cleanup_failures, true
+  | original_reason -> original_reason, default_effect, [], false
+;;
+
+let raise_resource_scope_cancellation
+      ~default_effect
+      ~release_failure
+      ({ reason; backtrace } : Resource_scope.cancelled)
+  =
+  let original_reason, store_effect, cleanup_failures, had_store_evidence =
+    cancellation_store_evidence ~default_effect reason
+  in
+  let cleanup_failures =
+    match release_failure with
+    | None -> cleanup_failures
+    | Some failure -> cleanup_failures @ [ failure ]
+  in
+  let reason =
+    if had_store_evidence
+       || store_effect <> No_record_change
+       || cleanup_failures <> []
+    then
+      Recovery_store_cancelled
+        (original_reason, store_effect, cleanup_failures)
+    else original_reason
+  in
+  Printexc.raise_with_backtrace (Eio.Cancel.Cancelled reason) backtrace
+;;
+
+let raise_resource_scope_exception
+      ?release_failure
+      ~store_effect
+      ({ exception_; backtrace } : Resource_scope.raised)
+  =
+  match exception_, release_failure with
+  | Transition_failed _, None ->
+    Printexc.raise_with_backtrace exception_ backtrace
+  | Transition_failed error, Some failure ->
+    Printexc.raise_with_backtrace
+      (Transition_failed (append_cleanup_failure error failure))
+      backtrace
+  | Store_failure _, None ->
+    Printexc.raise_with_backtrace exception_ backtrace
+  | Store_failure failure, Some cleanup_failure ->
+    Printexc.raise_with_backtrace
+      (Transition_failed
+         { store_effect
+         ; failure
+         ; cleanup_failures = [ cleanup_failure ]
+         })
+      backtrace
+  | _, None -> Printexc.raise_with_backtrace exception_ backtrace
+  | _, Some cleanup_failure ->
+    Printexc.raise_with_backtrace
+      (Resource_scope_callback_and_release_failed
+         { store_effect
+         ; callback = exception_, backtrace
+         ; release = cleanup_failure
+         })
+      backtrace
 ;;
 
 let protect_result ~store_effect f =
@@ -1386,7 +1513,12 @@ let stabilize_directory
      set_directory_permissions ~subject opened
    | `Existing ->
      if actual_permissions <> directory_permissions
-     then set_directory_permissions ~subject opened);
+     then
+       raise_validation
+         ~operation:Inspect_directory
+         ~subject
+         (Record_permissions_mismatch
+            { expected = directory_permissions; actual = actual_permissions }));
   (* Existing components receive the same barriers as newly created ones. A
      previous attempt may have reached mkdir/fchmod/child-fsync but failed
      before the parent fsync, so merely observing the path cannot prove the
@@ -1478,7 +1610,7 @@ type owner_inventory_row =
   | Valid_owner of owner
   | Invalid_owner_name of string
   | Unexpected_owner_kind of
-      { name : string
+      { owner : owner
       ; kind : Eio.File.Stat.kind
       }
   | Missing_owner_entry of owner
@@ -1521,7 +1653,7 @@ let inventory_owners (registry : registry) =
                   | `Symbolic_link
                   | `Socket ) as
                   kind ) ->
-                Unexpected_owner_kind { name; kind }
+                Unexpected_owner_kind { owner; kind }
             with
             | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
             | Transition_failed error ->
@@ -1543,43 +1675,283 @@ let open_store_in_scope ~sw ~registry ~owner =
       ~subject:(Lane_root owner)
     @@ fun lane ->
     let active =
-      open_ensured_directory
-        ~sw
-        ~parent:lane
-        ~parent_subject:(Lane_root owner)
-        ~leaf:active_directory_leaf
-        ~subject:(Area (Active, owner))
+      Area_available
+        (open_ensured_directory
+           ~sw
+           ~parent:lane
+           ~parent_subject:(Lane_root owner)
+           ~leaf:active_directory_leaf
+           ~subject:(Area (Active, owner)))
     in
     let owned =
-      open_ensured_directory
-        ~sw
-        ~parent:lane
-        ~parent_subject:(Lane_root owner)
-        ~leaf:owned_directory_leaf
-        ~subject:(Area (Owned, owner))
+      Area_available
+        (open_ensured_directory
+           ~sw
+           ~parent:lane
+           ~parent_subject:(Lane_root owner)
+           ~leaf:owned_directory_leaf
+           ~subject:(Area (Owned, owner)))
     in
     let forensic =
-      open_ensured_directory
-        ~sw
-        ~parent:lane
-        ~parent_subject:(Lane_root owner)
-        ~leaf:forensic_directory_leaf
-        ~subject:(Area (Forensic, owner))
+      Area_available
+        (open_ensured_directory
+           ~sw
+           ~parent:lane
+           ~parent_subject:(Lane_root owner)
+           ~leaf:forensic_directory_leaf
+           ~subject:(Area (Forensic, owner)))
     in
-    { owner; active; owned; forensic })
+    { owner; active; owned; forensic; lane_residues = [] })
 ;;
 
 let with_store ~registry ~owner f =
-  Eio.Switch.run @@ fun sw ->
-  match open_store_in_scope ~sw ~registry ~owner with
-  | Error _ as error -> error
-  | Ok store -> Ok (f store)
+  let subject = Lane_root owner in
+  let outcome =
+    Resource_scope.run_resource_only @@ fun sw ->
+    match open_store_in_scope ~sw ~registry ~owner with
+    | Error _ as error -> error
+    | Ok store -> Ok (f store)
+  in
+  let release_failure =
+    Option.map
+      (resource_scope_failure ~operation:Close_directory ~subject)
+      outcome.scope_failure
+  in
+  match outcome.callback with
+  | None ->
+    (match outcome.parent_cancellation with
+     | Some cancellation ->
+       raise_resource_scope_cancellation
+         ~default_effect:No_record_change
+         ~release_failure:None
+         cancellation
+     | None ->
+       (match outcome.scope_failure with
+        | Some raised ->
+          raise_resource_scope_exception ~store_effect:No_record_change raised
+        | None -> raise Internal_resource_scope_callback_not_entered))
+  | Some (Resource_scope.Cancelled cancellation) ->
+    raise_resource_scope_cancellation
+      ~default_effect:No_record_change
+      ~release_failure
+      cancellation
+  | Some (Resource_scope.Raised raised) ->
+    raise_resource_scope_exception
+      ?release_failure
+      ~store_effect:No_record_change
+      raised
+  | Some (Resource_scope.Returned result) ->
+    (match outcome.parent_cancellation with
+     | Some cancellation ->
+       let default_effect =
+         match result with
+         | Ok _ -> No_record_change
+         | Error error -> error.store_effect
+       in
+       raise_resource_scope_cancellation
+         ~default_effect
+         ~release_failure
+         cancellation
+     | None ->
+       (match result, release_failure with
+        | Ok value, None -> Ok value
+        | Error error, None -> Error error
+        | Error error, Some failure ->
+          Error (append_cleanup_failure error failure)
+        | Ok _, Some failure ->
+          Error (transition_error ~store_effect:No_record_change failure)))
 ;;
 
-let area_directory (store : store) = function
+let open_existing_directory ~sw ~parent ~leaf ~subject =
+  let path = Eio.Path.(parent / leaf) in
+  let lexical =
+    raise_io ~operation:Inspect_directory ~subject (fun () ->
+      Eio.Path.stat ~follow:false path)
+  in
+  if lexical.kind <> `Directory
+  then
+    raise_validation
+      ~operation:Inspect_directory
+      ~subject
+      (Record_kind_mismatch
+         { expected = `Directory; actual = lexical.kind });
+  let lexical_identity = identity_of_stat lexical in
+  let opened =
+    raise_io ~operation:Open_directory ~subject (fun () ->
+      Eio.Path.open_dir ~sw path)
+  in
+  let opened = (opened :> Eio.Fs.dir_ty Eio.Path.t) in
+  let opened_stat =
+    verify_opened_directory ~subject ~lexical_identity opened
+  in
+  let actual_permissions = opened_stat.perm land 0o7777 in
+  if actual_permissions <> directory_permissions
+  then
+    raise_validation
+      ~operation:Inspect_directory
+      ~subject
+      (Record_permissions_mismatch
+         { expected = directory_permissions; actual = actual_permissions });
+  opened
+;;
+
+let fixed_area_leaf name =
+  String.equal name active_directory_leaf
+  || String.equal name owned_directory_leaf
+  || String.equal name forensic_directory_leaf
+;;
+
+let inspect_lane_residue ~lane ~owner name =
+  let subject = Lane_entry (owner, name) in
+  match
+    protect_result ~store_effect:No_record_change (fun () ->
+      raise_io ~operation:Inspect_directory ~subject (fun () ->
+        Eio.Path.kind ~follow:false Eio.Path.(lane / name)))
+  with
+  | Error error -> Lane_residue_unavailable { name; error }
+  | Ok `Not_found -> Lane_residue_missing { name }
+  | Ok
+      ( ( `Unknown
+        | `Fifo
+        | `Character_special
+        | `Directory
+        | `Block_device
+        | `Regular_file
+        | `Symbolic_link
+        | `Socket ) as
+        kind ) ->
+    Lane_residue_present { name; kind }
+;;
+
+let open_existing_area ~sw ~lane ~owner ~area ~leaf =
+  match
+    protect_result ~store_effect:No_record_change (fun () ->
+      open_existing_directory
+        ~sw
+        ~parent:lane
+        ~leaf
+        ~subject:(Area (area, owner)))
+  with
+  | Ok directory -> Area_available directory
+  | Error error -> Area_unavailable error
+;;
+
+let with_existing_store ~registry ~owner f =
+  let subject = Lane_root owner in
+  protect_result ~store_effect:No_record_change (fun () ->
+    let outcome =
+      Resource_scope.run_resource_only @@ fun sw ->
+      let lane =
+        open_existing_directory
+          ~sw
+          ~parent:registry.lanes
+          ~leaf:(owner_to_string owner)
+          ~subject
+      in
+      let lane_names =
+        raise_io ~operation:Read_directory ~subject (fun () ->
+          Eio.Path.read_dir lane)
+      in
+      let lane_residues =
+        List.filter_map
+          (fun name ->
+             if fixed_area_leaf name
+             then None
+             else Some (inspect_lane_residue ~lane ~owner name))
+          lane_names
+      in
+      let active =
+        open_existing_area
+          ~sw
+          ~lane
+          ~owner
+          ~area:Active
+          ~leaf:active_directory_leaf
+      in
+      let owned =
+        open_existing_area
+          ~sw
+          ~lane
+          ~owner
+          ~area:Owned
+          ~leaf:owned_directory_leaf
+      in
+      let forensic =
+        open_existing_area
+          ~sw
+          ~lane
+          ~owner
+          ~area:Forensic
+          ~leaf:forensic_directory_leaf
+      in
+      f { owner; active; owned; forensic; lane_residues }
+    in
+    let release_failure =
+      Option.map
+        (fun ({ exception_; backtrace } as raised : Resource_scope.raised) ->
+           { failure =
+               resource_scope_failure
+                 ~operation:Close_directory
+                 ~subject
+                 raised
+           ; exception_
+           ; backtrace
+           })
+        outcome.scope_failure
+    in
+    match outcome.callback with
+    | None ->
+      (match outcome.parent_cancellation with
+       | Some cancellation ->
+         Existing_store_scope_cancelled
+           { value = None
+           ; reason = cancellation.reason
+           ; backtrace = cancellation.backtrace
+           ; release_failure = None
+           }
+       | None ->
+         (match outcome.scope_failure with
+          | Some raised ->
+            raise_resource_scope_exception
+              ~store_effect:No_record_change
+              raised
+          | None -> raise Internal_resource_scope_callback_not_entered))
+    | Some (Resource_scope.Cancelled cancellation) ->
+      Existing_store_scope_cancelled
+        { value = None
+        ; reason = cancellation.reason
+        ; backtrace = cancellation.backtrace
+        ; release_failure
+        }
+    | Some (Resource_scope.Raised raised) ->
+      raise_resource_scope_exception
+        ?release_failure:(Option.map (fun failure -> failure.failure) release_failure)
+        ~store_effect:No_record_change
+        raised
+    | Some (Resource_scope.Returned value) ->
+      (match outcome.parent_cancellation, release_failure with
+       | Some cancellation, release_failure ->
+         Existing_store_scope_cancelled
+           { value = Some value
+           ; reason = cancellation.reason
+           ; backtrace = cancellation.backtrace
+           ; release_failure
+           }
+       | None, Some release_failure ->
+         Existing_store_scope_release_failed { value; release_failure }
+       | None, None -> Existing_store_scope_released value))
+;;
+
+let area_capability (store : store) = function
   | Active -> store.active
   | Owned -> store.owned
   | Forensic -> store.forensic
+;;
+
+let area_directory store area =
+  match area_capability store area with
+  | Area_available directory -> directory
+  | Area_unavailable error -> raise (Transition_failed error)
 ;;
 
 let record_path (store : store) area operation_id =
@@ -1622,103 +1994,143 @@ let read_raw_record ~store ~area ~operation_id ~store_effect =
       (Record_kind_mismatch
          { expected = `Regular_file; actual = lexical.kind });
   let lexical_identity = identity_of_stat lexical in
-  Eio.Switch.run @@ fun sw ->
-  let resource = ref None in
-  let cleanup () =
-    match !resource with
-    | None -> []
-    | Some file ->
+  let outcome =
+    Resource_scope.run_resource_only @@ fun sw ->
+    let resource = ref None in
+    let cleanup () =
+      match !resource with
+      | None -> []
+      | Some file ->
+        resource := None;
+        close_resource_failures ~subject file
+    in
+    try
+      let file =
+        raise_io ~operation:Open_record ~subject (fun () ->
+          Eio.Path.open_in ~sw path)
+      in
+      resource := Some file;
+      let opened =
+        raise_io ~operation:Inspect_record ~subject (fun () ->
+          Eio.File.stat file)
+      in
+      if opened.kind <> `Regular_file
+      then
+        raise_validation
+          ~operation:Inspect_record
+          ~subject
+          (Record_kind_mismatch
+             { expected = `Regular_file; actual = opened.kind });
+      let opened_identity = identity_of_stat opened in
+      if not (equal_identity lexical_identity opened_identity)
+      then
+        raise_validation
+          ~operation:Verify_record_identity
+          ~subject
+          (Record_identity_mismatch
+             { expected = lexical_identity; actual = opened_identity });
+      let opened_permissions = opened.perm land 0o7777 in
+      if opened_permissions <> record_permissions
+      then
+        raise_validation
+          ~operation:Inspect_record
+          ~subject
+          (Record_permissions_mismatch
+             { expected = record_permissions; actual = opened_permissions });
+      let raw =
+        raise_io ~operation:Read_record ~subject (fun () ->
+          Eio.Flow.read_all file)
+      in
+      let after =
+        raise_io ~operation:Verify_record_identity ~subject (fun () ->
+          Eio.File.stat file)
+      in
+      let after_identity = identity_of_stat after in
+      if after.kind <> `Regular_file
+      then
+        raise_validation
+          ~operation:Verify_record_identity
+          ~subject
+          (Record_kind_mismatch
+             { expected = `Regular_file; actual = after.kind });
+      if not (equal_identity opened_identity after_identity)
+      then
+        raise_validation
+          ~operation:Verify_record_identity
+          ~subject
+          (Record_identity_mismatch
+             { expected = opened_identity; actual = after_identity });
+      raise_io ~operation:Close_record ~subject (fun () ->
+        Eio.Resource.close file);
       resource := None;
-      close_resource_failures ~subject file
-  in
-  try
-    let file =
-      raise_io ~operation:Open_record ~subject (fun () ->
-        Eio.Path.open_in ~sw path)
-    in
-    resource := Some file;
-    let opened =
-      raise_io ~operation:Inspect_record ~subject (fun () ->
-        Eio.File.stat file)
-    in
-    if opened.kind <> `Regular_file
-    then
-      raise_validation
-        ~operation:Inspect_record
-        ~subject
-        (Record_kind_mismatch
-           { expected = `Regular_file; actual = opened.kind });
-    let opened_identity = identity_of_stat opened in
-    if not (equal_identity lexical_identity opened_identity)
-    then
-      raise_validation
-        ~operation:Verify_record_identity
-        ~subject
-        (Record_identity_mismatch
-           { expected = lexical_identity; actual = opened_identity });
-    let opened_permissions = opened.perm land 0o7777 in
-    if opened_permissions <> record_permissions
-    then
-      raise_validation
-        ~operation:Inspect_record
-        ~subject
-        (Record_permissions_mismatch
-           { expected = record_permissions; actual = opened_permissions });
-    let raw =
-      raise_io ~operation:Read_record ~subject (fun () -> Eio.Flow.read_all file)
-    in
-    let after =
-      raise_io ~operation:Verify_record_identity ~subject (fun () ->
-        Eio.File.stat file)
-    in
-    let after_identity = identity_of_stat after in
-    if after.kind <> `Regular_file
-    then
-      raise_validation
-        ~operation:Verify_record_identity
-        ~subject
-        (Record_kind_mismatch
-           { expected = `Regular_file; actual = after.kind });
-    if not (equal_identity opened_identity after_identity)
-    then
-      raise_validation
-        ~operation:Verify_record_identity
-        ~subject
-        (Record_identity_mismatch
-           { expected = opened_identity; actual = after_identity });
-    raise_io ~operation:Close_record ~subject (fun () ->
-      Eio.Resource.close file);
-    resource := None;
-    raw, opened_identity
-  with
-  | Eio.Cancel.Cancelled reason as cancellation ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    let cleanup_failures = Eio.Cancel.protect cleanup in
-    if cleanup_failures = []
-    then Printexc.raise_with_backtrace cancellation backtrace
-    else
-      Printexc.raise_with_backtrace
-        (Eio.Cancel.Cancelled
-           (Recovery_store_cancelled
-              (reason, store_effect, cleanup_failures)))
-        backtrace
-  | Store_failure failure ->
-    let cleanup_failures = Eio.Cancel.protect cleanup in
-    if cleanup_failures = []
-    then raise (Store_failure failure)
-    else
+      raw, opened_identity
+    with
+    | Eio.Cancel.Cancelled reason as cancellation ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let cleanup_failures = Eio.Cancel.protect cleanup in
+      if cleanup_failures = []
+      then Printexc.raise_with_backtrace cancellation backtrace
+      else
+        Printexc.raise_with_backtrace
+          (Eio.Cancel.Cancelled
+             (Recovery_store_cancelled
+                (reason, store_effect, cleanup_failures)))
+          backtrace
+    | Store_failure failure ->
+      let cleanup_failures = Eio.Cancel.protect cleanup in
+      if cleanup_failures = []
+      then raise (Store_failure failure)
+      else
+        raise
+          (Transition_failed
+             { store_effect; failure; cleanup_failures })
+    | exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let cleanup_failures = Eio.Cancel.protect cleanup in
+      let failure =
+        make_failure ~operation:Read_record ~subject exception_ backtrace
+      in
       raise
         (Transition_failed
            { store_effect; failure; cleanup_failures })
-  | exception_ ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    let cleanup_failures = Eio.Cancel.protect cleanup in
-    let failure =
-      make_failure ~operation:Read_record ~subject exception_ backtrace
-    in
-    raise
-      (Transition_failed
-         { store_effect; failure; cleanup_failures })
+  in
+  let release_failure =
+    Option.map
+      (resource_scope_failure ~operation:Close_record ~subject)
+      outcome.scope_failure
+  in
+  match outcome.callback with
+  | None ->
+    (match outcome.parent_cancellation with
+     | Some cancellation ->
+       raise_resource_scope_cancellation
+         ~default_effect:store_effect
+         ~release_failure:None
+         cancellation
+     | None ->
+       (match outcome.scope_failure with
+        | Some raised ->
+          raise_resource_scope_exception ~store_effect raised
+        | None -> raise Internal_resource_scope_callback_not_entered))
+  | Some (Resource_scope.Cancelled cancellation) ->
+    raise_resource_scope_cancellation
+      ~default_effect:store_effect
+      ~release_failure
+      cancellation
+  | Some (Resource_scope.Raised raised) ->
+    raise_resource_scope_exception ?release_failure ~store_effect raised
+  | Some (Resource_scope.Returned value) ->
+    (match outcome.parent_cancellation, release_failure with
+     | Some cancellation, release_failure ->
+       raise_resource_scope_cancellation
+         ~default_effect:store_effect
+         ~release_failure
+         cancellation
+     | None, Some failure ->
+       raise
+         (Transition_failed
+            { store_effect; failure; cleanup_failures = [] })
+     | None, None -> value)
 ;;
 
 let decode_record ~store ~area ~operation_id ~decode ~owner_and_id raw =
@@ -1972,118 +2384,169 @@ let create_record_exclusive
       ~operation_id
       ~raw
       ~base_effect
+      ~success_effect
       ~unknown_effect
   =
   let subject = record_subject store area operation_id in
   let path = record_path store area operation_id in
   Eio.Cancel.protect @@ fun () ->
-  Eio.Switch.run @@ fun sw ->
-  let resource = ref None in
-  let created_identity = ref None in
-  let entry_created = ref false in
-  try
-    let opened =
-      try
-        Some
-          (raise_io ~operation:Create_record ~subject (fun () ->
-             Eio.Path.open_out
-               ~sw
-               ~create:(`Exclusive record_permissions)
-               path))
-      with
-      | Store_failure
-          { cause =
-              Io_failed
-                { exception_ =
-                    Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _)
-                ; _
-                }
-          ; _
-          } ->
-        None
-    in
-    match opened with
-    | None -> Record_exists
-    | Some file ->
-      entry_created := true;
-      resource := Some file;
-      let stat =
-        raise_io ~operation:Inspect_record ~subject (fun () ->
-          Eio.File.stat file)
+  let outcome =
+    Resource_scope.run_resource_only @@ fun sw ->
+    let resource = ref None in
+    let created_identity = ref None in
+    let entry_created = ref false in
+    try
+      let opened =
+        try
+          Some
+            (raise_io ~operation:Create_record ~subject (fun () ->
+               Eio.Path.open_out
+                 ~sw
+                 ~create:(`Exclusive record_permissions)
+                 path))
+        with
+        | Store_failure
+            { cause =
+                Io_failed
+                  { exception_ =
+                      Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _)
+                  ; _
+                  }
+            ; _
+            } ->
+          None
       in
-      if stat.kind <> `Regular_file
-      then
-        raise_validation
-          ~operation:Inspect_record
-          ~subject
-          (Record_kind_mismatch
-             { expected = `Regular_file; actual = stat.kind });
-      created_identity := Some (identity_of_stat stat);
-      apply_record_permissions ~subject file;
-      write_record_payload ~subject file raw;
-      raise_io ~operation:Sync_record ~subject (fun () -> Eio.File.sync file);
-      raise_io ~operation:Close_record ~subject (fun () ->
-        Eio.Resource.close file);
-      resource := None;
-      sync_directory
-        ~subject:(Area (area, store.owner))
-        (area_directory store area);
-      Record_created
-  with
-  | Eio.Cancel.Cancelled reason as cancellation ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    let cleanup_failures, record_absent_durable =
-      cleanup_created_record
-        ~store
-        ~area
-        ~operation_id
-        ~resource
-        ~created_identity
-        ~entry_created
+      match opened with
+      | None -> Record_exists
+      | Some file ->
+        entry_created := true;
+        resource := Some file;
+        let stat =
+          raise_io ~operation:Inspect_record ~subject (fun () ->
+            Eio.File.stat file)
+        in
+        if stat.kind <> `Regular_file
+        then
+          raise_validation
+            ~operation:Inspect_record
+            ~subject
+            (Record_kind_mismatch
+               { expected = `Regular_file; actual = stat.kind });
+        created_identity := Some (identity_of_stat stat);
+        apply_record_permissions ~subject file;
+        write_record_payload ~subject file raw;
+        raise_io ~operation:Sync_record ~subject (fun () -> Eio.File.sync file);
+        raise_io ~operation:Close_record ~subject (fun () ->
+          Eio.Resource.close file);
+        resource := None;
+        sync_directory
+          ~subject:(Area (area, store.owner))
+          (area_directory store area);
+        Record_created
+    with
+    | Eio.Cancel.Cancelled reason as cancellation ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let cleanup_failures, record_absent_durable =
+        cleanup_created_record
+          ~store
+          ~area
+          ~operation_id
+          ~resource
+          ~created_identity
+          ~entry_created
+      in
+      let store_effect =
+        if record_absent_durable then base_effect else unknown_effect
+      in
+      if store_effect = No_record_change && cleanup_failures = []
+      then Printexc.raise_with_backtrace cancellation backtrace
+      else
+        Printexc.raise_with_backtrace
+          (Eio.Cancel.Cancelled
+             (Recovery_store_cancelled
+                (reason, store_effect, cleanup_failures)))
+          backtrace
+    | Store_failure failure ->
+      let cleanup_failures, record_absent_durable =
+        cleanup_created_record
+          ~store
+          ~area
+          ~operation_id
+          ~resource
+          ~created_identity
+          ~entry_created
+      in
+      let store_effect =
+        if record_absent_durable then base_effect else unknown_effect
+      in
+      raise (Transition_failed { store_effect; failure; cleanup_failures })
+    | exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let cleanup_failures, record_absent_durable =
+        cleanup_created_record
+          ~store
+          ~area
+          ~operation_id
+          ~resource
+          ~created_identity
+          ~entry_created
+      in
+      let store_effect =
+        if record_absent_durable then base_effect else unknown_effect
+      in
+      let failure =
+        make_failure ~operation:Write_record ~subject exception_ backtrace
+      in
+      raise (Transition_failed { store_effect; failure; cleanup_failures })
+  in
+  let release_failure =
+    Option.map
+      (resource_scope_failure ~operation:Close_record ~subject)
+      outcome.scope_failure
+  in
+  match outcome.callback with
+  | None ->
+    (match outcome.parent_cancellation with
+     | Some cancellation ->
+       raise_resource_scope_cancellation
+         ~default_effect:base_effect
+         ~release_failure:None
+         cancellation
+     | None ->
+       (match outcome.scope_failure with
+        | Some raised ->
+          raise_resource_scope_exception ~store_effect:base_effect raised
+        | None -> raise Internal_resource_scope_callback_not_entered))
+  | Some (Resource_scope.Cancelled cancellation) ->
+    raise_resource_scope_cancellation
+      ~default_effect:base_effect
+      ~release_failure
+      cancellation
+  | Some (Resource_scope.Raised raised) ->
+    raise_resource_scope_exception
+      ?release_failure
+      ~store_effect:unknown_effect
+      raised
+  | Some (Resource_scope.Returned result) ->
+    let completed_effect =
+      match result with
+      | Record_created -> success_effect
+      | Record_exists -> base_effect
     in
-    let store_effect =
-      if record_absent_durable then base_effect else unknown_effect
-    in
-    if store_effect = No_record_change && cleanup_failures = []
-    then Printexc.raise_with_backtrace cancellation backtrace
-    else
-      Printexc.raise_with_backtrace
-        (Eio.Cancel.Cancelled
-           (Recovery_store_cancelled
-              (reason, store_effect, cleanup_failures)))
-        backtrace
-  | Store_failure failure ->
-    let cleanup_failures, record_absent_durable =
-      cleanup_created_record
-        ~store
-        ~area
-        ~operation_id
-        ~resource
-        ~created_identity
-        ~entry_created
-    in
-    let store_effect =
-      if record_absent_durable then base_effect else unknown_effect
-    in
-    raise (Transition_failed { store_effect; failure; cleanup_failures })
-  | exception_ ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    let cleanup_failures, record_absent_durable =
-      cleanup_created_record
-        ~store
-        ~area
-        ~operation_id
-        ~resource
-        ~created_identity
-        ~entry_created
-    in
-    let store_effect =
-      if record_absent_durable then base_effect else unknown_effect
-    in
-    let failure =
-      make_failure ~operation:Write_record ~subject exception_ backtrace
-    in
-    raise (Transition_failed { store_effect; failure; cleanup_failures })
+    (match outcome.parent_cancellation, release_failure with
+     | Some cancellation, release_failure ->
+       raise_resource_scope_cancellation
+         ~default_effect:completed_effect
+         ~release_failure
+         cancellation
+     | None, Some failure ->
+       raise
+         (Transition_failed
+            { store_effect = completed_effect
+            ; failure
+            ; cleanup_failures = []
+            })
+     | None, None -> result)
 ;;
 
 type ensure_record_result =
@@ -2096,6 +2559,7 @@ let ensure_exact_record
       ~operation_id
       ~raw
       ~base_effect
+      ~success_effect
       ~unknown_effect
   =
   match
@@ -2105,6 +2569,7 @@ let ensure_exact_record
       ~operation_id
       ~raw
       ~base_effect
+      ~success_effect
       ~unknown_effect
   with
   | Record_created -> Installed_record
@@ -2293,6 +2758,7 @@ let prepare_with_operation_id_internal
        ~operation_id
        ~raw
        ~base_effect:No_record_change
+       ~success_effect:Active_record_durable
        ~unknown_effect:Active_record_state_unknown);
   prepared
 ;;
@@ -2310,6 +2776,7 @@ let prepare ~(store : store) ~(locator : locator) ~(permissions : permissions) =
         ~operation_id
         ~raw
         ~base_effect:No_record_change
+        ~success_effect:Active_record_durable
         ~unknown_effect:Active_record_state_unknown
     with
     | Record_exists -> `Collision
@@ -2374,10 +2841,10 @@ let bind ~(store : store) ~(prepared : prepared) ~stage_identity =
           Source_removal_durability_unknown Active_to_owned;
         sync_directory
           ~subject:(Area (Owned, store.owner))
-          store.owned;
+          (area_directory store Owned);
         sync_directory
           ~subject:(Area (Active, store.owner))
-          store.active;
+          (area_directory store Active);
         observed_effect := Owned_record_durable
       | `Not_found -> raise_missing_record ~store ~area:Active ~operation_id
       | _ ->
@@ -2398,6 +2865,7 @@ let bind ~(store : store) ~(prepared : prepared) ~stage_identity =
           ~operation_id
           ~raw:owned_raw
           ~base_effect:Active_record_durable
+          ~success_effect:Owned_record_durable_with_active
           ~unknown_effect:Owned_record_state_unknown_with_active);
      observed_effect := Owned_record_durable_with_active;
      remove_exact_source
@@ -2426,7 +2894,7 @@ let discharge_prepared ~(store : store) ~(prepared : prepared) =
       Source_removal_durability_unknown Discharge_active;
     sync_directory
       ~subject:(Area (Active, store.owner))
-      store.active;
+      (area_directory store Active);
     observed_effect := Active_record_discharged;
     Already_discharged
   | `Regular_file ->
@@ -2454,7 +2922,7 @@ let discharge_bound ~(store : store) ~(bound : bound) =
       Source_removal_durability_unknown Discharge_owned;
     sync_directory
       ~subject:(Area (Owned, store.owner))
-      store.owned;
+      (area_directory store Owned);
     observed_effect := Owned_record_discharged;
     Already_discharged
   | `Regular_file ->
@@ -2508,7 +2976,7 @@ let transition_to_forensic
           Source_removal_durability_unknown removal_transition;
         sync_directory
           ~subject:(Area (Forensic, store.owner))
-          store.forensic;
+          (area_directory store Forensic);
         sync_directory
           ~subject:(Area (source_area, store.owner))
           (area_directory store source_area);
@@ -2533,6 +3001,7 @@ let transition_to_forensic
           ~operation_id
           ~raw:forensic_raw
           ~base_effect:source_effect
+          ~success_effect:Forensic_record_durable_with_source
           ~unknown_effect:Forensic_record_state_unknown_with_source);
      observed_effect := Forensic_record_durable_with_source;
      remove_exact_source
@@ -2633,6 +3102,8 @@ module For_testing = struct
     observed_effect := Active_record_durable;
     prepared
   ;;
+
+  let area_directory = area_directory
 end
 
 type corrupt_record =
@@ -2643,6 +3114,19 @@ type corrupt_record =
   }
 
 type inventory_row =
+  | Unexpected_lane_entry of
+      { name : string
+      ; kind : Eio.File.Stat.kind
+      }
+  | Missing_lane_entry of { name : string }
+  | Lane_entry_unavailable of
+      { name : string
+      ; error : transition_error
+      }
+  | Area_inventory_unavailable of
+      { area : area
+      ; error : transition_error
+      }
   | Active_record of prepared
   | Owned_record of bound
   | Forensic_record of forensic
@@ -2778,9 +3262,30 @@ let inventory_area ~store area =
     names
 ;;
 
+let inventory_row_of_lane_residue = function
+  | Lane_residue_present { name; kind } ->
+    Unexpected_lane_entry { name; kind }
+  | Lane_residue_missing { name } -> Missing_lane_entry { name }
+  | Lane_residue_unavailable { name; error } ->
+    Lane_entry_unavailable { name; error }
+;;
+
+let inventory_area_rows ~store area =
+  try inventory_area ~store area with
+  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | Transition_failed error -> [ Area_inventory_unavailable { area; error } ]
+  | Store_failure failure ->
+    [ Area_inventory_unavailable
+        { area
+        ; error = transition_error ~store_effect:No_record_change failure
+        }
+    ]
+;;
+
 let inventory store =
   protect_result ~store_effect:No_record_change (fun () ->
-    inventory_area ~store Active
-    @ inventory_area ~store Owned
-    @ inventory_area ~store Forensic)
+    List.map inventory_row_of_lane_residue store.lane_residues
+    @ inventory_area_rows ~store Active
+    @ inventory_area_rows ~store Owned
+    @ inventory_area_rows ~store Forensic)
 ;;

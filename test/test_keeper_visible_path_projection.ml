@@ -67,17 +67,20 @@ let make_meta
 let with_eio_fs f =
   Eio_main.run
   @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  Fs_compat.set_fs fs;
   Process_eio.init
     ~cwd_default:(Eio.Stdenv.cwd env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  f ()
+  f ~fs ~sw ()
 ;;
 
 let setup ?sandbox ?always_allow f =
   with_eio_fs
-  @@ fun () ->
+  @@ fun ~fs ~sw () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
   Fun.protect
@@ -89,7 +92,28 @@ let setup ?sandbox ?always_allow f =
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
        ignore (Keeper_registry.register ~base_path:base meta.name meta);
-       f ~config ~meta ~playground)
+       let registry =
+         match
+           Fs_compat.open_publication_recovery_registry
+             ~sw
+             ~registry_root:Eio.Path.(fs / Workspace.masc_root_dir config)
+         with
+         | Ok registry -> registry
+         | Error error ->
+           Alcotest.fail
+             (Fs_compat.publication_recovery_registry_error_to_string error)
+       in
+       match
+         Fs_compat.with_publication_recovery_lane
+           ~registry
+           ~owner:meta.name
+           (fun publication_recovery_access ->
+              f ~config ~meta ~playground ~publication_recovery_access)
+       with
+       | Ok value -> value
+       | Error error ->
+         Alcotest.fail
+           (Fs_compat.publication_recovery_lane_open_error_to_string error))
 ;;
 
 let parse raw = Yojson.Safe.from_string raw
@@ -135,7 +159,7 @@ let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =
 
 let test_visible_mind_read_resolves_to_private_storage () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery_access:_ ->
   let target = Filename.concat playground "mind/README.md" in
   write_file target "visible mind\n";
   match
@@ -150,7 +174,7 @@ let test_visible_mind_read_resolves_to_private_storage () =
 
 let test_absolute_playground_path_is_allowed () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery_access:_ ->
   let target = Filename.concat playground "mind/README.md" in
   write_file target "private storage fixture\n";
   (match
@@ -166,7 +190,7 @@ let test_absolute_playground_path_is_allowed () =
 
 let test_relative_path_does_not_depend_on_project_root_allowlist () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery_access:_ ->
   let target = Filename.concat playground "mind/README.md" in
   let project_root_meta = { meta with allowed_paths = [ "mind" ] } in
   match
@@ -181,7 +205,7 @@ let test_relative_path_does_not_depend_on_project_root_allowlist () =
 
 let test_relative_parent_escape_is_rejected () =
   setup
-  @@ fun ~config ~meta ~playground:_ ->
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery_access:_ ->
   match
     Keeper_tool_shared_runtime.resolve_keeper_read_path
       ~config
@@ -194,7 +218,7 @@ let test_relative_parent_escape_is_rejected () =
 
 let test_read_with_visible_repo_cwd_and_relative_file_path () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery_access:_ ->
   allow_repo ~config ~meta "masc";
   let target = Filename.concat playground "repos/masc/README.md" in
   write_file target "repo readme\n";
@@ -202,7 +226,7 @@ let test_read_with_visible_repo_cwd_and_relative_file_path () =
     Keeper_tool_filesystem_runtime.handle_read_file
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
       ~args:
         (`Assoc
             [ "cwd", `String "repos/masc"
@@ -219,7 +243,7 @@ let test_read_with_visible_repo_cwd_and_relative_file_path () =
 
 let test_repository_backlog_file_is_readable () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery_access:_ ->
   allow_repo ~config ~meta "masc";
   let target = Filename.concat playground "repos/masc/docs/backlog.json" in
   write_file target {|{"scope":"repository fixture"}|};
@@ -227,7 +251,7 @@ let test_repository_backlog_file_is_readable () =
     Keeper_tool_filesystem_runtime.handle_read_file
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
       ~args:
         (`Assoc
             [ "path", `String "repos/masc/docs/backlog.json"
@@ -245,13 +269,13 @@ let test_repository_backlog_file_is_readable () =
    repository or retry advice at the dispatch boundary. *)
 let test_repo_prefixed_missing_read_preserves_exact_input () =
   setup
-  @@ fun ~config ~meta ~playground:_ ->
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery_access:_ ->
   allow_repo ~config ~meta "masc";
   let raw =
     Keeper_tool_filesystem_runtime.handle_read_file
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
       ~args:
         (`Assoc
             [ "path", `String "repos/masc/lib/keeper/does_not_exist_xyz.ml"
@@ -270,12 +294,13 @@ let test_repo_prefixed_missing_read_preserves_exact_input () =
 
 let test_write_visible_mind_path () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker ~always_allow:true
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery_access ->
   let raw =
     Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
+      ~publication_recovery_access
       ~args:
         (`Assoc
             [ "path", `String "mind/allowed.txt"

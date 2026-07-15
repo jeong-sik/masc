@@ -380,11 +380,12 @@ let health_status_rank = Health_status.rank_string
 let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety
-    ~keeper_identity_drift_json ~reaction_ledger_json ~turn_admission_json
-    ~board_event_collection_json ~keeper_event_queue_json
-    ~runtime_startup_degradation_json ~keeper_config_schema_status
-    ~keeper_config_schema_blocking ~keeper_config_schema_terminal_reason
-    ~keeper_config_operator_action_required ~lazy_task_boot_guard_fires_total =
+    ~keeper_identity_drift_json ~publication_recovery_activation_json
+    ~reaction_ledger_json ~turn_admission_json ~board_event_collection_json
+    ~keeper_event_queue_json ~runtime_startup_degradation_json
+    ~keeper_config_schema_status ~keeper_config_schema_blocking
+    ~keeper_config_schema_terminal_reason ~keeper_config_operator_action_required
+    ~lazy_task_boot_guard_fires_total =
   let status = ref "ok" in
   let reasons = ref [] in
   let note_status component json fallback_reason =
@@ -426,6 +427,10 @@ let full_health_operator_summary ~keeper_fleet_safety
     (assoc_string_opt "blocker" keeper_fleet_safety);
   note_status "keeper_identity_drift" keeper_identity_drift_json
     (assoc_string_opt "terminal_reason" keeper_identity_drift_json);
+  note_status
+    "publication_recovery_activation"
+    publication_recovery_activation_json
+    (assoc_string_opt "reason" publication_recovery_activation_json);
   note_status "keeper_reaction_ledger" reaction_ledger_json None;
   note_status "keeper_turn_admission" turn_admission_json None;
   note_status "keeper_board_event_collection" board_event_collection_json None;
@@ -488,10 +493,11 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
+  let server_state = current_server_state_opt () in
   (* Single-pass fleet meta scan: reads each keeper meta file once,
      shared by paused-keepers and fleet-safety sections. *)
   let fleet_meta_scan =
-    match current_server_state_opt () with
+    match server_state with
     | Some state ->
       Some (keeper_fleet_meta_scan (Mcp_server.workspace_config state))
     | None -> None
@@ -499,7 +505,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let keeper_identity_drift_json =
     compute_section ~name:"keeper_identity_drift" ?section_timings_ref
       (fun () ->
-        match current_server_state_opt () with
+        match server_state with
         | Some state ->
           keeper_identity_drift_health_json (Mcp_server.workspace_config state)
         | None ->
@@ -522,6 +528,34 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
               ("meta_without_config_names", `List []);
               ("next_action", `String "none");
             ])
+  in
+  let publication_recovery_activation_json =
+    compute_section
+      ~name:"publication_recovery_activation"
+      ?section_timings_ref
+      (fun () ->
+        match server_state with
+        | None ->
+          `Assoc
+            [ "status", `String "unavailable"
+            ; "operator_action_required", `Bool false
+            ; "reason", `String "server_state_not_ready"
+            ]
+        | Some state ->
+          let workspace_scope = Mcp_server.workspace_scope state in
+          (match
+             Mcp_server.workspace_scope_publication_recovery_report
+               workspace_scope
+           with
+           | None ->
+             `Assoc
+               [ "status", `String "unavailable"
+               ; "operator_action_required", `Bool false
+               ; "reason", `String "non_runtime_state"
+               ]
+           | Some report ->
+             Mcp_server.publication_recovery_activation_report_to_health_yojson
+               report)
   in
   let paused_keepers_json =
     compute_section ~name:"paused_keepers" ?section_timings_ref
@@ -591,6 +625,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     full_health_operator_summary
       ~keeper_fleet_safety
       ~keeper_identity_drift_json
+      ~publication_recovery_activation_json
       ~reaction_ledger_json
       ~turn_admission_json
       ~board_event_collection_json
@@ -645,6 +680,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
+    ("publication_recovery_activation", publication_recovery_activation_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
     ("keeper_turn_admission", turn_admission_json);
     ("keeper_board_event_collection", board_event_collection_json);
@@ -750,6 +786,7 @@ let full_health_cached_field_names =
     "disk_observation";
     "keeper_fleet_safety";
     "keeper_identity_drift";
+    "publication_recovery_activation";
     "keeper_reaction_ledger";
     "keeper_turn_admission";
     "keeper_board_event_collection";
@@ -813,6 +850,12 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("next_action", `String "none");
           ("component_timed_out", `Bool component_timed_out);
         ] );
+    ( "publication_recovery_activation",
+      full_health_component_placeholder
+        ?error
+        ~component_timed_out
+        ~status
+        "publication_recovery_activation" );
     ( "keeper_reaction_ledger",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_reaction_ledger" );

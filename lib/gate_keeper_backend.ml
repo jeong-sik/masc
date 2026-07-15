@@ -499,7 +499,7 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
    to [None] ([dispatch]). Without the unit the optional leaks into [dispatch]'s
    inferred type and breaks the .mli signature. Do not drop the [()]. *)
 let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owner
-    ~sw ~clock ~proc_mgr ~net ~config
+    ~sw ~clock ~proc_mgr ~net ~publication_recovery_registry ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~idempotency_key ~metadata ~content () =
   let keeper_name = String.trim keeper_name in
@@ -608,6 +608,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
     clock;
     proc_mgr;
     net;
+    publication_recovery_registry;
   } in
   let start_mtime = Mtime_clock.now () in
   let on_text_delta =
@@ -808,19 +809,22 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
    the connector-neutral [dispatch_fn] shape. Requiring the connector to name
    its kind also makes a missing wiring a compile error rather than a silent
    [Generic] default. *)
-let dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net ~config
+let dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
+    ~publication_recovery_registry ~config
     ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content =
-  dispatch_core ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net ~config
+  dispatch_core ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
+    ~publication_recovery_registry ~config
     ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content ()
 
 let dispatch_with_text_snapshot ~connector_kind ~submission_owner
-    ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
-    ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
-    ~metadata ~content =
+    ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~publication_recovery_registry
+    ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
+    ~keeper_name ~idempotency_key ~metadata ~content =
   dispatch_core ~connector_kind ~submission_owner ~on_text_snapshot ~sw ~clock
-    ~proc_mgr ~net ~config ~channel ~channel_user_id ~channel_user_name
-    ~channel_workspace_id ~keeper_name ~idempotency_key ~metadata ~content ()
+    ~proc_mgr ~net ~publication_recovery_registry ~config ~channel
+    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+    ~idempotency_key ~metadata ~content ()

@@ -1,8 +1,7 @@
 (** P0 keeper registry hardening tests.
 
-    Verify typed validation errors on put/update, health-aware get, and the
-    tool-dispatch fallback path that uses the original meta when the registry
-    entry is corrupted. *)
+    Verify typed validation errors on put/update, health-aware get, and exact
+    turn-resource identity across same-name registry entry replacement. *)
 
 open Alcotest
 
@@ -158,6 +157,7 @@ let test_lane_fork_rejects_cancelling_switch () =
           (Lane.fork
              ~sw
              lane
+             ~with_run_scope:(fun run -> run ())
              ~run:(fun _ -> Atomic.set run_called true)
              ~cleanup:(fun _ ->
                Atomic.incr cleanup_calls;
@@ -304,44 +304,110 @@ let contains_substring text needle =
   needle_len = 0 || loop 0
 ;;
 
-let test_tool_dispatch_fallback_uses_original_meta () =
-  let dir = temp_dir "registry_fallback" in
+let test_tool_dispatch_preserves_exact_meta_after_replacement () =
+  let dir = temp_dir "registry_exact_turn_meta" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Eio.Switch.run @@ fun sw ->
        let config = Masc.Workspace.default_config dir in
-       let meta = make_meta "fallback-keeper" in
+       let meta =
+         { (make_meta "fallback-keeper") with
+           allowed_paths = [ config.base_path ]
+         }
+       in
+       let evidence = "exact-turn-meta-evidence" in
+       let evidence_path = Filename.concat config.base_path "exact-meta.txt" in
+       Out_channel.with_open_bin evidence_path (fun channel ->
+         Out_channel.output_string channel evidence);
        let ctx_work =
          Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
            ~max_tokens:4000
        in
-       ignore (KR.register ~base_path:config.base_path meta.name meta);
+       let original_entry =
+         KR.register ~base_path:config.base_path meta.name meta
+       in
        Fun.protect
          ~finally:(fun () -> KR.unregister ~base_path:config.base_path meta.name)
          (fun () ->
+            Masc_test_deps.with_publication_recovery_lane
+              ~sw
+              ~fs:(Eio.Stdenv.fs env)
+              ~registry_root:dir
+              ~owner:meta.name
+              (fun ~publication_recovery_registry
+                   ~publication_recovery_access ->
+            (match
+               KR.attach_publication_recovery_access
+                 original_entry
+                 publication_recovery_access
+             with
+             | Ok () -> ()
+             | Error KR.Publication_recovery_already_attached ->
+               fail "original entry recovery access was already attached");
+            Fun.protect
+              ~finally:(fun () ->
+                match KR.detach_publication_recovery_access original_entry with
+                | Ok () -> ()
+                | Error KR.Publication_recovery_not_attached ->
+                  fail "original entry recovery access detached unexpectedly")
+              (fun () ->
+            let exact_resources =
+              match
+                Masc.Keeper_publication_recovery_scope.resolve_turn_resources
+                  ~registry:(Some publication_recovery_registry)
+                  ~base_path:config.base_path
+                  ~keeper_name:meta.name
+              with
+              | Ok resources -> resources
+              | Error failure ->
+                fail
+                  (Masc.Keeper_publication_recovery_scope.failure_to_string
+                     failure)
+            in
+            let replacement_meta =
+              { meta with
+                allowed_paths = [ Filename.concat config.base_path "other" ]
+              }
+            in
+            let replacement =
+              KR.register
+                ~base_path:config.base_path
+                replacement_meta.name
+                replacement_meta
+            in
             (match KR.get_with_health ~base_path:config.base_path meta.name with
-             | None -> fail "registered entry not found"
-             | Some (entry, _) ->
-               let corrupted_meta = { entry.meta with name = "wrong-name" } in
-               let corrupted = { entry with meta = corrupted_meta } in
-               KR.For_testing.unsafe_put_entry ~base_path:config.base_path meta.name corrupted);
+             | Some (current, KR.Healthy) ->
+               check bool "healthy replacement installed" true (current == replacement)
+             | Some (_, health) ->
+               fail
+                 ("replacement is unhealthy: "
+                  ^ KR.registry_entry_validation_error_to_string health)
+             | None -> fail "replacement entry not found");
             let result =
               KET.execute_keeper_tool_call_with_outcome
                 ~config
-                ~meta
+                ~meta:exact_resources.entry.meta
+                ~publication_recovery_registry:exact_resources.registry
+                ~publication_recovery_access:exact_resources.access
                 ~ctx_work
                 ~exec_cache:None
                 ~name:"Read"
-                ~input:(`Assoc [ ("file_path", `String "dune-project") ])
+                ~input:(`Assoc [ ("file_path", `String "exact-meta.txt") ])
                 ()
             in
+            let content =
+              Yojson.Safe.from_string result.raw_output
+              |> Yojson.Safe.Util.member "content"
+              |> Yojson.Safe.Util.to_string
+            in
             check
-              bool
-              "fallback used original meta (Read not denied by corrupted registry entry)"
-              false
-              (contains_substring result.raw_output "\"error\":\"tool_not_allowed\"")))
+              string
+              "dispatch uses exact admitted meta, not same-name replacement meta"
+              evidence
+              content))))
 ;;
 
 let () =
@@ -398,9 +464,9 @@ let () =
             `Quick
             test_wakeup_denies_dead_tombstone_without_signaling
         ] )
-    ; ( "tool_dispatch_fallback"
-      , [ test_case "uses original meta on corrupted registry entry" `Quick
-            test_tool_dispatch_fallback_uses_original_meta
+    ; ( "tool_dispatch_exact_resources"
+      , [ test_case "preserves exact meta after healthy entry replacement" `Quick
+            test_tool_dispatch_preserves_exact_meta_after_replacement
         ] )
     ]
 ;;

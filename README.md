@@ -244,6 +244,7 @@ Runtime settings and state live under `.masc/` below `--base-path`. Config files
 | File | Role |
 |------|------|
 | `runtime.toml` | Provider/model catalog + `[runtime].default`. Required to start: if it (or `[runtime].default`) is missing, the server logs `refusing to boot` and exits 1 — no environment-default fallback |
+| `oas-models-overlay.toml` | Deployment-local capability rows merged onto OAS's embedded catalog. Do not copy upstream catalog rows here |
 ⚠️ **Legacy / unused keys**: If your `runtime.toml` contains `[autonomous] concurrency` or `[bootstrap] max_active_keepers`, remove it; neither key controls execution.
 
 **When creating agents**

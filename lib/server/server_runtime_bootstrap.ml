@@ -10,43 +10,7 @@ let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
-type model_catalog_env_resolution =
-  { path : string
-  ; source : model_catalog_env_source
-  }
-
-and model_catalog_env_source =
-  | Env_var of model_catalog_env_var
-  | Config_root_catalog_file of string
-  | Parent_file of
-      { origin : model_catalog_parent_origin
-      ; filename : string
-      }
-
-and model_catalog_env_var =
-  | Oas_model_catalog
-  | Masc_model_catalog
-
-and model_catalog_parent_origin =
-  | Cwd_parent
-  | Argv0_parent
-
-let model_catalog_env_var_name = function
-  | Oas_model_catalog -> "OAS_MODEL_CATALOG"
-  | Masc_model_catalog -> "MASC_MODEL_CATALOG"
-
-let model_catalog_parent_origin_label = function
-  | Cwd_parent -> "cwd-parent"
-  | Argv0_parent -> "argv0-parent"
-
-let model_catalog_env_source_to_string = function
-  | Env_var var -> model_catalog_env_var_name var
-  | Config_root_catalog_file filename -> Printf.sprintf "config-root:%s" filename
-  | Parent_file { origin; filename } ->
-    Printf.sprintf "%s:%s" (model_catalog_parent_origin_label origin) filename
-
-let models_toml_filename = "models.toml"
-let oas_models_toml_filename = "oas-models.toml"
+let oas_model_catalog_env_var_name = "OAS_MODEL_CATALOG"
 let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
 
 let nonempty_env env name =
@@ -66,99 +30,6 @@ let existing_file path =
     with
     | Sys_error _ -> None
 
-let rec find_in_parents filename dir depth =
-  if depth <= 0 then
-    None
-  else
-      let path = Filename.concat dir filename in
-      match existing_file path with
-      | Some _ as found -> found
-      | None ->
-        let parent = Filename.dirname dir in
-        if String.equal parent dir then None else find_in_parents filename parent (depth - 1)
-
-let find_catalog_in_parents ~origin dir =
-  match find_in_parents models_toml_filename dir 10 with
-  | Some path ->
-    Some { path; source = Parent_file { origin; filename = models_toml_filename } }
-  | None ->
-    (match find_in_parents oas_models_toml_filename dir 10 with
-     | Some path ->
-       Some { path; source = Parent_file { origin; filename = oas_models_toml_filename } }
-     | None -> None)
-
-let find_catalog_in_config_root config_root =
-  let catalog_file filename =
-    let candidate = Filename.concat config_root filename in
-    match existing_file candidate with
-    | Some path -> Some { path; source = Config_root_catalog_file filename }
-    | None -> None
-  in
-  match catalog_file models_toml_filename with
-  | Some _ as found -> found
-  | None -> catalog_file oas_models_toml_filename
-
-let absolute_or_cwd ~cwd path =
-  let path = String.trim path in
-  if String.equal path "" then
-    None
-  else if String.length path > 0 && Char.equal path.[0] '/' then
-    Some path
-  else
-    Some (Filename.concat cwd path)
-
-let argv0_parent_dir ~cwd argv0 =
-  match absolute_or_cwd ~cwd argv0 with
-  | None -> None
-  | Some path -> Some (Filename.dirname path)
-
-let resolve_oas_model_catalog_path
-      ?(env = Sys.getenv_opt)
-      ?config_root
-      ?cwd
-      ?argv0
-      ()
-  =
-  match nonempty_env env (model_catalog_env_var_name Oas_model_catalog) with
-  | Some path -> Some { path; source = Env_var Oas_model_catalog }
-  | None ->
-    (match nonempty_env env (model_catalog_env_var_name Masc_model_catalog) with
-     | Some path -> Some { path; source = Env_var Masc_model_catalog }
-     | None ->
-       let search_cwd =
-         match cwd with
-         | Some cwd when String.trim cwd <> "" -> cwd
-         | _ -> Config_dir_resolver.base_path_or_cwd ()
-       in
-       let process_cwd =
-         try Sys.getcwd () with Sys_error _ -> search_cwd
-       in
-       let argv0 =
-         match argv0 with
-         | Some argv0 -> argv0
-         | None ->
-           (match Array.to_list Sys.argv with
-           | head :: _ -> head
-           | [] -> "")
-       in
-       (match
-          config_root
-          |> Option.map String.trim
-          |> (fun opt ->
-               match opt with
-               | Some value when not (String.equal value "") -> Some value
-               | _ -> None)
-          |> (fun root -> Option.bind root find_catalog_in_config_root)
-        with
-        | Some _ as found -> found
-        | None ->
-          (match find_catalog_in_parents ~origin:Cwd_parent search_cwd with
-           | Some _ as found -> found
-           | None ->
-             (match argv0_parent_dir ~cwd:process_cwd argv0 with
-              | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
-              | None -> None))))
-
 let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
   match load_catalog path with
   | Ok catalog -> set_catalog catalog
@@ -167,30 +38,18 @@ let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
 
 let configure_oas_model_catalog_env
       ?(env = Sys.getenv_opt)
-      ?config_root
-      ?cwd
-      ?argv0
-      ?(putenv = Unix.putenv)
       ?(agent_sdk_catalog = Llm_provider.Model_catalog.global)
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
       ?(set_catalog = Llm_provider.Model_catalog.set_global)
       ()
   =
-  match resolve_oas_model_catalog_path ~env ?config_root ?cwd ?argv0 () with
-  | Some { source = Env_var Oas_model_catalog; path } as resolution ->
+  match nonempty_env env oas_model_catalog_env_var_name with
+  | Some path ->
     install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
     Log.Misc.info
       "model_catalog: OAS_MODEL_CATALOG=%s already configured and loaded"
       path;
-    resolution
-  | Some { source; path } as resolution ->
-    putenv (model_catalog_env_var_name Oas_model_catalog) path;
-    install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
-    Log.Misc.info
-      "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s and loaded"
-      path
-      (model_catalog_env_source_to_string source);
-    resolution
+    Some path
   | None ->
     (match agent_sdk_catalog () with
      | Some _ ->
@@ -201,13 +60,27 @@ let configure_oas_model_catalog_env
        raise (Env_config_core.Config_error "model_catalog: OAS embedded model catalog is unavailable"));
     None
 
+let warn_ignored_config_root_full_catalogs
+      ?(env = Sys.getenv_opt)
+      ~config_root
+      ()
+  =
+  if Option.is_none (nonempty_env env oas_model_catalog_env_var_name)
+  then
+    [ "models.toml"; "oas-models.toml" ]
+    |> List.iter (fun filename ->
+      let path = Filename.concat config_root filename in
+      if Option.is_some (existing_file path)
+      then
+        Log.Misc.warn
+          "model_catalog: ignoring retired config-root full catalog %s; OAS embedded catalog plus oas-models-overlay.toml is the deployment SSOT (set OAS_MODEL_CATALOG explicitly only for a deliberate full replacement)"
+          path)
+
 (* RFC-0342 D1 / RFC-OAS-036: deployment-local capability deltas live in a
    config-root overlay merged onto the embedded catalog
    ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
-   shadows every embedded row and goes stale on each OAS release. A resolved
-   full catalog (env var or config-root file above) still wins outright:
-   [Model_catalog.global] gives the [set_global] replacement precedence over
-   the overlay. *)
+   shadows every embedded row and goes stale on each OAS release. Only an
+   operator-supplied [OAS_MODEL_CATALOG] keeps full-replacement precedence. *)
 let resolve_oas_model_catalog_overlay_path ?config_root () =
   match config_root with
   | None -> None
@@ -382,9 +255,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   ensure_thompson_persistence ~base_path;
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
-  let (_ : model_catalog_env_resolution option) =
-    configure_oas_model_catalog_env ~config_root ()
-  in
+  warn_ignored_config_root_full_catalogs ~config_root ();
+  let (_ : string option) = configure_oas_model_catalog_env () in
   let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads

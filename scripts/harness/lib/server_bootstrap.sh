@@ -126,9 +126,9 @@ harness_seed_server_config() {
   if [[ ! -f "$config_dir/runtime.toml" ]]; then
     cat >"$config_dir/runtime.toml" <<'EOF'
 [runtime]
-default = "transport_harness.smoke"
+default = "deepseek.smoke"
 
-[providers.transport_harness]
+[providers.deepseek]
 display-name = "Transport Harness Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
@@ -143,7 +143,7 @@ max-context = 32768
 tools-support = true
 streaming = true
 
-[transport_harness.smoke]
+[deepseek.smoke]
 is-default = true
 max-concurrent = 1
 EOF

@@ -336,7 +336,7 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
       (Printf.sprintf
          "%s: %d runtime model(s) absent from the OAS capability catalog; they \
           would use provider_default and silently drop thinking/sampling control. \
-          Add them to oas-models.toml (OAS catalog): %s"
+          Add deployment rows to oas-models-overlay.toml or update the OAS embedded catalog: %s"
          config_path
          (List.length unknown)
          (String.concat ", " (List.map fst unknown)))
@@ -401,7 +401,7 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
   Printf.sprintf
     "%s: %d runtime model(s) absent from the OAS capability catalog; they \
      would use provider_default and silently drop thinking/sampling control. \
-     Add them to oas-models.toml (OAS catalog): %s"
+     Add deployment rows to oas-models-overlay.toml or update the OAS embedded catalog: %s"
     report.config_path
     (List.length report.missing_models)
     (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
@@ -494,7 +494,7 @@ let startup_degradation_to_yojson = function
       ; "dropped_lanes", `List (List.map dropped_lane_to_yojson degradation.dropped_lanes)
       ; ( "next_action"
         , `String
-            "Add the listed provider/model rows to oas-models.toml or remove \
+            "Add deployment rows to oas-models-overlay.toml (or upstream OAS) or remove \
              those runtime.toml bindings; uncatalogued runtimes are disabled \
              for this process." )
       ]
@@ -674,7 +674,7 @@ let missing_reference_error
   Printf.sprintf
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
      are referenced by routing config: %s. %s Add catalog rows to \
-     oas-models.toml or remove those routing references; MASC will not erase \
+     oas-models-overlay.toml (or upstream OAS) or remove those routing references; MASC will not erase \
      explicit runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)

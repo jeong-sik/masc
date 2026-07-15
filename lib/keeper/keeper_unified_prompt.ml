@@ -809,13 +809,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
         Buffer.add_char ubuf '\n';
         Some (Buffer.contents ubuf))
       else None
-    (* 4. Context health — stable resource framing. *)
-    | Keeper_context_layers.Context_health ->
-      Some
-        (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
-           (Lazy.force observation.context_ratio *. 100.0)
-           observation.idle_seconds)
-    (* 5. Autonomous trigger — lower churn than reactive inboxes. *)
+    (* 4. Autonomous trigger — lower churn than reactive inboxes. *)
     | Keeper_context_layers.Autonomous_trigger ->
       if autonomous_trigger <> [] then
         Some
@@ -823,7 +817,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ^ String.concat "\n" autonomous_trigger
           ^ "\n")
       else None
-    (* 6. Scheduled automation — durable MASC schedule store, not OAS/provider
+    (* 5. Scheduled automation — durable MASC schedule store, not OAS/provider
        state. Shows only identifiers and execution state so payload content does
        not become trusted instruction text. *)
     | Keeper_context_layers.Scheduled_automation ->
@@ -841,7 +835,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ^ "\n\n")
       else None
     | Keeper_context_layers.Scope_messages -> None
-    (* 10. Claimable work — advisory operational guidance. Body lives at
+    (* 9. Claimable work — advisory operational guidance. Body lives at
        config/prompts/keeper.immediate_task_move.md. The OCaml side only owns
        the section header and the trailing blank line; the bullet prose stays in
        the markdown file alongside the other keeper prompts. *)
@@ -854,7 +848,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
               Keeper_prompt_names.immediate_task_move
           ^ "\n")
       else None
-    (* 11. Board activity — reactive trigger. All authors and post kinds share
+    (* 10. Board activity — reactive trigger. All authors and post kinds share
        one neutral observation renderer. Exact mention remains routing context;
        it never promotes Board content to instruction authority. *)
     | Keeper_context_layers.Board_activity ->

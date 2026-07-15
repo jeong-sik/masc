@@ -16,9 +16,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(turn_generation : int)
     ~(channel : Keeper_world_observation.keeper_cycle_channel)
     ~(snapshot_source : string)
-    ~(context_ratio : float)
-    ~(context_tokens : int)
-    ~(context_max : int)
+    ~(checkpoint_bytes : int)
     ~(message_count : int)
     ~(compaction : Keeper_context_runtime.compaction_event)
     ~(handoff_json : Yojson.Safe.t option)
@@ -32,12 +30,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
       ~usage_reported:result.usage_reported
       ~usage:result.usage
   in
-  (* #9953: record context_max_bucket on the neutral runtime lane so
-     dashboards can directly count drift without preserving provider/model
-     identity at the MASC boundary. *)
-  record_context_max_observation
-    ~keeper:meta.name
-    ~context_max;
   let scheduled_autonomous_outcome =
     if Keeper_world_observation.is_autonomous channel then
       Some (scheduled_autonomous_outcome_for_result result)
@@ -119,9 +111,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
                (usage_trust_reasons usage_trust)) );
         ("latency_ms", `Int latency_ms);
         ("cost_usd", cost_json);
-        ("context_ratio", `Float context_ratio);
-        ("context_tokens", `Int context_tokens);
-        ("context_max", `Int context_max);
+        ("checkpoint_bytes", `Int checkpoint_bytes);
         ("message_count", `Int message_count);
         ("continuity_state", `Null);
         ("compacted", `Bool compaction.applied);

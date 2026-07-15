@@ -555,7 +555,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
                ]
            | Some report ->
              Mcp_server.publication_recovery_activation_report_to_health_yojson
-               report)
+               report))
   in
   let paused_keepers_json =
     compute_section ~name:"paused_keepers" ?section_timings_ref

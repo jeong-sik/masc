@@ -44,7 +44,7 @@ let get_phase name =
 
 let paired_lifecycle_origin = function
   | KSM.Compaction_started
-  | KSM.Compaction_completed _
+  | KSM.Compaction_completed
   | KSM.Compaction_failed _
   | KSM.Handoff_started
   | KSM.Handoff_completed _

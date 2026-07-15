@@ -54,12 +54,9 @@ type harness_verdict_item =
 type pre_compact_event =
   { timestamp : float
   ; keeper_name : string
-  ; context_ratio : float
+  ; checkpoint_bytes : int
   ; message_count : int
-  ; token_count : int
   ; strategies : string list
-  ; context_window : int
-  ; is_local_model : bool
   ; trigger : Compaction_trigger.t
   }
 
@@ -94,12 +91,9 @@ type wake_payload_event =
     record-pattern access. *)
 val record_pre_compact
   :  keeper_name:string
-  -> context_ratio:float
+  -> checkpoint_bytes:int
   -> message_count:int
-  -> token_count:int
   -> strategies:string list
-  -> context_window:int
-  -> is_local_model:bool
   -> trigger:Compaction_trigger.t
   -> pre_compact_event
 
@@ -109,12 +103,9 @@ val record_pre_compact
 val record_pre_compact_at
   :  timestamp:float
   -> keeper_name:string
-  -> context_ratio:float
+  -> checkpoint_bytes:int
   -> message_count:int
-  -> token_count:int
   -> strategies:string list
-  -> context_window:int
-  -> is_local_model:bool
   -> trigger:Compaction_trigger.t
   -> pre_compact_event
 

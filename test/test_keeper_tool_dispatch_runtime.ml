@@ -214,7 +214,11 @@ let test_public_read_rejects_unsupported_range_fields () =
       in
       check string "runtime outcome" "failure"
         (match result.outcome with `Success -> "success" | `Failure _ -> "failure");
-      let json = Yojson.Safe.from_string result.raw_output in
+      let json =
+        match result.data with
+        | Some data -> data
+        | None -> fail "validation rejection omitted typed data"
+      in
       let error =
         Yojson.Safe.Util.(member "error" json |> to_string_option)
         |> Option.value ~default:""
@@ -256,7 +260,11 @@ let test_public_read_rejects_offset_without_enrichment () =
           ()
       in
       check string "runtime outcome" "failure" (outcome_label result.outcome);
-      let json = Yojson.Safe.from_string result.raw_output in
+      let json =
+        match result.data with
+        | Some data -> data
+        | None -> fail "validation rejection omitted typed data"
+      in
       check bool "dispatch does not add a tutor" true
         Yojson.Safe.Util.(member "tool_tutor" json = `Null);
       check bool "validation names exact field" true
@@ -1297,10 +1305,10 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
         check bool "error message preserved" true
           (contains_substring execution.raw_output "Self-approval"))
 
-(* ── OAS descriptor concurrency class ────────────────────────
+(* ── OAS descriptor execution mode ───────────────────────────
 
    WebSearch/WebFetch hit external rate-limited APIs. They must not be
-   classified as [Parallel_read] even though they are read-only. *)
+   assigned an inferred execution mode merely because they are read-only. *)
 
 let make_dummy_oas_tool name =
   Masc.Tool_bridge.oas_tool_of_masc
@@ -1351,12 +1359,6 @@ let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
     Yojson.Safe.Util.(member "runtime_handler" payload |> to_string)
 ;;
 
-let string_of_concurrency_class = function
-  | Agent_sdk.Tool.Parallel_read -> "parallel_read"
-  | Agent_sdk.Tool.Sequential_workspace -> "sequential_workspace"
-  | Agent_sdk.Tool.Exclusive_external -> "exclusive_external"
-;;
-
 let check_no_inferred_descriptor ~msg name =
   let tool = make_dummy_oas_tool name in
   match Agent_sdk.Tool.descriptor tool with
@@ -1405,23 +1407,15 @@ let test_model_visible_tools_do_not_infer_oas_descriptors () =
          [ "WebSearch"; "WebFetch"; "Grep"; "Read" ])
 ;;
 
-(* ── Parallel read execution ─────────────────────────────────
+(* ── Concurrent execution ────────────────────────────────────
 
-   Confirm that two [Parallel_read] tools run concurrently and that
+   Confirm that two [Concurrent] tools run concurrently and that
    [Agent_tools.execute_tools] returns results in input order even when the
    second tool finishes before the first. *)
 
 let make_delayed_read_tool clock name delay_ms =
   let descriptor =
-    { Agent_sdk.Tool.kind = Some "test"
-    ; mutation_class = Some Agent_sdk.Tool.Read_only
-    ; concurrency_class = Some Agent_sdk.Tool.Parallel_read
-    ; permission = Some Agent_sdk.Tool.ReadOnly
-    ; evidence_role = None
-    ; shell = None
-    ; notes = []
-    ; examples = []
-    }
+    { Agent_sdk.Tool.execution_mode = Agent_sdk.Tool.Concurrent }
   in
   Agent_sdk.Tool.create
     ~descriptor
@@ -1436,10 +1430,9 @@ let make_delayed_read_tool clock name delay_ms =
 let execute_tools_in_env env ~tools tool_uses =
   let net = Eio.Stdenv.net env in
   let config =
-    { Agent_sdk.Types.default_config with
+    { (Agent_sdk.Types.default_config ~model:"parallel-read-test") with
       Agent_sdk.Types.name = "parallel-read-test"
     ; system_prompt = Some "test"
-    ; max_turns = 1
     }
   in
   let agent = Agent_sdk.Agent.create ~net ~config ~tools () in
@@ -1478,7 +1471,7 @@ let test_parallel_read_tools_reorder_results () =
     (elapsed_ms, results)
   in
   match elapsed_ms, results with
-  | _, [ r1; r2 ] ->
+  | _, Ok [ r1; r2 ] ->
     check string "first result id" "u-1" r1.Agent_sdk.Agent_tools.tool_use_id;
     check string "first result content" "slow_read" r1.Agent_sdk.Agent_tools.content;
     check string "second result id" "u-2" r2.Agent_sdk.Agent_tools.tool_use_id;
@@ -1486,7 +1479,8 @@ let test_parallel_read_tools_reorder_results () =
     (* If they ran sequentially the elapsed time would be at least 180 ms.
        Allow generous slack for scheduler jitter on shared CI runners. *)
     check bool "parallel read ran concurrently" true (elapsed_ms < 250)
-  | _ -> fail "expected exactly two tool execution results"
+  | _, Ok _ -> fail "expected exactly two tool execution results"
+  | _, Error _ -> fail "concurrent tool execution unexpectedly failed"
 ;;
 
 (* ── Exec cache data structure tests ───────────────────────── *)

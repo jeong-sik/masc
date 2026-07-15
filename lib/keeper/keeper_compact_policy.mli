@@ -1,9 +1,15 @@
 (** Keeper_compact_policy — explicit compaction request application.
 
     Applies a caller-owned typed request. Context observations never admit
-    compaction on their own.
+    compaction on their own. *)
 
-    Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
+type compaction_rejection =
+  | Retired_deterministic_mode
+  | Runtime_identity_unavailable
+  | Summarizer_unavailable
+  | Plan_unavailable_or_invalid
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
 
 (** [Prepared] is structural only; [Applied] requires a durable save. *)
 type compaction_decision =
@@ -13,65 +19,48 @@ type compaction_decision =
   | Not_requested
   | Skipped_no_checkpoint
 
-and compaction_rejection =
-  | Retired_deterministic_mode
-  | Runtime_unavailable
-  | Summarizer_unavailable_or_invalid
-  | Structural_noop
-
+val compaction_rejection_to_string : compaction_rejection -> string
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_prepared : compaction_decision -> bool
 val compaction_decision_applied : compaction_decision -> bool
 
-(** Project [meta] to its [(ratio_gate, message_gate, token_gate)]
-    tuple. *)
+(** Legacy configuration projection retained until the unused ratio/message/
+    token gates are removed from [keeper_meta]. It is not consulted by
+    {!compact_for_request_typed}. *)
 val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * int * int
 
-(** [compact_for_request_typed ~meta ~trigger ctx] applies a caller-owned typed
-    request through a valid configured-LLM plan. Missing/invalid LLM output and the retired
-    deterministic mode preserve the original messages exactly.
-
-    Return pair:
-    - the (possibly compacted) working context;
-    - a typed decision tag describing the request outcome. *)
+(** Apply a caller-owned request. Only a valid configured-LLM plan that
+    strictly reduces the exact serialized checkpoint byte length is prepared.
+    Every refusal preserves the original context and returns a typed reason.
+    The caller owns the durable save and promotion from [Prepared] to [Applied]. *)
 val compact_for_request_typed
   :  meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
   -> Keeper_context_core.working_context
   -> Keeper_context_core.working_context * compaction_decision
 
-type pre_compact_event = {
-  timestamp : float;
-  keeper_name : string;
-  context_ratio : float;
-  message_count : int;
-  token_count : int;
-  strategies : string list;
-  context_window : int;
-  is_local_model : bool;
-  trigger : Compaction_trigger.t;
-}
+type pre_compact_event =
+  { timestamp : float
+  ; keeper_name : string
+  ; checkpoint_bytes : int
+  ; message_count : int
+  ; strategies : string list
+  ; trigger : Compaction_trigger.t
+  }
 
-val record_pre_compact_callback :
-  keeper_name:string ->
-  context_ratio:float ->
-  message_count:int ->
-  token_count:int ->
-  strategies:string list ->
-  context_window:int ->
-  is_local_model:bool ->
-  trigger:Compaction_trigger.t ->
-  pre_compact_event option
+val record_pre_compact_callback
+  :  keeper_name:string
+  -> checkpoint_bytes:int
+  -> message_count:int
+  -> strategies:string list
+  -> trigger:Compaction_trigger.t
+  -> pre_compact_event option
 
-(** Replace [record_pre_compact_callback] with [f]. *)
-val register_record_pre_compact :
-  (keeper_name:string ->
-   context_ratio:float ->
-   message_count:int ->
-   token_count:int ->
-   strategies:string list ->
-   context_window:int ->
-   is_local_model:bool ->
-   trigger:Compaction_trigger.t ->
-   pre_compact_event option) ->
-  unit
+val register_record_pre_compact
+  :  (keeper_name:string
+      -> checkpoint_bytes:int
+      -> message_count:int
+      -> strategies:string list
+      -> trigger:Compaction_trigger.t
+      -> pre_compact_event option)
+  -> unit

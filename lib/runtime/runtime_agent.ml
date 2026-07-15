@@ -82,6 +82,18 @@ type stop_reason =
       request : Agent_sdk.Error.input_required;
     }
 
+type cooperative_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type cooperative_yield_decision =
+  | Continue
+  | Yield of cooperative_yield_reason
+
+type cooperative_yield_probe =
+  Agent_sdk.Agent.Advanced.tool_boundary ->
+  (cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
+
 type config =
   Runtime_agent_context.config = {
   name : string;
@@ -110,8 +122,6 @@ type config =
   yield_on_tool : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;
@@ -170,8 +180,6 @@ let resolve_provider_config_of_label =
 
 let invalid_runtime_config =
   Runtime_transport.invalid_runtime_config
-
-let invalid_exit detail = Error (invalid_runtime_config "exit_condition" detail)
 
 let provider_caps_of_config =
   Runtime_transport.provider_caps_of_config
@@ -1029,6 +1037,29 @@ let content_blocks_detail (blocks : Agent_sdk.Types.content_block list) =
   |> String.concat "\n"
   |> String.trim
 
+let config_with_boundary_response_capture
+      (config : config)
+      response_ref
+  =
+  let capture =
+    { Agent_sdk.Hooks.empty with
+      after_turn =
+        Some
+          (function
+            | Agent_sdk.Hooks.AfterTurn { response; _ } ->
+              response_ref := Some response;
+              Agent_sdk.Hooks.Continue
+            | _ -> Agent_sdk.Hooks.Continue)
+    }
+  in
+  let hooks =
+    match config.hooks with
+    | None -> capture
+    | Some hooks -> Agent_sdk.Hooks.compose ~outer:hooks ~inner:capture
+  in
+  { config with hooks = Some hooks }
+;;
+
 let run_blocks
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -1038,6 +1069,7 @@ let run_blocks
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
     ?(agent_ref : Agent_sdk.Agent.t option ref option)
+    ?cooperative_yield_probe
     ?goal_detail
     (goal_blocks : Agent_sdk.Types.content_block list)
   : (run_result, Agent_sdk.Error.sdk_error) result =
@@ -1049,6 +1081,12 @@ let run_blocks
   with
   | Error _ as err -> err
   | Ok () ->
+  let boundary_response = ref None in
+  let config =
+    match cooperative_yield_probe with
+    | None -> config
+    | Some _ -> config_with_boundary_response_capture config boundary_response
+  in
   let goal_detail =
     match goal_detail with
     | Some detail -> detail
@@ -1105,65 +1143,123 @@ let run_blocks
           "masc.runtime_id", `String config.name;
         ]
         (fun _trace_id ->
-          let api_strategy =
-            match on_event with
-            | None -> Agent_sdk.Agent.Sync
-            | Some on_event ->
-              let on_telemetry =
-                Option.map
-                  (fun bus ->
-                     Agent_sdk.Telemetry_bus.publish
-                       (Agent_sdk.Telemetry_bus.of_event_bus bus))
-                  (Agent_sdk.Agent.options agent).event_bus
-              in
-              Agent_sdk.Agent.Stream { on_event; on_telemetry }
+          let boundary_probe =
+            match cooperative_yield_probe with
+            | None -> None
+            | Some probe ->
+              Some
+                (fun (boundary : Agent_sdk.Agent.Advanced.tool_boundary) ->
+                   Result.map
+                     (function
+                       | Continue -> None
+                       | Yield reason -> Some reason)
+                     (probe boundary))
           in
-          match config.exit_condition, config.exit_condition_result with
-          | None, None | Some _, Some _ ->
-            Result.bind
-              (Agent_sdk.Agent.Advanced.run_blocks
-                 ~sw
-                 ?clock
-                 ?on_yield
-                 ?on_resume
-                 ~api_strategy
-                 ~on_tool_boundary:(fun boundary ->
-                   match config.exit_condition with
-                   | Some predicate when predicate boundary.turn ->
-                     Agent_sdk.Agent.Advanced.Yield
-                   | Some _ | None -> Agent_sdk.Agent.Advanced.Continue)
-                 agent
-                 goal_blocks)
-              (function
-              | Agent_sdk.Agent.Advanced.Completed response ->
-                Ok (response, None)
-              | Agent_sdk.Agent.Advanced.Yielded yielded ->
-                (match config.exit_condition_result with
-                 | Some render ->
-                   let stop_reason, response_text = render yielded.turn in
-                   let response_text =
-                     match response_text with
-                     | Some text when String.trim text <> "" -> text
-                     | _ -> Printf.sprintf "[exit condition met at turn %d]" yielded.turn
-                   in
-                   Ok
-                     ( partial_response_of_stop ~session_id ~text:response_text
-                     , Some (yielded, stop_reason) )
-                 | None ->
-                   invalid_exit "yielded without a typed result"))
-          | Some _, None | None, Some _ ->
-            invalid_exit "predicate and typed result must be paired")
+          match boundary_probe with
+            | None ->
+              (match on_event with
+               | Some cb ->
+                 Agent_sdk.Agent.run_stream_blocks
+                   ~sw
+                   ?clock
+                   ?on_yield
+                   ?on_resume
+                   ~on_event:cb
+                   agent
+                   goal_blocks
+               | None ->
+                 Agent_sdk.Agent.run_blocks
+                   ~sw
+                   ?clock
+                   ?on_yield
+                   ?on_resume
+                   agent
+                   goal_blocks)
+              |> Result.map (fun response -> `Completed response)
+            | Some probe ->
+              let probe_error = ref None in
+              let yield_decision = ref None in
+              let on_tool_boundary
+                    (boundary : Agent_sdk.Agent.Advanced.tool_boundary)
+                =
+                match probe boundary with
+                | Ok None -> Agent_sdk.Agent.Advanced.Continue
+                | Ok (Some decision) ->
+                  yield_decision := Some decision;
+                  Agent_sdk.Agent.Advanced.Yield
+                | Error error ->
+                  probe_error := Some error;
+                  Agent_sdk.Agent.Advanced.Yield
+              in
+              let api_strategy =
+                match on_event with
+                | None -> Agent_sdk.Agent.Sync
+                | Some on_event ->
+                  let on_telemetry =
+                    Option.map
+                      (fun bus ->
+                         Agent_sdk.Telemetry_bus.publish
+                           (Agent_sdk.Telemetry_bus.of_event_bus bus))
+                      (Agent_sdk.Agent.options agent).event_bus
+                  in
+                  Agent_sdk.Agent.Stream { on_event; on_telemetry }
+              in
+              let advanced_result =
+                Agent_sdk.Agent.Advanced.run_blocks
+                  ~sw
+                  ?clock
+                  ?on_yield
+                  ?on_resume
+                  ~api_strategy
+                  ~on_tool_boundary
+                  agent
+                  goal_blocks
+              in
+              (match !probe_error, advanced_result with
+               | Some error, _ -> Error error
+               | None, Error e -> Error e
+               | None, Ok (Agent_sdk.Agent.Advanced.Completed response) ->
+                 Ok (`Completed response)
+               | None, Ok (Agent_sdk.Agent.Advanced.Yielded yielded) ->
+                 (match !yield_decision, !boundary_response with
+                  | Some decision, Some response ->
+                    Ok (`Yielded (decision, yielded, response))
+                  | None, _ ->
+                    Error
+                      (Agent_sdk.Error.Internal
+                         "cooperative yield returned without a typed decision")
+                  | Some _, None ->
+                    Error
+                      (Agent_sdk.Error.Internal
+                         "cooperative yield returned without its provider response"))))
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =
-      let ckpt =
-        build_checkpoint ~session_id
-          ?checkpoint_sidecar:config.checkpoint_sidecar agent
-      in
-      Some ckpt
+      match result with
+      | Ok (`Yielded (_, yielded, _)) ->
+        Some
+          { yielded.checkpoint with
+            Agent_sdk.Checkpoint.session_id
+          ; working_context =
+              (match config.checkpoint_sidecar with
+               | Some _ as sidecar -> sidecar
+               | None -> yielded.checkpoint.working_context)
+          }
+      | Ok (`Completed _) | Error _ ->
+        Some
+          (build_checkpoint
+             ~session_id
+             ?checkpoint_sidecar:config.checkpoint_sidecar
+             agent)
     in
-    let sdk_result = Result.map fst result in
-    let lifecycle = worker_lifecycle_classification_of_result sdk_result in
+    let lifecycle =
+      match result with
+      | Ok (`Completed response) ->
+        worker_lifecycle_classification_of_result (Ok response)
+      | Ok (`Yielded _) ->
+        { event = "completed"; status = "cooperative_yield"; error = None }
+      | Error error -> worker_lifecycle_classification_of_result (Error error)
+    in
     publish_lifecycle ~name:config.name ~event:lifecycle.event
       ~detail:(Printf.sprintf "session=%s" session_id)
       ?error:lifecycle.error
@@ -1188,17 +1284,11 @@ let run_blocks
       | None -> None
     in
     (match result with
-    | Ok (response, yielded) ->
+    | Ok (`Completed response) ->
       close_after_success ();
-      let turns, stop_reason =
-        match yielded with
-        | None -> turns, Completed
-        | Some (yielded, stop_reason) -> yielded.turn, stop_reason
-      in
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason stop_reason)
-        response;
+        ~status:Dashboard_oas_bridge.Success response;
       let runtime_observation =
         runtime_observation_for_completed_config
           ~total_duration_ms:run_total_duration_ms config
@@ -1212,7 +1302,36 @@ let run_blocks
           trace_ref;
           run_validation;
           runtime_observation = Some runtime_observation;
-          stop_reason;
+          stop_reason = Completed;
+        }
+    | Ok (`Yielded (decision, yielded, response)) ->
+      close_after_success ();
+      let stop_reason =
+        match decision with
+        | Chat_waiting ->
+          Yielded_to_chat_waiting { turns_used = yielded.turn }
+        | Durable_stimulus_waiting ->
+          Yielded_to_durable_stimulus { turns_used = yielded.turn }
+      in
+      record_dashboard_oas_response
+        ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:(dashboard_status_of_stop_reason stop_reason)
+        response;
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms
+          config
+      in
+      Ok
+        { response
+        ; checkpoint
+        ; session_id
+        ; turns = yielded.turn
+        ; trace_ref
+        ; run_validation
+        ; runtime_observation = Some runtime_observation
+        ; stop_reason
         }
     | Error
         (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
@@ -1300,10 +1419,11 @@ let run
     ?on_yield
     ?on_resume
     ?agent_ref
+    ?cooperative_yield_probe
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   run_blocks ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume
-    ?agent_ref ~goal_detail:goal [Agent_sdk.Types.Text goal]
+    ?agent_ref ?cooperative_yield_probe ~goal_detail:goal [Agent_sdk.Types.Text goal]
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)

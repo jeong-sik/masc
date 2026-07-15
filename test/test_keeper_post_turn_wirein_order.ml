@@ -237,6 +237,7 @@ let make_checkpoint () =
     }
 
 let test_regular_post_turn_does_not_auto_compact () =
+  Eio_main.run @@ fun _env ->
   let meta = make_meta () in
   let checkpoint = make_checkpoint () in
   let unexpected_callback () = fail "regular post-turn invoked a compaction callback" in

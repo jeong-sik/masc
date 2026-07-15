@@ -197,27 +197,3 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
   let activity_ts = List.fold_left max created_ts [ meta.runtime.proactive_rt.last_ts ] in
   if activity_ts <= 0.0 then 0 else int_of_float (max 0.0 (now_ts -. activity_ts))
 ;;
-
-(** Read context ratio from checkpoint if available. *)
-let read_context_ratio ~(config : Workspace.config) ~(meta : keeper_meta) : float =
-  try
-    let primary_max_context =
-      let resolution =
-        Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
-      in
-      resolution.effective_budget
-    in
-    let base_dir = session_base_dir config in
-    let _session, ctx_opt =
-      load_context_from_checkpoint
-        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-        ~primary_model_max_tokens:primary_max_context
-        ~base_dir
-    in
-    match ctx_opt with
-    | Some c -> Keeper_context_runtime.context_ratio c
-    | None -> 0.0
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> 0.0
-;;

@@ -1668,7 +1668,10 @@ let replace_capability_file_with
                  match !staging_path with
                  | None -> ()
                  | Some path ->
-                   (try ignore (Eio.Path.stat ~follow:false path) with
+                   (try
+                      let _present = Eio.Path.stat ~follow:false path in
+                      ()
+                    with
                     | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
                       absent := true))
           in

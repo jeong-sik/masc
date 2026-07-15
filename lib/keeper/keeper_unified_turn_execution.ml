@@ -23,31 +23,29 @@ type retry_loop_input =
   ; attempted_runtimes : string list
   }
 
-let autonomous_yield_request ~base_path ~keeper_name ~channel =
-  if
-    Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
-    || (match Keeper_chat_queue.pending_count ~keeper_name with
-        | Ok count -> count > 0
-        | Error _ -> true)
-  then
-    let boundary =
-      match channel with
-      | Keeper_world_observation.Scheduled_autonomous ->
-        Keeper_agent_run.Yield_immediately
-      | Keeper_world_observation.Reactive ->
-        Keeper_agent_run.Yield_after_current_turn
-    in
-    Some Keeper_agent_run.{ reason = Chat_waiting; boundary }
-  else
-    let pending = Keeper_registry_event_queue.snapshot ~base_path keeper_name in
-    if Keeper_event_queue.is_empty pending
-    then None
+let autonomous_yield_request ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
+  | Some _ ->
+    if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
+    then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
     else
-      Some
-        Keeper_agent_run.
-          { reason = Durable_stimulus_waiting
-          ; boundary = Yield_after_current_turn
-          }
+      (match Keeper_chat_queue.has_active_receipts ~keeper_name with
+       | Error error ->
+         Error
+           ("chat queue snapshot failed: "
+            ^ Keeper_chat_queue.mutation_error_to_string error)
+       | Ok true -> Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
+       | Ok false ->
+         let pending =
+           Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         in
+         if Keeper_event_queue.is_empty pending
+         then Ok None
+         else
+           Ok
+             (Some
+                Keeper_agent_run.{ reason = Durable_stimulus_waiting }))
 ;;
 
 (** [run] operates on the immutable [Keeper_unified_turn_types.turn_state]
@@ -221,19 +219,13 @@ let run (ctx : ctx)
                       ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
                       reached via [Keeper_turn_admission.run_if_free]); the chat
                       lane runs [run_keeper_msg_turn_admitted] on a separate
-                      path. So passing the yield hook here is inherently
-                      lane-gated. Scheduled-idle chat can take the slot
-                      immediately; reactive chat and a durable event waiting
-                      behind the event leased by this cycle cause a checkpointed
-                      yield after at least one provider turn. A chat turn receives
-                      neither preemption hook. Both signals are read from the
-                      exact queues their consumers drain, so no cadence, timeout, or
-                      inferred text state participates in the decision. *)
+                      path. Thus the probe is lane-gated and runs only at OAS's
+                      post-tool boundary. Its signals come from the exact chat
+                      receipt and durable-event queues their consumers drain. *)
                  ~autonomous_yield_requested:(fun () ->
                    autonomous_yield_request
                      ~base_path:config.base_path
-                     ~keeper_name:meta.name
-                     ~channel)
+                     ~keeper_name:meta.name)
                  ()
            with
            | Eio.Cancel.Cancelled _ as exn ->

@@ -8,7 +8,7 @@
     via [set_tool_schema_stats]. *)
 val metric_mcp_tool_schema_count : string
 
-val metric_mcp_tool_schema_tokens_approx : string
+val metric_mcp_tool_schema_component_bytes : string
 
 
 val metric_inference_inflight : string

@@ -5,7 +5,6 @@ type layer_id =
   | Current_task
   | Connected_surfaces
   | Namespace_state
-  | Context_health
   | Autonomous_trigger
   | Scheduled_automation
   | Pending_mentions
@@ -23,7 +22,6 @@ let ordered =
   ; Current_task
   ; Connected_surfaces
   ; Namespace_state
-  ; Context_health
   ; Autonomous_trigger
   ; Scheduled_automation
   ; Pending_mentions
@@ -41,13 +39,12 @@ let order_index = function
   | Current_task -> 1
   | Connected_surfaces -> 2
   | Namespace_state -> 3
-  | Context_health -> 4
-  | Autonomous_trigger -> 5
-  | Scheduled_automation -> 6
-  | Pending_mentions -> 7
-  | Scope_messages -> 8
-  | Claimable_work -> 9
-  | Board_activity -> 10
+  | Autonomous_trigger -> 4
+  | Scheduled_automation -> 5
+  | Pending_mentions -> 6
+  | Scope_messages -> 7
+  | Claimable_work -> 8
+  | Board_activity -> 9
 ;;
 
 let assemble ~content_of =

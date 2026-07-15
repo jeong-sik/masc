@@ -187,7 +187,6 @@ let test_soft_context_in_dynamic_only () =
 let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
   let prompt =
     KP.build_keeper_system_prompt
-      ~goal:"Keep keeper guidance aligned with runtime behavior"
       ~instructions:""
       ()
   in
@@ -199,7 +198,6 @@ let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
 let test_keeper_prompt_preserves_runtime_continuity_anchors () =
   let prompt =
     KP.build_keeper_system_prompt
-      ~goal:"Keep runtime continuity safe"
       ~instructions:""
       ()
   in
@@ -219,7 +217,6 @@ let test_no_catalog_repository_injection () =
      the prompt carries only the constant self-discovery instruction. *)
   let prompt =
     KP.build_keeper_system_prompt
-      ~goal:"Work on repositories"
       ~instructions:""
       ()
   in
@@ -268,7 +265,6 @@ let test_prompt_recovery_guard_uses_code_fallback_when_registry_empty () =
 let test_prompt_names_non_hierarchical_effect_gate () =
   let prompt =
     KP.build_keeper_system_prompt
-      ~goal:"Keep keeper guidance aligned with runtime behavior"
       ~instructions:""
       ()
   in

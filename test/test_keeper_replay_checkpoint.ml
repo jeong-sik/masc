@@ -7,13 +7,15 @@ module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Receipt = Masc.Keeper_execution_receipt
 module Replay_prefix = Masc.Keeper_replay_prefix
 
+let observed_max_turns = 10
+
 let message role content =
   Agent_sdk.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
   Agent_sdk.Checkpoint.
-    { version = 4
+    { version = checkpoint_version
     ; session_id = "old-session"
     ; agent_name = "test-agent"
     ; model = "test-model"
@@ -29,6 +31,7 @@ let checkpoint ?(working_context = Some (`Assoc [])) messages =
     ; top_p = None
     ; top_k = None
     ; min_p = None
+    ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
     ; response_format = Agent_sdk.Types.Off
@@ -308,13 +311,13 @@ let test_execution_observations_preserve_tool_replay_suffix () =
         { elapsed_sec = 300.0
         ; timeout_sec = 300.0
         ; turn_count = 4
-        ; max_turns = Runtime_agent_context.unbounded_max_turns
+        ; max_turns = observed_max_turns
         }
     ; Runtime_agent.ExecutionIdleTimeoutObserved
         { idle_sec = 120.0
         ; idle_timeout_sec = 120.0
         ; turn_count = 4
-        ; max_turns = Runtime_agent_context.unbounded_max_turns
+        ; max_turns = observed_max_turns
         }
     ]
   in

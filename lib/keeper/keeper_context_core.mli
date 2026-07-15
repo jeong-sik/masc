@@ -10,17 +10,7 @@
 type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
-(** {1 Token counting} *)
-
-(** Token count of a single OAS message. *)
-val msg_tokens : Agent_sdk.Types.message -> int
-
-(** Total tokens across [system_prompt] + every message. *)
-val count_tokens : string -> Agent_sdk.Types.message list -> int
-
-val token_count : working_context -> int
 val message_count : working_context -> int
-val context_ratio : working_context -> float
 val max_tokens_of_context : working_context -> int
 
 (** Replace the working-context's [max_tokens]; mirrors the value
@@ -46,8 +36,9 @@ val set_system_prompt :
 val append : working_context -> Agent_sdk.Types.message -> working_context
 val append_many : working_context -> Agent_sdk.Types.message list -> working_context
 
-(** Push the working-context's derived counters into the OAS
-    [Context.t] (Session scope). *)
+(** Push the exact working-context message count into the OAS [Context.t]
+    (Session scope). Provider token usage is response telemetry and is not a
+    measure of the current checkpoint's context size. *)
 val sync_oas_context : working_context -> working_context
 
 (** {1 Working-context projections} *)
@@ -109,6 +100,9 @@ val repair_broken_tool_call_pairs_with_stats :
 (** {1 Context (de)serialization} *)
 
 val serialize_context : working_context -> string
+val serialized_bytes : working_context -> int
+(** Exact byte length of {!serialize_context}. This is structural observation,
+    not a token estimate or provider context-window admission signal. *)
 val deserialize_context : eio:bool -> string -> max_tokens:int -> working_context
 val context_to_json : working_context -> Yojson.Safe.t
 

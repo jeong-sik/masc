@@ -151,7 +151,14 @@ let validate_keeper_invocation_completion ~request_id stimulus =
     match stimulus.Keeper_event_queue.payload with
     | Keeper_event_queue.Bg_completed completion
       when completion.bg_kind = Keeper_event_queue.Keeper_invocation
-           && String.equal completion.bg_run_id request_id -> Ok ()
+           && String.equal completion.bg_run_id request_id ->
+      (match completion.bg_invocation_join with
+       | Some join
+         when String.equal
+                request_id
+                (Keeper_invocation_types.run_id join.run_ref) -> Ok ()
+       | Some _ -> Error "Keeper invocation receipt run_ref does not match request id"
+       | None -> Error "Keeper invocation receipt lacks its typed terminal join")
     | Keeper_event_queue.Bg_completed _ ->
       Error "Keeper invocation receipt does not match its typed completion"
     | _ -> Error "Keeper invocation receipt requires a Bg_completed payload"

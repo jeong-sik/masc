@@ -22,6 +22,7 @@ type layer_id =
   | Pending_mentions
   | Scope_messages
   | Claimable_work
+  | Keeper_invocation_results
   | Board_activity
 
 val ordered : layer_id list

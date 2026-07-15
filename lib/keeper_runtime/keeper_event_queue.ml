@@ -109,6 +109,7 @@ and bg_job_completion = {
   bg_kind : bg_job_kind;
   bg_outcome : bg_job_outcome;
   bg_board_post_id : string;
+  bg_invocation_join : keeper_invocation_join option;
   (* correlates to an optional board evidence post; "" if none was created. *)
 }
 
@@ -135,6 +136,13 @@ and hitl_resolution = {
 and bg_job_outcome =
   | Bg_ok of string  (* result payload *)
   | Bg_failed of string  (* failure label *)
+
+and keeper_invocation_join = {
+  run_ref : Keeper_invocation_types.run_ref;
+  result_contract : Keeper_invocation_types.result_contract;
+  terminal_result : Keeper_invocation_types.terminal_result;
+  artifact_refs : Shared_types.Artifact_id.t list;
+}
 
 and connector_attention = {
   event_id : string;
@@ -493,6 +501,92 @@ let float_field ~context name fields =
   let* json = required_field ~context name fields in
   float_of_json ~context:(context ^ "." ^ name) json
 
+let keeper_invocation_join_to_yojson join =
+  `Assoc
+    [ "run_ref", Keeper_invocation_types.run_ref_to_json join.run_ref
+    ; ( "result_contract"
+      , `String
+          (Keeper_invocation_types.result_contract_to_string join.result_contract) )
+    ; ( "terminal_result"
+      , Keeper_invocation_types.terminal_result_to_yojson join.terminal_result )
+    ; "artifact_refs", `List (List.map Shared_types.Artifact_id.to_json join.artifact_refs)
+    ]
+;;
+
+let terminal_result_matches_contract result contract =
+  match result, contract with
+  | Keeper_invocation_types.Invocation_succeeded _
+    , (Keeper_invocation_types.Completed | Keeper_invocation_types.Yielded)
+  | Keeper_invocation_types.Invocation_failed _, Keeper_invocation_types.Failed
+  | Keeper_invocation_types.Invocation_lost _, Keeper_invocation_types.Failed
+  | Keeper_invocation_types.Invocation_cancelled _, Keeper_invocation_types.Cancelled
+  | ( Keeper_invocation_types.Invocation_persistence_failed _
+    , Keeper_invocation_types.Failed ) -> true
+  | _ -> false
+;;
+
+let invocation_run_ref_of_yojson json =
+  let context = "keeper_invocation_join.run_ref" in
+  let* fields = assoc_fields ~context json in
+  let* run_id = string_field ~context "run_id" fields in
+  let* target_json = required_field ~context "target" fields in
+  let* target = assoc_fields ~context:(context ^ ".target") target_json in
+  let* target_kind = string_field ~context:(context ^ ".target") "kind" target in
+  let* keeper_name = string_field ~context:(context ^ ".target") "name" target in
+  let* capability = string_field ~context "capability" fields in
+  if String.equal run_id ""
+  then Error "keeper_invocation_join.run_ref.run_id must not be empty"
+  else if not (String.equal target_kind "keeper")
+  then Error "keeper_invocation_join.run_ref.target.kind must be keeper"
+  else if not (String.equal capability "invoke_turn")
+  then Error "keeper_invocation_join.run_ref.capability must be invoke_turn"
+  else
+    Keeper_invocation_types.keeper_turn ~keeper_name ~prompt:"run_ref"
+    |> Result.map (fun request ->
+      { Keeper_invocation_types.run_id
+      ; target = Keeper_invocation_types.request_target request
+      ; capability = Keeper_invocation_types.request_capability request
+      })
+;;
+
+let keeper_invocation_join_of_yojson json =
+  let context = "keeper_invocation_join" in
+  let* fields = assoc_fields ~context json in
+  let* run_ref_json = required_field ~context "run_ref" fields in
+  let* run_ref = invocation_run_ref_of_yojson run_ref_json in
+  let* contract_label = string_field ~context "result_contract" fields in
+  let* result_contract =
+    match Keeper_invocation_types.result_contract_of_string contract_label with
+    | Some value -> Ok value
+    | None -> Error (Printf.sprintf "unknown invocation result_contract: %s" contract_label)
+  in
+  let* terminal_json = required_field ~context "terminal_result" fields in
+  let* terminal_result =
+    Keeper_invocation_types.terminal_result_of_yojson terminal_json
+  in
+  let* artifacts_json = required_field ~context "artifact_refs" fields in
+  let* artifact_refs =
+    match artifacts_json with
+    | `List values ->
+      List.fold_left
+        (fun acc json ->
+           let* refs = acc in
+           Shared_types.Artifact_id.of_json json |> Result.map (fun id -> id :: refs))
+        (Ok [])
+        values
+      |> Result.map List.rev
+    | _ -> Error "keeper_invocation_join.artifact_refs must be a JSON list"
+  in
+  let canonical_refs =
+    List.sort_uniq Shared_types.Artifact_id.compare artifact_refs
+  in
+  if not (terminal_result_matches_contract terminal_result result_contract)
+  then Error "keeper_invocation_join terminal result contradicts result_contract"
+  else if canonical_refs <> artifact_refs
+  then Error "keeper_invocation_join.artifact_refs must be sorted and unique"
+  else Ok { run_ref; result_contract; terminal_result; artifact_refs }
+;;
+
 let payload_to_yojson = function
   | Board_signal board ->
     `Assoc
@@ -524,6 +618,7 @@ let payload_to_yojson = function
       ; "ok", `Bool ok
       ; "payload", `String payload
       ; "board_post_id", `String c.bg_board_post_id
+      ; "keeper_invocation_join", option_json keeper_invocation_join_to_yojson c.bg_invocation_join
       ]
   | Schedule_due sw ->
     `Assoc
@@ -634,10 +729,35 @@ let payload_of_yojson json =
     let* ok = bool_field ~context "ok" fields in
     let* payload = string_field ~context "payload" fields in
     let* board_post_id = string_field ~context "board_post_id" fields in
+    let* bg_invocation_join =
+      match optional_field "keeper_invocation_join" fields with
+      | None -> Ok None
+      | Some json -> keeper_invocation_join_of_yojson json |> Result.map Option.some
+    in
     let bg_outcome = if ok then Bg_ok payload else Bg_failed payload in
-    Ok
-      (Bg_completed
-         { bg_run_id = run_id; bg_kind; bg_outcome; bg_board_post_id = board_post_id })
+    (match bg_kind, bg_invocation_join with
+     | Subprocess, None ->
+       Ok
+         (Bg_completed
+            { bg_run_id = run_id
+            ; bg_kind
+            ; bg_outcome
+            ; bg_board_post_id = board_post_id
+            ; bg_invocation_join = None
+            })
+     | Keeper_invocation, Some join
+       when String.equal run_id (Keeper_invocation_types.run_id join.run_ref) ->
+       Ok
+         (Bg_completed
+            { bg_run_id = run_id
+            ; bg_kind
+            ; bg_outcome
+            ; bg_board_post_id = board_post_id
+            ; bg_invocation_join = Some join
+            })
+     | Subprocess, Some _ -> Error "subprocess completion cannot carry an invocation join"
+     | Keeper_invocation, None -> Error "keeper invocation completion requires a typed join"
+     | Keeper_invocation, Some _ -> Error "keeper invocation run_id does not match run_ref")
   | "schedule_due" ->
     let* schedule_id = string_field ~context "schedule_id" fields in
     let* due_at = float_field ~context "due_at_unix" fields in

@@ -345,6 +345,7 @@ let () =
       ; bg_kind = Subprocess
       ; bg_outcome = Bg_ok "done"
       ; bg_board_post_id = "post-2"
+      ; bg_invocation_join = None
       }
   in
   assert (not (is_board_signal (bg_payload ())));
@@ -356,6 +357,7 @@ let () =
          ; bg_kind = Subprocess
          ; bg_outcome = Bg_ok "done"
          ; bg_board_post_id = "post-2"
+         ; bg_invocation_join = None
          })
       "post-2");
   assert (
@@ -365,6 +367,7 @@ let () =
          ; bg_kind = Subprocess
          ; bg_outcome = Bg_failed "exit 1"
          ; bg_board_post_id = ""
+         ; bg_invocation_join = None
          })
       "bg-run:bg-2");
 
@@ -416,6 +419,7 @@ let () =
                 ; bg_kind = Subprocess
                 ; bg_outcome = Bg_failed "boom"
                 ; bg_board_post_id = ""
+                ; bg_invocation_join = None
                 }
           })
    with

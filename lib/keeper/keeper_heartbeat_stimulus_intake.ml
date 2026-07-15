@@ -61,6 +61,7 @@ let record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus =
 
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
+  keeper_invocation_joins : Keeper_event_queue.keeper_invocation_join list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   claimed_lease : Keeper_registry_event_queue.lease option;
@@ -96,6 +97,9 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Hitl_resolved_stimulus
   | Keeper_event_queue.Failure_judgment _ ->
     Some Keeper_world_observation.Failure_judgment_stimulus
+  | Keeper_event_queue.Bg_completed
+      { bg_kind = Keeper_event_queue.Keeper_invocation; _ } ->
+    Some Keeper_world_observation.Keeper_invocation_completed_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Fusion_completed _
@@ -149,7 +153,10 @@ let consume_single_heartbeat_stimulus
        | Keeper_event_queue.Bg_ok _ -> true
        | Keeper_event_queue.Bg_failed _ -> false)
       meta_after_triage.name;
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+    (match c.bg_kind with
+     | Keeper_event_queue.Subprocess ->
+       pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+     | Keeper_event_queue.Keeper_invocation -> [])
   | Keeper_event_queue.Schedule_due sw ->
     Log.Keeper.info
       "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
@@ -343,6 +350,18 @@ let heartbeat_event_intake
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in
+  let keeper_invocation_joins =
+    List.filter_map
+      (fun (stimulus : Keeper_event_queue.stimulus) ->
+         match stimulus.payload with
+         | Keeper_event_queue.Bg_completed
+             { bg_kind = Keeper_event_queue.Keeper_invocation
+             ; bg_invocation_join = Some join
+             ; _
+             } -> Some join
+         | _ -> None)
+      consumed_stimuli
+  in
   let pending_board_events =
     List.fold_left
       (fun acc (event : Keeper_world_observation.pending_board_event) ->
@@ -364,6 +383,7 @@ let heartbeat_event_intake
       (List.rev queued_observations)
   in
   { pending_board_events
+  ; keeper_invocation_joins
   ; consumed_stimulus_count
   ; consumed_stimuli
   ; claimed_lease

@@ -26,6 +26,16 @@ type result_contract =
   | Completed
   | Failed
 
+type terminal_result =
+  | Invocation_succeeded of { body : string; data : Yojson.Safe.t option }
+  | Invocation_failed of { body : string; data : Yojson.Safe.t option }
+  | Invocation_lost of { reason : string }
+  | Invocation_cancelled of { reason : string; cancelled_by : string }
+  | Invocation_persistence_failed of { attempted_status : string; reason : string }
+[@@deriving yojson]
+
+let artifact_refs_key = "artifact_refs"
+
 let target_name = function Keeper name -> Keeper_id.Keeper_name.to_string name
 
 let target_to_json target =

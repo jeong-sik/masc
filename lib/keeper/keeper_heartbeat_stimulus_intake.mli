@@ -35,6 +35,7 @@ val record_event_queue_stimulus_turn_started
     after dedup and the number of stimuli consumed from the queue. *)
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
+  keeper_invocation_joins : Keeper_event_queue.keeper_invocation_join list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   claimed_lease : Keeper_registry_event_queue.lease option;

@@ -848,7 +848,20 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
               Keeper_prompt_names.immediate_task_move
           ^ "\n")
       else None
-    (* 10. Board activity — reactive trigger. All authors and post kinds share
+    | Keeper_context_layers.Keeper_invocation_results ->
+      (match observation.keeper_invocation_joins with
+       | [] -> None
+       | joins ->
+         Some
+           (Printf.sprintf
+              "### Keeper Invocation Results (%d)\n%s\n\n"
+              (List.length joins)
+              (joins
+               |> List.map Keeper_event_queue.keeper_invocation_join_to_yojson
+               |> List.map Yojson.Safe.to_string
+               |> List.map (fun json -> "- " ^ json)
+               |> String.concat "\n")))
+    (* 11. Board activity — reactive trigger. All authors and post kinds share
        one neutral observation renderer. Exact mention remains routing context;
        it never promotes Board content to instruction authority. *)
     | Keeper_context_layers.Board_activity ->

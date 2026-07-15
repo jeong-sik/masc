@@ -22,6 +22,16 @@ type result_contract =
   | Completed
   | Failed
 
+type terminal_result =
+  | Invocation_succeeded of { body : string; data : Yojson.Safe.t option }
+  | Invocation_failed of { body : string; data : Yojson.Safe.t option }
+  | Invocation_lost of { reason : string }
+  | Invocation_cancelled of { reason : string; cancelled_by : string }
+  | Invocation_persistence_failed of { attempted_status : string; reason : string }
+[@@deriving yojson]
+
+val artifact_refs_key : string
+
 val target_name : target -> string
 val target_to_json : target -> Yojson.Safe.t
 val keeper_turn : keeper_name:string -> prompt:string -> (request, string) result

@@ -75,6 +75,7 @@ let empty_scheduled_automation_observation =
 type world_observation =
   { pending_messages : Keeper_world_observation_message_scope.pending_message list
   ; pending_board_events : pending_board_event list
+  ; keeper_invocation_joins : Keeper_event_queue.keeper_invocation_join list
   ; idle_seconds : int
   ; active_goals : string list
   ; unclaimed_task_count : int
@@ -99,6 +100,7 @@ type event_queue_trigger =
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
   | Failure_judgment_stimulus
+  | Keeper_invocation_completed_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -108,6 +110,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
+  | Keeper_invocation_completed_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -976,6 +979,7 @@ let collect_board_events_without_advancing_cursor
 
 let observe
       ~(pending_board_events : pending_board_event list option)
+      ?(keeper_invocation_joins = [])
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
   : world_observation
@@ -1008,6 +1012,7 @@ let observe
   in
   { pending_messages
   ; pending_board_events
+  ; keeper_invocation_joins
   ; idle_seconds
   ; active_goals = meta.active_goal_ids
   ; unclaimed_task_count
@@ -1041,6 +1046,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   in
   { pending_messages = []
   ; pending_board_events = []
+  ; keeper_invocation_joins = []
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
   ; unclaimed_task_count
@@ -1066,6 +1072,7 @@ let verification_drives_wake pending_verification_count =
 let actionable_signal_present (observation : world_observation) =
   observation.pending_messages <> []
   || observation.pending_board_events <> []
+  || observation.keeper_invocation_joins <> []
   || claimable_drives_wake observation.claimable_task_count
   || failed_drives_wake observation.failed_task_count
   || verification_drives_wake observation.pending_verification_count
@@ -1100,7 +1107,8 @@ let keeper_cycle_decision
         | Bootstrap_stimulus
         | Scheduled_automation_stimulus
         | Connector_attention_stimulus
-        | Hitl_resolved_stimulus ->
+        | Hitl_resolved_stimulus
+        | Keeper_invocation_completed_stimulus ->
           false)
       event_queue_triggers
   in

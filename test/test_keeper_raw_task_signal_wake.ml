@@ -6,6 +6,7 @@ module WO = Keeper_world_observation
 let base_observation : WO.world_observation =
   { pending_messages = []
   ; pending_board_events = []
+  ; keeper_invocation_joins = []
   ; idle_seconds = 0
   ; active_goals = []
   ; unclaimed_task_count = 0

@@ -61,8 +61,9 @@ let test_drain_empties_accumulator () =
 
 let test_snapshot_does_not_drain () =
   let acc = H.create_accumulator () in
-  H.capture_typed_result acc (tagged ~kind:"doc" ~id:"doc-1" []);
+  H.capture_typed_result acc (tagged ~kind:"doc" ~id:"01900000-0000-7000-8000-000000000001" []);
   Alcotest.(check int) "snapshot" 1 (List.length (H.snapshot acc));
+  Alcotest.(check int) "artifact refs" 1 (Result.get_ok (H.snapshot_artifact_refs acc) |> List.length);
   assert_size "snapshot preserves" 1 acc
 ;;
 

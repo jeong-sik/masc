@@ -38,6 +38,7 @@
   masc.bounded_event_dedupe
   masc.json_field
   masc.masc_core
+  masc.shared_types
   masc.types_boundary
   masc_cancel_safe
   masc_core

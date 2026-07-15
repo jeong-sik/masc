@@ -52,6 +52,7 @@ let record_event_queue_stimulus_turn_started =
 
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
+  keeper_invocation_joins : Keeper_event_queue.keeper_invocation_join list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   claimed_lease : Keeper_registry_event_queue.lease option;
@@ -505,6 +506,7 @@ let run_keepalive_unified_turn
       let obs =
         Keeper_world_observation.observe
           ~pending_board_events:(Some pending_board_events)
+          ~keeper_invocation_joins:event_intake.keeper_invocation_joins
           ~config:ctx.config
           ~meta:meta_after_triage
       in

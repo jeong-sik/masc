@@ -122,6 +122,7 @@ and bg_job_completion = {
   bg_kind : bg_job_kind;
   bg_outcome : bg_job_outcome;
   bg_board_post_id : string;
+  bg_invocation_join : keeper_invocation_join option;
 }
 (** RFC-0290 payload for [Bg_completed]: mirrors [fusion_completion]. [bg_kind]
     is a closed sum so a new job kind forces exhaustive handling; [bg_outcome]
@@ -138,6 +139,13 @@ and bg_job_kind =
 and bg_job_outcome =
   | Bg_ok of string  (** result payload *)
   | Bg_failed of string  (** failure label *)
+
+and keeper_invocation_join = {
+  run_ref : Keeper_invocation_types.run_ref;
+  result_contract : Keeper_invocation_types.result_contract;
+  terminal_result : Keeper_invocation_types.terminal_result;
+  artifact_refs : Shared_types.Artifact_id.t list;
+}
 
 and hitl_resolution_decision =
   | Hitl_approved
@@ -193,6 +201,8 @@ and goal_assignment = {
   ga_assigned_by : string;
 }
 (** Payload for [Goal_assigned]. *)
+
+val keeper_invocation_join_to_yojson : keeper_invocation_join -> Yojson.Safe.t
 
 
 val fusion_completion_post_id : fusion_completion -> post_id

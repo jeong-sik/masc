@@ -52,6 +52,41 @@ let snapshot acc : Yojson.Safe.t list =
   Stdlib.Mutex.unlock acc.mutex;
   items
 
+let unique_field name fields =
+  match List.filter_map (fun (key, value) -> if String.equal key name then Some value else None) fields with
+  | [] -> Ok None
+  | [ value ] -> Ok (Some value)
+  | _ -> Error (Printf.sprintf "tool result repeats reserved field %s" name)
+
+let artifact_ref_of_result = function
+  | `Assoc fields as result ->
+    let ( let* ) = Result.bind in
+    let* kind = unique_field Multimodal.Tool_emission.multimodal_kind_key fields in
+    (match kind with
+     | None -> Ok None
+     | Some (`String _) ->
+       (match Multimodal.Tool_emission.extract_kind_from_result result with
+        | None -> Error "tool result carries an unknown multimodal kind"
+        | Some _ ->
+          let* id = unique_field Multimodal.Tool_emission.multimodal_id_key fields in
+          (match id with
+           | Some json ->
+             Shared_types.Artifact_id.of_json json |> Result.map Option.some
+           | None -> Error "tagged tool result lacks a multimodal artifact id"))
+     | Some _ -> Error "tool result multimodal kind must be a string")
+  | _ -> Ok None
+
+let snapshot_artifact_refs acc =
+  snapshot acc
+  |> List.fold_left
+       (fun refs result ->
+          let ( let* ) = Result.bind in
+          let* refs = refs in
+          artifact_ref_of_result result
+          |> Result.map (function None -> refs | Some id -> id :: refs))
+       (Ok [])
+  |> Result.map (List.sort_uniq Shared_types.Artifact_id.compare)
+
 let accumulator_size acc =
   Stdlib.Mutex.lock acc.mutex;
   let n = List.length acc.items in

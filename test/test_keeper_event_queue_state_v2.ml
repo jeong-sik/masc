@@ -17,11 +17,30 @@ let stimulus ?(payload = Queue.Bootstrap) post_id arrived_at : Queue.stimulus =
 ;;
 
 let keeper_invocation_completion ?(outcome = Queue.Bg_ok "completed") request_id =
+  let request =
+    Keeper_invocation_types.keeper_turn ~keeper_name:"callee" ~prompt:"work"
+    |> Result.get_ok
+  in
+  let run_ref : Keeper_invocation_types.run_ref =
+    { run_id = request_id
+    ; target = Keeper_invocation_types.request_target request
+    ; capability = Keeper_invocation_types.request_capability request
+    }
+  in
   let completion : Queue.bg_job_completion =
     { bg_run_id = request_id
     ; bg_kind = Queue.Keeper_invocation
     ; bg_outcome = outcome
     ; bg_board_post_id = ""
+    ; bg_invocation_join =
+        Some
+          { run_ref
+          ; result_contract = Keeper_invocation_types.Completed
+          ; terminal_result =
+              Keeper_invocation_types.Invocation_succeeded
+                { body = "completed"; data = None }
+          ; artifact_refs = []
+          }
     }
   in
   stimulus

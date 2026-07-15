@@ -141,24 +141,58 @@ type keeper_completion_projection =
   | Completion_already_present
   | Completion_storage_failed of string
 
-let terminal_completion_outcome = function
+let terminal_completion = function
   | Keeper_msg_async.Done { ok; body; data } ->
     let payload =
       match data with
       | None -> body
       | Some value -> Yojson.Safe.to_string value
     in
+    let result =
+      if ok
+      then Keeper_invocation_types.Invocation_succeeded { body; data }
+      else Keeper_invocation_types.Invocation_failed { body; data }
+    in
     Some
-      (if ok
-       then Keeper_event_queue.Bg_ok payload
-       else Keeper_event_queue.Bg_failed payload)
-  | Keeper_msg_async.Lost { reason }
-  | Keeper_msg_async.Cancelled { reason; _ }
-  | Keeper_msg_async.Persistence_failed { reason; _ } ->
-    Some (Keeper_event_queue.Bg_failed reason)
+      ( (if ok then Keeper_event_queue.Bg_ok payload else Keeper_event_queue.Bg_failed payload)
+      , result )
+  | Keeper_msg_async.Lost { reason } ->
+    Some
+      ( Keeper_event_queue.Bg_failed reason
+      , Keeper_invocation_types.Invocation_lost { reason } )
+  | Keeper_msg_async.Cancelled { reason; cancelled_by } ->
+    Some
+      ( Keeper_event_queue.Bg_failed reason
+      , Keeper_invocation_types.Invocation_cancelled { reason; cancelled_by } )
+  | Keeper_msg_async.Persistence_failed { attempted_status; reason } ->
+    Some
+      ( Keeper_event_queue.Bg_failed reason
+      , Keeper_invocation_types.Invocation_persistence_failed { attempted_status; reason } )
   | Keeper_msg_async.Queued
   | Keeper_msg_async.Running
   | Keeper_msg_async.Cancelling _ -> None
+
+let artifact_refs_of_terminal_result = function
+  | Keeper_invocation_types.Invocation_succeeded { data; _ }
+  | Keeper_invocation_types.Invocation_failed { data; _ } ->
+    (match data with
+     | Some (`Assoc fields) ->
+       (match List.assoc_opt Keeper_invocation_types.artifact_refs_key fields with
+        | None -> Ok []
+        | Some (`List values) ->
+          List.fold_left
+            (fun refs json ->
+               let* refs = refs in
+               Shared_types.Artifact_id.of_json json
+               |> Result.map (fun id -> id :: refs))
+            (Ok [])
+            values
+          |> Result.map (List.sort_uniq Shared_types.Artifact_id.compare)
+        | Some _ -> Error "Keeper completion artifact_refs must be a JSON list")
+     | Some _ | None -> Ok [])
+  | Keeper_invocation_types.Invocation_lost _
+  | Keeper_invocation_types.Invocation_cancelled _
+  | Keeper_invocation_types.Invocation_persistence_failed _ -> Ok []
 
 let signal_completion_caller ~base_path caller_keeper =
   match
@@ -184,13 +218,28 @@ let signal_completion_caller ~base_path caller_keeper =
       (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
 
 let completion_stimulus (entry : Keeper_msg_async.entry) =
-  match terminal_completion_outcome entry.status, entry.completed_at with
-  | Some bg_outcome, Some arrived_at ->
+  match terminal_completion entry.status, entry.completed_at with
+  | Some (bg_outcome, terminal_result), Some arrived_at ->
+    let* artifact_refs = artifact_refs_of_terminal_result terminal_result in
+    let run_ref : Keeper_invocation_types.run_ref =
+      { run_id = entry.request_id
+      ; target = Keeper_invocation_types.request_target entry.request
+      ; capability = Keeper_invocation_types.request_capability entry.request
+      }
+    in
+    let bg_invocation_join : Keeper_event_queue.keeper_invocation_join =
+      { run_ref
+      ; result_contract = Keeper_invocation_contract.result_contract entry
+      ; terminal_result
+      ; artifact_refs
+      }
+    in
     let completion : Keeper_event_queue.bg_job_completion =
       { bg_run_id = entry.request_id
       ; bg_kind = Keeper_event_queue.Keeper_invocation
       ; bg_outcome
       ; bg_board_post_id = ""
+      ; bg_invocation_join = Some bg_invocation_join
       }
     in
     Ok

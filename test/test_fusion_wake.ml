@@ -222,7 +222,7 @@ let bg_payload
       ()
   : Keeper_event_queue.bg_job_completion
   =
-  { bg_run_id; bg_kind; bg_outcome; bg_board_post_id }
+  { bg_run_id; bg_kind; bg_outcome; bg_board_post_id; bg_invocation_join = None }
 ;;
 
 let bg_stimulus ?bg_run_id ?bg_kind ?bg_outcome ?bg_board_post_id ()

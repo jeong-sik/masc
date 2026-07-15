@@ -61,6 +61,8 @@ val drain_into_working_context :
     The returned list preserves capture order. *)
 val snapshot : accumulator -> Yojson.Safe.t list
 
+val snapshot_artifact_refs : accumulator -> (Shared_types.Artifact_id.t list, string) result
+
 (** Number of items currently held in the accumulator. Useful for
     tests and metrics. *)
 val accumulator_size : accumulator -> int

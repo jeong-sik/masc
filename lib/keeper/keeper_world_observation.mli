@@ -81,6 +81,8 @@ type world_observation = {
   pending_board_events : pending_board_event list;
   (** Structured board events needing triage. *)
 
+  keeper_invocation_joins : Keeper_event_queue.keeper_invocation_join list;
+
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
 
@@ -129,6 +131,7 @@ type event_queue_trigger =
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
   | Failure_judgment_stimulus
+  | Keeper_invocation_completed_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
@@ -140,6 +143,7 @@ type turn_reason =
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
+  | Keeper_invocation_completed_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of { unclaimed : int; failed : int }
@@ -300,6 +304,7 @@ val read_scheduled_automation_observation :
     @param meta Current keeper metadata *)
 val observe :
   pending_board_events:pending_board_event list option ->
+  ?keeper_invocation_joins:Keeper_event_queue.keeper_invocation_join list ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   world_observation

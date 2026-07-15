@@ -860,13 +860,17 @@ let run_keeper_invocation_turn_admitted
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
-	            | Ok (result, final_max_runtime_context) ->
+            | Ok (result, final_max_runtime_context) ->
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    Trajectory.Completed in
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
+              let invocation_artifact_refs =
+                Keeper_tool_emission_hook.accumulator_for_keeper meta.name
+                |> Keeper_tool_emission_hook.snapshot_artifact_refs
+              in
               let resilience_handles =
                 Keeper_turn_runtime_budget.post_turn_resilience_handles
                   ~config:ctx.config ~meta
@@ -983,6 +987,11 @@ let run_keeper_invocation_turn_admitted
               restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
+              (match invocation_artifact_refs with
+               | Error detail ->
+                 tool_result_error
+                   ("Keeper tool artifact contract failed: " ^ detail)
+               | Ok artifact_refs ->
               let reply_json =
                 let surface_model_used = Keeper_agent_run.runtime_lane_label in
                 let u = result.usage in
@@ -1032,9 +1041,11 @@ let run_keeper_invocation_turn_admitted
                      chat row via append_turn ?turn_ref. *)
                   ( Keeper_turn_outcome.turn_ref_wire_key,
                     Ids.Turn_ref.to_yojson turn_ref );
+                  ( Keeper_invocation_types.artifact_refs_key,
+                    `List (List.map Shared_types.Artifact_id.to_json artifact_refs) );
                 ]
               in
-              tool_result_ok_data reply_json
+              tool_result_ok_data reply_json)
 
 )))))))))
 

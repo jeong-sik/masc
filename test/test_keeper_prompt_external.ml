@@ -138,6 +138,7 @@ let task_create_observation : WO.world_observation =
   {
     pending_messages = [];
     pending_board_events = [];
+    keeper_invocation_joins = [];
     idle_seconds = 1;
     active_goals = [ "goal-test-task-create" ];
     unclaimed_task_count = 0;

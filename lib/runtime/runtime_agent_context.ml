@@ -7,22 +7,6 @@
 
 type stop_reason =
   | Completed
-  | TurnLimitObserved of
-      { turns_used : int
-      ; limit : int
-      }
-  | ExecutionTimeoutObserved of
-      { elapsed_sec : float
-      ; timeout_sec : float
-      ; turn_count : int
-      ; max_turns : int
-      }
-  | ExecutionIdleTimeoutObserved of
-      { idle_sec : float
-      ; idle_timeout_sec : float
-      ; turn_count : int
-      ; max_turns : int
-      }
   | Yielded_to_chat_waiting of { turns_used : int }
     (* The autonomous lane's OAS run stopped at a turn boundary because a
        dashboard/connector chat request was parked on the keeper's turn slot.

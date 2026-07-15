@@ -46,11 +46,12 @@ val cadence_step_keyed
 
 val cadence_due : keeper_id:string -> trace_id:string -> bool
 (** Advance the persistent cadence counter for [keeper_id] by one turn and
-    report whether extraction is due now. This is what [run_best_effort] gates
-    on. The counter is keyed by [keeper_id] and stores the active [trace_id]
-    alongside it, so a handoff rollover (a new [trace_id]) resets the cadence
-    cycle in place — bounding the table to one row per keeper. First call for an
-    unseen keeper, or the first call after a rollover, is due immediately.
+    report whether extraction is due now. The counter is keyed by [keeper_id]
+    and stores the active [trace_id] alongside it, so a handoff rollover (a new
+    [trace_id]) resets the cadence cycle in place — bounding the table to one
+    row per keeper. First call for an unseen keeper, or the first call after a
+    rollover, is due immediately. Explicit operations do not consult this
+    legacy scheduler state.
 
     Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
     focused pre-Eio tests keep a direct single-threaded path. *)
@@ -230,8 +231,7 @@ val extract_with_provider_classified
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result
 (** Provider-backed librarian extraction. [clock] stays optional at the API
-    boundary because [run_best_effort] may be called from contexts that cannot
-    supply an Eio clock; [None] returns
+    boundary for focused callers; [None] returns
     {!librarian_provider_clock_unavailable_error} before provider I/O because
     the provider call itself requires the clock. The extraction now runs to
     completion: [timeout_sec] no longer force-kills a legitimate in-flight
@@ -263,13 +263,31 @@ val extract_and_append_with_provider_classified
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result
 
-val run_best_effort
+type operation_request =
+  { runtime_id : string
+  ; keeper_id : string
+  ; input : Keeper_librarian.input
+  }
+(** Immutable input for one explicitly requested LLM Memory operation. *)
+
+type operation_error =
+  | Eio_context_unavailable
+  | Runtime_resolution_failed of string
+  | Direct_completion_unsupported
+  | Provider_slot_busy of { capacity : int }
+  | Extraction_failed of extraction_error
+  | Unexpected_failure of string
+
+val operation_error_to_string : operation_error -> string
+
+val execute_operation
   :  ?complete:complete_fn
   -> ?timeout_sec:float
-  -> runtime_id:string
-  -> keeper_id:string
-  -> Keeper_librarian.input
-  -> unit
-(** Run the opt-in post-turn librarian path.
+  -> operation_request
+  -> (Keeper_memory_os_types.episode, operation_error) result
+(** Execute one explicitly requested LLM Memory operation.
 
-    Non-cancel failures are logged and counted, never raised. *)
+    This boundary does not consult the retired enable/cadence policy and never
+    converts failure into [unit]. Cancellation propagates; every other outcome
+    is returned to its caller. Durable owner-lane settlement is a separate
+    orchestration boundary and must not infer success from this call returning. *)

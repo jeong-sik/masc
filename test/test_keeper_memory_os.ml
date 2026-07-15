@@ -860,6 +860,41 @@ let with_memory_os_env name value f =
   Fun.protect ~finally:(fun () -> restore_env name old) f
 ;;
 
+let test_librarian_runtime_uses_exact_message_cap () =
+  with_prompt_registry (fun () ->
+    with_memory_os_env
+      Env_config.KeeperMemoryOs.librarian_max_messages_env_key
+      "2"
+      (fun () ->
+         let input : Librarian.input =
+           { trace_id = "trace-exact-message-cap"
+           ; generation = 1
+           ; messages =
+               [ text_message "oldest-message-must-be-dropped"
+               ; text_message "recent-message-one"
+               ; text_message "recent-message-two"
+               ]
+           }
+         in
+         match Librarian_runtime.messages_for_librarian input with
+         | Error error -> Alcotest.fail error
+         | Ok [ _system; user ] ->
+           let prompt = message_text user in
+           Alcotest.(check bool)
+             "configured cap drops the oldest message"
+             false
+             (contains "oldest-message-must-be-dropped" prompt);
+           Alcotest.(check bool)
+             "configured cap keeps the first selected message"
+             true
+             (contains "recent-message-one" prompt);
+           Alcotest.(check bool)
+             "configured cap keeps the newest message"
+             true
+             (contains "recent-message-two" prompt)
+         | Ok _ -> Alcotest.fail "librarian prompt must contain system and user messages"))
+;;
+
 let with_captured_console_lines f =
   Console_sink.For_testing.reset ();
   let lines = ref [] in
@@ -4443,6 +4478,10 @@ let () =
             "librarian prompt omits private blocks"
             `Quick
             test_librarian_prompt_omits_private_blocks
+        ; Alcotest.test_case
+            "librarian runtime uses exact message cap"
+            `Quick
+            test_librarian_runtime_uses_exact_message_cap
         ; Alcotest.test_case
             "librarian rejects extra confidence field"
             `Quick

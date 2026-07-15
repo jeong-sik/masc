@@ -38,127 +38,8 @@ let enabled () =
   Env_config.KeeperMemoryOs.librarian_enabled ()
 ;;
 
-(* Librarian extraction cadence (per keeper).
-
-   Memory extraction runs once per keeper turn by default, which means every
-   keeper issues a provider-backed LLM extraction every turn against a shared
-   inference pool. That per-turn LLM load — not the lack of a concurrency gate —
-   is the dominant source of the librarian empty-response saturation observed
-   2026-06-16 (HTTP 200 empty body under pool contention). The fleet-wide
-   [provider_slot] only masked it by dropping (skip) most attempts.
-
-   Extract once every [cadence_turns ()] turns per keeper instead. The extraction
-   window ([max_messages ()], default 24) already spans several recent turns, so
-   batching over a small cadence is a deferral, not a loss: a skipped turn's
-   messages are still in the window at the next due turn. Cadence must stay small
-   relative to [max_messages ()] or early turns can scroll out of the window.
-
-   Tradeoff: recall in turns between extractions sees slightly staler memory
-   (a turn's freshly-produced fact is not extracted until the next due turn).
-   Memory extraction is best-effort, so this eventual-consistency is acceptable.
-
-   Set MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS=1 to restore per-turn
-   extraction (the previous behavior). *)
-let cadence_turns () =
-  Env_config.KeeperMemoryOs.librarian_cadence_turns ()
-;;
-
-(* Per-keeper "turns since last successful extraction" counter, paired with the
-   trace it belongs to. Keyed by [keeper_id] (the long-lived owner), NOT by
-   (keeper_id, trace_id): trace_id rotates on every keeper run, so a pair-keyed
-   table mints a fresh row per rotation and never reclaims the previous one,
-   growing without bound over the process lifetime. Keying by keeper_id bounds
-   the table to one row per live keeper; a rotated trace is detected as a stored
-   mismatch and resets the schedule in place.
-
-   [Eio_guard.with_mutex]: the cadence table is reachable from concurrent keeper
-   fibers, and a blocking stdlib mutex can stall unrelated Eio work if a fiber
-   holds that lock while waiting on another Eio resource. [Eio_guard] gives
-   runtime fibers cooperative locking while preserving a direct path for focused
-   tests that call the pure cadence helpers before the Eio runtime is enabled. *)
-let cadence_mu = Eio.Mutex.create ()
-let cadence_counters : (string, string * int) Hashtbl.t = Hashtbl.create 16
-
-(* A counter value below 0 means the keeper has never had a successful
-   extraction on the current trace: the next turn is due immediately. *)
-let fresh_counter = -1
-
-(* Pure cadence decision. Given the keeper's current [counter] (turns since its
-   last successful extraction) and the [cadence], return the updated counter and
-   whether extraction is due now.
-
-   - counter < 0 (fresh) is due immediately.
-   - cadence <= 1 is always due with the counter pinned at 0.
-   - When due, the counter is set to [cadence] and stays there until
-     [cadence_record_success] or [cadence_record_attempt] resets it to 0. This
-     keeps the keeper due across skipped work, while completed non-success
-     provider attempts can defer the next attempt to the cadence window instead
-     of retrying on every keeper turn. *)
-let cadence_step ~cadence ~counter =
-  if cadence <= 1
-  then 0, true
-  else if counter < 0
-  then cadence, true
-  else (
-    let next = counter + 1 in
-    if next >= cadence then cadence, true else next, false)
-;;
-
-(* Pure keyed cadence decision. Given a keeper's [prior] stored (trace, counter)
-   and the [current_trace], a stored entry from a different (rotated) trace is
-   treated as fresh — due immediately, not inheriting the old trace's schedule —
-   exactly like an unseen keeper ([prior = None]). Returns the value to store and
-   whether extraction is due now. Exposed for testing the rollover decision
-   without the global table. *)
-let cadence_step_keyed ~cadence ~current_trace ~prior =
-  let counter =
-    (* sound-partial: allow — an unseen keeper or a rotated trace is fresh
-       (due immediately via [fresh_counter]); fresh-state init, not a default
-       hiding a parse error. *)
-    match prior with
-    | Some (t, c) when String.equal t current_trace -> c
-    | _ -> fresh_counter
-  in
-  let updated, due = cadence_step ~cadence ~counter in
-  (current_trace, updated), due
-;;
-
-let cadence_due ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    let prior = Hashtbl.find_opt cadence_counters keeper_id in
-    let value, due =
-      cadence_step_keyed ~cadence:(cadence_turns ()) ~current_trace:trace_id ~prior
-    in
-    Hashtbl.replace cadence_counters keeper_id value;
-    due)
-;;
-
-let cadence_record_success ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
-;;
-
-let cadence_record_attempt ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
-;;
-
-(* Live per-keeper cadence rows. Bounded by the number of keepers that have run
-   (one row each), so it doubles as a leak-regression signal: it must not grow
-   with trace rotations. Read-only; consumed by the cadence test and the
-   dashboard memory-health panel. *)
-let cadence_counter_entries () =
-  Eio_guard.with_mutex_ro cadence_mu (fun () -> Hashtbl.length cadence_counters)
-;;
-
 let max_messages () =
   Env_config.KeeperMemoryOs.librarian_max_messages ()
-;;
-
-(* Scale the prompt window by the cadence so skipped turns stay visible until
-   the next due extraction. Without this, a tool-heavy skipped turn can scroll
-   out of the per-turn cap before its first successful extraction. *)
-let prompt_max_messages () = max_messages () * cadence_turns ()
 ;;
 
 let default_timeout_sec () =
@@ -360,19 +241,6 @@ type parse_retry_error =
   | Retry_exhausted_unparseable of unparseable_response
   | Retry_transport_failed of extraction_error
 
-let should_record_cadence_backoff_after_error = function
-  | Provider_timeout
-  | Provider_transport_failed _
-  | Provider_empty_response
-  | Provider_unparseable_response _ ->
-    true
-  | Provider_clock_unavailable
-  | Provider_config_rejected _
-  | Prompt_render_failed _
-  | Memory_fact_upsert_failed _ ->
-    false
-;;
-
 let prefer_unparseable_response prior current =
   match current.raw_evidence with
   | Some raw when not (String.equal (String.trim raw) "") -> current
@@ -413,7 +281,7 @@ let render_prompt key variables =
 
 let messages_for_librarian (inp : Keeper_librarian.input) =
   let input =
-    { inp with messages = select_recent_messages ~max_messages:(prompt_max_messages ()) inp.messages }
+    { inp with messages = select_recent_messages ~max_messages:(max_messages ()) inp.messages }
   in
   match render_prompt Keeper_prompt_names.librarian_system [] with
   | Error _ as e -> e

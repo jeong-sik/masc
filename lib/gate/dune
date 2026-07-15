@@ -16,6 +16,7 @@
   channel_gate_slack_state
   channel_gate_telegram_state
   channel_gate_metrics
+  connector_ingress_lane
   discord_observability
   discord_gateway_client
   discord_gateway_state

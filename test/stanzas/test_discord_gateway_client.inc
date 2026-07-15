@@ -2,4 +2,4 @@
 (test
  (name test_discord_gateway_client)
  (modules test_discord_gateway_client)
- (libraries alcotest yojson masc.gate))
+ (libraries alcotest yojson eio_main masc.gate))

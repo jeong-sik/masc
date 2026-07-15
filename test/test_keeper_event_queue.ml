@@ -1156,7 +1156,9 @@ let () =
         "unready continuation remains in place"
         [ "blocked-hitl" ]
         (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name
-         |> queue_post_ids));
+         |> Keeper_event_queue.to_list
+         |> List.map (fun (stimulus : Keeper_event_queue.stimulus) ->
+           stimulus.post_id)));
 
   (* --- registry unavailable window: enqueue persists before register --- *)
   let base_path = temp_dir "keeper-event-queue-unregistered" in

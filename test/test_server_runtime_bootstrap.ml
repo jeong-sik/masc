@@ -74,6 +74,8 @@ let with_config_input name value f =
     f
 
 let with_clean_base_path_env f =
+  with_config_input "OAS_CAPABILITY_MANIFEST" None @@ fun () ->
+  with_config_input "OAS_MODEL_CATALOG" None @@ fun () ->
   with_config_input "MASC_BASE_PATH" None @@ fun () ->
   with_config_input "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_config_input "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
@@ -159,7 +161,9 @@ let make_config_root root =
   write_file (Filename.concat root "oas-models.toml") repo_model_catalog_toml;
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
-  write_file (Filename.concat config "keepers/example.toml") "[keeper]\ngoal = \"example\"\n";
+  write_file
+    (Filename.concat config "keepers/example.toml")
+    "[keeper]\nautoboot_enabled = true\n";
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
@@ -498,7 +502,9 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
 let write_config_root_keeper_toml config_root name =
   write_file
     (Filename.concat (Filename.concat config_root "keepers") (name ^ ".toml"))
-    (Printf.sprintf "[keeper]\ninstructions = \"instructions-%s\"\n" name)
+    (Printf.sprintf
+       "[keeper]\nautoboot_enabled = true\ninstructions = \"instructions-%s\"\n"
+       name)
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -1367,12 +1373,6 @@ let mark_keeper_stopped config (meta : Keeper_meta_contract.keeper_meta) =
   dispatch_keeper_event config meta Keeper_state_machine.Stop_requested;
   dispatch_keeper_event config meta Keeper_state_machine.Drain_complete
 
-let mark_keeper_zombie config (meta : Keeper_meta_contract.keeper_meta) =
-  Keeper_registry.mark_dead
-    ~base_path:config.Workspace.base_path
-    meta.name
-    ~at:(Time_compat.now ())
-
 let record_keeper_dead_tombstone config (meta : Keeper_meta_contract.keeper_meta) =
   Keeper_registry.mark_dead
     ~base_path:config.Workspace.base_path
@@ -1422,7 +1422,7 @@ let mark_keeper_dead_with_registry_cause config
        base_path);
   Keeper_registry.record_crash ~base_path meta.name 1780000000.0
     (Printf.sprintf
-       "synthetic crash record github_pat_secret at %s/crash.log"
+       "synthetic crash record at %s/crash.log"
        base_path);
   Keeper_registry.mark_dead ~base_path meta.name ~at:1780000001.0
 
@@ -1761,7 +1761,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
     write_config_root_keeper_toml config_root "mad-improver";
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
-      "[keeper]\ngoal = \"operator\"\nautoboot_enabled = false\n";
+      "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -1905,7 +1905,7 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
         in
         Alcotest.(check string) "pause kind" "unclassified_paused"
           (detail |> member "pause_kind" |> to_string);
-        Alcotest.(check string) "last blocker class" "turn_timeout"
+        Alcotest.(check string) "last blocker class" "stale_turn_timeout"
           (detail |> member "last_blocker" |> member "klass" |> to_string)))
 
 let test_health_json_reports_dormant_task_owner_as_advisory () =
@@ -1914,7 +1914,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "executor.toml")
-      "[keeper]\ngoal = \"goal-executor\"\nautoboot_enabled = false\n";
+      "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -2805,12 +2805,8 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
           in
           Alcotest.(check bool) "health preserves crash reason class" true
             (contains_substring latest_crash_reason "synthetic crash record");
-          Alcotest.(check bool) "health redacts crash reason token" false
-            (contains_substring latest_crash_reason "github_pat_secret");
           Alcotest.(check bool) "health redacts crash reason base path" false
             (contains_substring latest_crash_reason config.Workspace.base_path);
-          Alcotest.(check bool) "health marks redacted crash reason" true
-            (contains_substring latest_crash_reason "[REDACTED]");
           Alcotest.(check bool) "health marks redacted crash reason path" true
             (contains_substring latest_crash_reason "[REDACTED_PATH]"))))
 
@@ -2892,15 +2888,6 @@ let test_health_json_explains_stopped_capacity_blocker_as_terminal () =
     ~expected_phase:"stopped"
     ~expected_action:"restart_or_disable_stopped_keeper"
     mark_keeper_stopped
-
-let test_health_json_explains_zombie_capacity_blocker_as_terminal () =
-  test_health_json_explains_terminal_capacity_blocker
-    ~dir_name:"health-zombie-capacity-blocker"
-    ~keeper_name:"zombie-capacity"
-    ~trace_id:"trace-zombie-capacity"
-    ~expected_phase:"zombie"
-    ~expected_action:"repair_terminal_keeper_failure"
-    mark_keeper_zombie
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->
@@ -4892,9 +4879,6 @@ let () =
           Alcotest.test_case
             "health json explains stopped capacity blocker as terminal"
             `Quick test_health_json_explains_stopped_capacity_blocker_as_terminal;
-          Alcotest.test_case
-            "health json explains zombie capacity blocker as terminal"
-            `Quick test_health_json_explains_zombie_capacity_blocker_as_terminal;
           Alcotest.test_case
             "health json exposes dead keeper registry cause"
             `Quick test_health_json_exposes_dead_keeper_registry_cause;

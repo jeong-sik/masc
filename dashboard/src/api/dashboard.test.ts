@@ -2710,7 +2710,7 @@ describe('fetchRuntimeModelMetrics', () => {
             {
               ts_unix: 1,
               outcome: 'success',
-              stop_reason: 'turn_limit_observed:turns=3,limit=3',
+              stop_reason: 'completed',
               turn_lane: 'text_only',
               input_tokens: null,
               output_tokens: null,
@@ -2768,7 +2768,7 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.total_input_tokens).toBeNull()
     expect(metric.total_cost_usd).toBeNull()
     expect(metric.recent_entries?.[0]?.outcome).toBe('success')
-    expect(metric.recent_entries?.[0]?.stop_reason).toBe('turn_limit_observed:turns=3,limit=3')
+    expect(metric.recent_entries?.[0]?.stop_reason).toBe('completed')
     expect(metric.recent_entries?.[0]?.turn_lane).toBe('text_only')
     expect(metric.recent_entries?.[0]?.input_tokens).toBeNull()
     expect(metric.recent_entries?.[0]?.cache_read_tokens).toBeNull()

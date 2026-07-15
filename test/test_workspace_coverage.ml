@@ -251,9 +251,9 @@ let ring_has_entry entries ~details =
 let test_batch_add_tasks () =
   with_test_env (fun config ->
     let tasks =
-      [ "Task A", 1, "Description A", None
-      ; "Task B", 2, "Description B", None
-      ; "Task C", 3, "Description C", None
+      [ "Task A", 1, "Description A"
+      ; "Task B", 2, "Description B"
+      ; "Task C", 3, "Description C"
       ]
     in
     let result = Workspace.batch_add_tasks config tasks in

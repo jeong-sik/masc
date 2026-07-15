@@ -62,7 +62,7 @@ ownership. Two defects compounded:
      radius is not.
 
 Interim state after the incident: masc#24528 restores boot, with a
-deployment-local full fork (`~/.masc/config/oas-models.toml` = upstream copy +
+deployment-local full fork (`<base-path>/.masc/config/oas-models.toml` = upstream copy +
 five alias rows, labeled `WORKAROUND … removal target: overlay RFC merge`).
 That fork is the debt this RFC removes.
 

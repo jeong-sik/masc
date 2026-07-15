@@ -76,15 +76,6 @@ function compactText(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
-function joinUnique(values: Array<string | null | undefined>): string | null {
-  const seen: string[] = []
-  for (const value of values) {
-    const compact = compactText(value)
-    if (compact && !seen.includes(compact)) seen.push(compact)
-  }
-  return seen.length ? seen.join(' · ') : null
-}
-
 function approvalTitle(item: KeeperApprovalQueueItem): string {
   return `${item.tool_name} Gate 요청`
 }

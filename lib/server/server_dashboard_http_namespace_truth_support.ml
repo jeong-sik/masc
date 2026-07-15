@@ -389,7 +389,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
       ]
   in
   let task_ownership_status = if unassigned_active_tasks > 0 then "bad" else "ok" in
-  in
   let operational_clarity_reasons =
     List.filter_map Fun.id
       [

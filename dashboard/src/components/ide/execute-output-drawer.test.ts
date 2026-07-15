@@ -2,7 +2,6 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { tasks } from '../../store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import {
   ExecuteOutputDrawer,
@@ -16,7 +15,6 @@ let mounted: HTMLDivElement | null = null
 afterEach(() => {
   if (mounted) render(null, mounted)
   mounted = null
-  tasks.value = []
   cursorOverlaySignal.value = {
     cursors: new Map(),
     heatmap: new Map(),
@@ -111,11 +109,6 @@ describe('ExecuteOutputDrawer event mapping', () => {
     const links = executeOutputRouteLinks({
       keeperName: 'sangsu',
       taskId: 'task-123',
-      taskList: [{
-        id: 'task-123',
-        title: 'Runtime task',
-
-      }],
       cursor: {
         keeper_id: 'sangsu',
         file_path: 'lib/runtime.ml',
@@ -218,12 +211,6 @@ describe('ExecuteOutputDrawer event mapping', () => {
   })
 
   it('renders Execute output context links and routes back into code and task context', async () => {
-    tasks.value = [{
-      id: 'task-123',
-      title: 'Runtime task',
-
-      status: 'in_progress',
-    }]
     cursorOverlaySignal.value = {
       cursors: new Map([['sangsu', {
         keeper_id: 'sangsu',

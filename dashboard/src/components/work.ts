@@ -54,6 +54,7 @@ function isWorkSection(value: string | undefined): value is WorkSection {
 
 function taskStatusLabel(status: Task['status']): string {
   switch (status) {
+    case undefined: return '미확인'
     case 'todo': return '백로그'
     case 'claimed': return '클레임'
     case 'in_progress': return '진행 중'

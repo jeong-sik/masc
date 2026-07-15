@@ -5,8 +5,6 @@ import {
   type ExecuteOutputLine,
   type ExecuteOutputStreamEvent,
 } from '../../api/execute-output'
-import { tasks } from '../../store'
-import type { Task } from '../../types'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
 import { Terminal, type TerminalLine } from '../common/terminal'
 import {
@@ -49,7 +47,6 @@ export interface ExecuteOutputSummary {
 export interface ExecuteOutputRouteLinkInput {
   readonly keeperName: string
   readonly taskId: string | null
-  readonly taskList: ReadonlyArray<Task>
   readonly cursor: KeeperCursor | null
 }
 
@@ -163,14 +160,10 @@ function executeOutputSummaryLabel(summary: ExecuteOutputSummary, status: Execut
 export function executeOutputRouteLinks({
   keeperName,
   taskId,
-  taskList,
   cursor,
 }: ExecuteOutputRouteLinkInput): ReadonlyArray<IdeContextRouteLink> {
   const keeperId = nonEmpty(keeperName)
   if (!keeperId) return []
-  const task = taskId
-    ? taskList.find(candidate => candidate.id === taskId) ?? null
-    : null
   const sourceParts = ['execute-output', keeperId, taskId].filter((part): part is string =>
     typeof part === 'string' && part.trim() !== '')
   return routeLinksForContext({
@@ -260,7 +253,6 @@ export function ExecuteOutputDrawer({
   const routeLinks = executeOutputRouteLinks({
     keeperName: keeper,
     taskId,
-    taskList: tasks.value,
     cursor,
   })
 

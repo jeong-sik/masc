@@ -269,8 +269,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       generation turn_count autonomous_turn_count autonomous_action_count
   in
   let focus =
-    String_util.trim_to_option (string_field "current_task_id" keeper)
-    |> Option.value ~default:"현재 활성 Task 없음"
+    match String_util.trim_to_option (string_field "current_task_id" keeper) with
+    | Some task_id -> task_id
+    | None -> "현재 활성 Task 없음"
   in
   let recent_input_preview =
     String_util.trim_to_option (string_field "recent_input_preview" keeper)

@@ -46,7 +46,8 @@ val expected_generation : token -> int
 val release : token -> release_outcome
 
 (** Serialize one ownership check plus authority mutation for this keeper key.
-    This is a per-keeper mutex, never a fleet-wide lock. *)
+    This is a per-keeper mutex, never a fleet-wide lock. Eio fibers wait
+    cooperatively while non-Eio callers share the same exclusion authority. *)
 val with_key_lock :
   base_path:string ->
   keeper_name:string ->

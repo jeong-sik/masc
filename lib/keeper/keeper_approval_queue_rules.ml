@@ -44,12 +44,13 @@ let make_generated_id prefix =
   prefix ^ "_" ^ Uuidm.to_string uuid
 ;;
 
-(* Stdlib.Mutex: rule reads/writes are short filesystem critical sections and
-   are also reached by synchronous dashboard/test paths. Eio.Mutex requires an
-   Eio fiber context and raises Cancel.Get_context outside one. *)
-let rules_mu = Stdlib.Mutex.create ()
+(* Rule transactions include durable Eio file operations and are also reached
+   by synchronous dashboard/test callers. Both contexts therefore share one
+   cross-context authority; an OS mutex alone cannot be held across an Eio
+   suspension by two fibers on the same Domain. *)
+let rules_mutex = Cross_context_mutex.create ()
 
-let with_rules_lock f = Stdlib.Mutex.protect rules_mu f
+let with_rules_lock f = Cross_context_mutex.with_durable_lock rules_mutex f
 
 let rules_path ~base_path () =
   Keeper_gate_path.always_allowed ~base_path

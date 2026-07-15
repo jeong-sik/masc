@@ -82,28 +82,9 @@ let install_error_to_string = function
 
 let pending_store_version = 2
 let pending_store_surface = "keeper_gate_pending"
-let pending_store_eio_gate = Eio.Mutex.create ()
-let pending_store_cross_context_mu = Stdlib.Mutex.create ()
+let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
-
-type execution_context =
-  | Eio_fiber
-  | Non_eio
-
-let execution_context () =
-  match Eio.Fiber.check () with
-  | () -> Eio_fiber
-  | exception Effect.Unhandled _ -> Non_eio
-;;
-
-let rec lock_pending_store_cooperatively () =
-  if Stdlib.Mutex.try_lock pending_store_cross_context_mu
-  then ()
-  else (
-    Eio.Fiber.yield ();
-    lock_pending_store_cooperatively ())
-;;
 
 (** Serialize one durable pending/delivery snapshot transition across both Eio
     fibers and non-Eio callers.  A plain [Stdlib.Mutex.protect] is invalid here:
@@ -111,23 +92,12 @@ let rec lock_pending_store_cooperatively () =
     letting another fiber on the same domain re-enter the OS mutex and raise
     [Sys_error "Mutex.lock: Resource deadlock avoided"].
 
-    The cooperative gate ensures only one Eio fiber reaches the cross-context
-    mutex.  [use_ro] releases rather than poisons the gate when [f] raises; the
-    shared OS mutex is always released before that exception propagates.
-    Cancellation is deferred across the durable transition so a published
-    snapshot is returned as committed rather than reported as an ambiguous
-    cancelled operation. *)
+    The shared cross-context authority waits cooperatively for Eio fibers and
+    uses the same OS mutex for non-Eio callers. Cancellation is deferred across
+    the durable transition so a published snapshot is returned as committed
+    rather than reported as an ambiguous cancelled operation. *)
 let with_pending_store_lock f =
-  match execution_context () with
-  | Non_eio -> Stdlib.Mutex.protect pending_store_cross_context_mu f
-  | Eio_fiber ->
-    Eio.Mutex.use_ro pending_store_eio_gate (fun () ->
-      lock_pending_store_cooperatively ();
-      Eio.Cancel.protect (fun () ->
-        Fun.protect
-          ~finally:(fun () ->
-            Stdlib.Mutex.unlock pending_store_cross_context_mu)
-          f))
+  Cross_context_mutex.with_durable_lock pending_store_mutex f
 ;;
 
 let mark_store_unavailable_unlocked ~base_path error =
@@ -615,7 +585,7 @@ let merge_loaded_map ~surface ~existing ~loaded =
     history stays with the workspace that made the decision. *)
 let audit_stores_mu = Stdlib.Mutex.create ()
 
-let audit_io_mu = Stdlib.Mutex.create ()
+let audit_io_mutex = Cross_context_mutex.create ()
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
 (* Runtime trust asks for per-keeper latest audit state across the same global
@@ -806,7 +776,7 @@ let audit_approval_event
             | None -> [])
          )
     in
-    Stdlib.Mutex.protect audit_io_mu (fun () ->
+    Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
       try
         Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
         invalidate_recent_audit_cache_for_store store
@@ -1219,7 +1189,7 @@ let record_summary_updated ~now (entry : pending_approval) =
             ]
             @ summary_audit_extras entry)
        in
-       Stdlib.Mutex.protect audit_io_mu (fun () ->
+       Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
          Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
          invalidate_recent_audit_cache_for_store store)
    with

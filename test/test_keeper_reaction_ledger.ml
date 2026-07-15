@@ -204,6 +204,7 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   let stimulus = schedule_due_stimulus () in
   let unrelated = schedule_due_stimulus ~schedule_id:"sched-ledger-other" () in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  check string "scheduled ledger id preserves occurrence" stimulus.post_id stimulus_id;
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name

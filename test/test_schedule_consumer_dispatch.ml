@@ -138,12 +138,13 @@ let create_board_schedule config =
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let create_keeper_wake_schedule config =
+let create_keeper_wake_schedule ?recurrence config =
   match
     Schedule_service.create config ~schedule_id:"keeper-wake-sched-1"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
-      ~payload:keeper_wake_payload ~source:Schedule_domain.Operator_request ()
+      ~payload:keeper_wake_payload ~source:Schedule_domain.Operator_request
+      ?recurrence ()
   with
   | Ok request -> request
   | Error err ->
@@ -193,6 +194,13 @@ let tick_ok config ~now =
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
 ;;
 
+let single_signal_id (result : Schedule_runner.tick_result) =
+  match result.emitted with
+  | [ signal ] -> signal.signal_id
+  | signals ->
+    failf "expected one emitted schedule occurrence, got %d" (List.length signals)
+;;
+
 let runner_status_json_after_dispatches (result : Schedule_runner.tick_result) =
   Schedule_runner_status.reset_for_test ();
   let wake_enqueue_counts =
@@ -229,6 +237,7 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
+  let occurrence_id = single_signal_id result in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "succeeded"
     (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
@@ -272,7 +281,7 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
    | None -> fail "expected queued scheduled wake"
    | Some (stimulus, rest) ->
      check bool "queue rest empty" true (Keeper_event_queue.is_empty rest);
-     check string "post id" "schedule-due:keeper-wake-sched-1" stimulus.post_id;
+     check string "post id is occurrence id" occurrence_id stimulus.post_id;
      check string "urgency" "immediate"
        (Keeper_event_queue.urgency_to_string stimulus.urgency);
      check (float 0.001) "arrived_at from tick now" 201.0 stimulus.arrived_at;
@@ -309,7 +318,7 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (receipt |> member "schedule_id" |> to_string);
     check string "receipt urgency" "immediate"
       (receipt |> member "urgency" |> to_string);
-    check string "receipt post id" "schedule-due:keeper-wake-sched-1"
+    check string "receipt post id" occurrence_id
       (receipt |> member "post_id" |> to_string);
     check string "receipt reaction ledger recorded" "recorded"
       (receipt |> member "reaction_ledger_status" |> to_string);
@@ -344,6 +353,28 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (queue_evidence |> member "inflight_count" |> to_int);
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
+;;
+
+let test_recurring_wakes_keep_distinct_occurrence_ids () =
+  with_workspace
+  @@ fun config ->
+  let _request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let first_id = tick_ok config ~now:201.0 |> single_signal_id in
+  let second_id = tick_ok config ~now:261.0 |> single_signal_id in
+  check bool "recurrences have distinct identities" false (String.equal first_id second_id);
+  let queued =
+    Keeper_registry_event_queue.snapshot
+      ~base_path:config.Workspace_utils.base_path
+      "schedule-keeper"
+    |> Keeper_event_queue.to_list
+  in
+  check int "both occurrences remain queued" 2 (List.length queued);
+  check (list string) "queue preserves occurrence order" [ first_id; second_id ]
+    (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
 let test_keeper_wake_durable_enqueue_failure_is_not_success () =
@@ -384,17 +415,13 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
   let request = create_keeper_wake_schedule config in
-  ignore (tick_ok config ~now:201.0 : Schedule_runner.tick_result);
-  let expected_wake : Keeper_event_queue.scheduled_wake =
-    { schedule_id = request.schedule_id
-    ; due_at = request.due_at
-    ; payload_digest = Schedule_domain.payload_digest request.payload
-    ; title = Some "Scheduled lane wake"
-    ; message = "Run the scheduled maintenance lane now."
-    }
-  in
-  let post_id = Keeper_event_queue.schedule_due_post_id expected_wake in
-  (match Keeper_registry_event_queue.drop_by_post_id ~base_path keeper_name ~post_id with
+  let occurrence_id = tick_ok config ~now:201.0 |> single_signal_id in
+  (match
+     Keeper_registry_event_queue.drop_by_post_id
+       ~base_path
+       keeper_name
+       ~post_id:occurrence_id
+   with
    | Error message -> fail ("drop failed: " ^ message)
    | Ok removed -> check int "removed current occurrence" 1 (List.length removed));
   let stale_payload_json =
@@ -424,7 +451,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
     }
   in
   let stale_stimulus : Keeper_event_queue.stimulus =
-    { post_id = Keeper_event_queue.schedule_due_post_id stale_wake
+    { post_id = "stale-schedule-occurrence"
     ; urgency = Keeper_event_queue.Immediate
     ; arrived_at = request.due_at +. 61.0
     ; payload = Keeper_event_queue.Schedule_due stale_wake
@@ -523,6 +550,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
     (fun () ->
       let request = create_keeper_wake_schedule config in
       let result = tick_ok config ~now:201.0 in
+      let occurrence_id = single_signal_id result in
       check int "one dispatch" 1 (List.length result.dispatches);
       check string "dispatch status" "succeeded"
         (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
@@ -542,8 +570,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (pending_evidence |> member "inflight_count" |> to_int);
       let pending_receipt = pending_row |> member "dispatch_receipt" in
       let stimulus_id = pending_receipt |> member "stimulus_id" |> to_string in
-      check bool "dispatch receipt includes stimulus id" true
-        (String.starts_with ~prefix:"stimulus:" stimulus_id);
+      check string "ledger preserves occurrence id" occurrence_id stimulus_id;
       let pending_reaction_evidence =
         pending_row |> member "keeper_reaction_evidence"
       in
@@ -574,7 +601,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
            | [ stimulus ] -> lease, stimulus
            | [] | _ :: _ :: _ -> fail "scheduled wake lease cardinality drifted")
       in
-      check string "leased post id" "schedule-due:keeper-wake-sched-1" leased.post_id;
+      check string "leased occurrence id" occurrence_id leased.post_id;
       (match leased.payload with
        | Keeper_event_queue.Schedule_due wake ->
          check string "leased schedule id" request.schedule_id wake.schedule_id
@@ -756,6 +783,8 @@ let () =
             test_board_post_schedule_is_rejected_without_mutation
         ; test_case "keeper wake enqueues typed stimulus" `Quick
             test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
+        ; test_case "recurring wakes keep distinct occurrence ids" `Quick
+            test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "keeper wake durable enqueue failure is not success" `Quick
             test_keeper_wake_durable_enqueue_failure_is_not_success
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick

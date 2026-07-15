@@ -182,8 +182,6 @@ let bg_job_completion_post_id (c : bg_job_completion) =
   if String.equal c.bg_board_post_id "" then "bg-run:" ^ c.bg_run_id
   else c.bg_board_post_id
 
-let schedule_due_post_id (sw : scheduled_wake) = "schedule-due:" ^ sw.schedule_id
-
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let failure_judgment_post_id (fj : failure_judgment) =

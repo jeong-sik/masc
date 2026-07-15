@@ -116,7 +116,7 @@ let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
   in
   { accepts = (fun _request -> accept)
   ; dispatch =
-      (fun _config ~now:_ request ->
+      (fun _config ~now:_ _signal request ->
         calls := request.schedule_id :: !calls;
         dispatch_result)
   }

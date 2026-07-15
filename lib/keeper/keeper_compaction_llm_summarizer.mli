@@ -36,11 +36,15 @@ type complete_fn =
     Runtime Lane. A Runtime contributes its exact provider config; a Lane tries
     its configured Runtime candidates in declared order until one returns a
     valid plan. Missing, ineligible, and failed candidates are logged with
-    their Runtime id. No default Runtime is substituted. [complete]/
-    [timeout_sec] override the call in tests. *)
+    their Runtime id. No default Runtime is substituted. [complete] overrides
+    the call in tests.
+
+    The compaction owner imposes no wall-clock deadline. The provider call is
+    cancelled only through the owning Keeper lane or returned provider/runtime
+    failure, so an arbitrary inference timeout cannot strand a live Keeper
+    behind a synthetic compaction failure. *)
 val make
   :  ?complete:complete_fn
-  -> ?timeout_sec:float
   -> runtime_id:string
   -> keeper_name:string
   -> unit

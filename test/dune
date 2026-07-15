@@ -1020,7 +1020,6 @@
   test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
-  test_tool_job
   test_typed_tool_masc
   test_state_product
   test_tool_result
@@ -1195,7 +1194,6 @@
   test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
-  test_tool_job
   test_typed_tool_masc
   test_state_product
   test_tool_result
@@ -1235,7 +1233,7 @@
   test_board_core_payload
   test_board_attachment_meta
   test_board_moderation)
- (libraries masc_test_deps masc.tool_orchestration bigstringaf)
+ (libraries masc_test_deps bigstringaf)
  (deps ../bin/main_eio.exe))
 
 (test

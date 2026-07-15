@@ -282,6 +282,19 @@ let broadcast_run_status ~registry ~run_id =
     Log.Keeper.warn "fusion_run_broadcast run_id=%s failed: %s" run_id
       (Printexc.to_string exn)
 
+let record_completion ~keeper ~run_id ?failure ?failure_code ~ok () =
+  match
+    Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+      ?failure ?failure_code ~ok ()
+  with
+  | Ok () -> ()
+  | Error error ->
+    Log.Keeper.error ~keeper_name:keeper
+      "fusion completion receipt error run_id=%s: %s"
+      run_id
+      (Fusion_run_registry.completion_error_to_string error)
+;;
+
 (* Fail-closed durable wake. The reply route is the sole in-memory carrier of
    the originating channel, so it must not be destroyed before the stimulus that
    carries it is durably persisted. [peek] reads the route WITHOUT removing it;
@@ -534,13 +547,12 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
        let wake_result =
          match judge with
          | Ok j ->
-           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-             ~ok:true ();
+           record_completion ~keeper ~run_id ~ok:true ();
            broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
            wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
              ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
          | Error e ->
-           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+           record_completion ~keeper ~run_id
              ~failure:(Fusion_types.judge_failure_text e)
              ~failure_code:(Fusion_types.judge_failure_tag e)
              ~ok:false ();

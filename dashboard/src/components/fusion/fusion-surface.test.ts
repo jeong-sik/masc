@@ -762,6 +762,26 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('1 진행')
   })
 
+  it('renders a completed run with an undurable completion receipt as recovery work', () => {
+    fusionRuns.value = [{
+      runId: 'fus-receipt-failed',
+      keeper: 'sangsu',
+      preset: 'balanced',
+      startedAt: 1_780_000_000,
+      status: 'completed',
+      receiptStatus: 'persistence_failed',
+      receiptError: 'disk unavailable',
+    }]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const row = container.querySelector('[data-testid="fusion-registry-row"]')
+    expect(row?.textContent).toContain('receipt 복구')
+    const detail = container.querySelector('[data-testid="fusion-registry-detail"]')
+    expect(detail?.textContent).toContain('completion receipt 저장에 실패')
+    expect(detail?.textContent).toContain('disk unavailable')
+  })
+
   it('defaults to board-backed evidence when a newer registry-only run is also present', () => {
     fusionRuns.value = [{
       runId: 'fus-running',

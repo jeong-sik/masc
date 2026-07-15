@@ -10,10 +10,18 @@ module Registry = Fusion_run_registry
 module R = struct
   include Registry
 
+  let mark_completed_result = Registry.mark_completed
+
   let register_running t ~run_id ~keeper ~preset ~started_at =
     match Registry.register_running t ~run_id ~keeper ~preset ~started_at with
     | Ok () -> ()
     | Error error -> fail (Registry.persistence_error_to_string error)
+  ;;
+
+  let mark_completed t ~run_id ?failure ?failure_code ~ok () =
+    match Registry.mark_completed t ~run_id ?failure ?failure_code ~ok () with
+    | Ok () -> ()
+    | Error error -> fail (Registry.completion_error_to_string error)
   ;;
 end
 
@@ -103,13 +111,43 @@ let test_persist_failure_detail () =
   check string "event2 failure_code" "parse_error" (str event2 "failure_code");
   let replayed = R.replay path in
   match R.get replayed ~run_id:"r-fail" with
-  | Some { R.status = R.Completed { ok = false; failure; failure_code }; _ } ->
+  | Some { R.status = R.Completed { ok = false; failure; failure_code; _ }; _ } ->
     check (option string) "replayed failure" (Some "judge failed: bad json")
       failure;
     check (option string) "replayed failure_code" (Some "parse_error")
       failure_code
   | Some _ -> fail "expected replayed failed completion"
   | None -> fail "expected replayed run"
+;;
+
+let test_completion_append_failure_is_explicit () =
+  let path = fresh_path "-completion-failure.jsonl" in
+  let t = R.create ~path () in
+  R.register_running t ~run_id:"r-volatile-complete" ~keeper:"k" ~preset:"p"
+    ~started_at:1.0;
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir path)
+    (fun () ->
+       (match R.mark_completed_result t ~run_id:"r-volatile-complete" ~ok:true () with
+        | Error
+            (R.Completion_persistence_failed
+               (R.Append_failed { path = failed_path; _ })) ->
+          check string "failed completion path" path failed_path
+        | Error error -> fail (R.completion_error_to_string error)
+        | Ok () -> fail "completion append failure must be explicit");
+       match R.get t ~run_id:"r-volatile-complete" with
+       | Some
+           ({ R.status =
+                R.Completed
+                  { ok = true; receipt = R.Persistence_failed _; _ }
+            ; _
+            } as run) ->
+         let json = R.run_to_yojson run in
+         check string "receipt status" "persistence_failed" (str json "receipt_status")
+       | Some _ -> fail "actual completion must retain failed receipt state"
+       | None -> fail "completed run must remain observable")
 ;;
 
 (* (2) Replay prunes completed runs to the newest [max_completed_retained]
@@ -188,7 +226,7 @@ let test_replay_streams_and_compacts () =
     content;
   let t = R.replay path in
   (match R.get t ~run_id:"r-stream" with
-   | Some { R.status = R.Completed { ok = true }; _ } -> ()
+   | Some { R.status = R.Completed { ok = true; _ }; _ } -> ()
    | Some _ -> fail "expected streamed run to be completed"
    | None -> fail "expected streamed run to replay");
   match Fs_compat.file_size path with
@@ -220,6 +258,8 @@ let () =
     [ ( "rfc-0266-phase-d"
       , [ test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
+        ; test_case "completion append failure is explicit" `Quick
+            test_completion_append_failure_is_explicit
         ; test_case
             "replay prunes completed and preserves recovery work"
             `Quick

@@ -9,6 +9,7 @@ import { get, type AbortableRequestOptions } from './core'
     Fusion_run_registry.status_label vocabulary: a run is `running`, needs
     restart recovery, or finished `completed` / `failed`. */
 export type FusionRunStatusLabel = 'running' | 'recovery_required' | 'completed' | 'failed'
+export type FusionCompletionReceiptStatus = 'durable' | 'persistence_failed'
 
 /** One row of the fusion run registry from GET /api/v1/dashboard/fusion-runs.
     The registry tracks what the board-post view cannot: an in-progress
@@ -26,6 +27,8 @@ export interface FusionRunRecord {
   // / …). Absent on running/completed rows.
   error?: string
   failureCode?: string
+  receiptStatus?: FusionCompletionReceiptStatus
+  receiptError?: string
 }
 
 export interface DashboardFusionRunsResponse {
@@ -46,6 +49,14 @@ function asFusionRunStatus(value: unknown): FusionRunStatusLabel {
   throw new Error(`unknown fusion run status: ${String(value)}`)
 }
 
+function asFusionCompletionReceiptStatus(
+  value: unknown,
+): FusionCompletionReceiptStatus | undefined {
+  if (value === undefined || value === null) return undefined
+  if (value === 'durable' || value === 'persistence_failed') return value
+  throw new Error(`unknown fusion completion receipt status: ${String(value)}`)
+}
+
 export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsResponse {
   const root = isRecord(raw) ? raw : {}
   const runs: FusionRunRecord[] = asRecordArray(root.runs)
@@ -57,6 +68,8 @@ export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsRespon
       status: asFusionRunStatus(row.status),
       error: asString(row.error),
       failureCode: asString(row.failure_code),
+      receiptStatus: asFusionCompletionReceiptStatus(row.receipt_status),
+      receiptError: asString(row.receipt_error),
     }))
     .filter(run => run.runId.length > 0)
   return {

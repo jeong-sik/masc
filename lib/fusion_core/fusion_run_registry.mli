@@ -19,6 +19,16 @@ type persistence_error =
 
 val persistence_error_to_string : persistence_error -> string
 
+type completion_receipt =
+  | Durable
+  | Persistence_failed of persistence_error
+
+type completion_error =
+  | Unknown_run of string
+  | Completion_persistence_failed of persistence_error
+
+val completion_error_to_string : completion_error -> string
+
 type run_status =
   | Running
   | Recovery_required of { reason : recovery_reason }
@@ -32,6 +42,7 @@ type run_status =
       failure_code : string option;
           (** 안정 분류 태그([Fusion_types.judge_failure_tag] 어휘 +
               denied/sink_failed/aborted/cancelled). [ok=true]면 [None]. *)
+      receipt : completion_receipt;
     }
 
 type run = {
@@ -73,17 +84,19 @@ val mark_completed
   -> ?failure_code:string
   -> ok:bool
   -> unit
-  -> unit
-(** Transition a run to [Completed]. No-op if [run_id] is unknown. [ok] is the
+  -> (unit, completion_error) result
+(** Transition a run to [Completed]. Unknown [run_id] is an explicit [Error]. [ok] is the
     judge/sink outcome (false for denied/sink_failed/aborted). [failure]/
     [failure_code]는 [ok=false]일 때의 사유·분류 태그 — 상태 표면(tool/HTTP/SSE)이
-    사유 없이 "failed"만 보이는 opaque 실패가 되지 않게 함께 기록한다. When
-    the registry was created with a path, appends a [Complete] event. *)
+    사유 없이 "failed"만 보이는 opaque 실패가 되지 않게 함께 기록한다. A failed
+    completion append is retained as [Persistence_failed] in memory and returned
+    to the caller; it is never silently presented as a durable receipt. *)
 
 val list_runs : t -> run list
-(** All tracked runs, newest [started_at] first ([Running] +
-    [Recovery_required] + recently [Completed]); older completed runs are
-    pruned. *)
+(** All tracked runs, newest [started_at] first. [Running],
+    [Recovery_required], and [Completed] with an undurable receipt are never
+    pruned; only older durably completed rows are retained by the history
+    bound. *)
 
 val get : t -> run_id:string -> run option
 (** The run with [run_id], if still tracked. *)

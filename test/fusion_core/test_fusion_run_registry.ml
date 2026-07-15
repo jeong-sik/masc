@@ -7,11 +7,18 @@ module R = struct
   include Registry
 
   let register_running_result = Registry.register_running
+  let mark_completed_result = Registry.mark_completed
 
   let register_running t ~run_id ~keeper ~preset ~started_at =
     match Registry.register_running t ~run_id ~keeper ~preset ~started_at with
     | Ok () -> ()
     | Error error -> fail (Registry.persistence_error_to_string error)
+  ;;
+
+  let mark_completed t ~run_id ?failure ?failure_code ~ok () =
+    match Registry.mark_completed t ~run_id ?failure ?failure_code ~ok () with
+    | Ok () -> ()
+    | Error error -> fail (Registry.completion_error_to_string error)
   ;;
 end
 
@@ -123,9 +130,12 @@ let test_finalize_before_suspend_keeps_completed () =
   | None -> fail "run must remain visible"
 ;;
 
-let test_mark_unknown_is_noop () =
+let test_mark_unknown_is_explicit_error () =
   let t = R.create () in
-  R.mark_completed t ~run_id:"ghost" ~ok:true ();
+  (match R.mark_completed_result t ~run_id:"ghost" ~ok:true () with
+   | Error (R.Unknown_run "ghost") -> ()
+   | Error error -> fail (R.completion_error_to_string error)
+   | Ok () -> fail "unknown completion must not succeed");
   check int "unknown run_id does not create an entry" 0 (List.length (R.list_runs t))
 ;;
 
@@ -166,7 +176,14 @@ let test_status_label () =
   check string "recovery label" "recovery_required"
     (R.status_label
        (R.Recovery_required { reason = R.Worker_process_restarted }));
-  check string "completed label" "completed" (R.status_label (R.Completed { ok = true; failure = None; failure_code = None }));
+  check string "completed label" "completed"
+    (R.status_label
+       (R.Completed
+          { ok = true
+          ; failure = None
+          ; failure_code = None
+          ; receipt = R.Durable
+          }));
   check string "failed label" "failed" (R.status_label
        (R.Completed
           { ok = false
@@ -247,7 +264,8 @@ let () =
             "finalize before suspend keeps Completed (buggy order leaks Running)"
             `Quick
             test_finalize_before_suspend_keeps_completed
-        ; test_case "mark unknown run_id is a no-op" `Quick test_mark_unknown_is_noop
+        ; test_case "mark unknown run_id is an explicit error" `Quick
+            test_mark_unknown_is_explicit_error
         ; test_case "list_runs is newest-first" `Quick test_list_newest_first
         ; test_case "prune keeps Running + recent completed" `Quick test_prune_keeps_running_and_recent
         ] )

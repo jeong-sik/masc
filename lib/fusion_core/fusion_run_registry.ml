@@ -23,6 +23,14 @@ type persistence_error =
       ; detail : string
       }
 
+type completion_receipt =
+  | Durable
+  | Persistence_failed of persistence_error
+
+type completion_error =
+  | Unknown_run of string
+  | Completion_persistence_failed of persistence_error
+
 type run_status =
   | Running
   | Recovery_required of { reason : recovery_reason }
@@ -33,6 +41,7 @@ type run_status =
          키퍼가 원인을 얻을 tool-reachable 경로가 없었다 (mli 참조). *)
       failure : string option;
       failure_code : string option;
+      receipt : completion_receipt;
     }
 
 type run = {
@@ -57,12 +66,13 @@ let create ?path () : t = { runs = Atomic.make []; path }
 
 let is_unresolved (r : run) =
   match r.status with
-  | Running | Recovery_required _ -> true
-  | Completed _ -> false
+  | Running | Recovery_required _
+  | Completed { receipt = Persistence_failed _; _ } -> true
+  | Completed { receipt = Durable; _ } -> false
 ;;
 
-(* Keep every unresolved run plus the [max_completed_retained] most recent
-   [Completed] runs (newest [started_at] first). *)
+(* Keep every live/recovery/undurable-receipt run plus the
+   [max_completed_retained] most recent durably completed runs. *)
 let prune (runs : run list) : run list =
   let unresolved, completed = List.partition is_unresolved runs in
   let recent_completed =
@@ -82,6 +92,11 @@ let rec update (t : t) (f : run list -> run list) =
 let persistence_error_to_string = function
   | Append_failed { path; detail } ->
     Printf.sprintf "fusion registry append failed for %s: %s" path detail
+;;
+
+let completion_error_to_string = function
+  | Unknown_run run_id -> Printf.sprintf "unknown fusion run %s" run_id
+  | Completion_persistence_failed error -> persistence_error_to_string error
 ;;
 
 let append_event t event =
@@ -114,25 +129,37 @@ let register_running t ~run_id ~keeper ~preset ~started_at =
     Ok ()
 ;;
 
-let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
-  ignore
-    (append_event t
-       (Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code }));
-  update t (fun runs ->
-    runs
-    |> List.map (fun r ->
-         if String.equal r.run_id run_id
-         then { r with status = Completed { ok; failure; failure_code } }
-         else r)
-    |> prune)
-;;
-
 let list_runs (t : t) : run list =
   Atomic.get t.runs |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
 ;;
 
 let get (t : t) ~run_id : run option =
   List.find_opt (fun r -> String.equal r.run_id run_id) (Atomic.get t.runs)
+;;
+
+let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
+  match get t ~run_id with
+  | None -> Error (Unknown_run run_id)
+  | Some _ ->
+    let persisted =
+      append_event t
+        (Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code })
+    in
+    let receipt =
+      match persisted with
+      | Ok () -> Durable
+      | Error error -> Persistence_failed error
+    in
+    update t (fun runs ->
+      runs
+      |> List.map (fun r ->
+           if String.equal r.run_id run_id
+           then { r with status = Completed { ok; failure; failure_code; receipt } }
+           else r)
+      |> prune);
+    (match persisted with
+     | Ok () -> Ok ()
+     | Error error -> Error (Completion_persistence_failed error))
 ;;
 
 (* Stable status vocabulary shared by every fusion-run surface (Phase 3 keeper
@@ -168,12 +195,21 @@ let run_to_yojson (r : run) : Yojson.Safe.t =
       [ ("error", `String "worker process restarted before fusion completion")
       ; ("failure_code", `String "worker_process_restarted")
       ]
-    | Completed { ok = false; failure; failure_code } ->
+    | Completed { ok = false; failure; failure_code; _ } ->
       List.filter_map
         (fun (k, v) -> Option.map (fun s -> (k, `String s)) v)
         [ ("error", failure); ("failure_code", failure_code) ]
   in
-  `Assoc (base @ failure_fields)
+  let receipt_fields =
+    match r.status with
+    | Running | Recovery_required _ -> []
+    | Completed { receipt = Durable; _ } -> [ "receipt_status", `String "durable" ]
+    | Completed { receipt = Persistence_failed error; _ } ->
+      [ ("receipt_status", `String "persistence_failed")
+      ; ("receipt_error", `String (persistence_error_to_string error))
+      ]
+  in
+  `Assoc (base @ failure_fields @ receipt_fields)
 ;;
 
 (* Replay helpers — used to hydrate the in-memory table from disk at boot. *)
@@ -186,7 +222,7 @@ let apply_event runs = function
     List.map
       (fun r ->
          if String.equal r.run_id run_id
-         then { r with status = Completed { ok; failure; failure_code } }
+         then { r with status = Completed { ok; failure; failure_code; receipt = Durable } }
          else r)
       runs
 ;;
@@ -249,7 +285,8 @@ let events_of_run (run : run) =
   in
   match run.status with
   | Running | Recovery_required _ -> [ register ]
-  | Completed { ok; failure; failure_code } ->
+  | Completed { receipt = Persistence_failed _; _ } -> [ register ]
+  | Completed { ok; failure; failure_code; receipt = Durable } ->
     [ register
     ; Fusion_run_registry_event.Complete
         { run_id = run.run_id; ok; failure; failure_code }

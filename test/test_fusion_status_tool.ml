@@ -23,6 +23,12 @@ module R = struct
     | Ok () -> ()
     | Error error -> fail (Registry.persistence_error_to_string error)
   ;;
+
+  let mark_completed t ~run_id ?failure ?failure_code ~ok () =
+    match Registry.mark_completed t ~run_id ?failure ?failure_code ~ok () with
+    | Ok () -> ()
+    | Error error -> fail (Registry.completion_error_to_string error)
+  ;;
 end
 module H = Keeper_tool_in_process_runtime
 

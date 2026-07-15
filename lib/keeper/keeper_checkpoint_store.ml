@@ -388,7 +388,7 @@ let load_canonical_strict path =
     (match Agent_sdk.Checkpoint.of_string content with
      | Ok checkpoint -> Ok (Some checkpoint)
      | Error error -> Error (classify_sdk_error error))
-  | exception Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Io_error (Printexc.to_string exn))
 
 let save_oas_classified_typed

@@ -266,7 +266,7 @@ let finish_slack_stream_reply ~clock state ~final_content =
 (* ---------------------------------------------------------------- *)
 
 let handle_inbound ?resolved_binding ~dispatch ~clock ~channel_id ~thread_ts
-    ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention =
+    ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention () =
   let binding =
     match resolved_binding with
     | Some binding -> Some binding
@@ -408,13 +408,13 @@ let on_event ?resolved_binding ~dispatch ~clock (ev : Gw.slack_event) =
       Slack_observability.record_gateway_event
         ~route:Slack_observability.Triggered Slack_observability.Message_create;
       handle_inbound ?resolved_binding ~dispatch ~clock ~channel_id ~thread_ts
-        ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention:false)
+        ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention:false ())
   | Gw.App_mention { channel_id; thread_ts; user_id; text; ts } ->
     Slack_observability.record_gateway_event ~route:Slack_observability.Triggered
       Slack_observability.App_mention;
     handle_inbound ?resolved_binding ~dispatch ~clock ~channel_id ~thread_ts
       ~user_id
-      ~user_name:None ~text ~ts ~mentions_bot:true ~is_app_mention:true
+      ~user_name:None ~text ~ts ~mentions_bot:true ~is_app_mention:true ()
   | Gw.Reaction_added _ ->
     (* Ambient this pass: reactions are not turn-starters (RFC-0317). *)
     Slack_observability.record_gateway_event ~route:Slack_observability.Ambient

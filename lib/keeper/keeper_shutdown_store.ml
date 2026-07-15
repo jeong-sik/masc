@@ -988,7 +988,8 @@ let prepare_operator_metadata_supersession
   | Ok operation -> Error (Supersession_phase_mismatch operation)
 ;;
 
-let supersession_token_operation_id token = token.operation_id
+let supersession_token_operation_id (token : operator_metadata_supersession_token) =
+  token.operation_id
 
 let supersede_blocked_operator_stop ~config ~token ~now =
   let config_base_path =

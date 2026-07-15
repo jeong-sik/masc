@@ -22,8 +22,7 @@
   keeper_event_queue
   keeper_event_queue_state
   keeper_event_queue_owner_lock
-  keeper_event_queue_persistence
-  keeper_continuation_channel)
+  keeper_event_queue_persistence)
  (private_modules keeper_event_queue_owner_lock)
  (libraries
   agent_sdk
@@ -32,6 +31,7 @@
   masc_eio_context
   masc.config
   masc.keeper_registry
+  masc.keeper_invocation_types
   masc.keeper_toml
   masc.config_dir_resolver
   masc.fs_compat

@@ -137,9 +137,9 @@ type post_kind =
    smuggle with a first-class field that a real index can key on (no
    meta_json substring scan, RFC §7.6 guard #2).
 
-   [source] is the channel's [Surface_ref.lane_label] string, NOT a typed
-   [Surface_ref.t]: Surface_ref lives in the [masc] umbrella, which depends on
-   [masc_board], so referencing the typed variant here would form a cycle.
+   [source] is the persisted channel label derived by
+   [Surface_ref.lane_label]; this board record does not own connector route
+   coordinates.
 
    [turn_ref] and [fusion_run_id] are distinct (RFC §7.6 guard #5): turn_ref is
    the turn-level join key, fusion_run_id correlates a fusion deliberation run.

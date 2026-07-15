@@ -16,10 +16,10 @@ open Masc
 
 module Stream = Server_routes_http_keeper_stream
 
-let surface : Masc.Surface_ref.t testable =
+let surface : Surface_ref.t testable =
   testable
-    (fun fmt t -> Format.pp_print_string fmt (Masc.Surface_ref.lane_label t))
-    Masc.Surface_ref.equal
+    (fun fmt t -> Format.pp_print_string fmt (Surface_ref.lane_label t))
+    Surface_ref.equal
 
 let parse_ok body =
   match Stream.For_testing.parse_request body with
@@ -67,7 +67,7 @@ let test_copilot_surface_is_gate_label () =
   in
   let chat_surface = Stream.For_testing.chat_surface_of_request payload in
   check surface "chat surface"
-    (Masc.Surface_ref.Gate
+    (Surface_ref.Gate
        {
          label = "copilot";
          address = [ ("connector", "copilot"); ("workspace_id", "session-7") ];
@@ -141,7 +141,7 @@ let test_external_connector_still_contextualized () =
     (Stream.For_testing.has_external_speaker payload);
   let chat_surface = Stream.For_testing.chat_surface_of_request payload in
   check surface "surface"
-    (Masc.Surface_ref.Gate
+    (Surface_ref.Gate
        {
          label = "discord";
          address = [ ("connector", "discord"); ("workspace_id", "workspace-9") ];
@@ -165,7 +165,7 @@ let test_dashboard_without_channel_is_owner () =
   check bool "no connector context" false
     (Stream.For_testing.has_connector_context payload);
   let chat_surface = Stream.For_testing.chat_surface_of_request payload in
-  check surface "surface" (Masc.Surface_ref.Dashboard { session_id = None }) chat_surface;
+  check surface "surface" (Surface_ref.Dashboard { session_id = None }) chat_surface;
   let speaker = Stream.For_testing.chat_speaker_of_request payload in
   check string "authority" "owner"
     (Keeper_chat_store.authority_label speaker.speaker_authority);

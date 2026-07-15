@@ -79,6 +79,7 @@
   masc.attribution
   masc.exec_policy
   masc.keeper_registry
+  masc.keeper_invocation_types
   masc.keeper_metrics
   masc.keeper_types
   masc.keeper_runtime

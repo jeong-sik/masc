@@ -154,7 +154,7 @@ let test_append_turn_roundtrip () =
             (* Empty args normalise to "{}", empty id to a positional one. *)
             { K.call_id = ""; call_name = "masc_status"; args = "  " };
           ]
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~surface:(Surface_ref.Dashboard { session_id = None })
         ~assistant_content:"all green"
         ();
       let messages = K.load ~base_dir ~keeper_name in
@@ -270,7 +270,7 @@ let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"what were you doing"
         ~user_attachments:[]
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~surface:(Surface_ref.Dashboard { session_id = None })
         ~assistant_content:"I was reading the board."
         ();
       K.append_turn ~base_dir ~keeper_name
@@ -280,7 +280,7 @@ let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
           [ { K.call_id = "toolu_board";
               call_name = "keeper_board_list";
               args = {|{"limit":20}|} } ]
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~surface:(Surface_ref.Dashboard { session_id = None })
         ~assistant_content:"This time I checked the board list."
         ();
       let lines =
@@ -309,7 +309,7 @@ let test_recent_direct_context_omits_transport_failure_as_self_reply () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"please answer this"
         ~user_attachments:[]
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~surface:(Surface_ref.Dashboard { session_id = None })
         ~assistant_kind:K.Row_kind.Transport_failure
         ~assistant_content:"Keeper request failed: timeout"
         ();
@@ -331,7 +331,7 @@ let test_recent_direct_context_omits_voice_audio_self_echo () =
       let keeper_name = "keeper-chat-recent-voice" in
       K.append_assistant_message ~base_dir ~keeper_name
         ~content:"I will say this out loud now."
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~surface:(Surface_ref.Dashboard { session_id = None })
         ~audio:
           { K.token = "voice-token-1"
           ; audio_url = None
@@ -363,7 +363,7 @@ let test_direct_owner_context_excludes_connector_turns () =
         K.append_turn ~base_dir ~keeper_name
           ~user_content:"what did you just say"
           ~user_attachments:[]
-          ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+          ~surface:(Surface_ref.Dashboard { session_id = None })
           ~assistant_content:"I just answered from direct chat."
           ();
         let config = Masc.Workspace.default_config base_dir in
@@ -469,7 +469,7 @@ let test_speaker_external_roundtrip () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"hello from discord"
         ~user_attachments:[]
-        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
+        ~surface:(Surface_ref.Gate { label = "discord"; address = [] })
         ~speaker:
           { K.speaker_id = Some "98791450001";
             speaker_name = Some "minsu";
@@ -503,7 +503,7 @@ let test_append_user_message_roundtrip () =
       let keeper_name = "keeper-chat-ambient" in
       K.append_user_message ~base_dir ~keeper_name
         ~content:"two humans chatting, no mention"
-        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
+        ~surface:(Surface_ref.Gate { label = "discord"; address = [] })
         ~conversation_id:"discord:guild-1:channel:chan-7"
         ~external_message_id:"msg-7"
         ~speaker:
@@ -513,7 +513,7 @@ let test_append_user_message_roundtrip () =
         ();
       K.append_assistant_message ~base_dir ~keeper_name
         ~content:"reply recorded separately"
-        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
+        ~surface:(Surface_ref.Gate { label = "discord"; address = [] })
         ~conversation_id:"discord:guild-1:channel:chan-7" ();
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
@@ -567,11 +567,11 @@ let test_append_user_message_roundtrip () =
               let user_surface = Yojson.Safe.Util.member "surface" user_json in
               Alcotest.(check bool) "json user row carries structured surface"
                 true (user_surface <> `Null);
-              (match Masc.Surface_ref.of_json user_surface with
+              (match Surface_ref.of_json user_surface with
                | Ok s ->
                    Alcotest.(check string)
                      "surface round-trips to the discord gate lane" "discord"
-                     (Masc.Surface_ref.lane_label s)
+                     (Surface_ref.lane_label s)
                | Error e ->
                    Alcotest.failf "surface did not round-trip from json: %s" e)
           | rows ->
@@ -589,7 +589,7 @@ let test_speaker_owner_roundtrip () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"deploy it"
         ~user_attachments:[]
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~surface:(Surface_ref.Dashboard { session_id = None })
         ~speaker:
           { K.speaker_id = None;
             speaker_name = None;
@@ -849,7 +849,7 @@ let test_failure_turn_kind_roundtrip () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"ping"
         ~user_attachments:[]
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~surface:(Surface_ref.Dashboard { session_id = None })
         ~assistant_kind:K.Row_kind.Transport_failure
         ~assistant_content:"Keeper request failed: boom"
         ();
@@ -937,7 +937,7 @@ let test_audio_clip_marked_expired_when_file_missing () =
       let token = "voice-token-missing" in
       K.append_assistant_message ~base_dir ~keeper_name
         ~content:"I will say this out loud now."
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~surface:(Surface_ref.Dashboard { session_id = None })
         ~audio:
           { K.token
           ; audio_url = None

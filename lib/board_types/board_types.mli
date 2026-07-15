@@ -80,9 +80,9 @@ type post_kind =
 (** {1 Records — Mandatory TTL} *)
 
 (** RFC-0233 §7: typed provenance of a board post — which keeper turn produced
-    it and through which channel.  [source] is the channel's
-    [Surface_ref.lane_label] string (not the typed [Surface_ref.t], which lives
-    in the [masc] umbrella that depends on [masc_board]).  [turn_ref] and
+    it and through which channel. [source] is the persisted channel label
+    derived by [Surface_ref.lane_label]; this record does not own connector
+    route coordinates. [turn_ref] and
     [fusion_run_id] are distinct (RFC §7.6 guard #5).  All sub-fields optional;
     an all-[None] origin is represented as [origin = None]. *)
 type post_origin = {

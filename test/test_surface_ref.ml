@@ -14,7 +14,7 @@
 
 open Alcotest
 
-module S = Masc.Surface_ref
+module S = Surface_ref
 module Store = Masc.Keeper_chat_store
 
 let surface : S.t testable =

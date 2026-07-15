@@ -332,8 +332,8 @@ describe('normalizeFusionJudgeNodes', () => {
         role: 'meta',
         identity: 'o1',
         status: 'failed',
-        error: 'judge budget exceeded',
-        failure_code: 'budget_exceeded',
+        error: 'provider unavailable',
+        failure_code: 'provider_error',
         elapsed_s: 12.5,
         timed_out: true,
         input_tokens: 800,
@@ -343,8 +343,8 @@ describe('normalizeFusionJudgeNodes', () => {
     expect(node).toMatchObject({
       role: 'meta',
       failed: true,
-      error: 'judge budget exceeded',
-      failureCode: 'budget_exceeded',
+      error: 'provider unavailable',
+      failureCode: 'provider_error',
       elapsedS: 12.5,
       timedOut: true,
     })

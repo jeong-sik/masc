@@ -46,7 +46,6 @@ let base_policy : Fusion_policy.t =
           ; judge_max_output_tokens = None
           ; meta_timeout_s = 300.0
           ; judges = []
-          ; judge_wave_budget_s = Float.max_float
           ; adaptive_timeout_factor = 1.0
           ; fallback_judge_model = None
           }
@@ -815,7 +814,7 @@ let test_config_disabled_with_preset () =
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
     ?(judges = [])
-    ?(meta_timeout_s = 300.0) ?(judge_wave_budget_s = Float.max_float)
+    ?(meta_timeout_s = 300.0)
     ?(adaptive_timeout_factor = 1.0) ?(fallback_judge_model = None)
     (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
@@ -826,7 +825,6 @@ let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthe
   ; judge_max_output_tokens = None
   ; meta_timeout_s
   ; judges
-  ; judge_wave_budget_s
   ; adaptive_timeout_factor
   ; fallback_judge_model
   }
@@ -1340,8 +1338,8 @@ let test_panels_unavailable_failure () =
     "fusion aborted: none of 3 panels returned an answer"
     (judge_failure_text failure);
   Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure);
-  Alcotest.(check bool) "not timeout-or-budget (no fallback judge trigger)" false
-    (judge_failure_is_timeout_or_budget failure)
+  Alcotest.(check bool) "not a timeout (no fallback judge trigger)" false
+    (judge_failure_is_timeout failure)
 
 (* --- FUSION adaptive timeout / P0 hardening (RFC-0284-FUSION-P0) --- *)
 
@@ -1355,7 +1353,6 @@ judge = "meta"
 judge_system_prompt = "reconcile"
 judge_timeout_s = 120.0
 meta_timeout_s = 90.0
-judge_wave_budget_s = 500.0
 adaptive_timeout_factor = 2.0
 fallback_judge_model = "fallback-model"
 [[fusion.presets.adaptive.panels]]
@@ -1380,8 +1377,6 @@ let test_config_adaptive_timeout_parse () =
        let preset = raw vp in
        Alcotest.(check (float 0.001)) "meta_timeout_s" 90.0
          preset.Fusion_policy.meta_timeout_s;
-       Alcotest.(check (float 0.001)) "judge_wave_budget_s" 500.0
-         preset.Fusion_policy.judge_wave_budget_s;
        Alcotest.(check (float 0.001)) "adaptive_timeout_factor" 2.0
          preset.Fusion_policy.adaptive_timeout_factor;
        Alcotest.(check (option string)) "fallback_judge_model"
@@ -1408,9 +1403,6 @@ let test_config_adaptive_timeout_defaults () =
        Alcotest.(check (float 0.001)) "meta_timeout_s defaults to judge_timeout_s"
          preset.Fusion_policy.judge_timeout_s
          preset.Fusion_policy.meta_timeout_s;
-       Alcotest.(check bool) "judge_wave_budget_s defaults to max_float"
-         true
-         (preset.Fusion_policy.judge_wave_budget_s = Float.max_float);
        Alcotest.(check (float 0.001)) "adaptive_timeout_factor defaults to 1.0"
          1.0
          preset.Fusion_policy.adaptive_timeout_factor;
@@ -1464,67 +1456,23 @@ adaptive_timeout_factor = 0.5
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_adaptive_timeout_factor"
 
-let test_config_invalid_judge_wave_budget () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p"
-[fusion.presets.p]
-panel = ["a"]
-judge = "j"
-panel_system_prompt = "x"
-judge_system_prompt = "y"
-judge_wave_budget_s = 50.0
-[[fusion.presets.p.judges]]
-model = "judge-a"
-system_prompt = "lens"
-timeout_s = 100.0
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_judge_wave_budget present" true
-      (List.exists
-         (function Fusion_config.Invalid_judge_wave_budget _ -> true | _ -> false)
-         es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_judge_wave_budget"
-
 let test_adjust_judge_timeout_disabled () =
-  Alcotest.(check (option (float 0.001))) "factor=1.0 within budget"
-    (Some 10.0)
+  Alcotest.(check (float 0.001)) "factor=1.0 returns base"
+    10.0
     (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  Alcotest.(check (option (float 0.001))) "factor=1.0 over budget"
-    None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:14.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  Alcotest.(check (option (float 0.001))) "wave budget 0 disables cap"
-    (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:0.0 ~elapsed_s:500.0 ~already_timed_out:false)
+       ~already_timed_out:false)
 
 let test_adjust_judge_timeout_extend () =
-  (* already timed out + factor > 1.0 extends up to max_s and remaining budget. *)
-  Alcotest.(check (option (float 0.001))) "extend capped by max_s"
-    (Some 15.0)
+  Alcotest.(check (float 0.001)) "extend capped by max_s"
+    15.0
     (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 15.0)
-       ~factor:2.0 ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  Alcotest.(check (option (float 0.001))) "extend capped by remaining budget"
-    (Some 7.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:12.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  Alcotest.(check (option (float 0.001))) "extend below 0.001 -> None"
-    None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:5.0 ~elapsed_s:5.0 ~already_timed_out:true)
+       ~factor:2.0 ~already_timed_out:true)
 
 let test_adjust_judge_timeout_not_yet_timed_out () =
-  (* factor > 1.0 but not yet timed out: still use base_s, just budget-check. *)
-  Alcotest.(check (option (float 0.001))) "not timed out uses base_s"
-    (Some 10.0)
+  Alcotest.(check (float 0.001)) "not timed out uses base_s"
+    10.0
     (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 5.0)
-       ~factor:2.0 ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:false)
+       ~factor:2.0 ~already_timed_out:false)
 
 let test_judge_error_node_timed_out () =
   let timeout_node =
@@ -1535,28 +1483,11 @@ let test_judge_error_node_timed_out () =
       ; elapsed_s = 5.0
       }
   in
-  let budget_node =
-    Fusion_types.Judge_failed
-      { Fusion_types.failed_role = First "j"
-      ; failure =
-          Fusion_types.Budget_exceeded "judge j skipped: would exceed wave budget"
-      ; usage = Fusion_types.zero_usage
-      ; elapsed_s = 3.0
-      }
-  in
-  match
-    ( Fusion_types.judge_outcome_of_yojson
-        (Fusion_types.judge_outcome_to_yojson timeout_node)
-    , Fusion_types.judge_outcome_of_yojson
-        (Fusion_types.judge_outcome_to_yojson budget_node) )
-  with
-  | Ok (Judge_failed n1), Ok (Judge_failed n2) ->
+  match Fusion_types.judge_outcome_of_yojson (Fusion_types.judge_outcome_to_yojson timeout_node) with
+  | Ok (Judge_failed n1) ->
     Alcotest.(check bool) "timeout node roundtrips timed_out" true
       (Fusion_types.judge_failure_is_timeout n1.failure);
-    Alcotest.(check (float 0.001)) "timeout node roundtrips elapsed_s" 5.0 n1.elapsed_s;
-    Alcotest.(check bool) "budget node roundtrips timed_out" false
-      (Fusion_types.judge_failure_is_timeout n2.failure);
-    Alcotest.(check (float 0.001)) "budget node roundtrips elapsed_s" 3.0 n2.elapsed_s
+    Alcotest.(check (float 0.001)) "timeout node roundtrips elapsed_s" 5.0 n1.elapsed_s
   | _ -> Alcotest.fail "expected Judge_failed roundtrip"
 
 let test_validated_bad_meta_timeout () =
@@ -1573,14 +1504,6 @@ let test_validated_bad_adaptive_factor () =
   with
   | Error (Fusion_policy.Validated_preset.Bad_adaptive_factor 0.5) -> ()
   | _ -> Alcotest.fail "expected Bad_adaptive_factor 0.5"
-
-let test_validated_bad_judge_wave_budget () =
-  match
-    Fusion_policy.Validated_preset.of_preset
-      (mk_preset ~judge_wave_budget_s:50.0 ~judges:[ base_judge ] "bad-budget")
-  with
-  | Error (Fusion_policy.Validated_preset.Bad_judge_wave_budget 50.0) -> ()
-  | _ -> Alcotest.fail "expected Bad_judge_wave_budget 50.0"
 
 let () =
   Alcotest.run "fusion_core"
@@ -1637,8 +1560,6 @@ let () =
         ; Alcotest.test_case "invalid_meta_timeout" `Quick test_config_invalid_meta_timeout
         ; Alcotest.test_case "invalid_adaptive_factor" `Quick
             test_config_invalid_adaptive_factor
-        ; Alcotest.test_case "invalid_judge_wave_budget" `Quick
-            test_config_invalid_judge_wave_budget
         ] )
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok
@@ -1658,8 +1579,6 @@ let () =
         ; Alcotest.test_case "bad_meta_timeout" `Quick test_validated_bad_meta_timeout
         ; Alcotest.test_case "bad_adaptive_factor" `Quick
             test_validated_bad_adaptive_factor
-        ; Alcotest.test_case "bad_judge_wave_budget" `Quick
-            test_validated_bad_judge_wave_budget
         ] )
     ; ( "staged_judge_groups"
       , [ Alcotest.test_case "exact_3x3" `Quick test_staged_judge_groups_exact_3x3

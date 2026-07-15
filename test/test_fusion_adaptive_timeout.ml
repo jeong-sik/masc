@@ -48,7 +48,6 @@ judge = "meta"
 judge_system_prompt = "reconcile"
 judge_timeout_s = 120.0
 meta_timeout_s = 90.0
-judge_wave_budget_s = 500.0
 adaptive_timeout_factor = 2.0
 fallback_judge_model = "fallback-model"
 [[fusion.presets.adaptive.panels]]
@@ -72,8 +71,6 @@ let test_config_adaptive_timeout_parse () =
      | [ vp ] ->
        let preset = Fusion_policy.Validated_preset.preset vp in
        check (float 0.001) "meta_timeout_s" 90.0 preset.Fusion_policy.meta_timeout_s;
-       check (float 0.001) "judge_wave_budget_s" 500.0
-         preset.Fusion_policy.judge_wave_budget_s;
        check (float 0.001) "adaptive_timeout_factor" 2.0
          preset.Fusion_policy.adaptive_timeout_factor;
        check (option string) "fallback_judge_model" (Some "fallback-model")
@@ -135,39 +132,25 @@ adaptive_timeout_factor = 0.5
   | Ok _ -> fail "expected Error Invalid_adaptive_timeout_factor"
 
 let test_adjust_judge_timeout_disabled () =
-  check (option (float 0.001)) "factor=1.0 within budget" (Some 10.0)
+  check (float 0.001) "factor=1.0 returns base" 10.0
     (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  check (option (float 0.001)) "factor=1.0 over budget" None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:14.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  check (option (float 0.001)) "wave budget 0 disables cap" (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:0.0 ~elapsed_s:500.0 ~already_timed_out:false)
+       ~already_timed_out:false)
 
 let test_adjust_judge_timeout_extend () =
-  check (option (float 0.001)) "extend capped by max_s" (Some 15.0)
+  check (float 0.001) "extend capped by max_s" 15.0
     (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 15.0)
-       ~factor:2.0 ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  check (option (float 0.001)) "extend capped by remaining budget" (Some 7.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:12.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  check (option (float 0.001)) "extend below 0.001 -> None" None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:5.0 ~elapsed_s:5.0 ~already_timed_out:true)
+       ~factor:2.0 ~already_timed_out:true)
 
-let test_timeout_budget_first_wave_appends_fallback () =
+let test_timeout_first_wave_appends_fallback () =
   let fallback_calls = ref 0 in
   let fallback = ok_judge_run "fallback-model" in
   let runs =
     [ failed_judge_run "judge-a" Fusion_types.Timeout
-    ; failed_judge_run
-        "judge-b"
-        (Fusion_types.Budget_exceeded "wave budget exhausted")
+    ; failed_judge_run "judge-b" Fusion_types.Timeout
     ]
   in
   let with_fallback =
-    Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
+    Fusion_orchestrator_judge_wave.with_timeout_fallback
       ~run_fallback_judge:(fun () ->
         incr fallback_calls;
         Some fallback)
@@ -179,7 +162,7 @@ let test_timeout_budget_first_wave_appends_fallback () =
   | (_, id, Ok _, _, _) :: _ -> check string "fallback id" "fallback-model" id
   | _ -> fail "expected appended successful fallback"
 
-let test_timeout_budget_first_wave_skips_fallback_on_provider_error () =
+let test_timeout_first_wave_skips_fallback_on_provider_error () =
   let fallback_calls = ref 0 in
   let runs =
     [ failed_judge_run "judge-a" Fusion_types.Timeout
@@ -187,7 +170,7 @@ let test_timeout_budget_first_wave_skips_fallback_on_provider_error () =
     ]
   in
   let without_fallback =
-    Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
+    Fusion_orchestrator_judge_wave.with_timeout_fallback
       ~run_fallback_judge:(fun () ->
         incr fallback_calls;
         Some (ok_judge_run "fallback-model"))
@@ -249,10 +232,10 @@ let () =
         ; test_case "extend" `Quick test_adjust_judge_timeout_extend
         ] )
     ; ( "fallback"
-      , [ test_case "timeout/budget wave appends fallback" `Quick
-            test_timeout_budget_first_wave_appends_fallback
+      , [ test_case "timeout wave appends fallback" `Quick
+            test_timeout_first_wave_appends_fallback
         ; test_case "provider failure skips fallback" `Quick
-            test_timeout_budget_first_wave_skips_fallback_on_provider_error
+            test_timeout_first_wave_skips_fallback_on_provider_error
         ] )
     ; ( "metrics"
       , [ test_case "record_adaptive_timeout emits counter" `Quick

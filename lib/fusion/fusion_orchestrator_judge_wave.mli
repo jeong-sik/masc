@@ -50,12 +50,12 @@ val all_fail_error_of_runs
   -> judge_run list
   -> Fusion_types.judge_failure * Fusion_types.usage
 
-val with_timeout_budget_fallback
+val with_timeout_fallback
   :  run_fallback_judge:(unit -> judge_run option)
   -> judge_run list
   -> judge_run list
 (** Append the configured fallback judge when the whole first-judge wave failed
-    only with timeout/budget failures. Shared by JOJ and staged JOJ so both
+    only with timeouts. Shared by JOJ and staged JOJ so both
     topologies honor [fallback_judge_model] consistently. *)
 
 val run_fallback_judge

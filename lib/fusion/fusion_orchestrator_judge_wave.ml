@@ -133,14 +133,14 @@ let all_fail_error_of_runs ~fallback runs =
     (List.map (fun (_, id, result, _, _) -> id, result) runs)
 ;;
 
-let failed_timeout_or_budget (_, _, result, _, _) =
+let failed_timeout (_, _, result, _, _) =
   match result with
-  | Error (failure, _) -> Fusion_types.judge_failure_is_timeout_or_budget failure
+  | Error (failure, _) -> Fusion_types.judge_failure_is_timeout failure
   | Ok _ -> false
 ;;
 
-let with_timeout_budget_fallback ~run_fallback_judge runs =
-  if runs <> [] && List.for_all failed_timeout_or_budget runs
+let with_timeout_fallback ~run_fallback_judge runs =
+  if runs <> [] && List.for_all failed_timeout runs
   then (
     match run_fallback_judge () with
     | Some fallback -> runs @ [ fallback ]

@@ -37,9 +37,6 @@ type config_error =
       (** (preset 이름, 중복 judge 정체성) — 두 JOJ 1차 심판이 같은 정체성 (RFC-0283). *)
   | Invalid_meta_timeout of string * float
       (** (preset 이름, meta_timeout_s) — 양수 유한수가 아님. *)
-  | Invalid_judge_wave_budget of string * float
-      (** (preset 이름, judge_wave_budget_s) — 0 미만이거나 최장 1차 심판 타임아웃/
-          [meta_timeout_s]보다 작음. *)
   | Invalid_adaptive_timeout_factor of string * float
       (** (preset 이름, adaptive_timeout_factor) — 1.0 미만. *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)

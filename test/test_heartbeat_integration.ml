@@ -2040,7 +2040,6 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; Keeper_types_support.keeper_policy_log_path config meta.name
         ; Keeper_types_support.keeper_decision_log_path config meta.name
         ; Keeper_types_support.keeper_feedback_log_path config meta.name
-        ; Keeper_types_support.keeper_dataset_export_path config meta.name
         ]
       in
       List.iter (fun path -> write_file path "fixture") sidecar_paths;

@@ -956,10 +956,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              , `String (Keeper_types_support.keeper_policy_log_path config m.name) );
              ( "feedback"
              , `String (Keeper_types_support.keeper_feedback_log_path config m.name) );
-           ( "dataset_export"
-           , `String
-               (Keeper_types_support.keeper_dataset_export_path config m.name)
-           );
            ("session_dir", `String session_dir);
              ("generation_manifest", `String generation_manifest_path);
              ("history", `String history_path);

@@ -98,6 +98,14 @@ val event_queue_reaction_evidence :
     This intentionally does not use a "recent rows" limit, because dashboards
     use it to prove a specific queue stimulus was observed by the keeper. *)
 
+val event_queue_reaction_evidence_result :
+  base_path:string ->
+  keeper_name:string ->
+  stimulus_id:string ->
+  (event_queue_reaction_evidence, string) result
+(** Fail-loud exact-id scan for delivery invariants. Unlike the dashboard
+    projection above, malformed or unreadable ledger rows return [Error]. *)
+
 val record_board_cursor_ack :
   base_path:string ->
   keeper_name:string ->

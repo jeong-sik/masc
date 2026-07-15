@@ -44,6 +44,34 @@ let string_array_schema =
     ("items", `Assoc [ ("type", `String "string") ]);
   ]
 
+let closed_object_schema ~required properties =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc properties
+    ; "required", `List (List.map (fun name -> `String name) required)
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let keeper_invocation_target_schema =
+  closed_object_schema
+    ~required:[ "kind"; "name" ]
+    [ "kind", `Assoc [ "type", `String "string"; "enum", `List [ `String "keeper" ] ]
+    ; "name", `Assoc [ "type", `String "string" ]
+    ]
+;;
+
+let keeper_invocation_run_ref_schema =
+  closed_object_schema
+    ~required:[ "run_id"; "target"; "capability" ]
+    [ "run_id", `Assoc [ "type", `String "string" ]
+    ; "target", keeper_invocation_target_schema
+    ; ( "capability"
+      , `Assoc
+          [ "type", `String "string"; "enum", `List [ `String "invoke_turn" ] ] )
+    ]
+;;
+
 let keeper_schemas : tool_schema list = [
   {
     name = "masc_keeper_sandbox_start";
@@ -326,95 +354,36 @@ let keeper_schemas : tool_schema list = [
     ];
   };
 
-  {
-    name = "masc_keeper_msg";
-    description = "Send a message to a keeper (async). Returns immediately with a request_id. Poll masc_keeper_msg_result for the response.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("message", `Assoc [
-          ("type", `String "string");
-          ("description", `String "User message");
-        ]);
-        ("direct_reply", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Optional: run the turn synchronously and return the reply directly instead of queueing");
-        ]);
-        ("turn_instructions", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: free-form instructions to prepend to the keeper prompt for this turn");
-        ]);
-        ("surface_context", `Assoc [
-          ("type", `String "object");
-          ("description", `String "Optional: co-view context from the dashboard ({ label, route, scene, fields }); formatted into turn instructions when turn_instructions is omitted");
-        ]);
-        ("channel", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: channel label (e.g. copilot) for the chat lane");
-        ]);
-        ("channel_user_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: external user id on the channel");
-        ]);
-        ("channel_user_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: external user name on the channel");
-        ]);
-        ("channel_workspace_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: operator session or workspace id for the channel");
-        ]);
-      ]);
-      ("required", `List [`String "name"; `String "message"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_msg_result";
-    description = "Poll the result of an async keeper_msg request. Returns status (queued/running/done/error) and the result when complete.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("request_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Request ID returned by masc_keeper_msg");
-        ]);
-      ]);
-      ("required", `List [`String "request_id"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_msg_cancel";
-    description = "Cancel a running async keeper_msg request by request_id.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("request_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Request ID returned by masc_keeper_msg");
-        ]);
-      ]);
-      ("required", `List [`String "request_id"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_msg_queue";
-    description = "List all pending/running async keeper_msg requests, optionally filtered by keeper_name.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("keeper_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: filter by keeper name");
-        ]);
-      ]);
-    ];
+  { name = "masc_keeper_delegate"
+  ; description = "Submit one typed, non-blocking Keeper invocation and return its durable run_ref."
+  ; input_schema =
+      closed_object_schema
+        ~required:[ "target"; "capability"; "prompt" ]
+        [ "target", keeper_invocation_target_schema
+        ; ( "capability"
+          , `Assoc
+              [ "type", `String "string"; "enum", `List [ `String "invoke_turn" ] ] )
+        ; "prompt", `Assoc [ "type", `String "string" ]
+        ]
+  }
+; { name = "masc_keeper_delegate_status"
+  ; description = "Read one Keeper invocation using the exact typed run_ref returned at submission."
+  ; input_schema =
+      closed_object_schema
+        ~required:[ "run_ref" ]
+        [ "run_ref", keeper_invocation_run_ref_schema ]
+  }
+; { name = "masc_keeper_delegate_cancel"
+  ; description = "Request cancellation of one Keeper invocation identified by its exact typed run_ref."
+  ; input_schema =
+      closed_object_schema
+        ~required:[ "run_ref" ]
+        [ "run_ref", keeper_invocation_run_ref_schema ]
+  }
+; { name = "masc_keeper_delegate_list"
+  ; description = "List non-terminal Keeper invocations, optionally filtered by a typed Keeper target."
+  ; input_schema =
+      closed_object_schema ~required:[] [ "target", keeper_invocation_target_schema ]
   };
 
   (* masc_keeper_reconcile removed with manual_reconcile blocker system. *)

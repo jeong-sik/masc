@@ -1940,13 +1940,13 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor "list" "masc_keeper_list"
       "List configured keepers with optional detailed metadata." ~readonly:true
-  ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
-      "Poll an async keeper_msg dispatch by request_id." ~readonly:true
+  ; masc_keeper_descriptor "delegate_status" "masc_keeper_delegate_status"
+      "Read one Keeper invocation by exact typed run_ref." ~readonly:true
       ~polling_read:true
-  ; masc_keeper_descriptor "msg_cancel" "masc_keeper_msg_cancel"
-      "Cancel a running async keeper_msg turn by request_id." ~readonly:false
-  ; masc_keeper_descriptor "msg_queue" "masc_keeper_msg_queue"
-      "List all pending/running async keeper_msg requests, optionally filtered by keeper_name." ~readonly:true
+  ; masc_keeper_descriptor "delegate_cancel" "masc_keeper_delegate_cancel"
+      "Request cancellation of one Keeper invocation by exact typed run_ref." ~readonly:false
+  ; masc_keeper_descriptor "delegate_list" "masc_keeper_delegate_list"
+      "List non-terminal Keeper invocations with an optional typed target filter." ~readonly:true
   ; masc_keeper_descriptor "compact" "masc_keeper_compact"
       "Run operator-requested context compaction on a keeper." ~readonly:false
   ; masc_keeper_descriptor "clear" "masc_keeper_clear"
@@ -1964,8 +1964,8 @@ let internal_descriptors : t list =
   ; masc_keeper_descriptor "down" "masc_keeper_down"
       "Stop keeper keepalive, optionally remove meta and session directory." ~readonly:false
   (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools (require sw + clock). *)
-  ; masc_keeper_descriptor "msg" "masc_keeper_msg"
-      "Submit an async keeper turn (returns request_id for keeper_msg_result polling)." ~readonly:false
+  ; masc_keeper_descriptor "delegate" "masc_keeper_delegate"
+      "Submit a typed non-blocking Keeper invocation and return its durable run_ref." ~readonly:false
   ; masc_keeper_descriptor "up" "masc_keeper_up"
       "Bring a keeper online (create new or update existing)." ~readonly:false
   ]

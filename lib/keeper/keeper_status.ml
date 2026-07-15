@@ -247,10 +247,6 @@ let handle_keeper_list ctx args : tool_result =
                 , `String (Keeper_types_support.keeper_policy_log_path ctx.config m.name) );
                 ( "feedback"
                 , `String (Keeper_types_support.keeper_feedback_log_path ctx.config m.name) );
-                ( "dataset_export"
-                , `String
-                    (Keeper_types_support.keeper_dataset_export_path ctx.config m.name)
-                );
                 ( "session_dir"
                 , `String
                     (Keeper_types_support.keeper_session_dir

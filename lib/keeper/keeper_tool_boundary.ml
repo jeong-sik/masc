@@ -65,7 +65,3 @@ let delegated_dispatch
   in
   fun ~name ~args -> dispatch ctx ~name ~args
 ;;
-
-let dispatch_stream ?on_text_delta ?on_event ctx ~name ~args =
-  Keeper_tool_surface.dispatch_stream ?on_text_delta ?on_event (to_tool_keeper_context ctx) ~name
-    ~args

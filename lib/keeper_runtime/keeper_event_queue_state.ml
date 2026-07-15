@@ -98,20 +98,23 @@ let active_lease state =
 
 let mark_transition_projected ~transition_id state =
   match state.transition_outbox with
-  | [ entry ] when String.equal entry.receipt.transition_id transition_id ->
+  | entry :: transition_outbox
+    when String.equal entry.receipt.transition_id transition_id ->
     Ok
       { state with
         last_settlement = Some entry.receipt
-      ; transition_outbox = []
+      ; transition_outbox
       }
   | [] ->
     (match state.last_settlement with
      | Some receipt when String.equal receipt.transition_id transition_id -> Ok state
      | Some _ | None ->
        Error (Printf.sprintf "event queue transition not found: %s" transition_id))
-  | [ _ ] ->
-    Error (Printf.sprintf "event queue transition not found: %s" transition_id)
-  | _ :: _ :: _ -> Error "event queue state has multiple unprojected transitions"
+  | _ :: _ ->
+    Error
+      (Printf.sprintf
+         "event queue transition is not the oldest unprojected receipt: %s"
+         transition_id)
 ;;
 let with_pending pending state = { state with pending }
 let with_revision revision state = { state with revision }
@@ -177,7 +180,7 @@ let make_lease ~kind ~claimed_at stimuli state =
 ;;
 
 let lease_admission_blocked state =
-  state.leases <> [] || state.transition_outbox <> []
+  state.leases <> []
 ;;
 
 let rec dequeue_first_ready ~ready skipped pending =
@@ -204,7 +207,7 @@ let claim_when ~claimed_at ~ready state =
 
 let add_legacy_inflight stimuli state =
   if lease_admission_blocked state
-  then Error "event queue cannot migrate legacy inflight work while a lease or outbox exists"
+  then Error "event queue cannot migrate legacy inflight work while a lease exists"
   else (
     let stimuli = Keeper_event_queue.uniq_stimuli stimuli in
     let pending = remove_stimuli state.pending stimuli in
@@ -435,13 +438,16 @@ let receipt_for_lease ~settled_at ~settlement (lease : lease) =
 ;;
 
 let find_prior_receipt lease_id state =
-  match state.transition_outbox with
-  | [ entry ] when String.equal entry.receipt.lease_id lease_id -> Some entry.receipt
-  | [] | [ _ ] ->
+  match
+    List.find_opt
+      (fun entry -> String.equal entry.receipt.lease_id lease_id)
+      state.transition_outbox
+  with
+  | Some entry -> Some entry.receipt
+  | None ->
     (match state.last_settlement with
      | Some receipt when String.equal receipt.lease_id lease_id -> Some receipt
      | Some _ | None -> None)
-  | _ :: _ :: _ -> None
 ;;
 
 let remove_lease lease_id leases =
@@ -509,7 +515,7 @@ let settle ~settled_at ~lease ~settlement state =
       ( { state with
           pending
         ; leases = remove_lease committed.lease_id state.leases
-        ; transition_outbox = [ outbox_entry ]
+        ; transition_outbox = state.transition_outbox @ [ outbox_entry ]
         }
       , Settled receipt )
 ;;
@@ -814,15 +820,13 @@ let validate_state state =
   then Error "event queue next lease sequence must be positive"
   else if List.length state.leases > 1
   then Error "event queue state must contain at most one active lease"
-  else if List.length state.transition_outbox > 1
-  then Error "event queue state must contain at most one unprojected transition"
-  else if state.leases <> [] && state.transition_outbox <> []
-  then Error "event queue state cannot contain both an active lease and an outbox transition"
   else if
-    match state.last_settlement, state.transition_outbox with
-    | Some receipt, [ entry ] ->
-      String.equal receipt.transition_id entry.receipt.transition_id
-    | None, _ | Some _, ([] | _ :: _ :: _) -> false
+    match state.last_settlement with
+    | None -> false
+    | Some receipt ->
+      List.exists
+        (fun entry -> String.equal receipt.transition_id entry.receipt.transition_id)
+        state.transition_outbox
   then Error "event queue last settlement duplicates the unprojected transition"
   else
     match duplicate_by (fun (lease : lease) -> lease.lease_id) state.leases with

@@ -89,8 +89,10 @@ val claim_when :
   (t * lease option, string) result
 (** Lease the earliest pending stimulus accepted by [ready]. Earlier unready
     stimuli retain their exact relative position, so one unavailable HITL
-    continuation cannot block unrelated ready work in the same Keeper lane. A
-    successful claim advances the monotonic lease sequence in the same state. *)
+    continuation cannot block unrelated ready work in the same Keeper lane.
+    Durable transition receipts awaiting observation projection do not block a
+    claim. A successful claim advances the monotonic lease sequence in the same
+    state. *)
 
 val add_legacy_inflight :
   Keeper_event_queue.stimulus list -> t -> (t * lease option, string) result
@@ -120,9 +122,10 @@ val active_lease : t -> lease option
     claiming new pending work. *)
 
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
-(** Atomically retire a durable outbox entry after an external projector has
-    materialized its stable [event_id], retaining only the last receipt for an
-    immediate idempotent retry. Unknown transition ids fail closed. *)
+(** Atomically retire the oldest durable outbox entry after an external projector has
+    materialized its stable [event_id]. Other ordered entries remain durable;
+    the retired receipt is retained for an immediate idempotent retry. Unknown
+    transition ids fail closed. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t

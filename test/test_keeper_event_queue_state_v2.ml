@@ -172,24 +172,25 @@ let test_requeue_and_escalation_are_total () =
     | [ entry ] -> entry.receipt
     | _ -> Alcotest.fail "retry settlement must create one outbox entry"
   in
-  let blocked_state, blocked_lease = claim_head state in
+  let claimed_state, claimed_lease = claim_head state in
   Alcotest.(check bool)
-    "unprojected outbox blocks the next claim"
+    "unprojected observation does not block the next claim"
     true
-    (Option.is_none blocked_lease);
+    (Option.is_some claimed_lease);
   Alcotest.(check (list string))
-    "blocked claim preserves pending work"
-    [ "retry" ]
-    (post_ids (State.pending blocked_state));
+    "claimed retry leaves no pending work"
+    []
+    (post_ids (State.pending claimed_state));
+  Alcotest.(check int)
+    "claim retains the unprojected receipt"
+    1
+    (List.length (State.transition_outbox claimed_state));
   let state =
-    State.mark_transition_projected
-      ~transition_id:retry_receipt.transition_id
-      blocked_state
-    |> require_ok "project retry transition"
+    State.to_yojson claimed_state
+    |> State.of_yojson
+    |> require_ok "lease and outbox codec roundtrip"
   in
-  Alcotest.(check (list string)) "retry restored" [ "retry" ] (post_ids (State.pending state));
-  let state, lease = claim_head state in
-  let lease = require_some "escalation lease" lease in
+  let lease = require_some "escalation lease" claimed_lease in
   let judgment : Queue.failure_judgment =
     { fj_runtime_id = "runtime-a"
     ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
@@ -217,9 +218,29 @@ let test_requeue_and_escalation_are_total () =
   in
   let escalation_receipt =
     match State.transition_outbox state with
-    | [ entry ] -> entry.receipt
-    | _ -> Alcotest.fail "judgment escalation must create one outbox entry"
+    | [ retry_entry; escalation_entry ] ->
+      Alcotest.(check string)
+        "outbox preserves settlement order"
+        retry_receipt.transition_id
+        retry_entry.receipt.transition_id;
+      escalation_entry.receipt
+    | _ -> Alcotest.fail "both unprojected transitions must remain durable"
   in
+  (match
+     State.mark_transition_projected
+       ~transition_id:escalation_receipt.transition_id
+       state
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "out-of-order projection crossed the receipt boundary");
+  let state =
+    State.mark_transition_projected ~transition_id:retry_receipt.transition_id state
+    |> require_ok "project retry transition"
+  in
+  Alcotest.(check int)
+    "projecting one receipt retains the next"
+    1
+    (List.length (State.transition_outbox state));
   let state =
     State.mark_transition_projected ~transition_id:escalation_receipt.transition_id state
     |> require_ok "project judgment escalation"
@@ -829,8 +850,9 @@ let test_transition_outbox_projects_with_stable_identity () =
   with_temp_dir "keeper-event-queue-v2-outbox" (fun base_path ->
     let keeper_name = "projection_keeper" in
     let source = stimulus "projected-source" 1.0 in
+    let second = stimulus "projected-second" 1.5 in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
-      Queue.enqueue pending source)
+      Queue.enqueue (Queue.enqueue pending source) second)
     |> require_ok "seed projection source";
     let lease =
       Persistence.claim_when_result
@@ -871,6 +893,30 @@ let test_transition_outbox_projects_with_stable_identity () =
      with
      | Persistence.Already_present -> ()
      | Persistence.Enqueued -> Alcotest.fail "outbox stimulus was duplicated");
+    let second_lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:3.5
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim while first transition awaits projection"
+      |> require_some "second projection lease"
+    in
+    ignore
+      (Persistence.settle_result
+         ~base_path
+         ~keeper_name
+         ~settled_at:4.0
+         ~lease:second_lease
+         ~settlement:State.Ack
+         ()
+       |> require_ok "settle second projection source");
+    let queued_outbox =
+      Persistence.transition_outbox_result ~base_path ~keeper_name
+      |> require_ok "load ordered transition outbox"
+    in
+    Alcotest.(check int) "two settlements await projection" 2 (List.length queued_outbox);
     Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
     |> require_ok "project transition outbox";
     let state =
@@ -897,7 +943,7 @@ let test_transition_outbox_projects_with_stable_identity () =
     let open Yojson.Safe.Util in
     Alcotest.(check int)
       "stable event id deduplicates crash replay"
-      1
+      2
       (summary |> member "event_queue_ack_count" |> to_int);
     Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
     |> require_ok "empty outbox projection is idempotent")

@@ -377,20 +377,26 @@ let project_transition_outbox ~base_path ~keeper_name =
        | Error _ as error -> error
        | Ok () -> project_stimuli ~reaction_kind ~receipt rest)
   in
-  match Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name with
-  | Error _ as error -> error
-  | Ok [] -> Ok ()
-  | Ok [ (entry : Keeper_registry_event_queue.outbox_entry) ] ->
+  let rec project_entries = function
+    | [] -> Ok ()
+    | (entry : Keeper_registry_event_queue.outbox_entry) :: rest ->
     let receipt = entry.receipt in
     let reaction_kind = reaction_kind_of_settlement receipt.settlement in
     (match project_stimuli ~reaction_kind ~receipt entry.stimuli with
      | Error _ as error -> error
      | Ok () ->
-       Keeper_registry_event_queue.mark_transition_projected_result
-         ~base_path
-         keeper_name
-         ~transition_id:receipt.transition_id)
-  | Ok (_ :: _ :: _) -> Error "event queue state has multiple unprojected transitions"
+       (match
+          Keeper_registry_event_queue.mark_transition_projected_result
+            ~base_path
+            keeper_name
+            ~transition_id:receipt.transition_id
+        with
+        | Error _ as error -> error
+        | Ok () -> project_entries rest))
+  in
+  match Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name with
+  | Error _ as error -> error
+  | Ok entries -> project_entries entries
 ;;
 
 let settle_claimed_lease
@@ -517,7 +523,11 @@ let run_keepalive_unified_turn
            ~keeper_name:meta_after_triage.name
        with
        | Ok () -> ()
-       | Error message -> raise (Event_queue_settlement_failed message));
+       | Error message ->
+         Log.Keeper.error
+           "registry: deferred transition projection keeper=%s: %s"
+           meta_after_triage.name
+           message);
       let event_intake =
         heartbeat_event_intake
           ~ctx
@@ -831,7 +841,11 @@ let run_keepalive_unified_turn
                  ~base_path:ctx.config.base_path
                  ~keeper_name:meta_after_triage.name
              with
-             | Error message -> raise (Event_queue_settlement_failed message)
+             | Error message ->
+               Log.Keeper.error
+                 "registry: deferred transition projection keeper=%s: %s"
+                 meta_after_triage.name
+                 message
              | Ok () -> ());
             if settlement_is_ack settlement
             then

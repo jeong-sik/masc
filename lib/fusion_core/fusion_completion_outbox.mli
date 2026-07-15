@@ -56,5 +56,6 @@ val acknowledge :
   t -> operation_id:string -> (acknowledgement_receipt, error) result
 
 val pending : t -> item list
+val registered_address : t -> operation_id:string -> Completion_address.t option
 val global : unit -> t
 val set_global : t -> unit

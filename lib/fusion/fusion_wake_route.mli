@@ -11,6 +11,7 @@ type delivery_receipt = Delivered | Already_delivered
 type drain_report = { delivered : int; failures : error list }
 
 val error_to_string : error -> string
+val validate_registered_address : string -> (unit, error) result
 val register :
   operation_id:string -> owner:string -> channel:Keeper_continuation_channel.t ->
   (Fusion_completion_outbox.register_receipt, error) result

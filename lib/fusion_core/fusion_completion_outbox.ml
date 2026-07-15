@@ -157,6 +157,7 @@ let acknowledge t ~operation_id =
 ;;
 
 let pending t = Atomic.get t.state |> fun state -> By_id.bindings state.pending |> List.map snd
+let registered_address t ~operation_id = By_id.find_opt operation_id (Atomic.get t.state).addresses
 
 let replay path =
   if not (Fs_compat.file_exists path)

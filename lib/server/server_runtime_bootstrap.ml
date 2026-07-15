@@ -1078,6 +1078,19 @@ let activate_owner_state
     ~domain_mgr
     ~proc_mgr
     state;
+  let base_dir = (Mcp_server.workspace_config state).base_path in
+  (match Fusion_config_loader.load ~base_path:base_dir with
+   | Error detail ->
+     Log.Server.error "fusion recovery policy unavailable: %s" detail
+   | Ok policy ->
+     let report = Fusion_tool.recover_required ~sw ~net ~base_dir ~policy in
+     Log.Server.info "fusion recovery started=%d failed=%d" report.started
+       (List.length report.failures);
+     List.iter
+       (fun (operation_id, error) ->
+          Log.Server.error "fusion recovery operation=%s error=%s" operation_id
+            (Fusion_tool.recovery_failure_to_string error))
+       report.failures);
   { state
   ; path_diagnostics = initialized.path_diagnostics
   ; domain_pool = initialized.domain_pool

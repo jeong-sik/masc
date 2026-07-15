@@ -9,6 +9,21 @@
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §4/§6 *)
 
+type recovery_failure =
+  | Completion_address_unavailable of Fusion_wake_route.error
+  | Recovery_claim_failed of Fusion_run_registry.claim_error
+  | Recovery_start_failed of Fusion_run_registry.start_error
+
+type recovery_report =
+  { started : int
+  ; failures : (string * recovery_failure) list
+  }
+
+val recovery_failure_to_string : recovery_failure -> string
+val recover_required :
+  sw:Eio.Switch.t -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  base_dir:string -> policy:Fusion_policy.t -> recovery_report
+
 (** [masc_fusion] 호출 처리. status JSON 문자열을 반환한다.
 
     @param now_unix 현재 유닉스초 (키퍼 clock에서; run 시작 시각 기록).
@@ -59,6 +74,11 @@ module For_test : sig
     -> request:Fusion_types.fusion_request
     -> unit
     -> Fusion_orchestrator.outcome
+
+  val recover_required_with_runner :
+    run_orchestrator:orchestrator_runner -> sw:Eio.Switch.t ->
+    net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> base_dir:string ->
+    policy:Fusion_policy.t -> recovery_report
 
   (** [handle]과 같은 계약이되 background runner를 명시적으로 받는다.
 

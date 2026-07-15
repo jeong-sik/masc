@@ -574,10 +574,162 @@ let register_route_exn ~operation_id ~owner channel =
   | Error error -> fail (Fusion_wake_route.error_to_string error)
 ;;
 
+let install_recovery_required_exn ~base_dir operation =
+  let path = Filename.concat base_dir "fusion-runs.jsonl" in
+  let registry = Fusion_run_registry.create ~path () in
+  Fusion_run_registry.set_global registry;
+  (match
+     Fusion_run_registry.register_running registry ~operation ~started_at:1.0
+   with
+   | Ok () -> ()
+   | Error error -> fail (Fusion_run_registry.persistence_error_to_string error));
+  let claim =
+    match
+      Fusion_run_registry.claim_operation registry
+        ~operation_id:(Fusion_types.fusion_operation_id operation)
+    with
+    | Ok claim -> claim
+    | Error error -> fail (Fusion_run_registry.claim_error_to_string error)
+  in
+  (match Fusion_run_registry.start_claimed registry claim with
+   | Ok started ->
+     check bool "started canonical operation" true
+       (Fusion_types.equal_fusion_operation operation started)
+   | Error error -> fail (Fusion_run_registry.start_error_to_string error));
+  let recovered = Fusion_run_registry.replay path in
+  Fusion_run_registry.set_global recovered;
+  recovered
+;;
+
+let test_recovery_resumes_exact_operation_and_owner_lane () =
+  with_isolated_eio_base_path "fusion-boot-recovery" (fun env sw base_dir ->
+    let keeper = "fusion-recovery-owner" in
+    let run_id = "fus-boot-recovery" in
+    let operation =
+      { (fusion_operation ~run_id ~keeper ~preset:"unit") with
+        request =
+          { (fusion_operation ~run_id ~keeper ~preset:"unit").request with
+            prompt = "recover this exact persisted prompt"
+          ; web_tools = true
+          }
+      ; topology = Fusion_types.Judge_of_judges
+      }
+    in
+    let registry = install_recovery_required_exn ~base_dir operation in
+    register_route_exn ~operation_id:run_id ~owner:keeper discord_channel;
+    let completed, resolve_completed = Eio.Promise.create () in
+    let run_orchestrator ~sw:_ ~net:_ ~base_dir ~policy:_ ~topology ~request () =
+      let observed : Fusion_types.fusion_operation = { request; topology } in
+      check bool "recovery uses exact persisted operation" true
+        (Fusion_types.equal_fusion_operation operation observed);
+      let synthesis = judge_synthesis "RECOVERED-ANSWER" in
+      let outcome =
+        match
+          Fusion_sink.emit ~base_dir ~keeper:request.keeper ~run_id:request.run_id
+            ~question:request.prompt ~panel:[] ~judge:(Ok synthesis) ~judges:[]
+            ~judge_usage:Fusion_types.zero_usage
+        with
+        | Ok () -> Fusion_orchestrator.Completed { panel = []; judge = Ok synthesis }
+        | Error detail -> Fusion_orchestrator.Sink_failed detail
+      in
+      Eio.Promise.resolve resolve_completed outcome;
+      outcome
+    in
+    let report =
+      Fusion_tool.For_test.recover_required_with_runner ~run_orchestrator ~sw
+        ~net:(Eio.Stdenv.net env) ~base_dir ~policy:(fusion_tool_policy ())
+    in
+    check int "one recovery started" 1 report.started;
+    check int "no recovery preparation failure" 0 (List.length report.failures);
+    (match
+       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 (fun () ->
+         Eio.Promise.await completed)
+     with
+     | Fusion_orchestrator.Completed _ -> ()
+     | Fusion_orchestrator.Denied _ -> fail "recovery runner denied"
+     | Fusion_orchestrator.Sink_failed detail -> fail detail);
+    (match get_run registry ~run_id with
+     | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
+     | Some _ -> fail "recovered operation must become terminal"
+     | None -> fail "recovered operation must remain observable");
+    (match
+       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+       |> Keeper_event_queue.dequeue
+     with
+     | Some ({ payload = Keeper_event_queue.Fusion_completed completion; _ }, _) ->
+       check string "owner lane receives recovered answer" "RECOVERED-ANSWER"
+         completion.resolved_answer;
+       (match completion.channel with
+        | Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ } -> ()
+        | channel ->
+          failf "recovery lost the persisted channel: %s"
+            (Keeper_continuation_channel.describe channel))
+     | Some _ -> fail "owner lane received the wrong recovery stimulus"
+     | None -> fail "owner lane must receive recovered completion");
+    let second =
+      Fusion_tool.For_test.recover_required_with_runner ~run_orchestrator ~sw
+        ~net:(Eio.Stdenv.net env) ~base_dir ~policy:(fusion_tool_policy ())
+    in
+    check int "terminal operation is not replayed" 0 second.started)
+;;
+
+let test_recovery_requires_exact_registered_owner () =
+  with_isolated_eio_base_path "fusion-recovery-wrong-owner" (fun env sw base_dir ->
+    let operation =
+      fusion_operation ~run_id:"fus-wrong-recovery-owner" ~keeper:"expected-owner"
+        ~preset:"unit"
+    in
+    register_running_exn (Fusion_run_registry.global ())
+      ~run_id:"fus-wrong-recovery-owner" ~keeper:"wrong-owner" ~preset:"unit"
+      ~started_at:0.0;
+    register_route_exn ~operation_id:"fus-wrong-recovery-owner"
+      ~owner:"wrong-owner" discord_channel;
+    let registry = install_recovery_required_exn ~base_dir operation in
+    (match
+       Fusion_wake_route.queue_completion ~operation_id:"fus-wrong-recovery-owner"
+         ~ok:true ~content:"must not reach wrong owner" ~evidence_ref:None
+     with
+     | Ok Fusion_completion_outbox.Queued -> ()
+     | Ok _ -> fail "test completion should be newly queued"
+     | Error error -> fail (Fusion_wake_route.error_to_string error));
+    let drain = Fusion_wake_route.drain_all ~base_dir in
+    check int "wrong owner delivers no pending completion" 0 drain.delivered;
+    check int "wrong owner is an explicit drain failure" 1
+      (List.length drain.failures);
+    check int "failed drain preserves pending completion" 1
+      (List.length
+         (Fusion_completion_outbox.pending (Fusion_completion_outbox.global ())));
+    check int "wrong owner lane remains empty" 0
+      (Keeper_event_queue.length
+         (Keeper_event_queue_persistence.load ~base_path:base_dir
+            ~keeper_name:"wrong-owner"));
+    let called = ref false in
+    let run_orchestrator ~sw:_ ~net:_ ~base_dir:_ ~policy:_ ~topology:_ ~request:_ () =
+      called := true;
+      failwith "recovery must not start for a different owner"
+    in
+    let report =
+      Fusion_tool.For_test.recover_required_with_runner ~run_orchestrator ~sw
+        ~net:(Eio.Stdenv.net env) ~base_dir ~policy:(fusion_tool_policy ())
+    in
+    check int "wrong owner starts no worker" 0 report.started;
+    check bool "runner is not called" false !called;
+    (match report.failures with
+     | [ ( "fus-wrong-recovery-owner"
+         , Fusion_tool.Completion_address_unavailable _ ) ] -> ()
+     | _ -> fail "owner mismatch must be a typed recovery failure");
+    match get_run registry ~run_id:"fus-wrong-recovery-owner" with
+    | Some { Fusion_run_registry.status = Recovery_required _; _ } -> ()
+    | Some _ -> fail "unroutable recovery must remain recovery_required"
+    | None -> fail "unroutable recovery inventory must remain observable")
+;;
+
 let test_wake_durable_commit_carries_channel_and_acks_outbox () =
   with_isolated_base_path "fusion-wake-durable" (fun base_dir ->
     let keeper = Printf.sprintf "fusion-wake-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-%d" (Random.bits ()) in
+    register_running_exn (Fusion_run_registry.global ()) ~run_id ~keeper
+      ~preset:"unit" ~started_at:1.0;
     register_route_exn ~operation_id:run_id ~owner:keeper discord_channel;
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
@@ -621,6 +773,8 @@ let test_wake_fail_closed_preserves_pending_completion () =
      with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "seeding the conflicting durable row should commit: %s" e));
+    register_running_exn (Fusion_run_registry.global ()) ~run_id ~keeper
+      ~preset:"unit" ~started_at:1.0;
     register_route_exn ~operation_id:run_id ~owner:keeper discord_channel;
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
@@ -900,6 +1054,14 @@ let () =
             "tool handle returns Running then async success projects evidence"
             `Quick
             test_tool_handle_async_success_projects_running_then_completed
+        ; test_case
+            "boot recovery resumes exact operation into exact owner lane"
+            `Quick
+            test_recovery_resumes_exact_operation_and_owner_lane
+        ; test_case
+            "boot recovery requires its exact registered owner"
+            `Quick
+            test_recovery_requires_exact_registered_owner
         ; test_case
             "tool handle does not start without durable register"
             `Quick

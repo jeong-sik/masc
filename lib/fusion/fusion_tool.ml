@@ -90,6 +90,30 @@ type orchestrator_runner =
   -> unit
   -> Fusion_orchestrator.outcome
 
+let fork_operation ~run_orchestrator ~sw ~net ~base_dir ~policy operation =
+  let request = operation.Fusion_types.request in
+  let keeper = request.keeper in
+  let run_id = request.run_id in
+  Eio.Fiber.fork ~sw (fun () ->
+    match
+      run_orchestrator ~sw ~net ~base_dir ~policy ~topology:operation.topology
+        ~request ()
+    with
+    | Fusion_orchestrator.Completed _ -> ()
+    | Fusion_orchestrator.Denied reason ->
+      append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"denied"
+        (Printf.sprintf "**Fusion run `%s`** _(denied after start: %s)_" run_id
+           (Fusion_types.deny_reason_label reason))
+    | Fusion_orchestrator.Sink_failed detail ->
+      append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
+        (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id detail)
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn ->
+      append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
+        (Printf.sprintf "**Fusion run `%s`** _(aborted: %s)_" run_id
+           (Printexc.to_string exn)))
+;;
+
 type execution_start_error =
   | Claim_failed of Fusion_run_registry.claim_error
   | Start_failed of Fusion_run_registry.start_error
@@ -107,6 +131,61 @@ let claim_and_start registry operation_id =
   in
   Fusion_run_registry.start_claimed registry claim
   |> Result.map_error (fun error -> Start_failed error)
+;;
+
+type recovery_failure =
+  | Completion_address_unavailable of Fusion_wake_route.error
+  | Recovery_claim_failed of Fusion_run_registry.claim_error
+  | Recovery_start_failed of Fusion_run_registry.start_error
+
+type recovery_report =
+  { started : int
+  ; failures : (string * recovery_failure) list
+  }
+
+let recovery_failure_to_string = function
+  | Completion_address_unavailable error -> Fusion_wake_route.error_to_string error
+  | Recovery_claim_failed error -> Fusion_run_registry.claim_error_to_string error
+  | Recovery_start_failed error -> Fusion_run_registry.start_error_to_string error
+;;
+
+let recovery_failure_of_start = function
+  | Claim_failed error -> Recovery_claim_failed error
+  | Start_failed error -> Recovery_start_failed error
+;;
+
+let recover_required_with_runner ~run_orchestrator ~sw ~net ~base_dir ~policy =
+  let registry = Fusion_run_registry.global () in
+  Fusion_run_registry.list_runs registry
+  |> List.fold_left
+       (fun report (run : Fusion_run_registry.run) ->
+         match run.status with
+         | Running | Completed _ -> report
+         | Recovery_required _ ->
+           let operation_id = Fusion_run_registry.operation_id run in
+           let prepared =
+             let ( let* ) = Result.bind in
+             let* () =
+               Fusion_wake_route.validate_registered_address operation_id
+               |> Result.map_error (fun error -> Completion_address_unavailable error)
+             in
+             claim_and_start registry operation_id
+             |> Result.map_error recovery_failure_of_start
+           in
+           (match prepared with
+            | Error error ->
+              Log.Misc.error "fusion recovery unavailable %s: %s" operation_id
+                (recovery_failure_to_string error);
+              { report with failures = (operation_id, error) :: report.failures }
+            | Ok operation ->
+              fork_operation ~run_orchestrator ~sw ~net ~base_dir ~policy operation;
+              { report with started = report.started + 1 }))
+       { started = 0; failures = [] }
+  |> fun report -> { report with failures = List.rev report.failures }
+;;
+
+let recover_required =
+  recover_required_with_runner ~run_orchestrator:Fusion_orchestrator.run
 ;;
 
 let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~run_id
@@ -211,8 +290,6 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
            ; ("error", `String reason)
            ]
        | Ok operation ->
-      let allowed = operation.Fusion_types.request in
-      let topology = operation.topology in
       (* RFC-0266 §7 Phase 4: push the new [Running] card to the dashboard panel
          (no polling). wake-free, broadcast-failure-safe; see
          Fusion_sink.broadcast_run_status. *)
@@ -221,26 +298,7 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
          배경 fiber 실패/거부/싱크 실패는 동일한 chat lane에 기록해 started-but-failed
          상태가 남지 않도록 한다. 호출자는 이 fiber가 키퍼 턴보다 오래 살아도록 root
          switch를 sw로 넘긴다 (turn switch면 턴 종료 시 심의가 취소됨). *)
-      Eio.Fiber.fork ~sw (fun () ->
-        match
-          run_orchestrator ~sw ~net ~base_dir ~policy ~topology ~request:allowed ()
-        with
-        | Fusion_orchestrator.Completed _ -> ()
-        | Fusion_orchestrator.Denied reason ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"denied"
-            (Printf.sprintf "**Fusion run `%s`** _(denied after start: %s)_" run_id
-               (Fusion_types.deny_reason_label reason))
-        | Fusion_orchestrator.Sink_failed msg ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
-            (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id msg)
-        | exception (Eio.Cancel.Cancelled _ as exn) ->
-          (* Root-switch cancellation is not a terminal Fusion outcome. The
-             durable Started claim remains replayable by the next process. *)
-          raise exn
-        | exception exn ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
-            (Printf.sprintf "**Fusion run `%s`** _(aborted: %s)_" run_id
-               (Printexc.to_string exn)));
+      fork_operation ~run_orchestrator ~sw ~net ~base_dir ~policy operation;
       (* [delivery] 필드는 도구 결과의 async 계약을 명시한다: 완료 시 키퍼는
          [Fusion_completed] wake로 깨워지고 결론/실패 사유가 chat lane에 durable하게
          남는다. 2026-07-01 관측: 이 계약이 결과 JSON에 없어서 키퍼들이 3-5초 간격
@@ -280,6 +338,8 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ?continuation_ch
 
 module For_test = struct
   type nonrec orchestrator_runner = orchestrator_runner
+
+  let recover_required_with_runner = recover_required_with_runner
 
   let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix
         ~run_id ~policy ?continuation_channel ~args () =

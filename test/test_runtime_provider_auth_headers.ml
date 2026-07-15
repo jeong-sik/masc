@@ -854,6 +854,68 @@ let provider_cfg () =
   | Ok provider_cfg -> provider_cfg
   | Error msg -> failf "unexpected adapter error: %s" msg
 
+(* --- provider_id capability qualification ---
+
+   The adapter must stamp the runtime.toml [providers.<id>] table name into
+   [Provider_config.provider_id]: it is the capability-catalog qualification
+   key ([capability_provider_label] prefers it over the wire kind), and the
+   OAS contract (provider_config.mli, capabilities_for_config_model) only
+   accepts an exact provider-scoped row once a provider is declared. Without
+   it every OpenAI-compatible endpoint collapsed into the "openai_compat"
+   label, which no catalog row carries — the 2026-07-15 boot-gate wipeout
+   where all routed runtimes were reported catalog-missing. *)
+
+let with_model_catalog toml f =
+  match Llm_provider.Model_catalog.of_toml_string ~source:"inline-test-catalog" toml with
+  | Error msg -> failf "test catalog parse failed: %s" msg
+  | Ok catalog ->
+    Llm_provider.Model_catalog.set_global catalog;
+    Fun.protect ~finally:Llm_provider.Model_catalog.clear_global f
+
+let test_adapter_stamps_declared_provider_id () =
+  check
+    (option string)
+    "provider_id"
+    (Some "runpod_mtp")
+    (provider_cfg ()).provider_id
+
+let test_provider_scoped_catalog_row_resolves_for_declared_provider () =
+  with_model_catalog
+    {|
+[[models]]
+id_prefix = "qwen"
+provider_name = "runpod_mtp"
+max_context_tokens = 160000
+|}
+    (fun () ->
+       match
+         Llm_provider.Provider_config.capabilities_for_config_model (provider_cfg ())
+       with
+       | Some caps ->
+         check
+           (option int)
+           "max_context_tokens from provider-scoped row"
+           (Some 160000)
+           caps.Llm_provider.Capabilities.max_context_tokens
+       | None -> fail "provider-scoped catalog row did not resolve")
+
+let test_bare_catalog_row_stays_fail_closed_for_declared_provider () =
+  with_model_catalog
+    {|
+[[models]]
+id_prefix = "qwen"
+max_context_tokens = 160000
+|}
+    (fun () ->
+       match
+         Llm_provider.Provider_config.capabilities_for_config_model (provider_cfg ())
+       with
+       | Some _ ->
+         fail
+           "bare catalog row must not satisfy a declared provider (exact \
+            provider-scoped row required)"
+       | None -> ())
+
 (* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
    Provider_config. Before the fix the adapter dropped both binding
    fields, so keep_alive fell back to OAS_OLLAMA_KEEP_ALIVE / "-1" and
@@ -1423,6 +1485,18 @@ let () =
         ] )
     ; ( "provider_config"
       , [ test_case
+            "adapter stamps declared provider id"
+            `Quick
+            test_adapter_stamps_declared_provider_id
+        ; test_case
+            "provider-scoped catalog row resolves for declared provider"
+            `Quick
+            test_provider_scoped_catalog_row_resolves_for_declared_provider
+        ; test_case
+            "bare catalog row stays fail-closed for declared provider"
+            `Quick
+            test_bare_catalog_row_stays_fail_closed_for_declared_provider
+        ; test_case
             "runtime adapter carries auth in api_key only"
             `Quick
             test_runtime_adapter_keeps_auth_out_of_headers

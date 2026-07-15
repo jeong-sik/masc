@@ -1469,7 +1469,11 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
          let missing = List.hd report.missing_models in
          check string "runtime id" "custom.sample" missing.runtime_id;
          check string "provider id" "custom" missing.provider_id;
-         check string "provider label" "openai_compat" missing.provider_label;
+         (* The label is the declared [providers.custom] table name, not the
+            wire kind: the adapter stamps [Provider_config.provider_id], so the
+            missing-row diagnostic tells the operator which catalog
+            [provider_name] to add instead of the generic "openai_compat". *)
+         check string "provider label" "custom" missing.provider_label;
          check string "model id" "missing-family-123" missing.model_id;
          check bool "diagnostic names OAS catalog file" true
            (String_util.contains_substring
@@ -1480,12 +1484,13 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
                  (Runtime.Missing_catalog_models report))
-              "provider_label=openai_compat"))
+              "provider_label=custom"))
 
 let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"good\"\n\
+     provider_name = \"ollama\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n"
   in
@@ -1548,6 +1553,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"good\"\n\
+     provider_name = \"ollama\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n"
   in
@@ -1638,6 +1644,7 @@ let test_server_degraded_init_rejects_uncatalogued_default () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"good\"\n\
+     provider_name = \"ollama\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n"
   in

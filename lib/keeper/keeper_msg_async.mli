@@ -104,7 +104,7 @@ type recovery_candidate =
   ; provenance : recovery_provenance
   }
 
-(** Recovery observations for canonical v4 storage only. [candidates] retain
+(** Recovery observations for canonical v6 storage only. [candidates] retain
     exact non-terminal restart provenance without mutating accepted work into
     a terminal failure. [finalized] counts
     terminal states moved from the active partition after a crash; [cleaned]
@@ -240,7 +240,7 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     explicitly supplied server-lifetime [background_sw].  The per-request
     worker switch passed to [f] is distinct: cancellation fails that switch,
     never the server root. Returns the fresh [request_id] synchronously after
-    the owner-bearing v4 request record is durably accepted. If an atomic
+    the owner-bearing v6 request record is durably accepted. If an atomic
     rename publishes the record but its directory fsync and the compensating
     rollback both fail, [Reconciliation_required] preserves the request id so
     the caller can poll instead of creating an unreachable orphan. The async
@@ -268,7 +268,8 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     delivery callback succeeds. Callback failures never escape to the server
     root switch.
 
-    [on_worker_settled] is invoked only for terminal truth that exact in-process
+    [on_worker_settled] is invoked with the exact accepted [request_id], only
+    for terminal truth that exact in-process
     poll also returns: a durably committed status, a typed volatile persistence
     overlay, or an already-existing canonical durable terminal discovered
     during an integrity conflict. Ambiguous durable evidence has no fabricated
@@ -278,7 +279,7 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
 val submit
   :  ?on_accepted:(string -> (unit, string) result)
   -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
-  -> ?on_worker_settled:(worker_settlement -> unit)
+  -> ?on_worker_settled:(request_id:string -> worker_settlement -> unit)
   -> background_sw:Eio.Switch.t
   -> base_path:string
   -> caller:string
@@ -380,7 +381,7 @@ module For_testing : sig
     :  request_ops
     -> ?on_accepted:(string -> (unit, string) result)
     -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
-    -> ?on_worker_settled:(worker_settlement -> unit)
+    -> ?on_worker_settled:(request_id:string -> worker_settlement -> unit)
     -> background_sw:Eio.Switch.t
     -> base_path:string
     -> caller:string

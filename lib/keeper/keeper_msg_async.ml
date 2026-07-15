@@ -511,8 +511,8 @@ let with_keeper_persistence_lock ~base_path ~keeper_name f =
 exception CancelledByOperator
 exception Worker_preempted of string
 exception Worker_already_settled of request_status
-(* v5 hard-cuts prompt-only records: executor identity and direct replay input are durable. *)
-let record_schema_version = 5
+(* v6 hard-cuts prompt-only records and persists optional caller-lane reply routing. *)
+let record_schema_version = 6
 
 let entry_keeper_name_id (entry : entry) =
   match Keeper_invocation_types.request_target entry.request with
@@ -1537,7 +1537,7 @@ let recover_record_path ~base_path ~request_id path report =
                     "non-terminal record has no recovery provenance")
                  report) with
               failed = report.failed + 1
-            })
+            }))
   | Unreadable reason ->
     { (record_error
          ~store:Active_store
@@ -2128,7 +2128,7 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
             | None -> ()
             | Some callback ->
               Eio.Cancel.protect (fun () ->
-                try callback settlement with
+                try callback ~request_id settlement with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->
                   Otel_metric_store.inc_counter

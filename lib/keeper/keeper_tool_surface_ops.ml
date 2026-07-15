@@ -33,12 +33,19 @@ let schemas = Keeper_types_profile.schemas
 type handler_error =
   | Message_error of string
   | Payload_error of Yojson.Safe.t
+  | Ambiguous_caller_identity of string * int
 
 let message_error result = Result.map_error (fun error -> Message_error error) result
 
 let tool_result_of_handler_error = function
   | Message_error message -> tool_result_error message
   | Payload_error data -> tool_result_error_data data
+  | Ambiguous_caller_identity (submitted_by, matches) ->
+    tool_result_error
+      (Printf.sprintf
+         "caller identity %S matches %d registered Keepers"
+         submitted_by
+         matches)
 ;;
 
 type json_cache = {
@@ -106,6 +113,7 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
       end
 
 let submit_keeper_msg_with_captured_event_bus
+      ?on_worker_settled
       ~background_sw
       ~base_path
       ~caller
@@ -118,12 +126,142 @@ let submit_keeper_msg_with_captured_event_bus
       () =
   let event_bus = Keeper_event_bus.get () in
   Keeper_invocation_contract.submit
+    ?on_worker_settled
     ~background_sw
     ~base_path
     ~caller
     ~request
     ~f:(fun request request_sw -> f ?event_bus request request_sw)
     ()
+
+type keeper_completion_projection =
+  | Completion_not_routed
+  | Completion_not_durable
+  | Completion_enqueued
+  | Completion_already_present
+  | Completion_storage_failed of string
+
+let terminal_completion_outcome = function
+  | Keeper_msg_async.Done { ok; body; data } ->
+    let payload =
+      match data with
+      | None -> body
+      | Some value -> Yojson.Safe.to_string value
+    in
+    Some
+      (if ok
+       then Keeper_event_queue.Bg_ok payload
+       else Keeper_event_queue.Bg_failed payload)
+  | Keeper_msg_async.Lost { reason }
+  | Keeper_msg_async.Cancelled { reason; _ }
+  | Keeper_msg_async.Persistence_failed { reason; _ } ->
+    Some (Keeper_event_queue.Bg_failed reason)
+  | Keeper_msg_async.Queued
+  | Keeper_msg_async.Running
+  | Keeper_msg_async.Cancelling _ -> None
+
+let signal_completion_caller ~base_path caller_keeper =
+  match
+    Keeper_registry.wakeup
+      ~intent:Keeper_registry.Reactive_signal
+      ~base_path
+      caller_keeper
+  with
+  | Keeper_registry.Signaled -> ()
+  | Keeper_registry.Deferred_unregistered ->
+    Log.Keeper.info
+      "keeper invocation completion persisted for unregistered caller=%s"
+      caller_keeper
+  | Keeper_registry.Deferred_not_running phase ->
+    Log.Keeper.info
+      "keeper invocation completion wake deferred caller=%s phase=%s"
+      caller_keeper
+      (Keeper_state_machine.phase_to_string phase)
+  | Keeper_registry.Deferred_lifecycle denial ->
+    Log.Keeper.info
+      "keeper invocation completion wake deferred caller=%s reason=%s"
+      caller_keeper
+      (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+
+let project_keeper_completion ~base_path ~request ~request_id settlement =
+  match Keeper_invocation_contract.reply_to_keeper_name request with
+  | None -> Completion_not_routed
+  | Some caller_keeper ->
+    (match settlement with
+     | Keeper_msg_async.Settlement_projection_error _ -> Completion_not_durable
+     | Keeper_msg_async.Status_settlement
+         { durability = Keeper_msg_async.Volatile_persistence_failure; _ } ->
+       Completion_not_durable
+     | Keeper_msg_async.Status_settlement
+         { durability = Keeper_msg_async.Durable; status; _ } ->
+       (match terminal_completion_outcome status with
+        | None -> Completion_not_durable
+        | Some bg_outcome ->
+          let completion : Keeper_event_queue.bg_job_completion =
+            { bg_run_id = request_id
+            ; bg_kind = Keeper_event_queue.Keeper_invocation
+            ; bg_outcome
+            ; bg_board_post_id = ""
+            }
+          in
+          let stimulus : Keeper_event_queue.stimulus =
+            { post_id = Keeper_event_queue.bg_job_completion_post_id completion
+            ; urgency = Keeper_event_queue.Immediate
+            ; arrived_at = Time_compat.now ()
+            ; payload = Keeper_event_queue.Bg_completed completion
+            }
+          in
+          (match
+             Keeper_registry_event_queue.enqueue_stimulus_durable_result
+               ~base_path
+               caller_keeper
+               stimulus
+           with
+           | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string FsFailures)
+               ~labels:
+                 [ "subsystem", "keeper_invocation_completion"
+                 ; "operation", "enqueue_caller_wake"
+                 ]
+               ();
+             Log.Keeper.error
+               "keeper invocation completion enqueue failed run_id=%s caller=%s: %s"
+               request_id
+               caller_keeper
+               detail;
+             Completion_storage_failed detail
+           | Keeper_registry_event_queue.Stimulus_enqueued ->
+             signal_completion_caller ~base_path caller_keeper;
+             Completion_enqueued
+           | Keeper_registry_event_queue.Stimulus_already_present ->
+             signal_completion_caller ~base_path caller_keeper;
+             Completion_already_present)))
+
+type registered_caller =
+  | No_registered_caller
+  | One_registered_caller of Keeper_registry.registry_entry
+  | Multiple_registered_callers of int
+
+let registered_caller ~base_path ~submitted_by =
+  match
+    Keeper_registry.all ~base_path ()
+    |> List.filter (fun (entry : Keeper_registry.registry_entry) ->
+      String.equal entry.meta.agent_name submitted_by)
+  with
+  | [] -> No_registered_caller
+  | [ entry ] -> One_registered_caller entry
+  | entries -> Multiple_registered_callers (List.length entries)
+
+let request_with_registered_reply_to ~base_path ~submitted_by request =
+  match registered_caller ~base_path ~submitted_by with
+  | No_registered_caller -> Ok request
+  | One_registered_caller entry ->
+    Keeper_invocation_contract.with_reply_to ~keeper_name:entry.name request
+    |> Result.map_error (fun error ->
+      Message_error (Keeper_invocation_contract.request_error_to_string error))
+  | Multiple_registered_callers matches ->
+    Error (Ambiguous_caller_identity (submitted_by, matches))
 
 module For_testing = struct
   let reset_keeper_list_cache () =
@@ -133,6 +271,9 @@ module For_testing = struct
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
   let submit_keeper_msg_with_captured_event_bus =
     submit_keeper_msg_with_captured_event_bus
+  let terminal_completion_outcome = terminal_completion_outcome
+  let project_keeper_completion = project_keeper_completion
+  let request_with_registered_reply_to = request_with_registered_reply_to
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -626,6 +767,14 @@ let submit_keeper_invocation
     in
     let* submission =
       submit_keeper_msg_with_captured_event_bus
+        ~on_worker_settled:(fun ~request_id settlement ->
+          ignore
+            (project_keeper_completion
+               ~base_path:ctx.config.base_path
+               ~request
+               ~request_id
+               settlement
+             : keeper_completion_projection))
         ~background_sw
         ~base_path:ctx.config.base_path
         ~caller:submitted_by
@@ -684,6 +833,12 @@ let handle_keeper_delegate ~submitted_by ctx args =
   match
     let* request =
       Keeper_invocation_contract.request_of_json args |> message_error
+    in
+    let* request =
+      request_with_registered_reply_to
+        ~base_path:ctx.config.base_path
+        ~submitted_by
+        request
     in
     let* request = message_error (Turn.preflight_keeper_delegate ctx request) in
     Ok

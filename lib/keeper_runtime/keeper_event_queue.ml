@@ -112,9 +112,9 @@ and bg_job_completion = {
   (* correlates to an optional board evidence post; "" if none was created. *)
 }
 
-and bg_job_kind = Subprocess
-      (* RFC-0290: closed sum of background job kinds (v1 = [Subprocess]); a new
-         kind forces every match to add an arm rather than defaulting. *)
+and bg_job_kind =
+  | Subprocess
+  | Keeper_invocation
 
 and hitl_resolution_decision =
   | Hitl_approved
@@ -205,9 +205,11 @@ let hitl_resolution_decision_to_string = function
 
 let bg_job_kind_to_string = function
   | Subprocess -> "subprocess"
+  | Keeper_invocation -> "keeper_invocation"
 
 let bg_job_kind_of_string = function
   | "subprocess" -> Ok Subprocess
+  | "keeper_invocation" -> Ok Keeper_invocation
   | other -> Error (Printf.sprintf "unknown bg_job_kind: %s" other)
 
 type stimulus = {

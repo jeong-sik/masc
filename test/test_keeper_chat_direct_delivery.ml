@@ -540,7 +540,7 @@ let start_settlement ~ops ~background_sw ~base_path ~request_id ~f =
   let submitted_request_id =
     Keeper_msg_async.For_testing.submit
       ops
-      ~on_worker_settled:(fun value ->
+      ~on_worker_settled:(fun ~request_id:_ value ->
         if Atomic.compare_and_set delivered false true
         then Eio.Promise.resolve resolve_settlement value)
       ~background_sw

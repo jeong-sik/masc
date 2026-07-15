@@ -2,6 +2,7 @@
     execution and lane admission remain in the Keeper implementation. *)
 type capability = Invoke_turn
 type target = Keeper of Keeper_id.Keeper_name.t
+type reply_to = Caller_keeper of Keeper_id.Keeper_name.t
 
 type input =
   | Delegated_turn of string
@@ -25,11 +26,14 @@ val target_name : target -> string
 val target_to_json : target -> Yojson.Safe.t
 val keeper_turn : keeper_name:string -> prompt:string -> (request, string) result
 val direct_turn : keeper_name:string -> Keeper_direct_invocation.t -> (request, string) result
+val with_reply_to : keeper_name:string -> request -> (request, string) result
 val request_target : request -> target
 val request_capability : request -> capability
 val request_target_name : request -> string
 val request_prompt : request -> string
 val request_direct_delivery : request -> Keeper_direct_invocation.t option
+val request_reply_to : request -> reply_to option
+val reply_to_keeper_name : reply_to -> string
 val request_equal : request -> request -> bool
 val request_to_json : request -> Yojson.Safe.t
 val request_of_json : Yojson.Safe.t -> (request, string) result

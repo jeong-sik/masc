@@ -40,9 +40,11 @@ type request_error =
 
 val request : keeper_name:string -> prompt:string -> (request, request_error) result
 val request_of_json : Yojson.Safe.t -> (request, request_error) result
+val with_reply_to : keeper_name:string -> request -> (request, request_error) result
 val request_error_to_string : request_error -> string
 val target_name : request -> string
 val prompt : request -> string
+val reply_to_keeper_name : request -> string option
 val target_of_json : Yojson.Safe.t -> (target, request_error) result
 val target_to_json : target -> Yojson.Safe.t
 val target_name_of_target : target -> string
@@ -66,7 +68,9 @@ val cancel :
   (Keeper_msg_async.cancel_result, request_error) result
 
 val submit
-  :  background_sw:Eio.Switch.t
+  :  ?on_worker_settled:
+       (request_id:string -> Keeper_msg_async.worker_settlement -> unit)
+  -> background_sw:Eio.Switch.t
   -> base_path:string
   -> caller:string
   -> request:request

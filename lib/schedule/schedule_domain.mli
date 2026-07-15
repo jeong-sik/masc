@@ -58,6 +58,22 @@ type recurrence =
       ; timezone : string
       }
 
+type recurrence_evaluation =
+  | Next_due_at of float
+  | No_next
+
+(** Closed failure channel for recurrence evaluation. In particular,
+    [Search_exhausted] must never be interpreted as [No_next]. *)
+type recurrence_evaluation_error =
+  | Invalid_persisted_recurrence of string
+  | Unsupported_timezone of string
+  | Search_exhausted of
+      { expression : string
+      ; timezone : string
+      ; searched_minutes : int
+      }
+  | Engine_failure of string
+
 (** Opaque consumer payload.
 
     The schedule domain does not interpret payload kind or body fields, but it
@@ -112,12 +128,19 @@ val create_request :
 val is_terminal : schedule_status -> bool
 val is_recurring : recurrence -> bool
 val validate_recurrence : recurrence -> (recurrence, string) result
-val first_due_after : now:float -> recurrence -> float option
+val recurrence_evaluation_error_to_string : recurrence_evaluation_error -> string
+val first_due_after :
+  now:float -> recurrence -> (recurrence_evaluation, recurrence_evaluation_error) result
 (** Compute the first due time for calendar recurrences that do not need an
-    explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)
+    explicit [due_at] anchor. Returns [No_next] for [One_shot] and [Interval]. *)
 
-val next_due_after : now:float -> schedule_request -> float option
-val reschedule_after_due_signal : now:float -> schedule_request -> schedule_request option
+val next_due_after :
+  now:float -> schedule_request -> (recurrence_evaluation, recurrence_evaluation_error) result
+
+val reschedule_after_due_signal :
+  now:float ->
+  schedule_request ->
+  (schedule_request option, recurrence_evaluation_error) result
 
 val payload_of_yojson : Yojson.Safe.t -> (payload, string) result
 val payload_to_yojson : payload -> Yojson.Safe.t

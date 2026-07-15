@@ -266,6 +266,21 @@ let finish_retryable_dispatch config ~now ~schedule_id detail =
     dispatch_result ~error schedule_id Dispatch_failed
 ;;
 
+let finish_recurrence_evaluation_failure config ~now ~schedule_id evaluation_error =
+  let reason = Schedule_store.Recurrence_evaluation_failure evaluation_error in
+  let error = Schedule_store.running_recovery_reason_to_string reason in
+  match Schedule_store.retry_running config ~now ~schedule_id ~reason with
+  | Ok _ -> dispatch_result ~error schedule_id Dispatch_failed
+  | Error err ->
+    let error =
+      Printf.sprintf
+        "%s; failed to defer schedule occurrence: %s"
+        error
+        (Schedule_store.store_error_to_string err)
+    in
+    dispatch_result ~error schedule_id Dispatch_failed
+;;
+
 let safe_consumer_dispatch config ~now consumer signal request =
   Cancel_safe.protect
     ~on_exn:(fun exn ->
@@ -309,6 +324,12 @@ let dispatch_candidate
         | Ok detail ->
           (match Schedule_store.complete_running config ~now ~schedule_id ~detail () with
            | Ok _ -> dispatch_result ~detail schedule_id Dispatch_succeeded
+           | Error (Schedule_store.Recurrence_evaluation_failed evaluation_error) ->
+             finish_recurrence_evaluation_failure
+               config
+               ~now
+               ~schedule_id
+               evaluation_error
            | Error err ->
              dispatch_result ~detail
                ~error:(Schedule_store.store_error_to_string err)

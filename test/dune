@@ -1338,7 +1338,7 @@
 (test
  (name test_schedule_domain)
  (modules test_schedule_domain)
- (libraries alcotest yojson masc_schedule))
+ (libraries alcotest ptime yojson masc_schedule))
 
 (test
  (name test_schedule_store)

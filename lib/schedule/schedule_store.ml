@@ -14,6 +14,7 @@ type store_error =
   | Invalid_status_transition of string
   | Schedule_not_due_candidate
   | Schedule_not_running
+  | Recurrence_evaluation_failed of Schedule_domain.recurrence_evaluation_error
   | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
@@ -22,6 +23,7 @@ type store_error =
 
 type running_recovery_reason =
   | Retryable_dispatch_failure of string
+  | Recurrence_evaluation_failure of Schedule_domain.recurrence_evaluation_error
   | Interrupted_by_process_restart
 
 type read_error =
@@ -77,6 +79,8 @@ let store_error_to_string = function
   | Invalid_status_transition reason -> "invalid schedule status transition: " ^ reason
   | Schedule_not_due_candidate -> "schedule is not due"
   | Schedule_not_running -> "schedule is not running"
+  | Recurrence_evaluation_failed error ->
+    Schedule_domain.recurrence_evaluation_error_to_string error
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
@@ -85,6 +89,8 @@ let store_error_to_string = function
 let running_recovery_reason_to_string = function
   | Retryable_dispatch_failure detail ->
     "retryable schedule dispatch failure: " ^ detail
+  | Recurrence_evaluation_failure error ->
+    Schedule_domain.recurrence_evaluation_error_to_string error
   | Interrupted_by_process_restart ->
     "schedule execution interrupted by process restart"
 ;;
@@ -481,28 +487,27 @@ let reschedule_due_recurring config ~now ~schedule_ids =
     let* state = load_for_mutation config in
     let ids = Hashtbl.create (List.length schedule_ids) in
     List.iter (fun schedule_id -> Hashtbl.replace ids schedule_id ()) schedule_ids;
-    let changed = ref 0 in
-    let schedules =
-      List.map
-        (fun (request : schedule_request) ->
-          if not (Hashtbl.mem ids request.schedule_id) then
-            request
-          else
-            match Schedule_domain.reschedule_after_due_signal ~now request with
-            | None -> request
-            | Some updated ->
-              incr changed;
-              updated)
-        state.schedules
+    let rec reschedule schedules_rev changed = function
+      | [] -> Ok (List.rev schedules_rev, changed)
+      | (request : schedule_request) :: rest ->
+        if not (Hashtbl.mem ids request.schedule_id) then
+          reschedule (request :: schedules_rev) changed rest
+        else
+          (match Schedule_domain.reschedule_after_due_signal ~now request with
+           | Error error -> Error (Recurrence_evaluation_failed error)
+           | Ok None -> reschedule (request :: schedules_rev) changed rest
+           | Ok (Some updated) ->
+             reschedule (updated :: schedules_rev) (changed + 1) rest)
     in
-    if !changed = 0 then
+    let* schedules, changed = reschedule [] 0 state.schedules in
+    if changed = 0 then
       Ok (state, 0)
     else (
       let next_state =
         bump_state state ~schedules ~executions:state.executions
       in
       let* () = write_state config next_state in
-      Ok (next_state, !changed)))
+      Ok (next_state, changed)))
 ;;
 
 let start_due_candidate config ~now ~schedule_id =
@@ -531,10 +536,18 @@ let complete_running config ~now ~schedule_id ?detail () =
       if request.status <> Running then
         Error Schedule_not_running
       else
-        let updated =
+        let* updated =
           match Schedule_domain.next_due_after ~now request with
-          | Some due_at -> { request with status = Scheduled; due_at }
-          | None -> { request with status = Succeeded }
+          | Error error -> Error (Recurrence_evaluation_failed error)
+          | Ok (Next_due_at due_at) -> Ok { request with status = Scheduled; due_at }
+          | Ok No_next ->
+            (match request.recurrence with
+             | One_shot -> Ok { request with status = Succeeded }
+             | Interval _ | Daily _ | Cron _ ->
+               Error
+                 (Recurrence_evaluation_failed
+                    (Engine_failure
+                       "recurring schedule produced no next occurrence")))
         in
         let schedules = replace_schedule state.schedules updated in
         let* executions =

@@ -300,6 +300,48 @@ let test_tick_dispatches_every_recurring_occurrence () =
     !calls
 ;;
 
+let test_recurrence_evaluation_failure_defers_only_its_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    match
+      Schedule_domain.create_request ~schedule_id:"unsupported-timezone"
+        ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
+        ~requested_at:100.0 ~due_at:200.0 ~payload:(payload_json "wake me")
+        ~source:Operator_request
+        ~recurrence:(Daily { hour = 9; minute = 0; second = 0; timezone = "UTC" })
+        ()
+    with
+    | Ok request ->
+      { request with
+        recurrence =
+          Daily
+            { hour = 9
+            ; minute = 0
+            ; second = 0
+            ; timezone = "America/New_York"
+            }
+      }
+    | Error error -> fail error
+  in
+  (match Schedule_store.insert_request config request with
+   | Ok _ -> ()
+   | Error error -> fail (Schedule_store.store_error_to_string error));
+  let calls = ref [] in
+  let result = tick_ok config ~now:201.0 ~consumer:(accepting_consumer calls) in
+  (match result.dispatches with
+   | [ dispatch ] ->
+     check_dispatch_status "dispatch failed loud" Dispatch_failed dispatch.status;
+     check (option string) "typed failure rendered"
+       (Some "unsupported recurrence timezone: America/New_York")
+       dispatch.error
+   | _ -> fail "expected one dispatch result");
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | Some stored -> check string "occurrence deferred" "due"
+                     (schedule_status_to_string stored.status)
+  | None -> fail "schedule missing"
+;;
+
 let test_tick_marks_terminal_dispatch_rejection_failed () =
   with_workspace
   @@ fun config ->
@@ -545,6 +587,8 @@ let () =
             test_tick_dispatches_recurring_candidate_to_next_due
         ; test_case "dispatches every recurring occurrence" `Quick
             test_tick_dispatches_every_recurring_occurrence
+        ; test_case "recurrence failure defers only its occurrence" `Quick
+            test_recurrence_evaluation_failure_defers_only_its_occurrence
         ; test_case "marks terminal dispatch rejection failed" `Quick
             test_tick_marks_terminal_dispatch_rejection_failed
         ; test_case "retries same occurrence without blocking other schedule" `Quick

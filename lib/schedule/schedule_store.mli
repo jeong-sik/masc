@@ -17,6 +17,7 @@ type store_error =
   | Invalid_status_transition of string
   | Schedule_not_due_candidate
   | Schedule_not_running
+  | Recurrence_evaluation_failed of Schedule_domain.recurrence_evaluation_error
   | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
@@ -28,6 +29,7 @@ type store_error =
 
 type running_recovery_reason =
   | Retryable_dispatch_failure of string
+  | Recurrence_evaluation_failure of Schedule_domain.recurrence_evaluation_error
   | Interrupted_by_process_restart
 
 val running_recovery_reason_to_string : running_recovery_reason -> string
@@ -125,7 +127,8 @@ val reschedule_due_recurring :
   (state * int, store_error) result
 (** Advances matching recurring [Due] requests back to [Scheduled] after their
     generic due signal has been durably recorded. One-shot requests are left
-    [Due] for a future consumer/terminal transition. *)
+    [Due] for a future consumer/terminal transition. Recurrence evaluation
+    failures abort the mutation explicitly. *)
 
 val start_due_candidate :
   Workspace_utils.config ->
@@ -144,7 +147,8 @@ val complete_running :
   (Schedule_domain.schedule_request, store_error) result
 (** Completes a [Running] request. One-shot requests become [Succeeded];
     recurring requests advance to the next [Scheduled] occurrence. The matching
-    execution attempt is marked [succeeded]. *)
+    execution attempt is marked [succeeded]. A recurrence evaluation failure
+    leaves both records [Running] and is returned explicitly for runner recovery. *)
 
 val fail_running :
   Workspace_utils.config ->

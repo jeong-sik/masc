@@ -540,6 +540,36 @@ let test_recurring_occurrences_remain_dispatchable () =
     (List.length (due_execution_candidates (read_state config)))
 ;;
 
+let test_recurrence_evaluation_failure_never_completes_schedule () =
+  with_workspace
+  @@ fun config ->
+  let valid =
+    make_request ~schedule_id:"invalid-recurrence"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  let invalid = { valid with recurrence = Interval { interval_sec = 0 } } in
+  ignore (insert_ok config invalid);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:invalid.schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match complete_running config ~now:203.0 ~schedule_id:invalid.schedule_id () with
+   | Error
+       (Recurrence_evaluation_failed
+          (Invalid_persisted_recurrence detail)) ->
+     check string "typed recurrence error"
+       "recurrence.interval_sec must be positive"
+       detail
+   | Error err -> fail (store_error_to_string err)
+   | Ok _ -> fail "invalid recurrence completed successfully");
+  match get_schedule config ~schedule_id:invalid.schedule_id with
+  | Some stored -> check_status "schedule remains running" Running stored.status
+  | None -> fail "schedule missing"
+;;
+
 let test_load_corrupt_when_both_unparseable () =
   with_workspace
   @@ fun config ->
@@ -720,6 +750,8 @@ let () =
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring occurrences remain dispatchable" `Quick
             test_recurring_occurrences_remain_dispatchable;
+          test_case "recurrence evaluation failure never completes schedule" `Quick
+            test_recurrence_evaluation_failure_never_completes_schedule;
         ] );
     ]
 ;;

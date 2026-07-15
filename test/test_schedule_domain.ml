@@ -35,6 +35,18 @@ let check_status label expected actual =
   check string label (schedule_status_to_string expected) (schedule_status_to_string actual)
 ;;
 
+let expect_due_at = function
+  | Ok (Next_due_at due_at) -> due_at
+  | Ok No_next -> fail "expected next due time"
+  | Error error -> fail (recurrence_evaluation_error_to_string error)
+;;
+
+let unix_timestamp date_time =
+  match Ptime.of_date_time date_time with
+  | Some timestamp -> Ptime.to_float_s timestamp
+  | None -> fail "invalid timestamp fixture"
+;;
+
 let test_request_starts_scheduled () =
   let req = request () in
   check_status "status" Scheduled req.status
@@ -89,9 +101,8 @@ let test_interval_recurrence_next_due () =
       ()
   in
   check bool "is recurring" true (is_recurring req.recurrence);
-  match next_due_after ~now:201.0 req with
-  | None -> fail "expected next interval due"
-  | Some due_at -> check (float 0.001) "next due" 260.0 due_at
+  let due_at = expect_due_at (next_due_after ~now:201.0 req) in
+  check (float 0.001) "next due" 260.0 due_at
 ;;
 
 let test_daily_recurrence_next_due_uses_fixed_offset_alias () =
@@ -101,9 +112,8 @@ let test_daily_recurrence_next_due_uses_fixed_offset_alias () =
         (Daily { hour = 9; minute = 0; second = 0; timezone = "Asia/Seoul" })
       ()
   in
-  match next_due_after ~now:1.0 req with
-  | None -> fail "expected next daily due"
-  | Some due_at -> check (float 0.001) "next KST 09:00" 86400.0 due_at
+  let due_at = expect_due_at (next_due_after ~now:1.0 req) in
+  check (float 0.001) "next KST 09:00" 86400.0 due_at
 ;;
 
 let test_daily_recurrence_next_due_accepts_explicit_fixed_offset () =
@@ -113,9 +123,8 @@ let test_daily_recurrence_next_due_accepts_explicit_fixed_offset () =
         (Daily { hour = 9; minute = 0; second = 0; timezone = "+09:00" })
       ()
   in
-  match next_due_after ~now:1.0 req with
-  | None -> fail "expected next daily due"
-  | Some due_at -> check (float 0.001) "next +09:00 09:00" 86400.0 due_at
+  let due_at = expect_due_at (next_due_after ~now:1.0 req) in
+  check (float 0.001) "next +09:00 09:00" 86400.0 due_at
 ;;
 
 let test_daily_recurrence_rejects_dst_iana_timezone () =
@@ -141,9 +150,8 @@ let test_cron_recurrence_next_due_weekdays () =
       ()
   in
   check bool "is recurring" true (is_recurring req.recurrence);
-  match next_due_after ~now:32400.0 req with
-  | None -> fail "expected next cron due"
-  | Some due_at -> check (float 0.001) "next weekday 09:00" 118800.0 due_at
+  let due_at = expect_due_at (next_due_after ~now:32400.0 req) in
+  check (float 0.001) "next weekday 09:00" 118800.0 due_at
 ;;
 
 let test_cron_recurrence_supports_steps_ranges_and_sunday_alias () =
@@ -152,9 +160,31 @@ let test_cron_recurrence_supports_steps_ranges_and_sunday_alias () =
       ~recurrence:(Cron { expression = "*/30 9-10 * * 7"; timezone = "UTC" })
       ()
   in
-  match next_due_after ~now:259199.0 req with
-  | None -> fail "expected next Sunday cron due"
-  | Some due_at -> check (float 0.001) "Sunday 09:00" 291600.0 due_at
+  let due_at = expect_due_at (next_due_after ~now:259199.0 req) in
+  check (float 0.001) "Sunday 09:00" 291600.0 due_at
+;;
+
+let check_search_exhausted ~expression =
+  let req = request ~recurrence:(Cron { expression; timezone = "UTC" }) () in
+  let after_leap_day =
+    unix_timestamp ((2096, 2, 29), ((0, 0, 0), 0))
+  in
+  match next_due_after ~now:after_leap_day req with
+  | Error (Search_exhausted error) ->
+    check string "expression" expression error.expression;
+    check string "timezone" "UTC" error.timezone;
+    check bool "search span observed" true (error.searched_minutes > 0)
+  | Error error -> fail (recurrence_evaluation_error_to_string error)
+  | Ok No_next -> fail "search exhaustion collapsed to No_next"
+  | Ok (Next_due_at _) -> fail "expected recurrence search exhaustion"
+;;
+
+let test_cron_search_exhaustion_is_explicit () =
+  (* 2100 is not a leap year, so the next occurrence after 2096 is 2104 and
+     exceeds the current scanner horizon. February 31 never occurs. Both must
+     stay distinguishable from a legitimate one-shot [No_next]. *)
+  check_search_exhausted ~expression:"0 0 29 2 *";
+  check_search_exhausted ~expression:"0 0 31 2 *"
 ;;
 
 let test_cron_recurrence_rejects_invalid_expression () =
@@ -283,6 +313,8 @@ let () =
             test_cron_recurrence_next_due_weekdays;
           test_case "cron recurrence supports steps ranges and Sunday alias" `Quick
             test_cron_recurrence_supports_steps_ranges_and_sunday_alias;
+          test_case "cron search exhaustion is explicit" `Quick
+            test_cron_search_exhaustion_is_explicit;
           test_case "cron recurrence rejects invalid expression" `Quick
             test_cron_recurrence_rejects_invalid_expression;
         ] );

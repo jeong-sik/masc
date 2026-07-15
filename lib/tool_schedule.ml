@@ -41,10 +41,12 @@ let resolve_due_at ~requested_at recurrence args =
   | Some due_at -> Ok due_at
   | None ->
     (match Schedule_domain.first_due_after ~now:requested_at recurrence with
-     | Some due_at -> Ok due_at
-     | None ->
+     | Ok (Schedule_domain.Next_due_at due_at) -> Ok due_at
+     | Ok Schedule_domain.No_next ->
        Error
-         "one of due_at_unix or due_at_iso is required unless recurrence_kind is daily or cron")
+         "one of due_at_unix or due_at_iso is required unless recurrence_kind is daily or cron"
+     | Error error ->
+       Error (Schedule_domain.recurrence_evaluation_error_to_string error))
 ;;
 
 let actor_kind_of_arg args key default =

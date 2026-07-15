@@ -16,7 +16,7 @@
 - [2.6 OAS Version Pin & Pending 0.213 Contract](#26-oas-version-pin)
 - [3. Subsystem cards (direction + audited snapshot)](#3-subsystem-ssot)
   - [3.1 Board](#31-board) · [3.2 Legacy Goal (retired)](#32-goal) · [3.3 Task](#33-task) · [3.4 Effect Permission Boundary](#34-hitlgate) · [3.5 Scheduler](#35-scheduler) · [3.6 Connector](#36-connector) · [3.7 Fusion](#37-fusion) · [3.8 Keeper (Lane-Per-Keeper)](#38-keeper-lane-per-keeper) · [3.9 Memory](#39-memory) · [3.10 Runtime (Provider/Model catalog)](#310-runtime-providermodel-catalog) · [3.11 Dashboard-Chat](#311-dashboard-chat)
-  - [3.12 OAS Internals (pure library)](#312-oas-internals) · [3.13 Keeper-as-a-Tool (cross-model invocation)](#313-keeper-as-a-tool) · [3.14 IDE Observation Plane v2](#314-ide-observation-plane-v2)
+  - [3.12 OAS Internals (pure library)](#312-oas-internals) · [3.13 Keeper-as-a-Tool (cross-model invocation)](#313-keeper-as-a-tool) · [3.14 IDE Observation Plane v2](#314-ide-observation-plane-v2) · [3.15 Keeper-Config SSOT](#315-keeper-config-ssot)
 - [4. Candidate Execution Roadmap (12 goals)](#4-execution-roadmap)
   - [4.13 Crossover finding details (CF-1..CF-6)](#413-migration-debt-goals)
   - [4.14 Deferred candidate specs (DS-1..DS-8)](#414-deferred-subsystem-goals)
@@ -368,6 +368,37 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 - **현재 상태:** 기본 ingestion/bridge 배선(위 모듈 존재). **미착수 후속 축(§8.4, DS-1):** 성능 A4 SSE fan-out · A5 consumer-gate · A6 orphan 파티션 repo 귀속(#23072 위 스택); 교차 C2 latched_reason(#23058) · C4·C6 promote Done_action 게이트 + Verification_requested stimulus. 이 축의 심볼(`latched_reason`, `consumer_gate`, SSE fan-out 등)은 `lib/ide/` HEAD에 아직 없음(unbuilt → **NEEDS_LOCATION**, 구현 대상).
 - **open goals:** DS-1(§4.14 IDE Observation Plane v2 후속 축).
 
+<a name="315-keeper-config-ssot"></a>
+### 3.15 Keeper-Config SSOT (per-keeper 개별 공간/설정)
+
+한 Keeper의 개별 공간·설정이 여러 파일/env/TOML 키에 흩어져, 같은 개념이 2~4곳에서 정의되는 파편화 축. 6-차원 매핑(2026-07-15, HEAD `b5b8ce95dd`) 근거. **repo SSOT 확립이 최우선.**
+
+- **책임:** per-keeper의 (a) repo config (b) identity/persona (c) runtime/model (d) sandbox/exec (e) playground layout (f) durable lifecycle state에 대해 **축당 단일 권위(SSOT) + 나머지는 명시적 stamped projection(단일 read path)**. Rich Hickey "simple" + "Parse, don't validate" — dir-name≠id, snapshot≠authored 같은 illegal state를 unrepresentable 또는 fail-loud로.
+- **파편화 인벤토리(실측):**
+
+  | per-keeper 개념 | 정의 위치(전부) | SSOT? | drift 위험 |
+  |---|---|---|---|
+  | **repo identity**(id/name/url/aliases) | `repositories.toml`(`Repo_store.find_url_by_identity`) | **YES** | 낮음 |
+  | **repo location**(keeper에게 repo가 어디 있나) | (a) `repositories.toml local_path`(기본 `.masc/repos/<id>`, **operator 작업트리**; `repo_sync.ml`·`server_ide_http.ml:45`만 소비) (b) `.masc/playground/<keeper>/repos/<repo_name>`(per-keeper clone, `clone_path`=`Keeper_sandbox.host_root_abs_of_meta+"repos"+repo_name`, `local_path` 안 읽음) (c) 조인 `parse_playground_repo_path`+`find_url_by_id` | **NO** — 2 권위 + 역파싱 | **높음** — RFC-0324 B-1/RFC-0128 §4.5 "playground clone path는 repositories.toml에 opaque". 과거 "모든 id가 `repos/<name>/`로 resolve" 주장→379 `path_not_found`/24h(2026-07-08 감사) |
+  | **clone의 default_branch/aliases** | catalog(권위, `repo_sync` fast-forward 준수) vs `clone_sandbox_repo`(`playground_repo_readiness.ml:344`: `default_branch="main"`·`aliases=[]`·`id=repo_name` **하드코딩**) | **NO** | **높음** — catalog가 `master`인 repo를 `main`으로 clone·추론 |
+  | **instructions**(system-prompt) | profile.json(base) + keeper.toml(overlay, wins) + keeper.json(snapshot) | **NO** — 3곳 | **높음** — reader가 어느 파일 보느냐에 따라 값 다름, hand-edit이 snapshot에 조용히 덮임 |
+  | **mention_targets** | profile.json + keeper.toml + keeper.json | **NO** — 3곳 | **높음** — `merge_string_list`(`keeper_types_profile_toml_parser.ml:277`)이 `overlay=[] → base, 아니면 overlay`로 = **replace(union 아님)** → keeper.toml에 하나만 적으면 persona 목록 전체 소실 |
+  | **proactive_enabled** | profile.json + keeper.toml + keeper.json(nested `proactive.enabled`) + 상수 `default_proactive_enabled=true` | **NO** — 3 shape + 상수 | 중 — 층마다 on-disk 키 shape 다름 |
+  | **sandbox_profile/network_mode** | keeper.toml`[keeper]`(SSOT) + keeper.json(생략, 없으면 Local/derived) + `effective_meta_result` overlay | Partial — TOML 권위, JSON은 stale mirror | **높음** — `read_effective_meta` 없이 raw read하면 Docker keeper를 Local로 오인 |
+  | sandbox_profile 파서/enum | `keeper_sandbox_config.load_declared_profile`(profile만) vs `keeper_types_profile_toml_parser`(+network_mode); enum 2개 bridged | **NO** — 2 parser + 2 enum | 중 — lockstep 필요 |
+  | **autoboot_enabled** | keeper.toml(effective 권위) + keeper.json(doc는 required라지만 `keeper_meta_json.ml` **never emit**) + 파서 default true | Partial — TOML wins | **높음** — `KEEPER-FILE-MODEL.md §3`가 serializer 현실과 drift |
+  | **runtime/model assignment** | `runtime.toml [runtime.assignments]`(keeper-name keyed 글로벌) | **YES** | 중 — keeper 삭제 시 orphan assignment row; seed vs live copy drift |
+  | rejected model-selection 키 | `removed_keeper_input_key_names`(models/allowed_models/active_model) + 별도 `runtime_assignment_result`(model/runtime_id→Error) + persona `removed_fields` | **NO** — 3 리스트 | 중 — `allowed_providers`는 **어느 리스트에도 없음(grep 0)** → 미강제; keeper.toml model=Error vs persona model=WARN(비대칭) |
+  | playground docker host layout | `keeper_sandbox.ml`·`keeper_sandbox_config.ml`(byte-identical 구성) + `playground_paths.ml`(**parse만**) | **NO** — SSOT 모듈이 구성 안 함 | **높음** — 3파일 drift → write가 canonical `(repo_id,rel)` 버킷 매핑 실패 |
+  | `repos`/`mind` segment 리터럴 | `playground_paths` + `keeper_sandbox.ml` + `keeper_alerting_path.ml` + `keeper_sandbox_repo_path.ml` + `playground_repo_readiness.ml`(5+) | **NO** — 5+ 재타이핑 | 중 — `repos/` load-bearing, `mind/` 구조적 소비자 0 |
+  | **lifecycle state**(paused/dead/active) | keeper.json(durable 권위) + registry `conditions`(mem mirror) + `phase` + `admission.state`(derived) | Partial | **높음** — 외부 write(dashboard pause)가 registry/phase를 sync hook 전까지 stale로 |
+
+- **경계 계약:** repo config·identity·runtime·sandbox·playground·lifecycle 각 축은 **정확히 하나의 파일/키가 권위**이고, 나머지 on-disk/in-mem 사본은 source `meta_version`으로 stamp된 projection이며 단일 read path만 노출한다. keeper 개별 파일(profile.json/keeper.toml/keeper.json)에 각자 역할이 있고 **같은 필드를 2곳 이상에서 정의하지 않는다**.
+- **결정론↔LLM:** 전부 결정론(config 로드/병합/경로 구성에 의미 판단 없음). merge 우선순위는 단일 모듈에 문서화+테스트.
+- **현재 상태:** 위 표대로 9개 축이 2~4곳에 파편화. repo identity·mapping·runtime assignment·durable snapshot은 SSOT 성립; repo **location**·instructions·mention_targets·sandbox mirror·docker layout·lifecycle은 미성립.
+- **candidate work:** **[REPO-SSOT, 우선]** `clone_sandbox_repo`가 catalog record 전체 읽기(하드코딩 `"main"`/`[]` 제거); clone location을 catalog **id** keyed 순수 함수로; 역파싱 조인(`parse_playground_repo_path`+`find_url_by_id`) 제거→`git remote get-url` 귀속 또는 per-keeper `checkout-manifest.json`; 등록 `local_path`를 `operator_checkout_path`로 개명(2역할 2이름). **[나머지 축]** single read path(`read_meta` private화), mention_targets union, single Local|Docker enum+parser, rejected-key 단일 closed set+`allowed_providers` 강제, docker layout을 `playground_paths` SSOT가 **구성+파싱** 둘 다. **[D8 정합]** 역파싱 귀속을 git-remote로 옮기면 playground 번들 전체가 bare per-keeper 작업디렉토리+주입 env로 붕괴 — §11 D8·D9와 한 수술.
+- **open goals:** RFC-scale(§11 D9 결정 후). doc-only 정정은 §4.14 DS-9.
+
 ---
 
 <a name="4-execution-roadmap"></a>
@@ -587,6 +618,13 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 - **touch (grep 확인):** dashboard auth = `lib/server/server_routes_http_dashboard_dev_token.ml`(§4 Goal 11 #69와 결합). **NEEDS_LOCATION:** transport-health read-model 사이트 — `git -C masc grep -l 'transport.*health\|reachable'`로 확정.
 - **acceptance:** non-loopback bind auth default hardened; REST 계약 versioned + crisp error shape; transport health가 runtime unreachable인데 reachable로 보고 불가.
 - **DoD:** auth default + transport truth 회귀.
+
+### DS-9 — Keeper-Config SSOT doc-only 정정 (§3.15)
+- **문제:** §3.15 파편화 축 중 **무행동변경 doc 정정**. 코드 SSOT 통합은 RFC-scale(§11 D9)이며 이 DS는 문서만.
+- **결정론↔LLM:** 문서. behavior-only.
+- **touch (grep 확인):** `docs/KEEPER-FILE-MODEL.md`(§3), `docs/runtime-tunables.md`, `lib/keeper/keeper_tool_execute_path.ml`(dead `_docker_playground_cwd`).
+- **acceptance:** (1) `KEEPER-FILE-MODEL.md §3`에서 `autoboot_enabled`(및 `keeper_meta_json.ml`이 emit 안 하는 필드)를 keeper.json 필드 목록에서 제거 — serializer 현실과 정합. (2) `display_name`은 profile.json에만 존재(키는 `name`; 리터럴 `display_name` 키는 아무 loader도 안 읽는 fallback)임을 명시. (3) runtime.toml = assignment 글로벌 SSOT + seed(`config/runtime.toml`) vs live(`<base>/.masc/config/runtime.toml`) 구분 문서화. (4) dead `_docker_playground_cwd` + stale 주석 삭제(runtime surface 0). (5) `allowed_providers`가 현재 미강제임 기록. (6) `recurring.json`은 미구현(RFC-0314 open) — 파일 존재 가정 doc 참조 제거 또는 "미구현" 명시.
+- **DoD:** 위 6 doc 정정 착지; serializer↔doc drift 0.
 
 ---
 
@@ -894,6 +932,7 @@ FSM 전이 매트릭스는 `_ -> false` catch-all 금지 — 모든 쌍 명시. 
 | **D5** | Board karma 의 post-vote public visibility (표결 후 karma 공개 여부) | (a) 공개 (b) 비공개 (c) operator-only. hot/confidence/karma quality-score ranking은 KILL이며 선택지 아님 | 중 — `lib/board/board_votes.ml`; Board+Dashboard 결합 | #58, #23933, §8.2 |
 | **D6** | RFC-0037 Board multimedia/vision 의 4 user open-question(§6) 해소 — Phase A0 PR 착수 전 필수 | 4개 질문 각각 답(provider_adapter 확장 범위/vision 커밋/frontend ergonomics 순서/cloud storage) | 중 — provider_adapter 확장; Board multimedia; Phase B vision commitment은 PR-time Evidence Record | RFC-0037, §8.2 |
 | **D8** | Keeper playground 구조를 유지할지, **bare sandbox + env**로 단순화할지 (§1.1) | (a) 현 playground(`.masc/playground/<keeper>/{mind,repos}`) 유지 (b) **bare sandbox + env**: MASC는 격리 sandbox + env(creds/MASC endpoint/repo-URL)만 제공, keeper가 self-provision(스스로 `git clone`, 아무 데나 scratch), MASC는 필요 시 `git remote get-url`로 논리 repo 귀속. **소분해 결정**: (b1) `mind/` 관례 제거(순수 무load) (b2) `repos/` pre-clone 인프라 제거(keeper self-clone) (b3) `docker/` 경로 세그먼트 제거 — 실행 백엔드가 저장 경로에 새는 것, playground ROOT는 단일 default `<base_path>/.masc/playground`여야 함 | **높음(RFC-scale)** — `playground_repo_readiness`/`clone_sandbox_repo`/`ensure_ready`/`parse_playground_repo_path`(경로-관례 귀속) 삭제. 유일 load-bearing 기능은 **cross-keeper repo 귀속**이며 git-remote 조회로 대체 가능. 나머지(scratch·mount target·clone)는 bare sandbox로 충분 | §1.1, `config/playground_paths.ml`, `keeper_sandbox_control.ml:433` |
+| **D9** | **repo location SSOT + keeper-config 파편 통합**(§3.15) — repo가 keeper에게 어디 있나를 단일 권위로. D8과 한 수술 | (a) **repo-SSOT 우선**: `clone_sandbox_repo`가 catalog record 전체 읽기(`"main"`/`[]` 하드코딩 제거), clone location=catalog id keyed 순수 함수, 역파싱 조인 제거→git-remote 귀속, 등록 `local_path`→`operator_checkout_path` 개명 (b) **전면 통합**: (a) + single read path(`read_meta` private)·mention_targets union·single `Local`/`Docker` enum·1 parser·rejected-key 단일 closed set(+`allowed_providers`)·docker layout을 `playground_paths` SSOT가 구성+파싱 (c) doc-only(DS-9)만 먼저, 코드는 defer | **높음(RFC-scale, credential-adjacent)** — repo location dual-authority가 379 `path_not_found`/24h 유발; `mention_targets` replace가 persona 목록 소실(무-에러 버그). N-of-M/string-classifier 시그니처라 site-by-site 패치 금지, RFC로 흡수 | §3.15, `playground_repo_readiness.ml:344`, `keeper_types_profile_toml_parser.ml:277` |
 
 > 이 ledger의 항목은 §4 goal이 아니다 — 결정 전까지 구현 goal로 승격 금지. 결정되면 해당 행을 §4(신규 goal) 또는 §8(revival) 또는 Non-Goal(§1.3)로 이동하고 이 ledger에서 제거한다.
 

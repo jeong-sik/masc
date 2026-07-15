@@ -108,6 +108,50 @@ let test_retired_managed_file_is_removed () =
         result.Prompt_defaults.removed;
       check bool "retired asset absent" false (Sys.file_exists retired))
 
+let test_current_managed_leaf_symlink_is_replaced_without_following () =
+  with_temp_prompts_dir (fun dir ->
+      let outside = Filename.temp_file "prompt-asset-sync-outside" ".md" in
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove outside with
+          | Sys_error _ -> ())
+        (fun () ->
+          Out_channel.with_open_text outside (fun oc ->
+              Out_channel.output_string oc "outside must survive\n");
+          let current = Filename.concat dir "keeper.example.md" in
+          Unix.symlink outside current;
+          let result = sync ~prompts_dir:dir in
+          check (list string) "symlink replaced"
+            [ "prompts/keeper.example.md" ]
+            result.Prompt_defaults.overwritten;
+          check bool "replacement is a regular file" true
+            ((Unix.lstat current).Unix.st_kind = Unix.S_REG);
+          check string "embedded content installed"
+            "---\ndescription: example\n---\nbody v2\n"
+            (read_file current);
+          check string "outside content unchanged" "outside must survive\n"
+            (read_file outside)))
+
+let test_retired_managed_leaf_symlink_is_removed_without_following () =
+  with_temp_prompts_dir (fun dir ->
+      let outside = Filename.temp_file "prompt-asset-sync-outside" ".md" in
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove outside with
+          | Sys_error _ -> ())
+        (fun () ->
+          Out_channel.with_open_text outside (fun oc ->
+              Out_channel.output_string oc "outside must survive\n");
+          let retired = Filename.concat dir "keeper.retired.md" in
+          Unix.symlink outside retired;
+          let result = sync ~prompts_dir:dir in
+          check (list string) "retired symlink removed"
+            [ "prompts/keeper.retired.md" ]
+            result.Prompt_defaults.removed;
+          check bool "retired link absent" false (Sys.file_exists retired);
+          check string "outside content unchanged" "outside must survive\n"
+            (read_file outside)))
+
 let test_invalid_manifest_preserves_managed_file () =
   with_temp_prompts_dir (fun dir ->
       let retired = Filename.concat dir "keeper.retired.md" in
@@ -225,6 +269,12 @@ let () =
             test_runtime_only_files_survive;
           test_case "retired managed file is removed" `Quick
             test_retired_managed_file_is_removed;
+          test_case "current managed leaf symlink is replaced without following"
+            `Quick
+            test_current_managed_leaf_symlink_is_replaced_without_following;
+          test_case "retired managed leaf symlink is removed without following"
+            `Quick
+            test_retired_managed_leaf_symlink_is_removed_without_following;
           test_case "invalid manifest preserves managed files" `Quick
             test_invalid_manifest_preserves_managed_file;
           test_case "incomplete manifest preserves managed files" `Quick

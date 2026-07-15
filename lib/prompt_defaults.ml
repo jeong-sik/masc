@@ -119,6 +119,7 @@ let writable_leaf_state dest =
   match Fs_compat.exact_path_kind ~follow:false dest with
   | Fs_compat.Exact_missing -> Ok `Missing
   | Fs_compat.Exact_kind Unix.S_REG -> Ok `Regular
+  | Fs_compat.Exact_kind Unix.S_LNK -> Ok `Symlink
   | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
     Error "managed prompt asset leaf is not a regular file"
 
@@ -152,17 +153,22 @@ let sync_prompt_assets ~read ~files ~prompts_dir () =
                (match writable_leaf_state dest with
                 | Error msg ->
                   { acc with failed = (embedded_rel, msg) :: acc.failed }
-                | Ok leaf_state ->
+                | Ok `Symlink ->
+                  (match Fs_compat.save_file_atomic dest content with
+                   | Ok () ->
+                     { acc with overwritten = embedded_rel :: acc.overwritten }
+                   | Error msg ->
+                     { acc with failed = (embedded_rel, msg) :: acc.failed })
+                | Ok (`Missing | `Regular as leaf_state) ->
                   let existing = read_file_opt dest in
                   (match existing with
                    | Some current when String.equal current content -> acc
                    | _ ->
                      Fs_compat.save_file dest content;
-                     (match leaf_state with
-                      | `Regular ->
-                        { acc with overwritten = embedded_rel :: acc.overwritten }
-                      | `Missing ->
-                        { acc with copied = embedded_rel :: acc.copied })))
+                     if leaf_state = `Regular
+                     then
+                       { acc with overwritten = embedded_rel :: acc.overwritten }
+                     else { acc with copied = embedded_rel :: acc.copied }))
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | Sys_error msg ->

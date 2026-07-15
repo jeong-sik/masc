@@ -202,6 +202,7 @@ let make_meta () : Masc.Keeper_meta_contract.keeper_meta =
       (`Assoc
         [ "name", `String "post-turn-no-auto-compact"
         ; "trace_id", `String "trace-post-turn-no-auto-compact"
+        ; "compaction_mode", `String "llm"
         ])
   with
   | Ok meta -> meta
@@ -214,7 +215,11 @@ let make_checkpoint () =
     ; agent_name = "post-turn-no-auto-compact"
     ; model = "test-model"
     ; system_prompt = None
-    ; messages = [ Agent_sdk.Types.text_message Agent_sdk.Types.User "keep this turn" ]
+    ; messages =
+        [ Agent_sdk.Types.text_message Agent_sdk.Types.User "keep"
+        ; Agent_sdk.Types.text_message Agent_sdk.Types.Assistant (String.make 2048 'x')
+        ; Agent_sdk.Types.text_message Agent_sdk.Types.User (String.make 2048 'y')
+        ]
     ; usage = Agent_sdk.Types.empty_usage
     ; turn_count = 7
     ; created_at = 1_700_000_000.0
@@ -266,6 +271,94 @@ let test_regular_post_turn_does_not_auto_compact () =
     check bool "checkpoint messages retained exactly" true
       (retained.messages = checkpoint.messages)
 
+let no_pre_compact
+    ~keeper_name:_ ~checkpoint_bytes:_ ~message_count:_ ~strategies:_ ~trigger:_ =
+  None
+
+let test_stale_compaction_is_not_applied () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let meta, checkpoint = make_meta (), make_checkpoint () in
+  Fun.protect
+    ~finally:(fun () ->
+      Compact_policy.register_record_pre_compact no_pre_compact;
+      Masc.Keeper_registry.unregister ~base_path meta.name;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      let runtime_path =
+        Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+      in
+      Result.get_ok (Runtime.init_default ~config_path:runtime_path);
+      Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+      ignore (Masc.Keeper_registry.register ~base_path meta.name meta);
+      let session =
+        Masc.Keeper_context_core.create_session
+          ~session_id:checkpoint.session_id
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+      in
+      let save checkpoint =
+        Masc.Keeper_checkpoint_store.save_oas_classified
+          ~session_dir:session.session_dir checkpoint
+        |> Result.get_ok |> ignore
+      in
+      save checkpoint;
+      Compact_policy.register_record_pre_compact
+        (fun ~keeper_name:_ ~checkpoint_bytes:_ ~message_count:_ ~strategies:_
+             ~trigger:_ -> save { checkpoint with turn_count = 9 }; None);
+      let plan =
+        Masc.Keeper_compaction_llm_summarizer.plan_of_json
+          ~message_count:3
+          (`Assoc
+             [ "summary", `String "unused"
+             ; "kept_indices", `List [ `Int 0 ]
+             ; "summarized_indices", `List []
+             ; "dropped_indices", `List [ `Int 1; `Int 2 ]
+             ])
+        |> Result.get_ok
+      in
+      let compactions () =
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string Compactions)
+          ~labels:[ "keeper", meta.name ] ()
+      in
+      let before = compactions () in
+      let ctx : _ Masc.Keeper_tool_surface.context =
+        { config; agent_name = "operator"; sw; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      let result =
+        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+          (fun ~runtime_id:_ ~keeper_name:_ () -> Some (fun ~messages:_ -> Some plan))
+          (fun () -> Masc.Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_compact"
+              ~args:(`Assoc [ "name", `String meta.name ]))
+      in
+      (match result with
+       | Some (Error failure) ->
+         check string "typed conflict" "conflict"
+           Yojson.Safe.Util.(failure.data |> member "error_code" |> to_string);
+         check string "stale cause" "checkpoint_superseded"
+           Yojson.Safe.Util.(failure.data |> member "compaction_error" |> to_string)
+       | Some (Ok _) -> fail "stale compaction reported tool success"
+       | None -> fail "masc_keeper_compact is not registered");
+      check (float 0.) "applied counter unchanged" before (compactions ());
+      check int "newer checkpoint retained" 9
+        (Result.get_ok (Masc.Keeper_checkpoint_store.load_oas
+           ~session_dir:session.session_dir ~session_id:checkpoint.session_id)).turn_count;
+      match Masc.Keeper_registry.get ~base_path meta.name with
+      | Some entry ->
+        check int "only request/start/failure dispatched" 3 entry.transition_seq;
+        check string "no completed stage" "Compaction_accumulating"
+          (Masc.Keeper_registry.packed_compaction_stage_label entry.compaction_stage)
+      | None -> fail "registered keeper disappeared")
+
 let () =
   run "RFC-0065 §3.2.3 WireinOrderPinned (OCaml-side guard)" [
     "WireinOrderPinned", [
@@ -277,6 +370,8 @@ let () =
     "durable compaction", [
       test_case "Prepared requires a successful checkpoint save"
         `Quick test_prepared_becomes_applied_only_after_save;
+      test_case "stale tool compaction is not applied"
+        `Quick test_stale_compaction_is_not_applied;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
     ];

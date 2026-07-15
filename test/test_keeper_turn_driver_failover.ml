@@ -51,6 +51,7 @@ let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
   ; top_p = None
   ; top_k = None
   ; min_p = None
+  ; reasoning_effort = None
   ; enable_thinking = None
   ; preserve_thinking = None
   ; response_format = Agent_sdk.Types.Off
@@ -800,7 +801,7 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_sdk.Agent.After_assistant_collected
     ; Agent_sdk.Agent.After_tool_results_appended
-    ; Agent_sdk.Agent.After_retry_feedback_appended
+    ; Agent_sdk.Agent.After_context_injection
     ]
   in
   List.iter

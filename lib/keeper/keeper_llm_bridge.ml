@@ -262,8 +262,20 @@ let run_with_timeout_and_fallback
               ; phase = None
               }))
     in
-    (try Eio.Time.with_timeout_exn clock timeout_s fn with
+    (* No wall-clock budget kill (fail-open directive; RFC-0305 non-reintroduction
+       rule). [timeout_s] is NOT used to force-kill the keeper LLM execution: a
+       bridge budget that fired at 30s while the provider legitimately needed
+       60s+ turned every HITL summary turn into kill -> Error -> retry churn that
+       burned API cost and never produced a summary. The call now runs to natural
+       completion. A genuine transport hang (dead socket, no bytes) is bounded by
+       the HTTP client's own connect/idle timeouts, not by a bridge wall budget;
+       if that inner transport itself raises [Eio.Time.Timeout] we still surface
+       it honestly below. See planning/claude-plans/oas-execution-cancellability.md. *)
+    (try fn () with
      | Eio.Time.Timeout ->
+       (* Inner transport-level timeout (the provider call's own deadline), not a
+          bridge wall budget being enforced here. Surface it as a provider timeout
+          so the operator can inspect the stream. *)
        let wall = elapsed () in
        timeout_error ~wall
      | Eio.Cancel.Cancelled inner_exn as exn ->

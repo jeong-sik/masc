@@ -558,6 +558,36 @@ let test_applied_compaction_settles_followup_atomically () =
   | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction"
 ;;
 
+let test_manifest_projection_failure_requeues_compaction () =
+  let lease =
+    lease_for
+      (stimulus
+         ~payload:Queue.Manual_compaction_requested
+         Queue.manual_compaction_post_id
+         1.0)
+  in
+  let meta = cycle_meta () in
+  let failure =
+    Masc.Keeper_manual_compaction.Manifest_projection
+      { operation_id = "compaction-operation"
+      ; detail = "manifest store unavailable"
+      ; failure_dispatch = Ok ()
+      }
+  in
+  match
+    Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+      ~base_path:(Sys.getcwd ())
+      ~settled_at:8.0
+      ~stop_requested:false
+      ~lease
+      (Some (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_failed { meta; failure }))
+  with
+  | Masc.Keeper_registry_event_queue.Requeue
+      Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+    ()
+  | _ -> Alcotest.fail "manifest projection failure acknowledged compacted source"
+;;
+
 let test_cancelled_and_skipped_cycles_requeue () =
   let lease = lease_for (stimulus "phase-gated" 1.0) in
   let meta = cycle_meta () in
@@ -1058,6 +1088,10 @@ let () =
             "applied compaction settles follow-up atomically"
             `Quick
             test_applied_compaction_settles_followup_atomically
+        ; Alcotest.test_case
+            "manifest projection failure requeues compaction"
+            `Quick
+            test_manifest_projection_failure_requeues_compaction
         ; Alcotest.test_case
             "cancelled and skipped cycles requeue"
             `Quick

@@ -220,11 +220,7 @@ let run_keeper_cycle_admitted
         then
           (match Keeper_manual_compaction.run ~config:ctx.config ~meta:meta_after_triage with
            | Error failure -> `Compaction_failed failure
-           | Ok success ->
-             Keeper_manual_compaction.observe_manifest
-               ~keeper_name:meta_after_triage.name
-               success.manifest;
-             `Run (obs, true))
+           | Ok _ -> `Run (obs, true))
         else
           match failure_judgment with
           | None -> `Run (obs, false)

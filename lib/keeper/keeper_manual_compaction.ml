@@ -1,13 +1,17 @@
 open Keeper_meta_contract
 type success =
-  { recovery : Keeper_context_runtime.overflow_retry_recovery
-  ; manifest : (unit, string) result
-  }
+  { recovery : Keeper_context_runtime.overflow_retry_recovery }
 type failure =
   | Lifecycle of string * bool * Keeper_context_runtime.lifecycle_dispatch_error
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
+  | Manifest_projection of
+      { operation_id : string
+      ; detail : string
+      ; failure_dispatch :
+          (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
+      }
 let primary_max_context meta =
   let min_context = Keeper_config.min_keeper_context_tokens in
   let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
@@ -57,7 +61,7 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
                 ])))
       ~checkpoint_path
       ()
-    |> Keeper_runtime_manifest.append config
+    |> Keeper_runtime_manifest.append_once ~operation_id:recovery.operation_id config
 ;;
 let run ~(config : Workspace.config) ~(meta : keeper_meta) =
   let dispatch stage event =
@@ -98,16 +102,29 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
           in
           Error (Recovery (error, failure_dispatch))
         | Ok recovery ->
-          let manifest = append_manifest ~config ~base_dir ~meta recovery in
-          (match
-             Keeper_context_runtime.dispatch_compaction_completed
-               ~config
-               ~keeper_name:meta.name
-               ~origin:Keeper_registry.Operator_compact
-           with
-           | Error error ->
-             Error (Lifecycle ("compaction_completed", true, error))
-           | Ok () -> Ok { recovery; manifest })))
+          (match append_manifest ~config ~base_dir ~meta recovery with
+           | Error detail ->
+             let failure_dispatch = dispatch_failed "manifest_projection_failed" in
+             Error
+               (Manifest_projection
+                  { operation_id = recovery.operation_id; detail; failure_dispatch })
+           | Ok
+               ( Keeper_runtime_manifest.Appended
+               | Keeper_runtime_manifest.Already_present ) ->
+             (match
+                Keeper_context_runtime.dispatch_compaction_completed
+                  ~config
+                  ~keeper_name:meta.name
+                  ~origin:Keeper_registry.Operator_compact
+              with
+              | Error error ->
+                Error (Lifecycle ("compaction_completed", true, error))
+              | Ok () -> Ok { recovery }))))
+;;
+
+let dispatch_result_to_string = function
+  | Ok () -> "ok"
+  | Error error -> Keeper_context_runtime.lifecycle_dispatch_error_to_string error
 ;;
 
 let failure_to_string = function
@@ -117,18 +134,16 @@ let failure_to_string = function
       stage
       checkpoint_applied
       (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
-  | Recovery (error, _) -> Keeper_post_turn.compaction_recovery_error_to_string error
-;;
-
-let observe_manifest ~keeper_name = function
-  | Ok () -> ()
-  | Error detail ->
-    Log.Keeper.error
-      ~keeper_name
-      "manual compaction manifest append failed after durable checkpoint: %s"
-      detail;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string WriteMetaFailures)
-      ~labels:[ "keeper", keeper_name; "phase", "manual_compaction_manifest" ]
-      ()
+  | Recovery (error, failure_dispatch) ->
+    Printf.sprintf
+      "recovery=%s failure_dispatch=%s"
+      (Keeper_post_turn.compaction_recovery_error_to_string error)
+      (dispatch_result_to_string failure_dispatch)
+  | Manifest_projection { operation_id; detail; failure_dispatch } ->
+    Printf.sprintf
+      "operation_id=%s checkpoint_applied=true manifest_projection=%s \
+       failure_dispatch=%s"
+      operation_id
+      detail
+      (dispatch_result_to_string failure_dispatch)
 ;;

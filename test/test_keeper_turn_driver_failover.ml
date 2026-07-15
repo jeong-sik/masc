@@ -51,6 +51,7 @@ let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
   ; top_p = None
   ; top_k = None
   ; min_p = None
+  ; reasoning_effort = None
   ; enable_thinking = None
   ; preserve_thinking = None
   ; response_format = Agent_sdk.Types.Off
@@ -448,19 +449,13 @@ let test_prior_checkpoint_appends_current_goal_once () =
          ~goal:current_goal
          ~session_id:prior_checkpoint.session_id
          ~oas_checkpoint:prior_checkpoint
-         ~exit_condition:(fun _turn -> true)
-         ~exit_condition_result:
-           (fun _turn -> Runtime_agent.Completed, Some "exit proof")
          ~agent_ref
          ~sw
          ~net:env#net
          ()
      with
-     | Ok _ -> ()
-     | Error err ->
-       Alcotest.failf
-         "prior-checkpoint start should complete before provider dispatch: %s"
-         (Agent_sdk.Error.to_string err));
+     | Ok _ -> Alcotest.fail "invalid provider endpoint unexpectedly completed"
+     | Error err -> ignore (Agent_sdk.Error.to_string err));
     let messages =
       match !agent_ref with
       | Some agent -> (Agent_sdk.Agent.state agent).messages
@@ -804,7 +799,6 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_sdk.Agent.After_assistant_collected
     ; Agent_sdk.Agent.After_tool_results_appended
-    ; Agent_sdk.Agent.After_retry_feedback_appended
     ]
   in
   List.iter

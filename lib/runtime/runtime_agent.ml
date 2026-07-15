@@ -171,6 +171,8 @@ let resolve_provider_config_of_label =
 let invalid_runtime_config =
   Runtime_transport.invalid_runtime_config
 
+let invalid_exit detail = Error (invalid_runtime_config "exit_condition" detail)
+
 let provider_caps_of_config =
   Runtime_transport.provider_caps_of_config
 
@@ -1103,13 +1105,54 @@ let run_blocks
           "masc.runtime_id", `String config.name;
         ]
         (fun _trace_id ->
-          match on_event with
-          | Some cb ->
-              Agent_sdk.Agent.run_stream_blocks ~sw ?clock ?on_yield ?on_resume
-                ~on_event:cb agent goal_blocks
-          | None ->
-              Agent_sdk.Agent.run_blocks ~sw ?clock ?on_yield ?on_resume agent
-                goal_blocks)
+          let api_strategy =
+            match on_event with
+            | None -> Agent_sdk.Agent.Sync
+            | Some on_event ->
+              let on_telemetry =
+                Option.map
+                  (fun bus ->
+                     Agent_sdk.Telemetry_bus.publish
+                       (Agent_sdk.Telemetry_bus.of_event_bus bus))
+                  (Agent_sdk.Agent.options agent).event_bus
+              in
+              Agent_sdk.Agent.Stream { on_event; on_telemetry }
+          in
+          match config.exit_condition, config.exit_condition_result with
+          | None, None | Some _, Some _ ->
+            Result.bind
+              (Agent_sdk.Agent.Advanced.run_blocks
+                 ~sw
+                 ?clock
+                 ?on_yield
+                 ?on_resume
+                 ~api_strategy
+                 ~on_tool_boundary:(fun boundary ->
+                   match config.exit_condition with
+                   | Some predicate when predicate boundary.turn ->
+                     Agent_sdk.Agent.Advanced.Yield
+                   | Some _ | None -> Agent_sdk.Agent.Advanced.Continue)
+                 agent
+                 goal_blocks)
+              (function
+              | Agent_sdk.Agent.Advanced.Completed response ->
+                Ok (response, None)
+              | Agent_sdk.Agent.Advanced.Yielded yielded ->
+                (match config.exit_condition_result with
+                 | Some render ->
+                   let stop_reason, response_text = render yielded.turn in
+                   let response_text =
+                     match response_text with
+                     | Some text when String.trim text <> "" -> text
+                     | _ -> Printf.sprintf "[exit condition met at turn %d]" yielded.turn
+                   in
+                   Ok
+                     ( partial_response_of_stop ~session_id ~text:response_text
+                     , Some (yielded, stop_reason) )
+                 | None ->
+                   invalid_exit "yielded without a typed result"))
+          | Some _, None | None, Some _ ->
+            invalid_exit "predicate and typed result must be paired")
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =
@@ -1119,7 +1162,8 @@ let run_blocks
       in
       Some ckpt
     in
-    let lifecycle = worker_lifecycle_classification_of_result result in
+    let sdk_result = Result.map fst result in
+    let lifecycle = worker_lifecycle_classification_of_result sdk_result in
     publish_lifecycle ~name:config.name ~event:lifecycle.event
       ~detail:(Printf.sprintf "session=%s" session_id)
       ?error:lifecycle.error
@@ -1144,11 +1188,17 @@ let run_blocks
       | None -> None
     in
     (match result with
-    | Ok response ->
+    | Ok (response, yielded) ->
       close_after_success ();
+      let turns, stop_reason =
+        match yielded with
+        | None -> turns, Completed
+        | Some (yielded, stop_reason) -> yielded.turn, stop_reason
+      in
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
-        ~status:Dashboard_oas_bridge.Success response;
+        ~status:(dashboard_status_of_stop_reason stop_reason)
+        response;
       let runtime_observation =
         runtime_observation_for_completed_config
           ~total_duration_ms:run_total_duration_ms config
@@ -1162,7 +1212,7 @@ let run_blocks
           trace_ref;
           run_validation;
           runtime_observation = Some runtime_observation;
-          stop_reason = Completed;
+          stop_reason;
         }
     | Error
         (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
@@ -1196,43 +1246,6 @@ let run_blocks
         ; runtime_observation = Some runtime_observation
         ; stop_reason
         }
-    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
-      match config.exit_condition_result with
-      | Some render ->
-        close_after_success ();
-        let stop_reason, response_text_opt = render r.turn in
-        let response_text =
-          match response_text_opt with
-          | Some text when String.trim text <> "" -> text
-          | _ -> Printf.sprintf "[exit condition met at turn %d]" r.turn
-        in
-        let partial_response =
-          partial_response_of_stop
-            ~session_id
-            ~text:response_text
-        in
-        record_dashboard_oas_response ~config
-          ~total_duration_ms:run_total_duration_ms
-          ~status:(dashboard_status_of_stop_reason stop_reason)
-          partial_response;
-        let runtime_observation =
-          runtime_observation_for_completed_config
-            ~total_duration_ms:run_total_duration_ms config
-        in
-        Ok
-          {
-            response = partial_response;
-            checkpoint;
-            session_id;
-            turns;
-            trace_ref;
-            run_validation;
-            runtime_observation = Some runtime_observation;
-            stop_reason;
-          }
-      | None ->
-        close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-        Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
       let error_response =

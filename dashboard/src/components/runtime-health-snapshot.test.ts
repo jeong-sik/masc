@@ -404,7 +404,7 @@ describe('RuntimeHealthSnapshot', () => {
         dropped_media_failover: [],
         dropped_lane_candidates: [],
         dropped_lanes: [],
-        next_action: 'Add the listed provider/model rows to oas-models.toml.',
+        next_action: 'Add deployment rows to oas-models-overlay.toml (or upstream OAS).',
       },
     })
     const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
@@ -421,7 +421,7 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.textContent).toContain('effective default: glm-coding.glm-5-turbo')
     expect(container.textContent).toContain('disabled runtimes: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
     expect(container.textContent).toContain('missing catalog: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
-    expect(container.textContent).toContain('next: Add the listed provider/model rows to oas-models.toml.')
+    expect(container.textContent).toContain('next: Add deployment rows to oas-models-overlay.toml (or upstream OAS).')
   })
 
   it('uses force=1 when the operator clicks Live probe', async () => {

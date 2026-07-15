@@ -2,9 +2,9 @@
 # docker-entrypoint.sh — seed a coherent runtime config + keeper team into the
 # container's writable state volume, then exec the MASC server.
 #
-# The image bakes immutable seed sources at /app/config-seed (catalogs, prompts)
+# The image bakes immutable seed sources at /app/config-seed (runtime, overlay, prompts)
 # and /app/presets (team overlays). This entrypoint copies them into the live
-# config root on the /app/.masc volume in the same catalog-first order the native
+# config root on the /app/.masc volume in the same config-first order the native
 # quickstart uses, so the server boots the requested team on the default flash
 # model. Idempotent: existing operator edits on the volume are preserved.
 set -euo pipefail
@@ -18,9 +18,9 @@ log() { printf '[entrypoint] %s\n' "$*" >&2; }
 
 mkdir -p "$CONFIG_DIR"
 
-# 1. Catalogs first (runtime.toml must exist before the team is seeded, and the
+# 1. Runtime and capability overlay first (runtime.toml must exist before the team is seeded, and the
 #    server only backfills a config root it did not create).
-for f in runtime.toml oas-models.toml; do
+for f in runtime.toml oas-models-overlay.toml; do
   if [ -f "$SEED_DIR/$f" ] && [ ! -e "$CONFIG_DIR/$f" ]; then
     cp "$SEED_DIR/$f" "$CONFIG_DIR/$f"; log "seeded $f"
   fi

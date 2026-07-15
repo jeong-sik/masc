@@ -10,48 +10,17 @@ val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 val bootstrap_base_path_config_root : base_path:string -> unit
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
 
-type model_catalog_env_resolution =
-  { path : string
-  ; source : model_catalog_env_source
-  }
-
-and model_catalog_env_source =
-  | Env_var of model_catalog_env_var
-  | Config_root_catalog_file of string
-  | Parent_file of
-      { origin : model_catalog_parent_origin
-      ; filename : string
-      }
-
-and model_catalog_env_var =
-  | Oas_model_catalog
-  | Masc_model_catalog
-
-and model_catalog_parent_origin =
-  | Cwd_parent
-  | Argv0_parent
-
-val model_catalog_env_source_to_string : model_catalog_env_source -> string
-
-val resolve_oas_model_catalog_path :
-  ?env:(string -> string option) ->
-  ?config_root:string ->
-  ?cwd:string ->
-  ?argv0:string ->
-  unit ->
-  model_catalog_env_resolution option
-
 val configure_oas_model_catalog_env :
   ?env:(string -> string option) ->
-  ?config_root:string ->
-  ?cwd:string ->
-  ?argv0:string ->
-  ?putenv:(string -> string -> unit) ->
   ?agent_sdk_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
   ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
   ?set_catalog:(Llm_provider.Model_catalog.t -> unit) ->
   unit ->
-  model_catalog_env_resolution option
+  string option
+(** Install only an operator-supplied [OAS_MODEL_CATALOG] as a full catalog
+    replacement. Without it, require OAS's packaged catalog and leave it
+    eligible for the deployment overlay. Config-root and executable-parent
+    full catalogs are deliberately not discovered (RFC-0342 D1). *)
 
 val configure_oas_model_catalog_overlay :
   ?config_root:string ->
@@ -63,9 +32,9 @@ val configure_oas_model_catalog_overlay :
     Resolves config-root [oas-models-overlay.toml] only; there is no parent
     or env fallback. When present, the parsed overlay is installed with
     [Model_catalog.set_global_overlay], so [Model_catalog.global] serves the
-    embedded catalog merged with the deployment's delta rows. A full catalog
-    resolved by {!configure_oas_model_catalog_env} keeps replacement
-    precedence over the overlay. Returns the installed overlay path. An
+    embedded catalog merged with the deployment's delta rows. An explicit
+    [OAS_MODEL_CATALOG] installed by {!configure_oas_model_catalog_env} keeps
+    replacement precedence over the overlay. Returns the installed overlay path. An
     unreadable or invalid overlay raises [Env_config_core.Config_error]
     (fail-loud at boot, same as the full-catalog path). *)
 

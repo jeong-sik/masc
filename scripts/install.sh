@@ -34,8 +34,8 @@
 #   MASC_RELEASE_BASE_URL  Override the release asset base URL (mirror or
 #                  air-gapped install; file:// works). Defaults to
 #                  https://github.com/<repo>/releases/download
-#   OAS_MODEL_CATALOG  Override model catalog path; defaults to seeded
-#                  <base-path>/.masc/config/oas-models.toml when present.
+#   OAS_MODEL_CATALOG  Explicit full model catalog override. When unset, OAS's
+#                  embedded catalog is merged with the deployment overlay.
 #   MASC_RUNTIME_EVENTS=0/1  Override OCaml Runtime_events. When unset, the
 #                  generated server command keeps the binary's default.
 #   MASC_WIZARD=0/1  Same as --no-wizard / --wizard
@@ -630,7 +630,6 @@ case "$WIZARD" in
 esac
 
 [ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
-MODEL_CATALOG_FILE="$BASE_PATH/.masc/config/oas-models.toml"
 
 require() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
 require curl
@@ -770,8 +769,6 @@ DEST="$PREFIX/masc"
 model_catalog_env_value() {
   if [ -n "${OAS_MODEL_CATALOG:-}" ]; then
     echo "$OAS_MODEL_CATALOG"
-  elif [ -e "$MODEL_CATALOG_FILE" ]; then
-    echo "$MODEL_CATALOG_FILE"
   else
     echo ""
   fi
@@ -859,14 +856,14 @@ fi
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
-  MODEL_CATALOG_FILE="$CONFIG_DIR/oas-models.toml"
+  MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/oas-models-overlay.toml"
 
-  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_FILE" ] && [ "$FORCE" -eq 0 ]; then
+  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$FORCE" -eq 0 ]; then
     log "config already present at $CONFIG_DIR, skipping seed"
   elif [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would seed configs and model catalog to $CONFIG_DIR from release"
+    log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
   else
-    log "seeding configs and model catalog to $CONFIG_DIR"
+    log "seeding configs and model catalog overlay to $CONFIG_DIR"
     mkdir -p "$CONFIG_DIR"
 
     seed_raw() {
@@ -900,7 +897,7 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     }
 
     seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"
-    seed_raw_if_missing "oas-models.toml" "oas-models.toml" "$MODEL_CATALOG_FILE"
+    seed_config_if_missing "oas-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"
   fi
 fi
 

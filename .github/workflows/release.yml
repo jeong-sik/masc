@@ -153,7 +153,7 @@ jobs:
             | sort -z \
             | xargs -0 sha256sum > SHA256SUMS
           (cd ../config && sha256sum runtime.toml) >> SHA256SUMS
-          (cd .. && sha256sum oas-models.toml) >> SHA256SUMS
+          (cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS
           # Team preset files, keyed by their repo-relative path so
           # `install.sh --team` can verify each seeded file (presets/<name>/...).
           (cd .. && for m in presets/*/manifest.txt; do

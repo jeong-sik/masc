@@ -30,11 +30,10 @@ let restore_model_catalog previous =
   | Some catalog -> Llm_provider.Model_catalog.set_global catalog
   | None -> Llm_provider.Model_catalog.clear_global ()
 
-let with_repo_oas_model_catalog f =
+let with_default_oas_model_catalog f =
   let previous = Llm_provider.Model_catalog.global () in
-  let path = Masc_test_deps.source_path "oas-models.toml" in
-  match Llm_provider.Model_catalog.load_file path with
-  | Error msg -> fail ("repo oas-models.toml should load: " ^ msg)
+  match Llm_provider.Model_catalog.load_default () with
+  | Error msg -> fail ("packaged OAS models.toml should load: " ^ msg)
   | Ok catalog ->
     Fun.protect
       ~finally:(fun () -> restore_model_catalog previous)
@@ -86,7 +85,7 @@ let test_output_contract_keeps_native_schema_when_supported () =
    나른다. 2026-07-01 사고 이후 #22768의 "native or fail before HTTP"를 뒤집은
    지점 — 근거는 fusion_judge.ml [apply_fusion_judge_output_contract] 주석. *)
 let test_output_contract_prompt_tier_when_schema_is_not_native () =
-  with_repo_oas_model_catalog @@ fun () ->
+  with_default_oas_model_catalog @@ fun () ->
   let cfg =
     provider_cfg
       ~kind:Llm_provider.Provider_config.OpenAI_compat

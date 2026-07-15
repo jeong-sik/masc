@@ -1,6 +1,6 @@
 (** Durable, nonblocking HITL requests for Keeper external effects. *)
 
-include Keeper_approval_queue_rules_types
+include Keeper_approval_queue_types
 
 let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
   Otel_metric_store.inc_counter

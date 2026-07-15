@@ -472,7 +472,9 @@ let iter_all_result t f =
     try
       match (Unix.stat t.base_dir).st_kind with
       | Unix.S_DIR -> Ok true
-      | _ -> Error ("dated JSONL base path is not a directory: " ^ t.base_dir)
+      | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+      | Unix.S_SOCK ->
+        Error ("dated JSONL base path is not a directory: " ^ t.base_dir)
     with
     | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
     | Unix.Unix_error (error, _, _) ->

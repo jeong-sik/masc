@@ -569,7 +569,8 @@ let event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id iter =
        | Some _
        | None -> ())
     | Some _
-    | None -> ());
+    | None -> ())
+  in
   iteration,
   { keeper_name
   ; stimulus_id

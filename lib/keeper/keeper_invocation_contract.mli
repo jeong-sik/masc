@@ -87,6 +87,9 @@ val delegate_submission_to_json
 val delegate_submission_error_to_json
   :  request -> Keeper_msg_async.submit_error -> Yojson.Safe.t
 
+val delegate_access_rejection_to_json
+  :  run_ref -> Keeper_msg_async.access_rejection -> Yojson.Safe.t
+
 val delegate_cancellation_to_json
   :  run_ref -> Keeper_msg_async.cancel_result -> Yojson.Safe.t
 

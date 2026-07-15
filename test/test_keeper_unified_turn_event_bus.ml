@@ -463,7 +463,18 @@ let test_typed_keeper_invocation_wire_contract () =
     |> require_unique_assoc "typed cancellation"
   in
   check bool "cancellation omits raw request id" false
-    (List.mem_assoc "request_id" cancellation_fields)
+    (List.mem_assoc "request_id" cancellation_fields);
+  let rejection_fields =
+    Invocation.delegate_access_rejection_to_json run_ref Kmsg.Invalid_request_id
+    |> require_unique_assoc "typed access rejection"
+  in
+  check (option string) "invalid id is projected as typed run ref error"
+    (Some "invalid_run_ref")
+    (Option.bind
+       (List.assoc_opt "error" rejection_fields)
+       Yojson.Safe.Util.to_string_option);
+  check bool "access rejection omits raw request id" false
+    (List.mem_assoc "request_id" rejection_fields)
 ;;
 
 let test_take_drain_cancel_clears_active_without_spin () =

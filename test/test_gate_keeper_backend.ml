@@ -242,6 +242,36 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
       check string "workspace id" "workspace-9" payload.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
+let test_parse_keeper_run_ref_body_is_exact_and_typed () =
+  let valid =
+    {|{"run_ref":{"run_id":"typed-run-1","target":{"kind":"keeper","name":"luna"},"capability":"invoke_turn"}}|}
+  in
+  let reference =
+    match Server_routes_http_keeper_stream.parse_keeper_run_ref_body valid with
+    | Ok reference -> reference
+    | Error error ->
+      fail
+        (Keeper_invocation_contract.request_error_to_string error)
+  in
+  check string "typed run id" "typed-run-1"
+    (Keeper_invocation_contract.run_id reference);
+  check string "typed target" "luna"
+    (Keeper_invocation_contract.run_ref_target_name reference);
+  let rejects_removed_shape label body =
+    match Server_routes_http_keeper_stream.parse_keeper_run_ref_body body with
+    | Error (Keeper_invocation_contract.Invalid_wire_value _) -> ()
+    | Error error ->
+      failf "%s: unexpected error: %s" label
+        (Keeper_invocation_contract.request_error_to_string error)
+    | Ok _ -> failf "%s: removed raw request shape decoded" label
+  in
+  rejects_removed_shape "raw request id" {|{"request_id":"typed-run-1"}|};
+  rejects_removed_shape
+    "extra operation field"
+    {|{"run_ref":{"run_id":"typed-run-1","target":{"kind":"keeper","name":"luna"},"capability":"invoke_turn"},"status":"running"}|};
+  rejects_removed_shape "malformed json" {|{"run_ref":|}
+;;
+
 let test_parse_keeper_chat_stream_request_rejects_removed_timeout () =
   let body = {|{"name":"luna","message":"hello","timeout_sec":1200.5}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
@@ -2777,6 +2807,8 @@ let () =
             test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
+          test_case "run operation body is exact and typed" `Quick
+            test_parse_keeper_run_ref_body_is_exact_and_typed;
           test_case "stream request rejects removed request timeout" `Quick
             test_parse_keeper_chat_stream_request_rejects_removed_timeout;
           test_case "stream request rejects partial connector context" `Quick

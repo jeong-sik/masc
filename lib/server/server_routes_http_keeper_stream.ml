@@ -347,46 +347,42 @@ let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
        | Ok queued -> `Queued queued
        | Error message -> `Queue_error message)
 
-let keeper_chat_request_prefixes =
-  [
-    "/api/v1/gate/message/requests/";
-    "/api/v1/keepers/chat/requests/";
-  ]
+let parse_keeper_run_ref_body body =
+  try
+    match Yojson.Safe.from_string body with
+    | `Assoc [ "run_ref", value ] ->
+      Keeper_invocation_contract.run_ref_of_json value
+    | _ ->
+      Error
+        (Keeper_invocation_contract.Invalid_wire_value
+           { field = "body"; expected = "JSON object containing only run_ref" })
+  with
+  | Yojson.Json_error _ ->
+    Error
+      (Keeper_invocation_contract.Invalid_wire_value
+         { field = "body"; expected = "valid JSON object containing only run_ref" })
+;;
 
-let has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
-
-let keeper_chat_request_suffix request =
-  let path = Http.Request.path request in
-  let rec loop = function
-    | [] -> None
-    | prefix :: rest ->
-        if has_prefix ~prefix path then
-          Some
-            (String.sub path (String.length prefix)
-               (String.length path - String.length prefix))
-        else loop rest
+let run_ref_operation_error_json error =
+  let code =
+    match error with
+    | Keeper_invocation_contract.Run_ref_mismatch -> "run_ref_mismatch"
+    | Keeper_invocation_contract.Invalid_target _
+    | Keeper_invocation_contract.Empty_prompt
+    | Keeper_invocation_contract.Invalid_wire_value _ -> "invalid_run_ref"
   in
-  loop keeper_chat_request_prefixes
+  `Assoc
+    [ "error", `String code
+    ; "message", `String (Keeper_invocation_contract.request_error_to_string error)
+    ]
+;;
 
-let parse_keeper_chat_request_result_path request =
-  match keeper_chat_request_suffix request with
-  | Some suffix -> (
-      match String.split_on_char '/' suffix with
-      | [ request_id ] when String.trim request_id <> "" -> Ok request_id
-      | _ -> Error "expected /api/v1/gate/message/requests/<request_id>" )
-  | None -> Error "invalid keeper chat request path"
-
-let parse_keeper_chat_request_cancel_path request =
-  match keeper_chat_request_suffix request with
-  | Some suffix -> (
-      match String.split_on_char '/' suffix with
-      | [ request_id; "cancel" ] when String.trim request_id <> "" ->
-          Ok request_id
-      | _ -> Error "expected /api/v1/gate/message/requests/<request_id>/cancel" )
-  | None -> Error "invalid keeper chat request path"
+let http_status_of_run_ref_error = function
+  | Keeper_invocation_contract.Run_ref_mismatch -> `Conflict
+  | Keeper_invocation_contract.Invalid_target _
+  | Keeper_invocation_contract.Empty_prompt
+  | Keeper_invocation_contract.Invalid_wire_value _ -> `Bad_request
+;;
 
 let http_status_of_access_rejection = function
   | Keeper_msg_async.Invalid_base_path _
@@ -395,69 +391,101 @@ let http_status_of_access_rejection = function
   | Keeper_msg_async.Caller_mismatch -> `Forbidden
 ;;
 
-let handle_keeper_chat_request_result ~caller state request reqd =
-  match parse_keeper_chat_request_result_path request with
-  | Error message ->
-      respond_json_value_with_cors ~status:`Bad_request request reqd
-        (keeper_chat_stream_error_json message)
-  | Ok request_id -> (
-      match
-        Keeper_msg_async.poll
-          ~base_path:(Mcp_server.workspace_config state).base_path
-          ~caller
-          request_id
-      with
-      | Keeper_msg_async.Absent ->
-          respond_json_value_with_cors ~status:`Not_found request reqd
-            (keeper_chat_stream_error_json "request_id not found")
-      | Keeper_msg_async.Unreadable reason ->
-          respond_json_value_with_cors ~status:`Internal_server_error request
-            reqd
-            (keeper_chat_stream_error_json
-               (Printf.sprintf
-                  "request record unreadable: %s — request was accepted but \
-                   its result is lost"
-                  reason))
-      | Keeper_msg_async.Rejected rejection ->
-          respond_json_value_with_cors
-            ~status:(http_status_of_access_rejection rejection)
-            request
-            reqd
-            (Keeper_msg_async.access_rejection_to_json rejection)
-      | Keeper_msg_async.Found entry ->
-          respond_json_value_with_cors ~status:`OK request reqd
-            (Keeper_msg_async.entry_to_json entry) )
+let handle_keeper_run_status ~caller state request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    match parse_keeper_run_ref_body body with
+    | Error error ->
+      respond_json_value_with_cors
+        ~status:(http_status_of_run_ref_error error)
+        request
+        reqd
+        (run_ref_operation_error_json error)
+    | Ok reference ->
+      (match
+         Keeper_invocation_contract.poll
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           ~caller
+           reference
+       with
+       | Error error ->
+         respond_json_value_with_cors
+           ~status:(http_status_of_run_ref_error error)
+           request
+           reqd
+           (run_ref_operation_error_json error)
+       | Ok Keeper_msg_async.Absent ->
+         respond_json_value_with_cors ~status:`Not_found request reqd
+           (`Assoc
+              [ "error", `String "run_not_found"
+              ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
+              ])
+       | Ok (Keeper_msg_async.Unreadable reason) ->
+         respond_json_value_with_cors ~status:`Internal_server_error request reqd
+           (`Assoc
+              [ "error", `String "invocation_record_unreadable"
+              ; "message", `String reason
+              ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
+              ])
+       | Ok (Keeper_msg_async.Rejected rejection) ->
+         respond_json_value_with_cors
+           ~status:(http_status_of_access_rejection rejection)
+           request
+           reqd
+           (Keeper_invocation_contract.delegate_access_rejection_to_json
+              reference
+              rejection)
+       | Ok (Keeper_msg_async.Found entry) ->
+         (match Keeper_invocation_contract.delegate_entry_to_json entry with
+          | Ok json -> respond_json_value_with_cors ~status:`OK request reqd json
+          | Error error ->
+            respond_json_value_with_cors ~status:`Internal_server_error request reqd
+              (`Assoc
+                 [ "error", `String "invalid_invocation_record"
+                 ; ( "message"
+                   , `String
+                       (Keeper_invocation_contract.request_error_to_string error) )
+                 ]))))
+;;
 
-let handle_keeper_chat_request_cancel ~caller state request reqd =
-  match parse_keeper_chat_request_cancel_path request with
-  | Error message ->
-      respond_json_value_with_cors ~status:`Bad_request request reqd
-        (keeper_chat_stream_error_json message)
-  | Ok request_id ->
-      let result =
-        Keeper_msg_async.cancel
-          ~base_path:(Mcp_server.workspace_config state).base_path
-          ~caller
-          request_id
-      in
-      let status =
-        match result with
-        | Keeper_msg_async.Cancellation_requested _ ->
-            `Accepted
-        | Keeper_msg_async.Cancel_not_found -> `Not_found
-        | Keeper_msg_async.Cancel_rejected rejection ->
-            http_status_of_access_rejection rejection
-        | Keeper_msg_async.Cancel_already_terminal _
-        | Keeper_msg_async.Cancel_worker_ownership_unknown _ ->
-            `Conflict
-        | Keeper_msg_async.Cancel_unreadable _
-        | Keeper_msg_async.Cancel_persistence_failed _
-        | Keeper_msg_async.Cancel_worker_signal_failed _
-        | Keeper_msg_async.Cancel_state_invariant_failed _ ->
-            `Internal_server_error
-      in
-      respond_json_value_with_cors ~status request reqd
-        (Keeper_msg_async.cancel_result_to_json ~request_id result)
+let handle_keeper_run_cancel ~caller state request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    match parse_keeper_run_ref_body body with
+    | Error error ->
+      respond_json_value_with_cors
+        ~status:(http_status_of_run_ref_error error)
+        request
+        reqd
+        (run_ref_operation_error_json error)
+    | Ok reference ->
+      (match
+         Keeper_invocation_contract.cancel
+           ~base_path:(Mcp_server.workspace_config state).base_path
+           ~caller
+           reference
+       with
+       | Error error ->
+         respond_json_value_with_cors
+           ~status:(http_status_of_run_ref_error error)
+           request
+           reqd
+           (run_ref_operation_error_json error)
+       | Ok result ->
+         let status =
+           match result with
+           | Keeper_msg_async.Cancellation_requested _ -> `Accepted
+           | Keeper_msg_async.Cancel_not_found -> `Not_found
+           | Keeper_msg_async.Cancel_rejected rejection ->
+             http_status_of_access_rejection rejection
+           | Keeper_msg_async.Cancel_already_terminal _
+           | Keeper_msg_async.Cancel_worker_ownership_unknown _ -> `Conflict
+           | Keeper_msg_async.Cancel_unreadable _
+           | Keeper_msg_async.Cancel_persistence_failed _
+           | Keeper_msg_async.Cancel_worker_signal_failed _
+           | Keeper_msg_async.Cancel_state_invariant_failed _ -> `Internal_server_error
+         in
+         respond_json_value_with_cors ~status request reqd
+           (Keeper_invocation_contract.delegate_cancellation_to_json reference result)))
+;;
 
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->

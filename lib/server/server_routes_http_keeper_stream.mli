@@ -113,19 +113,24 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 
 (** {1 Queue request handlers} *)
 
-val handle_keeper_chat_request_result :
-  caller:string ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
-    Reads the async keeper message request state directly from
-    {!Keeper_msg_async} without requiring an MCP session. *)
+val parse_keeper_run_ref_body :
+  string ->
+  (Keeper_invocation_contract.run_ref, Keeper_invocation_contract.request_error) result
+(** Parses an exact [{"run_ref": ...}] operation body. Raw request ids and
+    additional fields are rejected. *)
 
-val handle_keeper_chat_request_cancel :
+val handle_keeper_run_status :
   caller:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
-    Cancels a live async keeper message request when it is still
-    cancellable. *)
+(** Drives [POST /api/v1/keepers/chat/status] and the equivalent Gate route.
+    The exact typed run reference is checked against the durable invocation
+    entry without requiring an MCP session. *)
+
+val handle_keeper_run_cancel :
+  caller:string ->
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/chat/cancel] and the equivalent Gate route.
+    Cancels the exact typed run when it is still cancellable. *)
 
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit

@@ -346,7 +346,23 @@ let delegate_entry_to_json (entry : Keeper_msg_async.entry) =
         ; "submitted_at", `Float entry.submitted_at
         ]
         @ timing
-        @ entry_result entry.status))
+       @ entry_result entry.status))
+;;
+
+let delegate_access_rejection_to_json reference rejection =
+  let error, message =
+    match rejection with
+    | Keeper_msg_async.Invalid_base_path { reason } -> "invalid_base_path", reason
+    | Keeper_msg_async.Invalid_caller -> "invalid_caller", "caller identity is invalid"
+    | Keeper_msg_async.Invalid_request_id -> "invalid_run_ref", "run_ref.run_id is invalid"
+    | Keeper_msg_async.Caller_mismatch ->
+      "run_ref_caller_mismatch", "run_ref does not belong to the authenticated caller"
+  in
+  `Assoc
+    [ "error", `String error
+    ; "message", `String message
+    ; "run_ref", run_ref_to_json reference
+    ]
 ;;
 
 let delegate_cancellation_to_json reference result =
@@ -368,7 +384,7 @@ let delegate_cancellation_to_json reference result =
       [ "error", `String "invocation_record_unreadable"; "message", `String reason ]
     | Keeper_msg_async.Cancel_rejected rejection ->
       [ "error", `String "invocation_access_rejected"
-      ; "reason", Keeper_msg_async.access_rejection_to_json rejection
+      ; "reason", delegate_access_rejection_to_json reference rejection
       ]
     | Keeper_msg_async.Cancel_worker_ownership_unknown status ->
       contract (result_contract_of_status status)

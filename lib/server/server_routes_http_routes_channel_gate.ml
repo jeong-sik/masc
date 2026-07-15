@@ -518,17 +518,17 @@ let add_routes ~sw ~clock router =
          handle_gate_message ~sw ~clock ~submitted_by state request reqd
        ) request reqd)
 
-  |> Http.Router.prefix_get "/api/v1/gate/message/requests/" (fun request reqd ->
+  |> Http.Router.post "/api/v1/gate/message/status" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_keeper_delegate_status"
          (fun state caller _req reqd ->
-           Server_routes_http_keeper_stream.handle_keeper_chat_request_result
+           Server_routes_http_keeper_stream.handle_keeper_run_status
              ~caller state request reqd)
          request reqd)
 
-  |> Http.Router.prefix_post "/api/v1/gate/message/requests/" (fun request reqd ->
+  |> Http.Router.post "/api/v1/gate/message/cancel" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_keeper_delegate_cancel"
          (fun state caller _req reqd ->
-           Server_routes_http_keeper_stream.handle_keeper_chat_request_cancel
+           Server_routes_http_keeper_stream.handle_keeper_run_cancel
              ~caller state request reqd)
          request reqd)
 

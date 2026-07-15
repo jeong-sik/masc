@@ -718,22 +718,6 @@ let run_ref_error error =
        ])
 ;;
 
-let delegate_access_rejection reference rejection =
-  let error, message =
-    match rejection with
-    | Keeper_msg_async.Invalid_base_path { reason } -> "invalid_base_path", reason
-    | Keeper_msg_async.Invalid_caller -> "invalid_caller", "caller identity is invalid"
-    | Keeper_msg_async.Invalid_request_id -> "invalid_run_ref", "run_ref.run_id is invalid"
-    | Keeper_msg_async.Caller_mismatch ->
-      "run_ref_caller_mismatch", "run_ref does not belong to the authenticated caller"
-  in
-  `Assoc
-    [ "error", `String error
-    ; "message", `String message
-    ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
-    ]
-;;
-
 let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
   match run_ref_arg args with
   | Error error -> run_ref_error error
@@ -751,7 +735,8 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
             ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
             ])
      | Ok (Keeper_msg_async.Rejected rejection) ->
-       tool_result_error_data (delegate_access_rejection reference rejection)
+       tool_result_error_data
+         (Keeper_invocation_contract.delegate_access_rejection_to_json reference rejection)
      | Ok (Keeper_msg_async.Found entry) ->
        (match Keeper_invocation_contract.delegate_entry_to_json entry with
         | Ok json -> tool_result_ok_data json

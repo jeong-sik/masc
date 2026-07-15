@@ -273,13 +273,13 @@ let test_batch_add_empty_list () =
 
 let test_batch_add_single_task () =
   with_test_env (fun config ->
-    let result = Workspace.batch_add_tasks config [ "Single", 1, "Only one", None ] in
+    let result = Workspace.batch_add_tasks config [ "Single", 1, "Only one" ] in
     Alcotest.(check bool) "single task batch" true (contains_check result))
 ;;
 
 let test_batch_add_preserves_priorities () =
   with_test_env (fun config ->
-    let tasks = [ "High Priority", 1, "", None; "Low Priority", 5, "", None ] in
+    let tasks = [ "High Priority", 1, ""; "Low Priority", 5, "" ] in
     let _ = Workspace.batch_add_tasks config tasks in
     let task_list = Workspace.list_tasks config in
     Alcotest.(check bool)

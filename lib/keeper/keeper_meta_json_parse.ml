@@ -120,13 +120,14 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
   match parse_sandbox_policy_fields json with
   | Error msg -> Error ("meta parse error: " ^ msg)
   | Ok (pp_sandbox_profile, pp_sandbox_image, pp_network_mode) ->
-    let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
-    let pp_mention_targets =
-      Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
-    in
-    let proactive_enabled =
-      Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
-    in
+    (* TOML-only config fields: the write side ([keeper_meta_json.ml]) omits
+       these by design, so the runtime JSON never carries them. The parser no
+       longer reads them — [ensure_keeper_meta] overlays the TOML SSOT value.
+       Neutral placeholders here keep the record total; a legacy JSON that still
+       carries one of these keys is ignored (TOML remains authoritative). *)
+    let pp_allowed_paths = [] in
+    let pp_mention_targets = [] in
+    let proactive_enabled = default_proactive_enabled in
     let env_ratio_gate, env_message_gate, env_token_gate =
       keeper_compaction_policy_from_env ()
     in
@@ -175,7 +176,8 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_handoff_cooldown_sec =
       Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json
     in
-    let pp_always_allow = Safe_ops.json_bool_opt "always_allow" json in
+    let pp_always_allow = None in
+    (* TOML-only (see note above); overlaid by [ensure_keeper_meta]. *)
     Ok
       { pp_sandbox_profile
       ; pp_sandbox_image
@@ -345,7 +347,8 @@ let parse_keeper_state
            ();
          None)
   in
-  let ps_autoboot_enabled = Safe_ops.json_bool ~default:true "autoboot_enabled" json in
+  (* TOML-only config; overlaid by [ensure_keeper_meta]. Placeholder default. *)
+  let ps_autoboot_enabled = true in
   let ps_current_task_id =
     match Safe_ops.json_string_opt "current_task_id" json with
     | None -> None
@@ -523,10 +526,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; autoboot_enabled = state.ps_autoboot_enabled
                    ; current_task_id = state.ps_current_task_id
                    ; max_context_override = state.ps_max_context_override
-                   ; telemetry_feedback_enabled =
-                       Safe_ops.json_bool_opt "telemetry_feedback_enabled" json
-                   ; telemetry_feedback_window_hours =
-                       Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
+                     (* TOML-only config; overlaid by [ensure_keeper_meta]. *)
+                   ; telemetry_feedback_enabled = None
+                   ; telemetry_feedback_window_hours = None
                    ; runtime = state.ps_runtime
                    ; oas_env =
                        (match Json_util.assoc_member_opt "oas_env" json with

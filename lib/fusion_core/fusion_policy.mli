@@ -58,8 +58,6 @@ type preset =
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
-  ; judge_wave_budget_s : float
-      (** 1차 심판 wave 전체 wall-clock 예산 (초). 0=비활성(legacy). *)
   ; adaptive_timeout_factor : float
       (** 1차 심판 타임아웃 적응형 확장 계수. 1.0=확장 안 함. *)
   ; fallback_judge_model : string option
@@ -158,25 +156,16 @@ val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
     adaptive 재시도 분기를 판정한다. *)
 val adaptive_timeout_enabled : preset -> bool
 
-(** [judge_wave_budget_enabled ~wave_budget_s] is false only for the validated
-    legacy disabled value [0.0]. Positive finite or effectively-unbounded
-    budgets still enforce the wave cap. *)
-val judge_wave_budget_enabled : wave_budget_s:float -> bool
-
 (** 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-    [wave_budget_s = 0.0]이면 legacy disabled budget으로 간주해 wave cap을 적용하지
-    않는다. [factor <= adaptive_extension_threshold](= 1.0)이면 [base_s]를 반환하고,
+    [factor <= adaptive_extension_threshold](= 1.0)이면 [base_s]를 반환하고,
     [already_timed_out]이고 [factor > adaptive_extension_threshold]이면 [base_s *.
-    factor]를 [max_s]로 상한·남은 예산으로 하한해 확장한다. 결과가
-    [min_effective_timeout_s](0.001s) 미만이면 [None]. *)
+    factor]를 [max_s]로만 상한해 확장한다. *)
 val adjust_judge_timeout
   :  base_s:float
   -> max_s:float option
   -> factor:float
-  -> wave_budget_s:float
-  -> elapsed_s:float
   -> already_timed_out:bool
-  -> float option
+  -> float
 
 (** RFC-0280: 검증을 통과한 preset (Parse, don't validate). [t = private preset]이라
     필드는 자유롭게 읽되([preset] 또는 coercion [(vp :> preset)]) 검증 없이 생성할 수
@@ -197,9 +186,6 @@ module Validated_preset : sig
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_judge_wave_budget of float
-        (** [judge_wave_budget_s]가 0 미만이거나, 양수 유한인데 최장 1차 심판
-            타임아웃 또는 [meta_timeout_s]보다 작음. *)
     | Bad_adaptive_factor of float
         (** [adaptive_timeout_factor]가 1.0 미만. *)
 

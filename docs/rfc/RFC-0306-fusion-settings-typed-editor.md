@@ -188,7 +188,7 @@ no longer enforces.
 - Creating/deleting whole presets from the UI (edit existing presets only); preset
   CRUD is a possible follow-up, see §7.2.
 - Per-call `timeout_s` range validation beyond what `of_preset` already checks
-  (`Bad_meta_timeout`, `Bad_judge_wave_budget`, `Bad_adaptive_factor`).
+  (`Bad_meta_timeout`, `Bad_adaptive_factor`).
 
 ## 5. Implementation plan
 

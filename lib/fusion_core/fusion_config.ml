@@ -16,9 +16,6 @@ type config_error =
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
   | Invalid_meta_timeout of string * float
       (** (preset 이름, meta_timeout_s): 양수 유한수가 아님. *)
-  | Invalid_judge_wave_budget of string * float
-      (** (preset 이름, judge_wave_budget_s): 0 미만이거나 최장 1차 심판 타임아웃/
-          meta_timeout_s보다 작음. *)
   | Invalid_adaptive_timeout_factor of string * float
       (** (preset 이름, adaptive_timeout_factor): 1.0 미만. *)
   | Toml_type_error of string
@@ -96,11 +93,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
   in
-  (* 1차 심판 wave 전체 wall-clock 예산. 누락 시 무제한(legacy byte-identical). *)
-  let judge_wave_budget_s =
-    Otoml.find_or ~default:Float.max_float tbl Otoml.get_float
-      [ "judge_wave_budget_s" ]
-  in
   let adaptive_timeout_factor =
     Otoml.find_or ~default:1.0 tbl Otoml.get_float [ "adaptive_timeout_factor" ]
   in
@@ -116,7 +108,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     ; judge_max_output_tokens
     ; judges
     ; meta_timeout_s
-    ; judge_wave_budget_s
     ; adaptive_timeout_factor
     ; fallback_judge_model
     }
@@ -143,8 +134,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Duplicate_judge (name, id)
          | Fusion_policy.Validated_preset.Bad_meta_timeout v ->
            Invalid_meta_timeout (name, v)
-         | Fusion_policy.Validated_preset.Bad_judge_wave_budget v ->
-           Invalid_judge_wave_budget (name, v)
        | Fusion_policy.Validated_preset.Bad_adaptive_factor v ->
          Invalid_adaptive_timeout_factor (name, v))
 

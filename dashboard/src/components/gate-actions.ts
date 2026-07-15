@@ -1,6 +1,5 @@
 import { showToast } from './common/toast'
 import {
-  deleteGateApprovalRule,
   resolveGateApproval,
   setGateMode,
 } from '../api/dashboard-gate'
@@ -15,36 +14,19 @@ export { refreshGate }
 export async function respondToKeeperApproval(
   id: string,
   decision: 'approve' | 'reject',
-  rememberRule = false,
 ) {
   if (!id) return
   gateApprovalActing.value = id
   try {
-    await resolveGateApproval(id, decision, rememberRule)
+    await resolveGateApproval(id, decision)
     const message =
       decision === 'approve'
-        ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
+        ? 'keeper 승인 요청을 승인했습니다'
         : 'keeper 승인 요청을 거부했습니다'
     showToast(message, 'success')
     await refreshGate({ force: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'keeper 승인 요청을 처리하지 못했습니다'
-    gateError.value = message
-    showToast(message, 'error')
-  } finally {
-    gateApprovalActing.value = null
-  }
-}
-
-export async function deleteKeeperApprovalRule(id: string) {
-  if (!id) return
-  gateApprovalActing.value = `rule:${id}`
-  try {
-    await deleteGateApprovalRule(id)
-    showToast('Always 규칙을 삭제했습니다', 'success')
-    await refreshGate({ force: true })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Always 규칙을 삭제하지 못했습니다'
     gateError.value = message
     showToast(message, 'error')
   } finally {

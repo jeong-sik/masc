@@ -363,15 +363,12 @@ let approval_resolve_http_error_to_string = function
   | Unavailable err -> Keeper_approval_queue.resolve_error_to_string err
 ;;
 
-let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
+let dashboard_gate_resolve_http_json ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, approval_resolve_http_error) result
   =
   match Safe_ops.json_string_opt "id" args with
   | None -> Error (Bad_request "id is required")
   | Some id ->
-    let remember_rule =
-      Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
-    in
     (* RFC-0305: a missing [decision] field must not default to approve — this
        resolves a pending HITL approval, so an omitted/malformed decision is a
        bad request, not a silent grant. Mirrors the [id]-required check above. *)
@@ -384,23 +381,17 @@ let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
        let decision_name = approval_resolve_decision_name decision in
        let decision = approval_resolve_decision_to_queue_decision decision in
        (match
-          Keeper_approval_queue.resolve_with_policy
+         Keeper_approval_queue.resolve_with_policy
             ~id
             ~decision
-            ~remember_rule
-            ~created_by
             ()
         with
-        | Ok result ->
+        | Ok () ->
           Ok
             (`Assoc
                 [ "ok", `Bool true
                 ; "id", `String id
                 ; "decision", `String decision_name
-                ; ( "rule_id"
-                  , match result.remembered_rule with
-                    | Some rule -> `String rule.id
-                    | None -> `Null )
                 ])
         | Error (Keeper_approval_queue.Delivery_failed _ as err) ->
           Error (Unavailable err)

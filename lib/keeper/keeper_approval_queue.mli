@@ -216,16 +216,14 @@ val auto_judge_delivery_requeue_error_to_string :
 val requeue_failed_auto_judge_delivery :
   id:string -> (unit, auto_judge_delivery_requeue_error) result
 
-(** Commit a resolution, optionally persist an exact Always Allowed rule for
-    [Decision.Approve], then wake only the Keeper captured by the pending entry. *)
+(** Commit a request-local resolution, then wake only the Keeper captured by
+    the pending entry. A resolution never creates a standing authorization. *)
 val resolve_with_policy :
   id:string ->
   decision:decision ->
   ?source:decision_source ->
-  ?remember_rule:bool ->
-  ?created_by:string ->
   unit ->
-  (resolution_result, resolve_error) result
+  (unit, resolve_error) result
 
 val resolve :
   id:string ->

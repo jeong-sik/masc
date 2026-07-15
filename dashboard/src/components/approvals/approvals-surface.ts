@@ -1,10 +1,10 @@
 // MASC Dashboard — Gate / HITL Surface
 // Pending external effects wait here for Human judgment without blocking the
-// Keeper lane. Exact Always rules and Auto Judge share this same Gate contract.
+// Keeper lane. Explicit Always Allow and Auto Judge share this Gate contract.
 //
 // Data source: gateData.value?.approval_queue (KeeperApprovalQueueItem[]).
-// Actions: respondToKeeperApproval(id, 'approve' | 'reject', rememberRule).
-// The live decision model is the closed set {approve, reject} (+ rememberRule);
+// Actions: respondToKeeperApproval(id, 'approve' | 'reject').
+// The live request-local decision model is the closed set {approve, reject};
 // there is no defer/undo endpoint, so the prototype's 보류/되돌리기 controls are
 // intentionally not rendered. History is read-only from recent_resolved.
 // Visual layout ports the keeper-v2 .ap-* design.
@@ -55,15 +55,11 @@ const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   { id: 'reject', label: '거부', predicate: item => item.decision === 'reject' },
   { id: 'edit', label: '수정됨', predicate: item => item.decision === 'edit' },
   { id: 'unknown', label: '처리됨', predicate: item => item.decision === 'unknown' },
-  { id: 'rule', label: 'Always 규칙', predicate: item => item.rule_match != null },
 ]
 const DEFAULT_APPROVAL_HISTORY_FILTER = APPROVAL_HISTORY_FILTERS[0]!
 
 // Aside preview caps. The recent list is a preview of recent_resolved — the full
 // set lives in the 이력 (history) tab, so its overflow is expected. The Always
-// Rules list has NO other view, so when it overflows we make the hidden count
-// explicit (exact Always rules bypass HITL; the Human must know the full set
-// exists even if it is not all shown here).
 const ASIDE_RECENT_LIMIT = 5
 const ASIDE_RULES_LIMIT = 6
 
@@ -126,7 +122,7 @@ function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
       <span class="ap-history-source">${decisionSourceLabel(item.decision_source)}</span>
       <span class="ap-history-id mono">${item.id}</span>
       ${item.rule_match?.rule_id
-        ? html`<span class="ap-history-rule mono">rule ${item.rule_match.rule_id}</span>`
+        ? html`<span class="ap-history-rule mono">legacy rule ${item.rule_match.rule_id}</span>`
         : null}
       ${item.resolved_at
         ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
@@ -161,7 +157,7 @@ function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
       <div class="ap-hist-summary" aria-label="승인 이력 요약">
         <div class="ap-hist-stat"><b class="mono ok">${counts.approve}</b> 승인</div>
         <div class="ap-hist-stat"><b class="mono bad">${counts.reject}</b> 거부</div>
-        <div class="ap-hist-stat"><b class="mono">${counts.rule}</b> Rule</div>
+        <div class="ap-hist-stat"><b class="mono">${counts.rule}</b> Legacy</div>
         <div class="ap-hist-stat"><b class="mono">${counts.keepers}</b> 관련 키퍼</div>
       </div>
       <div class="ap-hist-filters" role="tablist" aria-label="승인 이력 필터">
@@ -333,13 +329,6 @@ function ApprovalCard({
           >${busy ? '처리 중…' : '승인'}</button>
           <button
             type="button"
-            class="ap-act always"
-            onClick=${() => void respondToKeeperApproval(item.id, 'approve', true)}
-            title="승인하고 동일 요청을 자동 승인하는 Always 규칙을 저장합니다"
-            disabled=${anyBusy}
-          >${busy ? '처리 중…' : '항상 승인'}</button>
-          <button
-            type="button"
             class="ap-act deny"
             onClick=${() => void respondToKeeperApproval(item.id, 'reject')}
             disabled=${anyBusy}
@@ -452,7 +441,7 @@ function ApAside({
               `)}
             </div>
           </div>
-          <div class="wka-auto-stat">${rules.length.toLocaleString()}개 Always 규칙 · 열린 승인 ${openCount.toLocaleString()}건</div>
+          <div class="wka-auto-stat">${rules.length.toLocaleString()}개 legacy 규칙 기록 · 열린 승인 ${openCount.toLocaleString()}건</div>
           <div class="wka-auto-note">
             Human은 사람이 판단하고, Auto Judge는 LLM이 판단하며, Always Allow는 workspace의 명시적 선택입니다.
           </div>
@@ -464,7 +453,7 @@ function ApAside({
 
       <section class="wka-card">
         <div class="wka-h">
-          <h3>Always Rules</h3>
+          <h3>Legacy Always Records</h3>
           <span class="mono">${rules.length}</span>
         </div>
         ${rules.length > 0
@@ -474,7 +463,7 @@ function ApAside({
                 ? html`<div class="ap-side-empty mono" data-testid="approvals-rules-overflow">외 ${hiddenRules.toLocaleString()}건 더</div>`
                 : null}
             `
-          : html`<div class="ap-side-empty">저장된 Always 규칙 없음</div>`}
+          : html`<div class="ap-side-empty">legacy 규칙 기록 없음</div>`}
       </section>
 
       <section class="wka-card">
@@ -586,12 +575,12 @@ export function ApprovalsSurface() {
             <div class="ov-kpi-v" data-testid="gate-kpi-keepers">${stats.keepers}</div>
           </div>
           <div class="ov-kpi">
-            <div class="ov-kpi-k">Always 규칙</div>
-            <div class="ov-kpi-v">${rules.length}</div>
-          </div>
-          <div class="ov-kpi">
             <div class="ov-kpi-k">처리 완료</div>
             <div class="ov-kpi-v volt">${resolvedItems.length}</div>
+          </div>
+          <div class="ov-kpi">
+            <div class="ov-kpi-k">Legacy 규칙 기록</div>
+            <div class="ov-kpi-v">${rules.length}</div>
           </div>
         </section>
 

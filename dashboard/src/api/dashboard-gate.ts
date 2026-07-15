@@ -139,24 +139,22 @@ export function fetchDashboardGate(
   })
 }
 
-export function resolveGateApproval(
-  id: string,
-  decision: 'approve' | 'reject',
-  rememberRule?: boolean,
-  reason?: string,
-): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject'; rule_id?: string | null }> {
-  return post('/api/v1/dashboard/gate/resolve', {
-    id,
-    decision,
-    remember_rule: rememberRule,
-    reason,
-  })
-}
-
 export function deleteGateApprovalRule(
   id: string,
 ): Promise<{ ok: boolean; id: string }> {
   return post('/api/v1/dashboard/gate/rules/delete', { id })
+}
+
+export function resolveGateApproval(
+  id: string,
+  decision: 'approve' | 'reject',
+  reason?: string,
+): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject' }> {
+  return post('/api/v1/dashboard/gate/resolve', {
+    id,
+    decision,
+    reason,
+  })
 }
 
 export interface SetGateModeResponse {

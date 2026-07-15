@@ -234,13 +234,11 @@ let write_pending_snapshot ~base_path json =
     output_string channel (Yojson.Safe.pretty_to_string json))
 ;;
 
-let delivery_json ~entry ~remember_rule =
+let delivery_json ~entry =
   `Assoc
     [ "entry", entry
     ; "decision", `Assoc [ "kind", `String "approve" ]
     ; "source", `String "human_operator"
-    ; "remember_rule", `Bool remember_rule
-    ; "created_by", `Null
     ; "grant_consumed", `Bool false
     ]
 ;;
@@ -262,7 +260,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -409,21 +407,10 @@ let test_resolution_is_durable_and_origin_scoped () =
     (fun () ->
        let input = `Assoc [ "target", `String "document"; "body", `String "hello" ] in
        let id = submit ~base_path ~keeper_name ~input in
-       let result =
-         AQ.resolve_with_policy
-           ~id
-           ~decision:AQ.Decision.Approve
-           ~remember_rule:true
-           ~created_by:"operator"
-           ()
-       in
-       let resolution_result =
-         match result with
-         | Ok result -> result
+       (match AQ.resolve_with_policy ~id ~decision:AQ.Decision.Approve () with
+        | Ok () -> ()
          | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
-       in
-       Alcotest.(check bool) "exact rule persisted" true
-         (Option.is_some resolution_result.remembered_rule);
+       );
        Alcotest.(check bool) "pending removed" false
          (Option.is_some (AQ.get_pending_entry ~id));
        let resolution =
@@ -449,7 +436,7 @@ let test_resolution_is_durable_and_origin_scoped () =
                ~base_path
                ~keeper_name:unrelated_keeper
                ~approval_id:id));
-       Alcotest.(check bool) "exact remembered request matches" true
+       Alcotest.(check bool) "request-local approval creates no standing rule" true
          (match
             AQ.find_matching_rule
               ~base_path
@@ -458,7 +445,7 @@ let test_resolution_is_durable_and_origin_scoped () =
               ~input
               ()
           with
-          | Ok matched -> Option.is_some matched
+          | Ok matched -> Option.is_none matched
           | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error));
        (match
           AQ.consume_approved_resolution
@@ -976,7 +963,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
             ]);
@@ -1006,7 +993,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 2
+               [ "version", `Int 3
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
                ]));
@@ -1045,7 +1032,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
             ; "pending", `List []
             ; ( "deliveries"
               , `List
@@ -1053,8 +1040,6 @@ let test_persisted_delivery_replays_before_origin_wake () =
                       [ "entry", pending_entry
                       ; "decision", `Assoc [ "kind", `String "approve" ]
                       ; "source", `String "human_operator"
-                      ; "remember_rule", `Bool false
-                      ; "created_by", `Null
                       ; "grant_consumed", `Bool false
                       ]
                   ] )
@@ -1135,16 +1120,12 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
             ; "pending", `List []
             ; ( "deliveries"
               , `List
-                  [ delivery_json
-                      ~entry:(entry_for failing_id)
-                      ~remember_rule:true
-                  ; delivery_json
-                      ~entry:(entry_for successful_id)
-                      ~remember_rule:false
+                  [ delivery_json ~entry:(entry_for failing_id)
+                  ; delivery_json ~entry:(entry_for successful_id)
                   ] )
             ]);
        let rules_path = AQ.For_testing.always_allowed_store_path ~base_path in
@@ -1416,10 +1397,6 @@ let () =
             "delivery journal replays"
             `Quick
             test_persisted_delivery_replays_before_origin_wake
-        ; Alcotest.test_case
-            "one replay failure does not stop others"
-            `Quick
-            test_one_delivery_replay_failure_does_not_stop_others
         ; Alcotest.test_case
             "storage failure is returned"
             `Quick

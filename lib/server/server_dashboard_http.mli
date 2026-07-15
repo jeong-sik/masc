@@ -93,7 +93,6 @@ val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_gate_resolve_http_json :
-  created_by:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, approval_resolve_http_error) result
 

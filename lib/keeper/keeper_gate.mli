@@ -24,7 +24,6 @@ type request =
 
 type authorization_source =
   | One_shot_resolution of string
-  | Exact_always_rule of string
   | Keeper_always_allow
   | Workspace_always_allow
 
@@ -74,8 +73,8 @@ val cycle_grant_of_resolution :
 (** Evaluate one exact external-effect request. [keeper_always_allow] is the
     explicit Keeper profile switch; it carries no inferred semantics. Manual,
     Auto Judge, and invalid-mode outcomes enqueue durably and return without
-    suspending the caller. Explicit Keeper/workspace Always Allow modes do not
-    depend on the optional exact-rule store being readable. A supplied one-shot
+    suspending the caller. Explicit Keeper/workspace Always Allow modes are
+    configuration choices, not remembered approvals. A supplied one-shot
     grant that cannot be consumed returns [Unavailable] without evaluating a
     second authorization path, so the durable grant remains single-use. *)
 val decide :

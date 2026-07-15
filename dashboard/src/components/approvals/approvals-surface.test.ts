@@ -124,9 +124,9 @@ describe('ApprovalsSurface', () => {
     expect(container.querySelector('[data-approval-id="appr-3"]')?.className).toContain('sev-info')
     expect(container.querySelector('[data-approval-id="appr-4"]')?.className).toContain('sev-info')
     expect(container.querySelector('[data-approval-id="appr-2"]')?.className).toContain('sev-info')
-    // the three live decisions are exposed; the prototype's defer/undo are not
+    // request-local approve/reject are exposed; standing promotion is not
     expect(container.textContent).toContain('승인')
-    expect(container.textContent).toContain('항상 승인')
+    expect(container.textContent).not.toContain('항상 승인')
     expect(container.textContent).toContain('거부')
     expect(container.textContent).not.toContain('보류')
     expect(container.textContent).not.toContain('되돌리기')
@@ -403,7 +403,7 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     const aside = container.querySelector('[data-testid="approvals-aside"]')
-    expect(aside?.textContent).toContain('Always Rules')
+    expect(aside?.textContent).toContain('Legacy Always Records')
     expect(aside?.textContent).toContain('keeper-a')
     expect(aside?.textContent).toContain('fs_write')
     expect(aside?.textContent).toContain('abcdef123456')
@@ -413,7 +413,7 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     expect(container.querySelector('[data-testid="approvals-history-view"]')?.textContent)
-      .toContain('rule rule-1')
+      .toContain('legacy rule rule-1')
 
     const rejectFilter = Array.from(container.querySelectorAll<HTMLButtonElement>('.ap-hist-f'))
       .find(button => button.textContent === '거부')
@@ -571,7 +571,7 @@ describe('ApprovalsSurface', () => {
     approveBtn?.click()
     await flushUi()
 
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-9', 'approve', false)
+    expect(resolveGateApproval).toHaveBeenCalledWith('appr-9', 'approve')
   })
 
   it('routes the 거부 action through resolveGateApproval with the reject decision', async () => {
@@ -585,21 +585,7 @@ describe('ApprovalsSurface', () => {
     container.querySelector<HTMLButtonElement>('.ap-card .ap-act.deny')?.click()
     await flushUi()
 
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-r', 'reject', false)
-  })
-
-  it('routes the 항상 승인 action through resolveGateApproval with rememberRule=true', async () => {
-    const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
-      queueItem({ id: 'appr-a', keeper_name: 'masc-improver' }),
-    ])
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    container.querySelector<HTMLButtonElement>('.ap-card .ap-act.always')?.click()
-    await flushUi()
-
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-a', 'approve', true)
+    expect(resolveGateApproval).toHaveBeenCalledWith('appr-r', 'reject')
   })
 
   it('binds the three non-hierarchical choices to hitl.gate_mode', async () => {

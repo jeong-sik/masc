@@ -282,6 +282,8 @@ let active_auto_judges : Auto_judge_ids.t Atomic.t =
 let rec claim_auto_judge id =
   let active = Atomic.get active_auto_judges in
   if Auto_judge_ids.mem id active
+     || Auto_judge_ids.cardinal active
+        >= Hitl_summary_worker.max_concurrency ()
   then false
   else
     let claimed = Auto_judge_ids.add id active in
@@ -297,7 +299,7 @@ let rec release_auto_judge id =
   then release_auto_judge id
 ;;
 
-let spawn_claimed_auto_judge_entry
+let rec spawn_claimed_auto_judge_entry
       (entry : Keeper_approval_queue.pending_approval)
   =
   let approval_id = entry.id in
@@ -373,7 +375,9 @@ let spawn_claimed_auto_judge_entry
          ~provider_config:selected.provider_config
          ~on_summary
          ~on_failure
-         ~on_finish:(fun () -> release_auto_judge approval_id)
+         ~on_finish:(fun () ->
+           release_auto_judge approval_id;
+           ignore (drain_auto_judges ~base_path:entry.audit_base_path))
          ();
        Ok Started
      with
@@ -394,15 +398,13 @@ let spawn_claimed_auto_judge_entry
       ~reason:"Auto Judge unavailable: no runtime provider is configured"
       ~retryable:true
   | Some _, Error reason -> fail_before_worker ~reason ~retryable:true
-;;
 
-let spawn_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
+and spawn_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
   if claim_auto_judge entry.id
   then spawn_claimed_auto_judge_entry entry
   else Ok Skipped
-;;
 
-let retry_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
+and retry_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
   if not (claim_auto_judge entry.id)
   then Ok Skipped
   else
@@ -414,9 +416,8 @@ let retry_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
       release_auto_judge entry.id;
       Ok Skipped
     | Ok true -> spawn_claimed_auto_judge_entry entry
-;;
 
-let start_auto_judge approval_id =
+and start_auto_judge approval_id =
   match Keeper_approval_queue.get_pending_entry ~id:approval_id with
   | None -> Ok Skipped
   | Some entry ->
@@ -431,6 +432,51 @@ let start_auto_judge approval_id =
          release_auto_judge approval_id;
          Ok Skipped
        | Ok true -> spawn_claimed_auto_judge_entry entry)
+
+and drain_auto_judges ~base_path =
+  match Keeper_gate_mode.read ~base_path with
+  | Error _
+  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) -> []
+  | Ok Keeper_gate_mode.Auto_judge ->
+    let capacity =
+      Hitl_summary_worker.max_concurrency ()
+      - Auto_judge_ids.cardinal (Atomic.get active_auto_judges)
+    in
+    if capacity <= 0
+    then []
+    else
+      Keeper_approval_queue.list_pending_entries ()
+      |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+        String.equal entry.audit_base_path base_path
+        &&
+        match entry.summary_status with
+        | Keeper_approval_queue.Summary_not_requested
+        | Keeper_approval_queue.Summary_pending -> true
+        | Keeper_approval_queue.Summary_available _
+        | Keeper_approval_queue.Summary_failed _ -> false)
+      |> List.sort
+           (fun (left : Keeper_approval_queue.pending_approval)
+                (right : Keeper_approval_queue.pending_approval) ->
+              Float.compare left.requested_at right.requested_at)
+      |> List.filteri (fun index _ -> index < capacity)
+      |> List.filter_map (fun (entry : Keeper_approval_queue.pending_approval) ->
+        let started =
+          match entry.summary_status with
+          | Keeper_approval_queue.Summary_not_requested -> start_auto_judge entry.id
+          | Keeper_approval_queue.Summary_pending -> spawn_auto_judge_entry entry
+          | Keeper_approval_queue.Summary_available _
+          | Keeper_approval_queue.Summary_failed _ -> Ok Skipped
+        in
+        match started with
+        | Ok Started -> Some entry.id
+        | Ok Skipped -> None
+        | Error reason ->
+          Log.Keeper.error
+            ~keeper_name:entry.keeper_name
+            "Auto Judge bounded drain failed approval=%s: %s"
+            entry.id
+            reason;
+          None)
 ;;
 
 type recovered_work =
@@ -559,6 +605,43 @@ let resume_persisted_auto_judges ~base_path =
   ; skipped_ids = List.rev skipped_ids
   ; failures = List.rev failures
   }
+;;
+
+type operator_recovery_report =
+  { reopened_ids : string list
+  ; started_ids : string list
+  ; queued : int
+  }
+
+let request_operator_auto_judge_recovery ~base_path =
+  match Keeper_gate_mode.read ~base_path with
+  | Error detail -> Error detail
+  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
+    Error "operator Auto Judge recovery requires auto_judge mode"
+  | Ok Keeper_gate_mode.Auto_judge ->
+    (match Hitl_summary_worker.readiness () with
+     | Error detail -> Error detail
+     | Ok () ->
+    (match Keeper_approval_queue.restart_failed_summaries ~base_path with
+     | Error error -> Error (Keeper_approval_queue.storage_error_to_string error)
+     | Ok reopened_ids ->
+       let started_ids = drain_auto_judges ~base_path in
+       let queued =
+         Keeper_approval_queue.list_pending_entries ()
+         |> List.fold_left
+              (fun count (entry : Keeper_approval_queue.pending_approval) ->
+                 if String.equal entry.audit_base_path base_path
+                    &&
+                    match entry.summary_status with
+                    | Keeper_approval_queue.Summary_not_requested
+                    | Keeper_approval_queue.Summary_pending -> true
+                    | Keeper_approval_queue.Summary_available _
+                    | Keeper_approval_queue.Summary_failed _ -> false
+                 then count + 1
+                 else count)
+              0
+       in
+       Ok { reopened_ids; started_ids; queued }))
 ;;
 
 let defer request reason =

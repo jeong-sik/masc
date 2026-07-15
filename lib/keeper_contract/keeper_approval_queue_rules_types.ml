@@ -54,25 +54,6 @@ type decision_source =
   | Auto_judge
   | Human_operator
 
-type approval_rule =
-  { id : string
-  ; keeper_name : string
-  ; tool_name : string
-  ; request_fingerprint : string
-  ; created_at : float
-  ; created_by : string option
-  ; source_approval_id : string option
-  }
-
-type rule_match = { rule_id : string }
-
-type rule_store_error =
-  { path : string
-  ; reason : string
-  }
-
-type resolution_result = { remembered_rule : approval_rule option }
-
 let advisory_judgment_to_string = function
   | Approve -> "approve"
   | Deny -> "deny"
@@ -120,26 +101,6 @@ let bool_member key json ~default =
   match Json_util.assoc_member_opt key json with
   | Some (`Bool value) -> value
   | _ -> default
-;;
-
-let rule_match_to_yojson (matched : rule_match) =
-  `Assoc [ "rule_id", `String matched.rule_id ]
-;;
-
-let rule_store_error_to_string error =
-  Printf.sprintf "%s: %s" error.path error.reason
-;;
-
-let approval_rule_to_yojson (rule : approval_rule) =
-  `Assoc
-    [ "id", `String rule.id
-    ; "keeper_name", `String rule.keeper_name
-    ; "tool_name", `String rule.tool_name
-    ; "request_fingerprint", `String rule.request_fingerprint
-    ; "created_at", `Float rule.created_at
-    ; "created_by", Json_util.string_opt_to_json rule.created_by
-    ; "source_approval_id", Json_util.string_opt_to_json rule.source_approval_id
-    ]
 ;;
 
 let hitl_context_summary_to_yojson (summary : hitl_context_summary) =
@@ -307,60 +268,4 @@ let summary_status_of_yojson_with_error json =
         | None -> Error "summary_status.retryable is required")
      | other -> Error (Printf.sprintf "summary_status.status %S is unknown" other))
   | _ -> Error "summary_status must be a known string or JSON object"
-;;
-
-let approval_rule_of_yojson_with_error json =
-  match json with
-  | `Assoc fields ->
-    let ( let* ) = Result.bind in
-    let* () =
-      match
-        reject_unknown_fields
-          ~surface:"approval rule"
-          ~allowed:
-            [ "id"
-            ; "keeper_name"
-            ; "tool_name"
-            ; "request_fingerprint"
-            ; "created_at"
-            ; "created_by"
-            ; "source_approval_id"
-            ]
-          fields
-      with
-      | Ok () -> Ok ()
-      | Error reason -> Error (reason ^ "; explicit re-approval is required")
-    in
-    let require field =
-      match Json_util.get_string_nonempty json field with
-      | Some value -> Ok value
-      | None -> Error (Printf.sprintf "%s must be a non-blank string" field)
-    in
-    let* id = require "id" in
-    let* keeper_name = require "keeper_name" in
-    let* tool_name = require "tool_name" in
-    let* request_fingerprint = require "request_fingerprint" in
-    let* created_at =
-      match Json_util.get_float json "created_at" with
-      | Some value -> Ok value
-      | None -> Error "created_at must be a number"
-    in
-    let created_by = Json_util.get_string json "created_by" in
-    let source_approval_id = Json_util.get_string json "source_approval_id" in
-    Ok
-      { id
-      ; keeper_name
-      ; tool_name
-      ; request_fingerprint
-      ; created_at
-      ; created_by
-      ; source_approval_id
-      }
-  | _ -> Error "approval rule must be a JSON object"
-;;
-
-let approval_rule_of_yojson json =
-  match approval_rule_of_yojson_with_error json with
-  | Ok rule -> Some rule
-  | Error _ -> None
 ;;

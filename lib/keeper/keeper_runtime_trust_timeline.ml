@@ -90,7 +90,7 @@ let severity_of_approval_event event decision =
       match decision with
       | Some raw when String_util.contains_substring_ci raw "reject" -> "bad"
       | _ -> "ok")
-  | "auto_approved_rule_match" | "auto_approved_always" | "rule_created" -> "ok"
+  | "auto_approved_always" -> "ok"
   | _ -> "warn"
 
 let tool_call_timeline_event json =
@@ -202,20 +202,10 @@ let approval_event_timeline_event json =
               Printf.sprintf "Approval · %s" tool_name,
               approval_summary summary,
               Some "retry_or_rerun" )
-        | "auto_approved_rule_match" ->
-            ( "approval_rule_match",
-              Printf.sprintf "Approval Rule · %s" tool_name,
-              approval_summary "allowed by an exact Always Allowed rule",
-              None )
         | "auto_approved_always" ->
             ( "approval_always_flag",
               Printf.sprintf "Approval Always · %s" tool_name,
               approval_summary "allowed by keeper always_allow flag",
-              None )
-        | "rule_created" ->
-            ( "approval_rule_created",
-              Printf.sprintf "Approval Rule · %s" tool_name,
-              approval_summary "persistent approval rule recorded",
               None )
         | other ->
             ( "approval_event",

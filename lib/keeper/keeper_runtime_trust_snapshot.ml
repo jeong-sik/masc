@@ -452,12 +452,6 @@ let pending_first_json pending_approvals =
 
 let approval_state_json ~pending_approval_count ~pending_approvals
     ~latest_approval_audit =
-  let latest_rule_match =
-    Option.bind latest_approval_audit (fun json ->
-        match json_member "rule_match" json with
-        | `Assoc _ as rule_match -> Some rule_match
-        | _ -> None)
-  in
   let latest_event_kind =
     Option.bind latest_approval_audit (json_string_opt_member "event")
   in
@@ -482,10 +476,6 @@ let approval_state_json ~pending_approval_count ~pending_approvals
       ( "latest_event_at",
         match Option.bind latest_approval_audit (json_float_opt_member "ts") with
         | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-        | None -> `Null );
-      ( "rule_id",
-        match latest_rule_match with
-        | Some json -> json |> json_string_opt_member "rule_id" |> Json_util.string_opt_to_json
         | None -> `Null );
       ("pending_first", pending_first_json pending_approvals);
     ]

@@ -93,7 +93,16 @@ let execute_with_observers
         Keeper_metrics.(to_string ToolsOasFailures)
         ~labels:[ "tool", name; "site", "error_result" ]
         ();
-      Log.Keeper.error "tool %s returned error result: %s" name detail;
+      (* Honor the declared per-class severity (Tool_result.log_level_of_
+         failure_class): Workflow_rejection / Policy_rejection / Transient_error
+         are WARN, Runtime_failure is ERROR. Hardcoding ERROR here logged
+         expected non-blocking gate deferrals (Workflow_rejection) as errors,
+         producing false alarms. Same idiom as mcp_server_eio_call_tool.ml and
+         keeper_tool_in_process_runtime.ml. *)
+      Log.Keeper.emit
+        (Tool_result.log_level_of_failure_class failure_class)
+        ~category:Log.Tool
+        (Printf.sprintf "tool %s returned error result: %s" name detail);
       let normalized_error_json =
         normalize_tool_result ~success:false ~data:producer_data raw_result
       in

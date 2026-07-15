@@ -10,6 +10,30 @@ let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
 ;;
 
+(* Severity policy the OAS exec-handler logger relies on: expected non-blocking
+   outcomes (Workflow_rejection — e.g. a gate deferral) log at WARN, only real
+   failures (Runtime_failure) log at ERROR. Locks the SSOT so the logger cannot
+   silently regress back to hardcoding ERROR for deferrals. *)
+let level_name : Log.level -> string = function
+  | Log.Debug -> "debug"
+  | Log.Info -> "info"
+  | Log.Warn -> "warn"
+  | Log.Error -> "error"
+;;
+
+let test_log_level_of_failure_class () =
+  let check_level expected cls =
+    Alcotest.(check string)
+      (Printf.sprintf "log level for %s" (Tool_result.tool_failure_class_to_string cls))
+      expected
+      (level_name (Tool_result.log_level_of_failure_class cls))
+  in
+  check_level "warn" Tool_result.Workflow_rejection;
+  check_level "warn" Tool_result.Policy_rejection;
+  check_level "warn" Tool_result.Transient_error;
+  check_level "error" Tool_result.Runtime_failure
+;;
+
 let test_schema tool =
   { Masc_domain.name = tool
   ; description = "test tool " ^ tool
@@ -491,6 +515,12 @@ let () =
             "done schema uses result and evidence refs"
             `Quick
             test_keeper_done_schema_uses_result_and_evidence_refs
+        ] )
+    ; ( "failure-class log severity"
+      , [ Alcotest.test_case
+            "Workflow/Policy/Transient are WARN, Runtime is ERROR"
+            `Quick
+            test_log_level_of_failure_class
         ] )
     ]
 ;;

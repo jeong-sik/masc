@@ -1398,6 +1398,12 @@ let rec lock_whole_file fd =
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file fd
 ;;
 
+let rec lock_whole_file_shared fd =
+  match Unix.lockf fd Unix.F_RLOCK 0 with
+  | () -> ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file_shared fd
+;;
+
 type capability_append_operation_failure =
   { exception_ : exn
   ; backtrace : Printexc.raw_backtrace
@@ -1712,12 +1718,114 @@ module Capability_append_for_testing = struct
   let append_fd_observed = append_fd_observed
 end
 
-let run_blocking_durable_append ~path f =
+let run_blocking_private_file_transaction ~label ~path f =
   with_fs_or_fallback
     ~path
     ~fallback:f
-    (fun _fs ->
-       Eio_unix.run_in_systhread ~label:"fs-compat-durable-append" f)
+    (fun _fs -> Eio_unix.run_in_systhread ~label f)
+;;
+
+module Private_jsonl_slice = struct
+  type t =
+    { bytes : string
+    ; end_offset : int
+    }
+
+  type error =
+    | Negative_offset of int
+    | Missing_file_after_offset of int
+    | Offset_beyond_end of
+        { offset : int
+        ; end_offset : int
+        }
+    | Offset_not_at_row_boundary of int
+    | Incomplete_tail of int
+    | Io_failed of exn
+
+  let error_to_string = function
+    | Negative_offset offset -> Printf.sprintf "negative JSONL cursor: %d" offset
+    | Missing_file_after_offset offset ->
+      Printf.sprintf "JSONL store is missing after cursor %d" offset
+    | Offset_beyond_end { offset; end_offset } ->
+      Printf.sprintf "JSONL cursor %d is beyond end %d" offset end_offset
+    | Offset_not_at_row_boundary offset ->
+      Printf.sprintf "JSONL cursor %d is not a row boundary" offset
+    | Incomplete_tail end_offset ->
+      Printf.sprintf "JSONL store has an incomplete tail at end %d" end_offset
+    | Io_failed exn -> Printexc.to_string exn
+  ;;
+end
+
+let read_private_jsonl_slice_locked_result path ~from =
+  let open Private_jsonl_slice in
+  if from < 0
+  then Error (Negative_offset from)
+  else
+    try
+      test_exec_home_guard ~op:"read_private_jsonl_slice_locked" path;
+      let path_mu = get_append_path_mutex path in
+      run_blocking_private_file_transaction
+        ~label:"fs-compat-private-jsonl-read"
+        ~path
+        (fun () ->
+           Stdlib.Mutex.protect path_mu (fun () ->
+             match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+             | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+               if from = 0
+               then Ok { bytes = ""; end_offset = 0 }
+               else Error (Missing_file_after_offset from)
+             | fd ->
+               Fun.protect
+                 ~finally:(fun () -> Unix.close fd)
+                 (fun () ->
+                    lock_whole_file_shared fd;
+                    let end_offset = Unix.lseek fd 0 Unix.SEEK_END in
+                    if from > end_offset
+                    then Error (Offset_beyond_end { offset = from; end_offset })
+                    else (
+                      let byte_at offset =
+                        (* See Unix.lseek: only the file-position side effect is required. *)
+                        ignore (Unix.lseek fd offset Unix.SEEK_SET : int);
+                        let byte = Bytes.create 1 in
+                        let rec read () =
+                          match Unix.read fd byte 0 1 with
+                          | 1 -> Bytes.get byte 0
+                          | 0 -> raise End_of_file
+                          | count ->
+                            invalid_arg
+                              (Printf.sprintf
+                                 "single-byte JSONL read returned %d bytes"
+                                 count)
+                          | exception Unix.Unix_error (Unix.EINTR, _, _) -> read ()
+                        in
+                        read ()
+                      in
+                      if from > 0 && not (Char.equal (byte_at (from - 1)) '\n')
+                      then Error (Offset_not_at_row_boundary from)
+                      else if
+                        end_offset > 0
+                        && not (Char.equal (byte_at (end_offset - 1)) '\n')
+                      then Error (Incomplete_tail end_offset)
+                      else (
+                        let length = end_offset - from in
+                        (* See Unix.lseek: only the file-position side effect is required. *)
+                        ignore (Unix.lseek fd from Unix.SEEK_SET : int);
+                        let bytes = Bytes.create length in
+                        let rec read_all offset =
+                          if offset = length
+                          then ()
+                          else
+                            match Unix.read fd bytes offset (length - offset) with
+                            | 0 -> raise End_of_file
+                            | count -> read_all (offset + count)
+                            | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+                              read_all offset
+                        in
+                        read_all 0;
+                        Ok { bytes = Bytes.unsafe_to_string bytes; end_offset })))))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Io_failed exn)
 ;;
 
 let update_private_file_durable_locked_result path decide =
@@ -1725,7 +1833,10 @@ let update_private_file_durable_locked_result path decide =
   let dir = Filename.dirname path in
   mkdir_p_memoized dir;
   let path_mu = get_append_path_mutex path in
-  run_blocking_durable_append ~path (fun () ->
+  run_blocking_private_file_transaction
+    ~label:"fs-compat-durable-update"
+    ~path
+    (fun () ->
     Stdlib.Mutex.protect path_mu (fun () ->
       let fd =
         Unix.openfile path
@@ -1779,7 +1890,10 @@ let append_private_jsonl_durable_locked_with_end_offset_result path suffix =
     let dir = Filename.dirname path in
     mkdir_p_memoized dir;
     let path_mu = get_append_path_mutex path in
-    run_blocking_durable_append ~path (fun () ->
+    run_blocking_private_file_transaction
+      ~label:"fs-compat-durable-append"
+      ~path
+      (fun () ->
       Stdlib.Mutex.protect path_mu (fun () ->
         let fd =
           Unix.openfile path

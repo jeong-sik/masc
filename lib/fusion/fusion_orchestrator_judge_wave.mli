@@ -6,24 +6,20 @@ type judge_run =
   * ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result
-  * float
+  * float option
   * bool
 
 type clock
 
 val make_clock
   :  now_opt:(unit -> float option)
-  -> missing_clock_failure:Fusion_types.judge_failure
   -> clock
 
-val make_runtime_clock
-  :  missing_clock_failure:Fusion_types.judge_failure
-  -> clock
+val make_runtime_clock : unit -> clock
 (** Build a clock from the current domain-local {!Masc_eio_env}. Missing
-    runtime env is represented as [None] so callers can return the configured
-    [missing_clock_failure] instead of raising from {!Masc_eio_env.get}. *)
+    runtime env never blocks execution and produces unavailable elapsed observations. *)
 
-val elapsed_since_t0 : clock -> float
+val elapsed_since_t0 : clock -> float option
 
 val run_first_judges
   :  sw:Eio.Switch.t
@@ -54,26 +50,7 @@ val all_fail_error_of_runs
   -> judge_run list
   -> Fusion_types.judge_failure * Fusion_types.usage
 
-val with_timeout_budget_fallback
-  :  run_fallback_judge:(unit -> judge_run option)
-  -> judge_run list
-  -> judge_run list
-(** Append the configured fallback judge when the whole first-judge wave failed
-    only with timeout/budget failures. Shared by JOJ and staged JOJ so both
-    topologies honor [fallback_judge_model] consistently. *)
-
-val meta_budget_check
+val meta_provider_timeout
   :  preset:Fusion_policy.preset
   -> clock
   -> (float, Fusion_types.judge_failure * Fusion_types.usage) result
-
-val run_fallback_judge
-  :  sw:Eio.Switch.t
-  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> preset:Fusion_policy.preset
-  -> panel:Fusion_types.panel_outcome list
-  -> question:string
-  -> clock:clock
-  -> judge_web_tools:bool
-  -> unit
-  -> judge_run option

@@ -25,9 +25,6 @@ type parsed_keeper_policy =
   ; pp_mention_targets : string list
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
-  ; pp_auto_handoff : bool
-  ; pp_handoff_threshold : float
-  ; pp_handoff_cooldown_sec : int
   ; pp_always_allow : bool option
   }
 
@@ -169,13 +166,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
         json
       |> normalize_compaction_cooldown_sec
     in
-    let pp_auto_handoff = Safe_ops.json_bool ~default:true "auto_handoff" json in
-    let pp_handoff_threshold =
-      Safe_ops.json_float ~default:0.85 "handoff_threshold" json
-    in
-    let pp_handoff_cooldown_sec =
-      Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json
-    in
     let pp_always_allow = None in
     (* TOML-only (see note above); overlaid by [ensure_keeper_meta]. *)
     Ok
@@ -193,9 +183,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
           ; token_gate = compaction_token_gate
           ; cooldown_sec = compaction_cooldown_sec
           }
-      ; pp_auto_handoff
-      ; pp_handoff_threshold
-      ; pp_handoff_cooldown_sec
       ; pp_always_allow
       }
 ;;
@@ -508,9 +495,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                            | Some p -> p
                            | None -> default_multimodal_policy)
                         | None -> default_multimodal_policy)
-                   ; auto_handoff = policy.pp_auto_handoff
-                   ; handoff_threshold = policy.pp_handoff_threshold
-                   ; handoff_cooldown_sec = policy.pp_handoff_cooldown_sec
                    ; always_allow = policy.pp_always_allow
                    ; created_at =
                        (if state.ps_created_at_raw = ""

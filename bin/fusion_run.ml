@@ -157,7 +157,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
   let n = List.length models_all in
   let max_fibers = max 1 n in
   (* 하네스는 동질 arm 비교 도구다(RFC-0252 §11). 이종 preset이면 첫 그룹의 plumbing
-     (system_prompt/web_tools/timeout)을 대표로 써 모든 arm을 같은
+     (system_prompt/web_tools)을 대표로 써 모든 arm을 같은
      설정으로 돌린다 — arm 차이는 모델 집합·judge이지 plumbing이 아니다(legacy 단일
      그룹이면 그 그룹 값 = 오늘과 동일). *)
   let g0 = List.hd preset.Fusion_policy.panels in
@@ -180,7 +180,6 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
       ~sw
       ~net
       ~max_fibers
-      ~outer_timeout_s:(Fusion_policy.panel_outer_timeout_of ~max_fibers groups)
       ~groups
       ~prompt
       ()

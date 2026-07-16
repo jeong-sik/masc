@@ -44,12 +44,14 @@ async function loadGate() {
   vi.doMock('../api', () => ({
     fetchDashboardGate,
     resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+    retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
     deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
     setGateMode: vi.fn().mockResolvedValue({ ok: true }),
   }))
   vi.doMock('../api/dashboard-gate', () => ({
     fetchDashboardGate,
     resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+    retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
     deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
     setGateMode: vi.fn().mockResolvedValue({ ok: true }),
   }))

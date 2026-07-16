@@ -262,8 +262,9 @@ type judge_error_node =
   ; failure : judge_failure
   ; usage : usage
       (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
-  ; elapsed_s : float
-      (** Wave start부터 실패까지 경과한 시간(초). 타임아웃/예산 원인 분석용. *)
+  ; elapsed_s : float option
+      (** Wave start부터 실패까지 경과한 시간(초). [None]은 clock 미가용으로
+          관측할 수 없었음을 뜻한다. *)
   }
 [@@deriving yojson, show, eq]
 

@@ -18,11 +18,7 @@ type threshold_params = {
   compaction_message_gate : int;
   compaction_token_gate : int;
   compaction_cooldown_sec : int;
-  handoff_threshold : float;
-  handoff_cooldown_sec : int;
-  auto_handoff_enabled : bool;
   model_ratio_multiplier : float;
-  model_handoff_multiplier : float;
 }
 
 (** {1 Sub-measurements} *)
@@ -38,7 +34,6 @@ type timing_measurement = {
   now_ts : float;
   idle_seconds : int;
   since_last_compaction_sec : float;
-  since_last_handoff_sec : float;
   proactive_warmup_elapsed : bool;
 }
 
@@ -82,7 +77,6 @@ val capture :
   now_ts:float ->
   idle_seconds:int ->
   since_last_compaction_sec:float ->
-  since_last_handoff_sec:float ->
   proactive_warmup_elapsed:bool ->
   consecutive_hb_failures:int ->
   consecutive_turn_failures:int ->

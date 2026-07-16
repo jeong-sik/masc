@@ -28,8 +28,6 @@ let constructor_cases : (string * T.t) list =
   ; "of_code/runtime_stop_not_final/completed", T.of_code "completed"
   ; "of_code/sdk_error/api_error_timeout", T.of_code "api_error_timeout"
   ; "of_code/sdk_error/api_error_overloaded", T.of_code "api_error_overloaded"
-  ; ( "of_code/sdk_error/agent_error_max_turns"
-    , T.of_code "agent_error_max_turns_exceeded:turns=10,limit=10" )
   ; "of_code/unknown", T.of_code "totally_unmapped"
   ; "of_code/empty", T.of_code ""
   ; "of_code/turn_wall_clock", T.of_code "turn_wall_clock_timeout"

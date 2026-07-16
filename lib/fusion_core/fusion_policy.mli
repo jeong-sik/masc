@@ -67,8 +67,9 @@ val min_answered_floor : int
 
 val default_min_answered : int
 
-(** Default JOJ first-judge execution concurrency. This batches execution only;
-    it never limits the number of configured judges or panel models. *)
+(** Legacy config default copied from the retired OpenRouter panel bound.
+    Execution does not read it. The stacked schema hard-cut deletes this value
+    with the dead config field. *)
 val default_max_concurrent_judges : int
 
 (** Default staged JOJ group size. A staged judge-of-judges run groups first

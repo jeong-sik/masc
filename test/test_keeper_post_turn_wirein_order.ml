@@ -141,8 +141,10 @@ let test_manual_compaction_serializes_owner_lane () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   let meta = make_meta ~name:"compaction-owner" ~trace_id:"trace-compaction-owner" () in
   let peer = make_meta ~name:"compaction-peer" ~trace_id:"trace-compaction-peer" () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
       Admission.For_testing.reset ();
       Masc.Keeper_registry.unregister ~base_path meta.name;
       Masc.Keeper_registry.unregister ~base_path peer.name;
@@ -150,6 +152,12 @@ let test_manual_compaction_serializes_owner_lane () =
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      let runtime_path =
+        Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+      in
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error detail -> failf "runtime fixture initialization failed: %s" detail);
       Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
       let owner_entry = Masc.Keeper_registry.register ~base_path meta.name meta in
       let peer_entry = Masc.Keeper_registry.register ~base_path peer.name peer in
@@ -212,11 +220,15 @@ let test_manual_compaction_serializes_owner_lane () =
           ~args:(`Assoc [ "name", `String meta.name ])
       in
       (match tool_result with
-       | Some (Ok success) ->
-         let data = Tool_result.data (Ok success) in
+       | Some (Tool_result.Completed output) ->
          check string "request durably enqueued" "enqueued"
-           Yojson.Safe.Util.(data |> member "queue_outcome" |> to_string)
-       | Some (Error failure) -> failf "compaction enqueue failed: %s" failure.message
+           Yojson.Safe.Util.(output.data |> member "queue_outcome" |> to_string)
+       | Some (Tool_result.Deferred output) ->
+         failf
+           "compaction enqueue unexpectedly deferred: %s"
+           (Yojson.Safe.to_string output.data)
+       | Some (Tool_result.Failed failure) ->
+         failf "compaction enqueue failed: %s" failure.message
        | None -> fail "masc_keeper_compact is not registered");
       check bool "owner wake set" true (Atomic.get owner_entry.fiber_wakeup);
       check bool "peer wake untouched" false (Atomic.get peer_entry.fiber_wakeup);

@@ -1,9 +1,8 @@
-(** Circuit_breaker — failure-based protection for MASC agents.
+(** Circuit_breaker — failure observation for MASC agents.
 
-    Threshold-driven state machine: 3 failures inside a 1-minute
-    window opens the breaker for 5 minutes (HalfOpen probe at the
-    end of the cooldown).  Defaults are tunable per-instance via
-    {!create}.
+    This intermediate status projection still groups failures by the legacy
+    window, but exposes no execution gate, wrapper, or administrative
+    suspension API. Recorded status never controls Keeper participation.
 
     {b Concurrency}: all breaker records are immutable; the single
     mutable field [breakers] in the instance is protected by a
@@ -34,11 +33,9 @@ type state =
       failure_count : int;
           (** Number of failures inside the window when opening. *)
     }
-      (** Cooldown — calls return [Error _] without invoking the
-          underlying function. *)
+      (** Legacy cooldown observation. It does not suppress execution. *)
   | HalfOpen
-      (** Probe state — single call permitted; success -> closed,
-          failure -> back to open with fresh cooldown. *)
+      (** Legacy recovery observation. It does not grant execution. *)
 
 (** {1 Records (concrete — for introspection)} *)
 
@@ -92,28 +89,6 @@ val record_success : t -> agent_id:string -> unit
 (** [record_success t ~agent_id] clears the agent's failure list.
     If the breaker was [HalfOpen], transitions to [Closed]. *)
 
-val check : t -> agent_id:string -> (unit, string) result
-(** [check t ~agent_id] is the gate query:
-
-    - [Closed] -> [Ok ()].
-    - [Open] past [until] -> transition to [HalfOpen], [Ok ()].
-    - [Open] before [until] ->
-      [Error "Circuit open until <iso> (<reason>)"].
-    - [HalfOpen] -> [Ok ()] (probe permitted). *)
-
-(** {1 Admin override} *)
-
-val force_open :
-  t -> agent_id:string -> reason:string -> duration_sec:float -> unit
-(** [force_open t ~agent_id ~reason ~duration_sec] manually opens
-    the breaker for [duration_sec] seconds with the supplied
-    [reason].  Used by operators to quarantine misbehaving agents. *)
-
-val force_close : t -> agent_id:string -> unit
-(** [force_close t ~agent_id] manually closes the breaker and
-    clears any pending failures.  Used by operators to override a
-    cooldown after manual intervention. *)
-
 (** {1 Introspection} *)
 
 type breaker_status = {
@@ -156,27 +131,6 @@ val cleanup : t -> older_than_seconds:int -> int
     Returns the number removed.  Open / half-open breakers are
     preserved regardless of age. *)
 
-(** {1 Wrappers (combined check + execute + record)} *)
-
-val wrap :
-  t ->
-  agent_id:string ->
-  (unit -> ('a, string) result) ->
-  ('a, string) result
-(** [wrap t ~agent_id f] composes [check] + [f] + record:
-
-    + [check] open -> [Error _] (f not called).
-    + [f ()] returns [Ok _] -> [record_success], pass through.
-    + [f ()] returns [Error msg] -> [record_failure ~reason:msg],
-      pass through. *)
-
-val wrap_result :
-  t -> agent_id:string -> (unit -> 'a) -> ('a, string) result
-(** [wrap_result t ~agent_id f] is the exception-catching variant.
-    Re-raises {!Eio.Cancel.Cancelled} (cooperative cancellation
-    must propagate); other exceptions are converted to
-    [Error (Printexc.to_string exn)] with [record_failure]. *)
-
 (** {1 Global instance}
 
     Memoized singleton.  Uses Atomic+Stdlib.Mutex rather than {!Eio.Lazy}
@@ -186,10 +140,6 @@ val wrap_result :
 val global : unit -> t
 (** Global circuit-breaker instance.  Prefer the [*_global] helpers below. *)
 
-val check_global : agent_id:string -> (unit, string) result
 val record_failure_global : agent_id:string -> reason:string -> unit
 val record_success_global : agent_id:string -> unit
-val force_open_global :
-  agent_id:string -> reason:string -> duration_sec:float -> unit
-val force_close_global : agent_id:string -> unit
 val get_status_global : agent_id:string -> breaker_status

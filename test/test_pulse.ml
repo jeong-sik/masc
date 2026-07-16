@@ -413,43 +413,6 @@ let () = test "failing consumer remains active" (fun () ->
   assert (!ok_count >= 5)
 )
 
-(* ── Test: circuit_breaker wrap ────────────────────────────── *)
-
-let () = test "circuit_breaker wrap records success/failure" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let cb = Circuit_breaker.create
-    ~failure_threshold:2 ~failure_window:60.0 ~cooldown:1.0 () in
-  (* Success path *)
-  let r1 = Circuit_breaker.wrap cb ~agent_id:"test" (fun () -> Ok 42) in
-  assert (r1 = Ok 42);
-  let s = Circuit_breaker.get_status cb ~agent_id:"test" in
-  assert (s.state_name = "closed");
-  (* 2 failures should open the breaker *)
-  ignore (Circuit_breaker.wrap cb ~agent_id:"test" (fun () -> Error "fail1"));
-  ignore (Circuit_breaker.wrap cb ~agent_id:"test" (fun () -> Error "fail2"));
-  let s2 = Circuit_breaker.get_status cb ~agent_id:"test" in
-  assert (s2.state_name = "open");
-  (* Wrapped call should be rejected while open *)
-  let r2 = Circuit_breaker.wrap cb ~agent_id:"test" (fun () -> Ok 99) in
-  (match r2 with Error _ -> () | Ok _ -> failwith "expected Error while open")
-)
-
-(* ── Test: circuit_breaker wrap_result ────────────────────────── *)
-
-let () = test "circuit_breaker wrap_result catches exceptions" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let cb = Circuit_breaker.create
-    ~failure_threshold:3 ~failure_window:60.0 ~cooldown:1.0 () in
-  let r = Circuit_breaker.wrap_result cb ~agent_id:"exc-test" (fun () ->
-    failwith "boom"
-  ) in
-  (match r with Error _ -> () | Ok _ -> failwith "expected Error from exception");
-  let s = Circuit_breaker.get_status cb ~agent_id:"exc-test" in
-  assert (s.recent_failures = 1)
-)
-
 (* ── Test: set_rhythm updates interval ────────────────────── *)
 
 let () = test "set_rhythm changes interval" (fun () ->

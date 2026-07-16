@@ -1,8 +1,8 @@
-(** Circuit Breaker for MASC agents
+(** Failure observation for MASC agents
 
-    Simple failure-based protection:
+    Legacy status projection:
     - 3 failures in 1 minute → 5 minute cooldown
-    - Prevents cascading failures in multi-agent systems
+    - No execution gate, wrapper, or suspension API
 
     Research basis:
     - Trust-Vulnerability Paradox (TVP) - arxiv:2510.18563v1
@@ -137,57 +137,6 @@ let record_success t ~agent_id =
         ()
   )
 
-(** Check if an agent is allowed to proceed *)
-let check t ~agent_id : (unit, string) result =
-  with_lock t (fun () ->
-    let breaker = get_or_create_breaker t ~agent_id in
-    let now = Time_compat.now () in
-    let breaker = { breaker with last_check = now } in
-
-    match breaker.state with
-    | Closed ->
-        put_breaker t breaker;
-        Ok ()
-
-    | Open { until; reason = _; _ } when now >= until ->
-        Log.Session.info "[CircuitBreaker] HALF-OPEN for %s, testing..." agent_id;
-        put_breaker t { breaker with state = HalfOpen };
-        Ok ()
-
-    | Open { until; reason; failure_count } ->
-        put_breaker t breaker;
-        let remaining = int_of_float (until -. now) in
-        Error (Printf.sprintf
-          "Circuit breaker OPEN for %s (%d failures). Retry in %ds. Reason: %s"
-          agent_id failure_count remaining reason)
-
-    | HalfOpen ->
-        put_breaker t breaker;
-        Ok ()
-  )
-
-(** Force-open a breaker (for manual suspension) *)
-let force_open t ~agent_id ~reason ~duration_sec =
-  with_lock t (fun () ->
-    let breaker = get_or_create_breaker t ~agent_id in
-    let now = Time_compat.now () in
-    put_breaker t { breaker with state = Open {
-      until = now +. duration_sec;
-      reason = "MANUAL: " ^ reason;
-      failure_count = 0;
-    } };
-    Log.Session.warn "[CircuitBreaker] FORCE-OPENED for %s: %s (%.0fs)"
-      agent_id reason duration_sec
-  )
-
-(** Force-close a breaker (for manual recovery) *)
-let force_close t ~agent_id =
-  with_lock t (fun () ->
-    let breaker = get_or_create_breaker t ~agent_id in
-    put_breaker t { breaker with state = Closed; failures = [] };
-    Log.Session.info "[CircuitBreaker] FORCE-CLOSED for %s" agent_id
-  )
-
 (** {1 Status & Statistics} *)
 
 type breaker_status = {
@@ -274,40 +223,6 @@ let cleanup t ~older_than_seconds =
     removed
   )
 
-(** {1 Wrap — Combined check + execute + record} *)
-
-(** Execute [f] with circuit breaker protection.
-    Returns [Error msg] if breaker is open.
-    Records success/failure automatically. *)
-let wrap t ~agent_id (f : unit -> ('a, string) result) : ('a, string) result =
-  match check t ~agent_id with
-  | Error msg -> Error msg
-  | Ok () ->
-      match f () with
-      | Ok _ as ok ->
-          record_success t ~agent_id;
-          ok
-      | Error msg as err ->
-          record_failure t ~agent_id ~reason:msg;
-          err
-
-(** Exception-catching variant of [wrap].
-    Re-raises [Eio.Cancel.Cancelled] to preserve cooperative cancellation. *)
-let wrap_result t ~agent_id (f : unit -> 'a) : ('a, string) result =
-  match check t ~agent_id with
-  | Error msg -> Error msg
-  | Ok () ->
-      (try
-         let result = f () in
-         record_success t ~agent_id;
-         Ok result
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         let msg = Printexc.to_string exn in
-         record_failure t ~agent_id ~reason:msg;
-         Error msg)
-
 (** {1 Global Instance}
 
     The singleton is read from tests and startup paths that can run before an
@@ -329,10 +244,6 @@ let global () =
             Atomic.set global_cache (Some candidate);
             candidate)
 
-let check_global ~agent_id = check (global ()) ~agent_id
 let record_failure_global ~agent_id ~reason = record_failure (global ()) ~agent_id ~reason
 let record_success_global ~agent_id = record_success (global ()) ~agent_id
-let force_open_global ~agent_id ~reason ~duration_sec =
-  force_open (global ()) ~agent_id ~reason ~duration_sec
-let force_close_global ~agent_id = force_close (global ()) ~agent_id
 let get_status_global ~agent_id = get_status (global ()) ~agent_id

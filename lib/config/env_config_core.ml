@@ -8,7 +8,6 @@
     {!Config_error} on missing/invalid environment variables.
 
     Usage:
-      let threshold = Env_config.Zombie.threshold_seconds
       let lock_timeout = Env_config.Lock.timeout_seconds
 *)
 
@@ -575,5 +574,3 @@ let pubsub_max_messages () =
     Set to "docker" to default all keepers to containerized execution. *)
 let keeper_default_sandbox_profile_raw () =
   get_string ~default:"local" "MASC_KEEPER_DEFAULT_SANDBOX_PROFILE"
-
-(** {1 Zombie Detection / Cleanup Configuration} *)

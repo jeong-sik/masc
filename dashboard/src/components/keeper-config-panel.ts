@@ -12,7 +12,7 @@ import {
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
-import { formatTokens, formatPct, formatCost } from '../lib/format-number'
+import { formatTokens, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import type { AsyncState } from '../lib/async-state'
@@ -260,7 +260,7 @@ function formatRelativeTime(date: Date): string {
   return date.toLocaleString('ko-KR')
 }
 
-// Runtime config draft for sandbox/proactive/compaction inline editing
+// Runtime config draft for sandbox/proactive inline editing
 export function normalizeMaxContextOverrideDraft(value: number, maxTokens?: number | null): number {
   if (!Number.isFinite(value)) return 0
   const normalized = Math.max(0, Math.trunc(value))
@@ -280,11 +280,6 @@ export type RuntimeDraft = {
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
   proactive_enabled: boolean
-  compaction_profile: string
-  compaction_ratio_gate: number
-  compaction_message_gate: number
-  compaction_token_gate: number
-  compaction_cooldown_sec: number
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
@@ -356,11 +351,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
-    compaction_profile: c.compaction.profile,
-    compaction_ratio_gate: c.compaction.ratio_gate,
-    compaction_message_gate: c.compaction.message_gate,
-    compaction_token_gate: c.compaction.token_gate,
-    compaction_cooldown_sec: c.compaction.cooldown_sec,
   }
 }
 
@@ -605,17 +595,12 @@ export function keeperConfigControlInventory(
           c,
           tab,
           'kcf-policy-continuity',
-          'Compaction and proactive',
-          `${configApiSource} compaction.* + proactive.* + autoboot_enabled`,
+          'Proactive continuity',
+          `${configApiSource} proactive.* + autoboot_enabled`,
           'PATCH /api/v1/keepers/:name/config continuity/autoboot fields',
           'continuity/autoboot fields',
           [
             'autoboot_enabled',
-            'compaction.profile',
-            'compaction.ratio_gate',
-            'compaction.message_gate',
-            'compaction.token_gate',
-            'compaction.cooldown_sec',
             'proactive.enabled',
           ],
         ),
@@ -805,11 +790,6 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
-  if (draft.compaction_profile !== orig.compaction.profile) payload.compaction_profile = draft.compaction_profile
-  if (draft.compaction_ratio_gate !== orig.compaction.ratio_gate) payload.compaction_ratio_gate = draft.compaction_ratio_gate
-  if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
-  if (draft.compaction_token_gate !== orig.compaction.token_gate) payload.compaction_token_gate = draft.compaction_token_gate
-  if (draft.compaction_cooldown_sec !== orig.compaction.cooldown_sec) payload.compaction_cooldown_sec = draft.compaction_cooldown_sec
   return payload
 }
 
@@ -847,11 +827,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
-    compaction_profile: 'compaction_profile' in payload,
-    compaction_ratio_gate: 'compaction_ratio_gate' in payload,
-    compaction_message_gate: 'compaction_message_gate' in payload,
-    compaction_token_gate: 'compaction_token_gate' in payload,
-    compaction_cooldown_sec: 'compaction_cooldown_sec' in payload,
   }
 }
 
@@ -1278,38 +1253,6 @@ function SetToggle({ on, onChange, ariaLabel }: { on: boolean; onChange: (v: boo
     >
       <span class="knob"></span>
     </button>
-  `
-}
-
-// Segmented selector for a bounded numeric value. To avoid silently dropping a
-// value that is not one of the presets, the current value is folded into the
-// option list (sorted) so it stays visible and selectable.
-function SetSeg({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  value: number
-  options: readonly number[]
-  onChange: (v: number) => void
-  ariaLabel: string
-}) {
-  const opts = options.includes(value)
-    ? options
-    : [...options, value].sort((a, b) => a - b)
-  return html`
-    <div class="set-seg" role="radiogroup" aria-label=${ariaLabel}>
-      ${opts.map((o) => html`
-        <button
-          type="button"
-          key=${o}
-          class=${`set-seg-b ${o === value ? 'on' : ''}`}
-          aria-pressed=${o === value ? 'true' : 'false'}
-          onClick=${() => onChange(o)}
-        >${o}</button>
-      `)}
-    </div>
   `
 }
 
@@ -1937,45 +1880,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     </${KcfSec}>
   `
 
-  // policy ⚖ — verify gate + compaction + proactive + tool policy
+  // policy ⚖ — verify gate + proactive + tool policy
   const policyTab = html`
     ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="검증" />
     <${BoolRow} label="검증" value=${c.execution.verify} />
-
-    <${SectionHeader} title="컴팩션" />
-    ${rd && runtimeCanEdit ? html`
-      <${InlineSelectRow}
-        label="compaction_profile"
-        value=${rd.compaction_profile}
-        options=${['aggressive', 'balanced', 'conservative', 'custom'] as const}
-        onChange=${(value: string) => updateRuntimeDraft('compaction_profile', value)}
-        dirty=${dirtyFlags.compaction_profile}
-      />
-      <${SetRow} label="비율 게이트" hint="컨텍스트 사용률 %" dirty=${dirtyFlags.compaction_ratio_gate}>
-        <${SetSeg} ariaLabel="비율 게이트" value=${Math.round(rd.compaction_ratio_gate * 100)}
-          options=${[75, 80, 85, 90]}
-          onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)} />
-      </${SetRow}>
-      <${InlineNumberRow} label="메시지 게이트" value=${rd.compaction_message_gate}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_message_gate', v)}
-        min=${0} max=${500} step=${5}
-        dirty=${dirtyFlags.compaction_message_gate} />
-      <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
-        min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
-        dirty=${dirtyFlags.compaction_token_gate} />
-      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
-        min=${0} max=${3600} step=${30} suffix="s"
-        dirty=${dirtyFlags.compaction_cooldown_sec} />
-    ` : html`
-      <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
-      <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
-      <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
-      <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
-      <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
-    `}
 
     <${SectionHeader} title="프로액티브" />
     ${rd && runtimeCanEdit ? html`

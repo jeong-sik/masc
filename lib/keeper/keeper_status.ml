@@ -65,9 +65,6 @@ let handle_keeper_list ctx args : tool_result =
           let last_compaction_saved_tokens =
             max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
           in
-          let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
-            compaction_policy_of_keeper m
-          in
           let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
           let metrics_path = Keeper_types_support.keeper_metrics_path ctx.config m.name in
           let metrics_window_lines =
@@ -124,16 +121,6 @@ let handle_keeper_list ctx args : tool_result =
               in
               empty, note
           in
-            let compaction_cooldown_remaining_s =
-              let cooldown = Float.of_int m.compaction.cooldown_sec in
-              if cooldown <= 0.0 then
-                0.0
-              else if m.runtime.compaction_rt.last_ts <= 0.0 then
-                0.0
-              else
-                let elapsed = now_ts -. m.runtime.compaction_rt.last_ts in
-                max 0.0 (cooldown -. elapsed)
-          in
           let context_json =
             match last_metrics with
             | None -> `Assoc [("source", `String "none")]
@@ -187,10 +174,6 @@ let handle_keeper_list ctx args : tool_result =
               ("handoff_count_total", `Int trace_history_count);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
-              ("compaction_profile", `String m.compaction.profile);
-              ("compaction_ratio_gate", `Float compact_ratio_gate);
-              ("compaction_message_gate", `Int compact_message_gate);
-              ("compaction_token_gate", `Int compact_token_gate);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
@@ -220,8 +203,6 @@ let handle_keeper_list ctx args : tool_result =
             ]
             @ runtime_blocker_fields
             @ attention_fields @ [
-              ("compaction_cooldown_sec", `Int m.compaction.cooldown_sec);
-              ("compaction_cooldown_remaining_s", `Float compaction_cooldown_remaining_s);
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
               ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);

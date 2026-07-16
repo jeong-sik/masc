@@ -191,14 +191,6 @@ module KeeperProactive : sig
   val stage_timing_ring_size : int
 end
 
-(** {1 Context ratio hard cap} *)
-
-(** Absolute ceiling for compaction ratio_gate / handoff threshold
-    after multiplier adjustment.  Range: [\[0.80, 0.99\]].  Reached
-    qualified ([Env_config_keeper.context_ratio_hard_cap]) by
-    {!Keeper_memory_recall} guard sites. *)
-val context_ratio_hard_cap : float
-
 (** {1 Dashboard health thresholds} *)
 
 module DashboardHealth : sig

@@ -64,7 +64,7 @@ type conditions = {
   turn_healthy : bool;
   (** Result of the latest completed turn observation. *)
   context_within_budget : bool;
-  (** [context_ratio < compaction.ratio_gate] *)
+  (** No compaction request is pending. *)
   context_handoff_needed : bool;
   compaction_active : bool;
   (** Set true on compaction entry, false on exit *)

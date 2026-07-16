@@ -141,12 +141,6 @@ let keeper_entries =
 
 let keeper_execution_entries =
   [
-    entry ~default:"0.85" "MASC_KEEPER_COMPACT_RATIO"
-      "Context compaction trigger ratio";
-    entry ~default:"12" "MASC_KEEPER_COMPACT_MAX_MESSAGES"
-      "Max messages before compaction";
-    entry ~default:"4000" "MASC_KEEPER_COMPACT_MAX_TOKENS"
-      "Max tokens before compaction (0=disabled)";
     entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
     entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
       "Unified turn max output tokens";
@@ -275,12 +269,6 @@ let channel_gate_entries =
       "Discord status stale threshold (seconds)";
     entry ~default:"30" "MASC_IMESSAGE_STATUS_STALE_SEC"
       "iMessage status stale threshold (seconds)";
-  ]
-
-let compaction_entries =
-  [
-    entry ~default:"0.95" "MASC_CONTEXT_RATIO_HARD_CAP"
-      "Absolute ceiling for compaction ratio_gate (clamped 0.80-0.99)";
   ]
 
 let decision_entries =
@@ -708,7 +696,7 @@ let all_categories () =
        @ docker_playground_entries
        @ keeper_sandbox_entries);
     category "keeper_execution"
-      (keeper_execution_entries @ compaction_entries @ decision_entries
+      (keeper_execution_entries @ decision_entries
        @ keeper_tool_entries @ keeper_runtime_entries
        @ keeper_proactive_entries @ keeper_grpc_entries);
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);

@@ -15,7 +15,6 @@ open Keeper_types_profile
     profile-default. *)
 type parsed_args =
   { name : string
-  ; compaction_profile_opt : string option
   ; runtime_id_opt : string option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option
@@ -24,10 +23,6 @@ type parsed_args =
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
   ; proactive_enabled_opt : bool option
-  ; compaction_ratio_gate_opt : float option
-  ; compaction_message_gate_opt : int option
-  ; compaction_token_gate_opt : int option
-  ; compaction_cooldown_sec_opt : int option
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
   ; instructions_arg : string option

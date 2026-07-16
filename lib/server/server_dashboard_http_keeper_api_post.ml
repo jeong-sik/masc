@@ -388,7 +388,6 @@ let dashboard_config_string_fields =
   [
     "runtime_id";
     "instructions";
-    "compaction_profile";
     "sandbox_profile";
     "network_mode";
   ]
@@ -397,18 +396,6 @@ let dashboard_config_bool_fields =
   [
     "autoboot_enabled";
     "proactive_enabled";
-  ]
-
-let dashboard_config_int_fields =
-  [
-    "compaction_message_gate";
-    "compaction_token_gate";
-    "compaction_cooldown_sec";
-  ]
-
-let dashboard_config_float_fields =
-  [
-    "compaction_ratio_gate";
   ]
 
 let dashboard_config_string_list_fields =
@@ -423,8 +410,6 @@ let dashboard_config_patch_allowed_fields =
   @
   dashboard_config_string_fields
   @ dashboard_config_bool_fields
-  @ dashboard_config_int_fields
-  @ dashboard_config_float_fields
   @ dashboard_config_string_list_fields
 
 let dedupe_keep_order_strings values =
@@ -540,20 +525,6 @@ let validate_dashboard_string_list_field key = function
       loop 0 items
   | other -> dashboard_field_type_error key "an array of strings" other
 
-let validate_dashboard_normalized_int key normalize value =
-  let normalized = normalize value in
-  if normalized = value then Ok ()
-  else
-    Error
-      (Printf.sprintf "%s is out of range for dashboard config: %d" key value)
-
-let validate_dashboard_normalized_float key normalize value =
-  let normalized = normalize value in
-  if normalized = value then Ok ()
-  else
-    Error
-      (Printf.sprintf "%s is out of range for dashboard config: %g" key value)
-
 let validate_dashboard_nonnegative_int key value =
   if value >= 0 then Ok ()
   else
@@ -588,31 +559,6 @@ let validate_dashboard_config_field key value =
     match value with
     | `Bool _ -> Ok ()
     | other -> dashboard_field_type_error key "a boolean" other
-  else if List.mem key dashboard_config_int_fields then
-    match value with
-    | `Int value ->
-        (match key with
-         | "compaction_message_gate" ->
-             validate_dashboard_normalized_int key
-               Keeper_config.normalize_compaction_message_gate value
-         | "compaction_token_gate" ->
-             validate_dashboard_normalized_int key
-               Keeper_config.normalize_compaction_token_gate value
-         | "compaction_cooldown_sec" ->
-             validate_dashboard_normalized_int key
-               Keeper_config.normalize_compaction_cooldown_sec value
-         | _ -> Ok ())
-    | other -> dashboard_field_type_error key "an integer" other
-  else if List.mem key dashboard_config_float_fields then
-    match value with
-    | `Int value ->
-        let f = float_of_int value in
-        validate_dashboard_normalized_float key
-          Keeper_config.normalize_compaction_ratio_gate f
-    | `Float value ->
-        validate_dashboard_normalized_float key
-          Keeper_config.normalize_compaction_ratio_gate value
-    | other -> dashboard_field_type_error key "a number" other
   else if List.mem key dashboard_config_string_list_fields then
     validate_dashboard_string_list_field key value
   else Ok ()

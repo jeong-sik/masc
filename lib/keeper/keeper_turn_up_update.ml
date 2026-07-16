@@ -96,17 +96,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
          else p.profile_defaults.mention_targets)
       ~name:p.name
   in
-  let (compaction_profile, compaction_ratio_gate, compaction_message_gate, compaction_token_gate) =
-    resolve_compaction_policy
-      ~profile_opt:p.compaction_profile_opt
-      ~ratio_opt:p.compaction_ratio_gate_opt
-      ~message_opt:p.compaction_message_gate_opt
-      ~token_opt:p.compaction_token_gate_opt
-      ~fallback_profile:old.compaction.profile
-      ~fallback_ratio:old.compaction.ratio_gate
-      ~fallback_message:old.compaction.message_gate
-      ~fallback_token:old.compaction.token_gate
-  in
   let { dead_revival_requested; clear_pause_state } =
     revival_decision ~latched_reason:old.latched_reason ~paused:old.paused
   in
@@ -170,17 +159,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
              (match p.profile_defaults.proactive_enabled with
               | Some v -> v
               | None -> old.proactive.enabled));
-    };
-    compaction = {
-      profile = compaction_profile;
-      ratio_gate = compaction_ratio_gate;
-      message_gate = compaction_message_gate;
-      token_gate = compaction_token_gate;
-      cooldown_sec =
-        Option.value
-          ~default:old.compaction.cooldown_sec
-          p.compaction_cooldown_sec_opt
-        |> normalize_compaction_cooldown_sec;
     };
     max_context_override =
       (if p.max_context_override_present then p.max_context_override_opt

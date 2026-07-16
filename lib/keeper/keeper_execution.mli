@@ -32,11 +32,6 @@ val memory_check_default_json : unit -> Yojson.Safe.t
 (* Proactive emission and explicit workspace replies are now handled
    by Keeper_unified_turn via the unified keeper loop. *)
 
-(** {1 Compaction} *)
-
-(** Extract compaction policy tuple from keeper metadata. *)
-val compaction_policy_of_keeper : keeper_meta -> float * int * int
-
 (** {1 Trace and Model} *)
 
 (** Generate unique trace ID for a keeper turn. *)

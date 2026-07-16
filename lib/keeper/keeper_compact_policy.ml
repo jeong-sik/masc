@@ -144,10 +144,6 @@ let compaction_decision_applied = function
   | Prepared _ | Rejected _ | Not_requested | Skipped_no_checkpoint -> false
 ;;
 
-let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
-  meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
-;;
-
 let strategy_names = [ "ConfiguredLlm" ]
 
 let record_pre_compact

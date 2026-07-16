@@ -179,8 +179,8 @@ stateDiagram-v2
   AgentRun --> UpdateMetrics : Agent.run 완료
   UpdateMetrics --> PostTurnLifecycle : 메트릭 갱신
   PostTurnLifecycle --> Checkpoint : continuity / checkpoint 정리
-  Checkpoint --> CompactCheck : compaction gate
-  CompactCheck --> HandoffCheck : handoff gate
+  Checkpoint --> CompactionRequest : explicit request 확인
+  CompactionRequest --> HandoffCheck : owner-lane operation 또는 요청 없음
   HandoffCheck --> MemoryWrite : memory bank notes
   MemoryWrite --> [*]
 ```
@@ -192,8 +192,8 @@ stateDiagram-v2
 3. **AgentRun**: `keeper_agent_run.run_turn`이 OAS `Agent.run`에 위임. tools + hooks + context_reducer를 전달하며 memory object는 전달하지 않는다
 4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_oas`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
-6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`가 compaction, handoff rollover, typed checkpoint metadata를 single-writer로 처리
-7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 gate에 따라 compaction 또는 handoff rollover를 실행
+6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`가 explicit compaction request, handoff rollover, typed checkpoint metadata를 single-writer로 처리
+7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 Manual 또는 typed provider-overflow 요청만 compaction 경계로 전달하고, handoff rollover를 별도 처리
 8. **MemoryWrite**: `keeper_agent_run` tail에서 MASC-owned memory bank note append를 수행한다
 
 ### 4.1.1 Post-turn Persistence Matrix
@@ -226,34 +226,28 @@ stateDiagram-v2
 - 재시작에는 fleet-wide 정지나 exponential backoff admission을 두지 않는다.
 - 최근 5건의 crash log 유지
 
-### 4.3 Compaction Policy
+### 4.3 Compaction Request Boundary
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Check
-  Check --> Blocked : ratio < ratio_gate AND messages < message_gate AND tokens < token_gate
-  Check --> CooldownHold : continuity_reflection 쿨다운 미충족
-  Check --> LlmPlan : threshold 초과 + 쿨다운 충족
-  LlmPlan --> Apply : configured LLM의 유효한 plan
-  LlmPlan --> Preserve : runtime/plan 오류 또는 deterministic mode
-  Apply --> [*] : LLM plan이 만든 context
-  Preserve --> [*] : 원문 checkpoint 유지
-  Blocked --> [*]
-  CooldownHold --> [*]
+  [*] --> Requested : Manual 또는 typed provider overflow
+  Requested --> OwnerLane : durable request claim
+  OwnerLane --> LlmPlan : configured Runtime 호출
+  LlmPlan --> Validate : typed structural plan
+  Validate --> Apply : source checkpoint CAS 성공
+  Validate --> Preserve : invalid 또는 stale plan
+  LlmPlan --> Preserve : Runtime 실패
+  Apply --> [*] : before/after 및 reinjection evidence
+  Preserve --> [*] : 원문 checkpoint 유지 + typed failure
 ```
 
-MASC에는 message importance scorer나 deterministic reducer fallback이 없다.
-실제 provider context-window compaction과 overflow retry는 OAS가 소유하며,
-MASC의 post-turn 경로는 configured LLM plan만 선택적으로 적용한다.
+MASC에는 ratio/message/token/cooldown gate, importance scorer, deterministic
+reducer fallback이 없다. `context_ratio`와 message/token count는 관측값이며
+semantic mutation 권한이 아니다.
 
-Compaction profile별 gate 기본값:
-
-| Profile | ratio_gate | message_gate | token_gate |
-|---------|-----------|--------------|------------|
-| `aggressive` | 0.35 | 120 | 60,000 |
-| `balanced` | 0.50 | 240 | 120,000 |
-| `conservative` | 0.70 | 480 | 250,000 |
-| `custom` | env 기반 | env 기반 | env 기반 |
+OAS는 provider/model 호출과 typed capacity failure만 제공한다. Compaction
+정책, 요청 수명, owner-lane 실행, source checkpoint CAS와 reinjection
+evidence는 MASC가 소유한다.
 
 ### 4.4 Deliberation Pipeline
 
@@ -417,8 +411,6 @@ dependency가 unavailable이면 해당 handler가 명시적 typed failure를 반
 
 모든 환경변수는 `MASC_KEEPER_` 접두사를 사용한다. 전체 목록은 `lib/keeper/keeper_config.ml` 참조.
 
-**Compaction**: `COMPACT_RATIO`(0.5), `COMPACT_MAX_MESSAGES`(240), `COMPACT_MAX_TOKENS`(0), `CONTINUITY_COMPACTION_COOLDOWN_SEC`(90)
-
 **Proactive**: `PROACTIVE_TEMP_LOW/MID/HIGH`(0.55/0.75/0.9), `PROACTIVE_SIMILARITY`(0.72), `PROACTIVE_MAX_TOKENS`(1024)
 
 **Cost Gates**: `TOOL_COST_MAX_USD`(disabled by default; set a positive USD value to enable the live unified-turn accumulated cost ceiling, `0` keeps it disabled), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
@@ -514,11 +506,11 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 `max_checkpoints_retained = 3`. `save` 후 `prune`이 호출되어 초과분을 삭제한다.
 
-### INV-KEEPER-004: compaction cooldown 강제
+### INV-KEEPER-004: compaction 요청 권한
 
-`compact_if_needed`는 실제 완료된 마지막 compaction 시각을 기준으로
-`compaction_cooldown_sec`를 적용한다. Assistant text나 proactive turn은 이
-clock을 갱신하지 않는다.
+Compaction은 명시적 Manual 요청 또는 typed provider overflow에서만
+시작한다. Context ratio, message count, token estimate, cooldown projection은
+compaction을 요청하거나 checkpoint를 변경할 수 없다.
 
 
 

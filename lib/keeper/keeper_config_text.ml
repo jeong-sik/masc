@@ -80,6 +80,11 @@ let removed_keeper_input_key_names =
     "policy_shell_mode";
     "persona_ref";
     "runtime_ref";
+    "compaction_profile";
+    "compaction_ratio_gate";
+    "compaction_message_gate";
+    "compaction_token_gate";
+    "compaction_cooldown_sec";
     "tool_access";
     "tool_denylist";
     "shards";

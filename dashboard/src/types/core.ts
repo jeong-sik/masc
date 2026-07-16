@@ -1244,10 +1244,6 @@ export interface Keeper {
     message_count?: number
     has_checkpoint?: boolean
   }
-  compaction_profile?: string | null
-  compaction_ratio_gate?: number | null
-  compaction_message_gate?: number | null
-  compaction_token_gate?: number | null
   traits?: string[]
   interests?: string[]
   primaryValue?: string
@@ -1393,14 +1389,6 @@ interface KeeperConfigExecution {
   runtime_ref?: RuntimeRef | null
 }
 
-interface KeeperConfigCompaction {
-  profile: string
-  ratio_gate: number
-  message_gate: number
-  token_gate: number
-  cooldown_sec: number
-}
-
 interface KeeperConfigProactive {
   enabled: boolean
 }
@@ -1523,7 +1511,6 @@ export interface KeeperConfig {
   effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
-  compaction: KeeperConfigCompaction
   proactive: KeeperConfigProactive
   drift: KeeperConfigDrift
   hooks?: KeeperHookIntrospection

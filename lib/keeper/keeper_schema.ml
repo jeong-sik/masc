@@ -250,26 +250,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "boolean");
           ("description", `String "If true, scheduled keeper cycles may produce proactive responses.");
         ]);
-        ("compaction_profile", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Compaction profile. One of: aggressive, balanced, conservative, custom.");
-        ]);
-        ("compaction_ratio_gate", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Context ratio gate for compaction (0.1-0.98). Overrides compaction profile when set.");
-        ]);
-        ("compaction_message_gate", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Message count gate for compaction (0 disables this gate). Overrides compaction profile when set.");
-        ]);
-        ("compaction_token_gate", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Token count gate for compaction (0 disables this gate). Overrides compaction profile when set.");
-        ]);
-        ("compaction_cooldown_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum seconds between completed compactions. 0 disables the cooldown.");
-        ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);

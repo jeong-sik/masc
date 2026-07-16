@@ -104,8 +104,9 @@ type operator_recovery_report =
   }
 
 (** Reopen failed request-local judgments after an explicit operator selection
-    of Auto Judge, then start a concurrency-bounded drain of every unresolved
-    judgment for the workspace. *)
+    of Auto Judge, then start every unresolved judgment for the workspace.
+    Exact approval identity prevents duplicate workers; MASC imposes no global
+    admission cap. *)
 val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 
@@ -113,3 +114,8 @@ val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
+
+module For_testing : sig
+  val claim_auto_judge : string -> bool
+  val release_auto_judge : string -> unit
+end

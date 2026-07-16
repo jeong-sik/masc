@@ -1,10 +1,9 @@
-(** Structured tool result type for MASC
+(** Structured tool result type for MASC.
 
-    RFC-0189 PR-2 (2026-05-26): the legacy [t] record and its
-    [to_legacy]/[of_legacy] converters were removed.  The typed
-    [(success_payload, failure_payload) Stdlib.Result.t] is the SSOT.
-    Callers pattern-match on [Ok | Error] rather than reading [.success]
-    + [.failure_class] off a record.
+    The closed {!disposition} sum is the semantic SSOT for every MASC tool
+    execution.  Keeper dispatch and observation layers may attach different
+    payloads to it, but they must not introduce parallel success/failure
+    enums or boolean outcome authorities.
 
     @since 2.95.0 *)
 
@@ -39,8 +38,9 @@ val log_level_of_failure_class : tool_failure_class -> Log.level
 
 (** {1 Tool call outcome (wire-level)} *)
 
-(** Lightweight tri-state for MCP/keeper tool call logging.
-    Maps from JSONRPC wire format or [result] variant. *)
+(** Lightweight observation of an MCP/OAS wire response.  This external
+    projection cannot represent {!Deferred}; it is not an internal execution
+    outcome authority. *)
 type tool_call_outcome = Ok | Error | Unknown
 
 val string_of_tool_call_outcome : tool_call_outcome -> string
@@ -53,9 +53,26 @@ val classify_from_exception : exn -> tool_failure_class
 
 (** {1 Structured result (SSOT)} *)
 
-(** Payload carried by a successful tool invocation. *)
-type success_payload =
+(** One authoritative execution disposition.  The type parameters let each
+    execution layer attach its own payload without copying the semantic
+    state into another enum. *)
+type ('completed, 'deferred, 'failed) disposition =
+  | Completed of 'completed
+  | Deferred of 'deferred
+  | Failed of 'failed
+
+val string_of_disposition : ('completed, 'deferred, 'failed) disposition -> string
+
+(** Strict wire decoder for persisted observation records. *)
+val unit_disposition_of_string
+  : string -> ((unit, unit, unit) disposition, string) Stdlib.Result.t
+
+(** Payload carried by a completed or deferred tool invocation.  [metadata]
+    is an opaque one-way boundary projection; MASC consumers must branch on
+    {!disposition}, never recover semantics by inspecting it. *)
+type output_payload =
   { data : Yojson.Safe.t
+  ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float
   }
@@ -71,17 +88,19 @@ type failure_payload =
   ; duration_ms : float
   }
 
-(** Typed result of a tool invocation.  Pattern-match on [Ok] / [Error]
-    rather than reading [.success] / [.failure_class] off a record. *)
-type result = (success_payload, failure_payload) Stdlib.Result.t
+(** Typed result of a tool invocation. *)
+type result =
+  (output_payload, output_payload, failure_payload) disposition
 
 (** {2 Accessors} *)
 
-(** [Ok ok] returns the JSON-stringified [ok.data] (or the bare string
-    if [data] is [`String]); [Error err] returns [err.message]. *)
+(** [Completed output] and [Deferred output] return the JSON-stringified
+    [output.data] (or the bare string if [data] is [`String]); [Failed err]
+    returns [err.message]. *)
 val message : result -> string
 
-(** [Ok _] → [None]; [Error err] → [Some err.class_]. *)
+(** [Completed _] and [Deferred _] return [None]; [Failed err] returns
+    [Some err.class_]. *)
 val failure_class : result -> tool_failure_class option
 
 val to_json : result -> Yojson.Safe.t
@@ -89,8 +108,15 @@ val tool_name : result -> string
 val duration_ms : result -> float
 val data : result -> Yojson.Safe.t
 
-(** [true] iff [Ok _]. *)
+val metadata : result -> Yojson.Safe.t option
+
+(** Explicit predicates.  Use all three when recording or serializing an
+    outcome; do not collapse {!Deferred} into a success boolean inside MASC. *)
+(** [true] only for [Completed].  This is a derived query, not an outcome value;
+    registries and serializers must consume the full {!disposition}. *)
 val is_success : result -> bool
+val is_deferred : result -> bool
+val is_failed : result -> bool
 
 (** {1 Handler constructors}
 
@@ -98,7 +124,7 @@ val is_success : result -> bool
     execution metadata at the boundary; zero-duration compatibility
     constructors have been removed. *)
 
-(** Successful result with an opaque string body.  Producers with typed JSON
+(** Completed result with an opaque string body.  Producers with typed JSON
     must use {!make_ok} and pass [~data] directly. *)
 val ok : tool_name:string -> start_time:float -> string -> result
 
@@ -122,17 +148,24 @@ val of_exn
   -> exn
   -> result
 
-(** {1 Typed constructors (RFC-0189)}
-
-    Same intent as {!ok}/{!error} but with the [class_] requirement
-    enforced positionally for new code that wants to commit to a
-    classification at the catch boundary. *)
+(** {1 Typed constructors} *)
 
 (** Typed success constructor.  [data] defaults to [`Null]. *)
 val make_ok
   :  tool_name:string
   -> start_time:float
   -> ?data:Yojson.Safe.t
+  -> ?metadata:Yojson.Safe.t
+  -> unit
+  -> result
+
+(** Typed deferred constructor.  [metadata] is forwarded opaquely at the OAS
+    boundary; the constructor itself is the only semantic authority. *)
+val make_deferred
+  :  tool_name:string
+  -> start_time:float
+  -> ?data:Yojson.Safe.t
+  -> ?metadata:Yojson.Safe.t
   -> unit
   -> result
 

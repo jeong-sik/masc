@@ -35,7 +35,7 @@ type judge_spec =
       (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초). *)
   ; jmax_timeout_s : float option
-      (** 적응형 타임아웃 확장 상한. None이면 예산 내에서 factor만큼 확장. *)
+      (** Legacy observed value; no runtime path extends a Provider timeout. *)
   }
 [@@deriving show, eq]
 
@@ -65,11 +65,11 @@ type preset =
           허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
           명시적으로 설정할 수 있다. *)
   ; judge_wave_budget_s : float
-      (** 1차 심판 wave 전체 wall-clock 예산 (초). 0=비활성(legacy). *)
+      (** Legacy observed value; it never gates or skips Provider work. *)
   ; adaptive_timeout_factor : float
-      (** 1차 심판 타임아웃 적응형 확장 계수. 1.0=확장 안 함. *)
+      (** Legacy observed value; it never extends Provider work. *)
   ; fallback_judge_model : string option
-      (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
+      (** Legacy observed value; failures never trigger an automatic call. *)
   }
 [@@deriving show, eq]
 
@@ -170,40 +170,9 @@ val staged_judge_groups
   -> judge_spec list
   -> (judge_spec list list, staged_judge_group_error) result
 
-(** 외곽 run_safe 타임아웃 = ceil(패널 총원 / max_fibers) 웨이브 × 그룹 timeout 중 max.
-    [max_fibers]는 패널 fan-out에 실제로 쓰는 동시성(= [max_concurrent_panels])과 같은
-    값을 넘겨야 한다 — 웨이브 직렬화를 무시하면 마지막 웨이브가 외곽 데드라인 밖에
-    놓여 완료된 답변까지 폐기된다. 단일 웨이브(N <= max_fibers)면 그룹 timeout 중 max. *)
-val panel_outer_timeout_of : max_fibers:int -> panel_group list -> float
-
 (** 심판 web_tools를 그룹들에서 derive: [req_web_tools] 또는 어느 그룹이든 web_tools.
     단일 그룹이면 [req_web_tools || group.web_tools] (오늘과 byte-identical). *)
 val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
-
-(** [adaptive_timeout_enabled preset] — preset의 [adaptive_timeout_factor]가 확장
-    임계값(1.0)을 넘는가. callers(orchestrator)가 float equality 비교 없이 typed bool로
-    adaptive 재시도 분기를 판정한다. *)
-val adaptive_timeout_enabled : preset -> bool
-
-(** [judge_wave_budget_enabled ~wave_budget_s] is false only for the validated
-    legacy disabled value [0.0]. Positive finite or effectively-unbounded
-    budgets still enforce the wave cap. *)
-val judge_wave_budget_enabled : wave_budget_s:float -> bool
-
-(** 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-    [wave_budget_s = 0.0]이면 legacy disabled budget으로 간주해 wave cap을 적용하지
-    않는다. [factor <= adaptive_extension_threshold](= 1.0)이면 [base_s]를 반환하고,
-    [already_timed_out]이고 [factor > adaptive_extension_threshold]이면 [base_s *.
-    factor]를 [max_s]로 상한·남은 예산으로 하한해 확장한다. 결과가
-    [min_effective_timeout_s](0.001s) 미만이면 [None]. *)
-val adjust_judge_timeout
-  :  base_s:float
-  -> max_s:float option
-  -> factor:float
-  -> wave_budget_s:float
-  -> elapsed_s:float
-  -> already_timed_out:bool
-  -> float option
 
 (** RFC-0280: 검증을 통과한 preset (Parse, don't validate). [t = private preset]이라
     필드는 자유롭게 읽되([preset] 또는 coercion [(vp :> preset)]) 검증 없이 생성할 수

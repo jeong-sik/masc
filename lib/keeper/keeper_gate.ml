@@ -406,7 +406,7 @@ let retry_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
   if not (claim_auto_judge entry.id)
   then Ok Skipped
   else
-    match Keeper_approval_queue.restart_retryable_summary ~id:entry.id with
+    match Keeper_approval_queue.restart_failed_summary ~id:entry.id with
     | Error error ->
       release_auto_judge entry.id;
       Error (Keeper_approval_queue.storage_error_to_string error)
@@ -438,7 +438,6 @@ type recovered_work =
   | Finalize_judgment of
       Keeper_approval_queue.pending_approval
       * Keeper_approval_queue.hitl_context_summary
-  | Retry_worker of Keeper_approval_queue.pending_approval
 
 let recovered_work_for_base_path ~base_path =
   Keeper_approval_queue.list_pending_entries ()
@@ -452,12 +451,10 @@ let recovered_work_for_base_path ~base_path =
           ({ judgment = (Keeper_approval_queue.Approve | Keeper_approval_queue.Deny); _ }
            as summary) ->
         Some (Finalize_judgment (entry, summary))
-      | Keeper_approval_queue.Summary_failed { retryable = true; _ } ->
-        Some (Retry_worker entry)
       | Keeper_approval_queue.Summary_not_requested
       | Keeper_approval_queue.Summary_available
           { judgment = Keeper_approval_queue.Require_human; _ }
-      | Keeper_approval_queue.Summary_failed { retryable = false; _ } ->
+      | Keeper_approval_queue.Summary_failed _ ->
         None)
 ;;
 
@@ -468,10 +465,6 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
       "auto_judge_restart_worker_recovered", "restart_worker_recovered"
     | `Finalize_judgment ->
       "auto_judge_restart_judgment_recovered", "restart_judgment_recovered"
-    | `Retry_worker ->
-      "auto_judge_restart_retryable_recovered", "restart_retryable_recovered"
-    | `Lane_activity_retry ->
-      "auto_judge_lane_activity_retry", "lane_activity_retry"
   in
   Log.Keeper.warn
     ~keeper_name:entry.keeper_name
@@ -496,6 +489,40 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
     ()
 ;;
 
+let retry_failed_auto_judge ~requested_by approval_id =
+  match Keeper_approval_queue.get_pending_entry ~id:approval_id with
+  | None -> Error ("pending approval not found: " ^ approval_id)
+  | Some entry ->
+    (match retry_auto_judge_entry entry with
+     | Error _ as error -> error
+     | Ok Skipped ->
+       Error ("approval summary is not failed or is already active: " ^ approval_id)
+     | Ok Started ->
+       Log.Keeper.info
+         ~keeper_name:entry.keeper_name
+         "auto judge operator retry started approval=%s operation=%s actor=%s"
+         entry.id
+         entry.tool_name
+         requested_by;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string HitlSummaryOutcomes)
+         ~labels:[ "outcome", "operator_retry_started" ]
+         ();
+       Keeper_approval_queue.audit_approval_event
+         ~base_path:entry.audit_base_path
+         ~event_type:"auto_judge_operator_retry_started"
+         ~id:entry.id
+         ~keeper_name:entry.keeper_name
+         ~tool_name:entry.tool_name
+         ?turn_id:entry.turn_id
+         ?task_id:entry.task_id
+         ?goal_id:entry.goal_id
+         ~goal_ids:entry.goal_ids
+         ~actor:requested_by
+         ();
+       Ok ())
+;;
+
 let resume_persisted_auto_judges ~base_path =
   let recovered = recovered_work_for_base_path ~base_path in
   let requested = List.length recovered in
@@ -510,9 +537,6 @@ let resume_persisted_auto_judges ~base_path =
            | Finalize_judgment (entry, summary) ->
              observe_recovered_work `Finalize_judgment entry;
              entry, `Finalize (resolve_judgment entry ~approval_id:entry.id summary)
-           | Retry_worker entry ->
-             observe_recovered_work `Retry_worker entry;
-             entry, `Start (retry_auto_judge_entry entry)
          in
          match result with
          | `Start (Ok Started) ->
@@ -639,35 +663,6 @@ let decide_without_cycle_grant ~keeper_always_allow request =
 ;;
 
 let decide ?cycle_grant ~keeper_always_allow request =
-  let retry_lane_failures () =
-    Keeper_approval_queue.list_pending_entries ()
-    |> List.iter (fun (entry : Keeper_approval_queue.pending_approval) ->
-      if String.equal entry.audit_base_path request.base_path
-         && String.equal entry.keeper_name request.keeper_name
-      then
-        match entry.summary_status with
-        | Keeper_approval_queue.Summary_failed { retryable = true; _ } ->
-          observe_recovered_work `Lane_activity_retry entry;
-          (match retry_auto_judge_entry entry with
-           | Ok (Started | Skipped) -> ()
-           | Error reason ->
-             Log.Keeper.error
-               ~keeper_name:request.keeper_name
-               "lane-local Auto Judge state recovery failed approval=%s: %s"
-               entry.id
-               reason)
-        | Keeper_approval_queue.Summary_not_requested
-        | Keeper_approval_queue.Summary_pending
-        | Keeper_approval_queue.Summary_available _
-        | Keeper_approval_queue.Summary_failed { retryable = false; _ } -> ())
-  in
-  (try retry_lane_failures () with
-   | Eio.Cancel.Cancelled _ as exn -> raise exn
-   | exn ->
-     Log.Keeper.error
-       ~keeper_name:request.keeper_name
-       "lane-local Auto Judge recovery boundary failed: %s"
-       (Printexc.to_string exn));
   let grant_result =
     match cycle_grant with
     | None -> Cycle_grant_not_applicable

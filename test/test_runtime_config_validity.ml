@@ -721,10 +721,8 @@ let test_repo_runtime_toml_loads () =
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
       default.provider_config.connect_timeout_s;
-    check int "one local Gemma canary pin in seed" 1 (List.length assignments);
-    check (option string) "nick0cave Gemma canary pin"
-      (Some "ollama.gemma4-26b-a4b-qat")
-      (List.assoc_opt "nick0cave" assignments);
+    check int "public seed has no keeper assignments" 0
+      (List.length assignments);
     check int "Ollama Cloud canonical seed count"
       (List.length ollama_cloud_seed_cases)
       (List.length
@@ -735,58 +733,6 @@ let test_repo_runtime_toml_loads () =
     List.iter
       (assert_ollama_cloud_seed_runtime runtimes)
       ollama_cloud_seed_cases;
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "ollama.gemma4-26b-a4b-qat")
-         runtimes
-     with
-     | None -> fail "expected Gemma4 Ollama runtime in seed"
-     | Some runtime ->
-       check bool "Gemma4 thinking enabled" true runtime.model.thinking_support;
-       check (option bool) "Gemma4 thinking not preserved" (Some false)
-         runtime.model.preserve_thinking;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "Gemma4 chat-template-token thinking control" true
-            (Runtime_schema.equal_thinking_control_format
-               caps.thinking_control_format
-               (Runtime_schema.Chat_template_token "<|think|>"));
-          (* Native Ollama /api/chat never serializes tool_choice
-             (oas backend_ollama.ml:24); declaring true here would override
-             oas models.toml false while the transport drops forced tool
-             choice. *)
-          check bool "Gemma4 forced tool_choice disabled" false
-            caps.supports_tool_choice
-        | None -> fail "expected Gemma4 capabilities"));
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "ollama.gemma4-e2b-it-qat")
-         runtimes
-     with
-     | None -> fail "expected Gemma4 E2B Ollama runtime in seed"
-     | Some runtime ->
-       check string
-         "Gemma4 E2B model api name"
-         "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
-         runtime.model.api_name;
-       check (option int) "Gemma4 E2B context" (Some 131072) runtime.model.max_context;
-       check bool "Gemma4 E2B thinking enabled" true
-         runtime.model.thinking_support;
-       check (option bool) "Gemma4 E2B thinking not preserved" (Some false)
-         runtime.model.preserve_thinking;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "Gemma4 E2B chat-template-token thinking control" true
-            (Runtime_schema.equal_thinking_control_format
-               caps.thinking_control_format
-               (Runtime_schema.Chat_template_token "<|think|>"));
-          check bool "Gemma4 E2B forced tool_choice disabled" false
-            caps.supports_tool_choice;
-          check bool "Gemma4 E2B image input" true caps.supports_image_input;
-          check bool "Gemma4 E2B audio input" true caps.supports_audio_input
-        | None -> fail "expected Gemma4 E2B capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -1143,10 +1089,10 @@ let test_runtime_atomic_getters_are_consistent_after_init () =
     let ids1 = Runtime.get_runtime_ids () in
     let ids2 = Runtime.get_runtime_ids () in
     check (list string) "get_runtime_ids is stable" ids1 ids2;
-    check bool "runtime_id_for_keeper resolves through atomic cache"
+    check bool "default runtime resolves through atomic cache"
       true
-      (match Runtime.runtime_id_for_keeper "nick0cave" with
-       | Some id -> Option.is_some (Runtime.get_runtime_by_id id)
+      (match Runtime.get_default_runtime () with
+       | Some rt -> Option.is_some (Runtime.get_runtime_by_id rt.id)
        | None -> false)
 
 let test_runtime_toml_parses_optional_max_concurrent () =

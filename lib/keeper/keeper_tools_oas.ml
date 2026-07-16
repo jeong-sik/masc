@@ -1,6 +1,6 @@
 (** Keeper_tools_oas — Wrap keeper tools as OAS Tool.t for Agent.run().
 
-    Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
+    Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] dispatch
     to [Agent_sdk.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
 
     Tool execution reads current context from [ctx_snapshot] (immutable),
@@ -22,22 +22,13 @@ let tool_usage_for_keeper keeper_name : (string * Keeper_types.tool_call_entry) 
   Keeper_registry_lookup.tool_usage_of_by_name keeper_name
 ;;
 
-let tool_usage_json keeper_name : Yojson.Safe.t =
-  `List
-    (List.map
-       (fun (name, e) ->
-          `Assoc
-            [ "tool_name", `String name
-            ; "count", `Int e.Keeper_types.count
-            ; "successes", `Int e.Keeper_types.successes
-            ; "failures", `Int e.Keeper_types.failures
-            ; "last_used_at", `Float e.Keeper_types.last_used_at
-            ])
-       (tool_usage_for_keeper keeper_name))
-;;
-
-let record_keeper_internal_tool_call ~tool_name ~success ~duration_ms =
-  Tool_registry.record_call ~source:Agent_internal ~tool_name ~success ~duration_ms ()
+let record_keeper_internal_tool_call ~tool_name ~disposition ~duration_ms =
+  Tool_registry.record_call
+    ~source:Agent_internal
+    ~tool_name
+    ~disposition
+    ~duration_ms
+    ()
 ;;
 
 let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
@@ -57,38 +48,13 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
 
 (* Build OAS Tool.t list from keeper's allowed tools.
 
-   Each tool delegates to [execute_keeper_tool_call] with the current
+   Each tool delegates to [execute_keeper_tool_call_with_outcome] with the current
    [ctx_snapshot] value. Tools that raise exceptions return error results
    instead of crashing the agent loop.
 
    @param config Workspace configuration for tool dispatch
    @param meta Keeper metadata (determines which tools are allowed)
    @param ctx_snapshot Immutable snapshot of current working context *)
-
-(** Project a producer-owned outcome into the model-facing envelope.
-
-    [raw] is always opaque text.  Only [data], supplied explicitly by the
-    producer, can become structured JSON.  No field name or string content can
-    alter success/failure or synthesize metadata. *)
-let normalize_tool_result
-      ~(success : bool)
-      ~(data : Yojson.Safe.t option)
-      (raw : string)
-  : Yojson.Safe.t
-  =
-  if success
-  then
-    `Assoc
-      [ "ok", `Bool true
-      ; "result", Option.value ~default:(`String raw) data
-      ]
-  else
-    `Assoc
-      [ "ok", `Bool false
-      ; "error", `String raw
-      ; "detail", Option.value ~default:`Null data
-      ]
-;;
 
 (** RFC-0006 Phase A.2: build the per-tool handler closure.
 

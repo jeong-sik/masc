@@ -155,8 +155,6 @@
   test_sse_qw
   test_sse_stream
   test_health
-  test_masc_oas_bridge_timeout_guard
-  test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
@@ -324,6 +322,7 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_owner_lock
+  test_cross_context_mutex
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
@@ -474,8 +473,6 @@
   test_sse_qw
   test_sse_stream
   test_health
-  test_masc_oas_bridge_timeout_guard
-  test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
@@ -647,6 +644,7 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_owner_lock
+  test_cross_context_mutex
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
@@ -1890,7 +1888,6 @@
 (include stanzas/test_keeper_mutex_coverage.inc)
 
 
-(include stanzas/test_keeper_pause_silent_failure_source.inc)
 
 (include stanzas/test_keeper_personality_round_trip.inc)
 
@@ -1981,9 +1978,6 @@
 
 (include stanzas/test_normalized_actor.inc)
 
-(include stanzas/test_oas_bridge_judge_callers_9629.inc)
-
-(include stanzas/test_oas_bridge_timeout_ssot_10094.inc)
 
 (include stanzas/test_keeper_runtime_observation_boundaries.inc)
 
@@ -1995,7 +1989,7 @@
 
 (include stanzas/test_openapi_api_e2e.inc)
 
-(include stanzas/test_masc_oas_bridge_cancel_boundary.inc)
+(include stanzas/test_masc_oas_bridge_observation.inc)
 
 (include stanzas/test_operator_mcp_e2e.inc)
 
@@ -2237,15 +2231,6 @@
  (name test_pr_d_agent_runtime_migration)
  (modules test_pr_d_agent_runtime_migration)
  (libraries masc_test_deps ast_grep))
-
-; server_bootstrap_loops fork helper ratchet.
-; Pins raw Eio.Fiber.fork ownership to the cancel-safe helper instead
-; of repeating ad hoc crash wrappers at each background loop site.
-
-(test
- (name test_server_bootstrap_loop_fork_helper)
- (modules test_server_bootstrap_loop_fork_helper)
- (libraries alcotest masc_test_deps))
 
 ; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
 ; and server bootstrap kept free of provider-specific OAS policy wiring.

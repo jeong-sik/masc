@@ -760,6 +760,7 @@ let run_turn
                                  capture is best-effort and gated by
                                  MASC_KEEPER_WIRE_CAPTURE. *)
                               Keeper_wire_capture.capture_response
+                                ~base_path:config.base_path
                                 ~masc_root:(Workspace.masc_root_dir config)
                                 ~keeper_name:meta.name
                                 ~turn_id:manifest_keeper_turn_id

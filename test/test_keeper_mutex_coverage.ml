@@ -406,11 +406,13 @@ let test_keeper_msg_async_does_not_accept_failed_initial_persistence () =
              tr_ok "{}")
            ()
        with
-       | Error (Keeper_msg_async.Initial_persistence_failed _) ->
+       | Error
+           (Keeper_msg_async.Submit_rejected
+              (Keeper_msg_async.Invalid_base_path _)) ->
          Alcotest.(check bool) "worker was not started" false (Atomic.get worker_ran)
        | Error error ->
          Alcotest.failf
-           "expected initial persistence failure, got %s"
+           "expected invalid base path rejection, got %s"
            (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
        | Ok outcome ->
          Alcotest.failf

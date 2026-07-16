@@ -412,6 +412,15 @@ let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
           Error (Gone err)))
 ;;
 
+let dashboard_gate_retry_http_json ~requested_by ~(args : Yojson.Safe.t) =
+  match Safe_ops.json_string_opt "id" args with
+  | None -> Error "id is required"
+  | Some id ->
+    (match Keeper_gate.retry_failed_auto_judge ~requested_by id with
+     | Error _ as error -> error
+     | Ok () -> Ok (`Assoc [ "ok", `Bool true; "id", `String id ]))
+;;
+
 let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, string) result
   =

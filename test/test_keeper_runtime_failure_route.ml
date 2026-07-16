@@ -151,13 +151,13 @@ let test_masc_internal_judgment_classes () =
           (Keeper_internal_error.Internal_contract_rejected { reason = "empty" }))
    with
    | KFR.Escalate_judgment
-       { judgment = KFR.Contract_violation
+       { judgment = KFR.Internal_opaque
        ; provenance = KFR.Masc_internal_error
        ; _
        } ->
      ()
    | other ->
-     Alcotest.failf "contract rejection should judge, got %s"
+     Alcotest.failf "internal contract rejection should remain opaque, got %s"
        (KFR.route_kind_label other));
   check_masc_route
     "capacity-exhausted runtime stays typed"

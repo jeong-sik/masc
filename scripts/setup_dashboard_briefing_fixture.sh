@@ -127,7 +127,6 @@ async function seedWorkspace() {
     models: ['glm:auto'],
     presence_keepalive: false,
     proactive_enabled: false,
-    auto_handoff: false,
   });
 }
 

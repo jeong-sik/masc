@@ -527,6 +527,7 @@ let assemble_hooks
                 Option.iter
                   (fun turn_id ->
                      Keeper_wire_capture.capture_request
+                       ~base_path:config.base_path
                        ~masc_root:(Workspace.masc_root_dir config)
                        ~keeper_name:meta.name
                        ~turn_id

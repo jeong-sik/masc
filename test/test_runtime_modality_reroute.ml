@@ -350,7 +350,8 @@ let test_degrade_manifest_public_projection () =
     (match assoc_field "media_dropped_counts" public with
      | Some (`String value) -> Some value
      | _ -> None);
-  check (option string) "payload role remains internal" None
+  check (option string) "payload role is explicit operator evidence"
+    (Some "operator_evidence")
     (match assoc_field "payload_role" public with
      | Some (`String value) -> Some value
      | _ -> None)

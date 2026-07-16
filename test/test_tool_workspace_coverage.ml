@@ -44,6 +44,14 @@ let set_current_task_ok config ~task_id =
   | Error msg -> failwith msg
 ;;
 
+let completion_pass : Masc_domain.configured_llm_completion_verdict =
+  { decision = Masc_domain.Completion_pass
+  ; runtime_id = "test-completion-reviewer"
+  ; rationale = Some "workspace status fixture approval"
+  ; evaluated_at = Masc_domain.now_iso ()
+  }
+;;
+
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -324,6 +332,7 @@ let () =
          ~task_id:"task-001"
          ~action:Masc_domain.Done_action
          ~notes:"ok"
+         ~configured_llm_verdict:completion_pass
          ()
      with
      | Ok _ -> ()
@@ -402,6 +411,7 @@ let () =
          ~task_id:"task-001"
          ~action:Masc_domain.Done_action
          ~notes:"ok"
+         ~configured_llm_verdict:completion_pass
          ()
      with
      | Ok _ -> ()

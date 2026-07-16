@@ -2,7 +2,7 @@ type completed_call =
   { operation : string
   ; input : Yojson.Safe.t
   ; result : Yojson.Safe.t
-  ; succeeded : bool
+  ; disposition : string
   }
 
 type t =
@@ -27,7 +27,7 @@ let record_tool_result t ~operation ~input result =
     { operation
     ; input
     ; result = Tool_result.data result
-    ; succeeded = Tool_result.is_success result
+    ; disposition = Tool_result.string_of_disposition result
     }
 ;;
 
@@ -36,7 +36,7 @@ let completed_call_to_yojson call =
     [ "operation", `String call.operation
     ; "input", call.input
     ; "result", call.result
-    ; "succeeded", `Bool call.succeeded
+    ; "disposition", `String call.disposition
     ]
 ;;
 

@@ -25,10 +25,10 @@ val install : on_io_failure:(site:string -> exn -> unit) -> unit
 val log_call :
   on_io_failure:(site:string -> exn -> unit) ->
   tool_name:string ->
-  success:bool ->
+  disposition:('completed, 'deferred, 'failed) Tool_result.disposition ->
   caller:string option ->
   unit
-(** [log_call ~on_io_failure ~tool_name ~success ~caller] appends a single
+(** [log_call ~on_io_failure ~tool_name ~disposition ~caller] appends a single
     entry to the JSONL store. Primarily used by the dispatch observer; exposed
     for testing. [on_io_failure] receives the append exception (if any). *)
 

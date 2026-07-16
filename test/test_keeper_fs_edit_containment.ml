@@ -48,7 +48,6 @@ let make_meta name =
       [ "name", `String name
       ; "agent_name", `String ("agent-" ^ name)
       ; "trace_id", `String ("trace-" ^ name)
-      ; "goal", `String "write containment test"
       ; "sandbox_profile", `String "docker"
       ; "always_allow", `Bool true
       ]

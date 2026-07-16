@@ -714,7 +714,6 @@ let () =
         [ "name", `String keeper_name
         ; "agent_name", `String keeper_name
         ; "trace_id", `String "trace-checkpoint-turn-persist"
-        ; "goal", `String "Persist checkpoint turn usage"
         ])
   in
   write_meta_exn config meta;
@@ -758,7 +757,6 @@ let () =
         [ "name", `String keeper_name
         ; "agent_name", `String keeper_name
         ; "trace_id", `String "trace-success-clears-stale-provider-failure"
-        ; "goal", `String "Clear stale provider runtime failure after success"
         ])
   in
   let run_result ?(stop_reason = Runtime_agent.Completed) ()

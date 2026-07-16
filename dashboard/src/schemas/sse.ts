@@ -137,6 +137,7 @@ const STRING_FIELDS = new Set([
   'new_phase',
   'event',
   'tool_name',
+  'disposition',
   'error_text',
   'tool_args_preview',
   'tool_output_preview',
@@ -361,6 +362,19 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
     if (!Number.isSafeInteger(value.revision) || (value.revision as number) < 0) {
       return fail('revision', 'Expected exact non-negative integer revision')
+    }
+  }
+
+  if (value.type === 'keeper_tool_call') {
+    if (
+      value.disposition !== 'completed'
+      && value.disposition !== 'deferred'
+      && value.disposition !== 'failed'
+    ) {
+      return fail(
+        'disposition',
+        'Expected keeper_tool_call disposition to be completed, deferred, or failed',
+      )
     }
   }
 

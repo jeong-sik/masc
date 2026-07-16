@@ -29,7 +29,7 @@ type judge_spec =
   ; jmax_output_tokens : int option  (** 출력 토큰 예산 override *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초) *)
   ; jmax_timeout_s : float option
-      (** 적응형 타임아웃 확장 상한. None이면 예산 내에서 factor만큼 확장. *)
+      (** Legacy observed value. No runtime path extends a Provider timeout. *)
   }
 [@@deriving show, eq]
 
@@ -49,11 +49,11 @@ type preset =
   ; min_answered : int
       (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
   ; judge_wave_budget_s : float
-      (** 1차 심판 wave 전체 wall-clock 예산 (초). 0=비활성(legacy). *)
+      (** Legacy observed value. It never gates or skips Provider work. *)
   ; adaptive_timeout_factor : float
-      (** 1차 심판 타임아웃 적응형 확장 계수. 1.0=확장 안 함. *)
+      (** Legacy observed value. It never extends Provider work. *)
   ; fallback_judge_model : string option
-      (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
+      (** Legacy observed value. Failures never trigger an automatic fallback call. *)
   }
 [@@deriving show, eq]
 
@@ -218,81 +218,11 @@ let staged_judge_groups ~group_size judges =
     in
     loop [] judges
 
-(* 외곽 run_safe 타임아웃. 하나의 Async_agent.all은 하나의 외곽 타임아웃만
-   가지므로(RFC-0252-A §4.3) 그룹별 정밀 timeout은 build_agent에 반영하고 외곽은
-   상한으로만 둔다.
-
-   상한은 fan-out 직렬화를 반영해야 한다: [Async_agent.all ~max_fibers]는 패널
-   총원 N을 [max_fibers]씩 웨이브로 실행하므로, 웨이브 수 = ceil(N / max_fibers)
-   이고 각 웨이브의 상한은 그룹 timeout 중 max다. 이전 구현(max만)은 N >
-   max_fibers일 때 마지막 웨이브가 구조적으로 외곽 데드라인 밖에 놓여, 이미
-   완료된 패널 답변까지 통째로 취소·폐기하고 전 패널을 bare [Timeout]으로
-   보고했다 (2026-07-01 사고의 reason_code=timeout 9건 서명; 라이브 config
-   3패널 × max_concurrent_panels=2 × 120s → 외곽 120s < 필요 240s).
-   [max_fibers <= 0]은 config 검증이 막지만 나눗셈 방어로 1로 clamp한다.
-   단일 웨이브(N <= max_fibers)면 이전과 byte-identical (max of group timeouts). *)
-let panel_outer_timeout_of ~max_fibers (groups : panel_group list) =
-  let max_group_timeout =
-    List.fold_left (fun acc (g : panel_group) -> Float.max acc g.timeout_s) 0.0 groups
-  in
-  let total_panelists =
-    List.fold_left (fun acc (g : panel_group) -> acc + List.length g.models) 0 groups
-  in
-  let max_fibers = max 1 max_fibers in
-  let waves = (total_panelists + max_fibers - 1) / max_fibers in
-  float_of_int (max 1 waves) *. max_group_timeout
-
 (* 심판은 preset당 1개이므로 그룹들에서 web_tools를 derive한다: req 또는 어느 그룹이든
    web_tools면 심판도 web tool. 단일 그룹이면 req || group.web_tools = 오늘의
    req.web_tools || preset.web_tools (byte-identity). *)
 let judge_web_tools_of ~req_web_tools (groups : panel_group list) =
   req_web_tools || List.exists (fun (g : panel_group) -> g.web_tools) groups
-
-(* 적응형 타임아웃 임계값들. [adaptive_extension_threshold]는 adaptive 확장을 끄는
-   factor 값(config default 1.0; 검증이 >= 1.0을 강제). 1.0은 IEEE754에서 정확히
-   표현되지만, 의도를 명시하고 drift를 막기 named 상수로 둔다 — callers 도 float
-   equality 비교 대신 [adaptive_timeout_enabled]를 쓴다 (CLAUDE.md §Magic Number +
-   P2#6 float-equality-as-toggle 회피). [min_effective_timeout_s]는 확장 후 effective
-   타임아웃이 이보다 작으면 즉시 실패(None)하는 하한이다. *)
-let adaptive_extension_threshold = 1.0
-
-let min_effective_timeout_s = 0.001
-
-(* [adaptive_timeout_enabled preset] — preset의 factor가 확장 임계값을 넘는가. float
-   equality 대신 typed bool 토글로, callers(orchestrator)가 adaptive 재시도 분기를
-   판정한다. *)
-let adaptive_timeout_enabled (p : preset) =
-  p.adaptive_timeout_factor > adaptive_extension_threshold
-
-let judge_wave_budget_enabled ~wave_budget_s = wave_budget_s > 0.0
-
-(* 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-   - factor <= [adaptive_extension_threshold] (또는 아직 타임아웃 안 됨): base_s를 wave
-     예산에 맞춰 반환.
-   - already_timed_out && factor > [adaptive_extension_threshold]: base_s *. factor를
-     max_s로 상한, 남은 예산으로 하한해 확장된 타임아웃을 반환.
-   예산/상한이 너무 작아 [min_effective_timeout_s] 미만이면 None (즉시 실패). *)
-let adjust_judge_timeout ~base_s ~max_s ~factor ~wave_budget_s ~elapsed_s
-    ~already_timed_out : float option =
-  let budget_enabled = judge_wave_budget_enabled ~wave_budget_s in
-  let budget_allows timeout_s =
-    (not budget_enabled) || elapsed_s +. timeout_s <= wave_budget_s
-  in
-  if factor <= adaptive_extension_threshold || not already_timed_out
-  then if budget_allows base_s then Some base_s else None
-  else
-    let extended = base_s *. factor in
-    let proposed =
-      match max_s with
-      | Some m -> Float.min extended m
-      | None -> extended
-    in
-    let effective =
-      if budget_enabled
-      then Float.min proposed (wave_budget_s -. elapsed_s)
-      else proposed
-    in
-    if effective < min_effective_timeout_s then None else Some effective
 
 (* RFC-0280: 검증된 preset을 타입으로 증명한다 (Parse, don't validate).
    [Validated_preset.t = private preset]이라 외부는 필드를 읽되([preset]/coercion)

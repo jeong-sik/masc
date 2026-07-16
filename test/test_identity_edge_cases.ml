@@ -95,6 +95,30 @@ let test_null_payload () =
     (String.length identity.agent_name >= 6
      && String.sub identity.agent_name 0 6 = "agent-")
 
+let check_arguments label expected params =
+  let actual = Mcp_server_eio_call_tool.For_testing.arguments_of_params params in
+  check string label (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
+;;
+
+let test_tools_call_arguments_presence () =
+  check_arguments
+    "omitted arguments become empty object"
+    (`Assoc [])
+    (`Assoc [ "name", `String "masc_status" ]);
+  check_arguments
+    "explicit null remains invalid"
+    `Null
+    (`Assoc [ "name", `String "masc_status"; "arguments", `Null ]);
+  check_arguments
+    "explicit object is preserved"
+    (`Assoc [ "days", `Int 7 ])
+    (`Assoc
+      [ "name", `String "masc_status"
+      ; "arguments", `Assoc [ "days", `Int 7 ]
+      ]);
+  check_arguments "non-object params remain invalid" `Null (`List [])
+;;
+
 (* Same defensive behavior for non-object scalars. *)
 let test_scalar_payload () =
   Eio_main.run @@ fun env ->
@@ -125,6 +149,8 @@ let () =
       test_case "empty" `Quick test_empty_params;
       test_case "null_values" `Quick test_null_values;
       test_case "null_payload" `Quick test_null_payload;
+      test_case "tools/call arguments presence" `Quick
+        test_tools_call_arguments_presence;
       test_case "scalar_payload" `Quick test_scalar_payload;
       test_case "long_name" `Quick test_long_agent_name;
       test_case "special_chars" `Quick test_special_chars;

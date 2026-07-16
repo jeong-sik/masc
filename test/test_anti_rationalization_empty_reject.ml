@@ -23,7 +23,7 @@ let review () = AR.review ~evaluator_runtime:"task-reviewer" request
 
 let configure_prompt_registry () =
   Prompt_registry.set_markdown_dir
-    (Filename.concat (Sys.getcwd ()) "config/prompts")
+    (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts")
 ;;
 
 let test_structured_tool_is_the_only_semantic_verdict () =

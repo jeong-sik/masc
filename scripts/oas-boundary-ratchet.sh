@@ -35,6 +35,7 @@
 #   scripts/oas-boundary-ratchet.sh              # check; exit 0 ok / 2 drift up / 1 error
 #   scripts/oas-boundary-ratchet.sh --regenerate # rewrite baseline from current counts
 #   scripts/oas-boundary-ratchet.sh --print      # print current counts, no compare
+#   scripts/oas-boundary-ratchet.sh --self-test  # prove clean/pass and reintroduction/fail
 
 set -euo pipefail
 
@@ -200,12 +201,52 @@ check() {
   return $drift
 }
 
+self_test() (
+  local fixture clean_count drift_count
+  fixture=$(mktemp -d "${TMPDIR:-/tmp}/oas-boundary-ratchet.XXXXXX")
+  trap 'rm -rf "$fixture"' EXIT
+  mkdir -p \
+    "$fixture/lib/keeper" \
+    "$fixture/lib/server" \
+    "$fixture/lib/dashboard" \
+    "$fixture/lib/local" \
+    "$fixture/scripts"
+  : >"$fixture/lib/masc_oas_bridge.ml"
+  : >"$fixture/lib/masc_oas_bridge.mli"
+  printf '%s\n' \
+    '{"c4_direct_runtime_calls_layer_c":0,"retired_bridge_timeout_policy":0}' \
+    >"$fixture/scripts/oas-boundary-baseline.json"
+
+  REPO_ROOT="$fixture"
+  BASELINE_FILE="$fixture/scripts/oas-boundary-baseline.json"
+
+  clean_count=$(count_retired_bridge_timeout_policy)
+  if [[ "$clean_count" != "0" ]] || ! check >/dev/null 2>&1; then
+    echo "[oas-boundary-ratchet:self-test] clean fixture did not pass (count=$clean_count)" >&2
+    exit 1
+  fi
+  echo "[oas-boundary-ratchet:self-test] clean fixture: count=0 check=pass"
+
+  printf '%s\n' \
+    'let _ = Env_config_oas_bridge.operator_judge_timeout_s ()' \
+    >"$fixture/lib/retired_bridge_timeout_policy.ml"
+  drift_count=$(count_retired_bridge_timeout_policy)
+  if [[ "$drift_count" == "0" ]] || check >/dev/null 2>&1; then
+    echo "[oas-boundary-ratchet:self-test] forbidden fixture did not fail (count=$drift_count)" >&2
+    exit 1
+  fi
+  echo "[oas-boundary-ratchet:self-test] forbidden fixture: count=$drift_count check=fail"
+)
+
 case "${1:-}" in
   --print)
     print_counts
     ;;
   --regenerate)
     regenerate
+    ;;
+  --self-test)
+    self_test
     ;;
   "")
     print_counts
@@ -222,7 +263,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    echo "Usage: $0 [--print|--regenerate]" >&2
+    echo "Usage: $0 [--print|--regenerate|--self-test]" >&2
     exit 1
     ;;
 esac

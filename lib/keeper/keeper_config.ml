@@ -239,29 +239,11 @@ let hitl_summary_temperature_rp =
 let hitl_summary_temperature () : float =
   Runtime_params.get hitl_summary_temperature_rp
 
-(** Maximum number of request-local Auto Judge calls that may be in flight.
-    A bounded queue prevents an operator recovery of a large durable backlog
-    from turning into an unbounded provider burst. *)
-let hitl_summary_max_concurrency_rp =
-  _rp_int ~key:"keeper.hitl_summary.max_concurrency"
-    ~default:(fun () ->
-      int_of_env_default
-        "MASC_KEEPER_HITL_SUMMARY_MAX_CONCURRENCY"
-        ~default:4
-        ~min_v:1
-        ~max_v:32)
-    ~min_v:1
-    ~max_v:32
-    ~description:"Maximum concurrent HITL Auto Judge calls" ()
-let hitl_summary_max_concurrency () : int =
-  Runtime_params.get hitl_summary_max_concurrency_rp
-
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
   let (_ : float) = Runtime_params.get hitl_summary_temperature_rp in
-  let (_ : int) = Runtime_params.get hitl_summary_max_concurrency_rp in
   ()
 
 let keeper_enable_thinking_rp =

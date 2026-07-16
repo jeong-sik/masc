@@ -2,6 +2,7 @@ open Alcotest
 
 module Q = Masc.Keeper_approval_queue
 module Worker = Masc.Hitl_summary_worker
+module Gate = Masc.Keeper_gate
 module Schema = Masc.Keeper_structured_output_schema
 module Runtime_resolved = Masc.Keeper_runtime_resolved
 
@@ -153,15 +154,22 @@ let test_request_context_projection_is_idempotent () =
     (Masc.Keeper_gate_request_context.project projected)
 ;;
 
-let test_concurrency_respects_runtime_binding () =
-  check int "runtime binding narrows subsystem cap" 1
-    (Worker.For_testing.effective_max_concurrency
-       ~configured:4
-       ~runtime_limit:(Some 1));
-  check int "subsystem cap remains when runtime omits a limit" 4
-    (Worker.For_testing.effective_max_concurrency
-       ~configured:4
-       ~runtime_limit:None)
+let test_auto_judge_admission_depends_only_on_exact_identity () =
+  let ids =
+    List.init 64 (fun index ->
+      Printf.sprintf "unbounded-auto-judge-test-%d" index)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Gate.For_testing.release_auto_judge ids)
+    (fun () ->
+      List.iter
+        (fun id ->
+           check bool ("claim " ^ id) true
+             (Gate.For_testing.claim_auto_judge id))
+        ids;
+      check bool "duplicate exact identity is rejected" false
+        (Gate.For_testing.claim_auto_judge (List.hd ids)))
 ;;
 
 let test_plain_json_requires_exact_object () =
@@ -306,13 +314,13 @@ let () =
             `Quick
             test_context_bundle_contains_exact_input_without_derived_classification
         ; test_case
-            "runtime binding caps judge concurrency"
-            `Quick
-            test_concurrency_respects_runtime_binding
-        ; test_case
             "request context projection is idempotent"
             `Quick
             test_request_context_projection_is_idempotent
+        ; test_case
+            "Auto Judge admission uses exact identity only"
+            `Quick
+            test_auto_judge_admission_depends_only_on_exact_identity
         ; test_case
             "plain JSON requires exact object"
             `Quick

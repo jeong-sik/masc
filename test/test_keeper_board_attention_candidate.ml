@@ -176,6 +176,26 @@ let test_record_dedupes_exact_candidate_identity () =
   ignore (only_loaded ~base_path ~keeper_name:first.keeper_name : A.candidate)
 ;;
 
+let test_record_and_start_retains_pending_when_worker_is_unavailable () =
+  with_temp_base "keeper-board-attention-worker-unavailable" @@ fun base_path ->
+  let recorded =
+    match A.record_and_start ~base_path (candidate ()) with
+    | Ok candidate -> candidate
+    | Error detail -> Alcotest.failf "record_and_start failed: %s" detail
+  in
+  let current = only_loaded ~base_path ~keeper_name:recorded.keeper_name in
+  match current.status with
+  | A.Pending
+      { last_failure = Some { kind = A.Worker_unavailable; detail; _ } } ->
+    Alcotest.(check string)
+      "worker startup failure is explicit"
+      "Board attention worker is not running"
+      detail
+  | A.Pending { last_failure = None } | A.Pending { last_failure = Some _ }
+  | A.Judged _ | A.Consumed _ ->
+    Alcotest.fail "worker startup failure did not remain durably Pending"
+;;
+
 let test_retryable_judge_failure_remains_pending () =
   with_temp_base "keeper-board-attention-retry" @@ fun base_path ->
   let pending = record_or_fail ~base_path (candidate ()) in
@@ -354,6 +374,10 @@ let () =
             "record dedupes exact candidate identity"
             `Quick
             test_record_dedupes_exact_candidate_identity
+        ; Alcotest.test_case
+            "record_and_start retains Pending without worker"
+            `Quick
+            test_record_and_start_retains_pending_when_worker_is_unavailable
         ; Alcotest.test_case
             "retryable judge failure remains Pending"
             `Quick

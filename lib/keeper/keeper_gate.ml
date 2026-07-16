@@ -285,11 +285,19 @@ type auto_judge_ready =
   ; source : auto_judge_ready_source
   }
 
+type auto_judge_attempt =
+  | Candidate_started
+  | Candidate_skipped
+  | Candidate_failed of string
+
+type auto_judge_wake_failure =
+  { candidate : auto_judge_ready
+  ; reason : string
+  }
+
 type auto_judge_wake_outcome =
-  | Wake_idle
-  | Wake_started of auto_judge_ready
-  | Wake_failed of auto_judge_ready * string
-  | Wake_crashed of string
+  | Wake_idle of auto_judge_wake_failure list
+  | Wake_started of auto_judge_ready * auto_judge_wake_failure list
 
 let active_auto_judges : Auto_judge_ids.t Atomic.t =
   Atomic.make Auto_judge_ids.empty
@@ -353,13 +361,52 @@ let ready_auto_judges ~finished_id =
   |> List.sort compare_ready_auto_judges
 ;;
 
+let attempt_ready_auto_judges ~attempt ready =
+  let rec loop failures = function
+    | [] -> Wake_idle (List.rev failures)
+    | candidate :: rest ->
+      (match attempt candidate with
+       | Candidate_started -> Wake_started (candidate, List.rev failures)
+       | Candidate_skipped -> loop failures rest
+       | Candidate_failed reason ->
+         loop ({ candidate; reason } :: failures) rest)
+  in
+  loop [] ready
+;;
+
+let observe_auto_judge_wake_failure ~finished_entry failure =
+  Log.Keeper.error
+    ~keeper_name:failure.candidate.entry.keeper_name
+    "Auto Judge terminal wake failed approval=%s after=%s: %s"
+    failure.candidate.entry.id
+    finished_entry.id
+    failure.reason;
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string HitlSummaryOutcomes)
+    ~labels:[ "outcome", "terminal_wake_failed" ]
+    ();
+  Keeper_approval_queue.audit_approval_event
+    ~base_path:failure.candidate.entry.audit_base_path
+    ~event_type:"auto_judge_terminal_wake_failed"
+    ~id:failure.candidate.entry.id
+    ~keeper_name:failure.candidate.entry.keeper_name
+    ~tool_name:failure.candidate.entry.tool_name
+    ?turn_id:failure.candidate.entry.turn_id
+    ?task_id:failure.candidate.entry.task_id
+    ?goal_id:failure.candidate.entry.goal_id
+    ~goal_ids:failure.candidate.entry.goal_ids
+    ()
+;;
+
 let observe_auto_judge_wake ~finished_entry = function
-  | Wake_idle ->
+  | Wake_idle failures ->
+    List.iter (observe_auto_judge_wake_failure ~finished_entry) failures;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HitlSummaryOutcomes)
       ~labels:[ "outcome", "terminal_wake_idle" ]
       ()
-  | Wake_started candidate ->
+  | Wake_started (candidate, failures) ->
+    List.iter (observe_auto_judge_wake_failure ~finished_entry) failures;
     Log.Keeper.info
       ~keeper_name:candidate.entry.keeper_name
       "Auto Judge terminal wake started approval=%s after=%s"
@@ -380,27 +427,18 @@ let observe_auto_judge_wake ~finished_entry = function
       ?goal_id:candidate.entry.goal_id
       ~goal_ids:candidate.entry.goal_ids
       ()
-  | Wake_failed (candidate, reason) ->
-    Log.Keeper.error
-      ~keeper_name:candidate.entry.keeper_name
-      "Auto Judge terminal wake failed approval=%s after=%s: %s"
-      candidate.entry.id
-      finished_entry.id
-      reason;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string HitlSummaryOutcomes)
-      ~labels:[ "outcome", "terminal_wake_failed" ]
-      ()
-  | Wake_crashed reason ->
-    Log.Keeper.error
-      ~keeper_name:finished_entry.keeper_name
-      "Auto Judge terminal wake crashed after=%s: %s"
-      finished_entry.id
-      reason;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string HitlSummaryOutcomes)
-      ~labels:[ "outcome", "terminal_wake_crashed" ]
-      ()
+;;
+
+let observe_auto_judge_wake_crash ~finished_entry exn =
+  Log.Keeper.error
+    ~keeper_name:finished_entry.keeper_name
+    "Auto Judge terminal wake crashed after=%s: %s"
+    finished_entry.id
+    (Printexc.to_string exn);
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string HitlSummaryOutcomes)
+    ~labels:[ "outcome", "terminal_wake_crashed" ]
+    ()
 ;;
 
 let rec claim_auto_judge id =
@@ -501,12 +539,12 @@ let rec spawn_claimed_auto_judge_entry
          ~on_failure
          ~on_finish:(fun () ->
            release_auto_judge approval_id;
-           let outcome =
-             try wake_one_auto_judge ~finished_id:approval_id with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn -> Wake_crashed (Printexc.to_string exn)
-           in
-           observe_auto_judge_wake ~finished_entry:entry outcome)
+           try
+             wake_one_auto_judge ~finished_id:approval_id
+             |> observe_auto_judge_wake ~finished_entry:entry
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> observe_auto_judge_wake_crash ~finished_entry:entry exn)
          ();
        Ok Started
      with
@@ -608,20 +646,18 @@ and drain_auto_judges ~base_path =
           None)
 
 and wake_one_auto_judge ~finished_id =
-  let rec start_first = function
-    | [] -> Wake_idle
-    | candidate :: rest ->
-      let result =
-        match candidate.source with
-        | Awaiting_start -> start_auto_judge candidate.entry.id
-        | Restart_replay -> spawn_auto_judge_entry candidate.entry
-      in
-      (match result with
-       | Ok Started -> Wake_started candidate
-       | Ok Skipped -> start_first rest
-       | Error reason -> Wake_failed (candidate, reason))
+  let attempt candidate =
+    let result =
+      match candidate.source with
+      | Awaiting_start -> start_auto_judge candidate.entry.id
+      | Restart_replay -> spawn_auto_judge_entry candidate.entry
+    in
+    match result with
+    | Ok Started -> Candidate_started
+    | Ok Skipped -> Candidate_skipped
+    | Error reason -> Candidate_failed reason
   in
-  start_first (ready_auto_judges ~finished_id)
+  attempt_ready_auto_judges ~attempt (ready_auto_judges ~finished_id)
 ;;
 
 type recovered_work =
@@ -932,10 +968,42 @@ module For_testing = struct
     | Awaiting_start
     | Restart_replay
 
+  type nonrec auto_judge_attempt = auto_judge_attempt =
+    | Candidate_started
+    | Candidate_skipped
+    | Candidate_failed of string
+
+  type auto_judge_wake_plan =
+    { started_id : string option
+    ; failures : (string * string) list
+    }
+
   let next_auto_judge_wake_candidate ~finished_id =
     match ready_auto_judges ~finished_id with
     | [] -> None
     | candidate :: _ -> Some (candidate.entry.id, candidate.source)
+  ;;
+
+  let drive_auto_judge_wake ~finished_id ~attempt =
+    let attempt candidate = attempt candidate.entry.id in
+    let plan =
+      attempt_ready_auto_judges ~attempt (ready_auto_judges ~finished_id)
+    in
+    match plan with
+    | Wake_idle failures ->
+      { started_id = None
+      ; failures =
+          List.map
+            (fun failure -> failure.candidate.entry.id, failure.reason)
+            failures
+      }
+    | Wake_started (candidate, failures) ->
+      { started_id = Some candidate.entry.id
+      ; failures =
+          List.map
+            (fun failure -> failure.candidate.entry.id, failure.reason)
+            failures
+      }
   ;;
 end
 ;;

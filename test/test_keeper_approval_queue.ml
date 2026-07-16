@@ -969,6 +969,64 @@ let test_terminal_wake_selects_replay_across_workspaces () =
        reject_and_cleanup replay_id)
 ;;
 
+let test_terminal_wake_continues_after_candidate_failure () =
+  let finished_base_path = temp_dir () in
+  let first_base_path = temp_dir () in
+  let second_base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      List.iter
+        cleanup_dir
+        [ finished_base_path; first_base_path; second_base_path ])
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let finished_id =
+         submit
+           ~base_path:finished_base_path
+           ~keeper_name:"queue-terminal-failure-origin"
+           ~input:(`String "finished")
+       in
+       let candidate_ids =
+         [ submit
+             ~base_path:first_base_path
+             ~keeper_name:"queue-terminal-first-candidate"
+             ~input:(`String "first")
+         ; submit
+             ~base_path:second_base_path
+             ~keeper_name:"queue-terminal-second-candidate"
+             ~input:(`String "second")
+         ]
+       in
+       let first_id =
+         match Gate.For_testing.next_auto_judge_wake_candidate ~finished_id with
+         | Some (id, _) -> id
+         | None -> Alcotest.fail "terminal wake had no first candidate"
+       in
+       let second_id =
+         match List.filter (fun id -> not (String.equal id first_id)) candidate_ids with
+         | [ id ] -> id
+         | _ -> Alcotest.fail "candidate identities were not exact"
+       in
+       let plan =
+         Gate.For_testing.drive_auto_judge_wake
+           ~finished_id
+           ~attempt:(fun id ->
+             if String.equal id first_id
+             then Gate.For_testing.Candidate_failed "first candidate failed"
+             else Gate.For_testing.Candidate_started)
+       in
+       Alcotest.(check (option string))
+         "second candidate starts"
+         (Some second_id)
+         plan.started_id;
+       Alcotest.(check (list (pair string string)))
+         "first failure remains observable"
+         [ first_id, "first candidate failed" ]
+         plan.failures;
+       List.iter reject_and_cleanup (finished_id :: candidate_ids))
+;;
+
 let test_malformed_snapshot_fails_install_and_is_observed () =
   let base_path = temp_dir () in
   Fun.protect
@@ -1416,6 +1474,10 @@ let () =
             "terminal wake crosses workspace boundary"
             `Quick
             test_terminal_wake_selects_replay_across_workspaces
+        ; Alcotest.test_case
+            "terminal wake continues after one failure"
+            `Quick
+            test_terminal_wake_continues_after_candidate_failure
         ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick

@@ -119,6 +119,21 @@ module For_testing : sig
     | Awaiting_start
     | Restart_replay
 
+  type auto_judge_attempt =
+    | Candidate_started
+    | Candidate_skipped
+    | Candidate_failed of string
+
+  type auto_judge_wake_plan =
+    { started_id : string option
+    ; failures : (string * string) list
+    }
+
   val next_auto_judge_wake_candidate :
     finished_id:string -> (string * auto_judge_ready_source) option
+
+  val drive_auto_judge_wake :
+    finished_id:string ->
+    attempt:(string -> auto_judge_attempt) ->
+    auto_judge_wake_plan
 end

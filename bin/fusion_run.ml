@@ -154,7 +154,6 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     ~(prompt : string) ~(config_path : string) : unit =
   let models_all = Fusion_policy.preset_models preset in
   let n = List.length models_all in
-  let max_fibers = max 1 n in
   (* 하네스는 동질 arm 비교 도구다(RFC-0252 §11). 이종 preset이면 첫 그룹의 plumbing
      (system_prompt/web_tools)을 대표로 써 모든 arm을 같은
      설정으로 돌린다 — arm 차이는 모델 집합·judge이지 plumbing이 아니다(legacy 단일
@@ -173,12 +172,11 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     preset.Fusion_policy.judge
     prompt;
 
-  let run_panel ~max_fibers ~models =
+  let run_panel ~models =
     let groups = [ { g0 with Fusion_policy.models } ] in
     Masc.Fusion_panel.run
       ~sw
       ~net
-      ~max_fibers
       ~groups
       ~prompt
       ()
@@ -190,7 +188,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     rule
     preset.Fusion_policy.judge
     rule;
-  let baseline = run_panel ~max_fibers:1 ~models:[ preset.Fusion_policy.judge ] in
+  let baseline = run_panel ~models:[ preset.Fusion_policy.judge ] in
   List.iter (print_outcome ~tag:"baseline") baseline;
   let baseline_answer =
     match first_some answer_of_outcome baseline with
@@ -213,7 +211,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     n
     rule;
   let sc_models = List.init n (fun _ -> preset.Fusion_policy.judge) in
-  let sc_panel = run_panel ~max_fibers ~models:sc_models in
+  let sc_panel = run_panel ~models:sc_models in
   List.iter (print_outcome ~tag:"self-consistency") sc_panel;
   let sc_answers = List.filter_map answer_of_outcome sc_panel in
   let sc_answer =
@@ -259,7 +257,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     rule
     n
     rule;
-  let fusion_panel = run_panel ~max_fibers ~models:models_all in
+  let fusion_panel = run_panel ~models:models_all in
   List.iter (print_outcome ~tag:"fusion") fusion_panel;
   let fusion_answer, fusion_judge_in, fusion_judge_out =
     match

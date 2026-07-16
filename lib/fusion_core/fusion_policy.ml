@@ -48,10 +48,6 @@ type preset =
 
 let min_answered_floor = 1
 let default_min_answered = min_answered_floor
-(* Legacy config default copied from the retired OpenRouter panel bound. No
-   execution path reads it; the stacked schema hard-cut deletes the field and
-   this value together. *)
-let default_max_concurrent_judges = 8
 let min_staged_judge_group_size = 2
 let default_staged_judge_group_size = 3
 
@@ -285,8 +281,6 @@ end
 type t =
   { enabled : bool
   ; default_preset : string
-  ; max_concurrent_panels : int
-  ; max_concurrent_judges : int
   ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }

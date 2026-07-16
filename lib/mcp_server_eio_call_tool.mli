@@ -115,6 +115,7 @@ val handle_call_tool_eio :
      workspace_scope:Mcp_server.workspace_scope ->
      ?profile:Mcp_server_eio_types.tool_profile ->
      ?mcp_session_id:string ->
+     ?invocation_ref:Tool_invocation_ref.t ->
      ?auth_token:'auth ->
      ?internal_keeper_runtime:bool ->
      Mcp_server.server_state ->

@@ -104,7 +104,7 @@ let with_call_tool_state f =
       f env sw state)
 ;;
 
-let call_with_result ~env ~sw state result =
+let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
   Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
     ~execute_tool_eio:
       (fun
@@ -113,15 +113,19 @@ let call_with_result ~env ~sw state result =
         ~workspace_scope:_
         ?profile:_
         ?mcp_session_id:_
+        ?invocation_ref
         ?auth_token:_
         ?internal_keeper_runtime:_
         _state
         ~name:_
-        ~arguments:_ -> result)
+        ~arguments:_ ->
+        Option.iter (fun observe -> observe invocation_ref) observe_invocation;
+        result)
     ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
     ~broadcast_tools_list_changed:(fun () -> ())
     ~sw
     ~clock:(Eio.Stdenv.clock env)
+    ?mcp_session_id
     state
     (`Int 1)
     (`Assoc
@@ -129,6 +133,36 @@ let call_with_result ~env ~sw state result =
       ; "arguments", `Assoc [ "_agent_name", `String "projection-test" ]
       ])
 ;;
+
+let test_threads_exact_mcp_invocation_identity () =
+  with_call_tool_state (fun env sw state ->
+    let observed = ref None in
+    let result =
+      Tool_result.make_ok
+        ~tool_name:"masc_status"
+        ~start_time:0.0
+        ~data:(`String "ok")
+        ()
+    in
+    ignore
+      (call_with_result
+         ~mcp_session_id:"typed-session"
+         ~observe_invocation:(fun invocation -> observed := invocation)
+         ~env ~sw state result);
+    let request_id =
+      Mcp_transport_protocol.request_id_of_yojson (`Int 1) |> Result.get_ok
+    in
+    let expected =
+      Tool_invocation_ref.external_mcp
+        ~request_id
+        ~session_id:"typed-session"
+      |> Result.get_ok
+    in
+    match !observed with
+    | Some actual ->
+      check bool "exact invocation identity" true
+        (Tool_invocation_ref.equal expected actual)
+    | None -> fail "execute callback did not receive invocation identity")
 
 let result_fields response = response |> U.member "result"
 let result_envelope response = result_fields response |> U.member "resultEnvelope"
@@ -261,6 +295,7 @@ let test_handle_call_executes_transient_failure_once () =
               ~workspace_scope:_
               ?profile:_
               ?mcp_session_id:_
+              ?invocation_ref:_
               ?auth_token:_
               ?internal_keeper_runtime:_
               _state
@@ -328,6 +363,7 @@ let test_call_captures_admission_scope_across_workspace_switch () =
               ~workspace_scope
               ?profile:_
               ?mcp_session_id:_
+              ?invocation_ref:_
               ?auth_token:_
               ?internal_keeper_runtime:_
               callback_state
@@ -732,6 +768,8 @@ let () =
             test_handle_call_executes_transient_failure_once;
           test_case "captures admission scope across workspace switch" `Quick
             test_call_captures_admission_scope_across_workspace_switch;
+          test_case "threads exact MCP invocation identity" `Quick
+            test_threads_exact_mcp_invocation_identity;
           test_case "activity payload sanitizes invalid UTF-8" `Quick
             test_activity_payload_sanitizes_invalid_utf8;
           test_case "records MCP server operation duration metric" `Quick

@@ -8,6 +8,7 @@ open Alcotest
 module Mcp_server_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 module Mcp_server_eio_protocol = Masc.Mcp_server_eio_protocol
+module Request_id = Mcp_transport_protocol
 (* ============================================================
    is_jsonrpc_v2 Tests
    ============================================================ *)
@@ -214,7 +215,7 @@ let test_get_id_none () =
    ============================================================ *)
 
 let test_is_valid_request_id_null () =
-  check bool "null valid" true (Mcp_server.is_valid_request_id `Null)
+  check bool "null invalid" false (Mcp_server.is_valid_request_id `Null)
 
 let test_is_valid_request_id_string () =
   check bool "string valid" true (Mcp_server.is_valid_request_id (`String "id-1"))
@@ -223,7 +224,38 @@ let test_is_valid_request_id_int () =
   check bool "int valid" true (Mcp_server.is_valid_request_id (`Int 123))
 
 let test_is_valid_request_id_float () =
-  check bool "float valid" true (Mcp_server.is_valid_request_id (`Float 1.5))
+  check bool "float invalid" false (Mcp_server.is_valid_request_id (`Float 1.5))
+
+let test_request_id_preserves_large_integer_lexeme () =
+  let lexeme = "92233720368547758081234567890" in
+  match Request_id.request_id_of_yojson (`Intlit lexeme) with
+  | Error _ -> fail "expected exact large integer request id"
+  | Ok request_id ->
+    check string "exact lexeme" lexeme
+      (Yojson.Safe.to_string (Request_id.request_id_to_yojson request_id))
+
+let invocation_ref_exn request_id =
+  match
+    Tool_invocation_ref.external_mcp
+      ~request_id
+      ~session_id:"mcp-session-1"
+  with
+  | Ok invocation -> invocation
+  | Error error -> fail (Tool_invocation_ref.error_to_string error)
+
+let test_tool_invocation_identity_distinguishes_string_and_integer () =
+  let string_id =
+    Request_id.request_id_of_yojson (`String "1")
+    |> Result.get_ok
+    |> invocation_ref_exn
+  in
+  let integer_id =
+    Request_id.request_id_of_yojson (`Int 1)
+    |> Result.get_ok
+    |> invocation_ref_exn
+  in
+  check bool "typed ids remain distinct" true
+    (not (Tool_invocation_ref.equal string_id integer_id))
 
 let test_is_valid_request_id_array () =
   check bool "array invalid" false (Mcp_server.is_valid_request_id (`List []))
@@ -484,6 +516,12 @@ let () =
       test_case "float" `Quick test_is_valid_request_id_float;
       test_case "array" `Quick test_is_valid_request_id_array;
       test_case "object" `Quick test_is_valid_request_id_object;
+    ];
+    "typed_request_identity", [
+      test_case "large integer lexeme" `Quick
+        test_request_id_preserves_large_integer_lexeme;
+      test_case "string and integer distinct" `Quick
+        test_tool_invocation_identity_distinguishes_string_and_integer;
     ];
     "validate_initialize_params", [
       test_case "valid" `Quick test_validate_initialize_params_valid;

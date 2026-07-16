@@ -7,6 +7,7 @@ type phase =
   | Reconciliation_pending
   | Commit_complete
   | Adopted
+  | Failed
   | Superseded
 
 type progress =
@@ -17,7 +18,7 @@ type progress =
   | Committed of Operation.candidate
   | Adopted_state of
       Operation.candidate * Keeper_checkpoint_ref.t * Ids.Turn_ref.t
-
+  | Failed_state of Operation.Attempt_id.t * Operation.attempt_failure
   | Superseded_state of superseded_state
 
 and superseded_state =
@@ -31,7 +32,6 @@ type state =
   { operation_id : Operation.Operation_id.t
   ; request : Operation.request
   ; progress : progress
-  ; closed_attempts : Operation.Attempt_id.t list
   }
 
 type snapshot =
@@ -49,6 +49,7 @@ type snapshot =
   ; committed_checkpoint : Keeper_checkpoint_ref.t option
   ; adopted_checkpoint : Keeper_checkpoint_ref.t option
   ; adopting_turn : Ids.Turn_ref.t option
+  ; failure : Operation.attempt_failure option
   ; superseded_by_checkpoint : Keeper_checkpoint_ref.t option
   }
 
@@ -56,7 +57,6 @@ type transition_error =
   | Invalid_transition of phase option
   | Operation_mismatch
   | Attempt_mismatch
-  | Attempt_reused
   | Source_mismatch
   | Candidate_mismatch
   | Reinjection_identity_mismatch
@@ -72,25 +72,29 @@ let phase state =
   | Reconciling _ -> Reconciliation_pending
   | Committed _ -> Commit_complete
   | Adopted_state _ -> Adopted
+  | Failed_state _ -> Failed
   | Superseded_state _ -> Superseded
 ;;
 
 let projection = function
-  | Pending -> None, None, None, None, None, None, None, None
+  | Pending -> None, None, None, None, None, None, None, None, None
   | Running attempt ->
-    Some attempt, None, None, None, None, None, None, None
+    Some attempt, None, None, None, None, None, None, None, None
   | Prepared value ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    None, None, None, None, None
+    None, None, None, None, None, None
   | Reconciling (value, reason) ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    Some reason, None, None, None, None
+    Some reason, None, None, None, None, None
   | Committed value ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    None, Some value.candidate_checkpoint, None, None, None
+    None, Some value.candidate_checkpoint, None, None, None, None
   | Adopted_state (value, checkpoint, turn) ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    None, Some value.candidate_checkpoint, Some checkpoint, Some turn, None
+    None, Some value.candidate_checkpoint, Some checkpoint, Some turn, None,
+    None
+  | Failed_state (attempt_id, failure) ->
+    Some attempt_id, None, None, None, None, None, None, Some failure, None
   | Superseded_state superseded ->
     let candidate_checkpoint, evidence =
       match superseded.candidate with
@@ -101,12 +105,12 @@ let projection = function
       if superseded.committed then candidate_checkpoint else None
     in
     Some superseded.attempt_id, candidate_checkpoint, evidence, None,
-    committed_checkpoint, None, None, superseded.observed_checkpoint
+    committed_checkpoint, None, None, None, superseded.observed_checkpoint
 ;;
 
 let snapshot state =
   let attempt_id, candidate_checkpoint, evidence, reconciliation_reason,
-      committed_checkpoint, adopted_checkpoint, adopting_turn,
+      committed_checkpoint, adopted_checkpoint, adopting_turn, failure,
       superseded_by_checkpoint =
     projection state.progress
   in
@@ -124,6 +128,7 @@ let snapshot state =
   ; committed_checkpoint
   ; adopted_checkpoint
   ; adopting_turn
+  ; failure
   ; superseded_by_checkpoint
   }
 ;;
@@ -148,10 +153,6 @@ let same_candidate
        && expected.evidence = actual.evidence)
   then Error Candidate_mismatch
   else Ok ()
-;;
-
-let close_attempt state attempt_id =
-  { state with progress = Pending; closed_attempts = attempt_id :: state.closed_attempts }
 ;;
 
 let validate_supersession
@@ -194,7 +195,6 @@ let apply current event =
       { operation_id = Operation.operation_id event
       ; request
       ; progress = Pending
-      ; closed_attempts = []
       }
   | None, _ | Some _, Operation.Requested _ -> invalid current
   | Some state, view ->
@@ -203,9 +203,7 @@ let apply current event =
     else
       match state.progress, view with
       | Pending, Operation.Attempt_started attempt_id ->
-        if List.exists (Operation.Attempt_id.equal attempt_id) state.closed_attempts
-        then Error Attempt_reused
-        else Ok { state with progress = Running attempt_id }
+        Ok { state with progress = Running attempt_id }
       | Running expected, Operation.Candidate_prepared value ->
         if not (Operation.Attempt_id.equal expected value.attempt_id)
         then Error Attempt_mismatch
@@ -222,14 +220,15 @@ let apply current event =
         then Error Candidate_mismatch
         else Ok { state with progress = Prepared value }
       | Running expected,
-        Operation.Attempt_failed (actual, Operation.Pre_commit_failure _) ->
+        Operation.Attempt_failed
+          (actual, (Operation.Pre_commit_failure _ as failure)) ->
         if Operation.Attempt_id.equal expected actual
-        then Ok (close_attempt state actual)
+        then Ok { state with progress = Failed_state (actual, failure) }
         else Error Attempt_mismatch
       | (Prepared expected | Reconciling (expected, _)),
         Operation.Attempt_failed
           ( actual
-          , Operation.Candidate_not_installed { observed_checkpoint; _ } ) ->
+          , (Operation.Candidate_not_installed { observed_checkpoint; _ } as failure) ) ->
         if not (Operation.Attempt_id.equal expected.attempt_id actual)
         then Error Attempt_mismatch
         else if
@@ -238,7 +237,11 @@ let apply current event =
                state.request.source_checkpoint
                observed_checkpoint)
         then Error Source_mismatch
-        else Ok (close_attempt state actual)
+        else
+          Ok
+            { state with
+              progress = Failed_state (actual, failure)
+            }
       | Prepared expected,
         Operation.Commit_reconciliation_required (actual, reason) ->
         same_candidate expected actual

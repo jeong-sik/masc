@@ -190,6 +190,31 @@ let test_reducer_happy_path () =
 ;;
 
 let test_reducer_confirmed_failure () =
+  let pre_commit_state =
+    ok (Reducer.fold [ request_event (); attempt_event () ])
+  in
+  let pre_commit_failure =
+    Operation.attempt_failed
+      ~operation_id
+      ~attempt_id
+      ~failure:(Operation.Pre_commit_failure cause)
+  in
+  let pre_commit_state =
+    ok (Reducer.apply (Some pre_commit_state) pre_commit_failure)
+  in
+  let pre_commit_snapshot = Reducer.snapshot pre_commit_state in
+  Alcotest.(check bool)
+    "pre-commit failure is terminal"
+    true
+    (pre_commit_snapshot.phase = Reducer.Failed);
+  (match pre_commit_snapshot.failure with
+   | Some (Operation.Pre_commit_failure actual_cause) ->
+     Alcotest.(check bool)
+       "pre-commit cause retained"
+       true
+       (Operation.Cause.equal cause actual_cause)
+   | Some (Operation.Candidate_not_installed _) | None ->
+     Alcotest.fail "pre-commit failure evidence was lost");
   let state = ok (Reducer.fold [ request_event (); attempt_event (); candidate_event () ]) in
   let wrong =
     Operation.attempt_failed
@@ -211,13 +236,28 @@ let test_reducer_confirmed_failure () =
            { cause; observed_checkpoint = source })
   in
   let state = ok (Reducer.apply (Some state) confirmed) in
+  let snapshot = Reducer.snapshot state in
   Alcotest.(check bool)
-    "confirmed non-install returns pending"
+    "confirmed non-install is terminal"
     true
-    (Reducer.phase state = Reducer.Request_pending);
+    (Reducer.phase state = Reducer.Failed);
+  (match snapshot.failure with
+   | Some
+       (Operation.Candidate_not_installed
+          { cause = actual_cause; observed_checkpoint }) ->
+     Alcotest.(check bool)
+       "failure cause retained"
+       true
+       (Operation.Cause.equal cause actual_cause);
+     Alcotest.(check bool)
+       "observed source retained"
+       true
+       (Keeper_checkpoint_ref.equal source observed_checkpoint)
+   | Some (Operation.Pre_commit_failure _) | None ->
+     Alcotest.fail "terminal failure evidence was lost");
   match Reducer.apply (Some state) (attempt_event ()) with
-  | Error Reducer.Attempt_reused -> ()
-  | Ok _ | Error _ -> Alcotest.fail "closed attempt id was reused"
+  | Error (Reducer.Invalid_transition (Some Reducer.Failed)) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "terminal failure accepted another attempt"
 ;;
 
 let test_reducer_reconciliation () =

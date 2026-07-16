@@ -9,6 +9,7 @@ type phase =
   | Reconciliation_pending
   | Commit_complete
   | Adopted
+  | Failed  (** Terminal; another objective requires a new operation. *)
   | Superseded
 
 type state
@@ -27,6 +28,7 @@ type snapshot =
   ; committed_checkpoint : Keeper_checkpoint_ref.t option
   ; adopted_checkpoint : Keeper_checkpoint_ref.t option
   ; adopting_turn : Ids.Turn_ref.t option
+  ; failure : Operation.attempt_failure option
   ; superseded_by_checkpoint : Keeper_checkpoint_ref.t option
   }
 
@@ -34,7 +36,6 @@ type transition_error =
   | Invalid_transition of phase option
   | Operation_mismatch
   | Attempt_mismatch
-  | Attempt_reused
   | Source_mismatch
   | Candidate_mismatch
   | Reinjection_identity_mismatch

@@ -7,6 +7,43 @@ module Runtime_resolved = Masc.Keeper_runtime_resolved
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
+let exact_runtime_id = "local.auto_judge"
+
+let runtime_toml ~hitl_summary =
+  "[providers.local]\n\
+   display-name = \"Local\"\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://localhost:11434\"\n\
+   \n\
+   [models.auto_judge]\n\
+   api-name = \"auto-judge\"\n\
+   max-context = 4096\n\
+   \n\
+   [models.auto_judge.capabilities]\n\
+   supports-structured-output = true\n\
+   \n\
+   [local.auto_judge]\n\
+   \n\
+   [runtime]\n\
+   default = \"local.auto_judge\"\n\
+   structured_judge = \"local.auto_judge\"\n"
+  ^ if hitl_summary then "hitl_summary = \"local.auto_judge\"\n" else ""
+;;
+
+let with_runtime_config content f =
+  let path = Filename.temp_file "hitl-summary-runtime" ".toml" in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match Runtime.save_config_text ~runtime_config_path:path content with
+       | Error detail -> failf "runtime config should load: %s" detail
+       | Ok () -> f ())
+;;
+
 let sample_entry : Q.pending_approval =
   { id = "approval-1"
   ; keeper_name = "keeper"
@@ -279,6 +316,34 @@ let test_explicit_body_timeout_forwards_root_clock () =
   | None -> fail "explicit body timeout dropped the root clock"
 ;;
 
+let test_readiness_requires_explicit_dedicated_runtime () =
+  Prompt_registry.set_markdown_dir
+    (Masc_test_deps.source_path "config/prompts");
+  with_runtime_config (runtime_toml ~hitl_summary:false) @@ fun () ->
+  check (option string) "dedicated runtime is absent" None
+    (Runtime.hitl_summary_runtime_id ());
+  check bool "structured judge is not reused" true
+    (Option.is_none (Worker.provider_config_for_summary ()));
+  match Worker.readiness () with
+  | Ok () -> fail "Auto Judge reported ready without [runtime].hitl_summary"
+  | Error detail ->
+    check bool "missing dedicated runtime is explicit" true
+      (Astring.String.is_infix ~affix:"[runtime].hitl_summary" detail)
+;;
+
+let test_readiness_selects_exact_dedicated_runtime () =
+  Prompt_registry.set_markdown_dir
+    (Masc_test_deps.source_path "config/prompts");
+  with_runtime_config (runtime_toml ~hitl_summary:true) @@ fun () ->
+  (match Worker.readiness () with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  match Worker.provider_config_for_summary () with
+  | None -> fail "configured Auto Judge runtime did not resolve"
+  | Some selected ->
+    check string "exact dedicated runtime selected" exact_runtime_id selected.runtime_id
+;;
+
 let () =
   run
     "Hitl_summary_worker"
@@ -333,6 +398,14 @@ let () =
             "explicit body timeout forwards root clock"
             `Quick
             test_explicit_body_timeout_forwards_root_clock
+        ; test_case
+            "readiness requires dedicated runtime"
+            `Quick
+            test_readiness_requires_explicit_dedicated_runtime
+        ; test_case
+            "readiness selects exact dedicated runtime"
+            `Quick
+            test_readiness_selects_exact_dedicated_runtime
         ] )
     ]
 ;;

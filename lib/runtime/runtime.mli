@@ -214,7 +214,7 @@ val structured_judge_runtime_id : unit -> string option
 val hitl_summary_runtime_id : unit -> string option
 (** [\[runtime\].hitl_summary] runtime id for HITL approval context summaries,
     or [None] when unset. Validated at load so a [Some] resolves to a configured
-    runtime. *)
+    runtime. Auto Judge does not inherit another subsystem's runtime. *)
 
 val runtime_id_for_structured_judge : unit -> string
 (** Resolved runtime id for configured structured-output judgment calls.
@@ -222,11 +222,6 @@ val runtime_id_for_structured_judge : unit -> string
     [\[runtime\].librarian] migration lane, then [\[runtime\].default]. The final
     default path still fails loudly at each caller's schema validation if the
     runtime cannot satisfy provider-native structured output. *)
-
-val runtime_id_for_hitl_summary : unit -> string
-(** Resolved runtime id for HITL approval context summaries. Uses
-    [\[runtime\].hitl_summary] first, then the existing structured-judge routing
-    chain. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a

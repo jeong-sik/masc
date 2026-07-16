@@ -397,7 +397,6 @@ let dashboard_config_bool_fields =
   [
     "autoboot_enabled";
     "proactive_enabled";
-    "auto_handoff";
   ]
 
 let dashboard_config_int_fields =
@@ -405,13 +404,11 @@ let dashboard_config_int_fields =
     "compaction_message_gate";
     "compaction_token_gate";
     "compaction_cooldown_sec";
-    "handoff_cooldown_sec";
   ]
 
 let dashboard_config_float_fields =
   [
     "compaction_ratio_gate";
-    "handoff_threshold";
   ]
 
 let dashboard_config_string_list_fields =
@@ -604,27 +601,17 @@ let validate_dashboard_config_field key value =
          | "compaction_cooldown_sec" ->
              validate_dashboard_normalized_int key
                Keeper_config.normalize_compaction_cooldown_sec value
-         | "handoff_cooldown_sec" ->
-             validate_dashboard_nonnegative_int key value
          | _ -> Ok ())
     | other -> dashboard_field_type_error key "an integer" other
   else if List.mem key dashboard_config_float_fields then
     match value with
     | `Int value ->
         let f = float_of_int value in
-        if key = "handoff_threshold" then
-          if f >= 0.0 && f <= 1.0 then Ok ()
-          else Error "handoff_threshold must be within 0.0..1.0"
-        else
-          validate_dashboard_normalized_float key
-            Keeper_config.normalize_compaction_ratio_gate f
+        validate_dashboard_normalized_float key
+          Keeper_config.normalize_compaction_ratio_gate f
     | `Float value ->
-        if key = "handoff_threshold" then
-          if value >= 0.0 && value <= 1.0 then Ok ()
-          else Error "handoff_threshold must be within 0.0..1.0"
-        else
-          validate_dashboard_normalized_float key
-            Keeper_config.normalize_compaction_ratio_gate value
+        validate_dashboard_normalized_float key
+          Keeper_config.normalize_compaction_ratio_gate value
     | other -> dashboard_field_type_error key "a number" other
   else if List.mem key dashboard_config_string_list_fields then
     validate_dashboard_string_list_field key value

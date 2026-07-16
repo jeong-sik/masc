@@ -1422,12 +1422,6 @@ interface KeeperConfigDrift {
   last_reason: string | null
 }
 
-interface KeeperConfigHandoff {
-  auto: boolean
-  threshold: number
-  cooldown_sec: number
-}
-
 export interface KeeperConfigActiveGoal {
   id: string
   title: string
@@ -1534,7 +1528,6 @@ export interface KeeperConfig {
   compaction: KeeperConfigCompaction
   proactive: KeeperConfigProactive
   drift: KeeperConfigDrift
-  handoff: KeeperConfigHandoff
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
   runtime_trust?: KeeperConfigRuntimeTrust | null

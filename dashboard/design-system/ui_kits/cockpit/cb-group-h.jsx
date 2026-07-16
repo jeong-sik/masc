@@ -32,8 +32,6 @@ function KeeperToolAccess() {
     { lbl: 'tools_preset',    v: k.tools_preset },
     { lbl: 'sandbox',         v: k.sandbox },
     { lbl: 'network',         v: k.network },
-    { lbl: 'auto_handoff',    v: String(k.auto_handoff), cls: k.auto_handoff ? 'on' : 'off' },
-    { lbl: 'handoff_threshold', v: `${(k.handoff_threshold * 100).toFixed(0)}%` },
     { lbl: 'proactive_idle',  v: `${k.proactive_idle_sec}s` },
     { lbl: 'mention targets', v: null, mentions: k.mention },
   ];

@@ -72,7 +72,6 @@ let test_create_omits_dead_fields () =
       [
         ("persona_name", `String "minimal");
         ("display_name", `String "미니멀");
-        ("auto_handoff", `Bool true);
       ]
   in
   let profile = Keeper_tool_persona_crud.profile_from_create_args args in
@@ -83,7 +82,6 @@ let test_create_omits_dead_fields () =
       Alcotest.(check bool) "dead display_name key not written" false (has "display_name");
       Alcotest.(check bool) "dead persona_name key not written" false (has "persona_name");
       Alcotest.(check bool) "dead created_at key not written" false (has "created_at");
-      Alcotest.(check bool) "dead auto_handoff key not written" false (has "auto_handoff");
       (* No keeper-template fields provided -> no empty keeper object. *)
       Alcotest.(check bool) "no keeper object when no defaults given" false (has "keeper")
   | _ -> Alcotest.fail "profile should be a JSON object"

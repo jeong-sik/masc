@@ -903,8 +903,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("paused", `Bool m.paused);
               ("keepalive_running", `Bool keepalive_running);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
-              ("auto_handoff", `Bool m.auto_handoff);
-              ("handoff_threshold", `Float m.handoff_threshold);
               ("agent", agent);
               ( "status",
                 `String

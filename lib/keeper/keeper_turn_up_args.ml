@@ -26,9 +26,6 @@ type parsed_args = {
   compaction_cooldown_sec_opt : int option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
-  auto_handoff_opt : bool option;
-  handoff_threshold_opt : float option;
-  handoff_cooldown_sec_opt : int option;
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
   instructions_opt : string option;
@@ -160,9 +157,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
-    let auto_handoff_opt = get_bool_opt args "auto_handoff" in
-    let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
-    let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
     let instructions_arg = get_string_opt args "instructions" in
     match
       load_keeper_profile_defaults_result_for_base_path
@@ -216,9 +210,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       compaction_cooldown_sec_opt;
       sandbox_profile_opt;
       network_mode_opt;
-      auto_handoff_opt;
-      handoff_threshold_opt;
-      handoff_cooldown_sec_opt;
       instructions_arg;
       profile_defaults;
       instructions_opt;

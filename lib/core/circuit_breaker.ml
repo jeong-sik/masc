@@ -174,15 +174,6 @@ let get_status t ~agent_id =
         }
   )
 
-let status_to_json (s : breaker_status) : Yojson.Safe.t =
-  `Assoc [
-    ("agent_id", `String s.agent_id);
-    ("state", `String s.state_name);
-    ("recent_failures", `Int s.recent_failures);
-    ("open_until", Json_util.float_opt_to_json s.open_until);
-    ("open_reason", Json_util.string_opt_to_json s.open_reason);
-  ]
-
 let list_all_breakers t =
   with_lock t (fun () ->
     StringMap.fold (fun agent_id breaker acc ->
@@ -204,24 +195,6 @@ let list_all_breakers t =
     ) t.breakers []
   )
 
-
-(** {1 Cleanup} *)
-
-let cleanup t ~older_than_seconds =
-  with_lock t (fun () ->
-    let now = Time_compat.now () in
-    let threshold = now -. float_of_int older_than_seconds in
-    let removed, kept =
-      StringMap.fold (fun agent_id breaker (n, m) ->
-        match breaker.state with
-        | Closed when breaker.last_check < threshold -> (n + 1, m)
-        | Closed | Open _ | HalfOpen ->
-            (n, StringMap.add agent_id breaker m)
-      ) t.breakers (0, StringMap.empty)
-    in
-    t.breakers <- kept;
-    removed
-  )
 
 (** {1 Global Instance}
 

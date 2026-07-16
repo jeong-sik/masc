@@ -1,9 +1,15 @@
 module Types = Masc_domain
 
-(** Unit tests for Tool_input_validation — OAS-delegated validation with coercion.
+(** Unit tests for Tool_input_validation — OAS-delegated strict validation.
 
     Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
-    -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping. *)
+    -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping.
+
+    OAS 0.212 (oas@6f3648d6, "hard-cut implicit agent governance") removed
+    implicit type coercion from validate: a string value for an
+    integer/boolean/number parameter is now a deterministic Reject with a
+    typed error the caller can act on, not a silent repair. These tests
+    codify that strict contract. *)
 
 open Masc
 
@@ -149,45 +155,39 @@ let test_no_required_fields () =
       (Yojson.Safe.to_string (Tool_result.data r)))
 
 (* ================================================================ *)
-(* Test: type coercion (Samchon Harness Rank 1)                     *)
+(* Test: strict typing — string never repairs to a scalar type       *)
+(* (OAS 0.212 removed implicit coercion; Reject carries the field)   *)
 (* ================================================================ *)
 
-let test_coerce_string_to_integer () =
+let test_string_for_integer_rejected () =
   let schema = make_schema [("count", "integer")] in
   let args = `Assoc [("count", `String "42")] in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
-  | Proceed coerced ->
-    let count = Yojson.Safe.Util.member "count" coerced in
-    Alcotest.(check string) "coerced to int" "42"
-      (match count with `Int i -> string_of_int i | _ -> "not_int")
-  | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
-  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
-      (Yojson.Safe.to_string (Tool_result.data r)))
+  | Reject r ->
+    let msg = Yojson.Safe.to_string (Tool_result.data r) in
+    Alcotest.(check bool) "mentions count" true (string_contains msg "count")
+  | Pass | Proceed _ ->
+    Alcotest.fail "Expected Reject: string must not repair to integer"
 
-let test_coerce_string_to_boolean () =
+let test_string_for_boolean_rejected () =
   let schema = make_schema [("flag", "boolean")] in
   let args = `Assoc [("flag", `String "true")] in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
-  | Proceed coerced ->
-    let flag = Yojson.Safe.Util.member "flag" coerced in
-    Alcotest.(check bool) "coerced to true" true
-      (match flag with `Bool b -> b | _ -> false)
-  | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
-  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
-      (Yojson.Safe.to_string (Tool_result.data r)))
+  | Reject r ->
+    let msg = Yojson.Safe.to_string (Tool_result.data r) in
+    Alcotest.(check bool) "mentions flag" true (string_contains msg "flag")
+  | Pass | Proceed _ ->
+    Alcotest.fail "Expected Reject: string must not repair to boolean"
 
-let test_coerce_string_to_number () =
+let test_string_for_number_rejected () =
   let schema = make_schema [("value", "number")] in
   let args = `Assoc [("value", `String "3.14")] in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
-  | Proceed coerced ->
-    let v = Yojson.Safe.Util.member "value" coerced in
-    (match v with
-     | `Float f -> Alcotest.(check bool) "close to pi" true (Float.abs (f -. 3.14) < 0.001)
-     | _ -> Alcotest.fail "Expected Float after coercion")
-  | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
-  | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
-      (Yojson.Safe.to_string (Tool_result.data r)))
+  | Reject r ->
+    let msg = Yojson.Safe.to_string (Tool_result.data r) in
+    Alcotest.(check bool) "mentions value" true (string_contains msg "value")
+  | Pass | Proceed _ ->
+    Alcotest.fail "Expected Reject: string must not repair to number"
 
 let test_coerce_int_to_number () =
   let schema = make_schema [("value", "number")] in
@@ -251,13 +251,18 @@ let test_correct_boolean () =
 (* Test: edge cases                                                  *)
 (* ================================================================ *)
 
-let test_null_args_no_required () =
+(* Raw OAS validate rejects `Null args ("expected object, got null").
+   The MCP boundary normalizes an omitted/null [arguments] field to
+   [`Assoc []] before validation (Mcp_server_eio_call_tool.
+   arguments_of_params), so this strict raw behavior never rejects a
+   spec-legal argument-less tools/call. *)
+let test_null_args_rejected_at_oas_layer () =
   let schema = make_schema [("optional", "string")] in
   let args = `Null in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
-  | Pass -> ()
-  | Proceed _ -> ()
-  | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
+  | Reject _ -> ()
+  | Pass | Proceed _ ->
+    Alcotest.fail "expected raw OAS validate to reject null args"
 
 let test_null_args_with_required () =
   let schema = make_schema ~required:["name"] [("name", "string")] in
@@ -367,21 +372,18 @@ let test_schema_union_type_does_not_raise () =
 (* Test: registered pre-hook path                                    *)
 (* ================================================================ *)
 
-let test_registered_hook_coerces_args () =
+let test_registered_hook_blocks_mistyped_args () =
   let args = `Assoc [("count", `String "42")] in
   let blocked, forwarded =
     run_registered_hook
       ~schema:(make_schema [("count", "integer")])
-      ~tool_name:"__tool_input_validation_registered_coerce"
+      ~tool_name:"__tool_input_validation_registered_strict"
       ~args
       ()
   in
-  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check bool) "coercion changed args" false
-    (Yojson.Safe.equal forwarded args);
-  match Yojson.Safe.Util.member "count" forwarded with
-  | `Int 42 -> ()
-  | _ -> Alcotest.fail "expected integer coercion through registered pre-hook"
+  Alcotest.(check bool) "blocked by strict typing" true (Option.is_some blocked);
+  Alcotest.(check bool) "args forwarded unmodified" true
+    (Yojson.Safe.equal forwarded args)
 
 let test_registered_hook_keeps_noop_as_pass () =
   let args = `Assoc [("count", `Int 42)] in
@@ -1260,28 +1262,25 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
            (Printf.sprintf
               "expected valid input, got %s"
               (Yojson.Safe.to_string (Tool_result.data result))));
-  let coerced_tool = "__tool_input_validation_metric_coerced" in
+  (* OAS 0.212 strict typing: a numeric string for an integer parameter
+     no longer repairs — it records the same fail counter as any other
+     invalid input. *)
+  let strict_string_tool = "__tool_input_validation_metric_strict_string" in
   check_validation_metric_increment
-    ~tool:coerced_tool
-    ~result:"pass"
-    ~reason:"coerced"
+    ~tool:strict_string_tool
+    ~result:"fail"
+    ~reason:"invalid_args"
     (fun () ->
        match
          Tool_input_validation.validate_args
            ~schema:valid_schema
-           ~name:coerced_tool
+           ~name:strict_string_tool
            ~args:(`Assoc [ "count", `String "42" ])
            ()
        with
-       | Ok coerced ->
-         (match Yojson.Safe.Util.member "count" coerced with
-          | `Int 42 -> ()
-          | _ -> Alcotest.fail "expected coerced integer")
-       | Error result ->
-         Alcotest.fail
-           (Printf.sprintf
-              "expected coerced input, got %s"
-              (Yojson.Safe.to_string (Tool_result.data result))));
+       | Error _ -> ()
+       | Ok _ ->
+         Alcotest.fail "expected strict Reject for string-typed integer");
   let fail_tool = "__tool_input_validation_metric_fail" in
   check_validation_metric_increment
     ~tool:fail_tool
@@ -2020,13 +2019,13 @@ let () =
       Alcotest.test_case "missing multiple" `Quick test_required_missing_multiple;
       Alcotest.test_case "no required fields" `Quick test_no_required_fields;
     ]);
-    ("coercion", [
-      Alcotest.test_case "string -> integer" `Quick test_coerce_string_to_integer;
-      Alcotest.test_case "string -> boolean" `Quick test_coerce_string_to_boolean;
-      Alcotest.test_case "string -> number" `Quick test_coerce_string_to_number;
+    ("strict_typing", [
+      Alcotest.test_case "string for integer rejected" `Quick test_string_for_integer_rejected;
+      Alcotest.test_case "string for boolean rejected" `Quick test_string_for_boolean_rejected;
+      Alcotest.test_case "string for number rejected" `Quick test_string_for_number_rejected;
       Alcotest.test_case "int -> number (widening)" `Quick test_coerce_int_to_number;
       Alcotest.test_case "Intlit -> Int (normalize)" `Quick test_coerce_intlit_to_integer;
-      Alcotest.test_case "non-coercible string -> reject" `Quick test_invalid_string_to_integer;
+      Alcotest.test_case "non-numeric string -> reject" `Quick test_invalid_string_to_integer;
     ]);
     ("correct_types", [
       Alcotest.test_case "string passes" `Quick test_correct_string;
@@ -2034,7 +2033,7 @@ let () =
       Alcotest.test_case "boolean passes" `Quick test_correct_boolean;
     ]);
     ("edge_cases", [
-      Alcotest.test_case "null args no required" `Quick test_null_args_no_required;
+      Alcotest.test_case "null args rejected at OAS layer" `Quick test_null_args_rejected_at_oas_layer;
       Alcotest.test_case "null args with required" `Quick test_null_args_with_required;
       Alcotest.test_case "extra fields allowed" `Quick test_extra_fields_allowed;
       Alcotest.test_case "empty schema allows empty args" `Quick
@@ -2055,8 +2054,8 @@ let () =
         test_validation_telemetry_emits_otel_event;
     ]);
     ("registered_hook", [
-      Alcotest.test_case "coercion flows through registered hook" `Quick
-        test_registered_hook_coerces_args;
+      Alcotest.test_case "mistyped args blocked by registered hook" `Quick
+        test_registered_hook_blocks_mistyped_args;
       Alcotest.test_case "no-op coercion stays pass" `Quick
         test_registered_hook_keeps_noop_as_pass;
       Alcotest.test_case "unknown tool rejects validation" `Quick

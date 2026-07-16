@@ -42,7 +42,7 @@ type judge_spec =
     desugar한다 — 그 경우 오늘과 byte-identical 동작. *)
 type preset =
   { name : string
-  ; panels : panel_group list  (** 1개 이상 그룹; 모델 총합 {!min_panel}..{!max_panel} *)
+  ; panels : panel_group list  (** 그룹 전체에 모델이 하나 이상 있어야 함. *)
   ; judge : string
   ; judge_system_prompt : string
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
@@ -62,18 +62,13 @@ type preset =
   }
 [@@deriving show, eq]
 
-(** 패널 크기(모델 총합) 하한/상한 (OpenRouter Fusion: 1..8 모델). *)
-val min_panel : int
-
-val max_panel : int
-
 (** [min_answered] 하한과 기본값. 기본 1 = "응답 패널이 1개도 없을 때만 judge skip". *)
 val min_answered_floor : int
 
 val default_min_answered : int
 
-(** Default JOJ first-judge concurrency. Derived from {!max_panel} so judge
-    fan-out has its own bounded capacity instead of borrowing panel throttling. *)
+(** Default JOJ first-judge execution concurrency. This batches execution only;
+    it never limits the number of configured judges or panel models. *)
 val default_max_concurrent_judges : int
 
 (** Default staged JOJ group size. A staged judge-of-judges run groups first
@@ -91,10 +86,10 @@ val valid_max_output_tokens : int option -> bool
 (** 모든 그룹의 모델을 평탄화 (그룹순 × 그룹내 모델순 보존). *)
 val preset_models : preset -> string list
 
-(** 패널 모델 총합이 [min_panel]..[max_panel] 범위이고 [panels]가 비어있지 않은가.
-    {!Validated_preset.of_preset}의 검증 술어 (RFC-0280: 게이트는 더 이상 재검증하지
-    않고 [Validated_preset.t]로 타입 증명한다). *)
-val preset_size_ok : preset -> bool
+(** 그룹 전체에 패널 모델이 하나 이상 있는가.
+    {!Validated_preset.of_preset}의 검증 술어. Provider별 cardinality 한계는 이
+    MASC-owned preset 타입을 제한하지 않는다. *)
+val preset_has_models : preset -> bool
 
 (** 패널 정체성 (RFC-0278). [label]이 비면 [model] 그대로(legacy byte-identical),
     있으면 ["label (model)"]. agent 카드명·심판 패널 태그·[panel_answer.model]에
@@ -169,7 +164,7 @@ module Validated_preset : sig
 
   (** 검증 실패 사유 — 닫힌 합. config 계층이 자기 [config_error]로 매핑한다. *)
   type invalid =
-    | Bad_size of int  (** 모델 총합(panels=[] 포함)이 [min_panel]..[max_panel] 밖 *)
+    | No_panel_models  (** 그룹 전체에 모델이 하나도 없음 *)
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성({!panelist_id}) *)
@@ -181,7 +176,7 @@ module Validated_preset : sig
         (** [min_answered]가 하한 [min_answered_floor] 미만. *)
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
-  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_output_tokens →
+  (** 검증 순서: model presence → prompt → judge → 정체성 중복 → max_output_tokens →
       1차 심판 prompt/정체성/max_output_tokens → min_answered.
       통과 시 [Ok vp], 첫 위반에서 [Error invalid].
       config 로드의 검증 순서와 동일. *)

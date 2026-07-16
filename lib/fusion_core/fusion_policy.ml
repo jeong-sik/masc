@@ -46,11 +46,9 @@ type preset =
   }
 [@@deriving show, eq]
 
-let min_panel = 1
-let max_panel = 8
 let min_answered_floor = 1
 let default_min_answered = min_answered_floor
-let default_max_concurrent_judges = max_panel
+let default_max_concurrent_judges = 8
 let min_staged_judge_group_size = 2
 let default_staged_judge_group_size = 3
 
@@ -62,12 +60,10 @@ let valid_max_output_tokens = function
 let preset_models (p : preset) =
   List.concat_map (fun (g : panel_group) -> g.models) p.panels
 
-(* 패널 전체(그룹 합) 모델 수가 1..8 범위인가. 1..8은 OpenRouter Fusion의 총 모델
-   상한이므로 그룹별이 아니라 평탄화 총합에 건다. panels=[]는 명시적 실패
-   (Unknown→Permissive 회피 — 빈 그룹 리스트를 통과시키지 않는다). *)
-let preset_size_ok (p : preset) =
-  let total = List.length (preset_models p) in
-  p.panels <> [] && total >= min_panel && total <= max_panel
+(* 적어도 하나의 패널 모델이 있는가. Provider별 cardinality 한계는 MASC의
+   preset 타입을 제한하지 않는다. 실행 시 provider가 거부하면 그 typed failure를
+   관측하며, 다른 provider와 heterogeneous panel 구성은 계속 실행된다. *)
+let preset_has_models (p : preset) = preset_models p <> []
 
 (* 패널 정체성 (RFC-0278). label이 비면 model 그대로(legacy byte-identity), 있으면
    "label (model)". 이 문자열이 패널의 유일 식별자다: agent 카드명(Async_agent.all
@@ -219,7 +215,7 @@ module Validated_preset = struct
   (* 검증 실패 사유 — 닫힌 합. config 계층이 이를 자기 [config_error]로 매핑한다
      (의존 방향: config → policy). *)
   type invalid =
-    | Bad_size of int  (** 모델 총합(panels=[] 포함)이 min_panel..max_panel 밖 *)
+    | No_panel_models  (** 그룹 전체에 모델이 하나도 없음 *)
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
@@ -232,13 +228,13 @@ module Validated_preset = struct
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
 
-  (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
+  (* 검증 순서는 config 로드 시점과 동일: model presence → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
      1차 심판 prompt → 1차 심판 정체성 중복 → 심판 max_output_tokens 범위 → min_answered.
      judges=[]면 1차 심판 관련 셋은 통과(simple/refine/conditional preset은 기존과 동일
      결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =
-    if not (preset_size_ok p) then Error (Bad_size (List.length (preset_models p)))
+    if not (preset_has_models p) then Error No_panel_models
     else if not (preset_prompts_present p) then Error Missing_prompt
     else if not (preset_judge_present p) then Error Missing_judge_model
     else

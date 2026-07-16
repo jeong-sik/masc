@@ -3,7 +3,7 @@
 
 type config_error =
   | Empty_presets
-  | Invalid_panel_size of string * int
+  | No_panel_models of string
   | Empty_panels of string
   | Conflicting_panel_grammar of string
   | Duplicate_panelist of string * string
@@ -110,7 +110,7 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Error invalid ->
       Error
         (match invalid with
-         | Fusion_policy.Validated_preset.Bad_size n -> Invalid_panel_size (name, n)
+         | Fusion_policy.Validated_preset.No_panel_models -> No_panel_models name
          | Fusion_policy.Validated_preset.Missing_prompt -> Missing_prompt name
          | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
          | Fusion_policy.Validated_preset.Duplicate_panelist id ->
@@ -131,8 +131,8 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
      단일 그룹이면 오늘과 byte-identical).
    둘 다 있으면 Conflicting_panel_grammar, panels=[](그룹 0개)면 Empty_panels로 명시적
    거부 (silent 한쪽 선택 금지). 빈 panel=[](모델 0개)은 legacy 길이-1 그룹으로 desugar
-   되어 size 검증에서 Invalid_panel_size(_, 0)으로 잡힌다 — "그룹 0개"(Empty_panels)와
-   "모델 0개"(Invalid_panel_size)는 다른 조건이므로 다른 variant로 구분한다.
+   되어 model-presence 검증에서 No_panel_models로 잡힌다 — "그룹 0개"(Empty_panels)와
+   "모델 0개"(No_panel_models)는 다른 조건이므로 다른 variant로 구분한다.
    panels가 스칼라 등 malformed면 get_array가 Type_error를 내고, find_opt/find_or는
    Key_error만 삼키고 Type_error는 전파하므로(otoml_base.ml:332-337) of_toml의
    Type_error 핸들러가 Toml_type_error로 fail-fast한다. 여기서 find_opt는 panels/panel

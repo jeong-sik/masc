@@ -251,8 +251,40 @@ let test_wakeup_running_reports_typed_outcome () =
      fail "offline keeper did not return Deferred_not_running")
 ;;
 
-let test_wakeup_denies_dead_tombstone_without_signaling () =
+let test_wakeup_signals_lifecycle_admitted_offline_keeper () =
   KR.clear ();
+  let meta = make_meta "offline-wakeup" in
+  let entry = KR.register_offline ~base_path meta.name meta in
+  Atomic.set entry.fiber_wakeup false;
+  (match KR.wakeup ~intent:KR.Scheduled_signal ~base_path meta.name with
+   | KR.Signaled -> ()
+   | KR.Deferred_unregistered
+   | KR.Deferred_not_running _
+   | KR.Deferred_lifecycle _ ->
+     fail "lifecycle-admitted offline keeper was not signaled");
+  check bool "offline keeper wake flag is set" true (Atomic.get entry.fiber_wakeup);
+  Atomic.set entry.fiber_wakeup false;
+  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path meta.name with
+   | KR.Deferred_not_running phase ->
+     check string "running-only deferred phase" "offline" (KSM.phase_to_string phase)
+   | KR.Signaled | KR.Deferred_unregistered | KR.Deferred_lifecycle _ ->
+     fail "running-only wake did not defer the offline keeper");
+  check bool "running-only wake leaves flag false" false (Atomic.get entry.fiber_wakeup)
+;;
+
+let test_wakeup_denies_paused_and_dead_without_signaling () =
+  KR.clear ();
+  let paused_meta = { (make_meta "paused-wakeup") with paused = true } in
+  let paused_entry = KR.register ~base_path paused_meta.name paused_meta in
+  Atomic.set paused_entry.fiber_wakeup false;
+  (match KR.wakeup ~intent:KR.Scheduled_signal ~base_path paused_meta.name with
+   | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
+   | KR.Signaled
+   | KR.Deferred_unregistered
+   | KR.Deferred_not_running _
+   | KR.Deferred_lifecycle Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
+     fail "paused wake was not lifecycle-deferred");
+  check bool "paused wake flag remains false" false (Atomic.get paused_entry.fiber_wakeup);
   let meta =
     { (make_meta "dead-wakeup") with
       paused = true
@@ -447,15 +479,19 @@ let () =
         ] )
     ; ( "get_with_health"
       , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )
-    ; ( "wakeup_running"
+    ; ( "wakeup"
       , [ test_case
             "reports signaled and deferred outcomes"
             `Quick
             test_wakeup_running_reports_typed_outcome
         ; test_case
-            "dead tombstone never receives runnable signal"
+            "signals lifecycle-admitted offline keeper"
             `Quick
-            test_wakeup_denies_dead_tombstone_without_signaling
+            test_wakeup_signals_lifecycle_admitted_offline_keeper
+        ; test_case
+            "paused and dead keepers never receive runnable signal"
+            `Quick
+            test_wakeup_denies_paused_and_dead_without_signaling
         ] )
     ; ( "tool_dispatch_exact_resources"
       , [ test_case "preserves exact meta after healthy entry replacement" `Quick

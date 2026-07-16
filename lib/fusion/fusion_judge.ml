@@ -126,8 +126,8 @@ let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
   | Agent_sdk.Error.Orchestration _ | Agent_sdk.Error.Internal _ ->
     Agent_sdk.Error.to_string e
 
-(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
-   모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Retry.Timeout _)]와
+(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. 두 runtime timeout
+   variant를 모두 [Timeout]으로 propagate한다: SDK [Api (Retry.Timeout _)]와
    provider-level [Provider (Llm_provider.Error.Timeout _)](비스트리밍 sync 경로의
    connect_timeout이 본문 전체를 바운드해 발생, detail "timeout phase=http_operation").
    후자는 [Fusion_panel.outcome_of_result]와 대칭으로, 이전에는 [_] catch-all에서
@@ -142,9 +142,16 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
   match e with
   | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _)
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
-  | _ ->
+  | Agent_sdk.Error.Api _ | Agent_sdk.Error.Provider _ ->
     Provider_error
       (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ -> Internal_error (prefix ^ sdk_error_detail e)
 
 (* 심판 출력 계약은 typed 2-tier다. tier는 OAS capability facts(
    [validate_output_schema_request])로만 결정하며 provider-name 특례는 없다:
@@ -177,7 +184,7 @@ let apply_fusion_judge_output_contract provider_cfg =
    에러도 usage를 동반한다: 토큰을 태운 뒤 실패(빈 응답/파싱 실패)는 소비분을, 토큰
    소비 전 실패(빌드/실행/빈 결과/provider 에러)는 [zero_usage]를 싣는다. 호출자는
    실패 경로에서도 비용을 회계할 수 있다. *)
-let run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model
+let run_composed ~sw ~net ~judge_system_prompt ~judge_model
     ~web_tools ~prompt () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
@@ -185,7 +192,6 @@ let run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model
   let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
   match
     Fusion_oas.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
-      ~timeout_s
       ~provider_config_transform:apply_fusion_judge_output_contract
       judge_model
   with
@@ -196,16 +202,11 @@ let run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model
              (Fusion_oas.panel_failure_detail ~runtime_id:judge_model reason))
       , Fusion_types.zero_usage )
   | Ok agent ->
-    (match
-       Masc_oas_bridge.run_safe ~caller:"fusion_judge" ~timeout_s (fun () ->
-         Ok (Agent_sdk.Async_agent.all ~sw [ (agent, prompt) ]))
-     with
-     | Error e ->
-       Error
-         ( failure_of_sdk_error ~runtime_id:judge_model ~prefix:"judge run failed: " e
-         , Fusion_types.zero_usage )
-     | Ok [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
-     | Ok ((_name, Ok resp) :: _) ->
+    (* Fusion adds no wall-clock or transport timeout. The resolved runtime owns
+       transport liveness; typed provider timeout errors remain observable below. *)
+    (match Agent_sdk.Async_agent.all ~sw [ agent, prompt ] with
+     | [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
+     | (_name, Ok resp) :: _ ->
        let text = Fusion_oas.answer_text resp in
        (* 응답은 받았으므로 소비 토큰을 회계한다 — 빈 응답이든 파싱 실패든 동일. *)
        let usage = Fusion_oas.usage_of resp in
@@ -216,34 +217,34 @@ let run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model
        else
          (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
          attach_usage (Fusion_judge_parse.of_string text) usage
-     | Ok ((_name, Error e) :: _) ->
+     | (_name, Error e) :: _ ->
        Error
          ( failure_of_sdk_error ~runtime_id:judge_model
              ~prefix:"judge provider error: " e
          , Fusion_types.zero_usage ))
 
-let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question
+let run ~sw ~net ~judge_system_prompt ~judge_model ~question
     ~panel ~web_tools () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
-  run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
+  run_composed ~sw ~net ~judge_system_prompt ~judge_model ~web_tools
     ~prompt:(compose_prompt ~question ~panel) ()
 
-let run_refine ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question
+let run_refine ~sw ~net ~judge_system_prompt ~judge_model ~question
     ~panel ~prior ~web_tools () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
-  run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
+  run_composed ~sw ~net ~judge_system_prompt ~judge_model ~web_tools
     ~prompt:(compose_refine_prompt ~question ~panel ~prior) ()
 
-let run_meta ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question
+let run_meta ~sw ~net ~judge_system_prompt ~judge_model ~question
     ~panel ~priors ~web_tools () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
-  run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
+  run_composed ~sw ~net ~judge_system_prompt ~judge_model ~web_tools
     ~prompt:(compose_meta_prompt ~question ~panel ~priors) ()
 
 module For_testing = struct

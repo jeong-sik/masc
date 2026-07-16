@@ -1,21 +1,5 @@
 open Masc
 
-let provider_cfg () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Anthropic
-    ~model_id:"fusion-test"
-    ~base_url:"http://localhost"
-    ()
-;;
-
-let runtime_config () =
-  Runtime_agent.default_config
-    ~name:"fusion-test"
-    ~provider_cfg:(provider_cfg ())
-    ~system_prompt:""
-    ~tools:[]
-;;
-
 let test_rewrites_unknown_provider () =
   let detail =
     Fusion_oas.provider_error_detail ~runtime_id:"ollama_cloud.kimi-k2-6"
@@ -209,24 +193,34 @@ let test_panel_failure_yojson_round_trips_current_shapes () =
           (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)")))
 ;;
 
-let test_timeout_budget_sets_transport_timeouts () =
-  let config =
-    Fusion_oas.For_testing.apply_timeout_budget
-      ~timeout_s:300.0
-      (runtime_config ())
-  in
-  Alcotest.(check (option (float 0.001)))
-    "stream idle timeout"
-    (Some 300.0)
-    config.stream_idle_timeout_s;
-  Alcotest.(check (option (float 0.001)))
-    "body timeout"
-    (Some 300.0)
-    config.body_timeout_s;
-  Alcotest.(check (option int))
-    "fusion does not synthesize an output token budget"
-    None
-    config.max_tokens
+let test_async_agent_internal_error_stays_internal () =
+  let sdk_error = Agent_sdk.Error.Internal "uncaught agent exception: boom" in
+  let rendered = Agent_sdk.Error.to_string sdk_error in
+  (match
+     Fusion_panel.For_testing.outcome_of_result
+       ~panelist:"panel-a"
+       ~model:"runtime-a"
+       (Error sdk_error)
+   with
+   | Fusion_types.Failed { failed_model; reason = Fusion_types.Bridge_error detail } ->
+     Alcotest.(check string) "panel identity" "panel-a" failed_model;
+     Alcotest.(check string) "panel internal detail" rendered detail
+   | outcome ->
+     Alcotest.failf
+       "agent internal error must remain a bridge failure, got %s"
+       (Fusion_types.show_panel_outcome outcome));
+  match
+    Fusion_judge.For_testing.failure_of_sdk_error
+      ~runtime_id:"runtime-a"
+      ~prefix:"judge: "
+      sdk_error
+  with
+  | Fusion_types.Internal_error detail ->
+    Alcotest.(check string) "judge internal detail" ("judge: " ^ rendered) detail
+  | failure ->
+    Alcotest.failf
+      "agent internal error must remain an internal judge failure, got %s"
+      (Fusion_types.show_judge_failure failure)
 ;;
 
 let () =
@@ -274,9 +268,9 @@ let () =
             `Quick
             test_panel_failure_yojson_round_trips_current_shapes
         ; Alcotest.test_case
-            "timeout budget sets transport timeouts"
+            "async agent internal error stays internal"
             `Quick
-            test_timeout_budget_sets_transport_timeouts
+            test_async_agent_internal_error_stays_internal
         ] )
     ]
 ;;

@@ -31,9 +31,8 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               groups
           in
           let panel =
-            Fusion_panel.run ~sw ~net
-              ~outer_timeout_s:(Fusion_policy.panel_outer_timeout_of groups)
-              ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
+            Fusion_panel.run ~sw ~net ~groups:effective_groups
+              ~prompt:req.Fusion_types.prompt ()
           in
           let judge_web_tools =
             Fusion_policy.judge_web_tools_of ~req_web_tools:req.Fusion_types.web_tools
@@ -41,7 +40,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           in
           let run_single_judge () =
             Fusion_judge.run ~sw ~net
-              ~timeout_s:preset.Fusion_policy.judge_timeout_s
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
               ~judge_model:preset.Fusion_policy.judge
               ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools ()
@@ -53,7 +51,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             in
             match
               Fusion_judge.run_refine ~sw ~net
-                ~timeout_s:preset.Fusion_policy.judge_timeout_s
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                 ~judge_model:preset.Fusion_policy.judge
                 ~question:req.Fusion_types.prompt ~panel ~prior:s1
@@ -148,7 +145,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                  (match
                        Fusion_judge.run_meta ~sw ~net
-                         ~timeout_s:preset.Fusion_policy.meta_timeout_s
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge
                          ~question:req.Fusion_types.prompt ~panel ~priors

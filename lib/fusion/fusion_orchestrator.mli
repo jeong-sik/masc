@@ -20,7 +20,7 @@ type outcome =
 
     + [Fusion_policy.decide]로 정책 판정 → [Deny]면 [Denied] 반환(부작용 없음).
     + [Allow]면 preset의 패널 모델로 [Fusion_panel.run], judge 모델로 [Fusion_judge.run].
-      패널/심판 system prompt와 타임아웃은 preset(=config)에서 온다 — 코드 default 없음.
+      패널/심판 system prompt는 preset(=config)에서 온다 — 코드 default 없음.
     + [topology]에 따라 reduce 위상을 고른다: [Simple]은 panel→judge→sink(현행),
       [Refine]은 panel→judge→judge'(1차 종합 재검토)→sink, [Conditional]은 1차 판정이
       [Insufficient]일 때만 refine하고 그 외엔 [Simple]처럼 1차 종합 그대로

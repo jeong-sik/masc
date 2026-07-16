@@ -1,0 +1,12 @@
+(test
+ (name test_keeper_compaction_operation)
+ (libraries
+  alcotest
+  masc.compaction_trigger
+  masc.keeper_checkpoint_ref
+  masc.keeper_compaction_evidence
+  masc.keeper_compaction_operation
+  masc.keeper_registry
+  masc.masc_types
+  masc.mcp_transport_protocol
+  masc.tool_invocation_ref))

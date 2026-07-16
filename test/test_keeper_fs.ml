@@ -145,11 +145,14 @@ let test_durable_raw_bytes_contract () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
+       let save path bytes =
+         match KF.save_bytes_durable_atomic path bytes with
+         | Ok () -> ()
+         | Error error -> fail (KF.durable_write_error_to_string error)
+       in
        let path = Filename.concat base "raw.bin" in
        let bytes = "\000raw\r\n\255" in
-       (match KF.save_bytes_durable_atomic path bytes with
-        | Ok () -> ()
-        | Error error -> fail (KF.durable_write_error_to_string error));
+       save path bytes;
        check string "exact bytes" bytes (read_file path);
        check int "private mode" 0o600 ((Unix.stat path).st_perm land 0o777);
        let fail_at expected path bytes =
@@ -166,6 +169,8 @@ let test_durable_raw_bytes_contract () =
         | Ok () -> fail "pre-rename fault succeeded");
        check bool "failed first create stays absent" false
          (Sys.file_exists absent);
+       save absent "retry\000bytes";
+       check string "same path retry" "retry\000bytes" (read_file absent);
        let published = "\255new\000bytes" in
        (match fail_at KF.Parent_directory_fsync_after_rename path published with
         | Error

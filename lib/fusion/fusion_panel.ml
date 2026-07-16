@@ -107,7 +107,7 @@ let run ~sw ~net ~max_fibers ~groups ~prompt ()
         raw model을 쓰기 위함 (RFC-0278). *)
   let answered =
     match
-      Masc_oas_bridge.run_safe ~caller:"fusion_panel" (fun () ->
+      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_panel (fun () ->
         Ok
           (Agent_sdk.Async_agent.all ~sw ~max_fibers
              (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))

@@ -6,6 +6,8 @@
 
 type caller =
   | Anti_rationalization
+  | Fusion_judge
+  | Fusion_panel
   | Operator_judge
 
 (** Stable observation label for the closed caller vocabulary. *)

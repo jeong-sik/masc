@@ -36,8 +36,10 @@ val get_active_agents : config -> Masc_domain.agent list
     Useful for keeper backlog-triage enrollment. *)
 val get_all_agents : config -> Masc_domain.agent list
 
-(** Find claimed/in_progress tasks whose assignees are not active.
-    Returns [(task, assignee)] pairs for orphaned tasks. *)
+(** Find owned tasks ([Claimed], [InProgress], [AwaitingVerification]) whose
+    exact assignee identity is absent from explicit active workspace/session
+    membership. [last_seen] is observational only. Returns [(task, assignee)]
+    pairs for orphaned tasks. *)
 val audit_orphan_tasks : config -> (Masc_domain.task * string) list
 
 (** RFC-0294 PR-4: typed source of truth for orphan-status classification.

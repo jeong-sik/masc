@@ -6,6 +6,14 @@ type summary_provider = private
 
 val provider_config_for_summary : keeper_name:string -> summary_provider option
 
+(** Effective Auto Judge worker cap. The subsystem cap is further bounded by
+    the selected runtime binding's [max_concurrent] declaration. *)
+val max_concurrency : unit -> int
+
+(** Verify that the registry-owned Gate judgment prompt is renderable. This is
+    the readiness floor for selecting the workspace Auto Judge mode. *)
+val readiness : unit -> (unit, string) result
+
 (** Spawn an asynchronous HITL context-summary worker for [runtime_id].
     The worker is fire-and-forget: it calls [on_summary] only for a validated
     LLM judgment and [on_failure] for every unavailable, timeout, transport, or
@@ -69,6 +77,19 @@ module For_testing : sig
     :  mode:summary_mode
     -> Agent_sdk.Error.sdk_error
     -> string list
+
+  val summary_llm_error_retryable : Agent_sdk.Error.sdk_error -> bool
+
+  val sdk_error_of_http_error
+    : Llm_provider.Http_client.http_error -> Agent_sdk.Error.sdk_error
+
+  val effective_max_concurrency
+    : configured:int -> runtime_limit:int option -> int
+
+  val body_timeout_clock
+    : unit -> float Eio.Time.clock_ty Eio.Resource.t option
+  (** Resolve the server root clock only when the non-streaming body timeout is
+      explicitly configured. [None] leaves the body-read deadline disabled. *)
 
   val summary_version : int
 end

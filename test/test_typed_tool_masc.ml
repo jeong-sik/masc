@@ -31,19 +31,18 @@ let test_parse_missing_message () =
   | Error _ -> ()
 
 let test_parse_wrong_type () =
-  (* agent_sdk coerces scalar values into string fields, so use a container
-     value here to assert a non-coercible parse failure. *)
   let json = `Assoc [("message", `List [`String "a"])] in
   match parse json with
   | Ok _ -> Alcotest.fail "expected parse error"
   | Error _ -> ()
 
-let test_parse_coerces_int_message () =
+let test_parse_rejects_int_message () =
+  (* OAS 0.212 removed implicit input coercion (issue #24773): a scalar of
+     the wrong type is a typed reject, no int -> string widening. *)
   let json = `Assoc [("message", `Int 42)] in
   match parse json with
-  | Ok message ->
-    Alcotest.(check string) "message coerced" "42" message
-  | Error e -> Alcotest.fail ("expected coercion: " ^ e)
+  | Ok message -> Alcotest.fail ("expected strict reject, got: " ^ message)
+  | Error _ -> ()
 
 let test_handler_success () =
   match Tool_broadcast_typed.handle_broadcast "hello @claude" with
@@ -93,16 +92,15 @@ let test_e2e_parse_error () =
   | Ok _ -> Alcotest.fail "expected error"
   | Error e -> Alcotest.(check bool) "recoverable" true e.recoverable
 
-let test_e2e_coerced_input () =
+let test_e2e_int_input_rejected () =
   let oas_tool = Typed_tool_masc.to_oas Tool_broadcast_typed.tool in
   match Agent_sdk.Typed_tool.execute oas_tool (`Assoc [("message", `Int 99)]) with
   | Ok { content; _ } ->
-    let result = Yojson.Safe.from_string content in
-    let open Yojson.Safe.Util in
-    Alcotest.(check bool) "delivered" true (result |> member "delivered" |> to_bool);
-    Alcotest.(check string) "broadcast_message" "99"
-      (result |> member "broadcast_message" |> to_string)
-  | Error e -> Alcotest.fail ("expected coercion success: " ^ e.message)
+    Alcotest.fail ("expected strict reject, got success: " ^ content)
+  | Error e ->
+    (* Recoverable: the typed error tells the caller to fix parameters and
+       retry, matching the strict contract codified in issue #24773. *)
+    Alcotest.(check bool) "recoverable" true e.recoverable
 
 let test_e2e_handler_error () =
   let oas_tool = Typed_tool_masc.to_oas Tool_broadcast_typed.tool in
@@ -127,7 +125,7 @@ let () =
       Alcotest.test_case "extra fields ignored (#8595)" `Quick test_parse_extra_fields_ignored;
       Alcotest.test_case "missing message" `Quick test_parse_missing_message;
       Alcotest.test_case "wrong type" `Quick test_parse_wrong_type;
-      Alcotest.test_case "int coerces to string" `Quick test_parse_coerces_int_message;
+      Alcotest.test_case "int is strictly rejected" `Quick test_parse_rejects_int_message;
     ]);
     ("handler", [
       Alcotest.test_case "success" `Quick test_handler_success;
@@ -141,7 +139,7 @@ let () =
     ("e2e", [
       Alcotest.test_case "success" `Quick test_e2e_success;
       Alcotest.test_case "parse error" `Quick test_e2e_parse_error;
-      Alcotest.test_case "coerced input" `Quick test_e2e_coerced_input;
+      Alcotest.test_case "int input rejected" `Quick test_e2e_int_input_rejected;
       Alcotest.test_case "handler error" `Quick test_e2e_handler_error;
     ]);
     ("registration", [

@@ -74,12 +74,15 @@ export const GATE_MODE_ACTING_KEY = 'gate-mode'
 export async function setKeeperGateMode(mode: GateMode) {
   gateApprovalActing.value = GATE_MODE_ACTING_KEY
   try {
-    await setGateMode(mode)
+    const result = await setGateMode(mode)
     const label = mode === 'manual' ? 'Human' : mode === 'auto_judge' ? 'Auto Judge' : 'Always Allow'
-    showToast(`Gate 모드를 ${label}(으)로 전환했습니다`, 'success')
+    const recovery = mode === 'auto_judge' && (result.reopened ?? 0) > 0
+      ? ` · 실패 ${(result.reopened ?? 0).toLocaleString()}건 재평가 시작`
+      : ''
+    showToast(`Gate 모드를 ${label}(으)로 저장했습니다${recovery}`, 'success')
     await refreshGate({ force: true })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Gate 모드를 변경하지 못했습니다'
+    const message = err instanceof Error ? err.message : 'Gate 모드를 저장하지 못했습니다'
     gateError.value = message
     showToast(message, 'error')
   } finally {

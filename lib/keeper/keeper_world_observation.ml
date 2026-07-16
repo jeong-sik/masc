@@ -306,9 +306,6 @@ let read_scheduled_automation_observation
     empty_scheduled_automation_observation
 ;;
 
-(** Board event cursor bootstrap window (seconds). *)
-let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
-
 let board_reaction_event_of_dispatch
       (reaction : Board_dispatch.board_reaction_change)
   : board_reaction_event
@@ -752,7 +749,7 @@ let collect_board_events_with_cursor_policy
     let base_cursor =
       if cursor_ts > 0.0
       then cursor_ts, cursor_post_id
-      else Time_compat.now () -. bootstrap_window_sec, None
+      else 0.0, None
     in
     let posts = list_board_posts_after_cursor base_cursor in
     let self_ids = self_ids meta in

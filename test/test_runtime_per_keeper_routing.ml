@@ -307,6 +307,16 @@ supports_tools = true
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
+
+[[providers]]
+id = "kimi"
+kind = "kimi"
+identity_kinds = ["kimi", "openai_compat"]
+base_url = "https://api.kimi.com/coding"
+request_path = "/v1/messages"
+api_key_env = "KIMI_API_KEY"
+capabilities_base = "kimi"
+identity_hosts = ["api.kimi.com"]
 |}
 ;;
 
@@ -1067,7 +1077,8 @@ max-concurrent = 1
 let runtime_thinking_model_catalog =
   {|
 [[models]]
-id_prefix = "openai_compat/qwen36-35b-a3b-mtp"
+id_prefix = "qwen36-35b-a3b-mtp"
+provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 131072
 max_output_tokens = 65536
@@ -1104,7 +1115,8 @@ supports_computer_use = true
 supports_code_execution = true
 
 [[models]]
-id_prefix = "openai_compat/reasoning-small-out"
+id_prefix = "reasoning-small-out"
+provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 131072
 max_output_tokens = 4096
@@ -1114,7 +1126,8 @@ supports_extended_thinking = true
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "openai_compat/reasoning-big-out"
+id_prefix = "reasoning-big-out"
+provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 1000000
 max_output_tokens = 200000

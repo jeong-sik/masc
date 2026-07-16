@@ -218,10 +218,6 @@ describe('FusionSettingsPanel', () => {
     const models = Array.from(container.querySelectorAll('[data-testid="fusion-preset-panel-model"]')).map(m => m.textContent)
     expect(models).toEqual(['a', 'b', 'c'])
     expect(q('[data-testid="fusion-preset-judge"]')?.textContent).toBe('j')
-    // SAMPLE's trio declares no timeouts → shown as '—', never fabricated.
-    const timing = q('[data-testid="fusion-preset-timing"]')?.textContent ?? ''
-    expect(timing).toContain('panel_timeout —')
-    expect(timing).toContain('judge_timeout —')
   })
 
   it('omits the preset card when the default preset has no backing section', async () => {

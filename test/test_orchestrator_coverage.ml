@@ -25,9 +25,6 @@ let test_default_config_interval_value () =
 let test_default_config_min_priority () =
   check int "min_priority" 2 Orchestrator.default_config.min_priority
 
-let test_default_config_agent_timeout () =
-  check int "agent_timeout" 300 Orchestrator.default_config.agent_timeout_s
-
 let test_default_config_agent () =
   check string "orchestrator_agent" (Env_config_runtime.Orchestrator.agent_name)
     Orchestrator.default_config.orchestrator_agent
@@ -53,10 +50,6 @@ let test_load_config_interval_positive () =
 let test_load_config_min_priority_positive () =
   let cfg = Orchestrator.load_config () in
   check bool "positive priority" true (cfg.min_priority >= 0)
-
-let test_load_config_agent_timeout_positive () =
-  let cfg = Orchestrator.load_config () in
-  check bool "positive timeout" true (cfg.agent_timeout_s > 0)
 
 let test_load_config_agent_nonempty () =
   let cfg = Orchestrator.load_config () in
@@ -153,11 +146,6 @@ let test_config_reasonable_priority () =
   check bool "priority 0-10" true
     (cfg.min_priority >= 0 && cfg.min_priority <= 10)
 
-let test_config_reasonable_timeout () =
-  let cfg = Orchestrator.default_config in
-  check bool "timeout 1-3600" true
-    (cfg.agent_timeout_s >= 1 && cfg.agent_timeout_s <= 3600)
-
 (* ============================================================
    should_orchestrate Tests (requires MASC Workspace)
    ============================================================ *)
@@ -217,6 +205,16 @@ let test_should_orchestrate_with_task_and_agent () =
   let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration with active agent" false result
 
+let test_should_orchestrate_ignores_elapsed_last_seen () =
+  with_initialized_workspace @@ fun config ->
+  let _ = Workspace.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
+  let agent = "observed-active-agent" in
+  let _ = Workspace.bind_session config ~agent_name:agent ~capabilities:[] () in
+  Workspace.update_local_agent_state config ~agent_name:agent (fun record ->
+    { record with last_seen = "2020-01-01T00:00:00Z" });
+  let result = Orchestrator.should_orchestrate ~min_priority:2 config in
+  check bool "last_seen is observation, not orchestration authority" false result
+
 let test_should_orchestrate_paused_workspace () =
   with_initialized_workspace @@ fun config ->
   (* Add task *)
@@ -245,7 +243,6 @@ let () =
       test_case "interval" `Quick test_default_config_interval;
       test_case "interval value" `Quick test_default_config_interval_value;
       test_case "min_priority" `Quick test_default_config_min_priority;
-      test_case "agent_timeout" `Quick test_default_config_agent_timeout;
       test_case "agent" `Quick test_default_config_agent;
       test_case "enabled" `Quick test_default_config_enabled;
       test_case "port" `Quick test_default_config_port;
@@ -254,7 +251,6 @@ let () =
       test_case "returns config" `Quick test_load_config_returns_config;
       test_case "interval positive" `Quick test_load_config_interval_positive;
       test_case "priority positive" `Quick test_load_config_min_priority_positive;
-      test_case "timeout positive" `Quick test_load_config_agent_timeout_positive;
       test_case "agent nonempty" `Quick test_load_config_agent_nonempty;
       test_case "port valid" `Quick test_load_config_port_valid;
     ];
@@ -272,12 +268,13 @@ let () =
     "config_bounds", [
       test_case "reasonable interval" `Quick test_config_reasonable_interval;
       test_case "reasonable priority" `Quick test_config_reasonable_priority;
-      test_case "reasonable timeout" `Quick test_config_reasonable_timeout;
     ];
     "should_orchestrate", [
       test_case "empty workspace" `Quick test_should_orchestrate_empty_workspace;
       test_case "task no agent" `Quick test_should_orchestrate_with_task_no_agent;
       test_case "task and agent" `Quick test_should_orchestrate_with_task_and_agent;
+      test_case "elapsed last_seen is observational" `Quick
+        test_should_orchestrate_ignores_elapsed_last_seen;
       test_case "paused workspace" `Quick test_should_orchestrate_paused_workspace;
       test_case "low priority task" `Quick test_should_orchestrate_low_priority_task;
     ];

@@ -110,9 +110,6 @@ module Orchestrator = struct
   let min_priority =
     max 0 (min 10 (get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY"))
 
-  let timeout_seconds =
-    max 10 (min 3600 (get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT"))
-
   let enabled =
     Feature_flag_registry.get_bool Env_config_core.orchestrator_enabled_env_key
 end
@@ -602,10 +599,6 @@ module InternalTimers = struct
   (** Dashboard mission briefing cache TTL (seconds). Default: 300 (5 min). *)
   let briefing_cache_ttl_sec =
     get_float ~default:300.0 "MASC_BRIEFING_CACHE_TTL_SEC"
-
-  (** Keeper world observation bootstrap window (seconds). Default: 300 (5 min). *)
-  let bootstrap_window_sec =
-    get_float ~default:300.0 "MASC_KEEPER_BOOTSTRAP_WINDOW_SEC"
 
   (** SSE buffer TTL (seconds). Default: 300 (5 min). *)
   let sse_buffer_ttl_sec =

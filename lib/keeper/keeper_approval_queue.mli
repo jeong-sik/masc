@@ -240,6 +240,12 @@ val mark_summary_failed :
     classification never controls work. There is no timer or retry count. *)
 val restart_failed_summary : id:string -> (bool, storage_error) result
 
+(** Explicit operator recovery: transition every failed summary for this
+    workspace back to [Summary_not_requested] in one durable transaction.
+    This includes failures previously classified terminal; only an operator
+    action may reopen those entries. Returns the reopened approval ids. *)
+val restart_failed_summaries : base_path:string -> (string list, storage_error) result
+
 val pending_count : unit -> int
 val pending_count_for_keeper : keeper_name:string -> int
 val has_pending_for_keeper : keeper_name:string -> bool

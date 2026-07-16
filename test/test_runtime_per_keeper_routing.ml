@@ -126,7 +126,6 @@ let make_meta name : KMC.keeper_meta =
     `Assoc
       [ "name", `String name
       ; "trace_id", `String ("test-trace-" ^ name)
-      ; "goal", `String "test goal"
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

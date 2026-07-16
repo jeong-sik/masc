@@ -34,7 +34,6 @@ let meta keeper_name =
       [ "name", `String keeper_name
       ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
       ; "trace_id", `String ("trace-" ^ keeper_name)
-      ; "goal", `String "Ship the active Board-related goal"
       ; "instructions", `String "Use the lane context and complete the task"
       ; "sandbox_profile", `String "local"
       ; "network_mode", `String "inherit"

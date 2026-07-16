@@ -41,7 +41,6 @@ type handover_record = {
 (** Why the outgoing agent triggered the handover. *)
 type trigger_reason =
   | ContextLimit of int  (** Percentage of context budget consumed. *)
-  | Timeout of int  (** Seconds before timeout fired. *)
   | Explicit  (** Operator-driven handover. *)
   | FatalError of string  (** Crash detail. *)
   | TaskComplete  (** Successful completion handoff. *)

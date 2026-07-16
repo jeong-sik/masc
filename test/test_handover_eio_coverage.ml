@@ -103,12 +103,6 @@ let test_trigger_reason_context_limit () =
   | Handover_eio.ContextLimit pct -> check int "percent" 80 pct
   | _ -> fail "expected ContextLimit"
 
-let test_trigger_reason_timeout () =
-  let r = Handover_eio.Timeout 300 in
-  match r with
-  | Handover_eio.Timeout secs -> check int "seconds" 300 secs
-  | _ -> fail "expected Timeout"
-
 let test_trigger_reason_explicit () =
   let r = Handover_eio.Explicit in
   match r with
@@ -149,10 +143,6 @@ let reason_string_for reason =
 let test_trigger_reason_to_string_context_limit () =
   let s = reason_string_for (Handover_eio.ContextLimit 85) in
   check string "context_limit" "context_limit_85" s
-
-let test_trigger_reason_to_string_timeout () =
-  let s = reason_string_for (Handover_eio.Timeout 600) in
-  check string "timeout" "timeout_600s" s
 
 let test_trigger_reason_to_string_explicit () =
   let s = reason_string_for Handover_eio.Explicit in
@@ -245,15 +235,6 @@ let test_create_handover_basic () =
   check string "task_id" "task-001" h.task_id;
   check bool "id not empty" true (String.length h.id > 0)
 
-let test_create_handover_timeout () =
-  let h = Handover_eio.create_handover
-    ~from_agent:"gemini"
-    ~task_id:"task-002"
-    ~session_id:"sess-002"
-    ~reason:(Handover_eio.Timeout 300)
-  in
-  check string "reason" "timeout_300s" h.handover_reason
-
 (* ============================================================
    handover_to_json / handover_of_json Tests
    ============================================================ *)
@@ -327,7 +308,7 @@ let test_list_handovers_multiple () =
   let h1 = Handover_eio.create_handover
     ~from_agent:"a1" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
   let h2 = Handover_eio.create_handover
-    ~from_agent:"a2" ~task_id:"t2" ~session_id:"s2" ~reason:(Handover_eio.Timeout 60) in
+    ~from_agent:"a2" ~task_id:"t2" ~session_id:"s2" ~reason:Handover_eio.TaskComplete in
   ignore (Handover_eio.save_handover ~fs config h1);
   ignore (Handover_eio.save_handover ~fs config h2);
   let handovers = Handover_eio.list_handovers ~fs config in
@@ -412,14 +393,12 @@ let () =
     ];
     "trigger_reason", [
       test_case "context_limit" `Quick test_trigger_reason_context_limit;
-      test_case "timeout" `Quick test_trigger_reason_timeout;
       test_case "explicit" `Quick test_trigger_reason_explicit;
       test_case "fatal_error" `Quick test_trigger_reason_fatal_error;
       test_case "task_complete" `Quick test_trigger_reason_task_complete;
     ];
     "trigger_reason_to_string", [
       test_case "context_limit" `Quick test_trigger_reason_to_string_context_limit;
-      test_case "timeout" `Quick test_trigger_reason_to_string_timeout;
       test_case "explicit" `Quick test_trigger_reason_to_string_explicit;
       test_case "fatal_error" `Quick test_trigger_reason_to_string_fatal_error;
       test_case "task_complete" `Quick test_trigger_reason_to_string_task_complete;
@@ -431,7 +410,6 @@ let () =
     ];
     "create_handover", [
       test_case "basic" `Quick test_create_handover_basic;
-      test_case "timeout" `Quick test_create_handover_timeout;
     ];
     "json_roundtrip", [
       test_case "roundtrip" `Quick test_handover_json_roundtrip;

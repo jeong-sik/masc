@@ -302,3 +302,6 @@ rewrite OAS run history. OAS does not decide when the Keeper resumes.
 The next companion document is the exact purge manifest. It must distinguish
 true Keeper execution constraints from legitimate transport page sizes,
 explicit caller deadlines, test/eval budgets, and bounded shutdown cleanup.
+
+Exact deletion and replacement contract:
+[`KEEPER-FULL-FEATURE-PURGE-MANIFEST.md`](KEEPER-FULL-FEATURE-PURGE-MANIFEST.md).

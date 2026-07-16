@@ -271,20 +271,45 @@ type keeper_persistence_report =
   ; requests : Keeper_msg_async.recovery_report
   }
 
+module Recovery_target = struct
+  type t = Keeper_invocation_types.target
+
+  let compare left right =
+    match left, right with
+    | Keeper left_name, Keeper right_name ->
+      String.compare
+        (Keeper_id.Keeper_name.to_string left_name)
+        (Keeper_id.Keeper_name.to_string right_name)
+  ;;
+end
+
+module Recovery_target_map = Map.Make (Recovery_target)
+
 let recovery_candidate_lanes candidates =
-  candidates
-  |> List.fold_left
-       (fun lanes (candidate : Keeper_msg_async.recovery_candidate) ->
-          let keeper_name =
-            Keeper_invocation_types.request_target_name candidate.entry.request
-          in
-          match lanes with
-          | (current, rev_candidates) :: rest when String.equal current keeper_name ->
-            (current, candidate :: rev_candidates) :: rest
-          | _ -> (keeper_name, [ candidate ]) :: lanes)
-       []
-  |> List.rev_map (fun (keeper_name, rev_candidates) ->
-    keeper_name, List.rev rev_candidates)
+  let lane_order_rev, candidates_by_target =
+    List.fold_left
+      (fun (lane_order_rev, candidates_by_target)
+        (candidate : Keeper_msg_async.recovery_candidate) ->
+         let target = Keeper_invocation_types.request_target candidate.entry.request in
+         match Recovery_target_map.find_opt target candidates_by_target with
+         | None ->
+           ( target :: lane_order_rev
+           , Recovery_target_map.add target [ candidate ] candidates_by_target )
+         | Some candidates_rev ->
+           ( lane_order_rev
+           , Recovery_target_map.add
+               target
+               (candidate :: candidates_rev)
+               candidates_by_target ))
+      ([], Recovery_target_map.empty)
+      candidates
+  in
+  List.rev_map
+    (fun target ->
+       match Recovery_target_map.find_opt target candidates_by_target with
+       | Some candidates_rev -> target, List.rev candidates_rev
+       | None -> invalid_arg "recovery lane target missing from immutable index")
+    lane_order_rev
 ;;
 
 type keeper_persistence_failure_phase =
@@ -1223,6 +1248,19 @@ let start_keeper_loops_owned
     loop ());
   (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
+  let observe_recovery_projection ~request_id = function
+    | Keeper_tool_surface_ops.Completion_not_durable ->
+      Log.Keeper.error
+        "keeper invocation restart completion was not durable request_id=%s"
+        request_id
+    | Keeper_tool_surface_ops.Completion_storage_failed _ ->
+      (* [project_keeper_completion] emits the exact failed operation and
+         storage detail before returning this typed result. *)
+      ()
+    | Keeper_tool_surface_ops.Completion_not_routed
+    | Keeper_tool_surface_ops.Completion_enqueued
+    | Keeper_tool_surface_ops.Completion_already_present -> ()
+  in
   let project_recovery_terminal (entry : Keeper_msg_async.entry) =
     match
       Keeper_msg_async.load_canonical_durable_terminal
@@ -1231,10 +1269,9 @@ let start_keeper_loops_owned
         entry.request_id
     with
     | Ok proof ->
-      ignore
-        (Keeper_tool_surface_ops.project_durable_keeper_completion
-           ~base_path:config.base_path proof
-          : Keeper_tool_surface_ops.keeper_completion_projection)
+      Keeper_tool_surface_ops.project_durable_keeper_completion
+        ~base_path:config.base_path proof
+      |> observe_recovery_projection ~request_id:entry.request_id
     | Error error ->
       Log.Keeper.error
         "keeper invocation restart terminal reload failed request_id=%s error=%s"
@@ -1255,13 +1292,12 @@ let start_keeper_loops_owned
         ~finally:(fun () ->
           ignore (Eio.Promise.try_resolve resolve_settled () : bool))
         (fun () ->
-           ignore
-             (Keeper_tool_surface_ops.project_keeper_completion
-                ~base_path:config.base_path
-                ~submitted_by:entry.submitted_by
-                ~request_id
-                settlement
-               : Keeper_tool_surface_ops.keeper_completion_projection))
+           Keeper_tool_surface_ops.project_keeper_completion
+             ~base_path:config.base_path
+             ~submitted_by:entry.submitted_by
+             ~request_id
+             settlement
+           |> observe_recovery_projection ~request_id)
     in
     let f request_sw =
       match candidate.provenance with
@@ -1318,7 +1354,8 @@ let start_keeper_loops_owned
   in
   claimed_persistence.claimed_report.requests.candidates
   |> recovery_candidate_lanes
-  |> List.iter (fun (keeper_name, candidates) ->
+  |> List.iter (fun (target, candidates) ->
+    let keeper_name = Keeper_invocation_types.target_name target in
     fork_logged_fiber
       ~sw
       ~on_error:(fun exn ->

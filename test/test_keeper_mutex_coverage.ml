@@ -1449,9 +1449,25 @@ let test_restart_candidates_preserve_fifo_per_keeper_lane () =
            ~status:"queued"
            ~status_fields:[]
            ());
-       let lanes =
+       let candidates =
          (Keeper_msg_async.For_testing.recover_request_records ~base_path ())
            .candidates
+       in
+       let candidate request_id =
+         match
+           List.find_opt
+             (fun (candidate : Keeper_msg_async.recovery_candidate) ->
+                String.equal candidate.entry.request_id request_id)
+             candidates
+         with
+         | Some candidate -> candidate
+         | None -> failf "missing restart candidate %s" request_id
+       in
+       let lanes =
+         [ candidate "kmsg_alpha_1"
+         ; candidate "kmsg_beta_1"
+         ; candidate "kmsg_alpha_2"
+         ]
          |> Server_bootstrap_loops.For_testing.recovery_candidate_lanes
        in
        let ids candidates =
@@ -1461,7 +1477,11 @@ let test_restart_candidates_preserve_fifo_per_keeper_lane () =
            candidates
        in
        match lanes with
-       | [ "alpha", alpha; "beta", beta ] ->
+       | [ (Keeper alpha_name, alpha); (Keeper beta_name, beta) ] ->
+         check string "first lane target" "alpha"
+           (Keeper_id.Keeper_name.to_string alpha_name);
+         check string "peer lane target" "beta"
+           (Keeper_id.Keeper_name.to_string beta_name);
          check (list string) "alpha FIFO" [ "kmsg_alpha_1"; "kmsg_alpha_2" ]
            (ids alpha);
          check (list string) "beta lane" [ "kmsg_beta_1" ] (ids beta)

@@ -162,7 +162,7 @@ module For_testing : sig
 
   val recovery_candidate_lanes :
     Keeper_msg_async.recovery_candidate list ->
-    (string * Keeper_msg_async.recovery_candidate list) list
+    (Keeper_invocation_types.target * Keeper_msg_async.recovery_candidate list) list
 
   val begin_keeper_loops_start :
     config:Workspace.config ->

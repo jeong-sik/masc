@@ -153,7 +153,7 @@ let test_durable_accept_precedes_delivery_handoff () =
   check bool "accept completed before handoff" true !accepted_before_delivery;
   (match !observed_delivery with
    | Some
-       { Gate_keeper_backend.source =
+       { source =
            Keeper_chat_queue.Discord { channel_id; user_id }
        ; surface =
            Surface_ref.Discord

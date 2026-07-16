@@ -107,27 +107,6 @@ describe('normalizeOperatorDigest', () => {
     expect(result.root).toEqual({})
   })
 
-  it('extracts operator_judge_runtime', () => {
-    const result = normalizeOperatorDigest({
-      operator_judge_runtime: {
-        enabled: true,
-        judge_online: true,
-        refreshing: false,
-        model_used: 'gpt-4',
-      },
-    })
-    expect(result.operator_judge_runtime).not.toBeNull()
-    expect(result.operator_judge_runtime!.enabled).toBe(true)
-    expect(result.operator_judge_runtime!.model_used).toBeNull()
-  })
-
-  it('returns null operator_judge_runtime for invalid input', () => {
-    const result = normalizeOperatorDigest({
-      operator_judge_runtime: 'invalid',
-    })
-    expect(result.operator_judge_runtime).toBeNull()
-  })
-
   it('extracts judgment', () => {
     const result = normalizeOperatorDigest({
       judgment: {
@@ -434,17 +413,6 @@ describe('normalizeOperatorSnapshot', () => {
     })
     expect(result.available_actions).toHaveLength(1)
     expect(result.available_actions[0]!.action_type).toBe('pause')
-  })
-
-  it('extracts operator_judge_runtime', () => {
-    const result = normalizeOperatorSnapshot({
-      operator_judge_runtime: {
-        enabled: true,
-        judge_online: false,
-      },
-    })
-    expect(result.operator_judge_runtime).not.toBeNull()
-    expect(result.operator_judge_runtime!.enabled).toBe(true)
   })
 
   it('normalizes the exact OAS inference observation', () => {

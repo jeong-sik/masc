@@ -42,8 +42,7 @@ type record = {
   disagreement_with_truth : bool;
 }
 (** Concrete record because consumers
-    ({!Operator_control_action}, {!Dashboard_operator_judge},
-    {!test_operator_control_judgment}) field-access the record
+    ({!Operator_control_action}, {!test_operator_control_judgment}) field-access the record
     when projecting to JSON or checking specific fields.  All
     19 fields are part of the on-disk JSONL contract — drift
     requires synchronized migration. *)

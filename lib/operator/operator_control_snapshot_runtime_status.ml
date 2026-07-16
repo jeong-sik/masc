@@ -21,9 +21,8 @@ let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
   let has_live_signal =
     Keeper_status_runtime.agent_runtime_has_live_signal agent_status_json
   in
-  let is_zombie = Safe_ops.json_bool ~default:false "is_zombie" agent_status_json in
-  match runtime_status, has_live_signal, is_zombie with
-  | Some status, true, false -> Some status
+  match runtime_status, has_live_signal with
+  | Some status, true -> Some status
   | _ -> None
 ;;
 

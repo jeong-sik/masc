@@ -134,13 +134,6 @@ let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojs
                 ("last_seen", `String agent.last_seen);
                 ("age_s", `Float age_s);
                 ("last_seen_ago_s", `Float last_seen_ago_s);
-                ("is_zombie",
-                 `Bool
-                   (Workspace.is_zombie_agent
-                      ~agent_type:agent.agent_type
-                      ?agent_meta:agent.meta
-                      ~agent_name:agent.name
-                      agent.last_seen));
               ]))
 
 let json_string_opt key json = Json_util.get_string_nonempty json key
@@ -356,15 +349,12 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   let last_seen_ago_s =
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
-  let is_zombie = json_bool "is_zombie" agent_status false in
   let stale_threshold_s = agent_staleness_threshold_s in
   let _ = now_ts in
   if
     (not keepalive_running)
     && (not agent_exists || agent_runtime_status = Some Masc_domain.Inactive)
   then KH_offline
-  (* H-4 fix: true zombies are stale regardless of keepalive state *)
-  else if is_zombie then KH_stale
   else if keepalive_running then
     if agent_exists && last_seen_ago_s > 2.0 *. keepalive_interval_s then KH_stale
     else

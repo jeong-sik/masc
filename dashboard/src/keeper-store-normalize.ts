@@ -629,7 +629,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
               last_seen: asString(agentRaw.last_seen),
               last_seen_ago_s: asNumber(agentRaw.last_seen_ago_s),
               capabilities: asStringArray(agentRaw.capabilities),
-              is_zombie: typeof agentRaw.is_zombie === 'boolean' ? agentRaw.is_zombie : undefined,
             }
           : undefined
 

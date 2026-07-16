@@ -1280,7 +1280,6 @@ export interface Keeper {
     last_seen?: string
     last_seen_ago_s?: number
     capabilities?: string[]
-    is_zombie?: boolean
     [key: string]: unknown
   }
   // Metrics time-series (from backend metrics_series)

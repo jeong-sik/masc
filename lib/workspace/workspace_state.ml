@@ -145,23 +145,11 @@ let pause_info config =
    Cannot re-export here — broadcast depends on next_seq, which would
    create a circular dep workspace_state <-> workspace_broadcast. *)
 
-(* ============================================ *)
-(* Re-exports: Zombie Detection (Resilience)    *)
-(* ============================================ *)
-
-let heartbeat_timeout_seconds = Workspace_resilience.default_zombie_threshold
 let parse_iso_time_opt = Workspace_resilience.Time.parse_iso8601_opt
 
 let parse_iso_time iso_str =
   match parse_iso_time_opt iso_str with
   | Some t -> t
   | None -> Workspace_resilience.Time.now ()
-
-let is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen_iso =
-  Workspace_resilience.Zombie.is_zombie_for_agent
-    ?agent_type
-    ?agent_meta
-    ~agent_name
-    last_seen_iso
 
 let take = List.take

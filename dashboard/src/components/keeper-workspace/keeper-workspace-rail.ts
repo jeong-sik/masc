@@ -27,7 +27,6 @@ import { requestConfirm } from '../common/confirm-dialog'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
 import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
-import { contextThresholds } from '../../config/context-thresholds'
 import {
   loadRuntimeCatalog,
   resolveRuntimeCatalogEntry,
@@ -367,14 +366,6 @@ function RuntimeSection({
   `
 }
 
-function compactionGatePct(keeper: Keeper): number {
-  const raw = keeper.compaction_ratio_gate
-  const ratio = typeof raw === 'number' && Number.isFinite(raw) && raw > 0
-    ? raw
-    : contextThresholds.value.compacting
-  return Math.max(1, Math.min(99, Math.round(ratio * 100)))
-}
-
 function compactRequiresForce(keeper: Keeper): boolean {
   const phase = phaseTokenFromKeeper(keeper)
   if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
@@ -394,8 +385,6 @@ function ContextSection({
 }): VNode {
   const [compacting, setCompacting] = useState(false)
   const pct = contextPercent(keeper)
-  const compactAt = compactionGatePct(keeper)
-  const hot = pct !== null && pct >= compactAt
   const max = contextMax(keeper)
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
   const tokens = formatK(baseTokens)
@@ -451,7 +440,7 @@ function ContextSection({
   // heading — the percentage and the 사용/전체 line below are self-explanatory.
   const usageHeader = html`
     <div class="ctx-meter-head">
-      <span class=${`ctx-meter-pct mono${hot ? ' hot' : ''}`}>${pct ?? 0}%</span>
+      <span class="ctx-meter-pct mono">${pct ?? 0}%</span>
     </div>
   `
 
@@ -464,16 +453,13 @@ function ContextSection({
               ${usageHeader}
               <div class="meter-wrap">
                 <div
-                  class=${`meter${hot ? ' hot' : ''}`}
+                  class="meter"
                   role="meter"
                   aria-label="컨텍스트 윈도우 사용률"
                   aria-valuenow=${pct ?? 0}
                   aria-valuemin="0"
                   aria-valuemax="100"
                 ><span style=${{ width: `${pct ?? 0}%` }}></span></div>
-                <span class=${`meter-mark${hot ? ' hot' : ''}`} style=${{ left: `${compactAt}%` }}>
-                  <i class="meter-mark-lbl">compact ${compactAt}%</i>
-                </span>
               </div>
             `
           : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다.</span></div>`}

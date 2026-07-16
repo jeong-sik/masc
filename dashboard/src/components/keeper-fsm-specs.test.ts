@@ -206,10 +206,10 @@ describe('buildCompactionSpec', () => {
     expect(buildCompactionSpec('accumulating').nodes.find(n => n.id === 'accumulating')!.type).toBe('active')
   })
 
-  it('has a ratio_gate edge from accumulating to compacting', () => {
+  it('has an explicit request edge from accumulating to compacting', () => {
     const spec = buildCompactionSpec('accumulating')
     const edge = spec.edges.find(e => e.source === 'accumulating' && e.target === 'compacting')
-    expect(edge?.label).toBe('ratio_gate')
+    expect(edge?.label).toBe('Compaction_requested')
   })
 
   it('has a recovery edge from compacting to done', () => {

@@ -1806,13 +1806,6 @@ describe('fetchKeeperConfig', () => {
         selected_runtime_canonical: 'keeper_unified',
         runtime_options: ['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'],
       },
-      compaction: {
-        profile: 'balanced',
-        ratio_gate: '0.85',
-        message_gate: '16',
-        token_gate: '24000',
-        cooldown_sec: '120',
-      },
       proactive: {
         enabled: 'true',
       },

@@ -210,7 +210,7 @@ let test_http_error_mapping_preserves_typed_domain () =
 
 let test_gate_judgment_prompt_comes_from_registry () =
   Prompt_registry.set_markdown_dir
-    (Filename.concat (Sys.getcwd ()) "config/prompts");
+    (Masc_test_deps.source_path "config/prompts");
   match Worker.For_testing.system_prompt () with
   | Error detail -> fail ("Gate judgment prompt unavailable: " ^ detail)
   | Ok prompt ->
@@ -218,7 +218,7 @@ let test_gate_judgment_prompt_comes_from_registry () =
 ;;
 
 let test_readiness_fails_when_gate_prompt_is_missing () =
-  let original_dir = Filename.concat (Sys.getcwd ()) "config/prompts" in
+  let original_dir = Masc_test_deps.source_path "config/prompts" in
   let empty_dir =
     Filename.concat
       (Filename.get_temp_dir_name ())

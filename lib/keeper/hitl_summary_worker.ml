@@ -487,7 +487,7 @@ let spawn
                  (summary_llm_error_outcomes ~mode error);
                on_failure
                  ~reason:(Agent_sdk.Error.to_string error)
-                 ~retryable:(summary_llm_error_retryable error)))
+                 ~retryable:(summary_llm_error_retryable error))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

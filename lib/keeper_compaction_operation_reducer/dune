@@ -1,13 +1,15 @@
-(test
- (name test_keeper_compaction_operation)
+(include_subdirs no)
+
+(library
+ (name masc_keeper_compaction_operation_reducer)
+ (public_name masc.keeper_compaction_operation_reducer)
+ (wrapped false)
+ (modules keeper_compaction_operation_reducer)
  (libraries
-  alcotest
   masc.compaction_trigger
   masc.keeper_checkpoint_ref
   masc.keeper_compaction_evidence
   masc.keeper_compaction_operation
-  masc.keeper_compaction_operation_reducer
   masc.keeper_registry
   masc.masc_types
-  masc.mcp_transport_protocol
   masc.tool_invocation_ref))

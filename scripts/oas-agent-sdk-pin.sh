@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.214.0"
-# Pinned to the v0.214.0 release (tracks main). On top of 0.213.0, this
-# release adds:
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.214.1"
+# Pinned to the v0.214.1 release (tracks main). On top of 0.213.0, the
+# 0.214.x line adds:
+# - 0.214.1: responses SSE frames decode through the total boundary
+#   (Type_error on non-object frames becomes SSEParseFailed, oas#2632);
+#   shared Gemini_interactions envelope (oas#2633); legacy Api path now
+#   warns instead of silently dropping tools/response_format.
 # - BREAKING (oas#2589): make_http_transport no longer accepts a
 #   construction-time ?stream_idle_timeout_s; masc already migrated to
 #   Builder.with_stream_idle_timeout (RFC-OAS-026), so no call-site change.
@@ -22,5 +26,5 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.214.0"
 # The reachability guard in check-oas-pin.sh tracks main; oas-drift-check.sh
 # reports the public-surface delta at pin-bump time.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="9b5f0835a1c8d579ae53987c092c889617b7f8ea"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.214.0"
+readonly OAS_AGENT_SDK_SHA="94a4cae15acceb6045150f0006dbc761521b1c50"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.214.1"

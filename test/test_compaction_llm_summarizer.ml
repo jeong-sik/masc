@@ -7,6 +7,9 @@
 
 open Masc
 module C = Keeper_compaction_llm_summarizer
+module E = Keeper_compaction_eligible_history
+module EP = Keeper_compaction_eligible_llm_planner
+module P = Keeper_compaction_eligible_plan
 
 let plan_json ~summary ~kept ~summarized ~dropped : Yojson.Safe.t =
   let ints xs = `List (List.map (fun i -> `Int i) xs) in
@@ -106,6 +109,114 @@ let test_lane_candidates_keep_declared_order () =
   Alcotest.(check (option (list string))) "declared candidate order"
     (Some [ "local.kimi_like"; "fallback.kimi_like" ])
     actual
+
+let eligible_source () =
+  match
+    E.of_messages
+      [ Agent_sdk.Types.text_message Agent_sdk.Types.System "protected secret"
+      ; Agent_sdk.Types.text_message Agent_sdk.Types.User "eligible detail"
+      ]
+  with
+  | Ok source -> source
+  | Error _ -> Alcotest.fail "eligible source should partition"
+
+let response text : Agent_sdk.Types.api_response =
+  { id = "eligible-plan"
+  ; model = "kimi-like"
+  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; usage = None
+  ; telemetry = None
+  }
+
+let test_eligible_planner_uses_resources_schema_and_ordered_failover () =
+  with_temperature_runtime @@ fun _ ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let source = eligible_source () in
+  let calls = ref [] in
+  let complete ~sw:sw' ~net:net' ?clock:clock' ~config ~messages () =
+    calls := config.base_url :: !calls;
+    Alcotest.(check bool) "exact switch" true (sw == sw');
+    Alcotest.(check bool) "exact net" true (net == net');
+    Alcotest.(check bool)
+      "exact clock"
+      true
+      (Option.fold ~none:false ~some:(fun value -> value == clock) clock');
+    Alcotest.(check bool) "tools disabled" true (config.tool_choice = None);
+    Alcotest.(check bool) "parallel tools disabled" true config.disable_parallel_tool_use;
+    Alcotest.(check (option (float 0.0001))) "temperature exact" (Some 1.0) config.temperature;
+    Alcotest.(check string) "model exact" "kimi-like" config.model_id;
+    Alcotest.(check bool)
+      "output schema exact"
+      true
+      (config.output_schema = Some P.output_schema);
+    Alcotest.(check bool)
+      "response schema exact"
+      true
+      (match config.response_format with
+       | Agent_sdk.Types.JsonSchema schema -> schema = P.output_schema
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
+    let user_json = Yojson.Safe.to_string (P.input_json source) in
+    (match messages with
+     | [ _; user ] ->
+       Alcotest.(check string)
+         "prompt contains only eligible input"
+         user_json
+         (Agent_sdk.Types.text_of_message user)
+     | _ -> Alcotest.fail "expected one system and one eligible-input message");
+    Alcotest.(check bool)
+      "protected history absent"
+      false
+      (List.exists
+         (fun message -> String.equal (Agent_sdk.Types.text_of_message message) "protected secret")
+         messages);
+    if String.equal config.base_url "http://localhost:11434"
+    then Ok (response "not-json")
+    else
+      Ok
+        (response
+           {|{"decisions":[{"unit_index":1,"action":"keep","summary":null}]}|})
+  in
+  match
+    EP.run ~complete ~sw ~net ~clock ~keeper_name:"keeper-test"
+      ~assignment_id:"compaction" ~source ()
+  with
+  | Error _ -> Alcotest.fail "second declared candidate should succeed"
+  | Ok success ->
+    Alcotest.(check string)
+      "selected runtime"
+      "fallback.kimi_like"
+      success.selected_runtime_id;
+    Alcotest.(check (list string))
+      "declared provider order"
+      [ "http://localhost:11434"; "http://localhost:11435" ]
+      (List.rev !calls);
+    (match success.failed_candidates with
+     | [ { runtime_id = "local.kimi_like"; reason = EP.Structured_response_rejected _ } ] -> ()
+     | _ -> Alcotest.fail "first typed candidate failure should be returned")
+
+let test_eligible_planner_returns_ordered_aggregate_failure () =
+  with_temperature_runtime @@ fun _ ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+    Ok (response "not-json")
+  in
+  match
+    EP.run ~complete ~sw ~net:(Eio.Stdenv.net env)
+      ~keeper_name:"keeper-test" ~assignment_id:"compaction"
+      ~source:(eligible_source ()) ()
+  with
+  | Ok _ -> Alcotest.fail "invalid responses should exhaust the lane"
+  | Error (EP.Assignment_missing _) -> Alcotest.fail "lane should resolve"
+  | Error (EP.Candidates_exhausted { failures; _ }) ->
+    Alcotest.(check (list string))
+      "all failures retain declared runtime ids"
+      [ "local.kimi_like"; "fallback.kimi_like" ]
+      (List.map (fun failure -> failure.EP.runtime_id) failures)
 
 (* -- plan_of_json: valid partition accepted -- *)
 
@@ -237,6 +348,10 @@ let () =
             test_provider_for_plan_preserves_temperature_omission
         ; Alcotest.test_case "lane candidates keep declared order" `Quick
             test_lane_candidates_keep_declared_order
+        ; Alcotest.test_case "eligible planner explicit resources and failover" `Quick
+            test_eligible_planner_uses_resources_schema_and_ordered_failover
+        ; Alcotest.test_case "eligible planner aggregate failure" `Quick
+            test_eligible_planner_returns_ordered_aggregate_failure
         ] )
     ; ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted

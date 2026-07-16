@@ -47,8 +47,6 @@ let preset_to_yojson (p : Fusion_policy.preset) : Yojson.Safe.t =
     ; ("meta_timeout_s", `Float p.Fusion_policy.meta_timeout_s)
     ; ("judges", `List (List.map judge_spec_to_yojson p.Fusion_policy.judges))
     ; ("min_answered", `Int p.Fusion_policy.min_answered)
-    ; ( "adaptive_timeout_factor"
-      , `Float p.Fusion_policy.adaptive_timeout_factor )
     ; ("fallback_judge_model", opt_string p.Fusion_policy.fallback_judge_model)
     ]
 

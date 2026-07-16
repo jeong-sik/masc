@@ -198,7 +198,6 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; meta_timeout_s = Fusion_policy.default_timeout_s
     ; judges = []
     ; min_answered = Fusion_policy.default_min_answered
-    ; adaptive_timeout_factor = 1.0
     ; fallback_judge_model = None
     }
   in

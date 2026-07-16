@@ -44,8 +44,6 @@ type preset =
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   ; min_answered : int
       (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
-  ; adaptive_timeout_factor : float
-      (** Legacy observed value. It never extends Provider work. *)
   ; fallback_judge_model : string option
       (** Legacy observed value. Failures never trigger an automatic fallback call. *)
   }
@@ -242,8 +240,6 @@ module Validated_preset = struct
         (** [min_answered]가 패널 모델 총합을 초과. *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_adaptive_factor of float
-        (** [adaptive_timeout_factor]가 1.0 미만. *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
@@ -288,8 +284,6 @@ module Validated_preset = struct
                   else if
                     not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
                   then Error (Bad_meta_timeout p.meta_timeout_s)
-                  else if p.adaptive_timeout_factor < 1.0
-                  then Error (Bad_adaptive_factor p.adaptive_timeout_factor)
                   else Ok p)))
 
   let preset (t : t) : preset = t

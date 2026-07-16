@@ -42,8 +42,6 @@ type config_error =
           모델 총합) 밖. full-panel quorum([총합])도 명시적으로 설정할 수 있다. *)
   | Invalid_meta_timeout of string * float
       (** (preset 이름, meta_timeout_s) — 양수 유한수가 아님. *)
-  | Invalid_adaptive_timeout_factor of string * float
-      (** (preset 이름, adaptive_timeout_factor) — 1.0 미만. *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]
 

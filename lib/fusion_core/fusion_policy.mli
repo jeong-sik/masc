@@ -60,8 +60,6 @@ type preset =
           [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
           허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
           명시적으로 설정할 수 있다. *)
-  ; adaptive_timeout_factor : float
-      (** Legacy observed value; it never extends Provider work. *)
   ; fallback_judge_model : string option
       (** Legacy observed value; failures never trigger an automatic call. *)
   }
@@ -191,11 +189,8 @@ module Validated_preset : sig
         (** [min_answered]가 패널 모델 총합을 초과. *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_adaptive_factor of float
-        (** [adaptive_timeout_factor]가 1.0 미만. *)
-
   (** 검증 순서: size → prompt → judge → 정체성 중복 → max_output_tokens →
-      1차 심판 prompt/정체성/max_output_tokens → min_answered → timeout 예산/계수.
+      1차 심판 prompt/정체성/max_output_tokens → min_answered → meta timeout.
       통과 시 [Ok vp], 첫 위반에서 [Error invalid].
       config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result

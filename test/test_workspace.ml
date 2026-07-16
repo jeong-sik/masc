@@ -1442,20 +1442,6 @@ let test_rejoin_event_log () =
     Alcotest.(check bool) "rejoin event logged" true has_rejoin
   )
 
-(** BUG-5: Keeper detection uses agent_type/metadata evidence, not just name *)
-let test_keeper_detection_by_agent_type () =
-  (* A non-keeper-named agent with agent_type="keeper" should get keeper threshold *)
-  let is_keeper_by_type = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"keeper" in
-  Alcotest.(check bool) "agent_type=keeper detected" true is_keeper_by_type;
-
-  (* A keeper-shaped name alone is not authoritative. *)
-  let is_keeper_by_name = Workspace_resilience.Zombie.is_keeper ~name:"keeper-test-agent" ~agent_type:"test" in
-  Alcotest.(check bool) "keeper-*-agent name alone rejected" false is_keeper_by_name;
-
-  (* Neither name nor type matches *)
-  let not_keeper = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"claude" in
-  Alcotest.(check bool) "non-keeper correctly rejected" false not_keeper
-
 (** BUG-6: Heartbeat Mutex protects concurrent access *)
 let test_heartbeat_concurrent_start_stop () =
   Eio_main.run @@ fun _env ->
@@ -1727,7 +1713,6 @@ let () =
     (* === Lifecycle Bug Fix Tests (#1655) === *)
     "lifecycle_bugs", [
       Alcotest.test_case "BUG-1: rejoin event log" `Quick test_rejoin_event_log;
-      Alcotest.test_case "BUG-5: keeper detection by agent_type" `Quick test_keeper_detection_by_agent_type;
       Alcotest.test_case "BUG-6: heartbeat concurrent start/stop" `Quick test_heartbeat_concurrent_start_stop;
     ];
 

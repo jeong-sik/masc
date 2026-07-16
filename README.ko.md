@@ -314,7 +314,6 @@ masc/
 | [`docs/OAS-MASC-BOUNDARY.md`](docs/OAS-MASC-BOUNDARY.md) | MASC ↔ OAS 경계 | reference 문서; 오래된 본문보다 `last_verified`와 generated pin block 우선 |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | spec suite 진입점 | living draft; 개별 spec에는 migration context가 남아 있을 수 있음 |
 | [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper 개념과 운영 메모 | 오래된 manual; config truth는 [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md), [`config/runtime.toml`](config/runtime.toml), live code 우선 |
-| [`docs/keeper-turn-lifecycle.md`](docs/keeper-turn-lifecycle.md) | historical lifecycle notes | [`docs/spec/04-turn-lifecycle.md`](docs/spec/04-turn-lifecycle.md)가 권위 문서 |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | release evidence bundle | 형식 문서; 사용 전 version line을 current release metadata와 맞출 것 |
 
 대시보드 라우트 포맷·서피스 목록은 위 [Dashboard](#dashboard) 섹션을 참고해 주세요.

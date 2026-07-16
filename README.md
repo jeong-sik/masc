@@ -379,7 +379,6 @@ unless they are linked from a current runbook.
 | [`docs/OAS-MASC-BOUNDARY.md`](docs/OAS-MASC-BOUNDARY.md) | MASC ↔ OAS boundary | Reference doc; prefer its `last_verified` and generated pin block over old prose elsewhere |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Spec suite entry point | Living draft; individual spec files may still carry migration context |
 | [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper concepts and operator notes | Older manual; for config truth prefer [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md), [`config/runtime.toml`](config/runtime.toml), and live code |
-| [`docs/keeper-turn-lifecycle.md`](docs/keeper-turn-lifecycle.md) | Historical lifecycle notes | Superseded by [`docs/spec/04-turn-lifecycle.md`](docs/spec/04-turn-lifecycle.md) |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence bundle | Evidence format; version lines must match current release metadata before use |
 
 See the [Dashboard](#dashboard) section above for dashboard route formats and surface list.

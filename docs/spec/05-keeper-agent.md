@@ -98,7 +98,6 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
   containment; external effects pass through the Gate.
 - **Scope**: `mention_targets`, `bound_workspace_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
-- **Compaction**: `compaction_profile`, `compaction_ratio_gate`, `compaction_message_gate`
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
 - **Team/Autonomy**: `active_goal_ids`, `autonomous_turn_count`, `board_reactive_turn_count`, `mention_reactive_turn_count`
 

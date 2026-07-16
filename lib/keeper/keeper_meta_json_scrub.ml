@@ -32,8 +32,8 @@ let config_field_names =
        config-only scrub list: any call-site that rewrites persisted JSON with
        this list would delete "delegate", after which parsing falls back to
        Mm_inherit and the next write re-emits "inherit". The
-       test/test_config_runtime_split invariant (no meta_to_json key may be in
-       config_field_names) guards this. *)
+       test/test_keeper_effective_meta_overlay invariant (no persisted runtime
+       snapshot key may leak through config_field_names) guards this. *)
   ; "autoboot_enabled"; "max_context_override"
   ; "telemetry_feedback_enabled"; "telemetry_feedback_window_hours"
   ]

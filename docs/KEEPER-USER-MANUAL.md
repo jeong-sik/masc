@@ -687,9 +687,12 @@ flowchart TD
 | 상태 | 조건 | 자동 동작 |
 |------|------|----------|
 | 정상 | < 50% | 없음 |
-| Compact 트리거 | >= `compaction_ratio_gate` (기본 50%) | 4-step compaction 실행 |
+| Compaction 요청 | 명시적 Manual 요청 또는 typed provider overflow | MASC-owned compaction 경계로 진입 |
 
-수동 대응: `masc_keeper_status`에서 `context_ratio` 확인 후, 필요하면 명시적인 compaction을 요청한다.
+`context_ratio`는 관측값일 뿐 compaction 실행 권한이 아니다. 필요하면
+명시적인 compaction을 요청하며, provider overflow는 typed failure에서만
+compaction 경계로 진입한다. Durable owner-lane operation, source CAS,
+reinjection receipt는 진행 중인 completion gate다.
 
 ### 7.4 Handoff 실패
 

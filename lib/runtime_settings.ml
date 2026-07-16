@@ -249,13 +249,21 @@ let keeper_supervisor_sweep_sec =
     ()
 
 let keeper_keepalive_interval_sec =
-  register_int
+  Runtime_params.register
     ~key:"keeper.keepalive_interval_sec"
     ~default:(fun () -> Env_config_keeper.KeeperKeepalive.interval_sec)
-    ~min:5 ~max:300
-    ~meta:{ description = "Heartbeat 주기(초)";
-            value_type = "int";
-            min_value = Some (`Int 5); max_value = Some (`Int 300) }
+    ~validate:(fun interval_sec ->
+      if interval_sec > 0
+      then Ok ()
+      else Error "keeper.keepalive_interval_sec must be a positive integer")
+    ~serialize:(fun interval_sec -> `Int interval_sec)
+    ~deserialize:deserialize_int
+    ~meta:
+      { description = "Heartbeat 주기(초)"
+      ; value_type = "int"
+      ; min_value = Some (`Int 1)
+      ; max_value = None
+      }
     ()
 
 let keeper_dead_ttl_sec =

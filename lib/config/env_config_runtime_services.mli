@@ -79,10 +79,9 @@ end
 (** {1 Timeouts} *)
 
 module Timeouts : sig
-  val neo4j_timeout_sec : float
-  (** [MASC_NEO4J_TIMEOUT_SEC] (default [60.0]).  Floor [1.0] —
-      prevents tight-loop when misconfigured.  Controls the
-      zero-zombie Pulse rhythm in the orchestrator. *)
+  val maintenance_pulse_interval_sec : float
+  (** [MASC_MAINTENANCE_PULSE_INTERVAL_SEC] (default [60.0]). Floor [1.0].
+      Controls the orphan-observation and channel-dedup consumers. *)
 
 end
 

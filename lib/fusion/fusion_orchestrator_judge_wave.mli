@@ -49,8 +49,3 @@ val all_fail_error_of_runs
   :  fallback:Fusion_types.judge_failure
   -> judge_run list
   -> Fusion_types.judge_failure * Fusion_types.usage
-
-val meta_provider_timeout
-  :  preset:Fusion_policy.preset
-  -> clock
-  -> (float, Fusion_types.judge_failure * Fusion_types.usage) result

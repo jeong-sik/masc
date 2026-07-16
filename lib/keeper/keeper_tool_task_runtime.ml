@@ -435,7 +435,7 @@ let handle_keeper_task_tool_with_outcome
       if orphans = [] then
         "ACTION: STOP calling keeper_tasks_audit — no orphans found. Move on to other work or end your turn."
       else
-        Printf.sprintf "ACTION: %d orphan(s) found. The workspace GC auto-releases zombie tasks — no keeper action required. STOP re-auditing."
+        Printf.sprintf "ACTION: %d orphan(s) found. This audit is read-only; explicit operator reconciliation is required. Surface these task IDs and STOP re-auditing until lifecycle state changes."
           (List.length orphans)
     in
     Keeper_tool_execution.success

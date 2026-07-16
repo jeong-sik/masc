@@ -144,9 +144,9 @@ let all_flags : flag list = [
 
   (* ── Runtime ──────────────────────────────────────────────── *)
   { env_name = Env_config_core.orchestrator_enabled_env_key;
-    description = "Auto-orchestration background loop (superseded by zero-zombie cleanup)";
+    description = "Enable the orchestrator task-availability check loop";
     default = false; category = "runtime";
-    lifecycle = Deprecated "superseded by zero-zombie cleanup since v2.130.0"; since = "2.0.0" };
+    lifecycle = Active; since = "2.0.0" };
 
   { env_name = "MASC_LOCAL_RUNTIME_DEBUG";
     description = "Local LLM runtime debug output";

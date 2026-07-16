@@ -66,6 +66,12 @@ type generate_probe_decision =
 
 let clamp ~min_value ~max_value value = max min_value (min max_value value)
 
+let validate_timeout_sec value =
+  if value > 0 then
+    Ok value
+  else
+    Error
+      (Printf.sprintf "timeout_sec must be a positive integer (got %d)" value)
 
 let normalize_ollama_server_url raw =
   let trimmed = String.trim raw in
@@ -508,7 +514,11 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
   in
   let probe_runs = clamp ~min_value:1 ~max_value:4 probe_runs in
   let max_tokens = clamp ~min_value:1 ~max_value:128 max_tokens in
-  let timeout_sec = clamp ~min_value:3 ~max_value:300 timeout_sec in
+  let timeout_sec =
+    match validate_timeout_sec timeout_sec with
+    | Ok value -> value
+    | Error message -> invalid_arg message
+  in
   let ps_timeout_sec = clamp ~min_value:1 ~max_value:30 ps_timeout_sec in
   let think_enabled = effective_think_enabled think_mode in
   let before_status, loaded_before, before_error =

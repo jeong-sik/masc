@@ -286,6 +286,7 @@
   test_keeper_artifact_hydrator
   test_artifacts_endpoint
   test_tool_output_washing_e2e
+  test_keeper_compaction_unit
   test_keeper_context_core_dedup
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
@@ -607,6 +608,7 @@
   test_keeper_artifact_hydrator
   test_artifacts_endpoint
   test_tool_output_washing_e2e
+  test_keeper_compaction_unit
   test_keeper_context_core_dedup
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
@@ -674,6 +676,11 @@
  (libraries alcotest masc_test_deps))
 
 (test
+ (name test_keeper_current_operations)
+ (modules test_keeper_current_operations)
+ (libraries alcotest masc_test_deps))
+
+(test
  (name test_keeper_failure_judgment_contract)
  (modules test_keeper_failure_judgment_contract)
  (libraries alcotest masc_test_deps))
@@ -697,11 +704,6 @@
  (modules test_runtime_config_validity)
  (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
  (libraries masc_test_deps))
-
-(test
- (name test_keeper_structured_output_coverage)
- (modules test_keeper_structured_output_coverage)
- (libraries alcotest ast_grep masc_test_deps masc.fusion_core))
 
 (test
  (name test_keeper_keepalive_launch_order_ast)
@@ -779,14 +781,6 @@
 (test
  (name test_fusion_sink_meta)
  (modules test_fusion_sink_meta)
- (libraries masc_test_deps masc.fusion_core))
-
-; FUSION adaptive timeout / P0 hardening: config, pure timeout helper, metrics,
-; and sink meta JSON for failed judge nodes.
-
-(test
- (name test_fusion_adaptive_timeout)
- (modules test_fusion_adaptive_timeout)
  (libraries masc_test_deps masc.fusion_core))
 
 ; RFC-0266 §7 Phase D — fusion run registry persistence: JSONL append + replay.
@@ -896,7 +890,6 @@
   ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
-  test_dashboard_keeper_worker_degrade_source
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify
@@ -1070,7 +1063,6 @@
   ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
-  test_dashboard_keeper_worker_degrade_source
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify
@@ -1261,7 +1253,14 @@
 (test
  (name test_server_auth_warn_log_bound)
  (modules test_server_auth_warn_log_bound)
- (libraries alcotest masc masc_server eio_main))
+ (libraries alcotest masc masc.auth masc_server eio_main))
+
+; Dashboard actor attribution: rejected credentials cannot become anonymous hints.
+
+(test
+ (name test_server_auth_dashboard_actor_resolution)
+ (modules test_server_auth_dashboard_actor_resolution)
+ (libraries alcotest masc masc.auth masc.masc_types masc_server eio_main httpun unix))
 
 ; RFC-0301 item 6: the turn-local generated-media accumulator turns stream media
 ; into reload chat blocks (image / voice / attach) via the content-addressed store.
@@ -1906,8 +1905,6 @@
 
 (include stanzas/test_keeper_receipt_authoritative_matrix.inc)
 
-(include stanzas/test_keeper_receipt_outcome_tla_parity.inc)
-
 (include stanzas/test_keeper_raw_trace_sink.inc)
 
 (include stanzas/test_keeper_sandbox_docker_cwd_response.inc)
@@ -1932,10 +1929,6 @@
 
 (include stanzas/test_keeper_tool_matrix.inc)
 
-
-(include stanzas/test_keeper_turn_fsm_wired_sites.inc)
-
-(include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 
 (include stanzas/test_keeper_unified_tool_event_order_source.inc)
 

@@ -711,6 +711,50 @@ let test_all_summary_failures_accept_explicit_restart () =
        reject_and_cleanup terminal_id)
 ;;
 
+let test_operator_recovery_reopens_all_failed_summaries () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-summary-operator-recovery" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       let retryable_id =
+         submit ~base_path ~keeper_name ~input:(`String "retryable")
+       in
+       let terminal_id =
+         submit ~base_path ~keeper_name ~input:(`String "terminal")
+       in
+       List.iter
+         (fun id -> check_update "mark pending" true (AQ.mark_summary_pending ~id))
+         [ retryable_id; terminal_id ];
+       check_update
+         "retryable failure"
+         true
+         (AQ.mark_summary_failed ~id:retryable_id ~reason:"transport" ~retryable:true);
+       check_update
+         "terminal failure"
+         true
+         (AQ.mark_summary_failed ~id:terminal_id ~reason:"prompt" ~retryable:false);
+       let reopened =
+         match AQ.restart_failed_summaries ~base_path with
+         | Ok ids -> List.sort String.compare ids
+         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+       in
+       Alcotest.(check (list string))
+         "explicit operator action reopens both classes"
+         (List.sort String.compare [ retryable_id; terminal_id ])
+         reopened;
+       List.iter
+         (fun id ->
+            match AQ.get_pending_entry ~id with
+            | Some { summary_status = AQ.Summary_not_requested; _ } -> ()
+            | Some _ | None -> Alcotest.fail "failed summary was not reopened")
+         reopened;
+       reject_and_cleanup retryable_id;
+       reject_and_cleanup terminal_id)
+;;
+
 let test_lane_activity_does_not_retry_failed_auto_judge () =
   let base_path = temp_dir () in
   let keeper_a = "queue-retry-lane-a" in
@@ -1314,6 +1358,10 @@ let () =
             "lane activity never retries a failed Auto Judge"
             `Quick
             test_lane_activity_does_not_retry_failed_auto_judge
+        ; Alcotest.test_case
+            "operator recovery reopens terminal failures"
+            `Quick
+            test_operator_recovery_reopens_all_failed_summaries
         ; Alcotest.test_case
             "decisive summary finalizes after restart"
             `Quick

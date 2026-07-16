@@ -41,7 +41,8 @@ val keeper_supervisor_sweep_sec : float Runtime_params.param
 (** Supervisor sweep interval (seconds).  Range \[10.0, 120.0]. *)
 
 val keeper_keepalive_interval_sec : int Runtime_params.param
-(** Heartbeat interval (seconds).  Range \[5, 300]. *)
+(** Heartbeat interval (seconds). Any positive value is accepted without an
+    implicit upper bound. *)
 
 val keeper_dead_ttl_sec : float Runtime_params.param
 (** Dead-state retention (seconds).  Range \[60.0, 1 day]. *)

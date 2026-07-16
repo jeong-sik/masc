@@ -201,7 +201,9 @@ type board_signal_match = {
   matched_targets : string list;
 }
 
-(** Collect recent board activity within the keeper's heartbeat window.
+(** Collect board activity after the keeper's durable cursor. A keeper without
+    a cursor starts at the beginning of Board history; no time window may hide
+    undelivered posts.
     Returns [(events, new_post_count, mention_count)].
     Used by both the world observation builder and the deliberation triage
     in keepalive to populate board-related triggers. *)

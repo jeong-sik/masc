@@ -205,17 +205,6 @@ let safe_read_backlog (ctx : context) =
     { Masc_domain.tasks = []; last_updated = Masc_domain.now_iso (); version = 1 }
 ;;
 
-let safe_is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen =
-  try Workspace.is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Workspace.warn
-      "is_zombie_agent failed for %s: %s"
-      agent_name
-      (Stdlib.Printexc.to_string exn);
-    false
-;;
-
 let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_domain.task)
   =
   match task.task_status with
@@ -363,26 +352,6 @@ let status_summary_string ~task_list_projection (ctx : context) =
       | Some _ | None -> agent)
     |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
       String.compare a.name b.name)
-  in
-  let agents_with_state =
-    List.map
-      (fun (agent : Masc_domain.agent) ->
-         Workspace_query.safe_yield ();
-         let is_zombie =
-             safe_is_zombie_agent
-               ~agent_type:agent.agent_type
-               ?agent_meta:agent.meta
-               ~agent_name:agent.name
-               agent.last_seen
-         in
-         agent, is_zombie)
-      agents
-  in
-  let zombie_count =
-    List.fold_left
-      (fun acc (_, is_zombie) -> if is_zombie then acc + 1 else acc)
-      0
-      agents_with_state
   in
   let ( active_tasks
       , todo_count
@@ -560,16 +529,6 @@ let status_summary_string ~task_list_projection (ctx : context) =
           ]
       else items
     in
-    let items =
-      if zombie_count > 0
-      then
-        items
-        @ [ Printf.sprintf
-              "%d stale agent(s) are still visible in the namespace."
-              zombie_count
-          ]
-      else items
-    in
     if fresh_todo_count > 0 && Stdlib.List.length binding.assigned_task_ids = 0
     then
       items
@@ -586,7 +545,7 @@ let status_summary_string ~task_list_projection (ctx : context) =
     ~credential_blocked
     ~current_task
     ~effective_cluster_name
-    ~agents_with_state
+    ~agents
     ~active_tasks
     ~todo_count
     ~claimed_count

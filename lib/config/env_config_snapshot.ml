@@ -346,8 +346,6 @@ let internal_timer_entries =
   [
     entry ~default:"300.0" "MASC_BRIEFING_CACHE_TTL_SEC"
       "Mission briefing cache TTL (seconds, 5 min)";
-    entry ~default:"300.0" "MASC_KEEPER_BOOTSTRAP_WINDOW_SEC"
-      "Keeper world observation bootstrap window (seconds, 5 min)";
     entry ~default:"300.0" "MASC_LABEL_QUIET_THRESHOLD_SEC"
       "Dashboard label quiet threshold (seconds, 5 min)";
     entry ~default:"900.0" "MASC_LABEL_STUCK_THRESHOLD_SEC"
@@ -384,7 +382,7 @@ let keeper_grpc_entries =
 let keeper_keepalive_entries =
   [
     entry ~default:"30" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
-      "Heartbeat cycle interval (clamped 5-300 seconds)";
+      "Heartbeat cycle interval (positive integer, no implicit upper bound)";
     entry ~default:"120.0" "MASC_KEEPER_MAX_SILENCE_SEC"
       "Max seconds since last heartbeat before presence sync required";
     entry ~default:"2.0" "MASC_KEEPER_SLEEP_CHUNK_SEC"
@@ -550,8 +548,6 @@ let orchestrator_entries =
       "Orchestrator check interval (seconds)";
     entry ~default:"2" "MASC_ORCHESTRATOR_MIN_PRIORITY"
       "Orchestrator minimum priority (clamped 0-10)";
-    entry ~default:"300" "MASC_ORCHESTRATOR_TIMEOUT"
-      "Orchestrator timeout (clamped 10-3600 seconds)";
   ]
 
 let path_entries =

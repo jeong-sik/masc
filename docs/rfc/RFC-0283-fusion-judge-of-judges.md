@@ -35,7 +35,7 @@ panel → [judge_1, judge_2, ..., judge_N] → meta-judge → sink
 
 ### 2.1 preset 스키마 — 비파괴 추가
 
-기존 단일 `judge`/`judge_system_prompt`/`judge_timeout_s`를 **그대로 둔다**. 이것이 `simple`/`refine`/`conditional`의 심판이자 **JOJ의 meta-judge(reducer)**다. 1차 심판 목록 `judges`를 **선택적으로 추가**한다(기본 `[]`).
+기존 단일 `judge`/`judge_system_prompt`를 **그대로 둔다**. 이것이 `simple`/`refine`/`conditional`의 심판이자 **JOJ의 meta-judge(reducer)**다. 1차 심판 목록 `judges`를 **선택적으로 추가**한다(기본 `[]`).
 
 ```ocaml
 type judge_spec =
@@ -44,7 +44,6 @@ type judge_spec =
   ; system_prompt : string     (* 이 1차 심판의 lens. 필수(코드 default 없음) *)
   ; web_tools : bool
   ; max_tool_calls : int
-  ; timeout_s : float
   }
 
 type preset =
@@ -52,7 +51,6 @@ type preset =
   ; panels : panel_group list
   ; judge : string                  (* (유지) simple/refine/conditional 심판 = JOJ meta-judge *)
   ; judge_system_prompt : string    (* (유지) *)
-  ; judge_timeout_s : float         (* (유지) *)
   ; judges : judge_spec list        (* (신규) JOJ 1차 심판들. default []. *)
   }
 ```
@@ -132,7 +130,7 @@ val run_meta : (* run/run_refine과 동형, ~priors 추가 *) ...
 
 | 건드림 | 안 건드림 |
 |--------|-----------|
-| preset에 `judges` 추가, Validated_preset 검증 | 기존 `judge`/`judge_system_prompt`/`judge_timeout_s` |
+| preset에 `judges` 추가, Validated_preset 검증 | 기존 `judge`/`judge_system_prompt` |
 | `[fusion].staged_judge_group_size` config + staged grouping validation | panel preset grammar |
 | fusion_topology에 `Judge_of_judges`, `Staged_judge_of_judges` | simple/refine/conditional 동작 |
 | Fusion_judge: compose_meta_prompt/run_meta | sink 계약, OAS |

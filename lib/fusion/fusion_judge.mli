@@ -30,7 +30,6 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> timeout_s:float
   -> ?max_tokens:int
   -> judge_system_prompt:string
   -> judge_model:string
@@ -60,7 +59,6 @@ val compose_refine_prompt
 val run_refine
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> timeout_s:float
   -> ?max_tokens:int
   -> judge_system_prompt:string
   -> judge_model:string
@@ -100,7 +98,6 @@ val compose_meta_prompt
 val run_meta
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> timeout_s:float
   -> ?max_tokens:int
   -> judge_system_prompt:string
   -> judge_model:string

@@ -15,23 +15,6 @@ open Keeper_types_profile
 module Message_json = Keeper_context_core_message_json
 module Canonical_tool = Agent_sdk.Canonical_tool
 
-(** Hard caps for checkpoint payload hygiene.
-    Message-count capping alone is insufficient when a single message
-    accumulates hundreds of text blocks or multi-MB synthetic context. *)
-let default_max_checkpoint_text_blocks_per_message = 32
-let default_max_checkpoint_text_chars_per_message = 16 * 1024
-let default_max_checkpoint_content_chars_total = 512 * 1024
-let checkpoint_text_cap_marker = "\n[capped]"
-
-(** ToolResult block caps — analogous to text block caps above.
-    Without these, a single message with hundreds of ToolResult blocks
-    (e.g. 280 blocks × 7K chars = 1.95M chars) passes through the
-    sanitizer untouched, causing context window overflow on next load.
-    Values aligned with Claude Code: 200K aggregate, per-result 8K. *)
-let default_max_checkpoint_tool_result_chars = 8_000
-let default_max_checkpoint_tool_results_per_message = 20
-let default_max_checkpoint_tool_result_total_chars = 200_000
-
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
 (* ================================================================ *)
@@ -159,18 +142,6 @@ let tool_result_ids_of_message = Keeper_context_tool_message_pairs.tool_result_i
 let has_tool_result_block = Keeper_context_tool_message_pairs.has_tool_result_block
 let has_tool_use_block = Keeper_context_tool_message_pairs.has_tool_use_block
 let trim_messages_preserving_pairs = Keeper_context_tool_message_pairs.trim_messages_preserving_pairs
-
-(* Tool block text renderers extracted to
-   [Keeper_context_tool_text_block] (godfile decomp). Parent wrapper
-   injects [default_max_checkpoint_tool_result_chars] so the existing
-   surface (no [~max_chars] arg) stays byte-compatible for callers. *)
-let tool_result_text_of_block ~tool_use_id ~content ~json =
-  Keeper_context_tool_text_block.tool_result_text_of_block
-    ~tool_use_id
-    ~content
-    ~json
-    ~max_chars:default_max_checkpoint_tool_result_chars
-;;
 
 type tool_pair_repair_stats = Keeper_context_core_pair_repair_stats.tool_pair_repair_stats =
   { dropped_tool_uses : int
@@ -554,30 +525,3 @@ let log_keeper_exn ~label exn =
   Log.Keeper.info "%s%s: %s" tag label (Printexc.to_string exn)
 
 let checkpoint_generation_key = "keeper_generation"
-
-type checkpoint_sanitize_stats = {
-  dropped_messages : int;
-  dropped_blocks : int;
-  dropped_chars : int;
-  truncated_blocks : int;
-  truncated_chars : int;
-  tool_pair_repair : tool_pair_repair_stats;
-}
-
-let empty_checkpoint_sanitize_stats =
-  {
-    dropped_messages = 0;
-    dropped_blocks = 0;
-    dropped_chars = 0;
-    truncated_blocks = 0;
-    truncated_chars = 0;
-    tool_pair_repair = empty_tool_pair_repair_stats;
-  }
-
-let checkpoint_sanitize_changed (stats : checkpoint_sanitize_stats) : bool =
-  stats.dropped_messages > 0
-  || stats.dropped_blocks > 0
-  || stats.dropped_chars > 0
-  || stats.truncated_blocks > 0
-  || stats.truncated_chars > 0
-  || tool_pair_repair_stats_changed stats.tool_pair_repair

@@ -25,7 +25,7 @@ let persisted_meta_exn config name =
   | Ok None -> fail "persisted keeper meta is missing"
   | Error detail -> failf "persisted keeper meta read failed: %s" detail
 
-let test_missing_checkpoint_is_typed_tool_failure () =
+let test_missing_checkpoint_still_queues_owner_lane_stimulus () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.ensure_rng_initialized ();
   Masc_test_deps.init_eio_clock env;
@@ -72,21 +72,29 @@ let test_missing_checkpoint_is_typed_tool_failure () =
           ~args:(`Assoc [ "name", `String keeper_name ])
       with
       | None -> fail "masc_keeper_compact is not registered"
-      | Some (Tool_result.Completed _) -> fail "missing checkpoint must not report success"
-      | Some (Tool_result.Deferred _) -> fail "missing checkpoint must not defer"
+      | Some (Tool_result.Deferred _) -> fail "compaction admission must not defer"
       | Some (Tool_result.Failed failure) ->
-        check string "tool identity" "masc_keeper_compact" failure.tool_name;
-        check string "typed recovery error" "checkpoint_not_found"
-          Yojson.Safe.Util.(failure.data |> member "compaction_error" |> to_string);
-        check bool "checkpoint was not applied" false
-          Yojson.Safe.Util.(failure.data |> member "checkpoint_applied" |> to_bool))
+        failf "compaction admission must queue, got failure: %s" failure.message
+      | Some (Tool_result.Completed output) ->
+        (* #24598 (RFC-0182 §3.1): the tool surface only queues a
+           Manual_compaction_requested stimulus on the owner lane; the
+           checkpoint lookup and its typed recovery failure now surface
+           when the lane consumes the stimulus, not at dispatch. *)
+        check string "tool identity" "masc_keeper_compact" output.tool_name;
+        check bool "admission acknowledges queueing" true
+          Yojson.Safe.Util.(output.data |> member "queued" |> to_bool);
+        check string "owner-lane stimulus kind" "manual_compaction_requested"
+          Yojson.Safe.Util.(output.data |> member "stimulus" |> to_string);
+        check bool "queue outcome is reported" true
+          Yojson.Safe.Util.(
+            output.data |> member "queue_outcome" |> to_string <> ""))
 
 let () =
   run "keeper_compact_recovery_tool_surface"
     [ ( "recovery_failure"
       , [ test_case
-            "missing checkpoint is a typed tool failure"
+            "missing checkpoint still queues the owner-lane stimulus"
             `Quick
-            test_missing_checkpoint_is_typed_tool_failure
+            test_missing_checkpoint_still_queues_owner_lane_stimulus
         ] )
     ]

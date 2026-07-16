@@ -145,6 +145,66 @@ let test_runtime_probe_status_only_skip_reports_reason () =
   check bool "status-only flag reported" false
     (json |> member "run_generate" |> to_bool)
 
+let test_runtime_probe_preserves_positive_timeout () =
+  let timeout_of requested =
+    Eio_main.run @@ fun _env ->
+    Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
+      ~server_url:"http://127.0.0.1:1"
+      ~model:"dummy-probe-model"
+      ~run_generate:false
+      ~timeout_sec:requested
+      ~ps_timeout_sec:1
+      ()
+    |> Yojson.Safe.Util.member "timeout_sec"
+    |> Yojson.Safe.Util.to_int
+  in
+  check int "below old floor is unchanged" 1 (timeout_of 1);
+  check int "above old cap is unchanged" 301 (timeout_of 301)
+
+let test_runtime_probe_rejects_nonpositive_timeout () =
+  check_raises
+    "zero timeout is rejected before I/O"
+    (Invalid_argument "timeout_sec must be a positive integer (got 0)")
+    (fun () ->
+      ignore
+        (Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
+           ~server_url:"http://127.0.0.1:1"
+           ~timeout_sec:0
+           ()))
+
+let test_dispatch_rejects_invalid_timeout_before_authorization () =
+  let authorization_calls = ref 0 in
+  let authorize_external_effect ~operation:_ ~input:_ ~continue:_ =
+    incr authorization_calls;
+    fail "invalid input must not reach authorization"
+  in
+  let context : Masc.Tool_local_runtime_core.context =
+    {
+      config = Masc.Workspace.default_config "/tmp";
+      agent_name = "probe-timeout-test";
+      authorize_external_effect = Some authorize_external_effect;
+    }
+  in
+  let expect_rejection label timeout_json =
+    match
+      Masc.Tool_local_runtime.dispatch context
+        ~name:"masc_runtime_ollama_probe"
+        ~args:(`Assoc [ ("timeout_sec", timeout_json) ])
+    with
+    | None -> fail "Ollama probe handler was not selected"
+    | Some result ->
+        check bool (label ^ " failed") true (Tool_result.is_failed result);
+        check
+          bool
+          (label ^ " is a typed workflow rejection")
+          true
+          (Tool_result.failure_class result
+           = Some Tool_result.Workflow_rejection)
+  in
+  expect_rejection "non-positive timeout" (`Int 0);
+  expect_rejection "wrong-shape timeout" (`String "301");
+  check int "authorization was not invoked" 0 !authorization_calls
+
 let test_normalize_server_url_strips_trailing_slashes () =
   check string "normalizes trailing slash" "http://127.0.0.1:11434"
     (Masc.Tool_local_runtime_probe.normalize_ollama_server_url
@@ -288,6 +348,12 @@ let () =
             test_runtime_probe_reports_effective_think_mode;
           test_case "status-only skip reports reason" `Quick
             test_runtime_probe_status_only_skip_reports_reason;
+          test_case "preserves every positive explicit timeout" `Quick
+            test_runtime_probe_preserves_positive_timeout;
+          test_case "rejects non-positive timeout before I/O" `Quick
+            test_runtime_probe_rejects_nonpositive_timeout;
+          test_case "rejects invalid timeout before authorization" `Quick
+            test_dispatch_rejects_invalid_timeout_before_authorization;
           test_case "computes tok per second from generate response" `Quick
             test_ollama_generate_parser_computes_tok_per_second;
         ] );

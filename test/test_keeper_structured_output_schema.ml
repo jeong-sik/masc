@@ -70,7 +70,6 @@ let schema_capable_oas_provider_config () =
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~model_id:"structured-output-ratchet"
     ~base_url:"https://structured-output.invalid/v1"
-    ~supports_structured_output_override:true
     ~model_capabilities_override:
       Llm_provider.Capabilities.openai_compat_chat_extended_capabilities
     ()
@@ -81,7 +80,6 @@ let prompt_tier_oas_provider_config () =
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~model_id:"prompt-tier-ratchet"
     ~base_url:"https://prompt-tier.invalid/v1"
-    ~supports_structured_output_override:false
     ~model_capabilities_override:
       { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
         supports_structured_output = false

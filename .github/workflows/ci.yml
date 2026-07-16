@@ -578,6 +578,7 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
     # (branch push to main/develop, workflow_dispatch) always run Build and Test
@@ -596,8 +597,8 @@ jobs:
     #     every test suite are merge-blocking.
     #   - Each suite runs exactly once. scripts/ci-run-tests.sh only reports
     #     heartbeat, disk pressure, process state, and failure diagnostics.
-    #   - GitHub Actions owns the outer workflow lifecycle; this job does not
-    #     impose a second deadline on individual commands or the suite.
+    #   - The job deadline is the single outer execution boundary; individual
+    #     commands and suites do not add independent retry/timeout policy.
     steps:
       - name: Free disk space
         # ubuntu-latest starts with roughly 14 GB free but preinstalls the

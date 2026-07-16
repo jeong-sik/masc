@@ -1723,6 +1723,19 @@ let recover_lost_disk_records ~base_path () =
 
 let with_lock f = Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
 
+let validate_request_store_root ~base_path =
+  match
+    Fs_compat.inspect_owned_directory_chain
+      ~ownership_root:base_path
+      (request_dir ~base_path)
+  with
+  | Ok (Fs_compat.Owned_directory_missing | Fs_compat.Owned_directory _) -> Ok ()
+  | Error rejection ->
+    Error
+      (Invalid_base_path
+         { reason = Fs_compat.owned_directory_chain_rejection_to_string rejection })
+;;
+
 let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
   let rec reserve () =
     let request_id = ops.generate_request_id () in
@@ -1738,7 +1751,7 @@ let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
                 { base_path; request_id }
               in
               if Store_transition_table.mem reserved_request_ids reservation_key
-              then None
+              then `Collision
               else
                 let entry =
                   { request_id
@@ -1758,13 +1771,21 @@ let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
                   ();
                 Request_table.add pending key entry;
                 Request_table.add transition_locks key transition_lock;
-                Some (request_id, entry, key, transition_lock))
-          | Located _ | Located_unreadable _ | Located_rejected _ -> None)
+                `Reserved (request_id, entry, key, transition_lock))
+          | Located _ -> `Collision
+          | Located_unreadable _ ->
+            (match validate_request_store_root ~base_path with
+             | Ok () -> `Collision
+             | Error rejection -> `Rejected rejection)
+          | Located_rejected rejection -> `Rejected rejection)
       with
-      | Some reserved -> reserved
-      | None -> reserve ()
+      | `Reserved reserved -> Ok reserved
+      | `Collision -> reserve ()
+      | `Rejected rejection -> Error rejection
   in
-  reserve ()
+  match validate_request_store_root ~base_path with
+  | Ok () -> reserve ()
+  | Error _ as error -> error
 ;;
 
 let remove_runtime_tables_if_owned ~release_reservation key transition_lock =
@@ -1994,9 +2015,9 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
      | Ok keeper_name_id ->
     let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
     with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
-    let request_id, entry, key, transition_lock =
-      reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name
-    in
+    match reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name with
+    | Error rejection -> Error (Submit_rejected rejection)
+    | Ok (request_id, entry, key, transition_lock) ->
     let reconciliation_outcome reason =
       Ok
         { request_id

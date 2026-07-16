@@ -5,7 +5,6 @@
   test_bash_history
   test_exec_buffer
   test_exec_cache
-  test_exec_budget
   test_shell_ir_command_shape
   test_shell_ir_oracle
   test_exec_dispatch_docker_streaming

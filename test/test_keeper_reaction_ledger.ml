@@ -699,10 +699,21 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     ~base_path
     keeper_name
     (board_stimulus ~post_id:"post-live-backlog-2" ());
-  Keeper_event_queue_persistence.record_inflight
+  Keeper_registry_event_queue.enqueue
     ~base_path
-    ~keeper_name
-    [ fusion_completed_stimulus () ];
+    keeper_name
+    (fusion_completed_stimulus ());
+  (match
+     Keeper_event_queue_persistence.claim_when_result
+       ~base_path
+       ~keeper_name
+       ~claimed_at:(Time_compat.now ())
+       ~ready:(fun _ -> true)
+       ()
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "expected durable backlog lease"
+   | Error error -> fail ("durable backlog claim failed: " ^ error));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path

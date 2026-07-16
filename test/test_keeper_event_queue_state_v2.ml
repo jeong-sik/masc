@@ -34,6 +34,8 @@ let test_claim_codec_ack_idempotency () =
   let lease = require_some "claimed lease" lease in
   Alcotest.(check int64) "lease sequence" 1L lease.sequence;
   Alcotest.(check string) "stable lease id" "lease:1" lease.lease_id;
+  Alcotest.(check (float 0.0)) "exact claim time" 10.0 lease.claimed_at;
+  Alcotest.(check string) "exact leased stimulus" first.post_id lease.stimulus.post_id;
   Alcotest.(check int) "pending drained" 0 (Queue.length (State.pending state));
   Alcotest.(check int64) "next sequence" 2L (State.next_lease_sequence state);
   let state =
@@ -97,6 +99,34 @@ let test_claim_codec_ack_idempotency () =
    | Ok _ -> Alcotest.fail "conflicting second settlement was accepted")
 ;;
 
+let test_lease_codec_rejects_retired_batch_shape () =
+  let first = stimulus "first" 1.0 in
+  let second = stimulus "second" 2.0 in
+  let state = State.with_pending (queue [ first ]) State.empty in
+  let _state, lease = claim_head state in
+  let lease = require_some "claimed lease" lease in
+  let fields =
+    match State.lease_to_yojson lease with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "lease codec did not emit an object"
+  in
+  let replace name value =
+    `Assoc ((name, value) :: List.remove_assoc name fields)
+  in
+  (match State.lease_of_yojson (replace "claimed_at_unix" `Null) with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "lease codec accepted a missing claim time");
+  let retired_batch =
+    `List
+      [ Queue.stimulus_to_yojson first
+      ; Queue.stimulus_to_yojson second
+      ]
+  in
+  match State.lease_of_yojson (replace "stimuli" retired_batch) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "lease codec accepted a retired multi-stimulus batch"
+;;
+
 let test_claim_leases_earliest_ready_without_reordering_skipped_work () =
   let blocked =
     { (stimulus "blocked" 1.0) with urgency = Queue.Immediate }
@@ -121,7 +151,7 @@ let test_claim_leases_earliest_ready_without_reordering_skipped_work () =
   Alcotest.(check (list string))
     "arrival order wins across urgency labels"
     [ first_ready.post_id ]
-    (post_ids (queue first_lease.stimuli));
+    [ first_lease.stimulus.post_id ];
   Alcotest.(check (list string))
     "skipped input keeps its position"
     [ blocked.post_id; second_ready.post_id ]
@@ -147,7 +177,7 @@ let test_claim_leases_earliest_ready_without_reordering_skipped_work () =
   Alcotest.(check (list string))
     "next ready input follows"
     [ second_ready.post_id ]
-    (post_ids (queue second_lease.stimuli));
+    [ second_lease.stimulus.post_id ];
   Alcotest.(check (list string))
     "blocked input remains durable"
     [ blocked.post_id ]
@@ -601,13 +631,10 @@ let test_unconsumed_approval_requeues_behind_other_work () =
        in
        let _state, next = claim_head state in
        let next = require_some "next fair lease" next in
-       match next.stimuli with
-       | [ next ] ->
-         Alcotest.(check string)
-           "unrelated work leases before the retained approval"
-           "board-next"
-           next.post_id
-       | _ -> Alcotest.fail "fairness fixture expected one leased stimulus")
+       Alcotest.(check string)
+         "unrelated work leases before the retained approval"
+         "board-next"
+         next.stimulus.post_id)
     [ State.Approval_grant_unconsumed
     ; State.Approval_grant_state_unavailable
     ]
@@ -629,24 +656,6 @@ let with_temp_dir prefix f =
 
 let keeper_dir ~base_path ~keeper_name =
   Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
-;;
-
-let write_queue path queue =
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Queue.queue_to_yojson queue
-  |> Yojson.Safe.pretty_to_string
-  |> Fs_compat.save_file_atomic path
-  |> require_ok ("write fixture " ^ path)
-;;
-
-let read_schema path =
-  match Safe_ops.read_json_file_safe path with
-  | Error message -> Alcotest.failf "read migrated state: %s" message
-  | Ok (`Assoc fields) ->
-    (match List.assoc_opt "schema" fields with
-     | Some (`String schema) -> schema
-     | _ -> Alcotest.fail "migrated state lacks schema")
-  | Ok _ -> Alcotest.fail "migrated state is not an object"
 ;;
 
 let test_context_compaction_retry_is_durable_and_lane_local () =
@@ -706,13 +715,11 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
       |> require_ok "claim peer while owner projection is pending"
       |> require_some "independent peer lease"
     in
-    (match Persistence.lease_stimuli peer_lease with
-     | [ claimed ] ->
-       Alcotest.(check bool)
-         "owner compaction transition does not block peer lane"
-         true
-         (Queue.stimulus_identity_equal peer_work claimed)
-     | _ -> Alcotest.fail "peer lane claim changed the stimulus set");
+    let peer_claimed = Persistence.lease_stimulus peer_lease in
+    Alcotest.(check bool)
+      "owner compaction transition does not block peer lane"
+      true
+      (Queue.stimulus_identity_equal peer_work peer_claimed);
     let restored =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "restore retryable state"
@@ -738,15 +745,12 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
     (match outbox_entry.receipt.settlement with
      | State.Requeue State.Context_compaction_retry -> ()
      | _ -> Alcotest.fail "compaction transition lost its typed requeue reason");
-    (match outbox_entry.stimuli with
-     | [ retained ] ->
-       Alcotest.(check bool)
-         "transition outbox retains the exact leased stimulus"
-         true
-         (Yojson.Safe.equal
-            (Queue.stimulus_to_yojson source)
-            (Queue.stimulus_to_yojson retained))
-     | _ -> Alcotest.fail "retryable transition changed the leased stimulus set");
+    Alcotest.(check bool)
+      "transition outbox retains the exact leased stimulus"
+      true
+      (Yojson.Safe.equal
+         (Queue.stimulus_to_yojson source)
+         (Queue.stimulus_to_yojson outbox_entry.stimulus));
     Persistence.mark_transition_projected_result
       ~base_path
       ~keeper_name
@@ -762,13 +766,10 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
       |> require_ok "claim unrelated work after retry"
       |> require_some "unrelated work lease"
     in
-    (match Persistence.lease_stimuli next_lease with
-     | [ next ] ->
-       Alcotest.(check string)
-         "unrelated work leases before the retained retry"
-         unrelated.post_id
-         next.post_id
-     | _ -> Alcotest.fail "retry fairness fixture expected one leased stimulus");
+    Alcotest.(check string)
+      "unrelated work leases before the retained retry"
+      unrelated.post_id
+      (Persistence.lease_stimulus next_lease).post_id;
     let after_next_claim =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "reload retained retry after unrelated claim"
@@ -782,48 +783,6 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
            (Queue.stimulus_to_yojson source)
            (Queue.stimulus_to_yojson retained))
     | _ -> Alcotest.fail "retained retry was not left pending after peer work claimed")
-;;
-
-let test_legacy_pair_migrates_once () =
-  with_temp_dir "keeper-event-queue-v2-migration" (fun base_path ->
-    let keeper_name = "migration_keeper" in
-    let dir = keeper_dir ~base_path ~keeper_name in
-    let primary = Filename.concat dir "event-queue.json" in
-    let legacy = Filename.concat dir "event-queue-inflight.json" in
-    write_queue primary (queue [ stimulus "pending" 1.0 ]);
-    write_queue legacy (queue [ stimulus "leased" 2.0 ]);
-    let state =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "migrate legacy pair"
-    in
-    Alcotest.(check string) "primary became v2" State.schema (read_schema primary);
-    Alcotest.(check bool) "legacy input removed" false (Sys.file_exists legacy);
-    Alcotest.(check (list string))
-      "legacy lease recovered before publication"
-      [ "leased"; "pending" ]
-      (post_ids (State.pending state));
-    Alcotest.(check int) "no abandoned lease survives migration" 0 (List.length (State.leases state));
-    Alcotest.(check int)
-      "migration recovery receipt retained"
-      1
-      (List.length (State.transition_outbox state));
-    write_queue legacy (queue [ stimulus "leased" 2.0 ]);
-    let resumed =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "resume completed migration cleanup"
-    in
-    Alcotest.(check (list string))
-      "crash residue does not duplicate migrated stimulus"
-      [ "leased"; "pending" ]
-      (post_ids (State.pending resumed));
-    Alcotest.(check bool)
-      "verified crash residue removed"
-      false
-      (Sys.file_exists legacy);
-    write_queue legacy (queue [ stimulus "forbidden-residue" 3.0 ]);
-    (match Persistence.load_state_result ~base_path ~keeper_name with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "v2 state silently accepted legacy residue"))
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
@@ -1023,6 +982,10 @@ let () =
     [ ( "state"
       , [ Alcotest.test_case "claim codec ack idempotency" `Quick test_claim_codec_ack_idempotency
         ; Alcotest.test_case
+            "lease codec rejects retired batch shape"
+            `Quick
+            test_lease_codec_rejects_retired_batch_shape
+        ; Alcotest.test_case
             "claim earliest ready without reordering"
             `Quick
             test_claim_leases_earliest_ready_without_reordering_skipped_work
@@ -1050,7 +1013,6 @@ let () =
             "context compaction retry is durable and lane-local"
             `Quick
             test_context_compaction_retry_is_durable_and_lane_local
-        ; Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once
         ; Alcotest.test_case
             "transition outbox projection"
             `Quick

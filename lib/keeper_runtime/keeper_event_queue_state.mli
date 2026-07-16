@@ -5,10 +5,6 @@
     module performs no I/O; persistence supplies the atomic file boundary and
     publishes [pending] into the live registry only after a durable commit. *)
 
-type lease_kind =
-  | Single
-  | Legacy_inflight
-
 type requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
@@ -45,9 +41,8 @@ type settlement =
 type lease =
   { lease_id : string
   ; sequence : int64
-  ; kind : lease_kind
-  ; claimed_at : float option
-  ; stimuli : Keeper_event_queue.stimulus list
+  ; claimed_at : float
+  ; stimulus : Keeper_event_queue.stimulus
   }
 
 type transition_receipt =
@@ -61,7 +56,7 @@ type transition_receipt =
 
 type outbox_entry =
   { receipt : transition_receipt
-  ; stimuli : Keeper_event_queue.stimulus list
+  ; stimulus : Keeper_event_queue.stimulus
   }
 
 type t
@@ -77,7 +72,6 @@ val pending : t -> Keeper_event_queue.t
 val leases : t -> lease list
 val last_settlement : t -> transition_receipt option
 val transition_outbox : t -> outbox_entry list
-val lease_kind : lease -> lease_kind
 
 val with_pending : Keeper_event_queue.t -> t -> t
 val with_revision : int64 -> t -> t
@@ -91,11 +85,6 @@ val claim_when :
     stimuli retain their exact relative position, so one unavailable HITL
     continuation cannot block unrelated ready work in the same Keeper lane. A
     successful claim advances the monotonic lease sequence in the same state. *)
-
-val add_legacy_inflight :
-  Keeper_event_queue.stimulus list -> t -> (t * lease option, string) result
-(** Migration/test compatibility boundary.  Adds one lease for legacy
-    [event-queue-inflight.json] rows and removes matching pending identities. *)
 
 val settle :
   settled_at:float ->
@@ -126,12 +115,6 @@ val mark_transition_projected : transition_id:string -> t -> (t, string) result
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
-
-val release_legacy_inflight :
-  Keeper_event_queue.stimulus list -> t -> t
-(** Compatibility-only projection for the retired split-file API.  Removes
-    matching identities from active leases while leaving pending untouched.
-    New runtime code must settle the opaque lease instead. *)
 
 val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result

@@ -44,8 +44,7 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
-let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
-let lease_kind = Keeper_event_queue_persistence.lease_kind
+let lease_stimulus = Keeper_event_queue_persistence.lease_stimulus
 
 let active_lease_result ~base_path name =
   match Keeper_registry.get ~base_path name with

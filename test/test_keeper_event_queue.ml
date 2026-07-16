@@ -89,10 +89,7 @@ let claim_single ~base_path ~keeper_name ~claimed_at ~ready =
   | Error error -> Alcotest.fail ("event queue claim failed: " ^ error)
   | Ok None -> Alcotest.fail "expected an event queue lease"
   | Ok (Some lease) ->
-    (match Masc.Keeper_registry_event_queue.lease_stimuli lease with
-     | [ stimulus ] -> lease, stimulus
-     | [] | _ :: _ :: _ ->
-       Alcotest.fail "single event queue lease changed cardinality")
+    lease, Masc.Keeper_registry_event_queue.lease_stimulus lease
 
 let settle_and_project
     ~base_path
@@ -741,105 +738,13 @@ let () =
       assert (String.equal only.post_id "bootstrap");
       assert (is_empty rest));
 
-  (* --- durable in-flight store: ack removes only consumed stimuli --- *)
-  let base_path = temp_dir "keeper-event-queue-inflight-partial-ack" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-inflight-partial-ack-test" in
-      Keeper_event_queue_persistence.record_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim; bootstrap_stim ];
-      Keeper_event_queue_persistence.ack_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim ];
-      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
-      assert (length restored = 1);
-      let remaining, rest =
-        match dequeue restored with
-        | Some item -> item
-        | None -> Alcotest.fail "partial ack should leave unrelated in-flight stimulus"
-      in
-      assert (String.equal remaining.post_id "bootstrap");
-      assert (is_empty rest));
-
-  (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
-         is drained from pending and inflight snapshots on the genuine-ack path.
-         [ack_inflight] clears the inflight file only (it is shared with
-         [requeue_front], which must leave the requeued stimulus in pending -
-         covered by the requeue-front test below). Here the stimulus lives in
-         the pending snapshot (event-queue.json), mirroring a bootstrap enqueued
-         by supervisor launch; after ack, [load] must be empty. Without the
-         A-fix this returns length 1 and accumulates across restarts. --- *)
-  let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-ack-drains-pending-test" in
-      Keeper_event_queue_persistence.persist
-        ~base_path ~keeper_name (enqueue empty bootstrap_stim);
-      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 1);
-      (* Genuine-ack path: ack_consumed drains inflight AND pending snapshot. *)
-      (match
-         Keeper_event_queue_persistence.ack_consumed
-           ~base_path
-           ~keeper_name
-           [ bootstrap_stim ]
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("pending acknowledgement failed: " ^ error));
-      (* Before the A-fix this returned length 1 (pending snapshot untouched);
-         after the fix the pending snapshot is drained. *)
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
-
-  (* --- Genuine consumed-ack handles the realistic mixed state: pending can
-         contain duplicates while inflight still carries the consumed lease.
-         A partial ack removes all matching consumed copies from both snapshots,
-         ignores absent stimuli, and leaves unrelated pending/inflight work
-         replayable exactly once after [load]'s merge. --- *)
-  let base_path = temp_dir "keeper-event-queue-ack-mixed-partial" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-ack-mixed-partial-test" in
-      let pending =
-        empty
-        |> fun q -> enqueue q board_stim
-        |> fun q -> enqueue q bootstrap_stim
-        |> fun q -> enqueue q board_stim
-      in
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name pending;
-      Keeper_event_queue_persistence.record_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim; bootstrap_stim ];
-      (match
-         Keeper_event_queue_persistence.ack_consumed
-           ~base_path
-           ~keeper_name
-           [ board_stim; ghost_stim ]
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("mixed acknowledgement failed: " ^ error));
-      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
-      assert (length restored = 1);
-      let remaining, rest =
-        match dequeue restored with
-        | Some item -> item
-        | None -> Alcotest.fail "partial consumed ack should leave unrelated stimulus"
-      in
-      assert (String.equal remaining.post_id "bootstrap");
-      assert (is_empty rest));
-
   (* --- durable fleet summary: health can see pending, in-flight, and oldest age. --- *)
   let base_path = temp_dir "keeper-event-queue-fleet-summary" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
       let pending_keeper = "keeper-event-queue-pending-summary-test" in
-      let inflight_keeper = "keeper-event-queue-inflight-summary-test" in
+      let inflight_keeper = "keeper-event-queue-active-summary-test" in
       let old_pending = { board_stim with post_id = "old-pending"; arrived_at = 10.0 } in
       let newer_pending =
         { bootstrap_stim with post_id = "newer-pending"; arrived_at = 25.0 }
@@ -851,10 +756,25 @@ let () =
         ~base_path
         ~keeper_name:pending_keeper
         (empty |> fun q -> enqueue q old_pending |> fun q -> enqueue q newer_pending);
-      Keeper_event_queue_persistence.record_inflight
+      Keeper_event_queue_persistence.persist
         ~base_path
         ~keeper_name:inflight_keeper
-        [ inflight ];
+        (enqueue empty inflight);
+      (match
+         Keeper_event_queue_persistence.claim_when_result
+           ~base_path
+           ~keeper_name:inflight_keeper
+           ~claimed_at:6.0
+           ~ready:(fun _ -> true)
+           ()
+       with
+       | Ok (Some lease) ->
+         assert (
+           String.equal
+             (Keeper_event_queue_persistence.lease_stimulus lease).post_id
+             inflight.post_id)
+       | Ok None -> Alcotest.fail "expected fleet-summary inflight lease"
+       | Error error -> Alcotest.fail ("fleet-summary claim failed: " ^ error));
       let noise_keeper_dir =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
       in
@@ -1127,14 +1047,7 @@ let () =
               expected_post_id
               error
         in
-        let stimulus =
-          match Masc.Keeper_registry_event_queue.lease_stimuli lease with
-          | [ stimulus ] -> stimulus
-          | [] | _ :: _ :: _ ->
-            Alcotest.failf
-              "late registry registration claim for %s changed cardinality"
-              expected_post_id
-        in
+        let stimulus = Masc.Keeper_registry_event_queue.lease_stimulus lease in
         Alcotest.(check string)
           "late registry registration replay order"
           expected_post_id

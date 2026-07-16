@@ -43,8 +43,7 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
-val lease_stimuli : lease -> Keeper_event_queue.stimulus list
-val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
+val lease_stimulus : lease -> Keeper_event_queue.stimulus
 
 val active_lease_result :
   base_path:string -> string -> (lease option, string) result

@@ -698,9 +698,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         | Error error -> fail ("scheduled wake claim failed: " ^ error)
         | Ok None -> fail "registered keeper should lease the scheduled wake"
         | Ok (Some lease) ->
-          (match Keeper_registry_event_queue.lease_stimuli lease with
-           | [ stimulus ] -> lease, stimulus
-           | [] | _ :: _ :: _ -> fail "scheduled wake lease cardinality drifted")
+          lease, Keeper_registry_event_queue.lease_stimulus lease
       in
       check string "leased occurrence id" occurrence_id leased.post_id;
       (match leased.payload with

@@ -1,7 +1,3 @@
-type lease_kind =
-  | Single
-  | Legacy_inflight
-
 type requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
@@ -39,9 +35,8 @@ type settlement =
 type lease =
   { lease_id : string
   ; sequence : int64
-  ; kind : lease_kind
-  ; claimed_at : float option
-  ; stimuli : Keeper_event_queue.stimulus list
+  ; claimed_at : float
+  ; stimulus : Keeper_event_queue.stimulus
   }
 
 type transition_receipt =
@@ -55,7 +50,7 @@ type transition_receipt =
 
 type outbox_entry =
   { receipt : transition_receipt
-  ; stimuli : Keeper_event_queue.stimulus list
+  ; stimulus : Keeper_event_queue.stimulus
   }
 
 type t =
@@ -89,7 +84,6 @@ let pending state = state.pending
 let leases state = state.leases
 let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
-let lease_kind (lease : lease) = lease.kind
 let active_lease state =
   match state.leases with
   | [] -> None
@@ -144,36 +138,23 @@ let append_missing stimuli queue =
     stimuli
 ;;
 
-let remove_stimuli queue stimuli =
-  let should_remove stimulus =
-    List.exists
-      (Keeper_event_queue.stimulus_identity_equal stimulus)
-      stimuli
-  in
-  queue
-  |> Keeper_event_queue.to_list
-  |> List.filter (fun stimulus -> not (should_remove stimulus))
-  |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
-;;
-
 let lease_id_of_sequence sequence = Printf.sprintf "lease:%Ld" sequence
 
-let make_lease ~kind ~claimed_at stimuli state =
-  match stimuli with
-  | [] -> Ok (state, None)
-  | _ when Int64.equal state.next_lease_sequence Int64.max_int ->
+let make_lease ~claimed_at stimulus state =
+  if Int64.equal state.next_lease_sequence Int64.max_int
+  then
     Error "event queue lease sequence exhausted"
-  | _ ->
+  else
     let sequence = state.next_lease_sequence in
     let lease =
-      { lease_id = lease_id_of_sequence sequence; sequence; kind; claimed_at; stimuli }
+      { lease_id = lease_id_of_sequence sequence; sequence; claimed_at; stimulus }
     in
     Ok
       ( { state with
           next_lease_sequence = Int64.succ sequence
         ; leases = state.leases @ [ lease ]
         }
-      , Some lease )
+      , lease )
 ;;
 
 let lease_admission_blocked state =
@@ -195,31 +176,9 @@ let claim_when ~claimed_at ~ready state =
   else match dequeue_first_ready ~ready [] state.pending with
   | None -> Ok (state, None)
   | Some (stimulus, pending) ->
-    make_lease
-      ~kind:Single
-      ~claimed_at:(Some claimed_at)
-      [ stimulus ]
-      { state with pending }
-;;
-
-let add_legacy_inflight stimuli state =
-  if lease_admission_blocked state
-  then Error "event queue cannot migrate legacy inflight work while a lease or outbox exists"
-  else (
-    let stimuli = Keeper_event_queue.uniq_stimuli stimuli in
-    let pending = remove_stimuli state.pending stimuli in
-    make_lease ~kind:Legacy_inflight ~claimed_at:None stimuli { state with pending })
-;;
-
-let lease_kind_label = function
-  | Single -> "single"
-  | Legacy_inflight -> "legacy_inflight"
-;;
-
-let lease_kind_of_label = function
-  | "single" -> Ok Single
-  | "legacy_inflight" -> Ok Legacy_inflight
-  | label -> Error (Printf.sprintf "unknown event queue lease kind: %s" label)
+    (match make_lease ~claimed_at stimulus { state with pending } with
+     | Error _ as error -> error
+     | Ok (state, lease) -> Ok (state, Some lease))
 ;;
 
 let requeue_reason_label = function
@@ -459,9 +418,8 @@ let committed_lease (lease : lease) state =
 let lease_equal (left : lease) (right : lease) =
   Int64.equal left.sequence right.sequence
   && String.equal left.lease_id right.lease_id
-  && left.kind = right.kind
-  && List.length left.stimuli = List.length right.stimuli
-  && List.for_all2 Keeper_event_queue.stimulus_identity_equal left.stimuli right.stimuli
+  && Float.equal left.claimed_at right.claimed_at
+  && Keeper_event_queue.stimulus_identity_equal left.stimulus right.stimulus
 ;;
 
 let settle ~settled_at ~lease ~settlement state =
@@ -493,8 +451,8 @@ let settle ~settled_at ~lease ~settlement state =
         (* Retryable provider work, a completed context-compaction handoff,
            and a durable one-shot grant retain the exact leased stimuli
            without monopolizing the FIFO front. *)
-        append_missing committed.stimuli state.pending
-      | Requeue _ -> prepend_missing committed.stimuli state.pending
+        append_missing [ committed.stimulus ] state.pending
+      | Requeue _ -> prepend_missing [ committed.stimulus ] state.pending
       | Escalate { successor = None; _ } -> state.pending
       | Escalate { successor = Some successor; _ } ->
         enqueue_if_missing state.pending successor
@@ -502,7 +460,7 @@ let settle ~settled_at ~lease ~settlement state =
     let receipt = receipt_for_lease ~settled_at ~settlement committed in
     let outbox_entry =
       { receipt
-      ; stimuli = committed.stimuli
+      ; stimulus = committed.stimulus
       }
     in
     Ok
@@ -538,40 +496,14 @@ let remove_by_post_id post_id state =
   let removed_leases, leases =
     List.fold_right
       (fun (lease : lease) (removed, kept) ->
-         let matched, remaining =
-           List.partition
-             (fun stimulus -> String.equal stimulus.Keeper_event_queue.post_id post_id)
-             lease.stimuli
-         in
-         let kept =
-           match remaining with
-           | [] -> kept
-           | _ -> { lease with stimuli = remaining } :: kept
-         in
-         matched @ removed, kept)
+         if String.equal lease.stimulus.Keeper_event_queue.post_id post_id
+         then lease.stimulus :: removed, kept
+         else removed, lease :: kept)
       state.leases
       ([], [])
   in
   ( Keeper_event_queue.uniq_stimuli (removed_pending @ removed_leases)
   , { state with pending; leases } )
-;;
-
-let release_legacy_inflight stimuli state =
-  let should_release stimulus =
-    List.exists
-      (Keeper_event_queue.stimulus_identity_equal stimulus)
-      stimuli
-  in
-  let leases =
-    List.filter_map
-      (fun (lease : lease) ->
-         let remaining = List.filter (fun stimulus -> not (should_release stimulus)) lease.stimuli in
-         match remaining with
-         | [] -> None
-         | _ :: _ -> Some { lease with stimuli = remaining })
-      state.leases
-  in
-  { state with leases }
 ;;
 
 let assoc_fields ~context = function
@@ -631,12 +563,8 @@ let lease_to_yojson (lease : lease) =
   `Assoc
     [ "lease_id", `String lease.lease_id
     ; "sequence", int64_json lease.sequence
-    ; "kind", `String (lease_kind_label lease.kind)
-    ; ( "claimed_at_unix"
-      , match lease.claimed_at with
-        | None -> `Null
-        | Some claimed_at -> `Float claimed_at )
-    ; "stimuli", `List (List.map Keeper_event_queue.stimulus_to_yojson lease.stimuli)
+    ; "claimed_at_unix", `Float lease.claimed_at
+    ; "stimuli", `List [ Keeper_event_queue.stimulus_to_yojson lease.stimulus ]
     ]
 ;;
 
@@ -645,27 +573,19 @@ let lease_of_yojson json =
   let* fields = assoc_fields ~context json in
   let* lease_id = string_field ~context "lease_id" fields in
   let* sequence = int64_field ~context "sequence" fields in
-  let* kind_label = string_field ~context "kind" fields in
-  let* kind = lease_kind_of_label kind_label in
-  let* claimed_at =
-    match List.assoc_opt "claimed_at_unix" fields with
-    | None | Some `Null -> Ok None
-    | Some (`Float value) -> Ok (Some value)
-    | Some (`Int value) -> Ok (Some (float_of_int value))
-    | Some _ -> Error "event queue lease.claimed_at_unix must be a number or null"
-  in
+  let* claimed_at = float_field ~context "claimed_at_unix" fields in
   let* stimuli =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
   in
   if Int64.compare sequence 1L < 0
   then Error "event queue lease sequence must be positive"
-  else if stimuli = []
-  then Error "event queue lease must contain at least one stimulus"
-  else if kind = Single && List.length stimuli <> 1
-  then Error "single event queue lease must contain exactly one stimulus"
   else if not (String.equal lease_id (lease_id_of_sequence sequence))
   then Error (Printf.sprintf "event queue lease id/sequence mismatch: %s" lease_id)
-  else Ok { lease_id; sequence; kind; claimed_at; stimuli }
+  else
+    match stimuli with
+    | [ stimulus ] -> Ok { lease_id; sequence; claimed_at; stimulus }
+    | [] | _ :: _ :: _ ->
+      Error "event queue lease must contain exactly one stimulus"
 ;;
 
 let settlement_to_yojson = function
@@ -764,7 +684,7 @@ let transition_receipt_of_yojson json =
 let outbox_entry_to_yojson entry =
   `Assoc
     [ "receipt", transition_receipt_to_yojson entry.receipt
-    ; "stimuli", `List (List.map Keeper_event_queue.stimulus_to_yojson entry.stimuli)
+    ; "stimuli", `List [ Keeper_event_queue.stimulus_to_yojson entry.stimulus ]
     ]
 ;;
 
@@ -776,7 +696,10 @@ let outbox_entry_of_yojson json =
   let* stimuli =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
   in
-  Ok { receipt; stimuli }
+  match stimuli with
+  | [ stimulus ] -> Ok { receipt; stimulus }
+  | [] | _ :: _ :: _ ->
+    Error "event queue outbox entry must contain exactly one stimulus"
 ;;
 
 let to_yojson state =

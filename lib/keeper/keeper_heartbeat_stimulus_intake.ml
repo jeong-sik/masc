@@ -300,18 +300,11 @@ let heartbeat_event_intake
       [], [], None, Some message
     | Ok None -> [], [], None, None
     | Ok (Some lease) ->
-      let stimuli = Keeper_registry_event_queue.lease_stimuli lease in
-      let observations =
-        match Keeper_registry_event_queue.lease_kind lease, stimuli with
-        | Keeper_event_queue_persistence.Single, [ stimulus ] ->
-          consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stimulus
-        | ( Keeper_event_queue_persistence.Single
-          | Keeper_event_queue_persistence.Legacy_inflight ), stimuli ->
-          List.concat_map
-            (consume_single_heartbeat_stimulus ~ctx ~meta_after_triage)
-            stimuli
-      in
-      observations, stimuli, Some lease, None
+      let stimulus = Keeper_registry_event_queue.lease_stimulus lease in
+      ( consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stimulus
+      , [ stimulus ]
+      , Some lease
+      , None )
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in

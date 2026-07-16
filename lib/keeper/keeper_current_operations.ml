@@ -165,7 +165,7 @@ let async_entry_to_yojson (entry : Keeper_msg_async.entry) =
 let outbox_to_yojson (entry : Keeper_event_queue_state.outbox_entry) =
   `Assoc
     [ "receipt", Keeper_event_queue_state.transition_receipt_to_yojson entry.receipt
-    ; "stimuli", `List (List.map Keeper_event_queue.stimulus_to_yojson entry.stimuli)
+    ; "stimulus", Keeper_event_queue.stimulus_to_yojson entry.stimulus
     ]
 ;;
 

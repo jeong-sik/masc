@@ -1,13 +1,7 @@
 (** Durable per-Keeper Event Layer state.
 
     [event-queue.json] uses one v2 envelope containing pending stimuli, active
-    typed leases, the monotonic lease sequence and the transition outbox.
-    [event-queue-inflight.json] is accepted only as a one-time v1 migration
-    input; it is never a second runtime authority. *)
-
-type lease_kind = Keeper_event_queue_state.lease_kind =
-  | Single
-  | Legacy_inflight
+    typed leases, the monotonic lease sequence and the transition outbox. *)
 
 type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Cycle_busy
@@ -45,8 +39,7 @@ type settle_result = Keeper_event_queue_state.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
-val lease_stimuli : lease -> Keeper_event_queue.stimulus list
-val lease_kind : lease -> lease_kind
+val lease_stimulus : lease -> Keeper_event_queue.stimulus
 
 val active_lease_result :
   base_path:string -> keeper_name:string -> (lease option, string) result
@@ -109,8 +102,8 @@ val load_snapshot_pair_with_errors :
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Strict state read used by tests and operator projection.  A malformed v2
-    envelope or v2-plus-legacy residue is an [Error], never an empty queue. *)
+(** Strict state read used by tests and operator projection. A malformed
+    envelope is an [Error], never an empty queue. *)
 
 val claim_when_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -184,20 +177,6 @@ val enqueue_stimulus_if_absent_result :
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-
-val record_inflight :
-  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-(** Legacy source/test adapter.  Writes a typed [Legacy_inflight] lease into the
-    v2 envelope; it never creates [event-queue-inflight.json]. *)
-
-val ack_inflight :
-  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-
-val ack_consumed :
-  base_path:string ->
-  keeper_name:string ->
-  Keeper_event_queue.stimulus list ->
-  (unit, string) result
 
 val drop_by_post_id :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

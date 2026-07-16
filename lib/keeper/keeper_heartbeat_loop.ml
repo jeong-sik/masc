@@ -287,13 +287,13 @@ let settlement_of_failure ~settled_at failure =
 ;;
 
 let single_approved_resolution lease =
-  match Keeper_registry_event_queue.lease_stimuli lease with
-  | [ { Keeper_event_queue.payload =
-          Hitl_resolved ({ decision = Hitl_approved; _ } as resolution)
-      ; _
-      } ] ->
+  match Keeper_registry_event_queue.lease_stimulus lease with
+  | { Keeper_event_queue.payload =
+        Hitl_resolved ({ decision = Hitl_approved; _ } as resolution)
+    ; _
+    } ->
     Some resolution
-  | [] | [ _ ] | _ :: _ :: _ -> None
+  | _ -> None
 ;;
 
 let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease outcome =
@@ -390,27 +390,20 @@ let reaction_kind_of_settlement = function
 ;;
 
 let project_transition_outbox ~base_path ~keeper_name =
-  let rec project_stimuli ~reaction_kind ~receipt = function
-    | [] -> Ok ()
-    | stimulus :: rest ->
-      (match
-         Keeper_reaction_ledger.record_event_queue_transition_reaction_result
-           ~base_path
-           ~keeper_name
-           ~reaction_kind
-           ~receipt
-           stimulus
-       with
-       | Error _ as error -> error
-       | Ok () -> project_stimuli ~reaction_kind ~receipt rest)
-  in
   match Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name with
   | Error _ as error -> error
   | Ok [] -> Ok ()
   | Ok [ (entry : Keeper_registry_event_queue.outbox_entry) ] ->
     let receipt = entry.receipt in
     let reaction_kind = reaction_kind_of_settlement receipt.settlement in
-    (match project_stimuli ~reaction_kind ~receipt entry.stimuli with
+    (match
+       Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+         ~base_path
+         ~keeper_name
+         ~reaction_kind
+         ~receipt
+         entry.stimulus
+     with
      | Error _ as error -> error
      | Ok () ->
        Keeper_registry_event_queue.mark_transition_projected_result

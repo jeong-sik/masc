@@ -307,8 +307,24 @@ let test_fleet_summary_serializes_with_owner_commit () =
     Persistence.persist
       ~base_path
       ~keeper_name
-      (Queue.enqueue Queue.empty pending);
-    Persistence.record_inflight ~base_path ~keeper_name [ inflight ];
+      (Queue.empty
+       |> fun queue -> Queue.enqueue queue inflight
+       |> fun queue -> Queue.enqueue queue pending);
+    (match
+       Persistence.claim_when_result
+         ~base_path
+         ~keeper_name
+         ~claimed_at:11.0
+         ~ready:(fun _ -> true)
+         ()
+     with
+     | Ok (Some lease) ->
+       Alcotest.(check string)
+         "claimed owner stimulus"
+         inflight.post_id
+         (Persistence.lease_stimulus lease).post_id
+     | Ok None -> Alcotest.fail "expected one claimed owner stimulus"
+     | Error error -> Alcotest.fail ("owner claim failed: " ^ error));
     let transform_entered = Atomic.make false in
     let release = Atomic.make false in
     let writer_result = ref None in

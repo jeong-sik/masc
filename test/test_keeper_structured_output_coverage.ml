@@ -60,11 +60,7 @@ let expected_unstructured_completion_exemptions =
     ]
 ;;
 
-let expected_structured_dashboard_agent_run_json_judges =
-  List.sort
-    String.compare
-    [ "lib/dashboard/dashboard_operator_judge.ml" ]
-;;
+let expected_structured_dashboard_agent_run_json_judges = []
 
 let expected_structured_fusion_agent_build_files =
   List.sort String.compare [ "lib/fusion/fusion_judge.ml" ]

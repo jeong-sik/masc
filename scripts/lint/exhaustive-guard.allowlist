@@ -245,8 +245,6 @@ lib/dashboard/dashboard_mission_assembly.ml:198
 lib/dashboard/dashboard_mission.ml:339
 lib/dashboard/dashboard_mission.ml:728
 lib/dashboard/dashboard_oas_bridge.ml:188
-lib/dashboard/dashboard_operator_judge.ml:148
-lib/dashboard/dashboard_operator_judge.ml:190
 lib/dashboard/dashboard_operator_nudges.ml:29
 lib/dashboard/dashboard_operator_nudges.ml:47
 lib/dashboard/dashboard_operator_nudges.ml:53

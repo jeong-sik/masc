@@ -9,6 +9,7 @@ type phase =
   | Reconciliation_pending
   | Commit_complete
   | Adopted
+  | Superseded
 
 type state
 type snapshot =
@@ -26,6 +27,7 @@ type snapshot =
   ; committed_checkpoint : Keeper_checkpoint_ref.t option
   ; adopted_checkpoint : Keeper_checkpoint_ref.t option
   ; adopting_turn : Ids.Turn_ref.t option
+  ; superseded_by_checkpoint : Keeper_checkpoint_ref.t option
   }
 
 type transition_error =
@@ -36,6 +38,9 @@ type transition_error =
   | Source_mismatch
   | Candidate_mismatch
   | Reinjection_identity_mismatch
+  | Supersession_not_observed
+  | Supersession_candidate_installed
+  | Supersession_trace_mismatch
 
 val phase : state -> phase
 val snapshot : state -> snapshot

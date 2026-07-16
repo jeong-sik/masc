@@ -7,6 +7,7 @@ type phase =
   | Reconciliation_pending
   | Commit_complete
   | Adopted
+  | Superseded
 
 type progress =
   | Pending
@@ -16,6 +17,15 @@ type progress =
   | Committed of Operation.candidate
   | Adopted_state of
       Operation.candidate * Keeper_checkpoint_ref.t * Ids.Turn_ref.t
+
+  | Superseded_state of superseded_state
+
+and superseded_state =
+  { attempt_id : Operation.Attempt_id.t
+  ; candidate : Operation.candidate option
+  ; committed : bool
+  ; observed_checkpoint : Keeper_checkpoint_ref.t option
+  }
 
 type state =
   { operation_id : Operation.Operation_id.t
@@ -39,6 +49,7 @@ type snapshot =
   ; committed_checkpoint : Keeper_checkpoint_ref.t option
   ; adopted_checkpoint : Keeper_checkpoint_ref.t option
   ; adopting_turn : Ids.Turn_ref.t option
+  ; superseded_by_checkpoint : Keeper_checkpoint_ref.t option
   }
 
 type transition_error =
@@ -49,6 +60,9 @@ type transition_error =
   | Source_mismatch
   | Candidate_mismatch
   | Reinjection_identity_mismatch
+  | Supersession_not_observed
+  | Supersession_candidate_installed
+  | Supersession_trace_mismatch
 
 let phase state =
   match state.progress with
@@ -58,28 +72,42 @@ let phase state =
   | Reconciling _ -> Reconciliation_pending
   | Committed _ -> Commit_complete
   | Adopted_state _ -> Adopted
+  | Superseded_state _ -> Superseded
 ;;
 
 let projection = function
-  | Pending -> None, None, None, None, None, None, None
-  | Running attempt -> Some attempt, None, None, None, None, None, None
+  | Pending -> None, None, None, None, None, None, None, None
+  | Running attempt ->
+    Some attempt, None, None, None, None, None, None, None
   | Prepared value ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    None, None, None, None
+    None, None, None, None, None
   | Reconciling (value, reason) ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    Some reason, None, None, None
+    Some reason, None, None, None, None
   | Committed value ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    None, Some value.candidate_checkpoint, None, None
+    None, Some value.candidate_checkpoint, None, None, None
   | Adopted_state (value, checkpoint, turn) ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    None, Some value.candidate_checkpoint, Some checkpoint, Some turn
+    None, Some value.candidate_checkpoint, Some checkpoint, Some turn, None
+  | Superseded_state superseded ->
+    let candidate_checkpoint, evidence =
+      match superseded.candidate with
+      | Some value -> Some value.candidate_checkpoint, Some value.evidence
+      | None -> None, None
+    in
+    let committed_checkpoint =
+      if superseded.committed then candidate_checkpoint else None
+    in
+    Some superseded.attempt_id, candidate_checkpoint, evidence, None,
+    committed_checkpoint, None, None, superseded.observed_checkpoint
 ;;
 
 let snapshot state =
   let attempt_id, candidate_checkpoint, evidence, reconciliation_reason,
-      committed_checkpoint, adopted_checkpoint, adopting_turn =
+      committed_checkpoint, adopted_checkpoint, adopting_turn,
+      superseded_by_checkpoint =
     projection state.progress
   in
   { operation_id = state.operation_id
@@ -96,6 +124,7 @@ let snapshot state =
   ; committed_checkpoint
   ; adopted_checkpoint
   ; adopting_turn
+  ; superseded_by_checkpoint
   }
 ;;
 
@@ -123,6 +152,38 @@ let same_candidate
 
 let close_attempt state attempt_id =
   { state with progress = Pending; closed_attempts = attempt_id :: state.closed_attempts }
+;;
+
+let validate_supersession
+      (state : state)
+      (candidate : Operation.candidate option)
+      ~source_may_match
+      (observed_checkpoint : Keeper_checkpoint_ref.t option)
+  =
+  match observed_checkpoint with
+  | None -> Ok ()
+  | Some observed_checkpoint ->
+    if
+      not
+        (Keeper_id.Trace_id.equal
+           state.request.source_checkpoint.trace_id
+           observed_checkpoint.trace_id)
+    then Error Supersession_trace_mismatch
+    else if
+      not source_may_match
+      &&
+      Keeper_checkpoint_ref.equal
+        state.request.source_checkpoint
+        observed_checkpoint
+    then Error Supersession_not_observed
+    else
+      (match candidate with
+       | Some value
+         when Keeper_checkpoint_ref.equal
+                value.candidate_checkpoint
+                observed_checkpoint ->
+         Error Supersession_candidate_installed
+       | Some _ | None -> Ok ())
 ;;
 
 let apply current event =
@@ -183,9 +244,75 @@ let apply current event =
         same_candidate expected actual
         |> Result.map (fun () ->
           { state with progress = Reconciling (expected, reason) })
+      | Running expected, Operation.Source_superseded supersession ->
+        if not (Operation.Attempt_id.equal expected supersession.attempt_id)
+        then Error Attempt_mismatch
+        else
+          validate_supersession
+            state
+            None
+            ~source_may_match:false
+            supersession.observed_checkpoint
+          |> Result.map (fun () ->
+            { state with
+              progress =
+                Superseded_state
+                  { attempt_id = expected
+                  ; candidate = None
+                  ; committed = false
+                  ; observed_checkpoint = supersession.observed_checkpoint
+                  }
+            })
+      | (Prepared expected | Reconciling (expected, _)),
+        Operation.Source_superseded supersession ->
+        if
+          not
+            (Operation.Attempt_id.equal
+               expected.attempt_id
+               supersession.attempt_id)
+        then Error Attempt_mismatch
+        else
+          validate_supersession
+            state
+            (Some expected)
+            ~source_may_match:false
+            supersession.observed_checkpoint
+          |> Result.map (fun () ->
+            { state with
+              progress =
+                Superseded_state
+                  { attempt_id = expected.attempt_id
+                  ; candidate = Some expected
+                  ; committed = false
+                  ; observed_checkpoint = supersession.observed_checkpoint
+                  }
+            })
       | (Prepared expected | Reconciling (expected, _)), Operation.Compacted actual ->
         same_candidate expected actual
         |> Result.map (fun () -> { state with progress = Committed expected })
+      | Committed expected, Operation.Source_superseded supersession ->
+        if
+          not
+            (Operation.Attempt_id.equal
+               expected.attempt_id
+               supersession.attempt_id)
+        then Error Attempt_mismatch
+        else
+          validate_supersession
+            state
+            (Some expected)
+            ~source_may_match:true
+            supersession.observed_checkpoint
+          |> Result.map (fun () ->
+            { state with
+              progress =
+                Superseded_state
+                  { attempt_id = expected.attempt_id
+                  ; candidate = Some expected
+                  ; committed = true
+                  ; observed_checkpoint = supersession.observed_checkpoint
+                  }
+            })
       | Committed value, Operation.Reinjected (checkpoint, turn) ->
         let trace =
           Keeper_id.Trace_id.to_string value.candidate_checkpoint.trace_id

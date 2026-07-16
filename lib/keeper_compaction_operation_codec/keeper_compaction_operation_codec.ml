@@ -143,6 +143,26 @@ let decode_reinjected ~operation_id payload =
   Ok (Operation.reinjected ~operation_id ~adopted_checkpoint ~adopting_turn)
 ;;
 
+let decode_source_superseded ~operation_id payload =
+  let path = "payload" in
+  let fields = [ "attempt_id"; "observed_checkpoint" ] in
+  let* values = Support.exact_object ~path ~allowed:fields ~required:fields payload in
+  let* attempt_id = field ~path "attempt_id" Support.attempt_id values in
+  let* observed_json = Support.required_field ~path "observed_checkpoint" values in
+  let* observed_checkpoint =
+    match observed_json with
+    | `Null -> Ok None
+    | json ->
+      Support.checkpoint ~path:"payload.observed_checkpoint" json
+      |> Result.map Option.some
+  in
+  Ok
+    (Operation.source_superseded
+       ~operation_id
+       ~attempt_id
+       ~observed_checkpoint)
+;;
+
 let of_json json =
   let path = "$" in
   let fields = [ "kind"; "operation_id"; "payload" ] in
@@ -168,6 +188,7 @@ let of_json json =
   | "attempt_failed" -> decode_attempt_failed ~operation_id payload
   | "commit_reconciliation_required" ->
     decode_reconciliation ~operation_id payload
+  | "source_superseded" -> decode_source_superseded ~operation_id payload
   | "compacted" ->
     decode_candidate
       ~operation_id

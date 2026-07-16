@@ -30,12 +30,18 @@ type candidate =
   ; evidence : Keeper_compaction_evidence.t
   }
 
+type supersession =
+  { attempt_id : Attempt_id.t
+  ; observed_checkpoint : Keeper_checkpoint_ref.t option
+  }
+
 type event_view =
   | Requested of request
   | Attempt_started of Attempt_id.t
   | Candidate_prepared of candidate
   | Attempt_failed of Attempt_id.t * attempt_failure
   | Commit_reconciliation_required of candidate * reconciliation_reason
+  | Source_superseded of supersession
   | Compacted of candidate
   | Reinjected of Keeper_checkpoint_ref.t * Ids.Turn_ref.t
 
@@ -71,6 +77,11 @@ val commit_reconciliation_required :
   candidate_checkpoint:Keeper_checkpoint_ref.t ->
   evidence:Keeper_compaction_evidence.t ->
   reason:reconciliation_reason ->
+  event
+val source_superseded :
+  operation_id:Operation_id.t ->
+  attempt_id:Attempt_id.t ->
+  observed_checkpoint:Keeper_checkpoint_ref.t option ->
   event
 val compacted :
   operation_id:Operation_id.t ->

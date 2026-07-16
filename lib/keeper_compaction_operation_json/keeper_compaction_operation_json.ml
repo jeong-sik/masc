@@ -87,6 +87,17 @@ let to_json event =
       "commit_reconciliation_required"
       (candidate ~checkpoint_field:"candidate_checkpoint" value
        @ [ "reason", `String reason ])
+  | Source_superseded supersession ->
+    envelope
+      event
+      "source_superseded"
+      [ ( "attempt_id"
+        , `String (Operation.Attempt_id.to_string supersession.attempt_id) )
+      ; ( "observed_checkpoint"
+        , match supersession.observed_checkpoint with
+          | Some value -> checkpoint value
+          | None -> `Null )
+      ]
   | Compacted value ->
     envelope
       event

@@ -18,6 +18,7 @@ let checkpoint bytes turn_count =
 ;;
 let source = checkpoint "before" 7
 let candidate = checkpoint "after" 7
+let advanced = checkpoint "advanced" 8
 let evidence : Keeper_compaction_evidence.t =
   { selected_runtime_id = Some "compact-runtime"
   ; before_checkpoint_bytes = 100
@@ -238,6 +239,128 @@ let test_reducer_reconciliation () =
     (snapshot.reconciliation_reason = Some Operation.Commit_durability_unknown)
 ;;
 
+let test_reducer_source_superseded () =
+  let superseded =
+    Operation.source_superseded
+      ~operation_id
+      ~attempt_id
+      ~observed_checkpoint:(Some advanced)
+  in
+  let before_candidate =
+    ok (Reducer.fold [ request_event (); attempt_event (); superseded ])
+  in
+  let before_snapshot = Reducer.snapshot before_candidate in
+  Alcotest.(check bool)
+    "preparation-free supersession is terminal"
+    true
+    (before_snapshot.phase = Reducer.Superseded);
+  Alcotest.(check bool)
+    "observed checkpoint retained"
+    true
+    (Option.exists
+       (Keeper_checkpoint_ref.equal advanced)
+       before_snapshot.superseded_by_checkpoint);
+  let source_removed =
+    Operation.source_superseded
+      ~operation_id
+      ~attempt_id
+      ~observed_checkpoint:None
+  in
+  let removed =
+    ok (Reducer.fold [ request_event (); attempt_event (); source_removed ])
+  in
+  let removed_snapshot = Reducer.snapshot removed in
+  Alcotest.(check bool)
+    "missing exact source is terminal"
+    true
+    (removed_snapshot.phase = Reducer.Superseded
+     && Option.is_none removed_snapshot.superseded_by_checkpoint);
+  let after_candidate =
+    ok
+      (Reducer.fold
+         [ request_event (); attempt_event (); candidate_event (); superseded ])
+  in
+  let after_snapshot = Reducer.snapshot after_candidate in
+  Alcotest.(check bool)
+    "prepared candidate remains observable"
+    true
+    (Option.exists
+       (Keeper_checkpoint_ref.equal candidate)
+       after_snapshot.candidate_checkpoint);
+  let compacted =
+    Operation.compacted
+      ~operation_id
+      ~attempt_id
+      ~source_checkpoint:source
+      ~committed_checkpoint:candidate
+      ~evidence
+  in
+  let after_commit =
+    ok
+      (Reducer.fold
+         [ request_event ()
+         ; attempt_event ()
+         ; candidate_event ()
+         ; compacted
+         ; superseded
+         ])
+  in
+  let committed_snapshot = Reducer.snapshot after_commit in
+  Alcotest.(check bool)
+    "superseded operation retains prior commit"
+    true
+    (Option.exists
+       (Keeper_checkpoint_ref.equal candidate)
+       committed_snapshot.committed_checkpoint);
+  match Reducer.apply (Some after_candidate) (attempt_event ()) with
+  | Error (Reducer.Invalid_transition (Some Reducer.Superseded)) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "superseded operation restarted"
+;;
+
+let test_reducer_rejects_false_supersession () =
+  let running = ok (Reducer.fold [ request_event (); attempt_event () ]) in
+  let event observed_checkpoint =
+    Operation.source_superseded
+      ~operation_id
+      ~attempt_id
+      ~observed_checkpoint:(Some observed_checkpoint)
+  in
+  (match Reducer.apply (Some running) (event source) with
+   | Error Reducer.Supersession_not_observed -> ()
+   | Ok _ | Error _ -> Alcotest.fail "source equality was called superseded");
+  let prepared = ok (Reducer.apply (Some running) (candidate_event ())) in
+  (match Reducer.apply (Some prepared) (event candidate) with
+   | Error Reducer.Supersession_candidate_installed -> ()
+   | Ok _ | Error _ -> Alcotest.fail "installed candidate was called superseded");
+  let committed =
+    ok
+      (Reducer.apply
+         (Some prepared)
+         (Operation.compacted
+            ~operation_id
+            ~attempt_id
+            ~source_checkpoint:source
+            ~committed_checkpoint:candidate
+            ~evidence))
+  in
+  (match Reducer.apply (Some committed) (event source) with
+   | Ok state when Reducer.phase state = Reducer.Superseded -> ()
+   | Ok _ | Error _ ->
+     Alcotest.fail "post-commit source restoration was not superseded");
+  let other_trace = ok (Keeper_id.Trace_id.of_string "trace-b") in
+  let other =
+    ok
+      (Keeper_checkpoint_ref.create
+         ~trace_id:other_trace
+         ~generation:2
+         ~turn_count:8
+         ~canonical_checkpoint_bytes:"other")
+  in
+  match Reducer.apply (Some running) (event other) with
+  | Error Reducer.Supersession_trace_mismatch -> ()
+  | Ok _ | Error _ -> Alcotest.fail "cross-trace supersession was accepted"
+;;
+
 let test_reducer_invalid_transition () =
   match Reducer.fold [ request_event (); candidate_event () ] with
   | Error (Reducer.Invalid_transition (Some Reducer.Request_pending)) -> ()
@@ -267,6 +390,10 @@ let test_canonical_json_projection () =
         ~candidate_checkpoint:candidate
         ~evidence
         ~reason:Operation.Commit_durability_unknown
+    ; Operation.source_superseded
+        ~operation_id
+        ~attempt_id
+        ~observed_checkpoint:(Some advanced)
     ; Operation.compacted
         ~operation_id
         ~attempt_id
@@ -295,6 +422,7 @@ let test_canonical_json_projection () =
     ; "attempt_failed"
     ; "attempt_failed"
     ; "commit_reconciliation_required"
+    ; "source_superseded"
     ; "compacted"
     ; "reinjected"
     ]
@@ -341,6 +469,10 @@ let test_codec_roundtrip_all_events () =
            { cause; observed_checkpoint = source })
     ; reconcile Operation.Commit_durability_unknown
     ; reconcile Operation.Transaction_outcome_unknown
+    ; Operation.source_superseded
+        ~operation_id
+        ~attempt_id
+        ~observed_checkpoint:(Some advanced)
     ; Operation.compacted
         ~operation_id
         ~attempt_id
@@ -448,6 +580,14 @@ let () =
             "reducer reconciliation"
             `Quick
             test_reducer_reconciliation
+        ; Alcotest.test_case
+            "reducer source superseded"
+            `Quick
+            test_reducer_source_superseded
+        ; Alcotest.test_case
+            "reducer rejects false supersession"
+            `Quick
+            test_reducer_rejects_false_supersession
         ; Alcotest.test_case
             "reducer invalid transition"
             `Quick

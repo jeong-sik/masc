@@ -11,6 +11,7 @@ type operation_entry = Projection.operation_entry =
   }
 type replay = { operations : operation_entry list; end_cursor : Cursor.t }
 type slice = { rows : row list; end_cursor : Cursor.t }
+type t
 type event_rejection = Projection.rejection =
   | Cursor_mismatch of
       { expected : Cursor.t
@@ -37,12 +38,20 @@ type read_error =
   | Read_failed of Fs_compat.Private_jsonl_slice.error
   | Invalid_history of history_error
 type transaction_error =
+  | Cursor_conflict of
+      { expected : Cursor.t
+      ; actual : Cursor.t
+      }
+  | Committed_cursor_mismatch of
+      { expected : Cursor.t
+      ; actual : Cursor.t
+      }
   | Not_committed of Fs_compat.durable_append_error
   | Outcome_unknown of Fs_compat.durable_append_error
+  | Storage_rejected of Fs_compat.private_jsonl_append_error
   | Access_failed of exn
 type append_error =
   | Encode_failed of Record.envelope_error
-  | Existing_history_invalid of history_error
   | Event_rejected of event_rejection
   | Transaction_error of transaction_error
 val journal_path :
@@ -51,6 +60,12 @@ val replay :
   base_path:string ->
   keeper_name:Keeper_id.Keeper_name.t ->
   (replay, read_error) result
+val open_writer :
+  base_path:string ->
+  keeper_name:Keeper_id.Keeper_name.t ->
+  (t, read_error) result
+val operations : t -> operation_entry list
+val end_cursor : t -> Cursor.t
 val read_slice :
   base_path:string ->
   keeper_name:Keeper_id.Keeper_name.t ->
@@ -58,8 +73,11 @@ val read_slice :
   (slice, read_error) result
 (** Structural decode only; it never invents prior reducer state. *)
 val append :
-  base_path:string ->
-  keeper_name:Keeper_id.Keeper_name.t ->
+  t ->
   recorded_at:float ->
   Keeper_compaction_operation.event ->
-  (row, append_error) result
+  (t * row, append_error) result
+(** Validate against the immutable projection, then append at its exact durable
+    end cursor. A successful result is the only writer state that may admit the
+    next event. A stale copied state receives [Cursor_conflict] without writing
+    bytes. *)

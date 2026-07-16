@@ -40,9 +40,14 @@ let with_base f =
   let base = Filename.temp_dir "operation_store_" "" in
   Fun.protect ~finally:(fun () -> remove base) (fun () -> f base)
 ;;
-let append base time event =
-  match Store.append ~base_path:base ~keeper_name ~recorded_at:time event with
-  | Ok row -> row
+let open_writer base =
+  match Store.open_writer ~base_path:base ~keeper_name with
+  | Ok writer -> writer
+  | Error _ -> Alcotest.fail "valid journal did not open"
+;;
+let append writer time event =
+  match Store.append writer ~recorded_at:time event with
+  | Ok result -> result
   | Error _ -> Alcotest.fail "valid append failed"
 ;;
 let cursor value = ok (Record.Cursor.of_int value)
@@ -79,9 +84,18 @@ let test_incremental_projection_matches_replay () =
 ;;
 let test_append_replay_and_slice () =
   with_base @@ fun base ->
-  let first = append base 1.0 (request op2) in
-  let second = append base 2.0 (request op1) in
-  let last = append base 3.0 (Operation.attempt_started ~operation_id:op2 ~attempt_id:attempt) in
+  let writer = open_writer base in
+  let writer, first = append writer 1.0 (request op2) in
+  let writer, second = append writer 2.0 (request op1) in
+  let writer, last =
+    append
+      writer
+      3.0
+      (Operation.attempt_started ~operation_id:op2 ~attempt_id:attempt)
+  in
+  Alcotest.(check int) "writer cursor is final row"
+    (Store.Cursor.to_int last.end_cursor)
+    (Store.Cursor.to_int (Store.end_cursor writer));
   (match Store.replay ~base_path:base ~keeper_name with
    | Ok { operations = [ a; b ]; _ } ->
      Alcotest.(check bool) "request-cursor FIFO" true
@@ -105,14 +119,14 @@ let producer () =
 let test_rejections_do_not_write () =
   with_base @@ fun base ->
   let producer = producer () in
-  ignore (append base 1.0 (request ~producer op1));
+  let writer, _ = append (open_writer base) 1.0 (request ~producer op1) in
   let path = Store.journal_path ~base_path:base ~keeper_name in
   let before = Fs_compat.load_file path in
-  (match Store.append ~base_path:base ~keeper_name ~recorded_at:2.0 (request ~producer op2) with
+  (match Store.append writer ~recorded_at:2.0 (request ~producer op2) with
    | Error (Store.Event_rejected (Store.Producer_already_bound { existing_operation_id; _ }))
      when Operation.Operation_id.equal existing_operation_id op1 -> ()
    | _ -> Alcotest.fail "producer retry was not bound to its original operation");
-  (match Store.append ~base_path:base ~keeper_name ~recorded_at:3.0 (request ~producer op1) with
+  (match Store.append writer ~recorded_at:3.0 (request ~producer op1) with
    | Error (Store.Event_rejected (Store.Transition_rejected _)) -> ()
    | _ -> Alcotest.fail "invalid transition was not rejected");
   let other = ok (Keeper_id.Keeper_name.of_string "other-keeper") in
@@ -120,7 +134,7 @@ let test_rejections_do_not_write () =
     Operation.requested ~operation_id:op2 ~keeper_name:other ~source_checkpoint:source
       ~trigger:Compaction_trigger.Manual ~cause ~producer:None
   in
-  (match Store.append ~base_path:base ~keeper_name ~recorded_at:4.0 wrong with
+  (match Store.append writer ~recorded_at:4.0 wrong with
    | Error (Store.Event_rejected (Store.Keeper_mismatch _)) -> ()
    | _ -> Alcotest.fail "cross-Keeper request was not rejected");
   Alcotest.(check string) "rejections wrote no bytes" before (Fs_compat.load_file path)
@@ -144,11 +158,10 @@ let provider_request operation_id source_checkpoint =
 ;;
 let test_provider_binding_includes_exact_source () =
   with_base @@ fun base ->
-  ignore (append base 1.0 (provider_request op1 source));
+  let writer, _ = append (open_writer base) 1.0 (provider_request op1 source) in
   (match
      Store.append
-       ~base_path:base
-       ~keeper_name
+       writer
        ~recorded_at:2.0
        (provider_request op2 source)
    with
@@ -157,7 +170,7 @@ let test_provider_binding_includes_exact_source () =
           (Store.Producer_already_bound { existing_operation_id; _ }))
      when Operation.Operation_id.equal existing_operation_id op1 -> ()
    | _ -> Alcotest.fail "same source delivery created a second operation");
-  ignore (append base 3.0 (provider_request op2 next_source));
+  let _, _ = append writer 3.0 (provider_request op2 next_source) in
   match Store.replay ~base_path:base ~keeper_name with
   | Ok { operations = first :: [ _ ]; _ } ->
     (match first.snapshot.producer with
@@ -178,10 +191,32 @@ let test_malformed_history_fails_loud () =
   (match Store.replay ~base_path:base ~keeper_name with
    | Error (Store.Invalid_history (Store.Invalid_record _)) -> ()
    | _ -> Alcotest.fail "malformed history did not fail replay");
-  match Store.append ~base_path:base ~keeper_name ~recorded_at:1.0 (request op1) with
-  | Error (Store.Existing_history_invalid _) ->
+  match Store.open_writer ~base_path:base ~keeper_name with
+  | Error (Store.Invalid_history (Store.Invalid_record _)) ->
     Alcotest.(check string) "malformed bytes unchanged" "not-json\n" (Fs_compat.load_file path)
-  | _ -> Alcotest.fail "append accepted malformed history"
+  | _ -> Alcotest.fail "writer opened malformed history"
+;;
+let test_stale_writer_cannot_append () =
+  with_base @@ fun base ->
+  let stale = open_writer base in
+  let current, first = append stale 1.0 (request op1) in
+  let path = Store.journal_path ~base_path:base ~keeper_name in
+  let committed = Fs_compat.load_file path in
+  (match Store.append stale ~recorded_at:2.0 (request op2) with
+   | Error
+       (Store.Transaction_error
+          (Store.Cursor_conflict { expected; actual })) ->
+     Alcotest.(check int) "stale expected cursor" 0
+       (Store.Cursor.to_int expected);
+     Alcotest.(check int) "durable cursor" (Store.Cursor.to_int first.end_cursor)
+       (Store.Cursor.to_int actual)
+   | _ -> Alcotest.fail "stale writer did not receive an exact cursor conflict");
+  Alcotest.(check string) "stale append wrote no bytes" committed
+    (Fs_compat.load_file path);
+  let current, second = append current 3.0 (request op2) in
+  Alcotest.(check int) "current writer advances"
+    (Store.Cursor.to_int second.end_cursor)
+    (Store.Cursor.to_int (Store.end_cursor current))
 ;;
 let () =
   Alcotest.run "keeper compaction operation store"
@@ -197,5 +232,7 @@ let () =
           `Quick
           test_provider_binding_includes_exact_source
       ; Alcotest.test_case "malformed history" `Quick test_malformed_history_fails_loud
+      ; Alcotest.test_case "stale writer no append" `Quick
+          test_stale_writer_cannot_append
       ] ]
 ;;

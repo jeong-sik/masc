@@ -197,8 +197,8 @@ val is_version_conflict_error : string -> bool
     dormant keepers never save). Deletion is destructive, so the drop
     set is an explicit in-code list ([retired_keeper_meta_key_names]),
     not a set derived from the codec: parser-consumed keys the
-    serializer never emits ([autoboot_enabled], [compaction_mode],
-    [keeper_name], ...) must survive, and deriving the complement was
+    serializer never emits ([autoboot_enabled], [keeper_name], ...)
+    must survive, and deriving the complement was
     twice shown to misclassify them. Forgetting to extend the list is
     fail-safe — the unknown-keys warning keeps firing until the key is
     added. Retired keys are filtered out of the raw JSON in place

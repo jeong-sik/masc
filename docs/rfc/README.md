@@ -321,7 +321,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0322 | Withdraw repository-catalog read authorization | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0323 | Withdraw mandatory cross-verifier completion | Withdrawn | 03d5feaf25 2026-07-08 | - |
 | 0324 | keeper repo 경로를 filesystem 진실로 (catalog 거짓 주입 제거) | Draft | 03d5feaf25 2026-07-08 | - |
-| 0327 | compaction LLM — provider-무관 structured output + 활성화/계측/가시화 | Draft | acd910998f 2026-07-09 | - |
 | 0328 | Retire the combined governance and perseveration incident plan | Withdrawn | 434a7f5a76 2026-07-10 | - |
 | 0329 | Keeper Execute Governance Payload Mapping | Rejected | 626afed7b7 2026-07-10 | - |
 | 0331 | Withdraw authorization by tool effect class | Withdrawn | 7662c42bb3 2026-07-09 | - |

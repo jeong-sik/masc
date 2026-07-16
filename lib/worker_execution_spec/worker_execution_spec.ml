@@ -47,23 +47,12 @@ let allowed_fields =
     "timeout_sec";
   ]
 
-let removed_fields =
-  [ "worker_class"; "max_turns"; "allowed_tools"; "allowed_shell_tools" ]
-
 let validate_fields fields =
   let field_names = List.map fst fields in
-  match List.find_opt (fun name -> List.mem name removed_fields) field_names with
+  match List.find_opt (fun name -> not (List.mem name allowed_fields)) field_names with
   | Some field ->
-      Error
-        (Printf.sprintf
-           "worker execution spec field %S has been removed; use runtime_backend + fixed worker surfaces"
-           field)
-  | None -> (
-      match List.find_opt (fun name -> not (List.mem name allowed_fields)) field_names with
-      | Some field ->
-          Error
-            (Printf.sprintf "unknown worker execution spec field %S" field)
-      | None -> Ok ())
+      Error (Printf.sprintf "unknown worker execution spec field %S" field)
+  | None -> Ok ()
 
 let to_yojson (spec : t) =
   `Assoc

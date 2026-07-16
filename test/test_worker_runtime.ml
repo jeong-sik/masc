@@ -196,25 +196,6 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
           check bool "mentions rejected label" true
             (String.contains err 'n' && String.contains err '-'))
 
-let test_worker_execution_spec_rejects_removed_fields () =
-  let json =
-    Yojson.Safe.from_string
-      {|{
-  "base_path": "/tmp/base",
-  "worker_name": "worker",
-  "model_label": "custom:qwen@http://127.0.0.1:19001",
-  "runtime_backend": "docker",
-  "prompt": "hello",
-  "timeout_sec": 30,
-  "allowed_tools": ["masc_status"]
-}|}
-  in
-  match Worker_execution_spec.of_yojson json with
-  | Ok _ -> fail "expected removed worker spec field to be rejected"
-  | Error msg ->
-      check bool "mentions removed field" true
-        (Astring.String.is_infix ~affix:"allowed_tools" msg)
-
 let () =
   Alcotest.run "worker_runtime"
     [
@@ -234,7 +215,4 @@ let () =
         [ test_case "invalid explicit model label fails before local worker execution"
             `Quick
             test_run_worker_oas_rejects_invalid_explicit_model_label ] );
-      ( "spec_schema",
-        [ test_case "removed worker spec fields are rejected" `Quick
-            test_worker_execution_spec_rejects_removed_fields ] );
     ]

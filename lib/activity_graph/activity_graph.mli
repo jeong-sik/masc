@@ -142,3 +142,28 @@ val agent_spans_json :
     window) are reported with [Span_open] and [end_ms] set
     to "now".  Returns [`Assoc [agents; spans; time_range;
     window]]. *)
+
+module For_testing : sig
+  val reset_current_day_cache_for_testing : unit -> unit
+  (** Clears the boundary-keyed current-day parse cache and its
+      delta-line counter so a test observes cold-start behavior. *)
+
+  val reset_past_day_cache_for_testing : unit -> unit
+  (** Clears the [(path, mtime) -> event list] past-day cache. *)
+
+  val current_day_parsed_line_count : unit -> int
+  (** Number of non-blank lines folded through the *incremental delta*
+      path since the last reset (excludes the initial cold-miss full
+      parse and the invalid-UTF-8 / shrink fallback rescans). Lets a
+      test prove that appending [n] lines behind a warm cache parses
+      exactly [n] lines, not the whole file. *)
+
+  val current_day_cache_entry_count : unit -> int
+  val past_day_cache_entry_count : unit -> int
+
+  val current_day_path : Workspace_utils.config -> string
+  (** Path of the file [read_all_events] treats as "current day" for
+      [config]. Exposed so tests can write directly to it to simulate
+      append growth, truncation, or invalid UTF-8 without going through
+      {!emit}. *)
+end

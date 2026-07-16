@@ -26,18 +26,8 @@ module Ws_wsd = Ws_direct_core.Endpoint.Wsd
 module Ws_msg = Ws_direct_core.Connection.Message
 
 (* RNG init is required for both the TLS handshake (ephemeral key exchange)
-   and ws-direct's per-frame masking key (its default [random] is
-   [Mirage_crypto_rng.generate], which needs a seeded generator).
-   [use_default] only installs if no generator is set, so repeated calls are
-   safe. *)
-let rng_initialized = ref false
-
-let init_rng () =
-  if not !rng_initialized
-  then (
-    Mirage_crypto_rng_unix.use_default ();
-    rng_initialized := true)
-;;
+   and ws-direct's per-frame masking key. *)
+let init_rng = Crypto_rng.ensure_default
 
 (** Application-level inbound event delivered to the gateway reader. The
     endpoint auto-replies to Ping, treats Pong observationally, and reassembles

@@ -28,7 +28,6 @@ module Dashboard_briefing = Dashboard_briefing
 (* module Dashboard_proof removed *)
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
-module Auth_login = Masc.Auth_login
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_tool_call_log = Masc.Keeper_tool_call_log
@@ -668,8 +667,7 @@ let run_cmd host port cli_base_path =
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->
-  (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
-  Mirage_crypto_rng_unix.use_default ();
+  Crypto_rng.ensure_default ();
 
   (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
   Eio_guard.enable ();

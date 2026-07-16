@@ -2125,10 +2125,27 @@ let get_or_create_entry keeper_name =
         Hashtbl.add registry keeper_name entry;
         entry)
 
+(* Cancellation must not poison the entry mutex. The transaction runner
+   converts an in-flight Cancelled into a coherent [Transaction_cancelled]
+   value (rollback/close bookkeeping done, entry state set by
+   [apply_transaction_result]) and only then re-raises per the Eio
+   protocol; letting that re-raise cross [Eio.Mutex.use_rw] would poison
+   the mutex and wedge every later operation on this keeper's queue with
+   [Eio_mutex.Poisoned]. Catch Cancelled inside the locked region, close
+   the lock normally, and re-raise outside. Any other exception still
+   poisons — protected state may genuinely be torn there. *)
 let with_entry_lock keeper_name entry f =
   Option.iter (fun observer -> observer keeper_name)
     (Atomic.get before_entry_lock_observer_for_testing);
-  Eio.Mutex.use_rw ~protect:true entry.mutex f
+  let outcome =
+    Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+      match f () with
+      | value -> Ok value
+      | exception (Eio.Cancel.Cancelled _ as exception_) -> Error exception_)
+  in
+  match outcome with
+  | Ok value -> value
+  | Error exception_ -> raise exception_
 
 let persistence_configured () =
   match Atomic.get persistence_configuration with

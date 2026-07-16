@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_crypto_rng)
+ (public_name masc.crypto_rng)
+ (wrapped false)
+ (modules crypto_rng)
+ (libraries threads mirage-crypto-rng mirage-crypto-rng.unix))

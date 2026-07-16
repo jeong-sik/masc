@@ -380,7 +380,7 @@ let () =
          exit 2)
   in
   Eio_main.run @@ fun env ->
-  Mirage_crypto_rng_unix.use_default ();
+  Crypto_rng.ensure_default ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
   (* Register the ambient Eio clock the agent runtime resolves via
      [Process_eio.get_clock]. Without this, any runtime config that sets

@@ -2459,8 +2459,12 @@ let test_render_if_enabled_empty_store_yields_none () =
 let test_render_if_enabled_surfaces_prompt_render_failure () =
   with_recall_env "true" (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
+      let missing_prompts = Filename.concat keepers_dir "missing-prompts" in
+      Unix.mkdir missing_prompts 0o700;
       Fun.protect
-        ~finally:Prompt_registry.clear
+        ~finally:(fun () ->
+          Prompt_registry.clear ();
+          Unix.rmdir missing_prompts)
         (fun () ->
           let keeper_id = "virtual-memory-keeper" in
           let now = 1_000_000.0 in
@@ -2469,7 +2473,7 @@ let test_render_if_enabled_surfaces_prompt_render_failure () =
           Memory_io.append_fact
             ~keeper_id
             { (fact_fixture ~now ()) with Types.claim = "Hidden fact should not leak" };
-          Prompt_registry.clear ();
+          Prompt_registry.set_markdown_dir missing_prompts;
           match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
           | None -> Alcotest.fail "expected sanitized recall-unavailable block"
           | Some block ->

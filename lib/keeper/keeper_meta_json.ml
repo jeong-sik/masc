@@ -102,67 +102,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
 
 include Keeper_meta_json_parse
 
-(* Runtime-only keys — used as fallback when seed round-trip fails.
-   Config keys are TOML-only and no longer appear in JSON. *)
-let fallback_canonical_keeper_meta_key_names =
-  [ "name"
-  ; "agent_name"
-  ; "persona"
-  ; "instructions"
-  ; "trace_id"
-  ; "multimodal_policy"
-  ; "trace_history"
-  ; "generation"
-  ; "last_handoff_ts"
-  ; "created_at"
-  ; "updated_at"
-  ; "total_turns"
-  ; "total_input_tokens"
-  ; "total_output_tokens"
-  ; "total_tokens"
-  ; "total_cost_usd"
-  ; "last_turn_ts"
-  ; "last_input_tokens"
-  ; "last_output_tokens"
-  ; "last_total_tokens"
-  ; "last_latency_ms"
-  ; "compaction_count"
-  ; "last_compaction_ts"
-  ; "last_compaction_before_tokens"
-  ; "last_compaction_after_tokens"
-  ; "proactive_count_total"
-  ; "last_proactive_ts"
-  ; "proactive_visible_count_total"
-  ; "last_visible_proactive_ts"
-  ; "last_proactive_outcome"
-  ; "last_proactive_reason"
-  ; "last_proactive_preview"
-  ; "consecutive_noop_count"
-  ; "last_compaction_check_ts"
-  ; "last_compaction_decision"
-  ; "active_goal_ids"
-  ; "last_autonomous_action_at"
-  ; "autonomous_action_count"
-  ; "autonomous_turn_count"
-  ; "autonomous_text_turn_count"
-  ; "autonomous_tool_turn_count"
-  ; "board_reactive_turn_count"
-  ; "mention_reactive_turn_count"
-  ; "noop_turn_count"
-  ; "last_seen_message_seq"
-  ; "message_scope_ack_id"
-  ; "last_blocker"
-  ; "last_runtime_attempt"
-  ; "last_turn_tool_calls"
-  ; "paused"
-  ; "latched_reason"
-  ; "current_task_id"
-  ; "keeper_id"
-  ; "oas_env"
-  ; "meta_version"
-  ]
-;;
-
 (* Seed round-trip: parse a minimal canonical JSON then serialize to derive
    the canonical key set. *)
 let canonical_keeper_meta_key_names =
@@ -178,16 +117,9 @@ let canonical_keeper_meta_key_names =
   | Ok meta ->
     (match meta_to_json meta with
      | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
-     | _ -> fallback_canonical_keeper_meta_key_names)
+     | _ -> invalid_arg "Keeper_meta_json.meta_to_json must return an object")
   | Error msg ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string MetaJsonFailures)
-      ~labels:[("site", "seed_parse")]
-      ();
-    Log.Keeper.warn
-      "canonical_keeper_meta_key_names seed failed: %s; falling back to static keys"
-      msg;
-    fallback_canonical_keeper_meta_key_names
+    invalid_arg ("Keeper_meta_json canonical seed is invalid: " ^ msg)
 ;;
 
 let unknown_keeper_meta_keys (json : Yojson.Safe.t) : string list =

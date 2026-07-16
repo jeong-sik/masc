@@ -8,7 +8,7 @@ open Masc_domain
 
 (** Generate a cryptographically random token (hex string) *)
 let generate_token () =
-  let random_bytes = Mirage_crypto_rng.generate 32 in
+  let random_bytes = Crypto_rng.generate 32 in
   let hex = Buffer.create 64 in
   String.iter (fun c -> Printf.bprintf hex "%02x" (Char.code c)) random_bytes;
   Buffer.contents hex

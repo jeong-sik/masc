@@ -237,15 +237,6 @@ let resolved_keeper_args_from_persona args :
         let defaults_source =
           Option.value defaults.manifest_path ~default:persona.profile_path
         in
-        (match persona_operator_todo_placeholder_fields persona defaults with
-        | _ :: _ as fields ->
-            Error
-              (Printf.sprintf
-                 "keeper defaults at %s contain OPERATOR_TODO placeholder(s): %s; \
-                  replace placeholders before masc_keeper_create_from_persona"
-                 defaults_source
-                 (String.concat ", " fields))
-        | [] ->
         let name =
           get_string_opt args "name" |> Option.value ~default:persona_name
         in
@@ -309,4 +300,4 @@ let resolved_keeper_args_from_persona args :
                           masc_keeper_create_from_persona"
                          defaults_source
                          (String.concat ", " fields))
-                  | [] -> Ok (persona, resolved)))))
+                  | [] -> Ok (persona, resolved))))

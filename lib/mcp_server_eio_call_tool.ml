@@ -143,8 +143,21 @@ let record_mcp_server_operation_duration result ~duration_ms =
     ~duration_seconds:(float_of_int duration_ms /. 1000.0)
 ;;
 
+(** MCP tools/call [arguments] is optional (spec: "arguments?: object").
+    Absence therefore means an empty object. An explicitly supplied [`Null]
+    is not absence and must remain [`Null] so OAS strict validation rejects it
+    instead of silently repairing an invalid wire value. *)
+let arguments_of_params = function
+  | `Assoc fields ->
+    (match List.assoc_opt "arguments" fields with
+     | None -> `Assoc []
+     | Some value -> value)
+  | _ -> `Null
+;;
+
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
+  let arguments_of_params = arguments_of_params
   let record_mcp_server_operation_duration = record_mcp_server_operation_duration
   let record_mcp_server_operation_duration_sample =
     record_mcp_server_operation_duration_sample
@@ -442,7 +455,7 @@ let record_runtime_mcp_keeper_tool_trace
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
   let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
-  let arguments = Yojson.Safe.Util.member "arguments" params in
+  let arguments = arguments_of_params params in
   let identity =
     Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
@@ -473,7 +486,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
     | Full | Operator_remote ->
-        (Json_util.get_string params "name" |> Option.value ~default:"", Yojson.Safe.Util.member "arguments" params)
+        (* DET-OK: pre-existing empty-name default fails typed downstream; arguments_of_params maps MCP-optional absence to a typed empty object. *)
+        (Json_util.get_string params "name" |> Option.value ~default:"", arguments_of_params params)
   in
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in

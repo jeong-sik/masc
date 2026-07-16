@@ -507,6 +507,11 @@ let keeper_compact_body
       args
   : tool_result
   =
+  match invocation_ref with
+  | None ->
+    tool_result_error
+      "masc_keeper_compact requires an exact tool invocation identity"
+  | Some producer_invocation ->
   match resolve_keeper_name_config ~config args with
   | Error err -> tool_result_error err
   | Ok name ->
@@ -527,10 +532,11 @@ let keeper_compact_body
     end
     else
       let stimulus : Keeper_event_queue.stimulus =
-        { post_id = Keeper_event_queue.manual_compaction_post_id
+        { post_id =
+            Keeper_event_queue.manual_compaction_post_id producer_invocation
         ; urgency = Immediate
         ; arrived_at = Time_compat.now ()
-        ; payload = Manual_compaction_requested
+        ; payload = Manual_compaction_requested producer_invocation
         }
       in
       let queued queue_outcome =
@@ -540,11 +546,7 @@ let keeper_compact_body
             ; "queued", `Bool true
             ; "queue_outcome", `String queue_outcome
             ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-            ; ( "producer_invocation"
-              , Option.fold
-                  ~none:`Null
-                  ~some:Tool_invocation_ref.to_yojson
-                  invocation_ref )
+            ; "producer_invocation", Tool_invocation_ref.to_yojson producer_invocation
             ; ( "wake"
               , manual_compaction_wakeup_observation
                   ~base_path:config.base_path

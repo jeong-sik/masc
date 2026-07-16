@@ -134,7 +134,7 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Failure_judgment _
-      | Keeper_event_queue.Manual_compaction_requested
+      | Keeper_event_queue.Manual_compaction_requested _
       | Keeper_event_queue.Goal_assigned _ ->
         None)
     stimuli
@@ -154,7 +154,7 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Failure_judgment _
-       | Keeper_event_queue.Manual_compaction_requested
+       | Keeper_event_queue.Manual_compaction_requested _
        | Keeper_event_queue.Goal_assigned _ -> ())
     stimuli
 ;;
@@ -224,7 +224,7 @@ let failure_judgment_of_stimuli = function
            | Keeper_event_queue.Bootstrap
            | Keeper_event_queue.Connector_attention _
            | Keeper_event_queue.Hitl_resolved _
-           | Keeper_event_queue.Manual_compaction_requested
+           | Keeper_event_queue.Manual_compaction_requested _
            | Keeper_event_queue.Goal_assigned _ ->
              false)
         stimuli
@@ -233,7 +233,7 @@ let failure_judgment_of_stimuli = function
 ;;
 
 let manual_compaction_requested_of_stimuli = function
-  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
+  | [ { Keeper_event_queue.payload = Manual_compaction_requested _; _ } ] -> true
   | [] | [ _ ] | _ :: _ :: _ -> false
 ;;
 

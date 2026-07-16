@@ -13,6 +13,14 @@ module Server_keeper_waiting_inventory = Masc.Server_keeper_waiting_inventory
 
 let () = ignore Operator_tool.force_link
 
+let manual_compaction_invocation () =
+  let request_id =
+    Mcp_transport_protocol.request_id_of_yojson (`String "waiting-inventory")
+    |> Result.get_ok
+  in
+  Tool_invocation_ref.external_mcp ~request_id ~session_id:"waiting-inventory-test"
+  |> Result.get_ok
+
 let temp_dir () =
   let path = Filename.temp_file "keeper_waiting_inventory_test" "" in
   Sys.remove path;
@@ -243,11 +251,12 @@ let test_manual_compaction_waiting_row_has_typed_producer () =
   @@ fun config ->
   let keeper_name = "manual-compaction-waiting-keeper" in
   ensure_keeper config keeper_name;
+  let producer_invocation = manual_compaction_invocation () in
   let pending =
     stimulus
-      ~post_id:Keeper_event_queue.manual_compaction_post_id
+      ~post_id:(Keeper_event_queue.manual_compaction_post_id producer_invocation)
       ~arrived_at:120.0
-      Keeper_event_queue.Manual_compaction_requested
+      (Keeper_event_queue.Manual_compaction_requested producer_invocation)
   in
   Keeper_event_queue_persistence.persist
     ~base_path:config.Workspace_utils_backend_setup.base_path

@@ -10,6 +10,14 @@ module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue
 module WO = Masc.Keeper_world_observation
 
+let manual_compaction_invocation () =
+  let request_id =
+    Mcp_transport_protocol.request_id_of_yojson (`String "post-turn-wirein")
+    |> Result.get_ok
+  in
+  Tool_invocation_ref.external_mcp ~request_id ~session_id:"post-turn-test"
+  |> Result.get_ok
+
 let test_prepared_becomes_applied_only_after_save () =
   let trigger = Compaction_trigger.Manual in
   check bool "Prepared is not Applied" false
@@ -212,8 +220,10 @@ let test_manual_compaction_serializes_owner_lane () =
         in
         Eio.Promise.resolve finished_u result);
       Eio.Promise.await held;
+      let producer_invocation = manual_compaction_invocation () in
       let tool_result =
         Masc.Keeper_tool_surface.dispatch
+          ~invocation_ref:producer_invocation
           ctx
           ~name:"masc_keeper_compact"
           ~args:(`Assoc [ "name", `String meta.name ])
@@ -239,7 +249,9 @@ let test_manual_compaction_serializes_owner_lane () =
       in
       let lease =
         match intake.claimed_lease, intake.consumed_stimuli with
-        | Some lease, [ { Queue.payload = Manual_compaction_requested; _ } ] -> lease
+        | Some lease, [ { Queue.payload = Manual_compaction_requested persisted; _ } ]
+          when Tool_invocation_ref.equal producer_invocation persisted ->
+          lease
         | _ -> fail "manual compaction request was not the sole durable lease"
       in
       let obs =
@@ -263,7 +275,9 @@ let test_manual_compaction_serializes_owner_lane () =
           ~obs
           ~turn_decision:decision
           ~shared_context:(Agent_sdk.Context.create_sync ())
-          ~wake:(Masc.Keeper_registry.Woken [ Manual_compaction_requested ])
+          ~wake:
+            (Masc.Keeper_registry.Woken
+               [ Manual_compaction_requested producer_invocation ])
           ~manual_compaction_requested:true
           ()
       in

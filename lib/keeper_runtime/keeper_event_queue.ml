@@ -76,7 +76,7 @@ type stimulus_payload =
          dedicated turn_reason, so scheduling cooldowns are unchanged and
          the stable per-(runtime, class) post_id lets queue identity dedup
          collapse repeats. *)
-  | Manual_compaction_requested
+  | Manual_compaction_requested of Tool_invocation_ref.t
   | Goal_assigned of goal_assignment
       (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
          (keeper_up tool args or TOML reconcile). Wakes the keeper ONCE at
@@ -194,7 +194,10 @@ let failure_judgment_post_id (fj : failure_judgment) =
   ^ ":"
   ^ Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance
 
-let manual_compaction_post_id = "manual-compaction-request"
+let manual_compaction_post_id producer_invocation =
+  "manual-compaction-request:"
+  ^ Yojson.Safe.to_string (Tool_invocation_ref.to_yojson producer_invocation)
+;;
 
 let goal_assignment_post_id (ga : goal_assignment) =
   (* Stable per goal: re-assigning the same goal before the keeper consumes
@@ -247,7 +250,7 @@ let identity_payload = function
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-    | Manual_compaction_requested
+    | Manual_compaction_requested _
     ) as payload ->
     payload
 
@@ -265,6 +268,8 @@ let stimulus_identity_equal a b =
   match a.payload, b.payload with
   | Failure_judgment left, Failure_judgment right ->
     failure_judgment_identity_equal left right
+  | Manual_compaction_requested left, Manual_compaction_requested right ->
+    Tool_invocation_ref.equal left right
   | _ -> identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
@@ -350,14 +355,14 @@ let payload_kind_label = function
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
   | Failure_judgment _ -> "failure_judgment"
-  | Manual_compaction_requested -> "manual_compaction_requested"
+  | Manual_compaction_requested _ -> "manual_compaction_requested"
   | Goal_assigned _ -> "goal_assigned"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _ | Bg_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Failure_judgment _ | Manual_compaction_requested | Goal_assigned _ ->
+  | Failure_judgment _ | Manual_compaction_requested _ | Goal_assigned _ ->
     false
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -565,8 +570,11 @@ let payload_to_yojson = function
         , Keeper_runtime_failure_route.judgment_provenance_to_yojson fj.fj_provenance )
       ; "detail", `String fj.fj_detail
       ]
-  | Manual_compaction_requested ->
-    `Assoc [ "kind", `String "manual_compaction_requested" ]
+  | Manual_compaction_requested producer_invocation ->
+    `Assoc
+      [ "kind", `String "manual_compaction_requested"
+      ; "producer_invocation", Tool_invocation_ref.to_yojson producer_invocation
+      ]
   | Goal_assigned ga ->
     `Assoc
       [ "kind", `String "goal_assigned"
@@ -696,7 +704,11 @@ let payload_of_yojson json =
          ; fj_provenance = provenance
          ; fj_detail = detail
          })
-  | "manual_compaction_requested" -> Ok Manual_compaction_requested
+  | "manual_compaction_requested" ->
+    let* producer_json = required_field ~context "producer_invocation" fields in
+    Tool_invocation_ref.of_yojson producer_json
+    |> Result.map (fun producer -> Manual_compaction_requested producer)
+    |> Result.map_error Tool_invocation_ref.decode_error_to_string
   | "goal_assigned" ->
     let* goal_id = string_field ~context "goal_id" fields in
     let* goal_title = string_field ~context "goal_title" fields in

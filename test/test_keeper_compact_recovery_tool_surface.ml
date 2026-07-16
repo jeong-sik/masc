@@ -25,6 +25,14 @@ let persisted_meta_exn config name =
   | Ok None -> fail "persisted keeper meta is missing"
   | Error detail -> failf "persisted keeper meta read failed: %s" detail
 
+let producer_invocation () =
+  let request_id =
+    Mcp_transport_protocol.request_id_of_yojson (`String "compact-request")
+    |> Result.get_ok
+  in
+  Tool_invocation_ref.external_mcp ~request_id ~session_id:"compact-test-session"
+  |> Result.get_ok
+
 let test_missing_checkpoint_still_queues_owner_lane_stimulus () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.ensure_rng_initialized ();
@@ -65,8 +73,22 @@ let test_missing_checkpoint_still_queues_owner_lane_stimulus () =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
+      (match
+         Keeper_tool_surface.dispatch
+           ctx
+           ~name:"masc_keeper_compact"
+           ~args:(`Assoc [ "name", `String keeper_name ])
+       with
+       | Some (Tool_result.Failed failure) ->
+         check string
+           "missing producer identity fails explicitly"
+           "masc_keeper_compact requires an exact tool invocation identity"
+           failure.message
+       | _ -> fail "compaction admission without a producer identity must fail");
+      let producer_invocation = producer_invocation () in
       match
         Keeper_tool_surface.dispatch
+          ~invocation_ref:producer_invocation
           ctx
           ~name:"masc_keeper_compact"
           ~args:(`Assoc [ "name", `String keeper_name ])
@@ -87,7 +109,23 @@ let test_missing_checkpoint_still_queues_owner_lane_stimulus () =
           Yojson.Safe.Util.(output.data |> member "stimulus" |> to_string);
         check bool "queue outcome is reported" true
           Yojson.Safe.Util.(
-            output.data |> member "queue_outcome" |> to_string <> ""))
+            output.data |> member "queue_outcome" |> to_string <> "");
+        (match
+           Keeper_registry_event_queue.snapshot
+             ~base_path:config.base_path
+             keeper_name
+           |> Keeper_event_queue.to_list
+         with
+         | [ { payload = Manual_compaction_requested persisted; post_id; _ } ] ->
+           check bool
+             "durable request preserves exact producer"
+             true
+             (Tool_invocation_ref.equal producer_invocation persisted);
+           check string
+             "queue identity is producer-bound"
+             (Keeper_event_queue.manual_compaction_post_id producer_invocation)
+             post_id
+         | _ -> fail "manual compaction producer was not durably queued"))
 
 let () =
   run "keeper_compact_recovery_tool_surface"

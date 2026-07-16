@@ -90,9 +90,12 @@ type stimulus_payload =
   | Failure_judgment of failure_judgment
       (** RFC-0313 deterministic failure class was rejected/blocked and should
           produce an LLM-boundary verdict prompt on the keeper lane. *)
-  | Manual_compaction_requested
-      (** Operator-requested MASC compaction. The tool only enqueues this
-          stimulus; the owning Keeper consumes it under its turn slot. *)
+  | Manual_compaction_requested of Tool_invocation_ref.t
+      (** Operator-requested MASC compaction, bound to the exact tool
+          invocation that admitted it. The owning Keeper consumes the durable
+          stimulus under its turn slot; downstream operation admission uses
+          this producer identity without reconstructing it from tool names,
+          arguments, timestamps, or payload hashes. *)
   | Goal_assigned of goal_assignment
       (** A goal was newly added to this keeper's [active_goal_ids]. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
@@ -212,7 +215,8 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 
 val failure_judgment_post_id : failure_judgment -> post_id
 
-val manual_compaction_post_id : post_id
+val manual_compaction_post_id : Tool_invocation_ref.t -> post_id
+(** Stable queue identity derived from the exact typed producer projection. *)
 
 val goal_assignment_post_id : goal_assignment -> post_id
 

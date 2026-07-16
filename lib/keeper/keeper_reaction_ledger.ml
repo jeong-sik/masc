@@ -116,7 +116,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Failure_judgment _ -> Failure_judgment
-  | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
+  | Keeper_event_queue.Manual_compaction_requested _ -> Manual_compaction
   | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
 ;;
 
@@ -221,7 +221,7 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       fj.fj_runtime_id
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
-  | Keeper_event_queue.Manual_compaction_requested -> "manual_compaction_requested"
+  | Keeper_event_queue.Manual_compaction_requested _ -> "manual_compaction_requested"
   | Keeper_event_queue.Goal_assigned ga ->
     Printf.sprintf
       "goal_assigned goal_id=%s assigned_by=%s"
@@ -244,7 +244,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Failure_judgment _
-    | Keeper_event_queue.Manual_compaction_requested
+    | Keeper_event_queue.Manual_compaction_requested _
     | Keeper_event_queue.Goal_assigned _ -> None
   in
   `Assoc

@@ -22,6 +22,15 @@ let post_ids queue =
   Queue.to_list queue |> List.map (fun (stimulus : Queue.stimulus) -> stimulus.post_id)
 ;;
 
+let manual_compaction_invocation () =
+  let request_id =
+    Mcp_transport_protocol.request_id_of_yojson (`String "queue-outcome")
+    |> Result.get_ok
+  in
+  Tool_invocation_ref.external_mcp ~request_id ~session_id:"event-queue-test"
+  |> Result.get_ok
+;;
+
 let claim_head state =
   State.claim_when ~claimed_at:10.0 ~ready:(fun _ -> true) state
   |> require_ok "claim head"
@@ -488,11 +497,12 @@ let cycle_meta () =
 ;;
 
 let test_applied_compaction_settles_followup_atomically () =
+  let producer_invocation = manual_compaction_invocation () in
   let lease =
     lease_for
       (stimulus
-         ~payload:Queue.Manual_compaction_requested
-         Queue.manual_compaction_post_id
+         ~payload:(Queue.Manual_compaction_requested producer_invocation)
+         (Queue.manual_compaction_post_id producer_invocation)
          1.0)
   in
   let meta = cycle_meta () in

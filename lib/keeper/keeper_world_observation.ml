@@ -711,7 +711,7 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Manual_compaction_requested ->
+  | Keeper_event_queue.Manual_compaction_requested _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
        inject — the keeper resumes on its own state once the approval is gone

@@ -348,8 +348,6 @@ let internal_timer_entries =
   [
     entry ~default:"300.0" "MASC_BRIEFING_CACHE_TTL_SEC"
       "Mission briefing cache TTL (seconds, 5 min)";
-    entry ~default:"300.0" "MASC_KEEPER_BOOTSTRAP_WINDOW_SEC"
-      "Keeper world observation bootstrap window (seconds, 5 min)";
     entry ~default:"300.0" "MASC_LABEL_QUIET_THRESHOLD_SEC"
       "Dashboard label quiet threshold (seconds, 5 min)";
     entry ~default:"900.0" "MASC_LABEL_STUCK_THRESHOLD_SEC"

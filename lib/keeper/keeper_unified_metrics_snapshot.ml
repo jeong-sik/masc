@@ -118,7 +118,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
           `Bool
             (match compaction.outcome with
              | Applied_checkpoint -> true
-             | Not_attempted | Failed_compaction _ -> false) );
+             | Not_attempted | No_checkpoint_change | Failed_compaction _ -> false) );
         ( "compaction_outcome",
           `String
             (Keeper_context_runtime.compaction_outcome_to_string

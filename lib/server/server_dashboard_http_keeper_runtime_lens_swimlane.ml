@@ -156,6 +156,7 @@ let event_lane = function
     "oas_agent"
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Context_compacted
+  | Keeper_runtime_manifest.Context_compaction_noop
   | Keeper_runtime_manifest.Event_bus_correlated ->
     "memory_context"
 

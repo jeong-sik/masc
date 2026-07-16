@@ -97,7 +97,6 @@ let compaction_recovery_error_data ?dispatch_error error =
     | Keeper_post_turn.Checkpoint_load_failed
         Keeper_checkpoint_store.Not_found -> Not_found
     | Compaction_rejected Runtime_identity_unavailable
-    | Compaction_rejected Structurally_unchanged
     | Compaction_rejected Checkpoint_not_reduced ->
       Precondition_failed
     | Compaction_rejected Summarizer_unavailable

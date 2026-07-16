@@ -11,6 +11,7 @@ type event_kind =
   | Provider_attempt_finished
   | Context_injected
   | Context_compacted
+  | Context_compaction_noop
   | Event_bus_correlated
   | Checkpoint_loaded
   | Checkpoint_saved

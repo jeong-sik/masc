@@ -66,6 +66,7 @@ let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_kee
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
   | Prepared of Compaction_trigger.t
+  | No_compaction of Compaction_trigger.t
   | Rejected of Compaction_trigger.t * Keeper_compact_policy.compaction_rejection
   | Not_requested
   | Skipped_no_checkpoint
@@ -87,6 +88,7 @@ let compaction_decision_prepared =
 type compaction_outcome = Keeper_post_turn.compaction_outcome =
   | Not_attempted
   | Applied_checkpoint
+  | No_checkpoint_change
   | Failed_compaction of string option
 
 let compaction_outcome_to_string = Keeper_post_turn.compaction_outcome_to_string
@@ -246,7 +248,7 @@ let dispatch_post_turn_lifecycle_events
     ~keeper_name
     (lifecycle : post_turn_lifecycle) =
   (match lifecycle.compaction.outcome with
-   | Applied_checkpoint ->
+   | Applied_checkpoint | No_checkpoint_change ->
       (* FSM boundary: compaction_stage must be Compaction_compacting
          before we dispatch Compaction_completed.  If the
          on_compaction_started callback succeeded (started_dispatched =

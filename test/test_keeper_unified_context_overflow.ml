@@ -1,6 +1,9 @@
 open Alcotest
 
 module EC = Masc.Keeper_error_classify
+module M = Masc.Keeper_runtime_manifest
+module U = Masc.Keeper_unified_turn
+
 let test_is_context_overflow_only_for_overflow_errors () =
   check
     bool
@@ -42,6 +45,24 @@ let test_context_overflow_is_auto_recoverable () =
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
 ;;
 
+let test_overflow_projection_never_requeues_unchanged_context () =
+  let project = U.provider_overflow_manifest_projection in
+  check bool "applied context requeues source" true
+    (match project Masc.Keeper_context_runtime.Applied_checkpoint with
+     | M.Context_compacted, true, U.Requeue_after_context_compaction -> true
+     | _ -> false);
+  List.iter
+    (fun outcome ->
+       check bool "unchanged context follows failure route" true
+         (match project outcome with
+          | (M.Context_compaction_noop | M.Runtime_failed), false,
+            U.Follow_failure_route -> true
+          | _ -> false))
+    [ Masc.Keeper_context_runtime.No_checkpoint_change
+    ; Masc.Keeper_context_runtime.Failed_compaction (Some "failed")
+    ]
+;;
+
 let () =
   run
     "keeper_unified_context_overflow"
@@ -54,6 +75,10 @@ let () =
             "context overflow is auto-recoverable"
             `Quick
             test_context_overflow_is_auto_recoverable
+        ; test_case
+            "overflow projection never requeues unchanged context"
+            `Quick
+            test_overflow_projection_never_requeues_unchanged_context
         ] )
     ]
 ;;

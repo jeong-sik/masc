@@ -137,6 +137,10 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ("context_injected_count", `Int scan.context_injected_count);
                   ( "context_compacted_event_count",
                     `Int scan.context_compacted_event_count );
+                  ( "context_compaction_noop_event_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Context_compaction_noop) );
                   ( "event_bus_correlated_count",
                     `Int scan.event_bus_count );
                   ( "context_compact_started_count",
@@ -234,6 +238,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   [
                     Keeper_runtime_manifest.Context_injected;
                     Keeper_runtime_manifest.Context_compacted;
+                    Keeper_runtime_manifest.Context_compaction_noop;
                     Keeper_runtime_manifest.Event_bus_correlated;
                     Keeper_runtime_manifest.Checkpoint_loaded;
                     Keeper_runtime_manifest.Checkpoint_saved;

@@ -13,10 +13,25 @@ let primary_max_context meta =
   let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
   max min_context resolution.effective_budget
 ;;
+
+let manifest_event = function
+  | Keeper_compact_policy.Applied _ ->
+    Ok (Keeper_runtime_manifest.Context_compacted, "compacted")
+  | Keeper_compact_policy.No_compaction _ ->
+    Ok (Keeper_runtime_manifest.Context_compaction_noop, "no_compaction")
+  | decision ->
+    Error
+      ("manual compaction recovered unexpected decision: "
+       ^ Keeper_compact_policy.compaction_decision_to_string decision)
+;;
+
 let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
   match recovery.Keeper_context_runtime.compaction.trigger with
   | None -> Error "manual compaction completed without its typed trigger"
   | Some trigger ->
+    (match manifest_event recovery.compaction.decision with
+     | Error _ as error -> error
+     | Ok (event, status) ->
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let context : Keeper_runtime_manifest.turn_context =
       { manifest_keeper_name = meta.name
@@ -34,15 +49,15 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
     let clock_refs =
       Keeper_runtime_manifest.clock_refs_for_context
         context
-        ~event:Keeper_runtime_manifest.Context_compacted
+        ~event
         ~compaction_source:"operator_manual"
         ()
     in
     Keeper_runtime_manifest.make_for_context
       context
-      ~event:Keeper_runtime_manifest.Context_compacted
+      ~event
       ?runtime_id:recovery.evidence.selected_runtime_id
-      ~status:"compacted"
+      ~status
       ~decision:
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs
@@ -57,6 +72,7 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
       ~checkpoint_path
       ()
     |> Keeper_runtime_manifest.append config
+    )
 ;;
 let run ~(config : Workspace.config) ~(meta : keeper_meta) =
   let dispatch stage event =

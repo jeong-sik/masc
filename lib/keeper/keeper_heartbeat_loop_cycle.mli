@@ -20,7 +20,7 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_manual_compaction.failure
       }
-  | Manual_compaction_applied of cycle_outcome
+  | Manual_compaction_completed of cycle_outcome
 
 and failure_judgment_terminal =
   | Judgment_boundary_failed of { detail : string }
@@ -38,9 +38,9 @@ val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
 val manual_compaction_followup_failure
   :  cycle_outcome
   -> Keeper_unified_turn.turn_failure option
-(** The following-turn failure only when manual compaction already committed.
-    Queue settlement uses this projection to preserve an LLM judgment
-    successor without replaying the completed compaction transaction. *)
+(** The following-turn failure only after the manual compaction request reached
+    a terminal decision. Queue settlement uses this projection without
+    replaying the completed compaction request. *)
 
 val run_keeper_cycle
   :  ?event_bus:Agent_sdk.Event_bus.t

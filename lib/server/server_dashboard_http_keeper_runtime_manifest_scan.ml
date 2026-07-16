@@ -298,6 +298,7 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
    | Keeper_runtime_manifest.Context_compacted ->
      scan.context_compacted_event_count <- scan.context_compacted_event_count + 1;
      scan.latest_context_compacted_row <- Some row
+   | Keeper_runtime_manifest.Context_compaction_noop -> ()
    | Keeper_runtime_manifest.Event_bus_correlated ->
      let decision = row.Keeper_runtime_manifest.decision in
      scan.event_bus_count <- scan.event_bus_count + 1;

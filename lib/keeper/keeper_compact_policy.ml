@@ -69,20 +69,19 @@ type compaction_rejection =
   | Runtime_identity_unavailable
   | Summarizer_unavailable
   | Plan_unavailable_or_invalid
-  | Structurally_unchanged
   | Checkpoint_not_reduced
 
 let compaction_rejection_to_string = function
   | Runtime_identity_unavailable -> "runtime_identity_unavailable"
   | Summarizer_unavailable -> "summarizer_unavailable"
   | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
-  | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
 ;;
 
 type compaction_decision =
   | Applied of Compaction_trigger.t
   | Prepared of Compaction_trigger.t
+  | No_compaction of Compaction_trigger.t
   | Rejected of Compaction_trigger.t * compaction_rejection
   | Not_requested
   | Skipped_no_checkpoint
@@ -125,6 +124,7 @@ type compaction_preparation =
 let compaction_decision_to_string = function
   | Applied trigger -> "applied:" ^ Compaction_trigger.to_human trigger
   | Prepared trigger -> "prepared:" ^ Compaction_trigger.to_human trigger
+  | No_compaction trigger -> "no_compaction:" ^ Compaction_trigger.to_human trigger
   | Rejected (trigger, reason) ->
     Printf.sprintf
       "rejected:%s:%s"
@@ -136,12 +136,14 @@ let compaction_decision_to_string = function
 
 let compaction_decision_prepared = function
   | Prepared _ -> true
-  | Applied _ | Rejected _ | Not_requested | Skipped_no_checkpoint -> false
+  | Applied _ | No_compaction _ | Rejected _ | Not_requested
+  | Skipped_no_checkpoint -> false
 ;;
 
 let compaction_decision_applied = function
   | Applied _ -> true
-  | Prepared _ | Rejected _ | Not_requested | Skipped_no_checkpoint -> false
+  | Prepared _ | No_compaction _ | Rejected _ | Not_requested
+  | Skipped_no_checkpoint -> false
 ;;
 
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
@@ -201,11 +203,13 @@ let record_pre_compact
 ;;
 
 type requested_compaction =
-  { messages : Agent_sdk.Types.message list
-  ; selected_runtime_id : string option
-  ; summarized_message_count : int
-  ; dropped_message_count : int
-  }
+  | Requested_plan of
+      { messages : Agent_sdk.Types.message list
+      ; selected_runtime_id : string option
+      ; summarized_message_count : int
+      ; dropped_message_count : int
+      }
+  | Requested_no_compaction of { selected_runtime_id : string option }
 
 let requested_messages (meta : keeper_meta) messages =
   let runtime_id =
@@ -232,14 +236,18 @@ let requested_messages (meta : keeper_meta) messages =
         | None -> Error Plan_unavailable_or_invalid
         | Some plan ->
           if plan.summarized = [] && plan.dropped = []
-          then Error Structurally_unchanged
+          then
+            Ok
+              (Requested_no_compaction
+                 { selected_runtime_id = plan.selected_runtime_id })
           else
             Ok
-              { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
-              ; selected_runtime_id = plan.selected_runtime_id
-              ; summarized_message_count = List.length plan.summarized
-              ; dropped_message_count = List.length plan.dropped
-              }))
+              (Requested_plan
+                 { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
+                 ; selected_runtime_id = plan.selected_runtime_id
+                 ; summarized_message_count = List.length plan.summarized
+                 ; dropped_message_count = List.length plan.dropped
+                 })))
 ;;
 
 let tool_block_counts messages =
@@ -311,7 +319,28 @@ let compact_for_request_typed
       ~checkpoint_bytes:before_bytes
       ~message_count:before_messages;
     { context = ctx; decision = Rejected (trigger, reason); evidence = None }
-  | Ok requested ->
+  | Ok (Requested_no_compaction { selected_runtime_id }) ->
+    let before_tool_use_count, before_tool_result_count =
+      tool_block_counts (messages_of_context ctx)
+    in
+    { context = ctx
+    ; decision = No_compaction trigger
+    ; evidence =
+        Some
+          { selected_runtime_id
+          ; before_checkpoint_bytes = before_bytes
+          ; after_checkpoint_bytes = before_bytes
+          ; before_message_count = before_messages
+          ; after_message_count = before_messages
+          ; summarized_message_count = 0
+          ; dropped_message_count = 0
+          ; before_tool_use_count
+          ; after_tool_use_count = before_tool_use_count
+          ; before_tool_result_count
+          ; after_tool_result_count = before_tool_result_count
+          }
+    }
+  | Ok (Requested_plan requested) ->
     let messages, pair_repair_stats =
       Keeper_context_core.repair_broken_tool_call_pairs_with_stats requested.messages
     in
@@ -329,9 +358,7 @@ let compact_for_request_typed
         ~message_count:before_messages;
       { context = ctx; decision = Rejected (trigger, reason); evidence = None }
     in
-    if after_bytes = before_bytes
-    then reject Structurally_unchanged
-    else if after_bytes > before_bytes
+    if after_bytes >= before_bytes
     then reject Checkpoint_not_reduced
     else (
       let after_messages = message_count compacted_ctx in

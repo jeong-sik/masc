@@ -4069,6 +4069,7 @@ let check_compaction_snapshot_event_class label expected actual =
 let expected_compaction_snapshot_event_class = function
   | Runtime_manifest.Event_bus_correlated
   | Runtime_manifest.Context_compacted
+  | Runtime_manifest.Context_compaction_noop
   | Runtime_manifest.Context_injected
   | Runtime_manifest.Checkpoint_loaded ->
     Runtime_manifest.Compaction_snapshot_relevant

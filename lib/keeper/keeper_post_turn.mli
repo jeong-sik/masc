@@ -15,6 +15,7 @@
 type compaction_outcome =
   | Not_attempted
   | Applied_checkpoint
+  | No_checkpoint_change
   | Failed_compaction of string option
 
 val compaction_outcome_to_string : compaction_outcome -> string
@@ -113,10 +114,10 @@ val apply_post_turn_lifecycle_with_resilience_handles :
     verification.  Callers own serialization; the typical pattern
     is one store per keeper, owned by the keeper bridge. *)
 
-(** Reload the canonical OAS checkpoint and apply an explicit typed
-    compaction request. Returns a durably saved [Applied] checkpoint only for a
-    structurally changed [Prepared] candidate; every other outcome is a typed
-    [Error]. *)
+(** Reload the canonical OAS checkpoint and apply an explicit typed compaction
+    request. A changed [Prepared] candidate is saved before returning [Applied].
+    An LLM [No_compaction] decision returns the unchanged durable checkpoint as
+    the successful terminal [No_checkpoint_change] outcome. *)
 val recover_latest_checkpoint_for_overflow_retry :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->

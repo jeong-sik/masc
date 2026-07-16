@@ -867,7 +867,8 @@ let compaction_snapshot_of_manifest_row
   match row.event with
   | Keeper_runtime_manifest.Event_bus_correlated ->
     compaction_event_bus_snapshot_json ~keeper_id row
-  | Keeper_runtime_manifest.Context_compacted ->
+  | Keeper_runtime_manifest.Context_compacted
+  | Keeper_runtime_manifest.Context_compaction_noop ->
     compaction_context_snapshot_json ~keeper_id ~manifest_rows ~row_index row
   | _ -> None
 ;;

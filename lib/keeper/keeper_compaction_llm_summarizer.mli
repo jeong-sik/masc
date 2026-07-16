@@ -6,8 +6,8 @@
     index in [kept]/[summarized]/[dropped] is in [\[0, n)], the three sets are
     pairwise disjoint, and together they cover every index exactly once. For
     non-empty inputs, at least one [kept] or [summarized] index is required so
-    applying the plan cannot erase the entire working set. At least one
-    [summarized] or [dropped] index is required, so all-kept no-ops are invalid. *)
+    applying the plan cannot erase the entire working set. An all-kept plan is
+    a valid terminal no-compaction judgment. *)
 type compaction_plan = private
   { summary : string
   ; kept : int list

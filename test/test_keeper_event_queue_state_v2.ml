@@ -503,7 +503,7 @@ let test_applied_compaction_settles_followup_atomically () =
       ~stop_requested:false
       ~lease
       (Some
-         (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
+         (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_completed
             (Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure })))
   in
   let judgment_failure =

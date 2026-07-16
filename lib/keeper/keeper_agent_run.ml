@@ -375,23 +375,6 @@ let run_turn
               | Some err -> `String (Agent_sdk.Error.to_string err) );
           ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
-  append_manifest ~site:"context_compacted"
-    ~keeper_turn_id:manifest_keeper_turn_id
-    ?compaction_source:
-      (if pre_dispatch_compacted then Some "pre_dispatch_hygiene" else None)
-    ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
-    ~decision:
-      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
-        (`Assoc
-          [
-            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-            ( "pre_dispatch_checkpoint_error",
-              match pre_dispatch_checkpoint_error with
-              | None -> `Null
-              | Some err -> `String (Agent_sdk.Error.to_string err) );
-            ("checkpoint_path", `String checkpoint_path);
-          ]))
-    Keeper_runtime_manifest.Context_compacted;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_ctx =

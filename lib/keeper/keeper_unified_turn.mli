@@ -146,6 +146,11 @@ type source_lease_disposition =
     the configured in-turn policy already handled the terminal failure; the
     cycle remains failed for receipts, counters, and heartbeat freshness. *)
 
+val provider_overflow_manifest_projection
+  :  Keeper_context_runtime.compaction_outcome
+  -> Keeper_runtime_manifest.event_kind * bool * source_lease_disposition
+(** Durable outcome projection; never requeues unchanged context. *)
+
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
   ; runtime_id : string

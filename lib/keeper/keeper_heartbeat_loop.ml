@@ -322,7 +322,7 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
          Keeper_registry_event_queue.Approval_grant_state_unavailable)
   | None ->
     (match outcome with
-  | Some (Cycle.Manual_compaction_applied _ as applied) ->
+  | Some (Cycle.Manual_compaction_completed _ as applied) ->
     (match Cycle.manual_compaction_followup_failure applied with
      | Some
          ({ Keeper_unified_turn.source_lease_disposition =
@@ -485,7 +485,7 @@ let run_keepalive_unified_turn
           | Cycle.Busy _
           | Cycle.Judgment_settled _
           | Cycle.Manual_compaction_failed _
-          | Cycle.Manual_compaction_applied _ )
+          | Cycle.Manual_compaction_completed _ )
       | None ->
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
@@ -800,7 +800,7 @@ let run_keepalive_unified_turn
           | Some (Cycle.Manual_compaction_failed _) ->
             record_settlement_failure
               "manual compaction failed without an owning event queue lease"
-          | Some (Cycle.Manual_compaction_applied _) ->
+          | Some (Cycle.Manual_compaction_completed _) ->
             record_settlement_failure
               "manual compaction completed without an owning event queue lease"
           | Some

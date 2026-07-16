@@ -24,6 +24,18 @@ type source_lease_disposition =
   | Requeue_after_context_compaction
   | Acknowledge_after_in_turn_handling
 
+let provider_overflow_manifest_projection = function
+  | Keeper_context_runtime.Applied_checkpoint ->
+    Keeper_runtime_manifest.Context_compacted,
+    true,
+    Requeue_after_context_compaction
+  | Keeper_context_runtime.No_checkpoint_change ->
+    Keeper_runtime_manifest.Context_compaction_noop, false, Follow_failure_route
+  | Keeper_context_runtime.Not_attempted
+  | Keeper_context_runtime.Failed_compaction _ ->
+    Keeper_runtime_manifest.Runtime_failed, false, Follow_failure_route
+;;
+
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
   ; runtime_id : string
@@ -129,6 +141,10 @@ type provider_overflow_recovery =
       { trigger : Compaction_trigger.t
       ; recovery : Keeper_context_runtime.overflow_retry_recovery
       }
+  | Provider_overflow_no_compaction of
+      { trigger : Compaction_trigger.t
+      ; recovery : Keeper_context_runtime.overflow_retry_recovery
+      }
   | Provider_overflow_retry of
       { trigger : Compaction_trigger.t
       ; reason : string
@@ -218,6 +234,11 @@ let recover_provider_context_overflow_in_lane
                        ~keeper_name:meta.name
                        "provider overflow compaction committed; source stimulus will be requeued";
                      Provider_overflow_applied { trigger; recovery }
+                   | Keeper_context_runtime.No_checkpoint_change ->
+                     Log.Keeper.info
+                       ~keeper_name:meta.name
+                       "provider overflow compaction completed without a context change";
+                     Provider_overflow_no_compaction { trigger; recovery }
                    | Keeper_context_runtime.Not_attempted
                    | Keeper_context_runtime.Failed_compaction _ ->
                      retry_after_started
@@ -255,8 +276,17 @@ let append_provider_overflow_manifest
       ~base_dir
       outcome
   =
-  let append_recovery ~status ~error ~trigger ~recovery turn_state =
+  let append_recovery
+        ~status
+        ~error
+        ~trigger
+        ~recovery
+        turn_state
+    =
     let evidence = recovery.evidence in
+    let event, source_requeued, disposition =
+      provider_overflow_manifest_projection recovery.compaction.outcome
+    in
     let session_id = recovery.checkpoint.session_id in
     let checkpoint_path =
       Keeper_checkpoint_store.oas_checkpoint_path
@@ -280,19 +310,19 @@ let append_provider_overflow_manifest
              (`Assoc
                [ "trigger", `String (Compaction_trigger.to_label trigger)
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "source_requeued", `Bool true
+               ; "source_requeued", `Bool source_requeued
                ; "error", error
                ; ( "exact_evidence"
                  , Keeper_compact_policy.compaction_evidence_to_json evidence )
                ]))
-        Keeper_runtime_manifest.Context_compacted
+        event
     in
-    turn_state
+    disposition, turn_state
   in
   match outcome with
   | Not_provider_overflow -> Follow_failure_route, turn_state
   | Provider_overflow_applied { trigger; recovery } ->
-    let turn_state =
+    let disposition, turn_state =
       append_recovery
         ~status:"compacted"
         ~error:`Null
@@ -300,9 +330,19 @@ let append_provider_overflow_manifest
         ~recovery
         turn_state
     in
-    Requeue_after_context_compaction, turn_state
+    disposition, turn_state
+  | Provider_overflow_no_compaction { trigger; recovery } ->
+    let disposition, turn_state =
+      append_recovery
+        ~status:"no_compaction"
+        ~error:`Null
+        ~trigger
+        ~recovery
+        turn_state
+    in
+    disposition, turn_state
   | Provider_overflow_retry { trigger; reason; recovery = Some recovery } ->
-    let turn_state =
+    let disposition, turn_state =
       append_recovery
         ~status:"retryable_failure"
         ~error:(`String reason)
@@ -310,7 +350,7 @@ let append_provider_overflow_manifest
         ~recovery
         turn_state
     in
-    Requeue_after_context_compaction, turn_state
+    disposition, turn_state
   | Provider_overflow_retry { trigger; reason; recovery = None } ->
     let turn_state =
       Keeper_unified_turn_manifest.append_manifest
@@ -327,12 +367,12 @@ let append_provider_overflow_manifest
              (`Assoc
                [ "trigger", `String (Compaction_trigger.to_label trigger)
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "source_requeued", `Bool true
+               ; "source_requeued", `Bool false
                ; "error", `String reason
                ]))
-        Keeper_runtime_manifest.Context_compacted
+        Keeper_runtime_manifest.Runtime_failed
     in
-    Requeue_after_context_compaction, turn_state
+    Follow_failure_route, turn_state
 ;;
 
 let run_keeper_cycle

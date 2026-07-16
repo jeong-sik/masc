@@ -116,12 +116,12 @@ let test_valid_partition_accepted () =
     true
     (is_ok (C.plan_of_json ~message_count:5 json))
 
-let test_all_kept_rejected () =
+let test_all_kept_accepted () =
   let json = plan_json ~summary:"n/a" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[] in
   Alcotest.(check bool)
-    "keeping everything is not semantic compaction"
+    "keeping everything is a terminal no-compaction judgment"
     true
-    (is_error (C.plan_of_json ~message_count:3 json))
+    (is_ok (C.plan_of_json ~message_count:3 json))
 
 let test_drop_only_with_kept_accepted () =
   let json = plan_json ~summary:"unused" ~kept:[ 1 ] ~summarized:[] ~dropped:[ 0 ] in
@@ -240,7 +240,7 @@ let () =
         ] )
     ; ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted
-        ; Alcotest.test_case "all kept rejected" `Quick test_all_kept_rejected
+        ; Alcotest.test_case "all kept accepted" `Quick test_all_kept_accepted
         ; Alcotest.test_case "drop-only with kept accepted" `Quick
             test_drop_only_with_kept_accepted
         ; Alcotest.test_case "out of range rejected" `Quick test_out_of_range_rejected

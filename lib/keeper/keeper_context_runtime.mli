@@ -77,6 +77,7 @@ val save_oas_checkpoint
 type compaction_outcome = Keeper_post_turn.compaction_outcome =
   | Not_attempted
   | Applied_checkpoint
+  | No_checkpoint_change
   | Failed_compaction of string option
 
 val compaction_outcome_to_string : compaction_outcome -> string
@@ -135,6 +136,7 @@ val compaction_policy_of_keeper : keeper_meta -> float * int * int
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
   | Prepared of Compaction_trigger.t
+  | No_compaction of Compaction_trigger.t
   | Rejected of Compaction_trigger.t * Keeper_compact_policy.compaction_rejection
   | Not_requested
   | Skipped_no_checkpoint

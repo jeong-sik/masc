@@ -7,13 +7,15 @@ type compaction_rejection =
   | Runtime_identity_unavailable
   | Summarizer_unavailable
   | Plan_unavailable_or_invalid
-  | Structurally_unchanged
   | Checkpoint_not_reduced
 
-(** [Prepared] is structural only; [Applied] requires a durable save. *)
+(** [Prepared] is structural only; [Applied] requires a durable save.
+    [No_compaction] is the LLM's terminal decision to preserve the exact
+    checkpoint, so it requires no replacement checkpoint. *)
 type compaction_decision =
   | Applied of Compaction_trigger.t
   | Prepared of Compaction_trigger.t
+  | No_compaction of Compaction_trigger.t
   | Rejected of Compaction_trigger.t * compaction_rejection
   | Not_requested
   | Skipped_no_checkpoint

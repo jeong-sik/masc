@@ -18,6 +18,7 @@ type event_kind =
   | Provider_attempt_finished
   | Context_injected
   | Context_compacted
+  | Context_compaction_noop
   | Event_bus_correlated
   | Checkpoint_loaded
   | Checkpoint_saved
@@ -38,6 +39,7 @@ let all_event_kinds =
     Provider_attempt_finished;
     Context_injected;
     Context_compacted;
+    Context_compaction_noop;
     Event_bus_correlated;
     Checkpoint_loaded;
     Checkpoint_saved;
@@ -58,6 +60,7 @@ let event_kind_to_string = function
   | Provider_attempt_finished -> "provider_attempt_finished"
   | Context_injected -> "context_injected"
   | Context_compacted -> "context_compacted"
+  | Context_compaction_noop -> "context_compaction_noop"
   | Event_bus_correlated -> "event_bus_correlated"
   | Checkpoint_loaded -> "checkpoint_loaded"
   | Checkpoint_saved -> "checkpoint_saved"
@@ -77,6 +80,7 @@ let event_kind_of_string = function
   | "provider_attempt_finished" -> Some Provider_attempt_finished
   | "context_injected" -> Some Context_injected
   | "context_compacted" -> Some Context_compacted
+  | "context_compaction_noop" -> Some Context_compaction_noop
   | "event_bus_correlated" -> Some Event_bus_correlated
   | "checkpoint_loaded" -> Some Checkpoint_loaded
   | "checkpoint_saved" -> Some Checkpoint_saved
@@ -150,6 +154,7 @@ let known_unrelated_untyped_compaction_snapshot_events =
 let classify_compaction_snapshot_typed_event = function
   | Event_bus_correlated
   | Context_compacted
+  | Context_compaction_noop
   | Context_injected
   | Checkpoint_loaded ->
     Compaction_snapshot_relevant

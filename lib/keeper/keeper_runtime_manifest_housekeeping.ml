@@ -86,7 +86,8 @@ let mandatory_clock_refs_for_event = function
     [ "edge_id"; "lane"; "provider_attempt_id"; "elapsed_ms" ]
   | Provider_lane_resolved ->
     [ "edge_id"; "lane"; "tool_batch_id" ]
-  | Context_compacted ->
+  | Context_compacted
+  | Context_compaction_noop ->
     [ "edge_id"; "lane"; "compaction_id"; "compaction_source" ]
   | Checkpoint_saved ->
     [ "edge_id"; "lane"; "checkpoint_id" ]

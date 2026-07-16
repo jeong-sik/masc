@@ -51,7 +51,8 @@ let source_clock_of_event = function
   | Provider_attempt_finished ->
     Provider
   | Context_injected
-  | Context_compacted ->
+  | Context_compacted
+  | Context_compaction_noop ->
     Logical
   | _ -> Wall
 
@@ -224,6 +225,7 @@ let clock_lane_of_event = function
     "oas_agent"
   | Context_injected
   | Context_compacted
+  | Context_compaction_noop
   | Event_bus_correlated ->
     "memory_context"
 
@@ -270,7 +272,8 @@ let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
   in
   let compaction_id =
     match event with
-    | Context_compacted ->
+    | Context_compacted
+    | Context_compaction_noop ->
       Some (context_compaction_id ctx ~source:(Option.value ~default:"pre_dispatch" compaction_source))
     | Event_bus_correlated ->
       Some (context_compaction_id ctx ~source:(Option.value ~default:"event_bus" compaction_source))

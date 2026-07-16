@@ -43,11 +43,13 @@ open Keeper_context_core
 type compaction_outcome =
   | Not_attempted
   | Applied_checkpoint
+  | No_checkpoint_change
   | Failed_compaction of string option
 
 let compaction_outcome_to_string = function
   | Not_attempted -> "not_attempted"
   | Applied_checkpoint -> "applied_checkpoint"
+  | No_checkpoint_change -> "no_checkpoint_change"
   | Failed_compaction _ -> "failed"
 
 type compaction_event = {
@@ -198,7 +200,10 @@ let apply_resilience_wirein
                compaction or handoff steps. *)
             match lifecycle.compaction.outcome with
             | Failed_compaction (Some _ as reason) -> reason
-            | Not_attempted | Applied_checkpoint | Failed_compaction None ->
+            | Not_attempted
+            | Applied_checkpoint
+            | No_checkpoint_change
+            | Failed_compaction None ->
               lifecycle.handoff_failure_reason
           in
           let witness = Resilience.Keeper_bridge.running_witness in
@@ -557,6 +562,20 @@ let recover_latest_checkpoint_for_overflow_retry
     (match preparation.decision, preparation.evidence with
      | Keeper_compact_policy.Prepared _, None ->
        Error Compaction_evidence_missing
+     | Keeper_compact_policy.No_compaction _, None ->
+       Error Compaction_evidence_missing
+     | Keeper_compact_policy.No_compaction no_compaction_trigger, Some evidence ->
+       Ok
+         { checkpoint
+         ; compaction =
+             { outcome = No_checkpoint_change
+             ; started_dispatched = false
+             ; trigger = Some no_compaction_trigger
+             ; decision = Keeper_compact_policy.No_compaction no_compaction_trigger
+             }
+         ; evidence
+         ; turn_generation
+         }
      | Keeper_compact_policy.Prepared prepared_trigger, Some evidence ->
        (try
           match

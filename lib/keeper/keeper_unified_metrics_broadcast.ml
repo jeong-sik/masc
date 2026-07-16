@@ -16,7 +16,7 @@ let broadcast_lifecycle_events ~(name : string)
   let now_ts = Time_compat.now () in
   (if
      match compaction.outcome with
-     | Applied_checkpoint -> true
+     | Applied_checkpoint | No_checkpoint_change -> true
      | Not_attempted | Failed_compaction _ -> false
    then
      try

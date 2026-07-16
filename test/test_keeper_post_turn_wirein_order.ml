@@ -112,7 +112,7 @@ let test_regular_post_turn_does_not_auto_compact () =
     check bool "checkpoint messages retained exactly" true
       (retained.messages = checkpoint.messages)
 
-let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
+let compaction_manifests config (meta : Masc.Keeper_meta_contract.keeper_meta) =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
     config
@@ -125,12 +125,11 @@ let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_met
     then None
     else
       match Masc.Keeper_runtime_manifest.of_json (Yojson.Safe.from_string line) with
-      | Ok ({ event = Context_compacted; _ } as row) -> Some row
+      | Ok
+          ({ event = (Context_compacted | Context_compaction_noop); _ } as row) ->
+        Some row
       | Ok _ -> None
       | Error detail -> failf "runtime manifest decode failed: %s" detail)
-  |> function
-  | [ row ] -> row
-  | rows -> failf "expected one manual compaction manifest, got %d" (List.length rows)
 ;;
 
 let test_manual_compaction_serializes_owner_lane () =
@@ -303,8 +302,8 @@ let test_manual_compaction_serializes_owner_lane () =
           run_cycle
       in
       (match outcome with
-       | Cycle.Manual_compaction_applied _ -> ()
-       | _ -> fail "owner-lane cycle did not apply manual compaction");
+       | Cycle.Manual_compaction_completed _ -> ()
+       | _ -> fail "owner-lane cycle did not complete manual compaction");
       let compacted =
         Result.get_ok
           (Masc.Keeper_checkpoint_store.load_oas
@@ -324,10 +323,54 @@ let test_manual_compaction_serializes_owner_lane () =
          |> Option.map Masc.Keeper_context_runtime.messages_of_context
          |> Option.value ~default:[]
          |> List.length);
-      let manifest = only_compaction_manifest config meta in
+      let manifest =
+        match compaction_manifests config meta with
+        | [ row ] -> row
+        | rows ->
+          failf "expected one applied compaction manifest, got %d" (List.length rows)
+      in
       check int "manifest records post-turn source size" 4
         Yojson.Safe.Util.(manifest.decision |> member "exact_evidence"
                           |> member "before_message_count" |> to_int);
+      let no_compaction_plan =
+        Masc.Keeper_compaction_llm_summarizer.plan_of_json
+          ~message_count:2
+          (`Assoc
+            [ "summary", `String ""
+            ; "kept_indices", `List [ `Int 0; `Int 1 ]
+            ; "summarized_indices", `List []
+            ; "dropped_indices", `List []
+            ])
+        |> Result.get_ok
+      in
+      let no_compaction =
+        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+          (fun ~runtime_id:_ ~keeper_name:_ () ->
+             Some (fun ~messages:_ -> Some no_compaction_plan))
+          (fun () -> Masc.Keeper_manual_compaction.run ~config ~meta)
+      in
+      (match no_compaction with
+       | Ok success ->
+         Masc.Keeper_manual_compaction.observe_manifest
+           ~keeper_name:meta.name
+           success.manifest;
+         (match success.recovery.compaction.outcome with
+          | Masc.Keeper_context_runtime.No_checkpoint_change -> ()
+          | _ -> fail "all-kept plan did not complete as no-compaction")
+       | Error failure ->
+         failf
+           "all-kept manual compaction failed: %s"
+           (Masc.Keeper_manual_compaction.failure_to_string failure));
+      (match List.rev (compaction_manifests config meta) with
+       | { event = Context_compaction_noop; status = "no_compaction"; decision; _ }
+         :: _ ->
+         let open Yojson.Safe.Util in
+         check int "no-op before bytes persisted"
+           (decision |> member "exact_evidence" |> member "before_checkpoint_bytes"
+            |> to_int)
+           (decision |> member "exact_evidence" |> member "after_checkpoint_bytes"
+            |> to_int)
+       | _ -> fail "typed no-compaction manifest was not persisted");
       Registry_queue.settle_result
         ~base_path
         meta.name

@@ -90,6 +90,7 @@ let event_started_at (row : manifest_row) =
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Context_compacted
+  | Keeper_runtime_manifest.Context_compaction_noop
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     Some row.Keeper_runtime_manifest.ts
@@ -120,6 +121,7 @@ let event_finished_at (row : manifest_row) =
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Context_compacted
+  | Keeper_runtime_manifest.Context_compaction_noop
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     None
@@ -160,6 +162,7 @@ let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
   let compaction_id =
     match event with
     | Keeper_runtime_manifest.Context_compacted
+    | Keeper_runtime_manifest.Context_compaction_noop
     | Keeper_runtime_manifest.Event_bus_correlated ->
       first_string_opt [ clock_string row "compaction_id"; Some (fallback_compaction_id row idx) ]
     | _ -> clock_string row "compaction_id"

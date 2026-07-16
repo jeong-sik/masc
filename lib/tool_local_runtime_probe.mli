@@ -221,6 +221,10 @@ val kv_cache_assessment_json :
 
 (** {1 Top-level probe} *)
 
+val validate_timeout_sec : int -> (int, string) result
+(** [validate_timeout_sec value] accepts every positive integer unchanged.
+    Non-positive values are rejected explicitly. *)
+
 val runtime_ollama_probe_json :
   ?server_url:string ->
   ?model:string ->
@@ -238,8 +242,9 @@ val runtime_ollama_probe_json :
 (** Top-level probe orchestrator.  Defaults: [probe_runs=2]
     (clamped to [\[1, 4]]), [max_tokens=16] (clamped to
     [\[1, 128]]), [think_mode=Think_auto], [timeout_sec=6]
-    (clamped to [\[3, 300]]), [ps_timeout_sec=2] (clamped to
-    [\[1, 30]]), [generate_when_unloaded=true], [run_generate=true].
+    (every positive explicit value is preserved; non-positive values raise
+    [Invalid_argument]), [ps_timeout_sec=2] (clamped to [\[1, 30]]),
+    [generate_when_unloaded=true], [run_generate=true].
     Returns a JSON snapshot with [/api/ps] state + per-run timing +
     KV-cache assessment.  Per PR #20479 spirit: the tool itself
     (ollama [OLLAMA_LOAD_TIMEOUT]) owns hang protection; callers do

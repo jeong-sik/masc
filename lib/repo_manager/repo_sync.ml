@@ -10,6 +10,11 @@ type advance_outcome =
   | Fast_forward_refused of { behind : int; reason : string }
   | Advance_inspect_failed of { reason : string }
 
+type sync_attempt = {
+  repository : repository;
+  result : (advance_outcome, string) result;
+}
+
 let advance_outcome_label = function
   | Advanced _ -> "advanced"
   | Already_current -> "already_current"
@@ -85,15 +90,27 @@ let should_sync repo ~now =
     let elapsed = Int64.sub now repo.updated_at in
     Int64.to_int elapsed >= repo.sync_interval
 
+let next_due_at repos =
+  List.fold_left
+    (fun earliest (repo : repository) ->
+      if not repo.auto_sync then earliest
+      else
+        let due_at =
+          Int64.add repo.updated_at (Int64.of_int repo.sync_interval)
+        in
+        match earliest with
+        | None -> Some due_at
+        | Some current -> Some (Int64.min current due_at))
+    None repos
+
 let sync_all ~base_path ~now :
-    ((repository * advance_outcome) list, string) result =
+    (sync_attempt list, string) result =
   let* repos = Repo_store.load_all ~base_path in
   let due = List.filter (fun r -> should_sync r ~now) repos in
-  let rec loop synced = function
-    | [] -> Ok (List.rev synced)
-    | repo :: rest -> (
-        match sync_repository ~base_path repo with
-        | Error _ -> loop synced rest
-        | Ok outcome -> loop ((repo, outcome) :: synced) rest)
+  let rec loop attempts = function
+    | [] -> Ok (List.rev attempts)
+    | repository :: rest ->
+        let result = sync_repository ~base_path repository in
+        loop ({ repository; result } :: attempts) rest
   in
   loop [] due

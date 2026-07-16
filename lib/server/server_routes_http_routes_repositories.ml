@@ -324,6 +324,7 @@ let handle_add_repository state _agent_name req reqd =
           | Error msg ->
               json_response ~status:`Bad_request req reqd (json_error msg)
           | Ok added_repo ->
+              Mcp_server.notify_repo_sync_change state;
               let json = repository_json ~base_path added_repo in
               Http.Response.json_value ~request:req json reqd))
 
@@ -341,6 +342,7 @@ let handle_remove_repository state _agent_name req reqd =
       | Error msg ->
           json_response ~status:`Not_found req reqd (json_error msg)
       | Ok () ->
+          Mcp_server.notify_repo_sync_change state;
           let json = `Assoc [("id", `String id); ("removed", `Bool true)] in
           Http.Response.json_value ~request:req json reqd)
       | _ ->
@@ -374,6 +376,7 @@ let handle_update_repository state _agent_name req reqd =
                           json_response ~status:`Internal_server_error req reqd
                             (json_error msg)
                       | Ok persisted ->
+                          Mcp_server.notify_repo_sync_change state;
                           Http.Response.json_value ~request:req
                             (repository_json ~base_path persisted) reqd))))
       | _ ->
@@ -392,7 +395,9 @@ let handle_sync_repository state _agent_name req reqd =
       | Error msg ->
           json_response ~status:`Not_found req reqd (json_error msg)
       | Ok repo -> (
-          match Repo_sync.sync_repository ~base_path repo with
+          let sync_result = Repo_sync.sync_repository ~base_path repo in
+          Mcp_server.notify_repo_sync_change state;
+          match sync_result with
           | Error msg ->
               json_response ~status:`Internal_server_error req reqd
                 (json_error msg)
@@ -445,6 +450,7 @@ let handle_discover_repositories state _agent_name req reqd =
   | Error msg ->
       json_response ~status:`Internal_server_error req reqd (json_error msg)
   | Ok repos ->
+      if repos <> [] then Mcp_server.notify_repo_sync_change state;
       let json =
         `Assoc
           [

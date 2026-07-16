@@ -189,11 +189,15 @@ type workspace_scope = private
 
 type workspace_runtime
 
+type repo_sync_revision
+type repo_sync_change_signal
+
 type server_state = private {
   workspace_runtime : workspace_runtime;
   session_registry : Session.registry;
   on_sse_broadcast :
     (Yojson.Safe.t -> unit) option Atomic.t;
+  repo_sync_change : repo_sync_change_signal;
   sw : Eio.Switch.t option;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   fs : Eio.Fs.dir_ty Eio.Path.t option;
@@ -213,6 +217,18 @@ val workspace_scope : server_state -> workspace_scope
 
 val workspace_config : server_state -> Workspace.config
 (** Current workspace configuration. *)
+
+val repo_sync_revision : server_state -> repo_sync_revision
+(** Snapshot the repository configuration revision before loading its schedule. *)
+
+val notify_repo_sync_change : server_state -> unit
+(** Wake the repository scheduler after a repository or workspace
+    configuration mutation has committed. *)
+
+val await_repo_sync_change :
+  server_state -> after:repo_sync_revision -> unit
+(** Wait until the repository configuration revision differs from [after].
+    Cancellation is propagated to the caller. *)
 
 val publication_recovery_availability_provider :
   server_state -> Keeper_publication_recovery_availability.provider

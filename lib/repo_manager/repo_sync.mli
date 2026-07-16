@@ -19,6 +19,14 @@ type advance_outcome =
       (** A read-only git inspection (rev-list / rev-parse / status) failed;
           the tree is unchanged. *)
 
+type sync_attempt = {
+  repository : repository;
+  result : (advance_outcome, string) result;
+}
+(** The explicit result of attempting one due repository. Failures remain in
+    the returned list so callers can observe them without stopping later
+    repositories. *)
+
 val advance_outcome_label : advance_outcome -> string
 (** Stable wire/log label for each [advance_outcome] constructor. *)
 
@@ -35,10 +43,15 @@ val should_sync : repository -> now:int64 -> bool
 (** [should_sync repo ~now] returns [true] if [repo.auto_sync] is enabled and
     [now - repo.updated_at] exceeds [repo.sync_interval] seconds. *)
 
+val next_due_at : repository list -> int64 option
+(** [next_due_at repos] returns the earliest declared auto-sync due time.
+    Repositories with [auto_sync = false] do not participate. *)
+
 val sync_all :
   base_path:string ->
   now:int64 ->
-  ((repository * advance_outcome) list, string) result
+  (sync_attempt list, string) result
 (** [sync_all ~base_path ~now] loads all repositories, filters those that
-    should_sync, syncs each one, and returns the successfully synced
-    repositories paired with their working-tree advance outcome. *)
+    should sync, and attempts each one. A repository failure is returned as a
+    [sync_attempt] and does not stop later due repositories. Only loading the
+    repository store can fail the whole operation. *)

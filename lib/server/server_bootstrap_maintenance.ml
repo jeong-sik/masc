@@ -641,53 +641,75 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~sw
     ~on_error:(log_server_fiber_crash "repo_sync")
     (fun () ->
-    let repo_sync_interval_sec =
-      Env_config_runtime.InternalTimers.repo_sync_interval_sec
-    in
-    let sync_once () =
-      try
-        let now = Int64.of_float (Eio.Time.now clock) in
-        match Repo_sync.sync_all ~base_path:(Mcp_server.workspace_config state).base_path ~now with
-        | Ok synced ->
-          List.iter
-            (fun ((repo : Repo_manager_types.repository), outcome) ->
-              match outcome with
-              | Repo_sync.Already_current -> ()
-              | Repo_sync.Advanced { behind } ->
-                Log.Server.info
-                  "repo_sync: %s advanced %d commit(s) to origin/%s"
-                  repo.id behind repo.default_branch
-              | Repo_sync.Skipped_dirty { staged; unstaged; conflicted } ->
-                Log.Server.warn
-                  "repo_sync: %s not advanced (dirty tree: staged=%d unstaged=%d conflicted=%d)"
-                  repo.id staged unstaged conflicted
-              | Repo_sync.Skipped_not_on_default_branch { current } ->
-                Log.Server.warn
-                  "repo_sync: %s not advanced (checked out %s, default %s)"
-                  repo.id current repo.default_branch
-              | Repo_sync.Fast_forward_refused { behind; reason } ->
-                Log.Server.warn
-                  "repo_sync: %s is %d commit(s) behind but fast-forward was refused: %s"
-                  repo.id behind reason
-              | Repo_sync.Advance_inspect_failed { reason } ->
-                Log.Server.warn
-                  "repo_sync: %s advance inspection failed: %s" repo.id reason)
-            synced;
-          if synced <> []
-          then Log.Server.info "repo_sync: synced %d repositories" (List.length synced)
-        | Error msg -> Log.Server.warn "repo_sync: sync_all failed: %s" msg
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> Log.Server.error "repo_sync: iteration failed: %s" (Printexc.to_string exn)
+    let log_attempt (attempt : Repo_sync.sync_attempt) =
+      let repo = attempt.repository in
+      match attempt.result with
+      | Error reason ->
+        Log.Server.warn "repo_sync: %s failed: %s" repo.id reason
+      | Ok Repo_sync.Already_current -> ()
+      | Ok (Repo_sync.Advanced { behind }) ->
+        Log.Server.info
+          "repo_sync: %s advanced %d commit(s) to origin/%s"
+          repo.id behind repo.default_branch
+      | Ok (Repo_sync.Skipped_dirty { staged; unstaged; conflicted }) ->
+        Log.Server.warn
+          "repo_sync: %s not advanced (dirty tree: staged=%d unstaged=%d conflicted=%d)"
+          repo.id staged unstaged conflicted
+      | Ok (Repo_sync.Skipped_not_on_default_branch { current }) ->
+        Log.Server.warn
+          "repo_sync: %s not advanced (checked out %s, default %s)"
+          repo.id current repo.default_branch
+      | Ok (Repo_sync.Fast_forward_refused { behind; reason }) ->
+        Log.Server.warn
+          "repo_sync: %s is %d commit(s) behind but fast-forward was refused: %s"
+          repo.id behind reason
+      | Ok (Repo_sync.Advance_inspect_failed { reason }) ->
+        Log.Server.warn
+          "repo_sync: %s advance inspection failed: %s" repo.id reason
     in
     let rec sync_loop () =
-      (try Eio.Time.sleep clock repo_sync_interval_sec with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn -> Log.Server.error "repo_sync: sleep failed: %s" (Printexc.to_string exn));
-      sync_once ();
+      let revision = Mcp_server.repo_sync_revision state in
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      let now = Int64.of_float (Eio.Time.now clock) in
+      let next_due_at =
+        match Repo_sync.sync_all ~base_path ~now with
+        | Error reason ->
+          Log.Server.warn "repo_sync: repository store load failed: %s" reason;
+          None
+        | Ok attempts ->
+          List.iter log_attempt attempts;
+          if attempts <> []
+          then (
+            let succeeded =
+              List.fold_left
+                (fun count (attempt : Repo_sync.sync_attempt) ->
+                  match attempt.result with
+                  | Ok _ -> count + 1
+                  | Error _ -> count)
+                0 attempts
+            in
+            Log.Server.info
+              "repo_sync: attempted=%d succeeded=%d failed=%d"
+              (List.length attempts)
+              succeeded
+              (List.length attempts - succeeded));
+          (match Repo_store.load_all ~base_path with
+           | Ok repositories -> Repo_sync.next_due_at repositories
+           | Error reason ->
+             Log.Server.warn
+               "repo_sync: next due schedule unavailable: %s"
+               reason;
+             None)
+      in
+      (match next_due_at with
+       | None -> Mcp_server.await_repo_sync_change state ~after:revision
+       | Some due_at ->
+         Eio.Fiber.first
+           (fun () -> Eio.Time.sleep_until clock (Int64.to_float due_at))
+           (fun () ->
+             Mcp_server.await_repo_sync_change state ~after:revision));
       sync_loop ()
     in
-    sync_once ();
     sync_loop ());
   (* RFC-0138 Phase 3 Step 1: lock-free dashboard snapshot refresher.
      Publishes shell/tools/telemetry_summary every [interval_sec] so

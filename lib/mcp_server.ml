@@ -521,11 +521,27 @@ type workspace_runtime =
   ; scope : workspace_scope Atomic.t
   }
 
+type repo_sync_revision = unit ref
+
+type repo_sync_change_signal =
+  { mutex : Eio.Mutex.t
+  ; changed : Eio.Condition.t
+  ; mutable revision : repo_sync_revision
+  }
+
+let create_repo_sync_change_signal () =
+  { mutex = Eio.Mutex.create ()
+  ; changed = Eio.Condition.create ()
+  ; revision = ref ()
+  }
+;;
+
 (** MCP Server state *)
 type server_state = {
   workspace_runtime: workspace_runtime;
   session_registry: Session.registry;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
+  repo_sync_change: repo_sync_change_signal;
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
   fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
@@ -550,6 +566,26 @@ let workspace_switch_error_to_string = function
 
 let workspace_scope state = Atomic.get state.workspace_runtime.scope
 let workspace_config state = (workspace_scope state).config
+
+let repo_sync_revision state =
+  Eio.Mutex.use_ro state.repo_sync_change.mutex (fun () ->
+    state.repo_sync_change.revision)
+;;
+
+let notify_repo_sync_change state =
+  Eio.Mutex.use_rw ~protect:false state.repo_sync_change.mutex (fun () ->
+    state.repo_sync_change.revision <- ref ());
+  Eio.Condition.broadcast state.repo_sync_change.changed
+;;
+
+let await_repo_sync_change state ~after =
+  Eio.Mutex.use_ro state.repo_sync_change.mutex (fun () ->
+    while state.repo_sync_change.revision == after do
+      Eio.Condition.await
+        state.repo_sync_change.changed
+        state.repo_sync_change.mutex
+    done)
+;;
 
 let workspace_scope_publication_recovery_registry scope =
   match Atomic.get scope.publication_recovery.state with
@@ -1016,6 +1052,7 @@ let set_workspace_config state config =
       then replace_config ()
     in
     replace_config ();
+    notify_repo_sync_change state;
     Ok ()
 ;;
 
@@ -1135,6 +1172,7 @@ module For_testing = struct
           }
       ; session_registry = registry
       ; on_sse_broadcast = Atomic.make None
+      ; repo_sync_change = create_repo_sync_change_signal ()
       ; sw = None
       ; proc_mgr = None
       ; fs = None
@@ -1234,6 +1272,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
       };
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
+    repo_sync_change = create_repo_sync_change_signal ();
     sw = Some sw;
     proc_mgr = Some proc_mgr;
     fs = Some fs;

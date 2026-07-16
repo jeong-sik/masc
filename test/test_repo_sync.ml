@@ -2,6 +2,8 @@
 
 open Repo_manager_types
 
+module Mcp_server = Masc.Mcp_server
+
 let sample_repo ?(auto_sync = true) ?(sync_interval = 300) ?(updated_at = Int64.of_int 1700000000) id =
   {
     id;
@@ -52,6 +54,42 @@ let test_should_sync_negative_elapsed () =
   let repo = sample_repo ~auto_sync:true ~sync_interval:300 ~updated_at:(Int64.of_int 1700000100) "r1" in
   let now = Int64.of_int 1700000000 in
   Alcotest.(check bool) "now < updated_at means elapsed < 0" false (Repo_sync.should_sync repo ~now)
+
+let test_next_due_at_uses_each_repository_cadence () =
+  let short =
+    sample_repo ~sync_interval:60 ~updated_at:(Int64.of_int 100) "short"
+  in
+  let long =
+    sample_repo ~sync_interval:300 ~updated_at:(Int64.of_int 100) "long"
+  in
+  let disabled =
+    sample_repo
+      ~auto_sync:false
+      ~sync_interval:1
+      ~updated_at:Int64.zero
+      "disabled"
+  in
+  Alcotest.(check (option int64))
+    "earliest declared cadence"
+    (Some (Int64.of_int 160))
+    (Repo_sync.next_due_at [ long; disabled; short ])
+
+let test_repo_sync_change_notification_wakes_waiter () =
+  Eio_main.run (fun _env ->
+    let state = Mcp_server.For_testing.create_state ~base_path:"." in
+    let revision = Mcp_server.repo_sync_revision state in
+    let awakened = Atomic.make false in
+    Eio.Fiber.both
+      (fun () ->
+        Mcp_server.await_repo_sync_change state ~after:revision;
+        Atomic.set awakened true)
+      (fun () ->
+        Eio.Fiber.yield ();
+        Mcp_server.notify_repo_sync_change state);
+    Alcotest.(check bool)
+      "committed change wakes scheduler"
+      true
+      (Atomic.get awakened))
 
 let with_temp_base_path f =
   let dir = Filename.temp_file "repo_sync_test" "" in
@@ -180,6 +218,58 @@ let with_advance_fixture base_path f =
    | Error e -> Alcotest.fail ("save_all failed: " ^ e));
   f ~origin ~clone repo
 
+let test_sync_all_preserves_failure_and_continues () =
+  with_temp_base_path (fun base_path ->
+    let bad_path = Filename.concat base_path "not-a-repository" in
+    Unix.mkdir bad_path 0o755;
+    let origin = Filename.concat base_path "origin-for-sync-all" in
+    let clone = Filename.concat base_path "clone-for-sync-all" in
+    init_origin origin;
+    git ~cwd:base_path [ "clone"; origin; clone ];
+    let bad =
+      { (sample_repo ~sync_interval:0 "bad") with
+        url = bad_path
+      ; local_path = bad_path
+      }
+    in
+    let good =
+      { (sample_repo ~sync_interval:0 "good") with
+        url = origin
+      ; local_path = clone
+      }
+    in
+    (match Repo_store.save_all ~base_path [ bad; good ] with
+     | Ok () -> ()
+     | Error reason -> Alcotest.fail ("save_all failed: " ^ reason));
+    match Repo_sync.sync_all ~base_path ~now:(Int64.of_int 1700004000) with
+    | Error reason -> Alcotest.fail ("sync_all failed: " ^ reason)
+    | Ok attempts ->
+      Alcotest.(check int) "both due repositories attempted" 2 (List.length attempts);
+      let find id =
+        List.find_opt
+          (fun (attempt : Repo_sync.sync_attempt) ->
+            String.equal attempt.repository.id id)
+          attempts
+      in
+      (match find "bad" with
+       | Some { result = Error reason; _ } ->
+         Alcotest.(check bool)
+           "failure reason remains observable"
+           true
+           (String.trim reason <> "")
+       | Some { result = Ok _; _ } ->
+         Alcotest.fail "non-repository unexpectedly synced"
+       | None -> Alcotest.fail "failed repository attempt was dropped");
+      (match find "good" with
+       | Some { result = Ok Repo_sync.Already_current; _ } -> ()
+       | Some { result = Ok outcome; _ } ->
+         Alcotest.failf
+           "good repository returned %s"
+           (Repo_sync.advance_outcome_label outcome)
+       | Some { result = Error reason; _ } ->
+         Alcotest.fail ("later repository was stopped: " ^ reason)
+       | None -> Alcotest.fail "later repository was not attempted"))
+
 let check_outcome expected actual =
   Alcotest.(check string)
     "advance outcome"
@@ -283,11 +373,15 @@ let () =
           Alcotest.test_case "zero interval" `Quick test_should_sync_zero_interval;
           Alcotest.test_case "large elapsed" `Quick test_should_sync_large_elapsed;
           Alcotest.test_case "negative elapsed" `Quick test_should_sync_negative_elapsed;
+          Alcotest.test_case "earliest repository cadence" `Quick
+            test_next_due_at_uses_each_repository_cadence;
         ] );
       ( "sync_all",
         [
           Alcotest.test_case "empty repos" `Quick test_sync_all_empty_repos;
           Alcotest.test_case "no due repos" `Quick test_sync_all_no_due_repos;
+          Alcotest.test_case "failure is observable and isolated" `Quick
+            test_sync_all_preserves_failure_and_continues;
         ] );
       ( "advance_working_tree",
         [
@@ -298,5 +392,10 @@ let () =
           Alcotest.test_case "preserves dirty tree" `Quick test_sync_preserves_dirty_tree;
           Alcotest.test_case "refuses diverged clone" `Quick test_sync_refuses_diverged_clone;
           Alcotest.test_case "skips non-default branch" `Quick test_sync_skips_non_default_branch;
+        ] );
+      ( "change_notification",
+        [
+          Alcotest.test_case "configuration change wakes scheduler" `Quick
+            test_repo_sync_change_notification_wakes_waiter;
         ] );
     ]

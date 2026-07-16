@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 271 unique knobs across 8 modules.
+**Total**: 270 unique knobs across 8 modules.
 
-**Typed getter classification**: 37/155 tagged (`operator`: 37, `algorithm`: 0, `unclassified`: 118).
+**Typed getter classification**: 37/154 tagged (`operator`: 37, `algorithm`: 0, `unclassified`: 117).
 
 ## Env_config_core (25 knobs; typed classification 2/6)
 
@@ -113,7 +113,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_DOMAIN_POOL_ENABLED` | feature_flag | n/a | n/a | 12 | Historical keeper Domain_pool pilot flag. The supervisor still reads this for observability, but keepalive fibers rem... |
 | `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 17 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
 
-## Env_config_runtime (82 knobs; typed classification 4/66)
+## Env_config_runtime (81 knobs; typed classification 4/65)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -171,14 +171,13 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_PUBLIC_TOOLS_EXTRA` | string_literal | n/a | n/a | 365 | Extra public tools (comma-separated names). |
 | `MASC_RATE_BURST` | typed:int | unclassified | unclassified | 393 | Burst capacity. Default: 150. |
 | `MASC_RATE_LIMIT` | typed:float | unclassified | unclassified | 390 | Requests per second. Default: 100. |
-| `MASC_RATE_LIMIT_BUCKET_TTL_SEC` | typed:int | unclassified | unclassified | 638 | Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for this long are reaped by the janitor loop. Defa... |
-| `MASC_REPO_SYNC_INTERVAL_SEC` | typed:float | unclassified | unclassified | 630 | Repository auto-sync interval (seconds). The repo_sync fiber in [server_bootstrap_loops] wakes at this cadence to fet... |
+| `MASC_RATE_LIMIT_BUCKET_TTL_SEC` | typed:int | unclassified | unclassified | 631 | Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for this long are reaped by the janitor loop. Defa... |
 | `MASC_SESSION_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 36 | Maximum session age before cleanup (seconds) |
 | `MASC_SESSION_RATE_LIMIT_WINDOW_SEC` | typed:float | unclassified | unclassified | 40 | Rate limit window (seconds) |
 | `MASC_SESSION_SSE_GRACE_PERIOD_SEC` | typed:float | unclassified | unclassified | 45 | Grace period after SSE disconnect before reaping transport session (seconds). Prevents "Unknown Mcp-Session-Id" error... |
-| `MASC_SIDECAR_CONTROL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 664 | Subprocess timeout (seconds) for sidecar control commands — [stop], [tail], and similar quick housekeeping operatio... |
-| `MASC_SIDECAR_RECONCILE_BACKOFF_SEC` | typed:float | unclassified | unclassified | 652 | Backoff window (seconds) between repeated same-generation [running + unavailable] start dispatches. Default: 30 (matc... |
-| `MASC_SIDECAR_SCHEMA_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 680 | Subprocess timeout (seconds) for sidecar Python schema generation. Wraps [Process_eio.run_argv_with_status] at [serve... |
+| `MASC_SIDECAR_CONTROL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 657 | Subprocess timeout (seconds) for sidecar control commands — [stop], [tail], and similar quick housekeeping operatio... |
+| `MASC_SIDECAR_RECONCILE_BACKOFF_SEC` | typed:float | unclassified | unclassified | 645 | Backoff window (seconds) between repeated same-generation [running + unavailable] start dispatches. Default: 30 (matc... |
+| `MASC_SIDECAR_SCHEMA_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 673 | Subprocess timeout (seconds) for sidecar Python schema generation. Wraps [Process_eio.run_argv_with_status] at [serve... |
 | `MASC_SSE_BUFFER_TTL_SEC` | typed:float | unclassified | unclassified | 612 | SSE buffer TTL (seconds). Default: 300 (5 min). |
 | `MASC_STALLED_SESSION_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 616 | Operator digest stalled session threshold (seconds). Default: 300 (5 min). |
 | `MASC_STARTUP_WATCHDOG_SEC` | typed:float | unclassified | unclassified | 295 | Startup watchdog timeout, clamped to [30, 600]. Default: 240. Re-readable within the process, but operationally a boo... |
@@ -193,8 +192,8 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WEB_SEARCH_PROVIDER` | string_literal | n/a | n/a | 368 |  |
 | `MASC_WEB_SEARCH_PROVIDER_ORDER` | string_literal | n/a | n/a | 371 |  |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | typed:int | unclassified | unclassified | 377 |  |
-| `MASC_WORKSPACE_FILE_MAX_READ_BYTES` | typed:int | Policies | operator | 725 | Maximum bytes served by the IDE workspace file endpoint in one response. The route rejects larger files instead of ma... |
-| `MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | Timeouts | operator | 715 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse]... |
+| `MASC_WORKSPACE_FILE_MAX_READ_BYTES` | typed:int | Policies | operator | 718 | Maximum bytes served by the IDE workspace file endpoint in one response. The route rejects larger files instead of ma... |
+| `MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | Timeouts | operator | 708 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse]... |
 | `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 265 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
 | `MASC_WS_PORT` | string_literal | n/a | n/a | 261 | WebSocket server port. Default: 8937. |
 | `MASC_ZOMBIE_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 14 | Cleanup loop interval (seconds) |

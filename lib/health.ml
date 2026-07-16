@@ -16,9 +16,9 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 module Random = Stdlib.Random
 
-(** Agent Health — Keeper failure observation over Circuit Breaker.
+(** Agent Health — Keeper outcome observation.
 
-    Wraps Circuit_breaker with agent-name semantics for Keeper Heartbeat.
+    Wraps Failure_observation with agent-name semantics for Keeper Heartbeat.
     Failure history is diagnostic data and never controls participation.
 
     Integration points:
@@ -29,22 +29,22 @@ module Random = Stdlib.Random
 type agent_health_summary = {
   agent_name : string;
   failure_count : int;
-  last_failure : Circuit_breaker.failure_record option;
+  last_failure : Failure_observation.failure_record option;
   last_success_at : float option;
 }
 
 let record_success ~agent_name =
-  Circuit_breaker.record_success_global ~agent_id:agent_name
+  Failure_observation.record_success_global ~agent_id:agent_name
 
 let record_failure ~agent_name ~reason =
-  Circuit_breaker.record_failure_global ~agent_id:agent_name ~reason
+  Failure_observation.record_failure_global ~agent_id:agent_name ~reason
 
 (** {1 Statistics} *)
 
 (** Get health summary for a single agent. *)
 let get_summary ~agent_name : agent_health_summary =
   let observation =
-    Circuit_breaker.get_observation_global ~agent_id:agent_name
+    Failure_observation.get_observation_global ~agent_id:agent_name
   in
   {
     agent_name;
@@ -55,7 +55,7 @@ let get_summary ~agent_name : agent_health_summary =
 
 (** {1 JSON Serialization} *)
 
-let failure_to_json (failure : Circuit_breaker.failure_record) =
+let failure_to_json (failure : Failure_observation.failure_record) =
   `Assoc
     [ "timestamp", `Float failure.timestamp
     ; "reason", `String failure.reason

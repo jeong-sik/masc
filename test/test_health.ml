@@ -1,7 +1,7 @@
-(** Tests for Health module — Keeper failure observation over Circuit Breaker.
+(** Tests for Health module — Keeper outcome observation.
 
-    All tests that touch Circuit_breaker must run inside Eio_main.run
-    because Circuit_breaker uses Eio.Mutex internally. *)
+    All tests that touch Failure_observation run inside Eio_main.run because
+    the shared observation store uses Eio.Mutex. *)
 
 module Health = Masc.Health
 
@@ -29,7 +29,7 @@ let test_get_summary_with_failures () =
   check int "all failures counted" 2 s.failure_count;
   let last_reason =
     Option.map
-      (fun (failure : Circuit_breaker.failure_record) -> failure.reason)
+      (fun (failure : Failure_observation.failure_record) -> failure.reason)
       s.last_failure
   in
   check (option string) "latest failure observed" (Some "oops2") last_reason

@@ -1,4 +1,4 @@
-(** Failure observation for MASC agents.
+(** Failure_observation records MASC agent outcomes.
 
     Recorded outcomes never classify, delay, or suppress execution.
 

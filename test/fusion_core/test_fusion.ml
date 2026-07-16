@@ -19,7 +19,6 @@ let base_group : Fusion_policy.panel_group =
   ; system_prompt = "panel"
   ; web_tools = false
   ; max_output_tokens = None
-  ; timeout_s = 300.0
   }
 
 (* RFC-0280: presets는 [Validated_preset.t]라 private — of_preset로만 생성. 테스트
@@ -206,7 +205,6 @@ default_preset = "p"
 [fusion.presets.p]
 web_tools = true
 max_output_tokens_per_panel = 2048
-panel_timeout_s = 123.0
 panel = ["a", "b", "c"]
 judge = "j"
 panel_system_prompt = "answer independently"
@@ -230,7 +228,6 @@ panel = ["a", "b", "c"]
 panel_system_prompt = "answer independently"
 web_tools = true
 max_output_tokens_per_panel = 2048
-panel_timeout_s = 123.0
 |}
 
 let test_config_panels_golden () =
@@ -267,7 +264,6 @@ web_tools = false
 panel = ["careful1"]
 panel_system_prompt = "deliberate"
 web_tools = true
-panel_timeout_s = 180.0
 |}
 
 let test_config_heterogeneous () =
@@ -285,9 +281,8 @@ let test_config_heterogeneous () =
           Alcotest.(check bool) "g2 web" true g2.Fusion_policy.web_tools;
           Alcotest.(check (option int)) "g1 default max output" None
             g1.Fusion_policy.max_output_tokens;
-          Alcotest.(check (float 0.001)) "g2 timeout" 180.0 g2.Fusion_policy.timeout_s;
-          Alcotest.(check (float 0.001)) "g1 default timeout"
-            Fusion_policy.default_timeout_s g1.Fusion_policy.timeout_s
+          Alcotest.(check (option int)) "g2 default max output" None
+            g2.Fusion_policy.max_output_tokens
         | _ -> Alcotest.fail "expected two groups")
      | _ -> Alcotest.fail "expected exactly one preset")
   | Error es ->
@@ -838,7 +833,6 @@ panel = [
 judge = "deepseek.deepseek-v4-pro"
 panel_system_prompt = "answer independently"
 judge_system_prompt = "synthesize the panel"
-panel_timeout_s = 300.0
 judge_timeout_s = 300.0
 |}
 
@@ -1078,7 +1072,7 @@ let test_config_no_judges () =
      | _ -> Alcotest.fail "expected one preset")
   | Error _ -> Alcotest.fail "golden must parse Ok"
 
-(* --- execution-axis judge argument derivations. --- *)
+(* --- execution-axis judge web-tool derivation. --- *)
 
 let g_web4 : Fusion_policy.panel_group =
   { Fusion_policy.models = [ "a" ]
@@ -1086,7 +1080,6 @@ let g_web4 : Fusion_policy.panel_group =
   ; system_prompt = "p"
   ; web_tools = true
   ; max_output_tokens = None
-  ; timeout_s = 123.0
   }
 
 let test_judge_args_single_group_identity () =
@@ -1099,6 +1092,11 @@ let test_judge_args_single_group_identity () =
   Alcotest.(check bool) "judge web = req||group, req=true overrides" true
     (Fusion_policy.judge_web_tools_of ~req_web_tools:true
        [ { g_web4 with Fusion_policy.web_tools = false } ])
+
+let test_judge_args_multi_group () =
+  let g_no_web = { g_web4 with Fusion_policy.web_tools = false } in
+  Alcotest.(check bool) "any group may request judge web tools" true
+    (Fusion_policy.judge_web_tools_of ~req_web_tools:false [ g_no_web; g_web4 ])
 
 (* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
 
@@ -1693,6 +1691,7 @@ let () =
     ; ( "judge_args"
       , [ Alcotest.test_case "single_group_identity" `Quick
             test_judge_args_single_group_identity
+        ; Alcotest.test_case "multi_group" `Quick test_judge_args_multi_group
         ] )
     ; ( "judge_parse"
       , [ Alcotest.test_case "valid" `Quick test_judge_valid

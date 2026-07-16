@@ -19,7 +19,6 @@ judge = "ollama_cloud.devstral-2-123b"
 panel_system_prompt = """
 You are an expert panelist. Answer directly.
 """
-panel_timeout_s = 300.0
 judge_timeout_s = 250.0
 
 [fusion.presets.quorum]
@@ -37,7 +36,7 @@ describe('readFusionPresetView', () => {
     expect(readFusionPresetView(MULTILINE, 'nonexistent')).toBeNull()
   })
 
-  it('parses a multi-line panel array plus scalar judge/timeouts', () => {
+  it('parses a multi-line panel array plus scalar judge timeout', () => {
     const view = readFusionPresetView(MULTILINE, 'trio')
     expect(view).not.toBeNull()
     expect(view!.preset).toBe('trio')
@@ -48,7 +47,6 @@ describe('readFusionPresetView', () => {
     ])
     expect(view!.judge).toBe('ollama_cloud.devstral-2-123b')
     // Scalars are found even though a multi-line prompt string precedes them.
-    expect(view!.panelTimeoutS).toBe(300)
     expect(view!.judgeTimeoutS).toBe(250)
   })
 
@@ -56,8 +54,7 @@ describe('readFusionPresetView', () => {
     const view = readFusionPresetView(MULTILINE, 'quorum')
     expect(view!.panel).toEqual(['lens_a', 'lens_b'])
     expect(view!.judge).toBe('meta')
-    // quorum declares no timeouts → null, not the trio values.
-    expect(view!.panelTimeoutS).toBeNull()
+    // quorum declares no judge timeout → null, not the trio value.
     expect(view!.judgeTimeoutS).toBeNull()
   })
 
@@ -74,7 +71,6 @@ describe('readFusionPresetView', () => {
     expect(view).not.toBeNull()
     expect(view!.panel).toEqual([])
     expect(view!.judge).toBeNull()
-    expect(view!.panelTimeoutS).toBeNull()
   })
 
   it('flags a flat preset as not grouped', () => {
@@ -102,7 +98,6 @@ web_tools = false
 panel = ["careful1"]
 panel_system_prompt = "deliberate"
 web_tools = true
-panel_timeout_s = 180.0
 `
 
 describe('readFusionPresetView — grouped panels', () => {
@@ -115,7 +110,6 @@ describe('readFusionPresetView — grouped panels', () => {
     // panel — the silent-partial regression this guards against.
     expect(view!.panel).toEqual([])
     expect(view!.judge).toBeNull()
-    expect(view!.panelTimeoutS).toBeNull()
   })
 
   it('treats a conflicting grouped+flat preset as grouped (never trusts the flat panel)', () => {

@@ -14,7 +14,6 @@ type panel_group =
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부 *)
   ; max_output_tokens : int option  (** 그룹 모델당 출력 토큰 예산 override *)
-  ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초) *)
   }
 [@@deriving show, eq]
 

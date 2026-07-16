@@ -1054,8 +1054,6 @@ question. Synthesize them: identify points of consensus, contradictions, \
 partial coverage, unique insights, and blind spots, then give one resolved \
 answer. Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-# 구조적 타임아웃(초). 미지정 시 Fusion_policy.default_timeout_s.
-panel_timeout_s = 300.0
 judge_timeout_s = 300.0
 # 패널/심판에 MASC web_search/web_fetch 도구를 주입할지 여부.
 web_tools = false
@@ -1092,7 +1090,6 @@ Reconcile them: where the judges agree, state the consensus; where they diverge,
 adjudicate with reasons; surface any blind spot that a single lens missed. Produce \
 one resolved answer. Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-panel_timeout_s = 300.0
 judge_timeout_s = 300.0
 # meta/stage-meta reducer 구조적 타임아웃. 미지정 시 judge_timeout_s와 동일.
 meta_timeout_s = 300.0
@@ -1164,7 +1161,6 @@ adjudicate with reasons; surface any blind spot that a single stage missed. \
 Produce one resolved answer. Respond with ONLY the requested JSON object, no \
 prose and no code fences.
 """
-panel_timeout_s = 300.0
 judge_timeout_s = 300.0
 meta_timeout_s = 300.0
 web_tools = false

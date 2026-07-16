@@ -19,7 +19,6 @@ type panel_group =
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부. *)
   ; max_output_tokens : int option
       (** 그룹 모델당 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
-  ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초). *)
   }
 [@@deriving show, eq]
 

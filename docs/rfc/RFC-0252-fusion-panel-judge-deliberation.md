@@ -255,7 +255,6 @@ panel = ["deepseek.v4-flash", "glm.5-turbo", "ollama.gemma4-26b"]
 judge = "deepseek.v4-flash"
 panel_system_prompt = "..."           # 행동 정의 — 코드 default 없음, 비면 Missing_prompt
 judge_system_prompt = "..."
-panel_timeout_s = 120.0               # 생략 시 default_timeout_s
 judge_timeout_s = 120.0
 max_output_tokens_per_panel = 4096    # 생략 시 Runtime_agent 기본 출력 예산
 judge_max_output_tokens = 4096        # 생략 시 Runtime_agent 기본 출력 예산

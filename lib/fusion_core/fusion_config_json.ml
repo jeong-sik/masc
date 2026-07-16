@@ -27,7 +27,6 @@ let panel_group_to_yojson (g : Fusion_policy.panel_group) : Yojson.Safe.t =
     ; ("system_prompt", `String g.Fusion_policy.system_prompt)
     ; ("web_tools", `Bool g.Fusion_policy.web_tools)
     ; ("max_output_tokens", opt_int g.Fusion_policy.max_output_tokens)
-    ; ("timeout_s", `Float g.Fusion_policy.timeout_s)
     ]
 
 (* Judge fields are prefixed [j*] in the record; the JSON drops the prefix so the

@@ -418,7 +418,7 @@ export function FusionSettingsPanel() {
               </div>
             </div>
             <div class="set-mcp-detail mono" data-testid="fusion-preset-timing" style=${{ marginTop: 10 }}>
-              panel_timeout ${timeoutLabel(presetView.panelTimeoutS)} · judge_timeout ${timeoutLabel(presetView.judgeTimeoutS)}
+              judge_timeout ${timeoutLabel(presetView.judgeTimeoutS)}
             </div>
           `
         : null}

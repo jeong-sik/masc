@@ -39,7 +39,7 @@ let disabled : Fusion_policy.t =
 
 (* 패널 그룹 한 개 파싱. 그룹 sub-table(새 [[...panels]] 문법)에도, preset table
    자체(legacy flat 문법의 desugar)에도 동일하게 적용된다 — 두 문법이 같은 키
-   이름(panel/label/panel_system_prompt/web_tools/panel_timeout_s)을
+   이름(panel/label/panel_system_prompt/web_tools)을
    쓰므로 코드 재사용. 누락 필드는 명시적 default. label 기본 ""(정체성=model 그대로)
    → legacy flat은 label 키가 없으므로 byte-identical (RFC-0278). *)
 let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
@@ -51,9 +51,6 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
   ; web_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
   ; max_output_tokens =
       Otoml.find_opt tbl Otoml.get_integer [ "max_output_tokens_per_panel" ]
-  ; timeout_s =
-      Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
-        [ "panel_timeout_s" ]
   }
 
 (* JOJ 1차 심판 한 명 파싱 (RFC-0283). [[fusion.presets.NAME.judges]] sub-table의

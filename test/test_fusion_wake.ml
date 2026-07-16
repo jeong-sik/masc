@@ -186,7 +186,6 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; system_prompt = "panel system prompt"
     ; web_tools = false
     ; max_output_tokens = None
-    ; timeout_s = Fusion_policy.default_timeout_s
     }
   in
   let preset : Fusion_policy.preset =

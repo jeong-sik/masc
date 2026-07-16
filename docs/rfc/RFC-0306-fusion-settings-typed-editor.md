@@ -35,7 +35,7 @@ Read-only display only (`dashboard/src/lib/fusion-preset-view.ts`, header commen
 "display-only reader — it never writes back"):
 
 - `panel = [...]` roster, `judge` (meta), `[[fusion.presets.<name>.judges]]` (JoJ
-  first-round judges), `panel_timeout_s`, `judge_timeout_s`,
+  first-round judges), `judge_timeout_s`,
   `max_tool_calls_per_panel`, `max_concurrent_judges`, `staged_judge_group_size`.
 
 Backend schema (`lib/fusion_core/fusion_config.ml`, `lib/fusion_core/fusion_policy.ml`)

@@ -378,9 +378,13 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
                 ~input:(`Assoc [ ("file_path", `String evidence_path) ])
                 ()
             in
-            (match result.outcome with
-             | `Success -> ()
-             | `Failure failure_class ->
+            (match result.disposition with
+             | Tool_result.Completed () -> ()
+             | Tool_result.Deferred () ->
+               failf
+                 "exact admitted meta dispatch was unexpectedly deferred: %s"
+                 result.raw_output
+             | Tool_result.Failed failure_class ->
                failf
                  "exact admitted meta dispatch failed (%s): %s"
                  (Tool_result.tool_failure_class_to_string failure_class)

@@ -84,12 +84,18 @@ val decide :
   request ->
   decision
 
-(** Recover durable Auto Judge work for exactly one workspace: restart
-    [Summary_pending], finalize decisive [Summary_available], and retry only
-    [Summary_failed { retryable = true }]. Every candidate id has an explicit
+(** Recover durable Auto Judge work for exactly one workspace: restart an
+    interrupted [Summary_pending] worker and finalize decisive
+    [Summary_available] output. Failed judgments are never retried merely
+    because a process restarted. Every recovery candidate id has an explicit
     started, finalized, skipped, or failed outcome. *)
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
+
+val retry_failed_auto_judge : requested_by:string -> string -> (unit, string) result
+(** Explicitly retry one failed Auto Judge summary. The stored [retryable]
+    classification is diagnostic only; operator authority controls this state
+    transition. No cadence, restart hook, or retry budget calls it. *)
 
 val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string

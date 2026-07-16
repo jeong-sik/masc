@@ -66,7 +66,6 @@ type conditions = {
   context_within_budget : bool;
   (** [context_ratio < compaction.ratio_gate] *)
   context_handoff_needed : bool;
-  (** [auto_handoff AND context_ratio >= handoff_threshold] *)
   compaction_active : bool;
   (** Set true on compaction entry, false on exit *)
   handoff_active : bool;

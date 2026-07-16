@@ -34,9 +34,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             let panel_count = max 1 (List.length (Fusion_policy.preset_models preset)) in
             Fusion_panel.run ~sw ~net
               ~max_fibers:panel_count
-              ~outer_timeout_s:
-                (Fusion_policy.panel_outer_timeout_of
-                   ~max_fibers:panel_count groups)
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
           let judge_web_tools =
@@ -87,10 +84,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 ] )
           in
           let clock =
-            Fusion_orchestrator_judge_wave.make_runtime_clock
-              ~missing_clock_failure:
-                (Fusion_types.Internal_error
-                   "fusion adaptive timeout requires a wall clock; initialise Masc_eio_env with ~clock")
+            Fusion_orchestrator_judge_wave.make_runtime_clock ()
           in
           let elapsed_since_t0 () =
             Fusion_orchestrator_judge_wave.elapsed_since_t0 clock
@@ -120,22 +114,8 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           let all_fail_error_of_runs =
             Fusion_orchestrator_judge_wave.all_fail_error_of_runs
           in
-          let with_timeout_budget_fallback =
-            Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
-          in
-          let meta_budget_check () =
-            Fusion_orchestrator_judge_wave.meta_budget_check ~preset clock
-          in
-          let run_fallback_judge () =
-            Fusion_orchestrator_judge_wave.run_fallback_judge
-              ~sw
-              ~net
-              ~preset
-              ~panel
-              ~question:req.Fusion_types.prompt
-              ~clock
-              ~judge_web_tools
-              ()
+          let meta_provider_timeout () =
+            Fusion_orchestrator_judge_wave.meta_provider_timeout ~preset clock
           in
           let run_judge_of_judges () =
             match preset.Fusion_policy.judges with
@@ -147,23 +127,20 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               , [] )
             | judges ->
               let firsts = run_first_judges judges in
-              let firsts_with_fallback =
-                with_timeout_budget_fallback ~run_fallback_judge firsts
-              in
-              let first_nodes = first_judge_nodes firsts_with_fallback in
-              let ok_priors = successful_syntheses firsts_with_fallback in
+              let first_nodes = first_judge_nodes firsts in
+              let ok_priors = successful_syntheses firsts in
               (match ok_priors with
                | [] ->
                  let err =
                    all_fail_error_of_runs
                      ~fallback:
                        (Fusion_types.Internal_error "judge_of_judges: no judge produced a synthesis")
-                     firsts_with_fallback
+                     firsts
                  in
                  (Error err, first_nodes)
                | (_, first_s, _) :: _ ->
-                 let firsts_usage = firsts_usage firsts_with_fallback in
-                 (match meta_budget_check () with
+                 let firsts_usage = firsts_usage firsts in
+                 (match meta_provider_timeout () with
                   | Error (failure, _) ->
                     let elapsed_s = elapsed_since_t0 () in
                     ( Ok (first_s, firsts_usage)
@@ -223,10 +200,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                   , Fusion_types.zero_usage )
               , [] )
             | Ok _groups ->
-              let firsts =
-                run_first_judges preset.Fusion_policy.judges
-                |> with_timeout_budget_fallback ~run_fallback_judge
-              in
+              let firsts = run_first_judges preset.Fusion_policy.judges in
               let rec take n acc rest =
                 if n = 0
                 then (List.rev acc, rest)
@@ -262,7 +236,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 | (_, first_s, _) :: _ ->
                   let firsts_usage = firsts_usage stage_firsts in
                   let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
-                  (match meta_budget_check () with
+                  (match meta_provider_timeout () with
                    | Error (failure, _) ->
                      let elapsed_s = elapsed_since_t0 () in
                      ( (stage_id, Ok (first_s, firsts_usage))
@@ -332,7 +306,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                | (_, first_stage_s, _) :: _ ->
                  let stage_usage = Fusion_types.sum_all_usage stage_results in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_stages in
-                 (match meta_budget_check () with
+                 (match meta_provider_timeout () with
                   | Error (failure, _) ->
                     let elapsed_s = elapsed_since_t0 () in
                     ( Ok (first_stage_s, stage_usage)

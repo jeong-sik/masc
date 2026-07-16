@@ -257,7 +257,7 @@ let handle_tool_execute_typed
             s
           |> Exec_policy.truncate_for_log
         in
-        let typed_error_fields =
+        let typed_context_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log ]
           @ response_cwd_field
           @ execution_location_fields cwd
@@ -270,7 +270,7 @@ let handle_tool_execute_typed
           Keeper_tool_execution.failure
             ~class_
             (error_json
-               ~fields:(typed_error_fields @ extra_fields)
+               ~fields:(typed_context_fields @ extra_fields)
                msg)
         in
         let sandbox_profile_label =
@@ -302,16 +302,13 @@ let handle_tool_execute_typed
              gate_request
          with
          | Keeper_gate.Deferred { approval_id; reason } ->
-           typed_error_json
-             ~class_:Tool_result.Workflow_rejection
-             ~extra_fields:
-               [ "error", `String "gate_deferred"
-               ; "approval_request_id", `String approval_id
-               ; "approval_queue_status", `String "pending"
-               ; "approval_nonblocking", `Bool true
-               ; "gate_reason", `String (Keeper_gate.deferred_reason_to_string reason)
-             ]
-             "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper lane will wake after resolution."
+           Keeper_gate_deferred_payload.create
+             ~operation:"tool_execute"
+             ~approval_id
+             ~reason
+             ~context:(`Assoc typed_context_fields)
+             ()
+           |> Keeper_gate_deferred_payload.to_execution
          | Keeper_gate.Unavailable reason ->
            typed_error_json
              ~extra_fields:

@@ -81,7 +81,6 @@ type t =
   | TransitionAuditFailures
   | ExecutionReceiptFailures
   | OperatorBroadcastSuppressed
-  | LlmBridgeFailures
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures
@@ -142,7 +141,6 @@ type t =
   | MemoryLaneInFlight
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
-  | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures
   | AlertPersistFailures
   | MetricsSseFailures

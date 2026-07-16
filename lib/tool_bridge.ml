@@ -177,12 +177,26 @@ let params_of_json_schema schema =
 
 let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result =
   match tr with
-  | Ok _ ->
+  | Tool_result.Completed output ->
     Ok
       { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr)
-      ; _meta = None
+      ; _meta = output.metadata
       }
-  | Error { class_; message; _ } ->
+  | Tool_result.Deferred output ->
+    let disposition_field =
+      "masc.tool_disposition", `String (Tool_result.string_of_disposition tr)
+    in
+    let metadata =
+      match output.metadata with
+      | None -> `Assoc [ disposition_field ]
+      | Some metadata ->
+        `Assoc [ disposition_field; "masc.payload", metadata ]
+    in
+    Ok
+      { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr)
+      ; _meta = Some metadata
+      }
+  | Tool_result.Failed { class_; message; _ } ->
     make_tool_error
       ~recoverable:(Tool_result.is_retryable class_)
       ~error_class:(oas_error_class_of_tool_failure_class class_)

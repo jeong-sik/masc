@@ -276,44 +276,6 @@ let keeper_dead_ttl_sec =
             min_value = Some (`Float 60.0); max_value = Some (`Float Masc_time_constants.day) }
     ()
 
-(* ── keeper_handoff surface ───────────────────────────────────── *)
-
-(** Default handoff threshold (context_ratio).
-    When context ratio exceeds this, automatic handoff is considered. *)
-let keeper_handoff_threshold =
-  register_float
-    ~key:"keeper.handoff_threshold"
-    ~default:(fun () -> 0.85)
-    ~min:0.5 ~max:0.99
-    ~meta:{ description = "Handoff context ratio 임계값";
-            value_type = "float";
-            min_value = Some (`Float 0.5); max_value = Some (`Float 0.99) }
-    ()
-
-(** Handoff cooldown in seconds.
-    After a handoff, suppress further handoffs for this duration. *)
-let keeper_handoff_cooldown_sec =
-  register_int
-    ~key:"keeper.handoff_cooldown_sec"
-    ~default:(fun () -> 300)
-    ~min:30 ~max:Masc_time_constants.hour_int
-    ~meta:{ description = "Handoff 쿨다운(초)";
-            value_type = "int";
-            min_value = Some (`Int 30);
-            max_value = Some (`Int Masc_time_constants.hour_int) }
-    ()
-
-(** Context ratio above which handoff pressure alert fires. *)
-let keeper_handoff_pressure_threshold =
-  register_float
-    ~key:"keeper.handoff_pressure_threshold"
-    ~default:(fun () -> 0.88)
-    ~min:0.5 ~max:0.99
-    ~meta:{ description = "Handoff pressure 알림 임계값";
-            value_type = "float";
-            min_value = Some (`Float 0.5); max_value = Some (`Float 0.99) }
-    ()
-
 (* ── keeper_diagnostics surface ───────────────────────────────── *)
 
 let keeper_snapshot_sec =
@@ -437,15 +399,6 @@ let surfaces =
         "keeper.supervisor_sweep_sec";
         "keeper.keepalive_interval_sec";
         "keeper.dead_ttl_sec";
-      ];
-    };
-    {
-      id = "keeper_handoff";
-      description = "Keeper handoff context ratio, cooldown, and pressure thresholds";
-      param_keys = [
-        "keeper.handoff_threshold";
-        "keeper.handoff_cooldown_sec";
-        "keeper.handoff_pressure_threshold";
       ];
     };
     {

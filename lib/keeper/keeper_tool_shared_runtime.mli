@@ -10,10 +10,6 @@ val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
     [failure_class] for keeper-facing routing and diagnostics. *)
 val tool_result_error_json : Tool_result.result -> string
 
-(** [Tool_result.result] passes [msg] through on success; wraps it
-    in [error_json] on failure. *)
-val tool_result_or_error : Tool_result.result -> string
-
 val file_not_found_prefix : string
 
 (** Render a missing-file JSON envelope with the error, path, and

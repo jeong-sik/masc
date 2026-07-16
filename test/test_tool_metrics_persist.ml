@@ -6,9 +6,9 @@ module R = Tool_result
 
 let make_result ~name ~success ~duration_ms : R.result =
   if success
-  then Ok { R.tool_name = name; data = `Null; duration_ms }
+  then R.Completed { R.tool_name = name; data = `Null; metadata = None; duration_ms }
   else
-    Error
+    R.Failed
       { R.class_ = Runtime_failure
       ; message = ""
       ; data = `Null
@@ -44,6 +44,13 @@ let test_enqueue_flush_restore () =
     (* Enqueue some records *)
     P.enqueue (make_result ~name:"alpha" ~success:true ~duration_ms:10.0);
     P.enqueue (make_result ~name:"alpha" ~success:false ~duration_ms:5.0);
+    P.enqueue
+      (R.Deferred
+         { R.tool_name = "alpha"
+         ; data = `Null
+         ; metadata = None
+         ; duration_ms = 3.0
+         });
     P.enqueue (make_result ~name:"beta" ~success:true ~duration_ms:20.0);
     (* flush_now drains the queue to disk *)
     P.flush_now ();
@@ -52,12 +59,13 @@ let test_enqueue_flush_restore () =
     Alcotest.(check bool) "cleared" true (Option.is_none (M.stats_for "alpha"));
     (* Restore from disk *)
     let n = P.restore ~base_path in
-    Alcotest.(check int) "restored 3 records" 3 n;
+    Alcotest.(check int) "restored 4 records" 4 n;
     (* Verify metrics are restored *)
     (match M.stats_for "alpha" with
      | Some s ->
-       Alcotest.(check int) "alpha call_count" 2 s.call_count;
+       Alcotest.(check int) "alpha call_count" 3 s.call_count;
        Alcotest.(check int) "alpha success" 1 s.success_count;
+       Alcotest.(check int) "alpha deferred" 1 s.deferred_count;
        Alcotest.(check int) "alpha failure" 1 s.failure_count
      | None -> Alcotest.fail "expected alpha stats");
     (match M.stats_for "beta" with
@@ -83,22 +91,37 @@ let test_malformed_lines_skipped () =
     Fs_compat.mkdir_p month_dir;
     let day_file = Filename.concat month_dir
       (Printf.sprintf "%02d.jsonl" tm.Unix.tm_mday) in
-    (* One valid, one malformed *)
+    (* One valid row, one malformed row, and one pre-disposition legacy row. *)
     let valid_line = Yojson.Safe.to_string
       (`Assoc [
         ("tool_name", `String "good");
-        ("success", `Bool true);
+        ("disposition", `String "completed");
         ("duration_ms", `Float 7.0);
         ("ts", `Float 1000.0);
-      ]) in
+    ]) in
     let malformed_line = "{\"garbage\": true}" in
-    let content = valid_line ^ "\n" ^ malformed_line ^ "\n" in
+    let legacy_line =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "tool_name", `String "legacy"
+          ; "success", `Bool true
+          ; "duration_ms", `Float 2.0
+          ; "ts", `Float 1000.0
+          ])
+    in
+    let content =
+      String.concat "\n" [ valid_line; malformed_line; legacy_line; "" ]
+    in
     Fs_compat.append_file day_file content;
     let n = P.restore ~base_path in
     Alcotest.(check int) "only valid record" 1 n;
     (match M.stats_for "good" with
      | Some s -> Alcotest.(check int) "good count" 1 s.call_count
-     | None -> Alcotest.fail "expected good stats"))
+     | None -> Alcotest.fail "expected good stats");
+    Alcotest.(check bool)
+      "legacy success bool is not migrated"
+      true
+      (Option.is_none (M.stats_for "legacy")))
 
 let test_reset_clears_cached_store () =
   with_tmp_dir (fun base_path ->

@@ -929,7 +929,6 @@ let render_keeper_detail (state : state) =
     add_row "Compactions:" (string_of_int k.k_compaction_count);
     add_row "Compaction Gate:" (Printf.sprintf "%.0f%%" (k.k_compaction_ratio_gate *. 100.0));
     add_row "Context Budget:" (string_of_int k.k_context_budget);
-    add_row "Handoff Threshold:" (Printf.sprintf "%.0f%%" (k.k_handoff_threshold *. 100.0));
     add_empty ();
 
     (* Behavior section *)

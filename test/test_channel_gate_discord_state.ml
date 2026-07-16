@@ -377,9 +377,14 @@ let test_resolve_keeper_for_thread_parent_binding () =
     ignore
       (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
          ~actor_name:"dashboard");
-    match Discord_state.resolve_keeper_for_channel ~channel_id:"thread-1" with
-    | None -> fail "expected parent binding to resolve"
-    | Some resolution ->
+    Discord_state.register_thread
+      ~thread_id:"thread-1"
+      ~parent_channel_id:"parent-1";
+    match
+      Discord_state.resolve_keeper_for_channel_result ~channel_id:"thread-1"
+    with
+    | Error _ | Ok None -> fail "expected registered parent binding to resolve"
+    | Ok (Some resolution) ->
         check string "keeper" "luna" resolution.keeper_name;
         check string "incoming" "thread-1" resolution.incoming_channel_id;
         check string "bound" "parent-1" resolution.bound_channel_id;
@@ -402,13 +407,39 @@ let test_resolve_keeper_exact_binding_wins_over_parent () =
     ignore
       (Discord_state.bind ~channel_id:"thread-1" ~keeper_name:"sangsu"
          ~actor_name:"dashboard");
-    match Discord_state.resolve_keeper_for_channel ~channel_id:"thread-1" with
-    | None -> fail "expected exact binding to resolve"
-    | Some resolution ->
+    match
+      Discord_state.resolve_keeper_for_channel_result ~channel_id:"thread-1"
+    with
+    | Error _ | Ok None -> fail "expected exact binding to resolve"
+    | Ok (Some resolution) ->
         check string "keeper" "sangsu" resolution.keeper_name;
         check string "incoming" "thread-1" resolution.incoming_channel_id;
         check string "bound" "thread-1" resolution.bound_channel_id;
         check bool "not via parent" false resolution.via_parent)
+
+let test_binding_store_failures_are_not_empty_state () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+    Fs_compat.save_file (Filename.concat dir "bindings.json") "{not-json";
+    (match
+       Discord_state.resolve_keeper_for_channel_result ~channel_id:"channel-1"
+     with
+     | Error (Discord_state.Binding_store_read_failed _) -> ()
+     | Ok _ -> fail "lookup reduced malformed store to an unbound channel");
+    (match
+       Discord_state.bind ~channel_id:"channel-1" ~keeper_name:"luna"
+         ~actor_name:"dashboard"
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "bind overwrote a malformed binding store");
+    (match
+       Discord_state.unbind ~channel_id:"channel-1" ~actor_name:"dashboard"
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "unbind overwrote a malformed binding store");
+    match Discord_state.bound_channels_result ~keeper_name:"luna" with
+    | Error _ -> ()
+    | Ok _ -> fail "presence reduced malformed bindings to an empty set")
 
 let test_thread_registry_round_trip () =
   let suffix = Printf.sprintf "%d-%06d" (Unix.getpid ()) !temp_dir_counter in
@@ -457,6 +488,8 @@ let () =
             test_bind_persists_binding_and_audit;
           test_case "unbind removes binding" `Quick
             test_unbind_removes_existing_binding;
+          test_case "binding-store failures remain explicit" `Quick
+            test_binding_store_failures_are_not_empty_state;
           test_case "connectors json advertises connector descriptor" `Quick
             test_connectors_json_advertises_gate_connector_descriptor;
           test_case "registry register replaces and all snapshots" `Quick

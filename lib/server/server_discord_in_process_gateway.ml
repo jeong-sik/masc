@@ -177,28 +177,18 @@ let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
         "discord external attention resolve failed (keeper=%s event=%s): %s"
         keeper_name event_id error
 
-let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
-  match State.resolve_keeper_for_channel ~channel_id with
-  | Some resolution -> Some (resolution, [])
-  | None -> (
-      match message_reference_channel_id with
-      | None -> None
-      | Some reference_channel_id ->
-          let reference_channel_id = String.trim reference_channel_id in
-          if reference_channel_id = "" || String.equal reference_channel_id channel_id
-          then None
-          else
-            match State.resolve_keeper_for_channel ~channel_id:reference_channel_id with
-            | None -> None
-            | Some resolution ->
-                Some
-                  ( {
-                      State.keeper_name = resolution.State.keeper_name;
-                      incoming_channel_id = channel_id;
-                      bound_channel_id = resolution.bound_channel_id;
-                      via_parent = true;
-                    },
-                    [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
+let log_binding_lookup_failure ~channel_id error =
+  let detail =
+    Format.asprintf "%a" State.pp_binding_lookup_error error
+  in
+  Log.Server.error
+    "Discord binding lookup failed (channel=%s): %s"
+    channel_id
+    detail
+
+let resolve_binding_for_message ~channel_id =
+  State.resolve_keeper_for_channel_result ~channel_id
+  |> Result.map (Option.map (fun resolution -> resolution, []))
 
 let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(channel_id : string) ~(message_id : string)
@@ -213,18 +203,22 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(referenced_message_author_id : string option) () =
   let binding =
     match resolved_binding with
-    | Some binding -> Some binding
-    | None ->
-      resolve_binding_for_message ~channel_id ~message_reference_channel_id
+    | Some binding -> Ok (Some binding)
+    | None -> resolve_binding_for_message ~channel_id
   in
   match binding with
-  | None ->
+  | Error error ->
+    log_binding_lookup_failure ~channel_id error;
+    Discord_observability.record_inbound_dispatch
+      Discord_observability.Gate_error;
+    None
+  | Ok None ->
     (* No binding for this channel — drop quietly. The bot may be in
        channels it isn't bound to (e.g. server-wide guild messages). *)
     Discord_observability.record_inbound_dispatch
       Discord_observability.Dropped_unbound;
     None
-  | Some (resolution, resolution_metadata) ->
+  | Ok (Some (resolution, resolution_metadata)) ->
     let keeper_name = resolution.State.keeper_name in
     let metadata =
       discord_chat_metadata ~guild_id ~channel_id ~message_id
@@ -421,14 +415,18 @@ let handle_ambient ?resolved_keeper_name ~base_dir
       ~(author_id : string) ~(author_name : string option) ~(content : string) () =
   let keeper_name =
     match resolved_keeper_name with
-    | Some keeper_name -> Some keeper_name
-    | None -> State.keeper_for_channel ~channel_id
+    | Some keeper_name -> Ok (Some keeper_name)
+    | None -> State.keeper_for_channel_result ~channel_id
   in
   match keeper_name with
-  | None ->
+  | Error error ->
+    log_binding_lookup_failure ~channel_id error;
     Discord_observability.record_ambient
       Discord_observability.Ambient_dropped_unbound
-  | Some keeper_name ->
+  | Ok None ->
+    Discord_observability.record_ambient
+      Discord_observability.Ambient_dropped_unbound
+  | Ok (Some keeper_name) ->
     let trimmed = String.trim content in
     if String.equal trimmed "" then
       Discord_observability.record_ambient
@@ -573,15 +571,16 @@ let submit_ingress ingress ~lane ~event_id run =
 let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
-  | Gw.Message_create
-      { channel_id; message_id; message_reference_channel_id; _ } ->
-    (match
-       resolve_binding_for_message ~channel_id ~message_reference_channel_id
-     with
-     | None ->
-       ignore
-         (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
-     | Some ((resolution, _) as resolved_binding) ->
+  | Gw.Message_create { channel_id; message_id; _ } ->
+    (match resolve_binding_for_message ~channel_id with
+     | Error error ->
+       log_binding_lookup_failure ~channel_id error;
+       Discord_observability.record_inbound_dispatch
+         Discord_observability.Gate_error
+     | Ok None ->
+       Discord_observability.record_inbound_dispatch
+         Discord_observability.Dropped_unbound
+     | Ok (Some ((resolution, _) as resolved_binding)) ->
        (match
           accept_event
             ~resolved_binding:(Some resolved_binding)
@@ -613,9 +612,10 @@ end
 let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create { channel_id; message_id; _ } ->
-    (match State.keeper_for_channel ~channel_id with
-     | None -> on_ambient ~base_dir ev
-     | Some keeper_name ->
+    (match State.keeper_for_channel_result ~channel_id with
+     | Error error -> log_binding_lookup_failure ~channel_id error
+     | Ok None -> on_ambient ~base_dir ev
+     | Ok (Some keeper_name) ->
        submit_ingress
          ingress
          ~lane:(Connector_ingress_lane.Keeper_lane keeper_name)

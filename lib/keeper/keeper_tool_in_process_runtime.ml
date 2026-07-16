@@ -835,7 +835,7 @@ let fusion_status_json ~(registry : Fusion_run_registry.t) ~keeper ~run_id : str
      adds the tool envelope + per-keeper scoping. *)
   let run_to_yojson = Fusion_run_registry.run_to_yojson in
   let belongs_to_keeper (r : Fusion_run_registry.run) =
-    String.equal r.keeper keeper
+    String.equal (Fusion_run_registry.keeper r) keeper
   in
   let not_found () =
     Yojson.Safe.to_string
@@ -859,7 +859,7 @@ let fusion_status_json ~(registry : Fusion_run_registry.t) ~keeper ~run_id : str
          ])
   end
   else (
-    match Fusion_run_registry.get registry ~run_id with
+    match Fusion_run_registry.get registry ~operation_id:run_id with
     | Some run when belongs_to_keeper run ->
       Yojson.Safe.to_string
         (`Assoc [ "ok", `Bool true; "found", `Bool true; "run", run_to_yojson run ])

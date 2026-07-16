@@ -14,12 +14,31 @@
 open Alcotest
 open Masc
 
+let fusion_operation ~run_id ~keeper ~preset : Fusion_types.fusion_operation =
+  { request =
+      { run_id
+      ; keeper
+      ; prompt = "fusion wake test"
+      ; preset
+      ; web_tools = false
+      ; depth = Fusion_types.Fusion_depth.Top
+      ; trigger = Fusion_types.Harness_eval
+      }
+  ; topology = Fusion_types.Simple
+  }
+;;
+
 let register_running_exn registry ~run_id ~keeper ~preset ~started_at =
   match
-    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset ~started_at
+    Fusion_run_registry.register_running registry
+      ~operation:(fusion_operation ~run_id ~keeper ~preset) ~started_at
   with
   | Ok () -> ()
   | Error error -> fail (Fusion_run_registry.persistence_error_to_string error)
+;;
+
+let get_run registry ~run_id =
+  Fusion_run_registry.get registry ~operation_id:run_id
 ;;
 
 (* substring check without pulling in the [str] library *)
@@ -522,7 +541,7 @@ let test_emit_success_projects_board_chat_and_registry () =
        check string "chat fusion block post id" post_id block_post_id;
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block for the board evidence");
-    match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    match get_run (Fusion_run_registry.global ()) ~run_id with
     | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
     | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
       fail "fusion run should complete ok=true"
@@ -725,10 +744,10 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       (contains
          ~needle:"No need to poll masc_fusion_status"
          (string_field "fusion_tool.response" response_fields "delivery"));
-    (match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-     | Some { keeper = observed_keeper; preset; status = Fusion_run_registry.Running; _ } ->
-       check string "running keeper" keeper observed_keeper;
-       check string "running preset" "unit" preset
+    (match get_run (Fusion_run_registry.global ()) ~run_id with
+     | Some ({ status = Fusion_run_registry.Running; _ } as run) ->
+       check string "running keeper" keeper (Fusion_run_registry.keeper run);
+       check string "running preset" "unit" (Fusion_run_registry.preset run)
      | Some { Fusion_run_registry.status = Completed _; _ } ->
        fail "fusion run should still be Running before the background runner is released"
      | Some { Fusion_run_registry.status = Recovery_required _; _ } ->
@@ -790,7 +809,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
        check string "chat fusion block post id" post_id block_post_id;
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block after async completion");
-    match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    match get_run (Fusion_run_registry.global ()) ~run_id with
     | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
     | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
       fail "fusion run should complete ok=true"
@@ -827,7 +846,7 @@ let test_tool_handle_does_not_start_without_durable_register () =
       (string_field "fusion_tool.persistence_failure" response "status");
     check bool "runner was not called" false !called;
     check bool "failed run was not published" true
-      (Option.is_none (Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id)))
+      (Option.is_none (get_run (Fusion_run_registry.global ()) ~run_id)))
 ;;
 
 let test_emit_board_failure_is_best_effort () =
@@ -843,7 +862,7 @@ let test_emit_board_failure_is_best_effort () =
         ~judge_usage:Fusion_types.zero_usage
     in
     check bool "board failure does not fail emit" true (Result.is_ok result);
-    (match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    (match get_run (Fusion_run_registry.global ()) ~run_id with
      | Some run ->
        (match run.Fusion_run_registry.status with
         | Fusion_run_registry.Completed { ok = true; _ } -> ()

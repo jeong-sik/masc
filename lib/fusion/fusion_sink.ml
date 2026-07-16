@@ -268,7 +268,7 @@ let judge_node_meta (o : Fusion_types.judge_outcome) : Yojson.Safe.t =
    (mirrors Keeper_chat_broadcast). An unknown run_id is a no-op. *)
 let broadcast_run_status ~registry ~run_id =
   try
-    match Fusion_run_registry.get registry ~run_id with
+    match Fusion_run_registry.get registry ~operation_id:run_id with
     | None -> ()
     | Some run ->
       Sse.broadcast
@@ -284,7 +284,7 @@ let broadcast_run_status ~registry ~run_id =
 
 let record_completion ~keeper ~run_id ?failure ?failure_code ~ok () =
   match
-    Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+    Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~operation_id:run_id
       ?failure ?failure_code ~ok ()
   with
   | Ok () -> ()

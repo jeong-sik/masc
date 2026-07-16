@@ -10,16 +10,36 @@ module Registry = Fusion_run_registry
 module R = struct
   include Registry
 
-  let mark_completed_result = Registry.mark_completed
+  let operation ~run_id ~keeper ~preset : Fusion_types.fusion_operation =
+    { request =
+        { run_id
+        ; keeper
+        ; prompt = "durable registry test"
+        ; preset
+        ; web_tools = true
+        ; depth = Fusion_types.Fusion_depth.Top
+        ; trigger = Fusion_types.Harness_eval
+        }
+    ; topology = Fusion_types.Judge_of_judges
+    }
+  ;;
+
+  let mark_completed_result t ~run_id ?failure ?failure_code ~ok () =
+    Registry.mark_completed t ~operation_id:run_id ?failure ?failure_code ~ok ()
+  ;;
+
+  let get t ~run_id = Registry.get t ~operation_id:run_id
 
   let register_running t ~run_id ~keeper ~preset ~started_at =
-    match Registry.register_running t ~run_id ~keeper ~preset ~started_at with
+    match
+      Registry.register_running t ~operation:(operation ~run_id ~keeper ~preset) ~started_at
+    with
     | Ok () -> ()
     | Error error -> fail (Registry.persistence_error_to_string error)
   ;;
 
   let mark_completed t ~run_id ?failure ?failure_code ~ok () =
-    match Registry.mark_completed t ~run_id ?failure ?failure_code ~ok () with
+    match mark_completed_result t ~run_id ?failure ?failure_code ~ok () with
     | Ok () -> ()
     | Error error -> fail (Registry.completion_error_to_string error)
   ;;
@@ -51,6 +71,24 @@ let fresh_path suffix =
   let path = Filename.temp_file "fusion-runs-" suffix in
   remove_if_exists path;
   path
+;;
+
+let register_event ~run_id ~keeper ~preset ~started_at =
+  Fusion_run_registry_event.Register
+    { operation = R.operation ~run_id ~keeper ~preset; started_at }
+  |> Fusion_run_registry_event.to_yojson
+  |> Yojson.Safe.to_string
+;;
+
+let complete_event ~run_id ~ok =
+  Fusion_run_registry_event.Complete
+    { operation_id = run_id
+    ; ok
+    ; failure = None
+    ; failure_code = None
+    }
+  |> Fusion_run_registry_event.to_yojson
+  |> Yojson.Safe.to_string
 ;;
 
 let field j k =
@@ -88,13 +126,22 @@ let test_persist_register_complete () =
   check int "two events + trailing newline" 3 (List.length lines);
   let event1 = parse (List.nth lines 0) in
   check string "event1 kind" "register" (str event1 "event");
-  check string "event1 run_id" "r1" (str event1 "run_id");
-  check string "event1 keeper" "k" (str event1 "keeper");
-  check string "event1 preset" "p" (str event1 "preset");
+  let persisted_operation =
+    match field event1 "operation" with
+    | Some json ->
+      (match Fusion_types.fusion_operation_of_yojson json with
+       | Ok operation -> operation
+       | Error error -> fail error)
+    | None -> fail "register event must contain its canonical operation"
+  in
+  check bool "event1 canonical operation" true
+    (Fusion_types.equal_fusion_operation
+       (R.operation ~run_id:"r1" ~keeper:"k" ~preset:"p")
+       persisted_operation);
   check (float 0.001) "event1 started_at" 1.0 (float_ event1 "started_at");
   let event2 = parse (List.nth lines 1) in
   check string "event2 kind" "complete" (str event2 "event");
-  check string "event2 run_id" "r1" (str event2 "run_id");
+  check string "event2 operation_id" "r1" (str event2 "operation_id");
   check bool "event2 ok" true (bool_ event2 "ok")
 ;;
 
@@ -172,7 +219,15 @@ let test_replay_prunes_completed () =
   check int "completed retention plus recovery row"
     (R.max_completed_retained + 1) (List.length runs);
   (match R.get t2 ~run_id:"r-running" with
-   | Some { R.status = R.Recovery_required { reason = R.Worker_process_restarted }; _ } -> ()
+   | Some
+       { R.operation
+       ; status = R.Recovery_required { reason = R.Worker_process_restarted }
+       ; _
+       } ->
+     check bool "recovery row preserves canonical operation" true
+       (Fusion_types.equal_fusion_operation
+          (R.operation ~run_id:"r-running" ~keeper:"k" ~preset:"p")
+          operation)
    | Some _ -> fail "unfinished run must be recovery-required after replay"
    | None -> fail "unfinished run must remain observable after replay");
   check bool "compacted log preserves unfinished run" true
@@ -191,21 +246,24 @@ let test_no_path_is_in_memory_only () =
   check bool "no file created" false (Sys.file_exists path)
 ;;
 
-(* (4) Replay skips malformed lines without dropping valid neighboring events. *)
+(* (4) Replay skips malformed and removed-schema lines without dropping valid
+   neighboring canonical events. The old metadata-only schema is not migrated. *)
 let test_replay_skips_malformed_lines () =
   let path = fresh_path "-malformed.jsonl" in
   Fs_compat.save_file
     path
     (String.concat
        "\n"
-	       [ {|{"event":"register","run_id":"r1","keeper":"k","preset":"p","started_at":1.0}|}
+	       [ register_event ~run_id:"r1" ~keeper:"k" ~preset:"p" ~started_at:1.0
 	       ; {|not-json|}
-	       ; {|{"event":"register","run_id":42,"keeper":"k","preset":"p","started_at":2.0}|}
-	       ; {|{"event":"complete","run_id":"r1","ok":"false"}|}
+	       ; {|{"event":"register","run_id":"r-legacy","keeper":"k","preset":"p","started_at":2.0}|}
 	       ; {|{"event":"complete","run_id":"r1","ok":false}|}
+	       ; complete_event ~run_id:"r1" ~ok:false
 	       ; ""
 	       ]);
   let t = R.replay path in
+  check bool "legacy metadata-only register is rejected" true
+    (Option.is_none (R.get t ~run_id:"r-legacy"));
   match R.get t ~run_id:"r1" with
   | Some { R.status = R.Completed { ok = false; _ }; _ } -> ()
   | Some _ -> fail "expected replayed run to be completed as failed"
@@ -216,9 +274,9 @@ let test_replay_skips_malformed_lines () =
 let test_replay_streams_and_compacts () =
   let path = fresh_path "-stream.jsonl" in
   let before =
-    {|{"event":"register","run_id":"r-stream","keeper":"k","preset":"p","started_at":1.0}|}
+    register_event ~run_id:"r-stream" ~keeper:"k" ~preset:"p" ~started_at:1.0
   in
-  let after = {|{"event":"complete","run_id":"r-stream","ok":true}|} in
+  let after = complete_event ~run_id:"r-stream" ~ok:true in
   let malformed_padding = String.make 70000 'x' in
   let content = String.concat "\n" [ before; malformed_padding; after; "" ] in
   Fs_compat.save_file
@@ -238,9 +296,9 @@ let test_replay_streams_and_compacts () =
 let test_replay_preserves_unterminated_tail () =
   let path = fresh_path "-partial-tail.jsonl" in
   let complete =
-    {|{"event":"register","run_id":"r-partial","keeper":"k","preset":"p","started_at":1.0}|}
+    register_event ~run_id:"r-partial" ~keeper:"k" ~preset:"p" ~started_at:1.0
   in
-  let partial = {|{"event":"complete","run_id":"r-partial","ok":true}|} in
+  let partial = complete_event ~run_id:"r-partial" ~ok:true in
   let content = String.concat "\n" [ complete; partial ] in
   Fs_compat.save_file
     path

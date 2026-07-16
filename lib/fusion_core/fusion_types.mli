@@ -348,6 +348,19 @@ val all_fusion_topologies : fusion_topology list
 (** [all_fusion_topologies]의 wire 문자열 (도구 인자 허용값 목록). *)
 val all_fusion_topology_strings : string list
 
+(** One immutable, replayable Fusion operation. The request owns the sole
+    operation identity; topology is persisted beside it rather than inferred
+    from logs or reconstructed from defaults after restart. *)
+type fusion_operation =
+  { request : fusion_request
+  ; topology : fusion_topology
+  }
+[@@deriving yojson, show, eq]
+
+val fusion_operation_id : fusion_operation -> string
+(** The sole operation identity, projected from [request.run_id]. The event
+    schema never stores a second copy that could drift. *)
+
 (** [Conditional] 위상의 에스컬레이트 정책. 1차 심판 [decision]이 더 깊은 심의를 요하면
     [true]. v1: [Insufficient]만 [true]([Answer]/[Recommend]는 [false]). 닫힌 합
     exhaustive — 새 [judge_decision] 변형 추가 시 컴파일 에러로 정책 갱신을 강제한다. *)

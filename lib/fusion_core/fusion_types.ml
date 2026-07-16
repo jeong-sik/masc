@@ -334,6 +334,14 @@ let all_fusion_topologies : fusion_topology list =
 let all_fusion_topology_strings : string list =
   List.map fusion_topology_to_string all_fusion_topologies
 
+type fusion_operation =
+  { request : fusion_request
+  ; topology : fusion_topology
+  }
+[@@deriving yojson, show, eq]
+
+let fusion_operation_id operation = operation.request.run_id
+
 (* Conditional 위상의 에스컬레이트 정책: 1차 심판 판정이 더 깊은 심의를 요하는가.
    [Insufficient](패널이 결정에 부족 = 애매)면 escalate, [Answer]/[Recommend](결론 있음)이면
    1차 종합 유지. 닫힌 합 exhaustive match(catch-all 없음) — 새 decision 변형 추가 시 여기서

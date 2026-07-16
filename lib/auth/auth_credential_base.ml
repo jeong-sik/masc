@@ -6,21 +6,26 @@ open Masc_domain
 (* Crypto utilities                             *)
 (* ============================================ *)
 
-let rng_initialized = Atomic.make false
+let rng_initialization_mutex = Mutex.create ()
 
-(** Seed the default RNG exactly once. Guarded here, at the point of use,
-    so token generation does not depend on a caller (auth_login, server
-    boot) having seeded it first. *)
-let ensure_rng_initialized () =
-  if not (Atomic.get rng_initialized) then begin
-    Mirage_crypto_rng_unix.use_default ();
-    Atomic.set rng_initialized true
-  end
+(** Return the process-wide default RNG at the token-generation boundary.
+    The Mirage default generator is the state authority; the mutex only
+    serializes the first missing-generator repair across Domains. *)
+let default_rng () =
+  match Mirage_crypto_rng.default_generator () with
+  | rng -> rng
+  | exception Mirage_crypto_rng.No_default_generator ->
+    Mutex.protect rng_initialization_mutex (fun () ->
+      match Mirage_crypto_rng.default_generator () with
+      | rng -> rng
+      | exception Mirage_crypto_rng.No_default_generator ->
+        Mirage_crypto_rng_unix.use_default ();
+        Mirage_crypto_rng.default_generator ())
 
 (** Generate a cryptographically random token (hex string) *)
 let generate_token () =
-  ensure_rng_initialized ();
-  let random_bytes = Mirage_crypto_rng.generate 32 in
+  let rng = default_rng () in
+  let random_bytes = Mirage_crypto_rng.generate ~g:rng 32 in
   let hex = Buffer.create 64 in
   String.iter (fun c -> Printf.bprintf hex "%02x" (Char.code c)) random_bytes;
   Buffer.contents hex

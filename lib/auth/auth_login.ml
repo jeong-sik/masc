@@ -22,8 +22,6 @@ type t = {
   mcp_token_env_var : string;
 }
 
-let ensure_rng_initialized = Auth_credential_base.ensure_rng_initialized
-
 let auth_change_to_string = function
   | Auth_already_required -> "already_required"
   | Auth_enabled -> "auth_enabled"
@@ -74,7 +72,6 @@ let create_token_for_lifetime = function
 
 let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
     ~token_lifetime () =
-  ensure_rng_initialized ();
   let base_path = normalize_base_path base_path in
   match ensure_required_bearer_auth ~base_path ~agent_name with
   | Error err -> Error err

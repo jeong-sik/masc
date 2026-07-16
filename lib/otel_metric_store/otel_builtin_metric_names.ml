@@ -150,11 +150,6 @@ let metric_cost_ledger_status = Otel_metric_store_core.declare_counter "masc_cos
    changing behavior because the strings are identical, but it makes
    the constant look like it has two declaration sites. *)
 
-(* RFC-0040: sender-side mention dedup decision counter.  Labels:
-   [outcome] in [skipped|passed|no_target|bypassed].  Wired from
-   [lib/workspace.ml] via [Workspace_hooks.mention_dedup_decision_fn]. *)
-let metric_mention_dedup_decisions_total = Otel_metric_store_core.declare_counter "masc_mention_dedup_decisions_total"
-
 (* #20677 incremental-cache health: a boundary past the file size means the
    file shrank/rotated and the reader re-parses from byte 0 (the expensive
    path the cache exists to avoid).  Scanned bytes is the per-cycle read

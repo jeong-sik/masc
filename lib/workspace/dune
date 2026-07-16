@@ -46,7 +46,6 @@
   event_kind
   workspace_git
   mention
-  mention_dedup
   workspace_resilience
   workspace_goal_index
   heartbeat

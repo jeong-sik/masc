@@ -231,13 +231,6 @@ let record_workspace_broadcast ~msg_type ~elapsed_s =
     elapsed_s
 ;;
 
-let record_mention_dedup_decision ~outcome =
-  Otel_metric_store.inc_counter
-    Otel_metric_store.metric_mention_dedup_decisions_total
-    ~labels:[ "outcome", outcome ]
-    ()
-;;
-
 let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
   if retries > 0
   then
@@ -393,7 +386,6 @@ let install () =
   Atomic.set Workspace_hooks.task_completion_path_observed_fn record_task_completion_path;
   Atomic.set Workspace_hooks.task_auto_release_observed_fn record_task_auto_release;
   Atomic.set Workspace_hooks.workspace_broadcast_observed_fn record_workspace_broadcast;
-  Atomic.set Workspace_hooks.mention_dedup_decision_fn record_mention_dedup_decision;
   Atomic.set File_lock_eio.on_lock_attempt_fn record_file_lock_attempt;
   Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry;
   Atomic.set Process_eio.process_timeout_observer_fn record_process_timeout;

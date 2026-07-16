@@ -148,11 +148,6 @@ val metric_cost_emit_zero_source : string
 val metric_cost_ledger_status : string
 (* metric_keeper_meta_read_failures declared earlier in this interface (line 200) *)
 
-(** RFC-0040: sender-side mention dedup decision counter.
-    Labels: [outcome] with values
-    [skipped|passed|no_target|bypassed]. *)
-val metric_mention_dedup_decisions_total : string
-
 (** #20677: incremental telemetry cache fell back to a full re-parse
     (file shrank or rotated under the boundary).  Labels: [store]. *)
 val metric_telemetry_cache_rescans : string

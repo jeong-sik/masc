@@ -298,14 +298,6 @@ let workspace_broadcast_observed_fn
   : (msg_type:string -> elapsed_s:float -> unit) Atomic.t
   = Atomic.make (fun ~msg_type:_ ~elapsed_s:_ -> ())
 
-(** RFC-0040: sender-side mention dedup decision counter.  Default
-    no-op; emit lives in [lib/workspace.ml] to avoid a
-    [masc_workspace → Otel_metric_store] dep cycle.
-    Outcome vocabulary: [skipped|passed|no_target|bypassed]. *)
-let mention_dedup_decision_fn
-  : (outcome:string -> unit) Atomic.t
-  = Atomic.make (fun ~outcome:_ -> ())
-
 (** #13460: stale task-state cache emission observability.
     Workspace sub-modules fire this when they replace a stale active-task
     broadcast/mention with a cache invalidation message. [lib/workspace.ml]

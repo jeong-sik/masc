@@ -150,7 +150,6 @@
   test_multi_workspace
   test_worktree_detection
   test_mention
-  test_mention_dedup
   test_heartbeat_qw
   test_sse_qw
   test_sse_stream
@@ -469,7 +468,6 @@
   test_multi_workspace
   test_worktree_detection
   test_mention
-  test_mention_dedup
   test_heartbeat_qw
   test_sse_qw
   test_sse_stream

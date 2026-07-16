@@ -108,12 +108,6 @@ val task_auto_release_observed_fn :
 val workspace_broadcast_observed_fn :
   (msg_type:string -> elapsed_s:float -> unit) Atomic.t
 
-(** RFC-0040: sender-side mention dedup decision counter.
-    Wired at startup ([lib/workspace.ml]) to
-    [masc_mention_dedup_decisions_total{outcome}].
-    Outcome vocabulary: [skipped|passed|no_target|bypassed]. *)
-val mention_dedup_decision_fn :
-  (outcome:string -> unit) Atomic.t
 val cache_desync_cleared_fn :
   (Workspace_utils_backend_setup.config ->
    module_name:string -> task_id:string -> status:string -> unit) Atomic.t

@@ -14,8 +14,6 @@
 \*
 \* What this spec deliberately abstracts away:
 \*   - The actual filesystem / JSON serialization of messages.
-\*   - The dedup gate (RFC-0040) — modelled as a non-deterministic
-\*     skip to keep the state space small.
 \*   - The exact regex for Mention.extract — modelled as a boolean
 \*     "original_has_mention".
 \*
@@ -40,7 +38,7 @@ ASSUME AgentNamesNonEmpty == AgentNames # {}
 ASSUME MaxRewritesPos == MaxRewrites \in Nat /\ MaxRewrites >= 1
 
 VARIABLES
-    phase,               \* {"idle", "building", "extracted", "rewritten", "delivered", "dedup_skipped"}
+    phase,               \* {"idle", "building", "extracted", "rewritten", "delivered"}
     original_content,    \* the raw content before any rewrite
     current_content,     \* content after rewrites (may differ from original)
     mention_tokens,      \* list of mention targets extracted from content
@@ -51,9 +49,9 @@ VARIABLES
 vars == << phase, original_content, current_content, mention_tokens,
            rewrites, msg_type, original_has_mention >>
 
-PhaseSet == {"idle", "building", "extracted", "rewritten", "delivered", "dedup_skipped"}
+PhaseSet == {"idle", "building", "extracted", "rewritten", "delivered"}
 MsgTypeSet == {"broadcast", "cache_invalidated"}
-RewriteLabelSet == {"cache_invalidation", "dedup_guard", "sanitize"}
+RewriteLabelSet == {"cache_invalidation", "sanitize"}
 
 (* ── Type invariant ─────────────────────────────────────── *)
 
@@ -133,20 +131,12 @@ Deliver ==
     /\ UNCHANGED << original_content, current_content, mention_tokens,
                     rewrites, msg_type, original_has_mention >>
 
-\* Non-deterministic dedup skip (RFC-0040 abstraction).
-SkipDedup ==
-    /\ phase = "building"
-    /\ phase' = "dedup_skipped"
-    /\ UNCHANGED << original_content, current_content, mention_tokens,
-                    rewrites, msg_type, original_has_mention >>
-
 Next ==
     /\ \E agent \in AgentNames, has_mention \in BOOLEAN :
          StartBroadcast(agent, has_mention)
     \/ ExtractMentionsClean
     \/ \E label \in RewriteLabelSet : ApplyRewrite(label)
     \/ Deliver
-    \/ SkipDedup
 
 Spec == Init /\ [][Next]_vars
 
@@ -197,7 +187,6 @@ NextBuggy ==
     \/ BroadcastRewriteSwallowsMention
     \/ \E label \in RewriteLabelSet : ApplyRewrite(label)
     \/ Deliver
-    \/ SkipDedup
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 

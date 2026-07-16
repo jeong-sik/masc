@@ -18,11 +18,13 @@ type compaction_plan = private
         plan parsed directly through {!plan_of_json} before provider binding. *)
   }
 
-(** [summarizer ~messages] returns [Some plan] when the LLM produced a valid
-    plan over [messages], or [None] on any failure (provider error, empty
-    or invalid structured response). Total and synchronous; the effect is
-    hidden in the closure captured by {!make}. *)
-type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
+type planning_outcome =
+  | Planned of compaction_plan
+  | No_compaction
+
+(** [None] means unavailable/invalid. [No_compaction] is reserved as a valid
+    terminal LLM judgment and must not fall through to another Runtime. *)
+type summarizer = messages:Agent_sdk.Types.message list -> planning_outcome option
 
 (** The low-level provider completion the summarizer drives. Defaulted to
     {!Llm_provider.Complete.complete}; overridable in tests. *)

@@ -194,9 +194,9 @@ let tick_ok config ~now =
   | Error err -> fail (Schedule_runner.runner_error_to_string err)
 ;;
 
-let single_signal_id (result : Schedule_runner.tick_result) =
+let single_occurrence_id (result : Schedule_runner.tick_result) =
   match result.emitted with
-  | [ signal ] -> signal.signal_id
+  | [ signal ] -> Schedule_occurrence_id.to_string signal.occurrence_id
   | signals ->
     failf "expected one emitted schedule occurrence, got %d" (List.length signals)
 ;;
@@ -237,7 +237,7 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
-  let occurrence_id = single_signal_id result in
+  let occurrence_id = single_occurrence_id result in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "succeeded"
     (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
@@ -365,8 +365,8 @@ let test_recurring_wakes_keep_distinct_occurrence_ids () =
       ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
       config
   in
-  let first_id = tick_ok config ~now:201.0 |> single_signal_id in
-  let second_id = tick_ok config ~now:261.0 |> single_signal_id in
+  let first_id = tick_ok config ~now:201.0 |> single_occurrence_id in
+  let second_id = tick_ok config ~now:261.0 |> single_occurrence_id in
   check bool "recurrences have distinct identities" false (String.equal first_id second_id);
   let queued =
     Keeper_registry_event_queue.snapshot
@@ -392,7 +392,7 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
   write_empty_file keeper_owner_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
-  let occurrence_id = single_signal_id result in
+  let occurrence_id = single_occurrence_id result in
   (match List.hd result.dispatches with
    | { status = Schedule_runner.Dispatch_failed; error = Some message; _ } ->
      check bool "storage failure is explicit" true
@@ -515,7 +515,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
   let request = create_keeper_wake_schedule config in
-  let occurrence_id = tick_ok config ~now:201.0 |> single_signal_id in
+  let occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
   (match
      Keeper_registry_event_queue.drop_by_post_id
        ~base_path
@@ -650,7 +650,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
     (fun () ->
       let request = create_keeper_wake_schedule config in
       let result = tick_ok config ~now:201.0 in
-      let occurrence_id = single_signal_id result in
+      let occurrence_id = single_occurrence_id result in
       check int "one dispatch" 1 (List.length result.dispatches);
       check string "dispatch status" "succeeded"
         (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);

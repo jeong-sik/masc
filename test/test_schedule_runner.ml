@@ -75,6 +75,13 @@ let check_dispatch_status label expected actual =
   check string label (dispatch_status_to_string expected) (dispatch_status_to_string actual)
 ;;
 
+let test_occurrence_id schedule_id =
+  Schedule_occurrence_id.make
+    ~schedule_id
+    ~due_at:200.0
+    ~payload_digest:"test-payload"
+;;
+
 let read_recent_signals_exn config n =
   match read_recent_signals config n with
   | Ok signals -> signals
@@ -106,6 +113,11 @@ let json_float key json =
   | Some (`Int value) -> float_of_int value
   | Some other -> failf "field %s expected float, got %s" key (Yojson.Safe.to_string other)
   | None -> failf "missing float field %s" key
+;;
+
+let replace_json_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | json -> json
 ;;
 
 let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
@@ -155,6 +167,11 @@ let test_tick_dispatches_due_candidate_to_success () =
   check int "one dispatch" 1 (List.length result.dispatches);
   check_dispatch_status "dispatch status" Dispatch_succeeded
     (List.hd result.dispatches).status;
+  (match result.emitted, result.dispatches with
+   | [ signal ], [ dispatch ] ->
+     check bool "dispatch keeps exact occurrence identity" true
+       (Schedule_occurrence_id.equal signal.occurrence_id dispatch.occurrence_id)
+   | _ -> fail "expected one emitted and dispatched occurrence");
   check Alcotest.(list string) "consumer called" [ request.schedule_id ] !calls;
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing after dispatch"
@@ -343,7 +360,9 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
     ; dispatch =
         (fun _config ~now:_ signal request ->
            if String.equal request.schedule_id retry_request.schedule_id then (
-             retry_signal_ids := signal.signal_id :: !retry_signal_ids;
+             retry_signal_ids :=
+               Schedule_occurrence_id.to_string signal.occurrence_id
+               :: !retry_signal_ids;
              if !retry_first_attempt then (
                retry_first_attempt := false;
                Error (Retryable_dispatch_failure "queue storage unavailable"))
@@ -358,7 +377,7 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
   check int "healthy schedule dispatched once" 1 !healthy_calls;
   let occurrence_id =
     match !retry_signal_ids with
-    | [ signal_id ] -> signal_id
+    | [ occurrence_id ] -> occurrence_id
     | _ -> fail "retry schedule did not dispatch exactly once"
   in
   (match Schedule_store.get_schedule config ~schedule_id:retry_request.schedule_id with
@@ -396,13 +415,40 @@ let test_recent_signal_decode_error_is_explicit () =
     (Dated_jsonl.create ~base_dir:(signals_dir config) ())
     (`Assoc
       [ "event_type", `String "schedule.due_candidate"
-      ; "signal_id", `String "malformed"
+      ; "occurrence_id", `String "malformed"
       ]);
   match read_recent_signals config 10 with
   | Ok _ -> fail "malformed durable signal was silently ignored"
   | Error error ->
     check bool "decode error identifies row" true
       (String_util.contains_substring error "schedule signal row 0")
+;;
+
+let test_occurrence_decode_rejects_tampered_facts () =
+  with_workspace
+  @@ fun config ->
+  let _request = create_ok ~schedule_id:"codec-1" config in
+  let signal =
+    tick_ok config ~now:201.0 |> fun result -> List.hd result.emitted
+  in
+  let encoded = wake_signal_to_yojson signal in
+  (match wake_signal_of_yojson encoded with
+   | Ok decoded ->
+     check bool "round trip occurrence identity" true
+       (Schedule_occurrence_id.equal signal.occurrence_id decoded.occurrence_id)
+   | Error error -> fail error);
+  let tampered_id =
+    replace_json_field "occurrence_id" (`String "tampered") encoded
+  in
+  (match wake_signal_of_yojson tampered_id with
+   | Error _ -> ()
+   | Ok _ -> fail "tampered occurrence_id was accepted");
+  let tampered_payload =
+    replace_json_field "payload" (payload_json "different payload") encoded
+  in
+  match wake_signal_of_yojson tampered_payload with
+  | Error _ -> ()
+  | Ok _ -> fail "payload facts diverging from payload_digest were accepted"
 ;;
 
 let test_runner_status_snapshot_tracks_liveness () =
@@ -420,7 +466,8 @@ let test_runner_status_snapshot_tracks_liveness () =
     ; emitted = []
     ; rescheduled = 2
     ; dispatches =
-        [ { schedule_id = "status-1"
+        [ { occurrence_id = test_occurrence_id "status-1"
+          ; schedule_id = "status-1"
           ; status = Dispatch_succeeded
           ; detail = Some (`Assoc [ "ok", `Bool true ])
           ; error = None
@@ -454,17 +501,20 @@ let test_runner_status_snapshot_tracks_liveness () =
     ; emitted = []
     ; rescheduled = 0
     ; dispatches =
-        [ { schedule_id = "status-dispatch-failed"
+        [ { occurrence_id = test_occurrence_id "status-dispatch-failed"
+          ; schedule_id = "status-dispatch-failed"
           ; status = Dispatch_failed
           ; detail = None
           ; error = Some "dispatch failed"
           }
-        ; { schedule_id = "status-dispatch-unsupported"
+        ; { occurrence_id = test_occurrence_id "status-dispatch-unsupported"
+          ; schedule_id = "status-dispatch-unsupported"
           ; status = Dispatch_unsupported
           ; detail = None
           ; error = Some "unsupported"
           }
-        ; { schedule_id = "status-dispatch-start-rejected"
+        ; { occurrence_id = test_occurrence_id "status-dispatch-start-rejected"
+          ; schedule_id = "status-dispatch-start-rejected"
           ; status = Dispatch_start_rejected
           ; detail = None
           ; error = Some "start rejected"
@@ -551,6 +601,8 @@ let () =
             test_tick_retries_same_occurrence_without_blocking_other_schedule
         ; test_case "recent signal decode error is explicit" `Quick
             test_recent_signal_decode_error_is_explicit
+        ; test_case "occurrence decode rejects tampered facts" `Quick
+            test_occurrence_decode_rejects_tampered_facts
         ] )
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick

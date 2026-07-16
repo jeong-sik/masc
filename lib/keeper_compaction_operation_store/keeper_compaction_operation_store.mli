@@ -1,5 +1,6 @@
-(** Sole durable mutation facade for one Keeper's compaction operations. *)
-module Record = Keeper_compaction_operation_record
+(** Current compaction reducer/append facade over generic Keeper operation
+    records. The single-writer implementation migrates separately. *)
+module Record = Keeper_operation_record
 module Cursor = Record.Cursor
 type row = Record.row
 type operation_entry =

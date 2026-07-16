@@ -36,7 +36,6 @@ val event_queue_lease_delivery_ref :
 val keeper_chat_delivery_ref :
   Keeper_chat_delivery_identity.delivery_key -> provider_delivery_ref
 val keeper_turn_delivery_ref : Ids.Turn_ref.t -> provider_delivery_ref
-val provider_delivery_ref_to_yojson : provider_delivery_ref -> Yojson.Safe.t
 
 val tool_invocation_producer_ref : Tool_invocation_ref.t -> producer_ref
 val provider_overflow_producer_ref :

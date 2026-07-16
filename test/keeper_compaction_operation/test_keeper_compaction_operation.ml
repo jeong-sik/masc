@@ -1,6 +1,6 @@
 module Operation = Keeper_compaction_operation
-module Codec = Keeper_compaction_operation_codec
-module Operation_json = Keeper_compaction_operation_json
+module Event = Keeper_operation_event
+module Record = Keeper_operation_record
 module Reducer = Keeper_compaction_operation_reducer
 
 let ok = function Ok value -> value | Error _ -> Alcotest.fail "fixture rejected"
@@ -519,6 +519,35 @@ let test_reducer_requires_typed_provider_producer () =
     Alcotest.fail "provider producer was attached to a manual trigger"
 ;;
 
+let event_json event =
+  Record.encode ~recorded_at:0.0 (Event.Compaction event)
+  |> ok
+  |> Yojson.Safe.from_string
+  |> Yojson.Safe.Util.member "event"
+;;
+
+let decode_event_json event =
+  let bytes =
+    `Assoc
+      [ "recorded_at", `Float 0.0
+      ; "domain", `String "compaction"
+      ; "event", event
+      ]
+    |> Yojson.Safe.to_string
+    |> fun value -> value ^ "\n"
+  in
+  match Record.decode_rows ~from:Record.Cursor.zero ~row_number:None bytes with
+  | Ok [ row ] ->
+    (match row.event with
+     | Event.Compaction event -> Ok event)
+  | Error
+      { issue = Record.Invalid_envelope (Record.Invalid_compaction_event error)
+      ; _
+      } ->
+    Error error
+  | Ok _ | Error _ -> Alcotest.fail "record boundary returned an unrelated result"
+;;
+
 let test_canonical_json_projection () =
   let turn = Ids.Turn_ref.make ~trace_id:"trace-a" ~absolute_turn:8 in
   let events =
@@ -561,7 +590,7 @@ let test_canonical_json_projection () =
   let kinds =
     List.map
       (fun event ->
-         Operation_json.to_json event
+         event_json event
          |> Yojson.Safe.Util.member "kind"
          |> Yojson.Safe.Util.to_string)
       events
@@ -579,7 +608,7 @@ let test_canonical_json_projection () =
     ; "reinjected"
     ]
     kinds;
-  let requested = Operation_json.to_json (List.hd events) in
+  let requested = event_json (List.hd events) in
   Alcotest.(check string)
     "exact producer request id"
     "req-1"
@@ -640,13 +669,13 @@ let test_codec_roundtrip_all_events () =
   in
   List.iter
     (fun event ->
-       let json = Codec.to_json event in
-       match Codec.of_json json with
+       let json = event_json event in
+       match decode_event_json json with
        | Ok decoded ->
          Alcotest.(check (testable Yojson.Safe.pp Yojson.Safe.equal))
            "canonical roundtrip"
            json
-           (Codec.to_json decoded)
+           (event_json decoded)
        | Error _ -> Alcotest.fail "canonical event was rejected")
     events
 ;;
@@ -661,14 +690,14 @@ let replace_field name value = function
   | json -> json
 ;;
 
-let expect_field_error message expected json =
-  match Codec.of_json json with
-  | Error (Codec.Invalid_field actual) when actual = expected -> ()
+let expect_structure_error message json =
+  match decode_event_json json with
+  | Error Record.Compaction_invalid_structure -> ()
   | Ok _ | Error _ -> Alcotest.fail message
 ;;
 
 let test_codec_rejects_nested_unknown_field () =
-  let json = Codec.to_json (request_event ()) in
+  let json = event_json (request_event ()) in
   let payload = Yojson.Safe.Util.member "payload" json in
   let prepend name value = function
     | `Assoc fields -> `Assoc ((name, value) :: fields)
@@ -681,36 +710,30 @@ let test_codec_rejects_nested_unknown_field () =
   let with_unknown name =
     prepend name `Null
   in
-  expect_field_error
+  expect_structure_error
     "event accepted an unknown top field"
-    (Codec.Unknown_field { path = "$"; field = "unexpected_top" })
     (with_unknown "unexpected_top" json);
-  expect_field_error
+  expect_structure_error
     "event accepted a duplicate top field"
-    (Codec.Duplicate_field { path = "$"; field = "kind" })
     (prepend "kind" (`String "requested") json);
-  expect_field_error
+  expect_structure_error
     "event accepted a missing top field"
-    (Codec.Missing_field { path = "$"; field = "payload" })
     (remove "payload" json);
-  expect_field_error
+  expect_structure_error
     "event accepted a wrong-type top field"
-    (Codec.Wrong_type { path = "$"; field = "operation_id"; expected = "string" })
     (replace_field "operation_id" (`Int 1) json);
   let payload_unknown =
     replace_field "payload" (with_unknown "unexpected_payload" payload) json
   in
-  expect_field_error
+  expect_structure_error
     "event accepted an unknown payload field"
-    (Codec.Unknown_field { path = "payload"; field = "unexpected_payload" })
     payload_unknown;
   let trigger =
     `Assoc [ "kind", `String "manual"; "unexpected", `Null ]
   in
   let malformed = replace_field "payload" (replace_field "trigger" trigger payload) json in
-  expect_field_error
+  expect_structure_error
     "event accepted an unknown trigger field"
-    (Codec.Unknown_field { path = "payload.trigger"; field = "unexpected" })
     malformed
 ;;
 
@@ -724,7 +747,7 @@ let test_codec_rejects_invalid_provider_delivery () =
       ~cause
       ~producer:(Some overflow_producer)
   in
-  let json = Codec.to_json event in
+  let json = event_json event in
   let payload = Yojson.Safe.Util.member "payload" json in
   let producer = Yojson.Safe.Util.member "producer" payload in
   let source_delivery = Yojson.Safe.Util.member "source_delivery" producer in
@@ -740,10 +763,8 @@ let test_codec_rejects_invalid_provider_delivery () =
       (replace_field "producer" malformed_producer payload)
       json
   in
-  match Codec.of_json malformed with
-  | Error
-      (Codec.Invalid_provider_delivery
-         (Operation.Non_positive_event_queue_lease_sequence 0L)) -> ()
+  match decode_event_json malformed with
+  | Error Record.Compaction_invalid_reference -> ()
   | Ok _ | Error _ -> Alcotest.fail "invalid typed provider delivery was accepted"
 ;;
 

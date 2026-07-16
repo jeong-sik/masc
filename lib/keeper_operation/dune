@@ -1,0 +1,20 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_operation)
+ (public_name masc.keeper_operation)
+ (wrapped false)
+ (modules keeper_compaction_operation_codec keeper_compaction_operation_codec_support
+  keeper_compaction_operation_json keeper_operation_event keeper_operation_record)
+ (private_modules keeper_compaction_operation_codec
+  keeper_compaction_operation_codec_support keeper_compaction_operation_json)
+ (libraries
+  masc.compaction_trigger
+  masc.keeper_checkpoint_ref
+  masc.keeper_chat_delivery_identity
+  masc.keeper_compaction_evidence
+  masc.keeper_compaction_operation
+  masc.keeper_registry
+  masc.masc_types
+  masc.tool_invocation_ref
+  yojson))

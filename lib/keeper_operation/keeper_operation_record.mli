@@ -1,4 +1,4 @@
-(** Closed JSONL record codec around one typed compaction operation event. *)
+(** Closed JSONL record codec around one typed MASC Keeper operation event. *)
 
 module Cursor : sig
   type t
@@ -12,8 +12,15 @@ type row =
   { recorded_at : float
   ; start_cursor : Cursor.t
   ; end_cursor : Cursor.t
-  ; event : Keeper_compaction_operation.event
+  ; event : Keeper_operation_event.t
   }
+
+type compaction_event_error =
+  | Compaction_invalid_structure
+  | Compaction_unknown_kind of string
+  | Compaction_invalid_identity
+  | Compaction_invalid_reference
+  | Compaction_invalid_payload
 
 type envelope_error =
   | Expected_object
@@ -21,7 +28,9 @@ type envelope_error =
   | Duplicate_field of string
   | Missing_field of string
   | Invalid_recorded_at
-  | Invalid_event of Keeper_compaction_operation_codec.decode_error
+  | Invalid_domain
+  | Unknown_domain of string
+  | Invalid_compaction_event of compaction_event_error
 
 type issue =
   | Incomplete_tail
@@ -37,7 +46,7 @@ type decode_error =
 
 val encode :
   recorded_at:float ->
-  Keeper_compaction_operation.event ->
+  Keeper_operation_event.t ->
   (string, envelope_error) result
 (** Returns exactly one newline-terminated JSONL row. *)
 

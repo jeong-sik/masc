@@ -6,6 +6,7 @@
   masc.fs_compat
   masc.keeper_checkpoint_ref
   masc.keeper_compaction_operation
+  masc.keeper_compaction_operation_store
   masc.keeper_registry
   masc.mcp_transport_protocol
   masc.tool_invocation_ref

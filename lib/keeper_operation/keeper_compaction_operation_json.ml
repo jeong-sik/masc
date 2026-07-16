@@ -28,6 +28,25 @@ let candidate ~checkpoint_field (candidate : Operation.candidate) =
   ]
 ;;
 
+let provider_delivery_ref = function
+  | Operation.Event_queue_lease sequence ->
+    `Assoc
+      [ "kind", `String "event_queue_lease"
+      ; "sequence", `String (Int64.to_string sequence)
+      ]
+  | Operation.Keeper_chat delivery ->
+    `Assoc
+      [ "kind", `String "keeper_chat"
+      ; ( "delivery"
+        , Keeper_chat_delivery_identity.delivery_key_to_yojson delivery )
+      ]
+  | Operation.Keeper_turn turn ->
+    `Assoc
+      [ "kind", `String "keeper_turn"
+      ; "turn", Ids.Turn_ref.to_yojson turn
+      ]
+;;
+
 let producer = function
   | Operation.Tool_invocation invocation ->
     `Assoc
@@ -37,7 +56,7 @@ let producer = function
   | Operation.Provider_overflow { source_delivery; _ } ->
     `Assoc
       [ "kind", `String "provider_overflow"
-      ; "source_delivery", Operation.provider_delivery_ref_to_yojson source_delivery
+      ; "source_delivery", provider_delivery_ref source_delivery
       ]
 ;;
 

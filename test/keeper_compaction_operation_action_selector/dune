@@ -2,4 +2,5 @@
  (name test_keeper_compaction_operation_action_selector)
  (libraries alcotest masc.compaction_trigger masc.keeper_checkpoint_ref
   masc.keeper_compaction_evidence masc.keeper_compaction_operation
+  masc.keeper_compaction_operation_store
   masc.keeper_registry))

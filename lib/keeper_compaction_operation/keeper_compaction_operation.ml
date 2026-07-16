@@ -75,25 +75,6 @@ let event_queue_lease_delivery_ref ~sequence =
 let keeper_chat_delivery_ref delivery = Keeper_chat delivery
 let keeper_turn_delivery_ref turn = Keeper_turn turn
 
-let provider_delivery_ref_to_yojson = function
-  | Event_queue_lease sequence ->
-    `Assoc
-      [ "kind", `String "event_queue_lease"
-      ; "sequence", `String (Int64.to_string sequence)
-      ]
-  | Keeper_chat delivery ->
-    `Assoc
-      [ "kind", `String "keeper_chat"
-      ; ( "delivery"
-        , Keeper_chat_delivery_identity.delivery_key_to_yojson delivery )
-      ]
-  | Keeper_turn turn ->
-    `Assoc
-      [ "kind", `String "keeper_turn"
-      ; "turn", Ids.Turn_ref.to_yojson turn
-      ]
-;;
-
 let tool_invocation_producer_ref invocation = Tool_invocation invocation
 
 let provider_overflow_producer_ref ~source_checkpoint ~source_delivery =

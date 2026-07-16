@@ -1,6 +1,7 @@
 module Operation = Keeper_compaction_operation
 module Reducer = Keeper_compaction_operation_reducer
-module Record = Keeper_compaction_operation_record
+module Event = Keeper_operation_event
+module Record = Keeper_operation_record
 module Cursor = Record.Cursor
 type row = Record.row
 type operation_entry =
@@ -79,7 +80,10 @@ let find_producer producer =
     else None)
 ;;
 let apply_row ~keeper_name state row =
-  let event = row.Record.event in
+  let event =
+    match row.Record.event with
+    | Event.Compaction event -> event
+  in
   let operation_id = Operation.operation_id event in
   let current = Operation_map.find_opt operation_id state.operations in
   let* next =
@@ -175,7 +179,8 @@ let read_slice ~base_path ~keeper_name ~from =
      | Ok rows -> Ok { rows; end_cursor = cursor source.end_offset })
 ;;
 let append ~base_path ~keeper_name ~recorded_at event =
-  match Record.encode ~recorded_at event with
+  let journal_event = Event.Compaction event in
+  match Record.encode ~recorded_at journal_event with
   | Error error -> Error (Encode_failed error)
   | Ok suffix ->
     let path = journal_path ~base_path ~keeper_name in
@@ -189,7 +194,13 @@ let append ~base_path ~keeper_name ~recorded_at event =
            let end_cursor =
              cursor (Cursor.to_int start_cursor + String.length suffix)
            in
-           let row = { Record.recorded_at; start_cursor; end_cursor; event } in
+           let row =
+             { Record.recorded_at
+             ; start_cursor
+             ; end_cursor
+             ; event = journal_event
+             }
+           in
            (match apply_row ~keeper_name state row with
             | Error error -> None, Error (Event_rejected error)
             | Ok _ -> Some suffix, Ok row))

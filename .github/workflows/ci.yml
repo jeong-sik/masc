@@ -1156,10 +1156,10 @@ jobs:
           #   - dune build (compile-only) is HARD REQUIRED — Build step lacks
           #     continue-on-error, so a compile failure makes the job result =
           #     failure → check "build" required = block merge.
-          #   - Test execution (quick-suite, operator-control, sse, transport,
-          #     contract harness) is now HARD REQUIRED as well. Each test step
-          #     lacks continue-on-error, so a test failure fails the Build and
-          #     Test job and blocks merge.
+          #   - Focused operator-control, SSE, transport, and contract harness
+          #     execution is HARD REQUIRED as well. Each test step lacks
+          #     continue-on-error, so a test failure fails the Build and Test
+          #     job and blocks merge.
           check() {
             local name=$1
             local result=$2

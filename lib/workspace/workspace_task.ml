@@ -398,6 +398,7 @@ let link_task_execution_artifacts_r
                | None -> []
              in
              emit_task_activity
+               ~actor_kind:Workspace_task_classify.System
                config
                ~agent_name:"system"
                ~task_id

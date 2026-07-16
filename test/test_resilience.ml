@@ -100,34 +100,6 @@ let test_zombie_custom_threshold () =
     (Workspace_resilience.Zombie.is_zombie ~threshold:999999999999.0 "2020-01-01T00:00:00Z")
 
 (* ================================================================
-   Zombie.is_keeper_name
-   ================================================================ *)
-
-let test_keeper_name_valid () =
-  check bool "keeper-abc-agent is keeper" true
-    (Workspace_resilience.Zombie.is_keeper_name "keeper-abc-agent")
-
-let test_keeper_name_case_insensitive () =
-  check bool "Keeper-ABC-Agent is keeper" true
-    (Workspace_resilience.Zombie.is_keeper_name "Keeper-ABC-Agent")
-
-let test_keeper_name_with_spaces () =
-  check bool "trimmed keeper name" true
-    (Workspace_resilience.Zombie.is_keeper_name "  keeper-test-agent  ")
-
-let test_keeper_name_regular_agent () =
-  check bool "claude is not keeper" false
-    (Workspace_resilience.Zombie.is_keeper_name "claude")
-
-let test_keeper_name_partial_match () =
-  check bool "keeper-only prefix not keeper" false
-    (Workspace_resilience.Zombie.is_keeper_name "keeper-")
-
-let test_keeper_name_empty () =
-  check bool "empty not keeper" false
-    (Workspace_resilience.Zombie.is_keeper_name "")
-
-(* ================================================================
    Zombie.is_zombie_for_agent
    ================================================================ *)
 
@@ -199,14 +171,6 @@ let () =
       test_case "invalid" `Quick test_zombie_invalid;
       test_case "recent" `Quick test_zombie_recent;
       test_case "custom threshold" `Quick test_zombie_custom_threshold;
-    ];
-    "Zombie.is_keeper_name", [
-      test_case "valid keeper" `Quick test_keeper_name_valid;
-      test_case "case insensitive" `Quick test_keeper_name_case_insensitive;
-      test_case "with spaces" `Quick test_keeper_name_with_spaces;
-      test_case "regular agent" `Quick test_keeper_name_regular_agent;
-      test_case "partial match" `Quick test_keeper_name_partial_match;
-      test_case "empty" `Quick test_keeper_name_empty;
     ];
     "Zombie.is_zombie_for_agent", [
       test_case "regular 600s" `Quick test_zombie_for_agent_regular_600s;

@@ -1669,6 +1669,69 @@ let test_task_transitions_emit_observability () =
            ]))
 ;;
 
+let test_task_activity_uses_explicit_actor_kind () =
+  with_test_env (fun config ->
+    let previous = Atomic.get Workspace_hooks.activity_emit_fn in
+    let emitted = ref [] in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.activity_emit_fn previous)
+      (fun () ->
+         Atomic.set
+           Workspace_hooks.activity_emit_fn
+           (fun _config ~actor ?subject:_ ~kind ~payload:_ ~tags:_ () ->
+              emitted := (actor.Workspace_hooks.kind, actor.id, kind) :: !emitted);
+         let agent_name = "keeper-spoof-agent" in
+         let bind_result =
+           Workspace.bind_session config ~agent_name ~capabilities:[ "test" ] ()
+         in
+         Alcotest.(check bool) "agent bind succeeds" true (contains_check bind_result);
+         let _ =
+           Workspace.add_task
+             config
+             ~title:"Actor boundary task"
+             ~priority:1
+             ~description:""
+         in
+         (match Workspace.claim_task_r config ~agent_name ~task_id:"task-001" () with
+          | Ok _ -> ()
+          | Error err ->
+            Alcotest.failf "claim_task_r failed: %s" (Masc_domain.show_masc_error err));
+         (match
+            Workspace.link_task_execution_artifacts_r
+              config
+              ~task_id:"task-001"
+              ~session_id:"session-actor-boundary"
+              ()
+          with
+          | Ok _ -> ()
+          | Error err ->
+            Alcotest.failf
+              "link_task_execution_artifacts_r failed: %s"
+              (Masc_domain.show_masc_error err));
+         let has_event ~actor_kind ~actor_id ~event_kind =
+           List.exists
+             (fun (actual_kind, actual_id, actual_event) ->
+                String.equal actual_kind actor_kind
+                && String.equal actual_id actor_id
+                && String.equal actual_event event_kind)
+             !emitted
+         in
+         Alcotest.(check bool)
+           "agent mutation emits agent actor"
+           true
+           (has_event
+              ~actor_kind:"agent"
+              ~actor_id:agent_name
+              ~event_kind:(Event_kind.Task.to_string Event_kind.Task.Claimed));
+         Alcotest.(check bool)
+           "system mutation emits explicit system actor"
+           true
+           (has_event
+              ~actor_kind:"system"
+              ~actor_id:"system"
+              ~event_kind:(Event_kind.Task.to_string Event_kind.Task.Linked))))
+;;
+
 let test_transition_done_from_claimed_emits_observability () =
   with_test_env (fun config ->
     let before_seq = latest_ring_seq () in
@@ -1887,7 +1950,7 @@ let test_get_active_agents_falls_back_to_state_when_agent_files_missing () =
     match agents with
     | [ agent ] ->
       Alcotest.(check string) "agent name" "keeper-albini-agent" agent.name;
-      Alcotest.(check string) "agent type" "keeper" agent.agent_type;
+      Alcotest.(check string) "agent type" "workspace-state" agent.agent_type;
       Alcotest.(check string)
         "agent status"
         "active"
@@ -2741,6 +2804,10 @@ let () =
             "task transitions fan-out"
             `Quick
             test_task_transitions_emit_observability
+        ; Alcotest.test_case
+            "task activity actor kind is explicit"
+            `Quick
+            test_task_activity_uses_explicit_actor_kind
         ; Alcotest.test_case
             "claimed done fan-out"
             `Quick

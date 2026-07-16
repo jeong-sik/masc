@@ -439,10 +439,20 @@ let record_runtime_mcp_keeper_tool_trace
        ~arguments
        ~message)
 
+(** MCP tools/call [arguments] is optional (spec: "arguments?: object").
+    [Yojson.Safe.Util.member] yields [`Null] for an absent field; OAS 0.212
+    validates strictly ("expected object, got null"), so an omitted
+    arguments field must normalize to an empty object at this protocol
+    boundary — absence of arguments means "no arguments", not null. *)
+let arguments_of_params params =
+  match Yojson.Safe.Util.member "arguments" params with
+  | `Null -> `Assoc []
+  | value -> value
+
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
   let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
-  let arguments = Yojson.Safe.Util.member "arguments" params in
+  let arguments = arguments_of_params params in
   let identity =
     Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
@@ -473,7 +483,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
     | Full | Operator_remote ->
-        (Json_util.get_string params "name" |> Option.value ~default:"", Yojson.Safe.Util.member "arguments" params)
+        (Json_util.get_string params "name" |> Option.value ~default:"", arguments_of_params params)
   in
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in

@@ -49,8 +49,8 @@ classification, and lossy checkpoint mutation into:
 - one independent durable operation lane per Keeper;
 - a flat external-effect Gate with exact Always Allowed, LLM Auto Judge, and
   nonblocking HITL;
-- asynchronous parent/child operations for Tool, Model, Agent, Keeper, Fusion,
-  Connector, and Scheduler;
+- typed `Any`, `Any[]`, and `AsyncAny[]` composition over Tool, Model, Agent,
+  Keeper, Fusion, Connector, and Scheduler adapters;
 - MASC-owned LLM compaction, Memory, reinjection, and product continuation;
 - lossless dashboard projection of both MASC operations and subordinate OAS
   finite runs.
@@ -148,6 +148,16 @@ Agent_run
         -> nested child Agent_run
 ```
 
+The diagram above is current stacked shape, not the complete target hierarchy.
+The current reducer permits `Tool_invocation -> Tool_attempt` and separately
+parents a nested child `Agent_run` directly to `Tool_invocation`. It has no
+typed `PreTool`/`PostTool` closure and cannot parent a child Tool invocation or
+Agent run to the exact Tool attempt that created it. That would merge child
+history across retries and cannot represent recursive Tool/collection
+composition losslessly. Before production wiring, the reducer and projections
+must implement the hierarchy in the normative Goal without adding
+Keeper/Fusion/MASC node kinds to OAS.
+
 Every scope admits one top-level Agent run, owns one logical sequence, and
 closes at lifecycle completion. Store directory, switch, and shared CPU
 executor are caller-owned. No Keeper, Gate, Task, or MASC type appears in this
@@ -180,7 +190,8 @@ landing risk high. Before production wiring:
 
 1. restore Draft discipline and current-head CI;
 2. resolve reviews against the real Eio 1.3 `Mutex.use_ro` contract;
-3. add typed Tool attempt/receipt/unknown-outcome semantics;
+3. add typed PreTool/attempt/PostTool, exact attempt-owned child edges,
+   receipt, and unknown-outcome semantics;
 4. prove the normal public Agent API stays simple;
 5. wire the new Journal and delete old writers in one hard cut.
 
@@ -283,7 +294,8 @@ rewrite OAS run history. OAS does not decide when the Keeper resumes.
 6. make progress, waiting, wake, and restart reconciliation durable per Keeper;
 7. make compaction a durable lane operation with exact source CAS;
 8. hard-cut ToolResult externalization/hydration and legacy Memory heuristics;
-9. wire Scheduler, Connector, Fusion, Model/Agent/Keeper-as-a-Tool;
+9. wire Scheduler, Connector, Fusion, and typed Model/Agent/Keeper/Tool
+   collection adapters without exposing MASC concepts through OAS;
 10. prove mixed multi-Keeper restart, Gate, compaction, and dashboard causality;
 11. delete obsolete implementation, tests, environment knobs, and current docs.
 

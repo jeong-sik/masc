@@ -552,8 +552,6 @@ let orchestrator_entries =
       "Orchestrator check interval (seconds)";
     entry ~default:"2" "MASC_ORCHESTRATOR_MIN_PRIORITY"
       "Orchestrator minimum priority (clamped 0-10)";
-    entry ~default:"300" "MASC_ORCHESTRATOR_TIMEOUT"
-      "Orchestrator timeout (clamped 10-3600 seconds)";
   ]
 
 let path_entries =

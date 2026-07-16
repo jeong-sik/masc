@@ -4,7 +4,6 @@
 type config = {
   check_interval_s: float;      (* How often to check (default: 300s = 5min) *)
   min_priority: int;            (* Minimum task priority to trigger (default: 1) *)
-  agent_timeout_s: int;         (* Timeout for spawned orchestrator (default: 300) *)
   orchestrator_agent: string;   (* Which agent to spawn as orchestrator (env: MASC_ORCHESTRATOR_AGENT) *)
   enabled: bool;                (* Is auto-orchestration enabled *)
   port: int;                    (* MASC HTTP port for API calls *)
@@ -17,8 +16,6 @@ let load_config () =
       Env_config_core.get_float ~default:300.0 "MASC_ORCHESTRATOR_INTERVAL";
     min_priority =
       Env_config_core.get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY";
-    agent_timeout_s =
-      Env_config_core.get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT";
     orchestrator_agent = Env_config.Orchestrator.agent_name;
     enabled =
       Env_config_core.get_bool ~default:false

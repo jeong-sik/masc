@@ -4,7 +4,6 @@
 type config = {
   check_interval_s: float;
   min_priority: int;
-  agent_timeout_s: int;
   orchestrator_agent: string;
   enabled: bool;
   port: int;

@@ -71,7 +71,6 @@ module Orchestrator : sig
   val check_interval_seconds : float
   val agent_name : string
   val min_priority : int
-  val timeout_seconds : int
   val enabled : bool
 end
 

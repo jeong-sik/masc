@@ -489,49 +489,43 @@ let test_checkpoint_sanitize_preserves_pair_repair_stats () =
     false
     (text_contains "unpaired tool use elided" texts)
 
-let test_checkpoint_sanitize_preserves_tool_failure_provenance () =
+let test_checkpoint_sanitize_preserves_tool_result_exactly () =
+  let expected =
+    Agent_sdk.Types.ToolResult
+      { tool_use_id = "failed-tool"
+      ; content = String.make 600_000 'x'
+      ; outcome =
+          Agent_sdk.Types.Tool_failed
+            { failure_kind = Agent_sdk.Types.Validation_error
+            ; error_class = Some Agent_sdk.Types.Deterministic
+            }
+      ; json = Some (`Assoc [ "artifact_ref", `String "sha256:exact-source" ])
+      ; content_blocks = Some [ Agent_sdk.Types.Text "typed projection" ]
+      }
+  in
   let message : Agent_sdk.Types.message =
     {
       role = Agent_sdk.Types.Tool;
-      content =
-        [
-          Agent_sdk.Types.ToolResult
-            {
-              tool_use_id = "failed-tool";
-              content =
-                String.make
-                  (KC.default_max_checkpoint_tool_result_chars + 1)
-                  'x';
-              outcome =
-                Agent_sdk.Types.Tool_failed
-                  {
-                    failure_kind = Agent_sdk.Types.Validation_error;
-                    error_class = Some Agent_sdk.Types.Deterministic;
-                  };
-              json = None;
-              content_blocks = None;
-            };
-        ];
+      content = [ expected ];
       name = None;
       tool_call_id = Some "failed-tool";
       metadata = [];
     }
   in
-  match fst (KC.sanitize_checkpoint_message message) with
-  | Some
+  let checkpoint =
+    KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096
+    |> fun ctx -> KC.append ctx message
+    |> KC.checkpoint_of_context
+  in
+  match (fst (KC.sanitize_oas_checkpoint ~repair_orphans:false checkpoint)).messages with
+  | [
       {
-        content =
-          [ Agent_sdk.Types.ToolResult { outcome; _ } ];
+        content = [ actual ];
         _;
-      } ->
-      Alcotest.(check bool) "failure provenance preserved" true
-        (outcome
-         = Agent_sdk.Types.Tool_failed
-             {
-               failure_kind = Agent_sdk.Types.Validation_error;
-               error_class = Some Agent_sdk.Types.Deterministic;
-             })
-  | _ -> Alcotest.fail "expected one sanitized ToolResult"
+      };
+    ] ->
+      Alcotest.(check bool) "full typed ToolResult preserved" true (actual = expected)
+  | _ -> Alcotest.fail "expected one checkpointed ToolResult"
 
 let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =
   let raw_messages =
@@ -758,8 +752,8 @@ let () =
         test_pair_repair_metadata_samples_bounded;
       Alcotest.test_case "checkpoint sanitize preserves pair repair stats" `Quick
         test_checkpoint_sanitize_preserves_pair_repair_stats;
-      Alcotest.test_case "checkpoint sanitize preserves typed failure provenance" `Quick
-        test_checkpoint_sanitize_preserves_tool_failure_provenance;
+      Alcotest.test_case "checkpoint sanitize preserves full typed ToolResult" `Quick
+        test_checkpoint_sanitize_preserves_tool_result_exactly;
       Alcotest.test_case "checkpoint save repair drops unpaired tool blocks" `Quick
         test_checkpoint_save_repair_drops_unpaired_tool_blocks;
       Alcotest.test_case

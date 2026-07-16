@@ -23,15 +23,6 @@ let default_max_checkpoint_text_chars_per_message = 16 * 1024
 let default_max_checkpoint_content_chars_total = 512 * 1024
 let checkpoint_text_cap_marker = "\n[capped]"
 
-(** ToolResult block caps — analogous to text block caps above.
-    Without these, a single message with hundreds of ToolResult blocks
-    (e.g. 280 blocks × 7K chars = 1.95M chars) passes through the
-    sanitizer untouched, causing context window overflow on next load.
-    Values aligned with Claude Code: 200K aggregate, per-result 8K. *)
-let default_max_checkpoint_tool_result_chars = 8_000
-let default_max_checkpoint_tool_results_per_message = 20
-let default_max_checkpoint_tool_result_total_chars = 200_000
-
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
 (* ================================================================ *)
@@ -159,18 +150,6 @@ let tool_result_ids_of_message = Keeper_context_tool_message_pairs.tool_result_i
 let has_tool_result_block = Keeper_context_tool_message_pairs.has_tool_result_block
 let has_tool_use_block = Keeper_context_tool_message_pairs.has_tool_use_block
 let trim_messages_preserving_pairs = Keeper_context_tool_message_pairs.trim_messages_preserving_pairs
-
-(* Tool block text renderers extracted to
-   [Keeper_context_tool_text_block] (godfile decomp). Parent wrapper
-   injects [default_max_checkpoint_tool_result_chars] so the existing
-   surface (no [~max_chars] arg) stays byte-compatible for callers. *)
-let tool_result_text_of_block ~tool_use_id ~content ~json =
-  Keeper_context_tool_text_block.tool_result_text_of_block
-    ~tool_use_id
-    ~content
-    ~json
-    ~max_chars:default_max_checkpoint_tool_result_chars
-;;
 
 type tool_pair_repair_stats = Keeper_context_core_pair_repair_stats.tool_pair_repair_stats =
   { dropped_tool_uses : int

@@ -561,7 +561,8 @@ albini = "provider.runtime-id"
 
 ### 6.1 JSONL 메트릭 구조
 
-Keeper의 모든 활동은 JSONL 파일에 기록된다: `{keeper_dir}/{name}.metrics.jsonl`
+Keeper의 모든 활동은 날짜별 JSONL에 기록된다:
+`{keeper_dir}/{name}/metrics/YYYY-MM/DD.jsonl`
 
 각 줄은 하나의 메트릭 항목이며, `channel` 필드로 구분:
 

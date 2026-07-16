@@ -208,73 +208,7 @@ let gc config ~days () =
    | Error e ->
        results := Printf.sprintf "Backend pubsub cleanup failed: %s" (Backend_types.show_error e) :: !results);
 
-  (* 4. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
-        and orphan date-split metrics directories (<name>/metrics/ without <name>.json) *)
-  let keeper_orphan_count = ref 0 in
-  let pk_dir = Common.keepers_runtime_dir_of_base ~base_path:config.base_path in
-  if Sys.file_exists pk_dir then begin
-    let entries = Sys.readdir pk_dir |> Array.to_list in
-    (* Active keepers = those with a .json config file *)
-    let active_keepers = List.filter_map (fun name ->
-      if Filename.check_suffix name ".json" && String.length name > 0 && name.[0] <> '_' then
-        Some (Filename.chop_suffix name ".json")
-      else None
-    ) entries in
-    (* Find and remove orphan legacy sidecar files *)
-    List.iter (fun name ->
-      (* Skip global files starting with _ (e.g. _alerts.jsonl) *)
-      if String.length name > 0 && name.[0] <> '_' then begin
-        let is_metrics = Filename.check_suffix name ".metrics.jsonl" in
-        let is_memory = Filename.check_suffix name ".memory.jsonl" in
-        if is_metrics || is_memory then begin
-          let suffix = if is_metrics then ".metrics.jsonl" else ".memory.jsonl" in
-          let base = String.sub name 0 (String.length name - String.length suffix) in
-          if not (List.mem base active_keepers) then begin
-            (try Sys.remove (Filename.concat pk_dir name)
-             with Sys_error _ -> ());
-            incr keeper_orphan_count
-          end
-        end
-      end
-    ) entries;
-    (* Find and remove orphan date-split metrics directories *)
-    let rec rmdir_recursive path =
-      if Sys.file_exists path && Sys.is_directory path then begin
-        Array.iter (fun child ->
-          let child_path = Filename.concat path child in
-          if Sys.is_directory child_path then rmdir_recursive child_path
-          else (try Sys.remove child_path with Sys_error _ -> ())
-        ) (Sys.readdir path);
-        (try Unix.rmdir path with Unix.Unix_error _ -> ())
-      end
-    in
-    List.iter (fun name ->
-      if String.length name > 0 && name.[0] <> '_'
-         && not (Filename.check_suffix name ".json")
-         && not (Filename.check_suffix name ".jsonl") then begin
-        let dir_path = Filename.concat pk_dir name in
-        if Sys.file_exists dir_path && Sys.is_directory dir_path then begin
-          let metrics_dir = Filename.concat dir_path "metrics" in
-          if not (List.mem name active_keepers)
-             && Sys.file_exists metrics_dir && Sys.is_directory metrics_dir then begin
-            rmdir_recursive metrics_dir;
-            (* Remove the keeper dir itself if now empty *)
-            (try
-               if Array.length (Sys.readdir dir_path) = 0 then
-                 Unix.rmdir dir_path
-             with Sys_error _ | Unix.Unix_error _ -> ());
-            incr keeper_orphan_count
-          end
-        end
-      end
-    ) entries
-  end;
-  if !keeper_orphan_count > 0 then
-    results := Printf.sprintf "Removed %d orphan keeper sidecar file(s)" !keeper_orphan_count :: !results
-  else
-    results := "No orphan keeper files" :: !results;
-
-  (* 5. Archive completed/interrupted team sessions older than N days *)
+  (* 4. Archive completed/interrupted team sessions older than N days *)
   let session_archive_count = ref 0 in
   let ts_root = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "team-sessions" in
   if Sys.file_exists ts_root && Sys.is_directory ts_root then begin
@@ -328,7 +262,6 @@ let gc config ~days () =
     ("old_messages", `Int !old_msg_count);
     ("preserved", `Int !preserved_count);
     ("pubsub_cleaned", `Int !pubsub_cleanup_count);
-    ("keeper_orphans", `Int !keeper_orphan_count);
     ("sessions_archived", `Int !session_archive_count);
     ("board_artifacts", `Int board_artifact_count);
     ("cp_cleanup", `Null);

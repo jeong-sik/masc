@@ -5,7 +5,6 @@
  (public_name masc.keeper_failure_taxonomy)
  (wrapped false)
  (modules
-  keeper_alert_persist_kind
   keeper_approval_queue_failure_site
   keeper_checkpoint_failure_operation
   keeper_checkpoint_store_failure_site

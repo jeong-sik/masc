@@ -448,7 +448,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          in
 
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
-         let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
          let memory_bank_path =
            Keeper_types_support.keeper_memory_bank_path config m.name
          in
@@ -479,11 +478,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
 
          let metrics_tail =
            let lines =
-             let dated = Dated_jsonl.read_recent_lines metrics_store tail_turns in
-             if dated <> [] then dated
-             else
-               read_tail_lines_or_empty ~site:"keeper_status_detail_metrics_tail"
-                 metrics_path ~max_bytes:tail_bytes ~max_lines:tail_turns
+             Dated_jsonl.read_recent_lines metrics_store tail_turns
            in
            let (parsed, _) =
              Fs_compat.parse_jsonl_lines ~source:"keeper_metrics" lines
@@ -493,11 +488,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let metrics_window_lines =
            if include_metrics_overview then
              let n = max tail_turns 200 in
-             let dated = Dated_jsonl.read_recent_lines metrics_store n in
-             if dated <> [] then dated
-             else
-               read_tail_lines_or_empty ~site:"keeper_status_detail_metrics_window"
-                 metrics_path ~max_bytes:tail_bytes ~max_lines:n
+             Dated_jsonl.read_recent_lines metrics_store n
            else
              []
          in
@@ -641,14 +632,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              (`List [], 0)
            else
              let n = max 200 (tail_compactions * 20) in
-             let lines =
-               let dated = Dated_jsonl.read_recent_lines metrics_store n in
-               if dated <> [] then dated
-               else
-                 read_tail_lines_or_empty
-                   ~site:"keeper_status_detail_compaction_history" metrics_path
-                   ~max_bytes:tail_bytes ~max_lines:n
-             in
+             let lines = Dated_jsonl.read_recent_lines metrics_store n in
              let events_rev =
                List.fold_left
                  (fun acc line ->
@@ -775,7 +759,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ~config:config ~meta:m
          in
          let latest_metrics =
-           latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
+           latest_metrics_json ~metrics_store
          in
          let model_observability =
            model_observability_json
@@ -951,13 +935,10 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-             ("metrics_single_file", `String metrics_path);
            ("memory_bank", `String memory_bank_path);
            ("generation_index", `String generation_index_path);
            ( "decisions"
            , `String (Keeper_types_support.keeper_decision_log_path config m.name) );
-           ( "policy"
-             , `String (Keeper_types_support.keeper_policy_log_path config m.name) );
              ( "feedback"
              , `String (Keeper_types_support.keeper_feedback_log_path config m.name) );
            ("session_dir", `String session_dir);

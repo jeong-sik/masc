@@ -151,7 +151,6 @@ type t =
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
-  | AlertPersistFailures
   | MetricsSseFailures
   | ChatStoreFailures
   | ChatTransportFailures
@@ -190,7 +189,6 @@ type t =
   | UsageAnomalyReason
   | ConfigEnvParseFailures
   | PostTurnWireinFailures
-  | RecurringFailures
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
@@ -372,7 +370,6 @@ let to_string = function
   | MemoryLaneProviderSlotBusy -> "masc_keeper_memory_lane_provider_slot_busy_total"
   | MemoryBankCompactionFailures -> "masc_keeper_memory_bank_compaction_failures_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
-  | AlertPersistFailures -> "masc_keeper_alert_persist_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"
   | ChatStoreFailures -> "masc_keeper_chat_store_failures_total"
   | ChatTransportFailures -> "masc_keeper_chat_transport_failures_total"
@@ -413,7 +410,6 @@ let to_string = function
   | UsageAnomalyReason -> "masc_keeper_usage_anomaly_reason_total"
   | ConfigEnvParseFailures -> "masc_keeper_config_env_parse_failures_total"
   | PostTurnWireinFailures -> "masc_keeper_post_turn_wirein_failures_total"
-  | RecurringFailures -> "masc_keeper_recurring_failures_total"
   | TurnCleanupFailures -> "masc_keeper_turn_cleanup_failures_total"
   | MemoryBankLoadHistorySwallowedExceptions ->
       "masc_keeper_memory_bank_load_history_swallowed_exceptions_total"

@@ -2714,11 +2714,11 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         | Ok backlog -> backlog.version
         | Error detail -> fail detail
       in
+      let metrics_dir = Keeper_types_support.keeper_metrics_dir config meta.name in
+      write_file (Filename.concat metrics_dir "2026-07/15.jsonl") "{}\n";
       let sidecar_paths =
-        [ Keeper_types_support.keeper_metrics_path config meta.name
-        ; Keeper_types_support.keeper_memory_bank_path config meta.name
+        [ Keeper_types_support.keeper_memory_bank_path config meta.name
         ; Keeper_types_support.keeper_generation_index_path config meta.name
-        ; Keeper_types_support.keeper_policy_log_path config meta.name
         ; Keeper_types_support.keeper_decision_log_path config meta.name
         ; Keeper_types_support.keeper_feedback_log_path config meta.name
         ]
@@ -2866,6 +2866,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
        | _ -> fail "dashboard purge did not persist its delivered receipt");
       let removed_paths =
         [ Keeper_types_profile.keeper_meta_path config meta.name
+        ; metrics_dir
         ; runtime_dir
         ; session_dir
         ; configuration_path

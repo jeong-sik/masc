@@ -26,15 +26,6 @@ val min_keeper_context_tokens : int
     re-hardcode [1_000_000] elsewhere. *)
 val max_keeper_context_tokens : int
 
-(** {2 Alert Preview Truncation Lengths}
-
-    Invariant: [excerpt_min < message_max < reply_max]. *)
-
-val alert_error_detail_max_chars : int
-val alert_excerpt_min_chars : int
-val alert_message_preview_max_chars : int
-val alert_reply_preview_max_chars : int
-
 val default_proactive_enabled : bool
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.

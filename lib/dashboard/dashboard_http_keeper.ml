@@ -465,15 +465,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              Previous value of 12000 caused 60K+ lines across 5 keepers. *)
           let metrics_cap = if compact then series_points else 500 in
           let metrics_window_max_bytes = if compact then 50000 else 200000 in
-          let all_metrics_lines =
-            let n = metrics_cap in
-            let dated = Dated_jsonl.read_recent_lines metrics_store n in
-            if dated <> [] then dated
-            else
-              let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
-              Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_metrics" metrics_path
-                ~max_bytes:metrics_window_max_bytes ~max_lines:n
-          in
+          let all_metrics_lines = Dated_jsonl.read_recent_lines metrics_store metrics_cap in
           let (metrics_24h, metrics_24h_summary) =
             if compact then (`Null, `Null)
             else keeper_metrics_24h_json ~metrics_lines:all_metrics_lines ~now_ts
@@ -1067,22 +1059,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
       results.(idx) <- row)
      names);
   let summaries = Array.to_list results |> List.filter_map Fun.id in
-  (* H-9 fix: include recent alerts so BAD alerts are visible on dashboard *)
-  let recent_alerts =
-    let alerts_path = Keeper_types_support.keeper_alerts_path config in
-    let lines =
-      Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_alerts" alerts_path
-        ~max_bytes:50000 ~max_lines:10
-    in
-    List.filter_map (fun line ->
-      try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-    ) lines
-  in
   `Assoc [
     ("keepers", `List summaries);
     ("total", `Int (List.length summaries));
-    ("recent_alerts", `List recent_alerts);
-    ("alert_count", `Int (List.length recent_alerts));
   ]
 
 let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =

@@ -50,10 +50,9 @@ type completion_action =
   | Dashboard_keeper_purged
 
 type dashboard_purge_artifact =
-  | Keeper_metrics_artifact
+  | Keeper_metrics_store_artifact
   | Keeper_memory_bank_artifact
   | Keeper_generation_index_artifact
-  | Keeper_policy_log_artifact
   | Keeper_decision_log_artifact
   | Keeper_feedback_log_artifact
   | Keeper_runtime_directory_artifact
@@ -445,10 +444,9 @@ let dashboard_purge_artifact_plan ~keeper_name context =
     |> List.filter_map String_util.trim_to_option
     |> List.sort_uniq String.compare
   in
-  [ Keeper_metrics_artifact
+  [ Keeper_metrics_store_artifact
   ; Keeper_memory_bank_artifact
   ; Keeper_generation_index_artifact
-  ; Keeper_policy_log_artifact
   ; Keeper_decision_log_artifact
   ; Keeper_feedback_log_artifact
   ; Keeper_runtime_directory_artifact

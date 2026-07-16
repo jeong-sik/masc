@@ -1,17 +1,10 @@
 type keeper_artifact =
   | Metadata
-  | Metrics_log
   | Memory_log
   | Generation_index_log
-  | Policy_log
   | Decision_log
   | Feedback_log
   | Tla_trace_log
-
-type global_artifact =
-  | Alerts_log
-  | Alerts_retry_log
-  | Alerts_deadletter_log
 
 type t =
   | Keeper of
@@ -19,17 +12,11 @@ type t =
       ; artifact : keeper_artifact
       ; rotation : int option
       }
-  | Global of
-      { artifact : global_artifact
-      ; rotation : int option
-      }
 
 let keeper_suffix = function
   | Metadata -> ".json"
-  | Metrics_log -> ".metrics.jsonl"
   | Memory_log -> ".memory.jsonl"
   | Generation_index_log -> ".generation_index.jsonl"
-  | Policy_log -> ".policy.jsonl"
   | Decision_log -> ".decisions.jsonl"
   | Feedback_log -> ".feedback.jsonl"
   | Tla_trace_log -> ".tla-trace.jsonl"
@@ -37,18 +24,9 @@ let keeper_suffix = function
 
 let keeper_basename ~keeper_name artifact = keeper_name ^ keeper_suffix artifact
 
-let global_basename = function
-  | Alerts_log -> "_alerts.jsonl"
-  | Alerts_retry_log -> "_alerts.retry.jsonl"
-  | Alerts_deadletter_log -> "_alerts.deadletter.jsonl"
-;;
-
 let basename = function
   | Keeper { keeper_name; artifact; rotation } ->
     let base = keeper_basename ~keeper_name artifact in
-    Option.fold ~none:base ~some:(fun rotation -> base ^ "." ^ string_of_int rotation) rotation
-  | Global { artifact; rotation } ->
-    let base = global_basename artifact in
     Option.fold ~none:base ~some:(fun rotation -> base ^ "." ^ string_of_int rotation) rotation
 ;;
 
@@ -57,24 +35,15 @@ type descriptor =
       { artifact : keeper_artifact
       ; rotatable : bool
       }
-  | Global_descriptor of
-      { artifact : global_artifact
-      ; rotatable : bool
-      }
 
 (* Longest Keeper suffixes precede [.json], preserving dotted Keeper names
    while keeping classification total and deterministic. *)
 let descriptors =
   [ Keeper_descriptor { artifact = Generation_index_log; rotatable = true }
-  ; Global_descriptor { artifact = Alerts_deadletter_log; rotatable = true }
-  ; Global_descriptor { artifact = Alerts_retry_log; rotatable = true }
   ; Keeper_descriptor { artifact = Decision_log; rotatable = true }
   ; Keeper_descriptor { artifact = Feedback_log; rotatable = true }
   ; Keeper_descriptor { artifact = Memory_log; rotatable = true }
-  ; Keeper_descriptor { artifact = Metrics_log; rotatable = true }
-  ; Keeper_descriptor { artifact = Policy_log; rotatable = true }
   ; Keeper_descriptor { artifact = Tla_trace_log; rotatable = true }
-  ; Global_descriptor { artifact = Alerts_log; rotatable = true }
   ; Keeper_descriptor { artifact = Metadata; rotatable = false }
   ]
 ;;
@@ -131,20 +100,6 @@ let classify_basename observed_basename =
          in
          classify candidates rest
        | Some _ | None -> classify candidates rest)
-    | Global_descriptor { artifact; rotatable } :: rest ->
-      if
-        String.equal unrotated_basename (global_basename artifact)
-        && (Option.is_none rotation || rotatable)
-      then
-        let candidate = Global { artifact; rotation } in
-        let candidates =
-          Option.fold
-            ~none:candidates
-            ~some:(fun candidate -> candidate :: candidates)
-            (candidate_if_canonical candidate)
-        in
-        classify candidates rest
-      else classify candidates rest
   in
   classify [] descriptors
 ;;
@@ -153,5 +108,5 @@ let metadata_keeper_name observed_basename =
   classify_basename observed_basename
   |> List.find_map (function
     | Keeper { keeper_name; artifact = Metadata; rotation = None } -> Some keeper_name
-    | Keeper _ | Global _ -> None)
+    | Keeper _ -> None)
 ;;

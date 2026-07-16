@@ -142,7 +142,6 @@ type t =
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
-  | AlertPersistFailures
   | MetricsSseFailures
   | ChatStoreFailures
   | ChatTransportFailures
@@ -181,7 +180,6 @@ type t =
   | UsageAnomalyReason
   | ConfigEnvParseFailures
   | PostTurnWireinFailures
-  | RecurringFailures
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors

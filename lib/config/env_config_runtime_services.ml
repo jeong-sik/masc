@@ -53,7 +53,10 @@ end
 (** {1 Client Registry Observation} *)
 
 module ClientRegistry = struct
-  (** Active-presence observation window used by HTTP projections. *)
+  (** Active-presence observation window used by HTTP projections.
+
+      @category Thresholds
+      @ops_class operator *)
   let active_window_seconds =
     Float.max 1.0
       (get_float ~default:300.0 "MASC_CLIENT_REGISTRY_ACTIVE_WINDOW_SEC")

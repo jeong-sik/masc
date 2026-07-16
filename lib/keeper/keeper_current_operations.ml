@@ -111,7 +111,7 @@ let status_to_yojson = function
   | Done { ok; body; data } ->
     `Assoc [ "kind", `String "done"; "terminal", `Bool true; "ok", `Bool ok
            ; "body", `String body
-           ; "data", Option.value ~default:`Null data ]
+           ; "data", (match data with None -> `Null | Some value -> value) ]
 ;;
 
 let async_entry_to_yojson (entry : Keeper_msg_async.entry) =

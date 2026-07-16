@@ -187,6 +187,35 @@ let compaction_plan_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+(* Replacement compaction plan. Summaries are attached to their atomic source
+   unit so disjoint reductions preserve chronological placement. *)
+let compaction_unit_plan_field_kept_indices = "kept_indices"
+let compaction_unit_plan_field_dropped_indices = "dropped_indices"
+let compaction_unit_plan_field_summarized_units = "summarized_units"
+let compaction_unit_plan_field_unit_index = "unit_index"
+let compaction_unit_plan_field_unit_summary = "summary"
+
+let compaction_unit_plan_output_schema =
+  let int_array = `Assoc [ "type", `String "array"; "items", integer_schema ] in
+  let summarized_unit_fields =
+    [ compaction_unit_plan_field_unit_index, integer_schema
+    ; compaction_unit_plan_field_unit_summary, string_schema
+    ]
+  in
+  let summarized_unit =
+    object_schema
+      ~required:(List.map fst summarized_unit_fields)
+      summarized_unit_fields
+  in
+  let fields =
+    [ compaction_unit_plan_field_kept_indices, int_array
+    ; compaction_unit_plan_field_dropped_indices, int_array
+    ; compaction_unit_plan_field_summarized_units, array_schema summarized_unit
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let vision_analyze_output_schema =
   let fields = [ "text", string_schema ] in
   object_schema ~required:(List.map fst fields) fields

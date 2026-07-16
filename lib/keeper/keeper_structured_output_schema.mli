@@ -26,6 +26,17 @@ val compaction_plan_output_schema : Yojson.Safe.t
 (** JSON object the LLM compaction summarizer must return: a [summary] prose
     block plus kept / summarized / dropped 0-based message indices. *)
 
+val compaction_unit_plan_field_kept_indices : string
+val compaction_unit_plan_field_dropped_indices : string
+val compaction_unit_plan_field_summarized_units : string
+val compaction_unit_plan_field_unit_index : string
+val compaction_unit_plan_field_unit_summary : string
+
+val compaction_unit_plan_output_schema : Yojson.Safe.t
+(** Replacement compaction schema. Every atomic source unit is kept, dropped,
+    or replaced by its own non-empty summary so disjoint reductions retain
+    chronological placement. *)
+
 val vision_analyze_output_schema : Yojson.Safe.t
 (** JSON object the one-shot vision analyzer provider must return. *)
 

@@ -1993,6 +1993,8 @@
 
 (include stanzas/test_masc_oas_bridge_cancel_boundary.inc)
 
+(include stanzas/test_masc_oas_bridge_observation.inc)
+
 (include stanzas/test_operator_mcp_e2e.inc)
 
 (include stanzas/test_otel_tick_poison_source.inc)

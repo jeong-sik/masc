@@ -3,7 +3,12 @@
     Included by {!Otel_metric_store} so existing callers keep using
     [Otel_metric_store.metric_*] bindings unchanged. *)
 
-(** Labelled [caller, bucket] to observe structured cancellation latency. *)
+(** Labelled [caller]. Counts genuine inner [Eio.Time.Timeout] observations;
+    MASC does not fabricate a bridge budget label. *)
+val metric_oas_bridge_timeout : string
+
+(** Labelled [caller, bucket]. [bucket] is a shared wall-clock class when a
+    domain-local clock exists, or [wall_unavailable] otherwise. *)
 val metric_oas_bridge_cancel : string
 
 val metric_oas_sse_relay_retries : string

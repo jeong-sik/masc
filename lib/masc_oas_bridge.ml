@@ -1,26 +1,60 @@
 (* lib/masc_oas_bridge.ml *)
 (** Centralized boundary between MASC subsystems and the OAS Agent SDK.
-    Preserves cancellation safety and type isolation. Provider transport owns
-    the only LLM timeout boundary. *)
+    Enforces cancellation safety and type isolation. MASC does not own a
+    wall-clock budget at this boundary. *)
 
-(** Safe execution of a generic OAS operation.
-    [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency.
+type caller =
+  | Anti_rationalization
+  | Operator_judge
 
-    [caller] (#10094) is a free-form identifier
-    ("anti_rationalization", "operator_judge", ...) for attribution. *)
+let caller_key = function
+  | Anti_rationalization -> "anti_rationalization"
+  | Operator_judge -> "operator_judge"
+;;
+
 let run_safe ~caller fn =
-  let t0 = Unix.gettimeofday () (* NDT-OK: cancellation telemetry only. *) in
+  let caller = caller_key caller in
+  let timing =
+    match Masc_eio_env.get_opt () with
+    | None -> None
+    | Some { Masc_eio_env.clock; _ } -> Some (clock, Eio.Time.now clock)
+  in
   let elapsed () =
-    Unix.gettimeofday () (* NDT-OK: cancellation telemetry only. *) -. t0
+    Option.map (fun (clock, started_at) -> Eio.Time.now clock -. started_at) timing
   in
   try fn () with
+  | Eio.Time.Timeout ->
+    let wall = elapsed () in
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_bridge_timeout
+      ~labels:[ "caller", caller ]
+      ();
+    (match wall with
+     | Some wall ->
+       Log.Misc.warn
+         "masc_oas_bridge: inner OAS timeout observed caller=%s wall=%.1fs"
+         caller wall
+     | None ->
+       Log.Misc.warn
+         "masc_oas_bridge: inner OAS timeout observed caller=%s wall_unavailable"
+         caller);
+    let message =
+      match wall with
+      | Some wall -> Printf.sprintf "Inner OAS timeout observed after %.1fs" wall
+      | None -> "Inner OAS timeout observed"
+    in
+    Error
+      (Agent_sdk.Error.Api
+         (Timeout
+            { message; phase = None }))
   | Eio.Cancel.Cancelled inner_exn as exn ->
-    (* Preserve wall-duration class and the inner cancellation reason.
-       [inner=...] surfaces the parent fiber's exception payload so
-       supervisor-pause and runtime-rotation remain distinguishable. *)
     let bt = Printexc.get_raw_backtrace () in
     let wall = elapsed () in
-    let bucket = Cancel_wall_bucket.of_wall wall in
+    let bucket =
+      match wall with
+      | Some wall -> Cancel_wall_bucket.of_wall wall
+      | None -> "wall_unavailable"
+    in
     let inner_str =
       match inner_exn with
       | Failure msg -> "Failure(" ^ msg ^ ")"
@@ -32,13 +66,15 @@ let run_safe ~caller fn =
         ("caller", caller);
         ("bucket", bucket);
       ] ();
-    (* Treat every [Eio.Cancel.Cancelled] as a routine cancellation and log it
-       at INFO level. We intentionally avoid matching on Eio internal exception
-       names (e.g. Fiber's Not_first race exception) because those strings are
-       not a stable API and will break if Eio renames the underlying exception. *)
-    Log.Misc.info
-      "masc_oas_bridge: OAS execution cancelled caller=%s wall=%.1fs bucket=%s inner=%s (re-raising)"
-      caller wall bucket inner_str;
+    (match wall with
+     | Some wall ->
+       Log.Misc.info
+         "masc_oas_bridge: OAS execution cancelled caller=%s wall=%.1fs bucket=%s inner=%s (re-raising)"
+         caller wall bucket inner_str
+     | None ->
+       Log.Misc.info
+         "masc_oas_bridge: OAS execution cancelled caller=%s wall_unavailable inner=%s (re-raising)"
+         caller inner_str);
     Printexc.raise_with_backtrace exn bt
   | exn ->
     let bt = Printexc.get_backtrace () in
@@ -51,8 +87,3 @@ let run_safe ~caller fn =
       (Keeper_internal_error.sdk_error_of_masc_internal_error
          (Keeper_internal_error.Internal_bridge_exception
             { caller; exn_repr = Printexc.to_string exn }))
-
-(** Typed-caller entry point. The bridge observes cancellation and exceptions;
-    OAS Provider transport owns LLM timeout enforcement. *)
-let run_with_caller ~caller fn =
-  run_safe ~caller:(Env_config_oas_bridge.caller_key caller) fn

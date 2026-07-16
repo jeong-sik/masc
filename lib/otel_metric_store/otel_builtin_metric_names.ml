@@ -60,6 +60,7 @@ let metric_telemetry_observe_failures = Otel_metric_store_core.declare_counter "
    most 19 (3 + 8 + 8). *)
 let metric_workspace_telemetry_drop = Otel_metric_store_core.declare_counter "masc_workspace_telemetry_drop_total"
 
+(* Per-caller observation of genuine inner OAS timeout exceptions. *)
 include Otel_oas_metric_names
 
 

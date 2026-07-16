@@ -457,19 +457,17 @@ let install () =
                 { field = "task.anti_rationalization.output_schema"; detail }))
     in
     match
-	      Masc_oas_bridge.run_with_caller
-	        ~caller:Env_config_oas_bridge.Anti_rationalization
-	        (fun () ->
-	           let base_path = Env_config_core.base_path () in
-	           Keeper_turn_driver_wrappers.run_named_with_masc_tools
-	             ~runtime_id:evaluator_runtime
-	             ~base_path
-	             ~goal:prompt
-             ~masc_tools:[ report_tool_schema ]
-             ~dispatch
-             ~provider_config_transform:apply_review_verdict_output_schema
-             ?sw
-             ())
+      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Anti_rationalization (fun () ->
+        let base_path = Env_config_core.base_path () in
+        Keeper_turn_driver_wrappers.run_named_with_masc_tools
+          ~runtime_id:evaluator_runtime
+          ~base_path
+          ~goal:prompt
+          ~masc_tools:[ report_tool_schema ]
+          ~dispatch
+          ~provider_config_transform:apply_review_verdict_output_schema
+          ?sw
+          ())
     with
     | Ok result ->
       (match !protocol_error_ref with

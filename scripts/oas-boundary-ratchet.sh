@@ -87,7 +87,7 @@ count_bridge_adoption() {
 
 # Metric definitions: name|hint
 METRICS=(
-  "c4_direct_runtime_calls_layer_c|Direct Oas.Agent.run / Oas.Tool.dispatch in Layer C — route through Masc_oas_bridge.run_with_caller (or Keeper_tools_oas / Oas_worker)."
+  "c4_direct_runtime_calls_layer_c|Direct Oas.Agent.run / Oas.Tool.dispatch in Layer C — route through Masc_oas_bridge.run_safe (or Keeper_tools_oas / Oas_worker)."
 )
 
 DESCRIPTIVE_METRICS=(

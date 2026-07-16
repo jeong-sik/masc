@@ -44,8 +44,6 @@ type compaction =
   }
 
 type read_error = Keeper_memory_recall_exn_class.t
-type consolidation_summarizer = Keeper_memory_bank.memory_consolidation_summarizer
-
 type t =
   { bank_summary : summary
   ; last_compaction : compaction
@@ -89,12 +87,6 @@ val append_from_tool_results :
   turn:int ->
   results:Yojson.Safe.t list ->
   int
-
-val compact_if_needed :
-  ?summarizer:consolidation_summarizer ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  compaction
 
 val summary_to_json : summary -> Yojson.Safe.t
 val compaction_to_json : compaction -> Yojson.Safe.t

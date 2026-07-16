@@ -235,9 +235,9 @@ copy_install_smoke() {
 # serves /health. The [models.deepseek-v4-flash] block mirrors
 # config/runtime.toml's shape so the runtime resolves; its model id is what the
 # gate matches against the catalog.
-default = "release_evidence.deepseek-v4-flash"
+default = "ollama_cloud.deepseek-v4-flash"
 
-[providers.release_evidence]
+[providers.ollama_cloud]
 display-name = "Release Evidence Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
@@ -248,7 +248,7 @@ max-context = 32768
 tools-support = true
 streaming = true
 
-[release_evidence.deepseek-v4-flash]
+[ollama_cloud.deepseek-v4-flash]
 is-default = true
 max-concurrent = 1
 EOF

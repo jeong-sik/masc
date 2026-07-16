@@ -96,6 +96,8 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Hitl_resolved_stimulus
   | Keeper_event_queue.Failure_judgment _ ->
     Some Keeper_world_observation.Failure_judgment_stimulus
+  | Keeper_event_queue.Manual_compaction_requested ->
+    Some Keeper_world_observation.Manual_compaction_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Fusion_completed _
@@ -179,6 +181,11 @@ let consume_single_heartbeat_stimulus
       (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Manual_compaction_requested ->
+    Log.Keeper.info
+      "turn entry: manual compaction request delivered (keeper=%s)"
+      meta_after_triage.name;
+    []
   | Keeper_event_queue.Bootstrap ->
     Log.Keeper.info
       "turn entry: bootstrap stimulus consumed (keeper=%s)"
@@ -277,6 +284,7 @@ let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Failure_judgment _
+  | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _ ->
     true
 ;;

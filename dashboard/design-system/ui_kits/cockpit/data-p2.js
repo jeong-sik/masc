@@ -131,7 +131,7 @@ window.MASC_P2 = (function () {
       configured: ["runtime-adapter-a:auto","runtime-adapter-b:capability-tier-b-coding","runtime-adapter-a:capability-tier-a-plus","runtime-adapter-b:runtime-slot-b-capability-tier-b","runtime-slot-c:capability-tier-c","runtime-slot-d:capability-tier-d","runtime-slot-a:capability-tier-a","runtime-slot-e:capability-tier-local-large","local-runtime:capability-tier-local","runtime-slot-f:capability-tier-f"],
       primary:"runtime-adapter-a:auto", selected:null,
       hops: [
-        { i:0, model:"runtime-adapter-a:auto",      status:"miss", ms:1065690, reason:"error_max_turns (15)" },
+        { i:0, model:"runtime-adapter-a:auto",      status:"miss", ms:1065690, reason:"api_error_server:502" },
         { i:1, model:"runtime-adapter-b:capability-tier-b-coding", status:"miss", ms:48161, reason:"runtime-slot-b exited code 1 — auth/config" },
         { i:2, model:"—",                     status:"exhausted", ms:0, reason:"runtime_exhausted" },
       ],
@@ -164,7 +164,7 @@ window.MASC_P2 = (function () {
     { ts:"16:32:18Z", kind:"suite.failed",    actor:"qa-king",       subject:"suite-merge-blockers",             duration:23800,payload:{pass:47, fail:3} },
     { ts:"16:32:01Z", kind:"verdict.approve", actor:"nick0cave",     subject:"PR #9712 backport",                duration:0,    payload:{evidence:"da11b0632"} },
     { ts:"16:31:44Z", kind:"task.claimed",    actor:"nick0cave",     subject:"task-031",                          duration:0,    payload:{goal:"goal-merge-blockers"} },
-    { ts:"16:31:27Z", kind:"runtime.exhausted",actor:"sangsu",       subject:"keeper_unified",                    duration:1113851,payload:{hops:2, error:"max_turns"} },
+    { ts:"16:31:27Z", kind:"runtime.exhausted",actor:"sangsu",       subject:"keeper_unified",                    duration:1113851,payload:{hops:2, error:"api_error_server:502"} },
     { ts:"16:31:17Z", kind:"tool.called",     actor:"qa-king",       subject:"test_runtime_retry",               duration:1230, payload:{tool:"keeper_test", outcome:"flake"} },
     { ts:"16:30:55Z", kind:"task.cancelled", actor:"taskmaster",     subject:"task-038",                          duration:0,    payload:{reason:"duplicate"} },
     { ts:"16:30:18Z", kind:"message.dm",      actor:"masc-improver", subject:"sangsu",                            duration:0,    payload:{seq:292, kind:"dm"} },
@@ -283,7 +283,7 @@ window.MASC_P2 = (function () {
   // K2 · DECISIONS stream (compressed from sangsu.decisions.jsonl)
   const decisions = [
     { id:"dec-1776922a",ts:"16:31:27Z", keeper:"sangsu", channel:"turn", surface:"silent", outcome:"error", summary:"mentions=1; scope=131; unclaimed=4; failed=15; idle=386s", blocker:"runtime_exhausted (agent-runtime-a exited code 1)", latency_ms:1074371 },
-    { id:"dec-1776921e",ts:"16:09:55Z", keeper:"sangsu", channel:"turn", surface:"silent", outcome:"error", summary:"mentions=1; scope=132; unclaimed=4; failed=15; idle=1585s", blocker:"runtime_exhausted (max_turns 15)", latency_ms:421106 },
+    { id:"dec-1776921e",ts:"16:09:55Z", keeper:"sangsu", channel:"turn", surface:"silent", outcome:"error", summary:"mentions=1; scope=132; unclaimed=4; failed=15; idle=1585s", blocker:"runtime_exhausted (api_error_server:502)", latency_ms:421106 },
     { id:"dec-1776920e",ts:"16:01:42Z", keeper:"sangsu", channel:"scheduled_autonomous", surface:"silent", outcome:"error", summary:"unclaimed=4; failed=15; idle=1466s", blocker:"runtime-adapter-b rejected (exit 1)", latency_ms:48161 },
     { id:"dec-1776919e",ts:"15:54:12Z", keeper:"qa-king", channel:"turn", surface:"broadcast", outcome:"failure", summary:"suite=merge-blockers; n=50; re-run flake test", blocker:null, latency_ms:23800 },
     { id:"dec-1776918e",ts:"15:32:00Z", keeper:"taskmaster", channel:"turn", surface:"broadcast", outcome:"success", summary:"task-038 duplicates task-031; cancel duplicate", blocker:null, latency_ms:412 },

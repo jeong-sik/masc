@@ -86,17 +86,15 @@ let with_temp_keepers f =
 ;;
 
 (* Load the on-disk prompt templates so messages_for_consolidation can render the
-   consolidation prompt. DUNE_SOURCEROOT points at the repo root under dune. *)
+   consolidation prompt. [Masc_test_deps.source_path] locates the repo root the same
+   way every other prompt-reading test does: DUNE_SOURCEROOT under dune, else a
+   walk up from cwd (find_project_root). This keeps the executable runnable both
+   under `dune test` and as a bare `_build/default/test/*.exe`. *)
 let with_prompts f =
-  let root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some r -> r
-    | None ->
-      Alcotest.fail "DUNE_SOURCEROOT is required to locate config/prompts in tests"
-  in
+  let prompts_dir = Masc_test_deps.source_path "config/prompts" in
   Fun.protect ~finally:Prompt_registry.clear (fun () ->
     Prompt_registry.clear ();
-    Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+    Prompt_registry.set_markdown_dir prompts_dir;
     Masc.Prompt_defaults.init ();
     f ())
 ;;

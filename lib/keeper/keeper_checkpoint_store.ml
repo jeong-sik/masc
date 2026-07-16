@@ -589,6 +589,16 @@ type checkpoint_ref_load_error =
       }
   | Ref_lock_failed of string
 
+type exact_checkpoint_snapshot =
+  { checkpoint : Agent_sdk.Checkpoint.t
+  ; reference : Keeper_checkpoint_ref.t
+  ; canonical_bytes : string
+  }
+
+let exact_snapshot_checkpoint snapshot = snapshot.checkpoint
+let exact_snapshot_reference snapshot = snapshot.reference
+let exact_snapshot_canonical_bytes snapshot = snapshot.canonical_bytes
+
 type checkpoint_cas_error =
   | Source_unavailable of checkpoint_ref_load_error
   | Source_changed of Keeper_checkpoint_ref.t
@@ -643,6 +653,29 @@ let checkpoint_ref_of_canonical_bytes canonical_bytes
          ~canonical_checkpoint_bytes:canonical_bytes
        |> Result.map_error (fun error -> Ref_create_failed error))
 
+let exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint =
+  match checkpoint_ref_of_canonical_bytes canonical_bytes checkpoint with
+  | Error error -> Error (Ref_identity_invalid error)
+  | Ok reference
+    when not
+           (Keeper_id.Trace_id.equal
+              expected_session_id reference.trace_id) ->
+    Error
+      (Ref_session_mismatch
+         { expected = expected_session_id; actual = reference.trace_id })
+  | Ok reference -> Ok { checkpoint; reference; canonical_bytes }
+;;
+
+let exact_snapshot_of_canonical_bytes ~expected_session_id canonical_bytes =
+  match Agent_sdk.Checkpoint.of_string canonical_bytes with
+  | Error error -> Error (Ref_read_failed (classify_sdk_error error))
+  | Ok checkpoint ->
+    exact_snapshot_of_checkpoint
+      ~expected_session_id
+      ~canonical_bytes
+      checkpoint
+;;
+
 let load_ref_locked ~session_dir ~expected_session_id =
   let canonical_path =
     oas_checkpoint_path
@@ -653,18 +686,12 @@ let load_ref_locked ~session_dir ~expected_session_id =
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Error Ref_not_found
   | Ok (Some (canonical_bytes, checkpoint)) ->
-    (match checkpoint_ref_of_canonical_bytes canonical_bytes checkpoint with
-     | Error error -> Error (Ref_identity_invalid error)
-     | Ok reference
-       when not
-              (Keeper_id.Trace_id.equal
-                 expected_session_id reference.trace_id) ->
-       Error
-         (Ref_session_mismatch
-            { expected = expected_session_id; actual = reference.trace_id })
-     | Ok reference -> Ok (checkpoint, reference))
+    exact_snapshot_of_checkpoint
+      ~expected_session_id
+      ~canonical_bytes
+      checkpoint
 
-let load_oas_with_ref ~session_dir ~session_id =
+let load_oas_exact_snapshot ~session_dir ~session_id =
   match Keeper_id.Trace_id.of_string session_id with
   | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
   | Ok expected_session_id ->
@@ -674,6 +701,12 @@ let load_oas_with_ref ~session_dir ~session_id =
      with
      | Ok result -> result
      | Error detail -> Error (Ref_lock_failed detail))
+
+let load_oas_with_ref ~session_dir ~session_id =
+  load_oas_exact_snapshot ~session_dir ~session_id
+  |> Result.map (fun snapshot ->
+    exact_snapshot_checkpoint snapshot, exact_snapshot_reference snapshot)
+;;
 
 let with_checkpoint_cas_lock ~session_dir ~candidate_ref f =
   match canonical_session_location session_dir with
@@ -733,11 +766,14 @@ let save_oas_if_source
     let expected_session_id = expected_source_ref.trace_id in
     with_checkpoint_cas_lock ~session_dir ~candidate_ref (fun session_dir ->
       match load_ref_locked ~session_dir ~expected_session_id with
-         | Error error -> Error (Source_unavailable error)
-         | Ok (_, actual_source)
-           when not (Keeper_checkpoint_ref.equal expected_source_ref actual_source) ->
-           Error (Source_changed actual_source)
-         | Ok _ ->
+      | Error error -> Error (Source_unavailable error)
+      | Ok snapshot
+        when not
+               (Keeper_checkpoint_ref.equal
+                  expected_source_ref
+                  (exact_snapshot_reference snapshot)) ->
+        Error (Source_changed (exact_snapshot_reference snapshot))
+      | Ok _ ->
            let canonical_path =
              oas_checkpoint_path
                ~session_dir

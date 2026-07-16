@@ -380,6 +380,12 @@ module For_testing : sig
   val set_before_entry_lock_observer : (string -> unit) option -> unit
   val set_inventory_classified_observer : (unit -> unit) option -> unit
   val failure_kind_of_string : string -> (failure_kind, string) result
+
+  val finalize_statement : Sqlite3.db -> Sqlite3.stmt -> (unit, string) result
+  (** Total statement finalize: folds both the rc channel and the
+      SqliteError raise channel of [Sqlite3.finalize] into [result], so
+      cleanup can never erase a body result or replace a pending
+      [Eio.Cancel.Cancelled]. Exposed for the totality regression test. *)
   val snapshot_path : base_path:string -> keeper_name:string -> (string, string) result
   val receipt_json :
     base_path:string ->

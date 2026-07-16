@@ -489,49 +489,106 @@ let test_checkpoint_sanitize_preserves_pair_repair_stats () =
     false
     (text_contains "unpaired tool use elided" texts)
 
-let test_checkpoint_sanitize_preserves_tool_failure_provenance () =
-  let message : Agent_sdk.Types.message =
-    {
-      role = Agent_sdk.Types.Tool;
-      content =
-        [
-          Agent_sdk.Types.ToolResult
-            {
-              tool_use_id = "failed-tool";
-              content =
-                String.make
-                  (KC.default_max_checkpoint_tool_result_chars + 1)
-                  'x';
-              outcome =
-                Agent_sdk.Types.Tool_failed
-                  {
-                    failure_kind = Agent_sdk.Types.Validation_error;
-                    error_class = Some Agent_sdk.Types.Deterministic;
-                  };
-              json = None;
-              content_blocks = None;
-            };
-        ];
-      name = None;
-      tool_call_id = Some "failed-tool";
-      metadata = [];
-    }
+let test_checkpoint_sanitize_without_pair_repair_is_byte_exact () =
+  let huge_text = String.make (600 * 1024 + 17) 'x' in
+  let world_state_looking_text =
+    "  user-authored note\n## Current World State\n### Namespace State\nsemantic user \
+     text\n[next]  "
   in
-  match fst (KC.sanitize_checkpoint_message message) with
-  | Some
-      {
-        content =
-          [ Agent_sdk.Types.ToolResult { outcome; _ } ];
-        _;
-      } ->
-      Alcotest.(check bool) "failure provenance preserved" true
-        (outcome
-         = Agent_sdk.Types.Tool_failed
-             {
-               failure_kind = Agent_sdk.Types.Validation_error;
-               error_class = Some Agent_sdk.Types.Deterministic;
-             })
-  | _ -> Alcotest.fail "expected one sanitized ToolResult"
+  let thinking = String.make (32 * 1024 + 3) 't' in
+  let reasoning = String.make (32 * 1024 + 5) 'r' in
+  let failed_tool_result = String.make (256 * 1024 + 7) 'f' in
+  let messages : Agent_sdk.Types.message list =
+    [ { role = Agent_sdk.Types.User
+      ; content =
+          [ Agent_sdk.Types.Text huge_text
+          ; Agent_sdk.Types.Text world_state_looking_text
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = [ "source", `String "exact-fixture" ]
+      }
+    ; { role = Agent_sdk.Types.Assistant
+      ; content =
+          [ Agent_sdk.Types.Thinking
+              { signature = Some "provider-signature"; content = thinking }
+          ; Agent_sdk.Types.ReasoningDetails
+              { reasoning_content = Some reasoning
+              ; details =
+                  [ { raw = `Assoc [ "kind", `String "provider-native" ]
+                    ; text = Some reasoning
+                    }
+                  ]
+              }
+          ]
+      ; name = Some "keeper"
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { role = Agent_sdk.Types.Tool
+      ; content =
+          [ Agent_sdk.Types.ToolResult
+              { tool_use_id = "failed-tool"
+              ; content = failed_tool_result
+              ; outcome =
+                  Agent_sdk.Types.Tool_failed
+                    { failure_kind = Agent_sdk.Types.Validation_error
+                    ; error_class = Some Agent_sdk.Types.Deterministic
+                    }
+              ; json = Some (`Assoc [ "full", `Bool true ])
+              ; content_blocks =
+                  Some [ Agent_sdk.Types.Text "typed result metadata" ]
+              }
+          ]
+      ; name = None
+      ; tool_call_id = Some "failed-tool"
+      ; metadata = []
+      }
+    ]
+  in
+  let ctx = KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096 in
+  let checkpoint =
+    KC.append_many ctx messages
+    |> KC.checkpoint_of_context
+  in
+  let preserved, stats =
+    KC.sanitize_oas_checkpoint ~repair_orphans:false checkpoint
+  in
+  Alcotest.(check bool)
+    "no semantic rewrite is reported"
+    false
+    (KC.checkpoint_sanitize_changed stats);
+  Alcotest.(check bool)
+    "all typed messages are structurally identical"
+    true
+    (preserved.Agent_sdk.Checkpoint.messages = messages);
+  let check_byte_exact label expected actual =
+    Alcotest.(check int)
+      (label ^ " byte length")
+      (String.length expected)
+      (String.length actual);
+    Alcotest.(check bool) label true (String.equal expected actual)
+  in
+  match preserved.Agent_sdk.Checkpoint.messages with
+  | [ { content = [ Text got_huge; Text got_world_state ]; _ }
+    ; { content =
+          [ Thinking { content = got_thinking; _ }
+          ; ReasoningDetails { reasoning_content = Some got_reasoning; _ }
+          ]; _ }
+    ; { content = [ ToolResult { content = got_tool_result; _ } ]; _ }
+    ] ->
+      check_byte_exact "huge Text is byte-exact" huge_text got_huge;
+      check_byte_exact
+        "world-state-looking Text is byte-exact"
+        world_state_looking_text
+        got_world_state;
+      check_byte_exact "Thinking is byte-exact" thinking got_thinking;
+      check_byte_exact "ReasoningDetails is byte-exact" reasoning got_reasoning;
+      check_byte_exact
+        "failed ToolResult is byte-exact"
+        failed_tool_result
+        got_tool_result
+  | _ -> Alcotest.fail "expected the original typed checkpoint message shape"
 
 let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =
   let raw_messages =
@@ -758,8 +815,8 @@ let () =
         test_pair_repair_metadata_samples_bounded;
       Alcotest.test_case "checkpoint sanitize preserves pair repair stats" `Quick
         test_checkpoint_sanitize_preserves_pair_repair_stats;
-      Alcotest.test_case "checkpoint sanitize preserves typed failure provenance" `Quick
-        test_checkpoint_sanitize_preserves_tool_failure_provenance;
+      Alcotest.test_case "checkpoint sanitize is semantic byte-exact" `Quick
+        test_checkpoint_sanitize_without_pair_repair_is_byte_exact;
       Alcotest.test_case "checkpoint save repair drops unpaired tool blocks" `Quick
         test_checkpoint_save_repair_drops_unpaired_tool_blocks;
       Alcotest.test_case

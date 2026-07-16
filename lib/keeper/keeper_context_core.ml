@@ -552,13 +552,13 @@ let sanitize_oas_checkpoint
     ?(repair_orphans = true)
     (cp : Agent_sdk.Checkpoint.t)
   : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
-  let messages, stats = sanitize_checkpoint_messages cp.messages in
   let messages, stats =
     if repair_orphans then (
-      let messages, repair_stats = repair_broken_tool_call_pairs_with_stats messages in
-      messages, add_checkpoint_sanitize_stats stats
-        (checkpoint_stats_of_tool_pair_repair repair_stats))
-    else messages, stats
+      let messages, repair_stats =
+        repair_broken_tool_call_pairs_with_stats cp.messages
+      in
+      messages, checkpoint_stats_of_tool_pair_repair repair_stats)
+    else cp.messages, empty_checkpoint_sanitize_stats
   in
   ({ cp with messages }, stats)
 

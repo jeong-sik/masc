@@ -675,6 +675,10 @@ let test_runtime_files_are_not_queue_lane_directories () =
   save_text (Filename.concat keepers_dir "executor.decisions.jsonl") "";
   save_text (Filename.concat keepers_dir "executor.decisions.jsonl.1") "";
   save_text (Filename.concat keepers_dir "_alerts.deadletter.jsonl") "";
+  save_text (Filename.concat keepers_dir "executor.json.bak-20260715") "{}";
+  save_text
+    (Filename.concat keepers_dir "executor.memory.jsonl.bak-20260715")
+    "";
   let report = configure base_path in
   check "runtime files produce no queue recovery failures"
     (report.load_errors = []);
@@ -724,9 +728,9 @@ let test_corrupt_dotted_metadata_authority_does_not_disappear () =
      | Ok names -> List.mem "corrupt.dataset" names
      | Error _ -> false)
 
-let test_unowned_regular_runtime_entry_is_reported () =
+let test_regular_runtime_entry_is_outside_queue_authority () =
   Printf.printf
-    "Test: unowned regular Keeper runtime entries are never silently accepted\n%!";
+    "Test: regular Keeper runtime entries remain outside queue authority\n%!";
   with_base "keeper-chat-unowned-runtime-entry" @@ fun base_path ->
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
   Fs_compat.mkdir_p keepers_dir;
@@ -734,16 +738,9 @@ let test_unowned_regular_runtime_entry_is_reported () =
   let entry_path = Filename.concat keepers_dir entry_name in
   save_text entry_path "not a declared Keeper runtime artifact";
   let report = configure base_path in
-  check "unowned regular entry is reported exactly once"
-    (match report.load_errors with
-     | [ Some observed_name, error ] ->
-       String.equal observed_name entry_name
-       && error.kind = Keeper_chat_queue.Invalid_path
-       && error.path = Some entry_path
-       && String.equal error.message
-            "Keeper chat queue inventory found an unowned regular entry"
-     | _ -> false);
-  check "unowned regular entry restores no queue lane"
+  check "regular entry produces no queue recovery failure"
+    (report.load_errors = []);
+  check "regular entry restores no queue lane"
     (report.restored_keeper_count = 0);
   check "unowned root entry does not block an unrelated Keeper lane"
     (Result.is_ok
@@ -871,7 +868,7 @@ let () =
   test_runtime_root_typed_filename_authority ();
   test_corrupt_dotted_metadata_authority_does_not_disappear ();
   test_runtime_files_are_not_queue_lane_directories ();
-  test_unowned_regular_runtime_entry_is_reported ();
+  test_regular_runtime_entry_is_outside_queue_authority ();
   test_runtime_root_replacement_during_inventory_is_rejected ();
   test_runtime_root_child_replacement_during_inventory_is_rejected ();
   test_foreign_database_and_symlink_are_quarantined ();

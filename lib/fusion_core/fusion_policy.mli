@@ -46,11 +46,8 @@ type preset =
   ; judge : string
   ; judge_system_prompt : string
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
-  ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
   ; judge_max_output_tokens : int option
       (** 단일/refine/meta 심판 출력 토큰 예산 override. [None]이면 기본값. *)
-  ; meta_timeout_s : float
-      (** meta/stage-meta/final-meta 호출 구조적 타임아웃 (초). *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
@@ -90,9 +87,6 @@ val min_staged_judge_group_size : int
 
 (** Optional max-output-token overrides must be positive when present. *)
 val valid_max_output_tokens : int option -> bool
-
-(** 패널/심판 타임아웃 기본값 (config 미지정 시). 운영 노브 — named SSOT. *)
-val default_timeout_s : float
 
 (** 모든 그룹의 모델을 평탄화 (그룹순 × 그룹내 모델순 보존). *)
 val preset_models : preset -> string list
@@ -187,10 +181,8 @@ module Validated_preset : sig
         (** [min_answered]가 하한 [min_answered_floor] 미만. *)
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
-    | Bad_meta_timeout of float
-        (** [meta_timeout_s]가 양수 유한수가 아님. *)
   (** 검증 순서: size → prompt → judge → 정체성 중복 → max_output_tokens →
-      1차 심판 prompt/정체성/max_output_tokens → min_answered → meta timeout.
+      1차 심판 prompt/정체성/max_output_tokens → min_answered.
       통과 시 [Ok vp], 첫 위반에서 [Error invalid].
       config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result

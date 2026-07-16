@@ -2,7 +2,7 @@
 
    RFC-0306 §3.1. The dashboard fusion settings editor needs the full active
    [Fusion_policy.t] as structured JSON to populate its form (panel roster, meta
-   judge, JoJ first-round judges, timeouts). No serializer existed: the config
+   judge, JoJ first-round judges). No serializer existed: the config
    types derive only [show]/[eq], and the only consumer flattens errors to a
    string ([fusion_config_loader.ml]). This is a read-only projection; it does
    not round-trip back to TOML (the write path is line-based, RFC-0306 §3.2). *)
@@ -42,9 +42,7 @@ let preset_to_yojson (p : Fusion_policy.preset) : Yojson.Safe.t =
     ; ("panels", `List (List.map panel_group_to_yojson p.Fusion_policy.panels))
     ; ("judge", `String p.Fusion_policy.judge)
     ; ("judge_system_prompt", `String p.Fusion_policy.judge_system_prompt)
-    ; ("judge_timeout_s", `Float p.Fusion_policy.judge_timeout_s)
     ; ("judge_max_output_tokens", opt_int p.Fusion_policy.judge_max_output_tokens)
-    ; ("meta_timeout_s", `Float p.Fusion_policy.meta_timeout_s)
     ; ("judges", `List (List.map judge_spec_to_yojson p.Fusion_policy.judges))
     ; ("min_answered", `Int p.Fusion_policy.min_answered)
     ; ("fallback_judge_model", opt_string p.Fusion_policy.fallback_judge_model)

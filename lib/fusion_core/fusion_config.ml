@@ -18,8 +18,6 @@ type config_error =
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
   | Invalid_min_answered of string * int
       (** (preset 이름, min_answered): policy 허용 범위 밖 *)
-  | Invalid_meta_timeout of string * float
-      (** (preset 이름, meta_timeout_s): 양수 유한수가 아님. *)
   | Toml_type_error of string
 [@@deriving show, eq]
 
@@ -78,16 +76,8 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   let judge_system_prompt =
     Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge_system_prompt" ]
   in
-  let judge_timeout_s =
-    Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
-      [ "judge_timeout_s" ]
-  in
   let judge_max_output_tokens =
     Otoml.find_opt tbl Otoml.get_integer [ "judge_max_output_tokens" ]
-  in
-  (* meta_timeout_s: 누락 시 judge_timeout_s와 byte-identical (legacy). *)
-  let meta_timeout_s =
-    Otoml.find_or ~default:judge_timeout_s tbl Otoml.get_float [ "meta_timeout_s" ]
   in
   let judges =
     match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "judges" ] with
@@ -105,10 +95,8 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
       ; panels
       ; judge
       ; judge_system_prompt
-      ; judge_timeout_s
       ; judge_max_output_tokens
       ; judges
-      ; meta_timeout_s
       ; min_answered
       ; fallback_judge_model
       }
@@ -135,9 +123,7 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Duplicate_judge (name, id)
          | Fusion_policy.Validated_preset.Min_answered_below_min v
          | Fusion_policy.Validated_preset.Min_answered_above_max v ->
-           Invalid_min_answered (name, v)
-         | Fusion_policy.Validated_preset.Bad_meta_timeout v ->
-           Invalid_meta_timeout (name, v)))
+           Invalid_min_answered (name, v)))
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.

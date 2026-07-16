@@ -1,7 +1,7 @@
 (* Fusion — 결정론적 발동 게이트 (구현).
    계약/문서: fusion_policy.mli, docs/rfc/RFC-0252 §6 *)
 
-(* 한 패널 그룹 — 공통 system_prompt/web_tools/timeout으로 실행되는
+(* 한 패널 그룹 — 공통 system_prompt/web_tools 설정으로 실행되는
    모델 묶음. 한 preset이 이종(heterogeneous) 그룹 여럿을 가질 수 있다(RFC-0252-A).
    닫힌 record (option-dual 없음); preset이 [panel_group list]를 deriving하므로
    nested deriving 필수. *)
@@ -35,10 +35,7 @@ type preset =
   ; judge : string
       (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0283) *)
   ; judge_system_prompt : string
-  ; judge_timeout_s : float
   ; judge_max_output_tokens : int option
-  ; meta_timeout_s : float
-      (** meta/stage-meta/final-meta 호출 구조적 타임아웃 (초). *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
@@ -60,10 +57,6 @@ let default_staged_judge_group_size = 3
 let valid_max_output_tokens = function
   | None -> true
   | Some n -> n > 0
-
-(* 패널/심판 호출 구조적 타임아웃 기본값 (preset이 명시 안 할 때). 운영 노브 —
-   행동 휴리스틱이 아니므로 named SSOT 상수로 둔다 (Magic Number 회피). *)
-let default_timeout_s = 300.0
 
 (* 모든 그룹의 모델을 평탄화 — 그룹순 × 그룹내 모델순 보존 (패널 fan-out 순서와 동일). *)
 let preset_models (p : preset) =
@@ -238,8 +231,6 @@ module Validated_preset = struct
         (** [min_answered]가 하한 [min_answered_floor] 미만. *)
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
-    | Bad_meta_timeout of float
-        (** [meta_timeout_s]가 양수 유한수가 아님. *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
@@ -281,9 +272,6 @@ module Validated_preset = struct
                   then Error (Min_answered_below_min p.min_answered)
                   else if p.min_answered > total
                   then Error (Min_answered_above_max p.min_answered)
-                  else if
-                    not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
-                  then Error (Bad_meta_timeout p.meta_timeout_s)
                   else Ok p)))
 
   let preset (t : t) : preset = t

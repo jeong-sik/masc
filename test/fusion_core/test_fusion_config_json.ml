@@ -17,7 +17,6 @@ panel = ["pa", "pb", "pc"]
 judge = "meta-reducer"
 panel_system_prompt = "answer independently"
 judge_system_prompt = "reconcile the first-judge syntheses"
-meta_timeout_s = 120.0
 
 [[fusion.presets.quorum.judges]]
 model = "judge-evidence"

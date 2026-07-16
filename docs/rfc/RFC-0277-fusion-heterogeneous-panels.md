@@ -56,7 +56,7 @@ type panel_group =
 
 type preset =
   { name : string; panels : panel_group list
-  ; judge : string; judge_system_prompt : string; judge_timeout_s : float }
+  ; judge : string; judge_system_prompt : string }
 [@@deriving show, eq]
 ```
 

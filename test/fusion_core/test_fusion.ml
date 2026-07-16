@@ -43,9 +43,7 @@ let base_policy : Fusion_policy.t =
           ; panels = [ base_group ]
           ; judge = "a"
           ; judge_system_prompt = "judge"
-          ; judge_timeout_s = 300.0
           ; judge_max_output_tokens = None
-          ; meta_timeout_s = 300.0
           ; judges = []
           ; min_answered = Fusion_policy.default_min_answered
           ; fallback_judge_model = None
@@ -157,7 +155,6 @@ panel = ["pa", "pb", "pc"]
 judge = "meta-reducer"
 panel_system_prompt = "answer independently"
 judge_system_prompt = "reconcile the first-judge syntheses"
-meta_timeout_s = 120.0
 
 [[fusion.presets.quorum.judges]]
 model = "judge-evidence"
@@ -207,7 +204,6 @@ panel = ["a", "b", "c"]
 judge = "j"
 panel_system_prompt = "answer independently"
 judge_system_prompt = "synthesize"
-judge_timeout_s = 99.0
 judge_max_output_tokens = 1024
 |}
 
@@ -219,7 +215,6 @@ default_preset = "p"
 [fusion.presets.p]
 judge = "j"
 judge_system_prompt = "synthesize"
-judge_timeout_s = 99.0
 judge_max_output_tokens = 1024
 [[fusion.presets.p.panels]]
 panel = ["a", "b", "c"]
@@ -829,7 +824,6 @@ panel = [
 judge = "deepseek.deepseek-v4-pro"
 panel_system_prompt = "answer independently"
 judge_system_prompt = "synthesize the panel"
-judge_timeout_s = 300.0
 |}
 
 let test_config_disabled_with_preset () =
@@ -857,15 +851,12 @@ let test_config_disabled_with_preset () =
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
     ?(judges = []) ?(min_answered = Fusion_policy.default_min_answered)
-    ?(meta_timeout_s = 300.0) ?(fallback_judge_model = None)
-    (name : string) : Fusion_policy.preset =
+    ?(fallback_judge_model = None) (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
   ; panels
   ; judge
   ; judge_system_prompt = judge_prompt
-  ; judge_timeout_s = 300.0
   ; judge_max_output_tokens = None
-  ; meta_timeout_s
   ; judges
   ; min_answered
   ; fallback_judge_model
@@ -1379,28 +1370,6 @@ let test_min_answered_constants () =
   Alcotest.(check int) "default_min_answered" 1 Fusion_policy.default_min_answered;
   Alcotest.(check int) "min_answered_floor" 1 Fusion_policy.min_answered_floor
 
-let test_config_invalid_meta_timeout () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p"
-[fusion.presets.p]
-panel = ["a"]
-judge = "j"
-panel_system_prompt = "x"
-judge_system_prompt = "y"
-meta_timeout_s = 0.0
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_meta_timeout present" true
-      (List.exists
-         (function Fusion_config.Invalid_meta_timeout _ -> true | _ -> false)
-         es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_meta_timeout"
-
 let test_judge_error_node_timed_out () =
   let timeout_node =
     Fusion_types.Judge_failed
@@ -1434,13 +1403,6 @@ let test_judge_error_node_timed_out () =
     Alcotest.(check (option (float 0.001))) "unavailable elapsed roundtrips"
       None n2.elapsed_s
   | _ -> Alcotest.fail "expected Judge_failed roundtrip"
-
-let test_validated_bad_meta_timeout () =
-  match
-    Fusion_policy.Validated_preset.of_preset (mk_preset ~meta_timeout_s:0.0 "bad-meta")
-  with
-  | Error (Fusion_policy.Validated_preset.Bad_meta_timeout 0.0) -> ()
-  | _ -> Alcotest.fail "expected Bad_meta_timeout 0.0"
 
 let () =
   Alcotest.run "fusion_core"
@@ -1494,7 +1456,6 @@ let () =
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ; Alcotest.test_case "judges_parse" `Quick test_config_judges_parse
         ; Alcotest.test_case "no_judges" `Quick test_config_no_judges
-        ; Alcotest.test_case "invalid_meta_timeout" `Quick test_config_invalid_meta_timeout
         ] )
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok
@@ -1510,7 +1471,6 @@ let () =
         ; Alcotest.test_case "duplicate_judge" `Quick test_validated_duplicate_judge
         ; Alcotest.test_case "judge_bad_max_output_tokens" `Quick
             test_validated_judge_bad_max_output_tokens
-        ; Alcotest.test_case "bad_meta_timeout" `Quick test_validated_bad_meta_timeout
         ] )
     ; ( "staged_judge_groups"
       , [ Alcotest.test_case "exact_3x3" `Quick test_staged_judge_groups_exact_3x3

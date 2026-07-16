@@ -40,8 +40,6 @@ type config_error =
   | Invalid_min_answered of string * int
       (** (preset 이름, min_answered) — [min_answered]가 policy 허용 범위(1..패널
           모델 총합) 밖. full-panel quorum([총합])도 명시적으로 설정할 수 있다. *)
-  | Invalid_meta_timeout of string * float
-      (** (preset 이름, meta_timeout_s) — 양수 유한수가 아님. *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]
 

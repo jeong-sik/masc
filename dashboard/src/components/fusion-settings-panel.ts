@@ -323,8 +323,8 @@ export function FusionSettingsPanel() {
   const str = (e: Event) => (e.target as HTMLInputElement).value
   const checked = (e: Event) => (e.target as HTMLInputElement).checked
 
-  // Read-only view of the active preset's composition (panel models · judge ·
-  // timeouts), parsed from the same runtime.toml source the
+  // Read-only view of the active preset's composition (panel models · judge),
+  // parsed from the same runtime.toml source the
   // editor already loaded. Shown only when the default_preset resolves to a real
   // [fusion.presets.<preset>] table that actually declares panel models — a
   // preset with no panel has no composition worth displaying. The editor scalars
@@ -337,7 +337,6 @@ export function FusionSettingsPanel() {
   const showPresetView = showPresetEditor && presetView.panel.length > 0
   const showGroupedNote = presetView !== null && presetView.grouped
   const runtimeOptions = runtimeOptionsFromSource(source, draft)
-  const timeoutLabel = (value: number | null): string => (value === null ? '—' : `${value}s`)
   const judgeLabel = presetView?.judgeGroupCount ? 'Judge-of-judges runtime' : 'Judge runtime'
 
   return html`
@@ -416,9 +415,6 @@ export function FusionSettingsPanel() {
                   ? html`<div class="set-fus-model judge mono" data-testid="fusion-preset-judge">${presetView.judge}</div>`
                   : html`<div class="set-fus-model judge mono" data-testid="fusion-preset-judge">미지정</div>`}
               </div>
-            </div>
-            <div class="set-mcp-detail mono" data-testid="fusion-preset-timing" style=${{ marginTop: 10 }}>
-              judge_timeout ${timeoutLabel(presetView.judgeTimeoutS)}
             </div>
           `
         : null}

@@ -133,5 +133,3 @@ let all_fail_error_of_runs ~fallback runs =
     ~fallback
     (List.map (fun (_, id, result, _, _) -> id, result) runs)
 ;;
-
-let meta_provider_timeout ~preset _clock = Ok preset.Fusion_policy.meta_timeout_s

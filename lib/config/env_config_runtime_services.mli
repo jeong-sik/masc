@@ -10,10 +10,6 @@
 (** {1 Inference} *)
 
 module Inference : sig
-  val timeout_seconds : float
-  (** [MASC_INFERENCE_TIMEOUT_SEC] (default [30.0]).  Timeout
-      for model API calls. *)
-
   val cache_enabled : bool
   (** [MASC_INFERENCE_CACHE_ENABLED] feature flag.  Enable L1+L2
       response cache. *)

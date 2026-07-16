@@ -114,8 +114,6 @@ let transport_entries =
 
 let inference_entries =
   [
-    entry ~default:"30" "MASC_INFERENCE_TIMEOUT_SEC"
-      "Inference call timeout (seconds)";
     entry ~default:"true" "MASC_INFERENCE_CACHE_ENABLED"
       "Enable inference result cache";
     entry ~default:"48000" "MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS"

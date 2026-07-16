@@ -138,14 +138,6 @@ let inference_default_model =
     ~max_len:100
     ()
 
-let inference_timeout =
-  register_float
-    ~key:"inference.timeout_seconds"
-    ~default:(fun () -> Env_config_runtime_services.Inference.timeout_seconds)
-    ~min:5.0 ~max:300.0
-
-    ()
-
 (* ── dashboard surface (display-only) ────────────────────────── *)
 
 (** Maximum path length before truncation in dashboard output. *)
@@ -380,12 +372,8 @@ let surfaces =
     };
     {
       id = "inference_config";
-      description = "Default MODEL model and timeout";
-      param_keys =
-        [
-          "inference.default_model";
-          "inference.timeout_seconds";
-        ];
+      description = "Default MODEL model";
+      param_keys = [ "inference.default_model" ];
     };
     {
       id = "cost_policy";

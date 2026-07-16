@@ -4,6 +4,7 @@
     schema-capable provider filter + fail-closed [None]. *)
 
 module Schema = Keeper_structured_output_schema
+module Unit = Keeper_compaction_unit
 module Int_set = Set.Make (Int)
 
 type compaction_plan =
@@ -12,6 +13,7 @@ type compaction_plan =
   ; summarized : int list
   ; dropped : int list
   ; selected_runtime_id : string option
+  ; source : Unit.partition
   }
 
 type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
@@ -39,42 +41,44 @@ let plan_schema_supported provider_cfg =
 
 let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
-(* One indexed line per message: "[i] role: <text>". The model must classify
-   every [i] into exactly one of kept/summarized/dropped. *)
-let indexed_messages_text (messages : Agent_sdk.Types.message list) =
-  messages
-  |> List.mapi (fun idx (m : Agent_sdk.Types.message) ->
-    let role =
-      match m.role with
-      | Agent_sdk.Types.System -> "system"
-      | Agent_sdk.Types.User -> "user"
-      | Agent_sdk.Types.Assistant -> "assistant"
-      | Agent_sdk.Types.Tool -> "tool"
-    in
-    let text = Agent_sdk.Types.text_of_message m |> String.trim in
-    Printf.sprintf "[%d] %s: %s" idx role text)
-  |> String.concat "\n"
-
-let messages_for_plan ~(messages : Agent_sdk.Types.message list) =
-  let count = List.length messages in
+let structural_error_to_string = Unit.show_structural_error
+let unit_to_json unit_index = function
+  | Unit.Ordinary_message message ->
+    `Assoc
+      [ "unit_index", `Int unit_index
+      ; "unit_type", `String "ordinary_message"
+      ; "must_keep", `Bool false
+      ; "messages", `List [ Keeper_context_core.message_to_json message ]
+      ]
+  | Unit.Closed_tool_cycle messages ->
+    `Assoc
+      [ "unit_index", `Int unit_index
+      ; "unit_type", `String "closed_tool_cycle"
+      ; "must_keep", `Bool true
+      ; "messages", `List (List.map Keeper_context_core.message_to_json messages)
+      ]
+let input_json (source : Unit.partition) =
+  `Assoc
+    [ "unit_count", `Int (List.length source.closed_prefix)
+    ; ( "units"
+      , `List (List.mapi unit_to_json source.closed_prefix) )
+    ]
+let messages_for_plan ~(source : Unit.partition) =
+  let count = List.length source.closed_prefix in
   let system =
-    "You compact a keeper's working context. Classify EVERY message, by its \
-     0-based index, into exactly one of: kept (verbatim, still load-bearing), \
-     summarized (folded into the summary), or dropped (low value, discard). \
-     Every index in range must appear in exactly one list; do not invent \
-     indices. Prefer keeping recent messages and any with concrete code paths, \
-     commands, decisions, or unresolved blockers. Write one durable [summary] \
-     prose block that stands in for the summarized messages. Do not invent \
-     facts. Do not include markdown fences."
+    "Classify every supplied compaction unit by unit_index into exactly one of \
+     kept, summarized, or dropped. A unit with must_keep=true MUST be kept. \
+     Only ordinary_message units may be summarized or dropped. Preserve facts \
+     exactly and return one summary for summarized units. Do not invent indices \
+     or facts and do not include markdown fences."
   in
   let user =
     Printf.sprintf
-      "message_count: %d\nmessages:\n%s\n\nReturn a JSON object with fields \
-       summary, kept_indices, summarized_indices, dropped_indices covering \
-       every index in [0, %d) exactly once."
+      "Canonical compaction input JSON follows. Return summary, kept_indices, \
+       summarized_indices, and dropped_indices covering every unit index in \
+       [0,%d) exactly once.\n%s"
       count
-      (indexed_messages_text messages)
-      count
+      (Yojson.Safe.to_string (input_json source))
   in
   [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
 
@@ -106,89 +110,100 @@ let string_field key = function
 
 let ( let* ) = Result.bind
 
-(* The three index lists must together partition [0, message_count) exactly.
+(* The three index lists must together partition [0, unit_count) exactly.
    An invalid LLM plan is an explicit error, never a silent repair. *)
-let validate_partition ~message_count ~kept ~summarized ~dropped =
-  let all = kept @ summarized @ dropped in
-  let seen = Array.make message_count false in
-  let rec check = function
-    | [] -> Ok ()
+let validate_partition ~unit_count ~kept ~summarized ~dropped =
+  let rec check seen = function
+    | [] ->
+      if Int_set.cardinal seen = unit_count
+      then Ok ()
+      else Error (Printf.sprintf "indices do not cover [0,%d)" unit_count)
     | idx :: rest ->
-      if idx < 0 || idx >= message_count then
-        Error (Printf.sprintf "index %d out of range [0, %d)" idx message_count)
-      else if seen.(idx) then Error (Printf.sprintf "index %d appears more than once" idx)
-      else begin
-        seen.(idx) <- true;
-        check rest
-      end
+      if idx < 0 || idx >= unit_count then
+        Error (Printf.sprintf "index %d out of range [0, %d)" idx unit_count)
+      else if Int_set.mem idx seen then
+        Error (Printf.sprintf "index %d appears more than once" idx)
+      else check (Int_set.add idx seen) rest
   in
-  let* () = check all in
-  let missing = ref [] in
-  Array.iteri (fun idx covered -> if not covered then missing := idx :: !missing) seen;
-  match !missing with
-  | [] -> Ok ()
-  | xs ->
-    Error
-      (Printf.sprintf
-         "indices not covered: %s"
-         (String.concat "," (List.rev_map string_of_int xs)))
+  check Int_set.empty (kept @ summarized @ dropped)
 
-let validate_non_empty_output ~message_count ~kept ~summarized =
-  if message_count > 0 && kept = [] && summarized = [] then
-    Error "plan would produce empty compaction output"
-  else Ok ()
+let validate_closed_cycles ~source ~kept =
+  let kept = List.fold_left (fun set i -> Int_set.add i set) Int_set.empty kept in
+  let rec check index = function
+    | [] -> Ok ()
+    | Unit.Closed_tool_cycle _ :: _ when not (Int_set.mem index kept) ->
+      Error (Printf.sprintf "closed tool cycle unit %d must be kept" index)
+    | _ :: rest -> check (index + 1) rest
+  in
+  check 0 source.Unit.closed_prefix
 
-let plan_of_json ~message_count json =
+let validate_contiguous indices =
+  let rec check = function
+    | [] | [ _ ] -> Ok ()
+    | left :: ((right :: _) as rest) ->
+      if right = left + 1
+      then check rest
+      else Error "summarized unit indices must form one contiguous run"
+  in
+  check (List.sort Int.compare indices)
+
+let plan_of_json_for_source ~(source : Unit.partition) json =
+  let unit_count = List.length source.closed_prefix in
   let* summary = string_field Schema.compaction_plan_field_summary json in
-  let summary = String.trim summary in
   let* kept = int_list_field Schema.compaction_plan_field_kept_indices json in
   let* summarized = int_list_field Schema.compaction_plan_field_summarized_indices json in
   let* dropped = int_list_field Schema.compaction_plan_field_dropped_indices json in
   (* The summary must be non-empty exactly when [apply] will use it. *)
   let* () =
-    if summarized <> [] && summary = ""
+    if summarized <> [] && String.trim summary = ""
     then Error "summary must be non-empty when summarized indices are present"
     else Ok ()
   in
-  let* () = validate_partition ~message_count ~kept ~summarized ~dropped in
-  let* () = validate_non_empty_output ~message_count ~kept ~summarized in
+  let* () = validate_partition ~unit_count ~kept ~summarized ~dropped in
+  let* () = validate_closed_cycles ~source ~kept in
+  let* () = validate_contiguous summarized in
   let* () =
-    if summarized = [] && dropped = []
-    then Error "plan keeps every message without summarizing or dropping any"
-    else Ok ()
+    match kept, summarized, dropped, source.protected_suffix with
+    | [], [], _ :: _, [] -> Error "plan would erase the entire source"
+    | _, [], [], _ -> Error "plan keeps every unit without summarizing or dropping any"
+    | _ -> Ok ()
   in
-  Ok { summary; kept; summarized; dropped; selected_runtime_id = None }
+  Ok { summary; kept; summarized; dropped; selected_runtime_id = None; source }
 
-(* Marker prefix so the folded summary is recognizable in the transcript and
-   by downstream tooling, matching the memory-bank [MEMORY_SUMMARY] convention. *)
-let summary_marker = "[COMPACTION_SUMMARY]"
+let plan_of_json ~messages json =
+  match Unit.partition messages with
+  | Error error -> Error (structural_error_to_string error)
+  | Ok source -> plan_of_json_for_source ~source json
 
-let apply (plan : compaction_plan) ~(messages : Agent_sdk.Types.message list) =
+let apply (plan : compaction_plan) =
   let summarized = List.fold_left (fun s i -> Int_set.add i s) Int_set.empty plan.summarized in
   let dropped = List.fold_left (fun s i -> Int_set.add i s) Int_set.empty plan.dropped in
-  let first_summarized =
-    List.fold_left min max_int plan.summarized
+  let first_summarized = List.fold_left min max_int plan.summarized in
+  let summary_msg = message Agent_sdk.Types.Assistant plan.summary in
+  let compacted_prefix =
+    plan.source.closed_prefix
+    |> List.mapi (fun index unit -> index, unit)
+    |> List.concat_map (fun (index, unit) ->
+      match unit with
+      | Unit.Closed_tool_cycle messages -> messages
+      | Unit.Ordinary_message message ->
+        if Int_set.mem index dropped then []
+        else if Int_set.mem index summarized then
+          if index = first_summarized then [ summary_msg ] else []
+        else [ message ])
   in
-  let summary_msg =
-    message Agent_sdk.Types.Assistant (summary_marker ^ " " ^ plan.summary)
-  in
-  messages
-  |> List.mapi (fun idx m -> idx, m)
-  |> List.filter_map (fun (idx, m) ->
-    if Int_set.mem idx dropped then None
-    else if Int_set.mem idx summarized then
-      (* Emit the single summary message at the position of the first
-         summarized index; the rest of the summarized indices collapse away. *)
-      if idx = first_summarized then Some summary_msg else None
-    else Some m)
+  compacted_prefix @ plan.source.protected_suffix
 
-let plan_of_response ~message_count response =
+let observation plan =
+  plan.selected_runtime_id, List.length plan.summarized, List.length plan.dropped
+
+let plan_of_response ~source response =
   match
     Agent_sdk_response.structured_json_of_response
       ~schema_name:"keeper_compaction_plan"
       response
   with
-  | Ok json -> plan_of_json ~message_count json
+  | Ok json -> plan_of_json_for_source ~source json
   | Error detail -> Error ("invalid structured response: " ^ detail)
 
 let run_plan
@@ -201,26 +216,32 @@ let run_plan
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(messages : Agent_sdk.Types.message list)
     () : compaction_plan option =
-  let message_count = List.length messages in
-  let provider_cfg = provider_for_plan provider_cfg in
-  let request = messages_for_plan ~messages in
-  match
-    Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
-      ~config:provider_cfg ~messages:request ()
-  with
-  | Error err ->
+  match Unit.partition messages with
+  | Error error ->
     Log.Keeper.warn ~keeper_name
-      "compaction LLM plan failed runtime=%s: %s"
-      runtime_id (Provider_http_error.to_message err);
+      "compaction LLM source rejected runtime=%s: %s"
+      runtime_id (structural_error_to_string error);
     None
-  | Ok response ->
-    (match plan_of_response ~message_count response with
-     | Ok plan -> Some { plan with selected_runtime_id = Some runtime_id }
-     | Error detail ->
+  | Ok source ->
+    let provider_cfg = provider_for_plan provider_cfg in
+    let request = messages_for_plan ~source in
+    (match
+       Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
+         ~config:provider_cfg ~messages:request ()
+     with
+     | Error err ->
        Log.Keeper.warn ~keeper_name
-         "compaction LLM plan rejected runtime=%s: %s"
-         runtime_id detail;
-       None)
+         "compaction LLM plan failed runtime=%s: %s"
+         runtime_id (Provider_http_error.to_message err);
+       None
+     | Ok response ->
+       (match plan_of_response ~source response with
+        | Ok plan -> Some { plan with selected_runtime_id = Some runtime_id }
+        | Error detail ->
+          Log.Keeper.warn ~keeper_name
+            "compaction LLM plan rejected runtime=%s: %s"
+            runtime_id detail;
+          None))
 
 type candidate =
   { runtime_id : string
@@ -335,6 +356,11 @@ module For_testing = struct
     Fun.protect ~finally:(fun () -> Atomic.set make_override previous) f
 
   let provider_for_plan = provider_for_plan
+
+  let input_json ~messages =
+    match Unit.partition messages with
+    | Ok source -> Ok (input_json source)
+    | Error error -> Error (structural_error_to_string error)
 
   let candidate_runtime_ids_for_assignment ~keeper_name ~runtime_id =
     candidates_for_assignment ~keeper_name runtime_id

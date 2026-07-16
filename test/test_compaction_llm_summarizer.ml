@@ -6,7 +6,13 @@
     integration, not here. *)
 
 open Masc
-module C = Keeper_compaction_llm_summarizer
+module Raw = Keeper_compaction_llm_summarizer
+module C = struct
+  include Raw
+  let plan_of_json ~message_count json =
+    Raw.plan_of_json ~messages:(List.init message_count (fun index ->
+      Agent_sdk.Types.text_message Agent_sdk.Types.User (string_of_int index))) json
+end
 
 let plan_json ~summary ~kept ~summarized ~dropped : Yojson.Safe.t =
   let ints xs = `List (List.map (fun i -> `Int i) xs) in
@@ -163,7 +169,7 @@ let test_missing_index_rejected () =
 let test_all_dropped_rejected () =
   let json = plan_json ~summary:"S" ~kept:[] ~summarized:[] ~dropped:[ 0; 1 ] in
   Alcotest.(check bool)
-    "a non-empty working set must not compact to empty output"
+    "a non-empty source cannot be erased without a protected suffix"
     true
     (is_error (C.plan_of_json ~message_count:2 json))
 
@@ -197,10 +203,15 @@ let sample =
 let test_apply_keeps_summarizes_drops () =
   (* kept: 3 ; summarized: 0,1 ; dropped: 2 *)
   let json = plan_json ~summary:"S" ~kept:[ 3 ] ~summarized:[ 0; 1 ] ~dropped:[ 2 ] in
-  match C.plan_of_json ~message_count:4 json with
+  let noncontiguous =
+    plan_json ~summary:"S" ~kept:[ 1; 3 ] ~summarized:[ 0; 2 ] ~dropped:[]
+  in
+  Alcotest.(check bool) "noncontiguous summary rejected" true
+    (is_error (Raw.plan_of_json ~messages:sample noncontiguous));
+  match Raw.plan_of_json ~messages:sample json with
   | Error e -> Alcotest.failf "expected valid plan, got %s" e
   | Ok plan ->
-    let out = C.apply plan ~messages:sample in
+    let out = C.apply plan in
     let out_texts = texts out in
     (* summary replaces indices 0,1 at position of first summarized (0);
        index 2 dropped; index 3 kept. Result: [summary; u3]. *)
@@ -209,8 +220,7 @@ let test_apply_keeps_summarizes_drops () =
       "first is the compaction summary"
       true
       (match out_texts with
-       | s :: _ -> Astring.String.is_infix ~affix:"S" s
-                   && Astring.String.is_prefix ~affix:"[COMPACTION_SUMMARY]" s
+       | s :: _ -> String.equal "S" s
        | [] -> false);
     Alcotest.(check (list string))
       "kept message survives verbatim after the summary"
@@ -219,10 +229,10 @@ let test_apply_keeps_summarizes_drops () =
 
 let test_apply_drop_only_preserves_kept () =
   let json = plan_json ~summary:"unused" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[ 3 ] in
-  match C.plan_of_json ~message_count:4 json with
+  match Raw.plan_of_json ~messages:sample json with
   | Error e -> Alcotest.failf "expected valid plan, got %s" e
   | Ok plan ->
-    let out = C.apply plan ~messages:sample in
+    let out = C.apply plan in
     Alcotest.(check (list string))
       "drop-only removes only the selected message"
       [ "u0"; "a1"; "t2" ]

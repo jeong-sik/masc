@@ -42,6 +42,7 @@ type structural_error =
       { message_index : int
       ; tool_use_id : string
       }
+[@@deriving show]
 
 type partition =
   { closed_prefix : closed_unit list

@@ -63,26 +63,23 @@ let test_total_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Client_registry_eio.reset_for_testing ();
-  let initial = Client_registry_eio.total_count () in
-  
-  (* Create a new agent with unique name *)
-  let name = Printf.sprintf "count-test-agent-%d" (Random.int 10000) in
+  check int "empty registry" 0 (Client_registry_eio.total_count ());
+  let name = "count-test-agent" in
   let _ = Client_registry_eio.get_or_create_identity 
     (`Assoc [("_agent_name", `String name)]) in
-  
-  let after = Client_registry_eio.total_count () in
-  check bool "count increased" true (after >= initial)
+  check int "one registered identity" 1 (Client_registry_eio.total_count ())
 
 let test_list_registered () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Client_registry_eio.reset_for_testing ();
-  let name = Printf.sprintf "active-list-agent-%d" (Random.int 10000) in
+  let name = "registered-list-agent" in
   let _ = Client_registry_eio.get_or_create_identity 
     (`Assoc [("_agent_name", `String name)]) in
   
   let registered = Client_registry_eio.list_registered () in
-  check bool "has registered agents" true (List.length registered > 0)
+  check int "one registered identity" 1 (List.length registered);
+  check string "registered identity name" name (List.hd registered).agent_name
 
 let test_cleanup_stale () =
   Eio_main.run @@ fun env ->

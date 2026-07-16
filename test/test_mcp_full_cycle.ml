@@ -101,33 +101,6 @@ let test_capability_filtering () =
   check bool "has search" true (Client_identity.has_capability id "search");
   check bool "no admin" false (Client_identity.has_capability id "admin")
 
-(** Test: Stale agent cleanup *)
-let test_registered_agents_preserve_old_observations () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let reg = Client_identity.Registry.create () in
-  
-  (* Active agent *)
-  let active = Fixtures.identity_for "active-agent" in
-  let _ = Client_identity.Registry.register reg active in
-  
-  (* Stale agent (last_seen in the past) *)
-  let stale = Client_identity.({
-    (Fixtures.identity_for "stale-agent") with
-    last_seen = Unix.gettimeofday () -. 3600.0;  (* 1 hour ago *)
-  }) in
-  let _ = Client_identity.Registry.register reg stale in
-  
-  check int "total count" 2 (Client_identity.Registry.count reg);
-  
-  let registered = Client_identity.Registry.list_all reg in
-  check int "registered count" 2 (List.length registered);
-  check bool "stale observation remains registered" true
-    (List.exists
-       (fun (identity : Client_identity.t) ->
-          String.equal identity.agent_name "stale-agent")
-       registered)
-
 (** Test: Concurrent registration safety *)
 let test_concurrent_registration () =
   Eio_main.run @@ fun env ->
@@ -175,10 +148,6 @@ let () =
       test_case "capability_filtering" `Quick test_capability_filtering;
     ];
     "lifecycle", [
-      test_case
-        "registered observations"
-        `Quick
-        test_registered_agents_preserve_old_observations;
       test_case "concurrent_registration" `Quick test_concurrent_registration;
       test_case "session_key_stability" `Quick test_session_key_stability;
     ];

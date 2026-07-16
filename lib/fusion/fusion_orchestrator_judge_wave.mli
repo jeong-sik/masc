@@ -1,13 +1,11 @@
 (** Judge wave helpers for {!Fusion_orchestrator}. *)
 
 type judge_run =
-  Fusion_policy.judge_spec
-  * string
+  string
   * ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result
   * float
-  * bool
 
 type clock
 
@@ -51,13 +49,13 @@ val all_fail_error_of_runs
   -> judge_run list
   -> Fusion_types.judge_failure * Fusion_types.usage
 
-val with_timeout_budget_fallback
+val with_all_error_fallback
   :  run_fallback_judge:(unit -> judge_run option)
   -> judge_run list
   -> judge_run list
 (** Append the configured fallback judge when the whole first-judge wave failed
-    only with timeout/budget failures. Shared by JOJ and staged JOJ so both
-    topologies honor [fallback_judge_model] consistently. *)
+    with typed errors and produced no synthesis. Shared by JOJ and staged JOJ
+    so both topologies honor [fallback_judge_model] consistently. *)
 
 val run_fallback_judge
   :  sw:Eio.Switch.t

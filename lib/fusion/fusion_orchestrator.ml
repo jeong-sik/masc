@@ -110,8 +110,8 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           let all_fail_error_of_runs =
             Fusion_orchestrator_judge_wave.all_fail_error_of_runs
           in
-          let with_timeout_budget_fallback =
-            Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
+          let with_all_error_fallback =
+            Fusion_orchestrator_judge_wave.with_all_error_fallback
           in
           let run_fallback_judge () =
             Fusion_orchestrator_judge_wave.run_fallback_judge
@@ -135,7 +135,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             | judges ->
               let firsts = run_first_judges judges in
               let firsts_with_fallback =
-                with_timeout_budget_fallback ~run_fallback_judge firsts
+                with_all_error_fallback ~run_fallback_judge firsts
               in
               let first_nodes = first_judge_nodes firsts_with_fallback in
               let ok_priors = successful_syntheses firsts_with_fallback in
@@ -197,7 +197,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             | Ok _groups ->
               let firsts =
                 run_first_judges preset.Fusion_policy.judges
-                |> with_timeout_budget_fallback ~run_fallback_judge
+                |> with_all_error_fallback ~run_fallback_judge
               in
               let rec take n acc rest =
                 if n = 0

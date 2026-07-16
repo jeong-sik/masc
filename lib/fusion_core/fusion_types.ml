@@ -216,10 +216,6 @@ type judge_failure =
 
 let judge_failure_is_timeout = function Timeout -> true | _ -> false
 
-let judge_failure_is_timeout_or_budget = function
-  | Timeout | Budget_exceeded _ -> true
-  | _ -> false
-
 let judge_failure_text = function
   | Timeout -> "timeout"
   | Provider_error detail -> detail

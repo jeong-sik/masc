@@ -1,6 +1,6 @@
 (* FUSION adaptive timeout / P0 hardening tests.
-   Covers: config parse/validation, pure adjust_judge_timeout semantics,
-   OTel counter emission, and sink meta JSON for failed judge nodes. *)
+   Covers: config parse/validation, fallback semantics, OTel counter emission,
+   and sink meta JSON for failed judge nodes. *)
 
 open Alcotest
 open Masc
@@ -19,22 +19,12 @@ let sample_synthesis : Fusion_types.judge_synthesis =
   ; decision = Fusion_types.Answer "ok"
   }
 
-let sample_judge model : Fusion_policy.judge_spec =
-  { Fusion_policy.jmodel = model
-  ; jlabel = ""
-  ; jsystem_prompt = "judge"
-  ; jweb_tools = false
-  ; jmax_output_tokens = None
-  ; jtimeout_s = 1.0
-  ; jmax_timeout_s = None
-  }
-
 let failed_judge_run model failure :
     Fusion_orchestrator_judge_wave.judge_run =
-  sample_judge model, model, Error (failure, Fusion_types.zero_usage), 0.0, false
+  model, Error (failure, Fusion_types.zero_usage), 0.0
 
 let ok_judge_run model : Fusion_orchestrator_judge_wave.judge_run =
-  sample_judge model, model, Ok (sample_synthesis, sample_usage), 0.0, false
+  model, Ok (sample_synthesis, sample_usage), 0.0
 
 let parse s = Otoml.Parser.from_string s
 
@@ -144,28 +134,6 @@ adaptive_timeout_factor = 0.5
          es)
   | Ok _ -> fail "expected Error Invalid_adaptive_timeout_factor"
 
-let test_adjust_judge_timeout_disabled () =
-  check (option (float 0.001)) "factor=1.0 within budget" (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  check (option (float 0.001)) "factor=1.0 over budget" None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:14.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  check (option (float 0.001)) "wave budget 0 disables cap" (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:0.0 ~elapsed_s:500.0 ~already_timed_out:false)
-
-let test_adjust_judge_timeout_extend () =
-  check (option (float 0.001)) "extend capped by max_s" (Some 15.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 15.0)
-       ~factor:2.0 ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  check (option (float 0.001)) "extend capped by remaining budget" (Some 7.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:12.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  check (option (float 0.001)) "extend below 0.001 -> None" None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:5.0 ~elapsed_s:5.0 ~already_timed_out:true)
-
 let test_runtime_clock_missing_env_still_attempts_fallback () =
   Masc_eio_env.reset_for_test ();
   Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
@@ -189,27 +157,25 @@ let test_runtime_clock_missing_env_still_attempts_fallback () =
         ~judge_web_tools:false
         ()
     with
-    | Some (_, id, Error (Fusion_types.Build_error _, _), elapsed_s, false) ->
+    | Some (id, Error (Fusion_types.Build_error _, _), elapsed_s) ->
       check string "fallback attempted"
         "fallback (fusion-clockless-regression-missing-runtime)" id;
       check (float 0.0) "missing clock is observation-only" 0.0 elapsed_s
-    | Some (_, _, Error (failure, _), _, _) ->
+    | Some (_, Error (failure, _), _) ->
       failf "unexpected fallback failure: %s" (Fusion_types.judge_failure_text failure)
     | Some _ -> fail "expected missing runtime build failure"
     | None -> fail "configured fallback must be attempted")
 
-let test_timeout_budget_first_wave_appends_fallback () =
+let test_all_error_first_wave_appends_fallback () =
   let fallback_calls = ref 0 in
   let fallback = ok_judge_run "fallback-model" in
   let runs =
     [ failed_judge_run "judge-a" Fusion_types.Timeout
-    ; failed_judge_run
-        "judge-b"
-        (Fusion_types.Budget_exceeded "wave budget exhausted")
+    ; failed_judge_run "judge-b" (Fusion_types.Provider_error "provider unavailable")
     ]
   in
   let with_fallback =
-    Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
+    Fusion_orchestrator_judge_wave.with_all_error_fallback
       ~run_fallback_judge:(fun () ->
         incr fallback_calls;
         Some fallback)
@@ -218,18 +184,18 @@ let test_timeout_budget_first_wave_appends_fallback () =
   check int "fallback called once" 1 !fallback_calls;
   check int "fallback appended" 3 (List.length with_fallback);
   match List.rev with_fallback with
-  | (_, id, Ok _, _, _) :: _ -> check string "fallback id" "fallback-model" id
+  | (id, Ok _, _) :: _ -> check string "fallback id" "fallback-model" id
   | _ -> fail "expected appended successful fallback"
 
-let test_timeout_budget_first_wave_skips_fallback_on_provider_error () =
+let test_partial_success_skips_fallback () =
   let fallback_calls = ref 0 in
   let runs =
     [ failed_judge_run "judge-a" Fusion_types.Timeout
-    ; failed_judge_run "judge-b" (Fusion_types.Provider_error "hard failure")
+    ; ok_judge_run "judge-b"
     ]
   in
   let without_fallback =
-    Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
+    Fusion_orchestrator_judge_wave.with_all_error_fallback
       ~run_fallback_judge:(fun () ->
         incr fallback_calls;
         Some (ok_judge_run "fallback-model"))
@@ -286,19 +252,15 @@ let () =
         ; test_case "invalid_adaptive_factor" `Quick
             test_config_invalid_adaptive_factor
         ] )
-    ; ( "adjust_judge_timeout"
-      , [ test_case "disabled" `Quick test_adjust_judge_timeout_disabled
-        ; test_case "extend" `Quick test_adjust_judge_timeout_extend
-        ] )
     ; ( "clock"
       , [ test_case "missing runtime env still attempts fallback" `Quick
             test_runtime_clock_missing_env_still_attempts_fallback
         ] )
     ; ( "fallback"
-      , [ test_case "timeout/budget wave appends fallback" `Quick
-            test_timeout_budget_first_wave_appends_fallback
-        ; test_case "provider failure skips fallback" `Quick
-            test_timeout_budget_first_wave_skips_fallback_on_provider_error
+      , [ test_case "all-error wave appends fallback" `Quick
+            test_all_error_first_wave_appends_fallback
+        ; test_case "partial success skips fallback" `Quick
+            test_partial_success_skips_fallback
         ] )
     ; ( "metrics"
       , [ test_case "record_adaptive_timeout emits counter" `Quick

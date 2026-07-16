@@ -236,11 +236,6 @@ type judge_failure =
     충분하므로 별도 bool 필드를 두지 않는다. *)
 val judge_failure_is_timeout : judge_failure -> bool
 
-(** [Timeout] 또는 [Budget_exceeded] 인가. orchestrator의 fallback-judge 트리거 조건:
-    1차 심판 전원이 타임아웃/예산-skip이면 fallback을 시도한다. exhaustive match로
-    string classifier([is_timeout_or_budget_error])를 대체한다. *)
-val judge_failure_is_timeout_or_budget : judge_failure -> bool
-
 (** sink/로그용 사람-가독 문자열. {!Fusion_oas.panel_failure_text}와 대칭. *)
 val judge_failure_text : judge_failure -> string
 

@@ -66,11 +66,7 @@ let test_reads_disk_only_entry () =
        check string "exact keeper" "inventory-keeper" entry.keeper_name;
        check bool "exact running status" true
          (match entry.status with Async.Running -> true | _ -> false)
-     | Ok inventory ->
-       failf
-         "expected one exact entry and no errors, got entries=%d errors=%d"
-         (List.length inventory.entries)
-         (List.length inventory.record_errors)
+     | Ok _ -> fail "expected one exact active entry"
      | Error _ -> fail "durable active inventory read was rejected");
     Eio.Promise.resolve resolve_release ();
     Eio.Fiber.yield ())
@@ -155,7 +151,10 @@ let test_reports_malformed_link_non_file_and_name () =
       check int "no malformed entry fabricated" 0 (List.length entries);
       check (list string) "record errors have exact path order"
         [ "directory.json"; "link.json"; "malformed.json"; "undeclared.txt" ]
-        (List.map (fun error -> Filename.basename error.Async.path) record_errors);
+        (List.map
+           (fun (error : Async.active_inventory_record_error) ->
+              Filename.basename error.path)
+           record_errors);
       (match error_kind_by_basename record_errors "malformed.json" with
        | Some (Async.Record_unreadable _) -> ()
        | _ -> fail "malformed JSON was not a typed unreadable record");

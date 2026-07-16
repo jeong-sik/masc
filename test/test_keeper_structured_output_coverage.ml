@@ -23,6 +23,13 @@ let direct_completion_files_under rel =
   |> List.sort String.compare
 ;;
 
+let subcall_caller_files_under rel =
+  ml_files_under rel
+  |> List.filter (fun rel ->
+    Ast_grep.count_calls ~module_path:rel ~callee:"Keeper_provider_subcall.complete" > 0)
+  |> List.sort String.compare
+;;
+
 let direct_agent_run_files_under rel =
   ml_files_under rel
   |> List.filter (fun rel ->
@@ -38,7 +45,16 @@ let direct_agent_run_files () =
 
 let keeper_direct_completion_files () = direct_completion_files_under "lib/keeper"
 
-let expected_structured_completion_files =
+let expected_completion_boundary_files =
+  List.sort
+    String.compare
+    [ (* #24571 centralized every keeper LLM subcall behind this boundary;
+         the schema contract now lives in its callers, pinned below. *)
+      "lib/keeper/keeper_provider_subcall.ml"
+    ]
+;;
+
+let expected_subcall_caller_files =
   List.sort
     String.compare
     [ "lib/keeper/hitl_summary_worker.ml"
@@ -169,7 +185,7 @@ let masc_tool_agent_run_files () =
 let expected_all_direct_completion_files =
   List.sort
     String.compare
-    (expected_structured_completion_files @ expected_unstructured_completion_exemptions)
+    (expected_completion_boundary_files @ expected_unstructured_completion_exemptions)
 ;;
 
 let structured_output_contract_call_count rel =
@@ -212,12 +228,20 @@ let test_keeper_direct_completions_are_enumerated () =
   check
     (list string)
     "keeper direct completion files"
-    expected_structured_completion_files
+    expected_completion_boundary_files
     (keeper_direct_completion_files ())
 ;;
 
-let test_keeper_direct_completions_request_structured_output () =
-  List.iter check_structured_output_contract expected_structured_completion_files
+let test_keeper_subcall_callers_are_enumerated () =
+  check
+    (list string)
+    "keeper subcall caller files"
+    expected_subcall_caller_files
+    (subcall_caller_files_under "lib")
+;;
+
+let test_keeper_subcall_callers_request_structured_output () =
+  List.iter check_structured_output_contract expected_subcall_caller_files
 ;;
 
 let test_agent_run_json_judges_request_structured_output rels =
@@ -521,10 +545,16 @@ let () =
             "lib/keeper direct completion files are enumerated"
             `Quick
             test_keeper_direct_completions_are_enumerated
-        ; test_case
-            "lib/keeper direct completions request structured output"
+        ] )
+    ; ( "keeper subcall callers"
+      , [ test_case
+            "Keeper_provider_subcall callers are enumerated"
             `Quick
-            test_keeper_direct_completions_request_structured_output
+            test_keeper_subcall_callers_are_enumerated
+        ; test_case
+            "Keeper_provider_subcall callers request structured output"
+            `Quick
+            test_keeper_subcall_callers_request_structured_output
         ] )
     ; ( "dashboard json judges"
       , [ test_case

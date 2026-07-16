@@ -1,0 +1,4 @@
+(test
+ (name test_keeper_compaction_wake_registry)
+ (libraries alcotest eio eio_main masc.keeper_compaction_wake_registry
+  masc.keeper_registry))

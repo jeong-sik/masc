@@ -730,7 +730,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
   let outside = Filename.concat config.Workspace.base_path "leaf-swap-outside" in
   ensure_dir outside;
   let run_existing_case
-        ?(expected_success = true)
+        ~expected_success
         ~label
         ~initial
         ~args
@@ -783,6 +783,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
        | _ -> false)
   in
   run_existing_case
+    ~expected_success:true
     ~label:"overwrite"
     ~initial:"inside-overwrite"
     ~args:[ "mode", `String "overwrite"; "content", `String "replacement" ]
@@ -790,6 +791,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
     ~expected_leaf:"replacement"
     ~expected_leaf_kind:`Regular;
   run_existing_case
+    ~expected_success:true
     ~label:"patch"
     ~initial:"let leaf = 1\n"
     ~args:

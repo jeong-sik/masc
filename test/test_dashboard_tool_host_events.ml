@@ -99,8 +99,8 @@ let test_record_writes_audit_ring_and_telemetry () =
       let latest =
         match
           Log.Ring.recent ~limit:20 ()
-          |> List.find_opt (fun row ->
-            String.equal (Log.source_to_string row.Log.source) "client_tool_host"
+          |> List.find_opt (fun (row : Log.Ring.entry) ->
+            String.equal (Log.source_to_string row.source) "client_tool_host"
             && String.equal row.module_name "ToolHost")
         with
         | Some row -> row

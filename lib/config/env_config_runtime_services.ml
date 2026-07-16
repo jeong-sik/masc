@@ -3,10 +3,6 @@ open Env_config_core
 (** {1 Inference Configuration} *)
 
 module Inference = struct
-  (** Timeout for model API calls (seconds) *)
-  let timeout_seconds =
-    get_float ~default:30.0 "MASC_INFERENCE_TIMEOUT_SEC"
-
   (** Enable inference response cache (L1+L2). *)
   let cache_enabled =
     Feature_flag_registry.get_bool "MASC_INFERENCE_CACHE_ENABLED"

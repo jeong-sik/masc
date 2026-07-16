@@ -244,30 +244,37 @@ let pre_compact_event_json (event : pre_compact_event) =
 ;;
 
 let pre_compact_event_of_json json =
-  let record_type = string_field json "record_type" in
-  if record_type <> "" && not (String.equal record_type "pre_compact")
-  then None
-  else
-    Some
-      { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
-      ; keeper_name = string_field json "keeper_name"
-      ; checkpoint_bytes = Safe_ops.json_int ~default:0 "checkpoint_bytes" json
-      ; message_count = Safe_ops.json_int ~default:0 "message_count" json
-      ; strategies = Safe_ops.json_string_list "strategies" json
-      ; trigger =
-          (match
-             List.assoc_opt
-               "trigger_detail"
-               (match json with
-                | `Assoc kv -> kv
-                | _ -> [])
-           with
-           | Some detail ->
-             (match Compaction_trigger.of_detail_json detail with
-              | Some t -> t
-              | None -> Compaction_trigger.Manual)
-           | None -> Compaction_trigger.Manual)
-      }
+  let reject reason =
+    Log.Harness.warn "[pre_compact] rejected persisted row: %s" reason;
+    None
+  in
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "record_type" fields with
+     | None -> reject "missing record_type"
+     | Some (`String "pre_compact") ->
+       (match List.assoc_opt "trigger_detail" fields with
+        | None -> reject "missing trigger_detail"
+        | Some detail ->
+          (match Compaction_trigger.of_detail_json detail with
+           | Ok trigger ->
+             Some
+               { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
+               ; keeper_name = string_field json "keeper_name"
+               ; checkpoint_bytes = Safe_ops.json_int ~default:0 "checkpoint_bytes" json
+               ; message_count = Safe_ops.json_int ~default:0 "message_count" json
+               ; strategies = Safe_ops.json_string_list "strategies" json
+               ; trigger
+               }
+           | Error error ->
+             reject
+               (Printf.sprintf
+                  "invalid trigger_detail: %s"
+                  (Compaction_trigger.decode_error_to_string error))))
+     | Some (`String record_type) ->
+       reject (Printf.sprintf "unexpected record_type %S" record_type)
+     | Some _ -> reject "record_type must be a string")
+  | _ -> reject "expected an object"
 ;;
 
 let role_counts_to_json (counts : (string * int) list) : Yojson.Safe.t =

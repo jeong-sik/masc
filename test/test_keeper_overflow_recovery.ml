@@ -26,9 +26,87 @@ let overflow_event ?(limit = Some 200_000) () =
 let test_provider_overflow_trigger_roundtrip () =
   let trigger = Compaction_trigger.Provider_overflow { limit_tokens = Some 200_000 } in
   check string "typed trigger label" "provider_overflow" (Compaction_trigger.to_label trigger);
-  match Compaction_trigger.of_detail_json (Compaction_trigger.to_detail_json trigger) with
-  | Some (Compaction_trigger.Provider_overflow { limit_tokens = Some 200_000 }) -> ()
-  | _ -> fail "typed provider overflow trigger did not round-trip"
+  List.iter
+    (fun expected ->
+       match
+         Compaction_trigger.of_detail_json (Compaction_trigger.to_detail_json expected)
+       with
+       | Ok actual when actual = expected -> ()
+       | Ok _ | Error _ -> fail "typed compaction trigger did not round-trip")
+    [ trigger
+    ; Compaction_trigger.Provider_overflow { limit_tokens = None }
+    ; Compaction_trigger.Manual
+    ]
+;;
+
+let test_retired_trigger_kinds_are_rejected () =
+  let decode kind =
+    Compaction_trigger.of_detail_json (`Assoc [ "kind", `String kind ])
+  in
+  List.iter
+    (fun kind ->
+       match decode kind with
+       | Error (Compaction_trigger.Unknown_kind actual)
+         when String.equal actual kind -> ()
+       | Ok _ | Error _ -> failf "retired trigger %s was not explicitly rejected" kind)
+    [ "ratio"; "messages"; "tokens" ];
+  match
+    Compaction_trigger.of_detail_json
+      (`Assoc [ "kind", `String "provider_overflow" ])
+  with
+  | Error Compaction_trigger.Missing_provider_limit -> ()
+  | Ok _ | Error _ -> fail "provider overflow without limit_tokens was admitted"
+;;
+
+let test_malformed_trigger_details_are_typed_errors () =
+  let check_error message expected json =
+    match Compaction_trigger.of_detail_json json with
+    | Error actual when actual = expected -> ()
+    | Ok _ | Error _ -> fail message
+  in
+  check_error
+    "non-object trigger detail was admitted"
+    Compaction_trigger.Expected_object
+    (`String "manual");
+  check_error
+    "missing trigger kind was admitted"
+    Compaction_trigger.Missing_kind
+    (`Assoc []);
+  check_error
+    "unknown manual field was admitted"
+    (Compaction_trigger.Unknown_field "limit_tokens")
+    (`Assoc [ "kind", `String "manual"; "limit_tokens", `Null ]);
+  check_error
+    "unknown provider field was admitted"
+    (Compaction_trigger.Unknown_field "extra")
+    (`Assoc
+      [ "kind", `String "provider_overflow"
+      ; "limit_tokens", `Int 200_000
+      ; "extra", `Null
+      ]);
+  check_error
+    "duplicate trigger kind was admitted"
+    (Compaction_trigger.Duplicate_field "kind")
+    (`Assoc [ "kind", `String "manual"; "kind", `String "manual" ]);
+  check_error
+    "duplicate provider limit was admitted"
+    (Compaction_trigger.Duplicate_field "limit_tokens")
+    (`Assoc
+      [ "kind", `String "provider_overflow"
+      ; "limit_tokens", `Int 200_000
+      ; "limit_tokens", `Int 200_000
+      ]);
+  check_error
+    "non-string trigger kind was admitted"
+    Compaction_trigger.Invalid_kind
+    (`Assoc [ "kind", `Int 1 ]);
+  List.iter
+    (fun limit ->
+       check_error
+         "invalid provider limit was admitted"
+         Compaction_trigger.Invalid_provider_limit
+         (`Assoc [ "kind", `String "provider_overflow"; "limit_tokens", limit ]))
+    [ `Int 0; `Int (-1); `String "200000" ]
 ;;
 
 let apply_ok phase conds ev =
@@ -170,6 +248,10 @@ let () =
     "overflow-lifecycle",
     [ test_case "provider overflow trigger codec" `Quick
         test_provider_overflow_trigger_roundtrip;
+      test_case "retired trigger kinds rejected" `Quick
+        test_retired_trigger_kinds_are_rejected;
+      test_case "malformed trigger details are typed errors" `Quick
+        test_malformed_trigger_details_are_typed_errors;
       test_case "happy path" `Quick test_happy_path;
       test_case "compact failure releases Lane" `Quick
         test_compact_failure_releases_lane;

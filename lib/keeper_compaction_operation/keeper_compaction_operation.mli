@@ -15,29 +15,34 @@ type reconciliation_reason =
   | Commit_durability_unknown
   | Transaction_outcome_unknown
 
+type provider_delivery_ref = private
+  | Event_queue_lease of int64
+  | Keeper_chat of Keeper_chat_delivery_identity.delivery_key
+  | Keeper_turn of Ids.Turn_ref.t
+
+type provider_delivery_ref_error =
+  | Non_positive_event_queue_lease_sequence of int64
+
 type producer_ref = private
   | Tool_invocation of Tool_invocation_ref.t
   | Provider_overflow of
       { source_checkpoint : Keeper_checkpoint_ref.t
-      ; source_delivery_sha256 : string
+      ; source_delivery : provider_delivery_ref
       }
 
-type producer_ref_error =
-  | Invalid_source_delivery_sha256_length of int
-  | Invalid_source_delivery_sha256_character of
-      { index : int
-      ; found : char
-      }
+val event_queue_lease_delivery_ref :
+  sequence:int64 ->
+  (provider_delivery_ref, provider_delivery_ref_error) result
+val keeper_chat_delivery_ref :
+  Keeper_chat_delivery_identity.delivery_key -> provider_delivery_ref
+val keeper_turn_delivery_ref : Ids.Turn_ref.t -> provider_delivery_ref
+val provider_delivery_ref_to_yojson : provider_delivery_ref -> Yojson.Safe.t
 
 val tool_invocation_producer_ref : Tool_invocation_ref.t -> producer_ref
 val provider_overflow_producer_ref :
   source_checkpoint:Keeper_checkpoint_ref.t ->
-  source_delivery_identity:string ->
+  source_delivery:provider_delivery_ref ->
   producer_ref
-val provider_overflow_producer_ref_of_persisted :
-  source_checkpoint:Keeper_checkpoint_ref.t ->
-  source_delivery_sha256:string ->
-  (producer_ref, producer_ref_error) result
 
 val producer_ref_equal : producer_ref -> producer_ref -> bool
 

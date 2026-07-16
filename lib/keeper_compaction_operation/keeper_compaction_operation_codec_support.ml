@@ -33,8 +33,11 @@ type decode_error =
   | Invalid_checkpoint of Keeper_checkpoint_ref.create_error
   | Invalid_trigger of Compaction_trigger.decode_error
   | Unknown_producer_kind of string
+  | Unknown_provider_delivery_kind of string
+  | Invalid_provider_delivery_sequence of string
+  | Invalid_provider_delivery of Operation.provider_delivery_ref_error
+  | Invalid_keeper_chat_delivery of string
   | Invalid_tool_producer of Tool_invocation_ref.decode_error
-  | Invalid_provider_producer of Operation.producer_ref_error
   | Invalid_evidence of Keeper_compaction_evidence.decode_error
   | Invalid_turn_ref of string
 
@@ -155,11 +158,63 @@ let trigger ~path json =
   Ok trigger
 ;;
 
+let provider_delivery_ref ~path json =
+  let allowed = [ "kind"; "sequence"; "delivery"; "turn" ] in
+  let* values = exact_object ~path ~allowed ~required:[ "kind" ] json in
+  let* kind_json = required_field ~path "kind" values in
+  let* kind = string_field ~path "kind" kind_json in
+  match kind with
+  | "event_queue_lease" ->
+    let* values =
+      exact_object
+        ~path
+        ~allowed:[ "kind"; "sequence" ]
+        ~required:[ "kind"; "sequence" ]
+        json
+    in
+    let* sequence_json = required_field ~path "sequence" values in
+    let* sequence_wire = string_field ~path "sequence" sequence_json in
+    let* sequence =
+      match Int64.of_string_opt sequence_wire with
+      | Some value -> Ok value
+      | None -> Error (Invalid_provider_delivery_sequence sequence_wire)
+    in
+    Operation.event_queue_lease_delivery_ref ~sequence
+    |> Result.map_error (fun error -> Invalid_provider_delivery error)
+  | "keeper_chat" ->
+    let* values =
+      exact_object
+        ~path
+        ~allowed:[ "kind"; "delivery" ]
+        ~required:[ "kind"; "delivery" ]
+        json
+    in
+    let* delivery_json = required_field ~path "delivery" values in
+    Keeper_chat_delivery_identity.delivery_key_of_yojson delivery_json
+    |> Result.map_error (fun error -> Invalid_keeper_chat_delivery error)
+    |> Result.map Operation.keeper_chat_delivery_ref
+  | "keeper_turn" ->
+    let* values =
+      exact_object
+        ~path
+        ~allowed:[ "kind"; "turn" ]
+        ~required:[ "kind"; "turn" ]
+        json
+    in
+    let* turn_json = required_field ~path "turn" values in
+    Ids.Turn_ref.of_yojson turn_json
+    |> Result.map_error (fun error -> Invalid_turn_ref error)
+    |> Result.map Operation.keeper_turn_delivery_ref
+  | unknown -> Error (Unknown_provider_delivery_kind unknown)
+;;
+
 let producer ~source_checkpoint = function
   | `Null -> Ok None
   | json ->
     let path = "payload.producer" in
-    let allowed = [ "kind"; "invocation"; "source_delivery_sha256" ] in
+    let allowed =
+      [ "kind"; "invocation"; "source_delivery" ]
+    in
     let* values = exact_object ~path ~allowed ~required:[ "kind" ] json in
     let* kind_json = required_field ~path "kind" values in
     let* kind = string_field ~path "kind" kind_json in
@@ -181,19 +236,21 @@ let producer ~source_checkpoint = function
        let* values =
          exact_object
            ~path
-           ~allowed:[ "kind"; "source_delivery_sha256" ]
-           ~required:[ "kind"; "source_delivery_sha256" ]
+           ~allowed:[ "kind"; "source_delivery" ]
+           ~required:[ "kind"; "source_delivery" ]
            json
        in
-       let* digest_json = required_field ~path "source_delivery_sha256" values in
-       let* source_delivery_sha256 =
-         string_field ~path "source_delivery_sha256" digest_json
+       let* delivery_json = required_field ~path "source_delivery" values in
+       let* source_delivery =
+         provider_delivery_ref
+           ~path:"payload.producer.source_delivery"
+           delivery_json
        in
-       Operation.provider_overflow_producer_ref_of_persisted
-         ~source_checkpoint
-         ~source_delivery_sha256
-       |> Result.map_error (fun error -> Invalid_provider_producer error)
-       |> Result.map Option.some
+       Ok
+         (Some
+            (Operation.provider_overflow_producer_ref
+               ~source_checkpoint
+               ~source_delivery))
      | unknown -> Error (Unknown_producer_kind unknown))
 ;;
 

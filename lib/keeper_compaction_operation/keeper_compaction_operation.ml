@@ -13,18 +13,19 @@ type reconciliation_reason =
   | Commit_durability_unknown
   | Transaction_outcome_unknown
 
+type provider_delivery_ref =
+  | Event_queue_lease of int64
+  | Keeper_chat of Keeper_chat_delivery_identity.delivery_key
+  | Keeper_turn of Ids.Turn_ref.t
+
+type provider_delivery_ref_error =
+  | Non_positive_event_queue_lease_sequence of int64
+
 type producer_ref =
   | Tool_invocation of Tool_invocation_ref.t
   | Provider_overflow of
       { source_checkpoint : Keeper_checkpoint_ref.t
-      ; source_delivery_sha256 : string
-      }
-
-type producer_ref_error =
-  | Invalid_source_delivery_sha256_length of int
-  | Invalid_source_delivery_sha256_character of
-      { index : int
-      ; found : char
+      ; source_delivery : provider_delivery_ref
       }
 
 type request =
@@ -65,40 +66,49 @@ type event =
 let operation_id event = event.operation_id
 let view event = event.view
 
+let event_queue_lease_delivery_ref ~sequence =
+  if Int64.compare sequence 1L < 0
+  then Error (Non_positive_event_queue_lease_sequence sequence)
+  else Ok (Event_queue_lease sequence)
+;;
+
+let keeper_chat_delivery_ref delivery = Keeper_chat delivery
+let keeper_turn_delivery_ref turn = Keeper_turn turn
+
+let provider_delivery_ref_to_yojson = function
+  | Event_queue_lease sequence ->
+    `Assoc
+      [ "kind", `String "event_queue_lease"
+      ; "sequence", `String (Int64.to_string sequence)
+      ]
+  | Keeper_chat delivery ->
+    `Assoc
+      [ "kind", `String "keeper_chat"
+      ; ( "delivery"
+        , Keeper_chat_delivery_identity.delivery_key_to_yojson delivery )
+      ]
+  | Keeper_turn turn ->
+    `Assoc
+      [ "kind", `String "keeper_turn"
+      ; "turn", Ids.Turn_ref.to_yojson turn
+      ]
+;;
+
 let tool_invocation_producer_ref invocation = Tool_invocation invocation
 
-let validate_source_delivery_sha256 value =
-  let length = String.length value in
-  if length <> 64
-  then Error (Invalid_source_delivery_sha256_length length)
-  else
-    let rec loop index =
-      if index = length
-      then Ok ()
-      else
-        match value.[index] with
-        | '0' .. '9' | 'a' .. 'f' -> loop (index + 1)
-        | found ->
-          Error
-            (Invalid_source_delivery_sha256_character { index; found })
-    in
-    loop 0
+let provider_overflow_producer_ref ~source_checkpoint ~source_delivery =
+  Provider_overflow { source_checkpoint; source_delivery }
 ;;
 
-let provider_overflow_producer_ref_of_persisted
-      ~source_checkpoint
-      ~source_delivery_sha256
-  =
-  validate_source_delivery_sha256 source_delivery_sha256
-  |> Result.map (fun () ->
-    Provider_overflow { source_checkpoint; source_delivery_sha256 })
-;;
-
-let provider_overflow_producer_ref ~source_checkpoint ~source_delivery_identity =
-  let source_delivery_sha256 =
-    Digestif.SHA256.(digest_string source_delivery_identity |> to_hex)
-  in
-  Provider_overflow { source_checkpoint; source_delivery_sha256 }
+let provider_delivery_ref_equal left right =
+  match left, right with
+  | Event_queue_lease left, Event_queue_lease right -> Int64.equal left right
+  | Keeper_chat left, Keeper_chat right ->
+    Keeper_chat_delivery_identity.delivery_key_equal left right
+  | Keeper_turn left, Keeper_turn right -> Ids.Turn_ref.equal left right
+  | Event_queue_lease _, (Keeper_chat _ | Keeper_turn _)
+  | Keeper_chat _, (Event_queue_lease _ | Keeper_turn _)
+  | Keeper_turn _, (Event_queue_lease _ | Keeper_chat _) -> false
 ;;
 
 let producer_ref_equal left right =
@@ -108,9 +118,9 @@ let producer_ref_equal left right =
   | ( Provider_overflow left
     , Provider_overflow right ) ->
     Keeper_checkpoint_ref.equal left.source_checkpoint right.source_checkpoint
-    && String.equal
-         left.source_delivery_sha256
-         right.source_delivery_sha256
+    && provider_delivery_ref_equal
+         left.source_delivery
+         right.source_delivery
   | Tool_invocation _, Provider_overflow _
   | Provider_overflow _, Tool_invocation _ -> false
 ;;

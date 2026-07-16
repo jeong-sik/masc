@@ -39,10 +39,13 @@ let producer =
   ok (Tool_invocation_ref.external_mcp ~request_id ~session_id:"session-1")
   |> Operation.tool_invocation_producer_ref
 ;;
+let overflow_delivery =
+  ok (Operation.event_queue_lease_delivery_ref ~sequence:1L)
+;;
 let overflow_producer =
   Operation.provider_overflow_producer_ref
     ~source_checkpoint:source
-    ~source_delivery_identity:"canonical-provider-delivery"
+    ~source_delivery:overflow_delivery
 ;;
 
 let request_event () =
@@ -95,6 +98,63 @@ let test_requested_view () =
       true
       (Option.exists (Operation.producer_ref_equal producer) request.producer)
   | _ -> Alcotest.fail "requested event changed shape"
+;;
+
+let test_provider_delivery_ref_is_typed () =
+  (match Operation.event_queue_lease_delivery_ref ~sequence:0L with
+   | Error (Operation.Non_positive_event_queue_lease_sequence 0L) -> ()
+   | Ok _ | Error _ ->
+     Alcotest.fail "non-positive event queue lease identity was accepted");
+  let same =
+    Operation.provider_overflow_producer_ref
+      ~source_checkpoint:source
+      ~source_delivery:
+        (ok (Operation.event_queue_lease_delivery_ref ~sequence:1L))
+  in
+  let next =
+    Operation.provider_overflow_producer_ref
+      ~source_checkpoint:source
+      ~source_delivery:
+        (ok (Operation.event_queue_lease_delivery_ref ~sequence:2L))
+  in
+  let request_id =
+    ok (Keeper_chat_delivery_identity.Request_id.of_string "delivery-1")
+  in
+  let chat =
+    Operation.provider_overflow_producer_ref
+      ~source_checkpoint:source
+      ~source_delivery:
+        (Operation.keeper_chat_delivery_ref
+           (Keeper_chat_delivery_identity.Direct_request request_id))
+  in
+  let turn =
+    Operation.provider_overflow_producer_ref
+      ~source_checkpoint:source
+      ~source_delivery:
+        (Operation.keeper_turn_delivery_ref
+           (Ids.Turn_ref.make ~trace_id:"trace-a" ~absolute_turn:7))
+  in
+  Alcotest.(check bool)
+    "same typed lease is stable"
+    true
+    (Operation.producer_ref_equal overflow_producer same);
+  Alcotest.(check bool)
+    "lease sequence participates"
+    false
+    (Operation.producer_ref_equal overflow_producer next);
+  Alcotest.(check bool)
+    "chat identity kind participates"
+    false
+    (Operation.producer_ref_equal overflow_producer chat);
+  Alcotest.(check bool)
+    "turn identity kind participates"
+    false
+    (Operation.producer_ref_equal overflow_producer turn);
+  match overflow_producer with
+  | Operation.Provider_overflow
+      { source_delivery = Operation.Event_queue_lease 1L; _ } -> ()
+  | Operation.Provider_overflow _ | Operation.Tool_invocation _ ->
+    Alcotest.fail "typed source delivery was discarded after construction"
 ;;
 
 let test_candidate_views () =
@@ -654,7 +714,7 @@ let test_codec_rejects_nested_unknown_field () =
     malformed
 ;;
 
-let test_codec_rejects_invalid_provider_digest () =
+let test_codec_rejects_invalid_provider_delivery () =
   let event =
     Operation.requested
       ~operation_id
@@ -667,8 +727,12 @@ let test_codec_rejects_invalid_provider_digest () =
   let json = Codec.to_json event in
   let payload = Yojson.Safe.Util.member "payload" json in
   let producer = Yojson.Safe.Util.member "producer" payload in
+  let source_delivery = Yojson.Safe.Util.member "source_delivery" producer in
   let malformed_producer =
-    replace_field "source_delivery_sha256" (`String "bad") producer
+    replace_field
+      "source_delivery"
+      (replace_field "sequence" (`String "0") source_delivery)
+      producer
   in
   let malformed =
     replace_field
@@ -678,9 +742,9 @@ let test_codec_rejects_invalid_provider_digest () =
   in
   match Codec.of_json malformed with
   | Error
-      (Codec.Invalid_provider_producer
-         (Operation.Invalid_source_delivery_sha256_length 3)) -> ()
-  | Ok _ | Error _ -> Alcotest.fail "invalid provider digest was accepted"
+      (Codec.Invalid_provider_delivery
+         (Operation.Non_positive_event_queue_lease_sequence 0L)) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "invalid typed provider delivery was accepted"
 ;;
 
 let () =
@@ -688,6 +752,10 @@ let () =
     "keeper compaction operation events"
     [ ( "events"
       , [ Alcotest.test_case "requested typed view" `Quick test_requested_view
+        ; Alcotest.test_case
+            "provider delivery reference is typed"
+            `Quick
+            test_provider_delivery_ref_is_typed
         ; Alcotest.test_case "candidate typed views" `Quick test_candidate_views
         ; Alcotest.test_case
             "failure and reinjection typed views"
@@ -735,8 +803,8 @@ let () =
             `Quick
             test_codec_rejects_nested_unknown_field
         ; Alcotest.test_case
-            "codec rejects invalid provider digest"
+            "codec rejects invalid provider delivery"
             `Quick
-            test_codec_rejects_invalid_provider_digest
+            test_codec_rejects_invalid_provider_delivery
         ] )
     ]

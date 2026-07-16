@@ -4,6 +4,7 @@
   alcotest
   masc.compaction_trigger
   masc.keeper_checkpoint_ref
+  masc.keeper_chat_delivery_identity
   masc.keeper_compaction_evidence
   masc.keeper_compaction_operation
   masc.keeper_registry

@@ -34,10 +34,10 @@ let producer = function
       [ "kind", `String "tool_invocation"
       ; "invocation", Tool_invocation_ref.to_yojson invocation
       ]
-  | Operation.Provider_overflow { source_delivery_sha256; _ } ->
+  | Operation.Provider_overflow { source_delivery; _ } ->
     `Assoc
       [ "kind", `String "provider_overflow"
-      ; "source_delivery_sha256", `String source_delivery_sha256
+      ; "source_delivery", Operation.provider_delivery_ref_to_yojson source_delivery
       ]
 ;;
 

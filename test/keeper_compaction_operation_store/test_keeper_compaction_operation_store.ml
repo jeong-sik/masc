@@ -92,10 +92,13 @@ let test_rejections_do_not_write () =
   Alcotest.(check string) "rejections wrote no bytes" before (Fs_compat.load_file path)
 ;;
 let provider_request operation_id source_checkpoint =
+  let source_delivery =
+    ok (Operation.event_queue_lease_delivery_ref ~sequence:1L)
+  in
   let producer =
     Operation.provider_overflow_producer_ref
       ~source_checkpoint
-      ~source_delivery_identity:"same-delivery"
+      ~source_delivery
   in
   Operation.requested
     ~operation_id
@@ -122,7 +125,15 @@ let test_provider_binding_includes_exact_source () =
    | _ -> Alcotest.fail "same source delivery created a second operation");
   ignore (append base 3.0 (provider_request op2 next_source));
   match Store.replay ~base_path:base ~keeper_name with
-  | Ok { operations = [ _; _ ]; _ } -> ()
+  | Ok { operations = first :: [ _ ]; _ } ->
+    (match first.snapshot.producer with
+     | Some
+         (Operation.Provider_overflow
+            { source_delivery = Operation.Event_queue_lease 1L; _ }) -> ()
+     | Some (Operation.Provider_overflow _)
+     | Some (Operation.Tool_invocation _)
+     | None ->
+       Alcotest.fail "journal replay discarded the exact provider delivery")
   | _ -> Alcotest.fail "advanced source did not create a distinct operation"
 ;;
 let test_malformed_history_fails_loud () =

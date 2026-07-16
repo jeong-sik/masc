@@ -3,7 +3,6 @@ open Alcotest
 module Discord_state = Channel_gate_discord_state
 module Discord_names = Channel_gate_discord_names
 module U = Yojson.Safe.Util
-
 module Registry_test_connector_a = struct
   let connector_id = "registry-test-connector"
   let display_name = "Registry Test A"
@@ -23,7 +22,6 @@ module Registry_test_connector_a = struct
   let bound_channels ~keeper_name:_ = []
   let connected () = false
 end
-
 module Registry_test_connector_b = struct
   include Registry_test_connector_a
 
@@ -38,7 +36,6 @@ module Registry_test_connector_b = struct
   let bind ~channel_id:_ ~keeper_name:_ ~actor_name:_ =
     Ok (`Assoc [ "variant", `String "b" ])
 end
-
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   (match value with
@@ -50,9 +47,7 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
-
 let temp_dir_counter = ref 0
-
 let with_temp_dir f =
   incr temp_dir_counter;
   let base =
@@ -421,25 +416,19 @@ let test_binding_store_failures_are_not_empty_state () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
     Fs_compat.save_file (Filename.concat dir "bindings.json") "{not-json";
-    (match
-       Discord_state.resolve_keeper_for_channel_result ~channel_id:"channel-1"
-     with
-     | Error (Discord_state.Binding_store_read_failed _) -> ()
-     | Ok _ -> fail "lookup reduced malformed store to an unbound channel");
-    (match
-       Discord_state.bind ~channel_id:"channel-1" ~keeper_name:"luna"
-         ~actor_name:"dashboard"
-     with
-     | Error _ -> ()
-     | Ok _ -> fail "bind overwrote a malformed binding store");
-    (match
-       Discord_state.unbind ~channel_id:"channel-1" ~actor_name:"dashboard"
-     with
-     | Error _ -> ()
-     | Ok _ -> fail "unbind overwrote a malformed binding store");
-    match Discord_state.bound_channels_result ~keeper_name:"luna" with
-    | Error _ -> ()
-    | Ok _ -> fail "presence reduced malformed bindings to an empty set")
+    let expect_error label = function
+      | Error _ -> ()
+      | Ok _ -> fail label
+    in
+    Discord_state.resolve_keeper_for_channel_result ~channel_id:"channel-1"
+    |> expect_error "lookup reduced malformed store to unbound";
+    Discord_state.bind ~channel_id:"channel-1" ~keeper_name:"luna"
+      ~actor_name:"dashboard"
+    |> expect_error "bind overwrote malformed store";
+    Discord_state.unbind ~channel_id:"channel-1" ~actor_name:"dashboard"
+    |> expect_error "unbind overwrote malformed store";
+    Discord_state.bound_channels_result ~keeper_name:"luna"
+    |> expect_error "presence reduced malformed store to empty")
 
 let test_thread_registry_round_trip () =
   let suffix = Printf.sprintf "%d-%06d" (Unix.getpid ()) !temp_dir_counter in

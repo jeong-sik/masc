@@ -37,27 +37,41 @@ let presence_status_for_keepers ~gateway_connected keepers =
 
 let keeper_presence_of_registry_entry ~base_path (entry : Keeper_registry.registry_entry)
   =
-  { keeper_name = entry.name
-  ; running = Keeper_registry.is_running ~base_path entry.name
-  ; bound_channels =
-      Channel_gate_discord_state.bound_channels ~keeper_name:entry.name
-  }
+  Channel_gate_discord_state.bound_channels_result ~keeper_name:entry.name
+  |> Result.map (fun bound_channels ->
+       { keeper_name = entry.name
+       ; running = Keeper_registry.is_running ~base_path entry.name
+       ; bound_channels
+       })
 ;;
 
 let live_keeper_presence ~base_path =
   Keeper_registry.all ~base_path ()
-  |> List.map (keeper_presence_of_registry_entry ~base_path)
+  |> List.fold_left
+       (fun result entry ->
+          match result with
+          | Error _ as error -> error
+          | Ok keepers ->
+            keeper_presence_of_registry_entry ~base_path entry
+            |> Result.map (fun keeper -> keeper :: keepers))
+       (Ok [])
 ;;
 
 let update_presence ~workspace_config =
   let base_path = workspace_config.Workspace.base_path in
-  match
-    presence_status_for_keepers
-      ~gateway_connected:(Channel_gate_discord_state.connected ())
-      (live_keeper_presence ~base_path)
-  with
-  | None -> ()
-  | Some status -> Discord_gateway_client.set_presence status
+  match live_keeper_presence ~base_path with
+  | Error detail ->
+    Log.Discord.error
+      "discord_presence_bridge: binding read failed: %s"
+      detail
+  | Ok keepers ->
+    (match
+       presence_status_for_keepers
+         ~gateway_connected:(Channel_gate_discord_state.connected ())
+         keepers
+     with
+     | None -> ()
+     | Some status -> Discord_gateway_client.set_presence status)
 ;;
 
 (* ── Fiber entry ────────────────────────────────────────────────── *)

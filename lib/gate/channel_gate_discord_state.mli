@@ -80,10 +80,6 @@ val keeper_for_channel_result :
 (** Typed keeper lookup. A binding-store read failure is distinct from an
     unbound channel. *)
 
-val keeper_for_channel : channel_id:string -> string option
-(** Compatibility projection of {!keeper_for_channel_result}. Store failures
-    raise rather than silently becoming [None]. *)
-
 val resolve_keeper_for_channel_result :
   channel_id:string ->
   (keeper_binding_resolution option, binding_lookup_error) result
@@ -92,8 +88,10 @@ val resolve_keeper_for_channel_result :
 
 val bound_channels : keeper_name:string -> string list
 (** Channel snowflakes bound to [keeper_name], freshly read from the
-    binding store on each call. Store failures raise rather than silently
-    becoming an empty set. RFC-0223 P2 presence. *)
+    binding store on each call. The generic connector interface cannot carry
+    an error, so store failures are logged before returning an empty projection.
+    Callers that need control-flow authority must use
+    {!bound_channels_result}. RFC-0223 P2 presence. *)
 
 val bound_channels_result : keeper_name:string -> (string list, string) result
 (** Typed bound-channel lookup. *)

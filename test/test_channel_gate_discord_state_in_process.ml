@@ -20,18 +20,19 @@ let unsetenv k = Unix.putenv k ""
 (* ---------------------------------------------------------------- *)
 
 let test_lookup_blank_channel_id () =
-  check (option string) "empty => None" None
-    (State.keeper_for_channel ~channel_id:"")
+  check (result (option string) reject) "empty => None" (Ok None)
+    (State.keeper_for_channel_result ~channel_id:"")
 
 let test_lookup_whitespace_channel_id () =
-  check (option string) "whitespace => None" None
-    (State.keeper_for_channel ~channel_id:"   ")
+  check (result (option string) reject) "whitespace => None" (Ok None)
+    (State.keeper_for_channel_result ~channel_id:"   ")
 
 let test_lookup_unbound_channel_returns_none () =
   (* No bind() called for this channel id and the binding store may
      be empty or missing; lookup must not raise either way. *)
-  check (option string) "no binding => None" None
-    (State.keeper_for_channel ~channel_id:"channel-id-with-no-binding")
+  check (result (option string) reject) "no binding => None" (Ok None)
+    (State.keeper_for_channel_result
+       ~channel_id:"channel-id-with-no-binding")
 
 (* ---------------------------------------------------------------- *)
 (* send_error / pp_send_error                                       *)

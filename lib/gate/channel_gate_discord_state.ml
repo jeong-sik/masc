@@ -547,12 +547,6 @@ let keeper_for_channel_result ~channel_id =
   |> Result.map
        (Option.map (fun resolution -> resolution.keeper_name))
 
-let keeper_for_channel ~channel_id =
-  match keeper_for_channel_result ~channel_id with
-  | Ok keeper_name -> keeper_name
-  | Error error ->
-    failwith (Format.asprintf "%a" pp_binding_lookup_error error)
-
 (* RFC-0223 P2: presence surface. Both recomputed per call — no cached
    presence state. *)
 
@@ -572,7 +566,11 @@ let bound_channels ~keeper_name =
   match bound_channels_result ~keeper_name with
   | Ok channels -> channels
   | Error detail ->
-    failwith ("Discord binding store read failed: " ^ detail)
+    Log.Discord.error
+      "Discord binding presence read failed (keeper=%s): %s"
+      keeper_name
+      detail;
+    []
 
 let connected () =
   (* The in-process gateway (RFC-0203) is the only Discord transport;

@@ -166,29 +166,37 @@ let test_adjust_judge_timeout_extend () =
     (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
        ~factor:2.0 ~wave_budget_s:5.0 ~elapsed_s:5.0 ~already_timed_out:true)
 
-let test_runtime_clock_missing_env_returns_typed_failure () =
+let test_runtime_clock_missing_env_still_attempts_fallback () =
   Masc_eio_env.reset_for_test ();
   Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-    let missing_clock_failure =
-      Fusion_types.Internal_error "missing runtime clock"
-    in
-    let clock =
-      Fusion_orchestrator_judge_wave.make_runtime_clock ~missing_clock_failure
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let clock = Fusion_orchestrator_judge_wave.make_runtime_clock () in
+    let preset =
+      { (adaptive_preset ()) with
+        Fusion_policy.fallback_judge_model =
+          Some "fusion-clockless-regression-missing-runtime"
+      }
     in
     match
-      Fusion_orchestrator_judge_wave.meta_budget_check
-        ~preset:(adaptive_preset ())
-        clock
+      Fusion_orchestrator_judge_wave.run_fallback_judge
+        ~sw
+        ~net:(Eio.Stdenv.net env)
+        ~preset
+        ~panel:[]
+        ~question:"clockless"
+        ~clock
+        ~judge_web_tools:false
+        ()
     with
-    | Error (Fusion_types.Internal_error msg, usage) ->
-      check string "typed failure message" "missing runtime clock" msg;
-      check int "input usage" 0 usage.Fusion_types.input_tokens;
-      check int "output usage" 0 usage.Fusion_types.output_tokens
-    | Error (failure, _) ->
-      failf
-        "expected Internal_error, got %s"
-        (Fusion_types.judge_failure_text failure)
-    | Ok _ -> fail "expected missing clock failure")
+    | Some (_, id, Error (Fusion_types.Build_error _, _), elapsed_s, false) ->
+      check string "fallback attempted"
+        "fallback (fusion-clockless-regression-missing-runtime)" id;
+      check (float 0.0) "missing clock is observation-only" 0.0 elapsed_s
+    | Some (_, _, Error (failure, _), _, _) ->
+      failf "unexpected fallback failure: %s" (Fusion_types.judge_failure_text failure)
+    | Some _ -> fail "expected missing runtime build failure"
+    | None -> fail "configured fallback must be attempted")
 
 let test_timeout_budget_first_wave_appends_fallback () =
   let fallback_calls = ref 0 in
@@ -283,8 +291,8 @@ let () =
         ; test_case "extend" `Quick test_adjust_judge_timeout_extend
         ] )
     ; ( "clock"
-      , [ test_case "missing runtime env returns typed failure" `Quick
-            test_runtime_clock_missing_env_returns_typed_failure
+      , [ test_case "missing runtime env still attempts fallback" `Quick
+            test_runtime_clock_missing_env_still_attempts_fallback
         ] )
     ; ( "fallback"
       , [ test_case "timeout/budget wave appends fallback" `Quick

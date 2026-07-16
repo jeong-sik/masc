@@ -681,7 +681,7 @@ flowchart TD
 |------|------|------|
 | `last_seen_ago_s`가 내부 heartbeat window를 크게 초과 | heartbeat fiber 중단 | `masc_keeper_up`으로 재시작 |
 | health_state = `stale` | 네트워크 또는 Workspace 접근 문제 | MASC 서버 상태 확인 (`curl /health`) |
-| `is_zombie = true` | agent의 last_seen이 너무 오래됨 | keeper 재생성 또는 `masc_cleanup_zombies` |
+| `is_zombie = true` | agent의 last_seen이 너무 오래됨 | 상태를 확인한 뒤 `masc_keeper_down(name: ...)`과 `masc_keeper_up`으로 명시적 재생성 |
 
 ### 7.3 context_ratio 높음
 

@@ -37,6 +37,7 @@ type wake_producer =
   | Operator_pending_confirm_store
   | Keeper_turn_failure_route
   | Keeper_goal_assignment
+  | Keeper_compaction_request
   | Read_model_reader
   | Keeper_manual_compaction
 
@@ -115,6 +116,7 @@ let wake_producer_to_string = function
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
   | Keeper_turn_failure_route -> "keeper_turn_failure_route"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
+  | Keeper_compaction_request -> "keeper_compaction_request"
   | Read_model_reader -> "read_model_reader"
   | Keeper_manual_compaction -> "keeper_manual_compaction"
 ;;
@@ -130,6 +132,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
   | Failure_judgment _ -> Keeper_turn_failure_route
+  | Manual_compaction_requested -> Keeper_compaction_request
   | Goal_assigned _ -> Keeper_goal_assignment
   | Manual_compaction_requested -> Keeper_manual_compaction
 ;;

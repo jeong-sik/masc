@@ -147,16 +147,6 @@ let masc_tool_stats_spec : tool_spec =
   }
 ;;
 
-let masc_cleanup_zombies_spec : tool_spec =
-  { name = "masc_cleanup_zombies"
-  ; description =
-      "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_pause_spec : tool_spec =
   { name = "masc_pause"
   ; description =
@@ -418,7 +408,6 @@ let phase6_specs : tool_spec list =
   ; masc_keeper_waiting_inventory_spec
   ; masc_gc_spec
   ; masc_tool_stats_spec
-  ; masc_cleanup_zombies_spec
     (* PR-2: plan group *)
   ; masc_plan_init_spec
   ; masc_plan_update_spec

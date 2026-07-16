@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const navigate = vi.fn()
 const requestConfirm = vi.fn()
 const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
-const cleanupZombies = vi.fn().mockResolvedValue(undefined)
 const route = signal<any>({ tab: 'code', params: { section: 'ide-shell' }, postId: null })
 const missionSnapshot = signal<any>(null)
 const missionAgentBriefs = signal<any[]>([])
@@ -18,7 +17,6 @@ async function loadPalette() {
   vi.doMock('../../router', () => ({ navigate, route }))
   vi.doMock('./confirm-dialog', () => ({ requestConfirm }))
   vi.doMock('../flow-control/flow-control-state', () => ({
-    cleanupZombies,
     runGarbageCollection,
   }))
   vi.doMock('../../mission-signals', () => ({
@@ -129,9 +127,6 @@ describe('CommandPalette', () => {
     await palette?.data?.find((item) => item.id === 'action-gc')?.handler()
     expect(runGarbageCollection).toHaveBeenCalledTimes(1)
 
-    requestConfirm.mockResolvedValueOnce(false)
-    await palette?.data?.find((item) => item.id === 'action-zombie')?.handler()
-    expect(cleanupZombies).not.toHaveBeenCalled()
   })
 
   it('indexes live mission sessions in the palette', async () => {

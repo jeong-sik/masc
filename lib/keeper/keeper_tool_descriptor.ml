@@ -1914,8 +1914,6 @@ let internal_descriptors : t list =
       "Read workspace dashboard summary." ~readonly:true
   ; masc_misc_descriptor "keeper_waiting_inventory" "masc_keeper_waiting_inventory"
       "Read keeper waiting inventory." ~readonly:true
-  ; masc_misc_descriptor "cleanup_zombies" "masc_cleanup_zombies"
-      "Reap orphan / zombie workspace state." ~readonly:false
   ; masc_misc_descriptor "tool_stats" "masc_tool_stats"
       "Read tool-usage statistics." ~readonly:true
   ; masc_misc_descriptor "tool_help" "masc_tool_help"

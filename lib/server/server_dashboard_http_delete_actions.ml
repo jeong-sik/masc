@@ -367,14 +367,12 @@ let purge_agent_filesystem_artifacts config agent_names =
 let keeper_artifact_path config keeper_name artifact =
   let open Keeper_shutdown_types in
   match artifact with
-  | Keeper_metrics_artifact ->
-    Some (Keeper_types_support.keeper_metrics_path config keeper_name)
+  | Keeper_metrics_store_artifact ->
+    Some (Keeper_types_support.keeper_metrics_dir config keeper_name)
   | Keeper_memory_bank_artifact ->
     Some (Keeper_types_support.keeper_memory_bank_path config keeper_name)
   | Keeper_generation_index_artifact ->
     Some (Keeper_types_support.keeper_generation_index_path config keeper_name)
-  | Keeper_policy_log_artifact ->
-    Some (Keeper_types_support.keeper_policy_log_path config keeper_name)
   | Keeper_decision_log_artifact ->
     Some (Keeper_types_support.keeper_decision_log_path config keeper_name)
   | Keeper_feedback_log_artifact ->
@@ -416,10 +414,9 @@ let purge_dashboard_keeper_artifacts config operation =
               (match artifact with
                | Keeper_runtime_directory_artifact ->
                  Keeper_fs.invalidate_dir path
-               | Keeper_metrics_artifact
+               | Keeper_metrics_store_artifact
                | Keeper_memory_bank_artifact
                | Keeper_generation_index_artifact
-               | Keeper_policy_log_artifact
                | Keeper_decision_log_artifact
                | Keeper_feedback_log_artifact
                | Keeper_configuration_artifact

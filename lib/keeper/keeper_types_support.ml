@@ -24,14 +24,6 @@ let session_base_dir_ (config : Workspace.config) =
 let ensure_api_keys_for_labels (_labels : string list) : (unit, string) result =
   Ok ()
 
-(** Single-file metrics path kept for fallback reads. *)
-let keeper_metrics_path config name =
-  Filename.concat
-    (keeper_dir_ config)
-    (Keeper_runtime_root_entry.keeper_basename
-       ~keeper_name:name
-       Keeper_runtime_root_entry.Metrics_log)
-
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
 let metrics_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
@@ -48,6 +40,9 @@ let keeper_metrics_store config name : Dated_jsonl.t =
       store
   in
   Eio_guard.with_mutex metrics_store_mu lookup
+
+let keeper_metrics_dir config name =
+  Dated_jsonl.base_dir (keeper_metrics_store config name)
 
 let execution_receipt_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
   Hashtbl.create 8
@@ -234,13 +229,6 @@ let is_internal_history_source (source : string) =
   | "world_state_prompt" | "internal_assistant" -> true
   | _ -> false
 
-let keeper_policy_log_path config name =
-  Filename.concat
-    (keeper_dir_ config)
-    (Keeper_runtime_root_entry.keeper_basename
-       ~keeper_name:name
-       Keeper_runtime_root_entry.Policy_log)
-
 let keeper_decision_log_path config name =
   Filename.concat
     (keeper_dir_ config)
@@ -254,23 +242,6 @@ let keeper_feedback_log_path config name =
     (Keeper_runtime_root_entry.keeper_basename
        ~keeper_name:name
        Keeper_runtime_root_entry.Feedback_log)
-
-let keeper_alerts_path config =
-  Filename.concat
-    (keeper_dir_ config)
-    (Keeper_runtime_root_entry.global_basename Keeper_runtime_root_entry.Alerts_log)
-
-let keeper_alert_retry_path config =
-  Filename.concat
-    (keeper_dir_ config)
-    (Keeper_runtime_root_entry.global_basename
-       Keeper_runtime_root_entry.Alerts_retry_log)
-
-let keeper_alert_deadletter_path config =
-  Filename.concat
-    (keeper_dir_ config)
-    (Keeper_runtime_root_entry.global_basename
-       Keeper_runtime_root_entry.Alerts_deadletter_log)
 
 (** Rotate [path] if it exceeds the configured size threshold.
     Keeps at most [max_rotated] numbered backups (.1, .2, ...). *)

@@ -713,7 +713,17 @@ let test_runtime_root_typed_filename_authority () =
        true
      | _ -> false);
   check "metadata migration root backup is not an owned runtime artifact"
-    (classify_basename "executor.json.bak" = [])
+    (classify_basename "executor.json.bak" = []);
+  check "legacy single-file metrics are not owned"
+    (classify_basename "executor.metrics.jsonl" = []);
+  check "removed policy logs are not owned"
+    (classify_basename "executor.policy.jsonl" = []);
+  check "removed alert logs are not owned"
+    (classify_basename "_alerts.jsonl" = []);
+  check "removed alert retry logs are not owned"
+    (classify_basename "_alerts.retry.jsonl" = []);
+  check "removed alert deadletters are not owned"
+    (classify_basename "_alerts.deadletter.jsonl" = [])
 
 let test_corrupt_dotted_metadata_authority_does_not_disappear () =
   Printf.printf

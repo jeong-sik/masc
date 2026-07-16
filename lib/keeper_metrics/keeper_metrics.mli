@@ -142,7 +142,6 @@ type t =
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
-  | AlertPersistFailures
   | MetricsSseFailures
   | ChatStoreFailures
   | ChatTransportFailures

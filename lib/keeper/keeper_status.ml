@@ -18,13 +18,6 @@ include Keeper_status_bridge
 (* Re-export handle_keeper_status from the detail module *)
 let handle_keeper_status = Keeper_status_detail.handle_keeper_status
 
-let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
-  match read_file_tail_lines_result path ~max_bytes ~max_lines with
-  | Ok lines -> lines
-  | Error exn_class ->
-      record_memory_recall_read_error ~site path exn_class;
-      []
-
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
@@ -69,14 +62,7 @@ let handle_keeper_list ctx args : tool_result =
             compaction_policy_of_keeper m
           in
           let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
-          let metrics_path = Keeper_types_support.keeper_metrics_path ctx.config m.name in
-          let metrics_window_lines =
-            let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
-            if dated <> [] then dated
-            else
-              read_tail_lines_or_empty ~site:"keeper_status_metrics" metrics_path
-                ~max_bytes:120000 ~max_lines:120
-          in
+          let metrics_window_lines = Dated_jsonl.read_recent_lines metrics_store 120 in
           let last_metrics =
             match List.rev metrics_window_lines with
             | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
@@ -240,11 +226,8 @@ let handle_keeper_list ctx args : tool_result =
               ("storage_paths", `Assoc [
                 ("meta", `String (keeper_meta_path ctx.config m.name));
                 ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-                ("metrics_single_file", `String metrics_path);
                 ( "memory_bank"
                 , `String (Keeper_types_support.keeper_memory_bank_path ctx.config m.name) );
-                ( "policy"
-                , `String (Keeper_types_support.keeper_policy_log_path ctx.config m.name) );
                 ( "feedback"
                 , `String (Keeper_types_support.keeper_feedback_log_path ctx.config m.name) );
                 ( "session_dir"

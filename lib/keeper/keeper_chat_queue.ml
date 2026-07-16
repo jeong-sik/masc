@@ -3661,9 +3661,10 @@ let validate_keeper_directory_inventory_blocking path ~initial_entries inventory
     |> List.find_map (fun (entry_name, before) ->
       let entry_path = Filename.concat path entry_name in
       match Unix.lstat entry_path with
-      | after when same_entry_identity before after -> None
-      | _ -> Some entry_path
-      | exception _ -> Some entry_path)
+      | after ->
+        if same_entry_identity before after then None else Some entry_path
+      | exception Unix.Unix_error (_error, _operation, _argument) ->
+        Some entry_path)
     |> function
     | None -> Ok ()
     | Some entry_path ->

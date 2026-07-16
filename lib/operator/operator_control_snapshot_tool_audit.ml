@@ -59,20 +59,7 @@ let recent_tool_names_from_files config keeper_name =
   in
   let metrics_lines =
     let store = Keeper_types_support.keeper_metrics_store config keeper_name in
-    let dated = Dated_jsonl.read_recent_lines store 120 in
-    if dated <> []
-    then dated
-    else (
-      let path = Keeper_types_support.keeper_metrics_path config keeper_name in
-      match
-        Keeper_memory.read_file_tail_lines_result path
-          ~max_bytes:120000 ~max_lines:120
-      with
-      | Ok lines -> lines
-      | Error exn_class ->
-          Keeper_memory.record_memory_recall_read_error
-            ~site:"operator_tool_audit_metrics" path exn_class;
-          [])
+    Dated_jsonl.read_recent_lines store 120
   in
   merge_tool_name_lists
     (collect_recent_tool_names decision_lines)

@@ -273,7 +273,6 @@ disk is historical residue and must not recreate a runtime authority.
 - `<runtime_root>/keepers/<name>.json`: keeper meta/state.
 - `<runtime_root>/keepers/<name>.decisions.jsonl`
 - `<runtime_root>/keepers/<name>.memory.jsonl`
-- `<runtime_root>/keepers/<name>.policy.jsonl`
 - `<runtime_root>/keepers/<name>.feedback.jsonl`
 - `<runtime_root>/keepers/<name>.tla-trace.jsonl`
 - `<runtime_root>/keepers/<name>/metrics/YYYY-MM/DD.jsonl`

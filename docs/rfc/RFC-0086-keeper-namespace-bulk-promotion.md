@@ -105,8 +105,8 @@ non-prefix cleanup. Repo-auth provider files have since been retired and are
 omitted from the live inventory below.
 
 ```
-alert_persist_kind.ml                    chat_store_operation.ml
-approval_queue_failure_site.ml           checkpoint_failure_operation.ml
+chat_store_operation.ml                  approval_queue_failure_site.ml
+checkpoint_failure_operation.ml
 bookkeeping_failure_kind.ml              checkpoint_store_failure_site.ml
 runtime_sync_failure_site.ml             compact_audit_failure_site.ml
 crash_persistence_failure_site.ml        docker_client.ml

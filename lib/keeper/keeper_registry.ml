@@ -437,7 +437,7 @@ let wakeup_entry ~intent ~require_running (entry : registry_entry) =
 let wakeup ~intent ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> Deferred_unregistered
-  | Some entry -> wakeup_entry ~intent ~require_running:true entry
+  | Some entry -> wakeup_entry ~intent ~require_running:false entry
 ;;
 
 let wakeup_running ~intent ~base_path name =

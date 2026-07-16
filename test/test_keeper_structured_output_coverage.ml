@@ -84,6 +84,7 @@ let expected_structured_tool_agent_runs =
   List.sort
     String.compare
     [ "lib/keeper/keeper_adversarial_review.ml"
+    ; "lib/keeper/keeper_board_attention_candidate.ml"
     ; "lib/keeper/keeper_failure_judge.ml"
     ; "lib/verifier_oas.ml"
     ; "lib/workspace_metric_hooks.ml"
@@ -391,6 +392,9 @@ let test_structured_tool_agent_runs_use_tool_schema_output () =
     [ ( "lib/keeper/keeper_adversarial_review.ml"
       , "dispatch"
       , "Verifier_core.parse_grounded_verdict_from_json" )
+    ; ( "lib/keeper/keeper_board_attention_candidate.ml"
+      , "run_judge"
+      , "Keeper_board_attention_judgment.of_yojson" )
     ; ( "lib/keeper/keeper_failure_judge.ml"
       , "parse_response"
       , "Keeper_failure_judgment_contract.of_yojson" )

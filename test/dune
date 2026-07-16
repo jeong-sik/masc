@@ -667,6 +667,11 @@
   test_board_context_inference_resolution)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf))
 
+(test
+ (name test_crypto_rng)
+ (modules test_crypto_rng)
+ (libraries alcotest masc.crypto_rng))
+
 ; Request-authority admission uses Eio fiber-local bindings and therefore owns
 ; an explicit executable stanza instead of borrowing the pure synchronous test
 ; group above.

@@ -35,6 +35,9 @@
 
 이 문서는 MASC/OAS 제품 방향의 **candidate SSOT**다. 병합 뒤에도 소유 범위는 장기 경계와 불변식이다. OAS public API, 현재 코드, pin, PR/CI/live 상태는 각각의 정본을 따른다. 이 문서 밖의 자료를 blanket-stale로 선언하거나 OAS upstream 문서를 supersede하지 않는다.
 
+현재 Keeper 실행 경계 수술을 다른 세션이 이어가기 위한 acceptance gate,
+PR slicing, live-check 절차는 [`KEEPER-FULL-FEATURE-GOAL.md`](../KEEPER-FULL-FEATURE-GOAL.md)를 따른다.
+
 **읽는 순서 (Haiku급 에이전트 기준):**
 
 1. §1 North Star & Non-Goals — 무엇을 만들고 무엇을 안 만드는가. 스코프 크리프 방지.

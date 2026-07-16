@@ -57,9 +57,9 @@ val set_resolved_name : string -> string -> is_ephemeral:bool -> unit
 
 (** {1 Statistics} *)
 
-val active_count : ?within_seconds:float -> unit -> int
+val active_count : within_seconds:float -> unit -> int
 val total_count : unit -> int
-val list_active : ?within_seconds:float -> unit -> Client_identity.t list
+val list_active : within_seconds:float -> unit -> Client_identity.t list
 
 (** {1 Cleanup} *)
 
@@ -76,4 +76,3 @@ val start_cleanup_loop :
   clock:_ Eio.Time.clock ->
   ?interval:float ->
   unit -> unit
-

@@ -189,7 +189,7 @@ let set_resolved_name sid name ~is_ephemeral =
 (** {1 Statistics} *)
 
 (** Get count of active agents *)
-let active_count ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
+let active_count ~within_seconds () =
   with_state_ro (fun s ->
     List.length (Client_identity.Registry.list_active s.registry ~within_seconds)
   )
@@ -199,7 +199,7 @@ let total_count () =
   with_state_ro (fun s -> Client_identity.Registry.count s.registry)
 
 (** List all active identities *)
-let list_active ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
+let list_active ~within_seconds () =
   with_state_ro (fun s ->
     Client_identity.Registry.list_active s.registry ~within_seconds
   )

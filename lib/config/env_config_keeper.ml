@@ -474,7 +474,9 @@ end
 
 (** Shared keepalive interval, read early so WorkAsHeartbeat can reference it.
     Any positive interval is valid; the scheduler must not silently rewrite an
-    operator-selected cadence. *)
+    operator-selected cadence.
+
+    @category Thresholds @ops_class operator *)
 let keepalive_interval_sec_ =
   let interval_sec = get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
   if interval_sec > 0

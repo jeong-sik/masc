@@ -1,7 +1,7 @@
 (** MASC Handover - Agent Capsule Transfer (Eio Native)
 
     Implements the "last will and testament" pattern for agent succession.
-    When an agent exits (context limit, timeout, crash), it leaves behind
+    When an agent exits (context limit, crash, or explicit transition), it leaves behind
     structured state for the next agent to inherit.
 *)
 
@@ -41,14 +41,12 @@ type handover_record = {
 (** Handover trigger reasons *)
 type trigger_reason =
   | ContextLimit of int
-  | Timeout of int
   | Explicit
   | FatalError of string
   | TaskComplete
 
 let trigger_reason_to_string = function
   | ContextLimit pct -> Printf.sprintf "context_limit_%d" pct
-  | Timeout secs -> Printf.sprintf "timeout_%ds" secs
   | Explicit -> "explicit"
   | FatalError msg -> Printf.sprintf "error: %s" msg
   | TaskComplete -> "task_complete"

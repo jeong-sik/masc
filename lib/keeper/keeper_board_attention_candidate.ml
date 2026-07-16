@@ -802,7 +802,7 @@ let reject_unregistered_tool ~name ~args:_ =
     "Board attention judgment is a tool-free boundary"
 ;;
 
-let run_judge ~base_path candidate =
+let run_judge ~sw ~net ~base_path candidate =
   let runtime_id_result =
     try Ok (Runtime.runtime_id_for_structured_judge ()) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -826,6 +826,8 @@ let run_judge ~base_path candidate =
                ~keeper_name:candidate.keeper_name
                ~goal:prompt
                ~base_path
+               ~sw
+               ~net
                ~masc_tools:[]
                ~dispatch:reject_unregistered_tool
                ~provider_config_transform:apply_output_schema
@@ -873,31 +875,33 @@ let rec process_with_judge ~base_path ~judge candidate =
        process_with_judge ~base_path ~judge current)
 ;;
 
-let process ~base_path candidate =
-  process_with_judge ~base_path ~judge:(run_judge ~base_path) candidate
-;;
+type scheduled_work =
+  { base_path : string
+  ; candidate : candidate
+  }
 
-let active_candidates = Atomic.make Active_set.empty
+let scheduled_work = Eio.Stream.create max_int
+let worker_running = Atomic.make false
+let active_workspaces = Atomic.make Active_set.empty
 
-let active_key ~base_path candidate =
-  String.concat "\031" [ base_path; candidate.keeper_name; candidate.candidate_id ]
+let active_key ~base_path = base_path
 ;;
 
 let rec claim_active key =
-  let current = Atomic.get active_candidates in
+  let current = Atomic.get active_workspaces in
   if Active_set.mem key current
   then false
-  else if Atomic.compare_and_set active_candidates current (Active_set.add key current)
+  else if Atomic.compare_and_set active_workspaces current (Active_set.add key current)
   then true
   else claim_active key
 ;;
 
 let rec release_active key =
-  let current = Atomic.get active_candidates in
+  let current = Atomic.get active_workspaces in
   if not (Active_set.mem key current)
   then ()
   else if
-    Atomic.compare_and_set active_candidates current (Active_set.remove key current)
+    Atomic.compare_and_set active_workspaces current (Active_set.remove key current)
   then ()
   else release_active key
 ;;
@@ -923,59 +927,79 @@ let observe_worker_failure ~base_path candidate kind detail =
       storage_detail
 ;;
 
-let start_async ~base_path candidate =
+let process_scheduled_work ~sw ~net { base_path; candidate } =
+  let key = active_key ~base_path in
+  Fun.protect
+    ~finally:(fun () -> release_active key)
+    (fun () ->
+       try
+         match
+           process_with_judge
+             ~base_path
+             ~judge:(run_judge ~sw ~net ~base_path)
+             candidate
+         with
+         | Ok _ -> ()
+         | Error detail ->
+           observe_worker_failure
+             ~base_path
+             candidate
+             Worker_unavailable
+             detail
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         observe_worker_failure
+           ~base_path
+           candidate
+           Worker_unavailable
+           (Printexc.to_string exn))
+;;
+
+let run_worker ~sw ~net () =
+  if not (Atomic.compare_and_set worker_running false true)
+  then Log.Keeper.warn "Board attention worker already running"
+  else (
+    Log.Keeper.info "Board attention worker started (global concurrency=1)";
+    Fun.protect
+      ~finally:(fun () -> Atomic.set worker_running false)
+      (fun () ->
+         while true do
+           Eio.Stream.take scheduled_work |> process_scheduled_work ~sw ~net
+         done))
+;;
+
+let schedule ~base_path candidate =
   match candidate.status with
   | Consumed _ -> false
   | Pending _ | Judged _ ->
-    let key = active_key ~base_path candidate in
-    if not (claim_active key)
+    let key = active_key ~base_path in
+    if not (Atomic.get worker_running)
+    then (
+      observe_worker_failure
+        ~base_path
+        candidate
+        Worker_unavailable
+        "Board attention worker is not running";
+      false)
+    else if not (claim_active key)
     then false
     else (
-      match Eio_context.get_root_switch_opt () with
-      | None ->
+      try
+        Eio.Stream.add scheduled_work { base_path; candidate };
+        true
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+        release_active key;
+        raise exn
+      | exn ->
         release_active key;
         observe_worker_failure
           ~base_path
           candidate
           Worker_unavailable
-          "server root switch is not installed";
-        false
-      | Some sw ->
-        (try
-           Eio.Fiber.fork ~sw (fun () ->
-             Fun.protect
-               ~finally:(fun () -> release_active key)
-               (fun () ->
-                  try
-                    match process ~base_path candidate with
-                    | Ok _ -> ()
-                    | Error detail ->
-                      observe_worker_failure
-                        ~base_path
-                        candidate
-                        Worker_unavailable
-                        detail
-                  with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | exn ->
-                    observe_worker_failure
-                      ~base_path
-                      candidate
-                      Worker_unavailable
-                      (Printexc.to_string exn)));
-           true
-         with
-         | Eio.Cancel.Cancelled _ as exn ->
-           release_active key;
-           raise exn
-         | exn ->
-           release_active key;
-           observe_worker_failure
-             ~base_path
-             candidate
-             Worker_unavailable
-             (Printexc.to_string exn);
-           false))
+          (Printexc.to_string exn);
+        false)
 ;;
 
 let record_and_start ~base_path candidate =
@@ -983,8 +1007,8 @@ let record_and_start ~base_path candidate =
   | Record_error detail -> Error detail
   | Recorded persisted | Duplicate persisted ->
     (* The durable candidate is the authority. Worker startup is best-effort
-       scheduling only; [start_async] records every startup failure itself. *)
-    let (_worker_started : bool) = start_async ~base_path persisted in
+       scheduling only; [schedule] records every scheduling failure itself. *)
+    let (_worker_started : bool) = schedule ~base_path persisted in
     Ok persisted
 ;;
 
@@ -993,7 +1017,7 @@ let resume_pending ~base_path ~keeper_name =
   let started =
     List.fold_left
       (fun count candidate ->
-         if start_async ~base_path candidate then count + 1 else count)
+         if schedule ~base_path candidate then count + 1 else count)
       0
       candidates
   in

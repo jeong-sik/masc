@@ -1416,6 +1416,9 @@ let start_keeper_loops_owned
       ());
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
+  fork_subsystem
+    "keeper_board_attention_worker"
+    (fun () -> Keeper_board_attention_candidate.run_worker ~sw ~net ());
   (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —
      the wall-clock deadline rescue was removed in §5 and the fork had been
      spinning on a no-op since PR-1. *)

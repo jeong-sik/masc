@@ -112,6 +112,11 @@ val process_with_judge :
 (** Testable state-machine boundary. Production uses the configured structured
     judge through {!record_and_start} and {!resume_pending}. *)
 
+val run_worker : sw:Eio.Switch.t -> net:Eio_context.eio_net -> unit -> unit
+(** Run the process-lifetime Board-attention judgment consumer. The caller must
+    pass the Eio capabilities owned by the server domain. Work submission is
+    cross-domain safe and globally serialized. *)
+
 val record_and_start :
   base_path:string -> candidate -> (candidate, string) result
 (** Returns after the Pending row is durably committed. Worker availability or

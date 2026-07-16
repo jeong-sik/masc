@@ -128,7 +128,10 @@ let test_resolve_masc_base_path_relative_request_ignores_inherited_env () =
     (fun () ->
       Sys.chdir scratch;
       let requested = "tmp-fixture" in
-      let expected = Filename.concat scratch requested in
+      (* The resolver anchors a relative request to [Sys.getcwd ()], the
+         symlink-canonical cwd (macOS temp [/var/…] → [/private/var/…]).
+         Canonicalize [scratch] so the expected matches the real anchor. *)
+      let expected = Filename.concat (Unix.realpath scratch) requested in
       with_envs
         [ ("MASC_BASE_PATH", Some (inherited_env_base "inherited-relative"));
           ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]

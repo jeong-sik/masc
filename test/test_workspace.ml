@@ -811,19 +811,6 @@ let test_heartbeat_nonexistent_agent () =
 (* test_get_agents_status removed (2026-06-09): get_agents_status deleted with
    the dead agent-status surface. *)
 
-let test_cleanup_zombies_empty () =
-  with_test_env (fun config ->
-    (* Cleanup with no zombies returns a structured result *)
-    let result = Workspace.cleanup_zombies config in
-    let has_result =
-      match result with
-      | Workspace.No_agents_dir -> true
-      | Workspace.No_zombies -> true
-      | Workspace.Cleaned _ -> true
-    in
-    Alcotest.(check bool) "cleanup result" true has_result
-  )
-
 (** Return ISO8601 timestamp offset by seconds from now *)
 let iso_ago seconds =
   let t = Unix.gettimeofday () -. seconds in
@@ -832,24 +819,8 @@ let iso_ago seconds =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-(** Helper: join an agent then overwrite its last_seen to simulate staleness *)
-let make_stale_agent ?(agent_type = "test") config ~name ~age_seconds =
-  let _ = Workspace.bind_session config ~agent_name:name ~capabilities:[] () in
-  (* Overwrite the agent file with a stale last_seen *)
-  let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-  let path = Filename.concat agents_path (Workspace.safe_filename name ^ ".json") in
-  let stale_ts = iso_ago age_seconds in
-  let agent_json = Printf.sprintf
-    {|{"name":"%s","agent_type":"%s","status":"inactive","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
-    name agent_type stale_ts stale_ts
-  in
-  Workspace.write_json config path (Yojson.Safe.from_string agent_json)
-
-(* Age a bound agent's last_seen while keeping status:active — simulates a live
-   agent that has gone quiet between heartbeats. Unlike make_stale_agent (which
-   marks the agent inactive, so the include_inactive:false load drops it before
-   any threshold check), this exercises the staleness threshold path in
-   audit_orphan_tasks. *)
+(* Age a bound agent's last_seen while keeping status:active to exercise the
+   staleness classification still used by the orphan observation path. *)
 let age_active_agent ?(agent_type = "test") config ~name ~age_seconds =
   let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
   let path = Filename.concat agents_path (Workspace.safe_filename name ^ ".json") in
@@ -859,75 +830,6 @@ let age_active_agent ?(agent_type = "test") config ~name ~age_seconds =
     name agent_type stale_ts stale_ts
   in
   Workspace.write_json config path (Yojson.Safe.from_string agent_json)
-
-let test_cleanup_zombies_detects_regular () =
-  with_test_env (fun config ->
-    (* Create a regular agent idle for 10 minutes (> 300s threshold) *)
-    make_stale_agent config ~name:"stale-regular-agent" ~age_seconds:700.0;
-    let result = Workspace.cleanup_zombies config in
-    let found = match result with
-      | Workspace.Cleaned { names; _ } -> List.mem "stale-regular-agent" names
-      | _ -> false
-    in
-    Alcotest.(check bool) "regular zombie detected" true found
-  )
-
-let test_cleanup_zombies_detects_keeper () =
-  with_test_env (fun config ->
-    (* Create a keeper agent idle for 2 hours (> 3600s keeper threshold) *)
-    make_stale_agent config ~name:"keeper-longplay-agent" ~age_seconds:7200.0;
-    let result = Workspace.cleanup_zombies config in
-    let found = match result with
-      | Workspace.Cleaned { names; _ } -> List.mem "keeper-longplay-agent" names
-      | _ -> false
-    in
-    Alcotest.(check bool) "keeper zombie detected after keeper threshold" true found
-  )
-
-let test_cleanup_zombies_spares_recent_keeper () =
-  with_test_env (fun config ->
-    (* Create a keeper agent idle for 10 minutes (< 3600s keeper threshold) *)
-    make_stale_agent
-      ~agent_type:"keeper"
-      config
-      ~name:"keeper-active-agent"
-      ~age_seconds:600.0;
-    let result = Workspace.cleanup_zombies config in
-    let spared = match result with
-      | Workspace.Cleaned { names; _ } -> not (List.mem "keeper-active-agent" names)
-      | _ -> true
-    in
-    Alcotest.(check bool) "recent keeper spared" true spared
-  )
-
-let test_cleanup_zombies_spares_type_keeper () =
-  with_test_env (fun config ->
-    (* Non-pattern keeper agents also use the keeper threshold. *)
-    make_stale_agent
-      ~agent_type:"keeper"
-      config
-      ~name:"regular-keeper-runtime"
-      ~age_seconds:600.0;
-    let result = Workspace.cleanup_zombies config in
-    let spared = match result with
-      | Workspace.Cleaned { names; _ } -> not (List.mem "regular-keeper-runtime" names)
-      | _ -> true
-    in
-    Alcotest.(check bool) "agent_type=keeper spared below keeper threshold" true spared
-  )
-
-let test_cleanup_zombies_removes_broken_agent_file () =
-  with_test_env (fun config ->
-    (* Write an empty JSON object — unparseable as agent *)
-    let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-    let path = Filename.concat agents_path "broken-agent.json" in
-    Workspace.write_json config path (Yojson.Safe.from_string "{}");
-    Alcotest.(check bool) "broken file exists before GC"
-      true (Sys.file_exists path);
-    let _result = Workspace.cleanup_zombies config in
-    Alcotest.(check bool) "broken file removed by GC"
-      false (Sys.file_exists path)
-  )
 
 let test_fd_pressure_exn_classification () =
   Alcotest.(check bool)
@@ -945,21 +847,6 @@ let test_fd_pressure_exn_classification () =
     false
     (Workspace.is_fd_pressure_exn
        (Unix.Unix_error (Unix.ETIMEDOUT, "connect", "api")))
-
-let test_cleanup_zombies_preserves_non_json_files () =
-  with_test_env (fun config ->
-    (* Place a non-JSON file in the agents directory *)
-    let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-    let path = Filename.concat agents_path ".gitkeep" in
-    let oc = open_out path in
-    output_string oc "";
-    close_out oc;
-    Alcotest.(check bool) "non-json file exists before GC"
-      true (Sys.file_exists path);
-    let _result = Workspace.cleanup_zombies config in
-    Alcotest.(check bool) "non-json file preserved by GC"
-      true (Sys.file_exists path)
-  )
 
 (* ============================================================ *)
 (* Agent Discovery / Capability Tests                           *)
@@ -1184,8 +1071,6 @@ let test_xss_in_message_type () =
    (Nickname.is_generated_nickname requires 3+ dash-separated parts) *)
 let admin_keeper_agent = "admin-board-keeper"
 let test_agent_a = "agent-test-alpha"
-let test_agent_z = "agent-test-zombie"
-
 let test_orphan_reconciliation_requires_exact_absent_assignee () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Orphan Task" ~priority:1 ~description:"" in
@@ -1580,37 +1465,6 @@ let test_keeper_tasks_audit_excludes_self_owned_orphan () =
     Alcotest.(check int) "keeper's own orphan excluded from audit" 0 orphan_count
   )
 
-let test_cleanup_zombies_releases_tasks () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_z ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_z ~task_id:"task-001" in
-    (* Manually set agent's last_seen to a very old timestamp to make it a zombie *)
-    let agents_path = Filename.concat
-      (Filename.concat config.base_path Common.masc_dirname) "agents" in
-    let agent_file = Filename.concat agents_path (test_agent_z ^ ".json") in
-    let json = Workspace.read_json config agent_file in
-    let updated_json = match json with
-      | `Assoc pairs ->
-          `Assoc (List.map (fun (k, v) ->
-            if k = "last_seen" then (k, `String "2020-01-01T00:00:00Z") else (k, v)
-          ) pairs)
-      | other -> other
-    in
-    Workspace.write_json config agent_file updated_json;
-    (* Run cleanup — should remove zombie agent AND release its tasks *)
-    let result = Workspace.cleanup_zombies config in
-    Alcotest.(check bool) "cleanup ran" true
-      (match result with
-       | Workspace.No_agents_dir -> true
-       | Workspace.No_zombies -> true
-       | Workspace.Cleaned _ -> true);
-    (* Verify task is released (back to Todo) *)
-    let tasks = Workspace.list_tasks config in
-    Alcotest.(check bool) "task released to todo" true
-      (str_contains tasks "Todo" || str_contains tasks "todo")
-  )
-
 (* --- Rejoin Identity Preservation (BUG-003) --- *)
 
 let test_rejoin_preserves_identity () =
@@ -1730,63 +1584,6 @@ let test_rejoin_event_log () =
       && str_contains line "agent_session_bound"
     ) events in
     Alcotest.(check bool) "rejoin event logged" true has_rejoin
-  )
-
-(** BUG-2: Zombie file deletion failure preserves state consistency *)
-let test_zombie_file_delete_failure_keeps_state () =
-  with_test_env (fun config ->
-    (* Create a stale agent *)
-    make_stale_agent config ~name:"unremovable-agent" ~age_seconds:700.0;
-
-    (* Make the agent file read-only to prevent deletion *)
-    let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-    let path = Filename.concat agents_path (Workspace.safe_filename "unremovable-agent" ^ ".json") in
-    Unix.chmod path 0o444;
-    (* Make directory non-writable so Sys.remove fails *)
-    Unix.chmod agents_path 0o555;
-
-    (* Run cleanup — file deletion should fail *)
-    let _result = Workspace.cleanup_zombies config in
-
-    (* Restore permissions for cleanup *)
-    Unix.chmod agents_path 0o755;
-    Unix.chmod path 0o644;
-
-    (* Key assertion: agent should still be in active_agents since file deletion failed *)
-    let state = Workspace.read_state config in
-    let still_present = List.exists (fun name ->
-      str_contains name "unremovable"
-    ) state.active_agents in
-    (* With BUG-2 fix: agent remains in state when file delete fails *)
-    (* File should still exist *)
-    Alcotest.(check bool) "file still exists" true (Sys.file_exists path);
-    (* Agent MAY or may not be in active_agents depending on Phase 2 transition.
-       But the file should definitely still exist — that's the core BUG-2 fix. *)
-    ignore still_present
-  )
-
-(** BUG-4: Zombie cleanup transitions status to Inactive before deletion *)
-let test_zombie_cleanup_transitions_to_inactive () =
-  with_test_env (fun config ->
-    (* Create stale agent *)
-    make_stale_agent config ~name:"transition-test-agent" ~age_seconds:700.0;
-
-    (* Make file undeletable to observe Inactive transition without removal *)
-    let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-    let path = Filename.concat agents_path (Workspace.safe_filename "transition-test-agent" ^ ".json") in
-    Unix.chmod path 0o444;
-    Unix.chmod agents_path 0o555;
-
-    let _result = Workspace.cleanup_zombies config in
-
-    (* Restore permissions *)
-    Unix.chmod agents_path 0o755;
-    Unix.chmod path 0o644;
-
-    (* Read agent file — should be Inactive now (Phase 2 ran before Phase 4 failed) *)
-    let json = Workspace.read_json config path in
-    let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-    Alcotest.(check string) "status transitioned to inactive" "inactive" status
   )
 
 (** BUG-5: Keeper detection uses agent_type/metadata evidence, not just name *)
@@ -1976,7 +1773,7 @@ let () =
       Alcotest.test_case "log on claim/done" `Quick test_event_log_on_claim_done;
     ];
 
-    (* === Heartbeat & Zombie Detection Tests === *)
+    (* === Heartbeat Tests === *)
     "heartbeat", [
       Alcotest.test_case "updates last_seen" `Quick test_heartbeat_updates_lastseen;
       Alcotest.test_case "default join keeps bound status" `Quick test_is_agent_session_bound_after_default_join;
@@ -1987,14 +1784,7 @@ let () =
         test_read_backlog_r_recovers_from_last_good_snapshot;
       Alcotest.test_case "read_backlog_r reports parse error when recovery also invalid" `Quick
         test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid;
-      Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
-      Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
-      Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;
-      Alcotest.test_case "cleanup spares recent keeper" `Quick test_cleanup_zombies_spares_recent_keeper;
-      Alcotest.test_case "cleanup spares type keeper" `Quick test_cleanup_zombies_spares_type_keeper;
-      Alcotest.test_case "cleanup removes broken agent file" `Quick test_cleanup_zombies_removes_broken_agent_file;
       Alcotest.test_case "fd pressure exn is not broken JSON" `Quick test_fd_pressure_exn_classification;
-      Alcotest.test_case "cleanup preserves non-json files" `Quick test_cleanup_zombies_preserves_non_json_files;
     ];
 
 
@@ -2088,14 +1878,11 @@ let () =
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
-      Alcotest.test_case "cleanup zombies runtime" `Quick test_cleanup_zombies_releases_tasks;
     ];
 
     (* === Lifecycle Bug Fix Tests (#1655) === *)
     "lifecycle_bugs", [
       Alcotest.test_case "BUG-1: rejoin event log" `Quick test_rejoin_event_log;
-      Alcotest.test_case "BUG-2: file delete failure keeps state" `Quick test_zombie_file_delete_failure_keeps_state;
-      Alcotest.test_case "BUG-4: zombie transitions to inactive" `Quick test_zombie_cleanup_transitions_to_inactive;
       Alcotest.test_case "BUG-5: keeper detection by agent_type" `Quick test_keeper_detection_by_agent_type;
       Alcotest.test_case "BUG-6: heartbeat concurrent start/stop" `Quick test_heartbeat_concurrent_start_stop;
     ];

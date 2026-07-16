@@ -251,8 +251,8 @@ type config =
     (** [\[runtime\].hitl_summary] — runtime id for HITL approval context
         summaries. When set, it must resolve to a configured runtime. The HITL
         worker decides native structured vs plain JSON mode at call time, so
-        load-time validation only rejects unknown ids. [None] keeps the legacy
-        structured-judge routing fallback. *)
+        load-time validation only rejects unknown ids. [None] leaves Auto Judge
+        unavailable; it never inherits another subsystem's runtime. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
         evaluator. It requests JSON mode and must run on a model declaring

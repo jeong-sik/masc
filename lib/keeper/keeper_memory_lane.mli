@@ -34,6 +34,12 @@ type outcome =
           discarded. Memory extraction is best-effort, so saturation drops
           rather than blocking the turn. The drop is counted, never silent. *)
 
+type idle_submission =
+  | Idle_submitted
+  | Idle_already_active
+  | Idle_executor_unavailable
+  | Idle_fork_failed
+
 val init : sw:Eio.Switch.t -> unit
 (** Record the long-lived switch that owns detached memory fibers. Call once at
     server startup, after [Eio_context.set_switch]. *)
@@ -49,6 +55,18 @@ val submit
     executor is not initialized, [f] runs inline and any exception is contained
     and counted rather than escaping. The bound, outcomes, and per-keeper
     pending/in-flight state are exported as metrics. *)
+
+val submit_if_idle
+  :  base_path:string
+  -> keeper_name:string
+  -> (Eio.Switch.t -> unit)
+  -> idle_submission
+(** Submit [f] only when the exact Keeper memory lane has no running or queued
+    unit. This is the nonblocking maintenance boundary: an active lane yields
+    [Idle_already_active] instead of waiting, queueing duplicate work, or
+    dropping it under a numeric capacity policy. A missing executor and a fork
+    failure remain distinct typed outcomes. [f] receives the unit-local child
+    switch that owns provider and I/O resources. *)
 
 module For_testing : sig
   val reset : unit -> unit

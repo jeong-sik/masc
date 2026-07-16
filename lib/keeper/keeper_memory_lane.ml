@@ -15,6 +15,17 @@ type outcome =
   | Ran_inline
   | Dropped
 
+type idle_submission =
+  | Idle_submitted
+  | Idle_already_active
+  | Idle_executor_unavailable
+  | Idle_fork_failed
+
+type start_result =
+  | Start_submitted
+  | Start_executor_unavailable
+  | Start_fork_failed
+
 type reservation =
   { release_mu : Stdlib.Mutex.t
   ; mutable released : bool
@@ -112,6 +123,16 @@ let try_reserve ~keeper_name entry =
       Some bound))
 ;;
 
+let try_reserve_if_idle ~keeper_name entry =
+  Stdlib.Mutex.protect entry.state_mu (fun () ->
+    if entry.pending <> 0
+    then false
+    else (
+      entry.pending <- 1;
+      inc_pending ~keeper_name ();
+      true))
+;;
+
 let release_reservation ~keeper_name entry =
   Stdlib.Mutex.protect entry.state_mu (fun () ->
     entry.pending <- entry.pending - 1;
@@ -190,7 +211,7 @@ let arm_switch_release ~keeper_name entry reservation sw =
    exit, including cancellation at shutdown. No exception escapes: a best-effort
    unit must never propagate into the executor switch — that would cancel the
    fleet. *)
-let run_unit ~keeper_name entry reservation sw f =
+let run_unit ~keeper_name entry reservation f =
   let acquired = ref false in
   let in_flight = ref false in
   Eio.Switch.run (fun cleanup_sw ->
@@ -204,7 +225,7 @@ let run_unit ~keeper_name entry reservation sw f =
         acquired := true;
         inc_in_flight ~keeper_name ();
         in_flight := true;
-        Eio_context.with_turn_switch sw f
+        Eio_context.with_turn_switch cleanup_sw (fun () -> f cleanup_sw)
       with
       | Eio.Cancel.Cancelled _ -> () (* shutdown: silent, cleanup runs above *)
       | exn ->
@@ -212,6 +233,35 @@ let run_unit ~keeper_name entry reservation sw f =
         Log.Keeper.warn ~keeper_name
           "memory lane unit failed: %s"
           (Printexc.to_string exn))
+;;
+
+let start_reserved ~keeper_name entry sw f =
+  let reservation = make_reservation () in
+  arm_switch_release ~keeper_name entry reservation sw;
+  if reservation_released reservation
+  then (
+    record_counter ~keeper_name MemoryLaneDropped;
+    Log.Keeper.warn ~keeper_name
+      "memory lane executor switch unavailable: dropping memory unit";
+    Start_executor_unavailable)
+  else
+    try
+      record_counter ~keeper_name MemoryLaneSubmitted;
+      Eio.Fiber.fork ~sw (fun () -> run_unit ~keeper_name entry reservation f);
+      Start_submitted
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      protect_cleanup ~keeper_name "fork_cancel_release" (fun () ->
+        release_reservation_once ~keeper_name entry reservation);
+      raise e
+    | exn ->
+      protect_cleanup ~keeper_name "fork_failure_release" (fun () ->
+        release_reservation_once ~keeper_name entry reservation);
+      record_counter ~keeper_name MemoryLaneUnitFailures;
+      Log.Keeper.warn ~keeper_name
+        "memory lane fork failed: %s"
+        (Printexc.to_string exn);
+      Start_fork_failed
 ;;
 
 let submit ~base_path ~keeper_name f =
@@ -243,32 +293,23 @@ let submit ~base_path ~keeper_name f =
          (max_pending ());
        Dropped
      | Some _bound ->
-       let reservation = make_reservation () in
-       arm_switch_release ~keeper_name entry reservation sw;
-       if reservation_released reservation
-       then (
-         record_counter ~keeper_name MemoryLaneDropped;
-         Log.Keeper.warn ~keeper_name
-           "memory lane executor switch unavailable: dropping post-turn memory unit";
-         Dropped)
-       else (
-         try
-           record_counter ~keeper_name MemoryLaneSubmitted;
-           Eio.Fiber.fork ~sw (fun () -> run_unit ~keeper_name entry reservation sw f);
-           Submitted
-         with
-         | Eio.Cancel.Cancelled _ as e ->
-           protect_cleanup ~keeper_name "fork_cancel_release" (fun () ->
-             release_reservation_once ~keeper_name entry reservation);
-           raise e
-         | exn ->
-           protect_cleanup ~keeper_name "fork_failure_release" (fun () ->
-             release_reservation_once ~keeper_name entry reservation);
-           record_counter ~keeper_name MemoryLaneUnitFailures;
-           Log.Keeper.warn ~keeper_name
-             "memory lane fork failed: %s"
-             (Printexc.to_string exn);
-           Dropped))
+       (match start_reserved ~keeper_name entry sw (fun _ -> f ()) with
+        | Start_submitted -> Submitted
+        | Start_executor_unavailable | Start_fork_failed -> Dropped))
+;;
+
+let submit_if_idle ~base_path ~keeper_name f =
+  match current_sw () with
+  | None -> Idle_executor_unavailable
+  | Some sw ->
+    let entry = entry_for ~base_path ~keeper_name in
+    if not (try_reserve_if_idle ~keeper_name entry)
+    then Idle_already_active
+    else
+      match start_reserved ~keeper_name entry sw f with
+      | Start_submitted -> Idle_submitted
+      | Start_executor_unavailable -> Idle_executor_unavailable
+      | Start_fork_failed -> Idle_fork_failed
 ;;
 
 module For_testing = struct

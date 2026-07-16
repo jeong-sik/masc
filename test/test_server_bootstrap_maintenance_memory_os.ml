@@ -9,14 +9,8 @@
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Recall = Masc.Keeper_memory_os_recall
+module Lane = Masc.Keeper_memory_lane
 module Atypes = Agent_sdk.Types
-
-let message_text (m : Atypes.message) =
-  m.content
-  |> List.filter_map (function
-    | Atypes.Text s -> Some s
-    | _ -> None)
-  |> String.concat "\n"
 
 let now = 1_000_000.0
 let unconfigured_runtime_id = "test.unconfigured"
@@ -57,10 +51,14 @@ let provider_cfg () =
     ()
 ;;
 
-let with_temp_keepers f =
+let with_temp_keepers ~sw f =
   let marker = Filename.temp_file "consolidation-tick-" ".tmp" in
   Sys.remove marker;
-  Io.For_testing.with_keepers_dir marker f
+  Lane.For_testing.reset ();
+  Lane.init ~sw;
+  Fun.protect
+    ~finally:Lane.For_testing.reset
+    (fun () -> Io.For_testing.with_keepers_dir marker (fun () -> f marker))
 ;;
 
 let with_prompts f =
@@ -78,11 +76,30 @@ let with_prompts f =
        f ())
 ;;
 
+let pending_count ~base_path keeper_ids =
+  List.fold_left
+    (fun total keeper_name ->
+       total
+       + Option.value
+           ~default:0
+           (Lane.For_testing.pending ~base_path ~keeper_name))
+    0
+    keeper_ids
+;;
+
+let rec await_pending ~base_path ~keeper_ids expected =
+  if pending_count ~base_path keeper_ids = expected
+  then ()
+  else (
+    Eio.Fiber.yield ();
+    await_pending ~base_path ~keeper_ids expected)
+;;
+
 let test_accumulate_consolidate_recall () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
-        with_temp_keepers (fun () ->
+        with_temp_keepers ~sw (fun base_path ->
           let keeper_id = "keeper-1" in
           (* 1. Accumulate: append five redundant facts. *)
           List.iter
@@ -101,13 +118,14 @@ let test_accumulate_consolidate_recall () =
           in
           Server_bootstrap_maintenance.run_memory_os_consolidation_tick
             ~complete:(fake_complete plan)
-            ~sw
+            ~base_path
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
             ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ();
+          await_pending ~base_path ~keeper_ids:[ keeper_id ] 0;
           let after_facts = Io.read_facts_all ~keeper_id in
           let after_count = List.length after_facts in
           Alcotest.(check int) "consolidated store size" 4 after_count;
@@ -138,7 +156,7 @@ let test_skips_when_too_few () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
-        with_temp_keepers (fun () ->
+        with_temp_keepers ~sw (fun base_path ->
           let keeper_id = "keeper-1" in
           (* A single fact is below the consolidation threshold. *)
           Io.append_fact ~keeper_id (fact "only one fact");
@@ -146,21 +164,22 @@ let test_skips_when_too_few () =
           Alcotest.(check int) "single fact accumulated" 1 before_count;
           Server_bootstrap_maintenance.run_memory_os_consolidation_tick
             ~complete:(fake_complete "{\"groups\":[],\"drop_indices\":[]}")
-            ~sw
+            ~base_path
             ~net:(Eio.Stdenv.net env)
             ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ();
+          await_pending ~base_path ~keeper_ids:[ keeper_id ] 0;
           let after_count = List.length (Io.read_facts_all ~keeper_id) in
           Alcotest.(check int) "store unchanged when too few facts" 1 after_count))))
 ;;
 
-let test_parallel_timeout_per_keeper () =
+let test_parallel_natural_completion_per_keeper () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
-        with_temp_keepers (fun () ->
+        with_temp_keepers ~sw (fun base_path ->
           (* Two keepers each have enough facts to be considered for consolidation. *)
           List.iter (Io.append_fact ~keeper_id:"keeper-slow") [ fact "slow 1"; fact "slow 2" ];
           List.iter (Io.append_fact ~keeper_id:"keeper-fast") [ fact "fast 1"; fact "fast 2" ];
@@ -168,42 +187,52 @@ let test_parallel_timeout_per_keeper () =
           let fast_count_before = List.length (Io.read_facts_all ~keeper_id:"keeper-fast") in
           Alcotest.(check int) "slow keeper accumulated" 2 slow_count_before;
           Alcotest.(check int) "fast keeper accumulated" 2 fast_count_before;
-          let slow_complete ~sw:_ ~net:_ ?clock ~config:_ ~messages:_ () =
-            (match clock with
-             | Some clock -> Eio.Time.sleep clock 2.0
-             | None -> ());
+          let calls = Atomic.make 0 in
+          let release_first, set_release_first = Eio.Promise.create () in
+          let first_started, set_first_started = Eio.Promise.create () in
+          let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+            let call_index = Atomic.fetch_and_add calls 1 in
+            if call_index = 0
+            then (
+              Eio.Promise.resolve set_first_started ();
+              Eio.Promise.await release_first);
             Ok (fake_response "{\"groups\":[],\"drop_indices\":[]}")
           in
-          let fast_complete = fake_complete "{\"groups\":[],\"drop_indices\":[]}" in
-          let complete ~sw ~net ?clock ~config ~messages () =
-            if List.exists
-                 (fun (m : Agent_sdk.Types.message) ->
-                    String.contains (message_text m) 'f')
-                 messages
-            then fast_complete ~sw ~net ?clock ~config ~messages ()
-            else slow_complete ~sw ~net ?clock ~config ~messages ()
-          in
-          let start = Unix.gettimeofday () in
           Server_bootstrap_maintenance.run_memory_os_consolidation_tick
             ~complete
-            ~timeout_sec:0.1
-            ~sw
+            ~base_path
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
             ~runtime_id:unconfigured_runtime_id
             ~provider_cfg:(provider_cfg ())
             ~now
             ();
-          let elapsed = Unix.gettimeofday () -. start in
-          (* The slow keeper should hit the 0.1s timeout and the fast keeper should
-             complete; the total elapsed time must be far below the slow keeper's
-             2.0s sleep, proving per-keeper timeout and parallel scheduling. *)
-          Alcotest.(check bool) "tick returns before slow keeper sleep" true (elapsed < 1.0);
-          (* The fast keeper store should be unchanged (no groups). The slow keeper
-             may or may not have been rewritten depending on timing; we only assert
-             that the fast path completed. *)
+          Eio.Promise.await first_started;
+          let keeper_ids = [ "keeper-fast"; "keeper-slow" ] in
+          await_pending ~base_path ~keeper_ids 1;
+          Alcotest.(check int) "first tick dispatched both keepers" 2 (Atomic.get calls);
+          Server_bootstrap_maintenance.run_memory_os_consolidation_tick
+            ~complete
+            ~base_path
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ();
+          while Atomic.get calls < 3 do
+            Eio.Fiber.yield ()
+          done;
+          Alcotest.(check int)
+            "active keeper skipped while peer ran again"
+            3
+            (Atomic.get calls);
+          Eio.Promise.resolve set_release_first ();
+          await_pending ~base_path ~keeper_ids 0;
           let fast_count_after = List.length (Io.read_facts_all ~keeper_id:"keeper-fast") in
-          Alcotest.(check int) "fast keeper unchanged" fast_count_before fast_count_after))))
+          let slow_count_after = List.length (Io.read_facts_all ~keeper_id:"keeper-slow") in
+          Alcotest.(check int) "fast keeper unchanged" fast_count_before fast_count_after;
+          Alcotest.(check int) "slow keeper unchanged" slow_count_before slow_count_after))))
 ;;
 
 let () =
@@ -219,9 +248,9 @@ let () =
             `Quick
             test_skips_when_too_few
         ; Alcotest.test_case
-            "parallel per-keeper timeout"
+            "parallel per-keeper natural completion"
             `Quick
-            test_parallel_timeout_per_keeper
+            test_parallel_natural_completion_per_keeper
         ] )
     ]
 ;;

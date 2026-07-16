@@ -12,6 +12,7 @@ val default_complete : complete_fn
 
 type outcome =
   | Skipped_too_few of int
+  | Transport_timed_out
   | Transport_failed of string
   | Unparseable of string
   | Empty_response
@@ -36,19 +37,15 @@ end
     still matches the model's input. Only an empty store skips the LLM call; a
     numeric fact-count threshold never suppresses model judgment. Returns the
     outcome without raising for the expected failure modes so a
-    caller fiber stays alive. If [timeout_sec] is configured but no [clock] is
-    available, the provider call is refused as [Transport_failed _] (without a
-    clock the provider's inner transport cannot enforce its idle/connect
-    deadlines). When a clock is present the call runs to natural completion:
-    [timeout_sec] is advisory and never force-kills a legitimate provider call
-    (fail-open per RFC-0156); only a genuine inner transport [Eio.Time.Timeout]
-    surfaces as [Transport_failed _]. [runtime_id] remains paired with
+    caller fiber stays alive. The call runs to natural completion without a
+    MASC wall-clock budget. A genuine inner transport [Eio.Time.Timeout]
+    surfaces as [Transport_timed_out], while parent cancellation propagates.
+    [runtime_id] remains paired with
     [provider_cfg] so model-level temperature declarations survive request
     tuning. *)
 val consolidate_keeper
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?timeout_sec:float
   -> ?dry_run:bool
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

@@ -363,7 +363,7 @@ let test_consolidate_classifies_invalid_structured_response () =
             "expected Invalid_structured_response for malformed provider output"))))
 ;;
 
-let test_consolidate_requires_clock_before_provider_call () =
+let test_consolidate_runs_without_clock () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
@@ -372,16 +372,15 @@ let test_consolidate_requires_clock_before_provider_call () =
         List.iter
           (Io.append_fact ~keeper_id)
           [ fact "a"; fact "b"; fact "c"; fact "d" ];
-        let called = ref false in
+        let called = Atomic.make false in
         let complete : Runtime.complete_fn =
           fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
-          called := true;
+          Atomic.set called true;
           Ok (fake_response {|{"groups":[],"drop_indices":[]}|})
         in
         let outcome =
           Runtime.consolidate_keeper
             ~complete
-            ~timeout_sec:1.0
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~runtime_id:unconfigured_runtime_id
@@ -390,18 +389,58 @@ let test_consolidate_requires_clock_before_provider_call () =
             ~keeper_id
             ()
         in
-        Alcotest.(check bool) "provider was not called" false !called;
+        Alcotest.(check bool) "provider was called" true (Atomic.get called);
         match outcome with
-        | Runtime.Transport_failed msg ->
-          Alcotest.(check bool)
-            "message names unavailable clock"
-            true
-            (contains "clock unavailable" msg);
-          Alcotest.(check bool)
-            "message names timeout"
-            true
-            (contains "timeout_sec=1.0" msg)
-        | _ -> Alcotest.fail "expected Transport_failed for missing clock"))))
+        | Runtime.Consolidated { before = 4; after = 4 } -> ()
+        | _ -> Alcotest.fail "expected clockless provider completion to be applied"))))
+;;
+
+let test_consolidate_preserves_transport_timeout_and_parent_cancellation () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter (Io.append_fact ~keeper_id) [ fact "a"; fact "b" ];
+        let timeout_complete : Runtime.complete_fn =
+          fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+          raise Eio.Time.Timeout
+        in
+        let timeout_outcome =
+          Runtime.consolidate_keeper
+            ~complete:timeout_complete
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match timeout_outcome with
+         | Runtime.Transport_timed_out -> ()
+         | _ -> Alcotest.fail "expected typed transport timeout outcome");
+        let cancel_complete : Runtime.complete_fn =
+          fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+          raise (Eio.Cancel.Cancelled (Failure "synthetic parent cancellation"))
+        in
+        let cancel_propagated =
+          try
+            ignore
+              (Runtime.consolidate_keeper
+                 ~complete:cancel_complete
+                 ~sw
+                 ~net:(Eio.Stdenv.net env)
+                 ~runtime_id:unconfigured_runtime_id
+                 ~provider_cfg:(provider_cfg ())
+                 ~now
+                 ~keeper_id
+                 ());
+            false
+          with
+          | Eio.Cancel.Cancelled _ -> true
+        in
+        Alcotest.(check bool) "parent cancellation propagated" true cancel_propagated))))
 ;;
 
 let test_consolidate_respects_provider_config_and_prompt_template () =
@@ -499,9 +538,13 @@ let () =
             `Quick
             test_consolidate_classifies_invalid_structured_response
         ; Alcotest.test_case
-            "requires clock before provider call"
+            "runs without a clock"
             `Quick
-            test_consolidate_requires_clock_before_provider_call
+            test_consolidate_runs_without_clock
+        ; Alcotest.test_case
+            "preserves transport timeout and parent cancellation"
+            `Quick
+            test_consolidate_preserves_transport_timeout_and_parent_cancellation
         ; Alcotest.test_case
             "respects provider config and prompt template"
             `Quick

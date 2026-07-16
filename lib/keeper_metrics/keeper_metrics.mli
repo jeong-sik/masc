@@ -143,6 +143,7 @@ type t =
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
   | MemoryOsMaintenanceKeeperTimeout
+  | MemoryOsConsolidationDispatches
   | WriteMetaCycleFailures
   | AlertPersistFailures
   | MetricsSseFailures

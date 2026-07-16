@@ -23,38 +23,13 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
 let user_message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
 ;;
 
-type 'a timeout_result =
-  | Completed of 'a
-  | Timed_out
-  | Clock_unavailable
-
-(* Fail-open per RFC-0156 (MASC turn-budget timeout policy withdrawn) / repo-owner
-   directive (mirrors [Keeper_llm_bridge]
-   @151ac9a27f): a wall-clock budget must NOT force-kill a legitimate LLM/agent
-   execution. The old [Eio.Time.with_timeout_exn] kill only produced
-   kill -> error -> retry churn on slow-but-legitimate provider calls, so [f] now
-   runs to natural completion. A genuine INNER transport timeout still raises
-   [Eio.Time.Timeout] (from the provider's own transport/idle deadlines) and is
-   surfaced as [Timed_out]. [Eio.Cancel.Cancelled] is deliberately not caught here
-   so it propagates (re-raises) to the enclosing switch. [timeout_sec] is no longer
-   consulted for a wall deadline (kept in the signature as advisory only).
-   The [None -> Clock_unavailable] fail-closed guard is retained unchanged: without
-   a clock the provider's inner transport cannot enforce its own idle/connect
-   deadlines, so the call is still refused upstream. *)
-let with_timeout ?clock ~timeout_sec:_ f =
-  match clock with
-  | None -> Clock_unavailable
-  | Some _clock ->
-    (try Completed (f ()) with
-     | Eio.Time.Timeout -> Timed_out)
-;;
-
 (* The plan can list many groups over a large store, so allow more than the
    512-token summary budget. *)
 let consolidation_max_tokens = 2048
 
 type outcome =
   | Skipped_too_few of int
+  | Transport_timed_out
   | Transport_failed of string
   | Unparseable of string
   | Empty_response
@@ -155,7 +130,6 @@ let invalid_structured_response_detail detail =
 let consolidate_keeper
       ?(complete = default_complete)
       ?clock
-      ?(timeout_sec = Env_config_runtime_services.Inference.timeout_seconds)
       ?(dry_run = false)
       ~sw
       ~net
@@ -179,19 +153,15 @@ let consolidate_keeper
         (match validate_provider_for_consolidation config with
          | Error msg -> Transport_failed ("consolidation provider config rejected: " ^ msg)
          | Ok () ->
-        (match
-           with_timeout ?clock ~timeout_sec (fun () ->
-             complete ~sw ~net ?clock ~config ~messages ())
-         with
-         | Timed_out -> Transport_failed "consolidation provider timed out"
-         | Clock_unavailable ->
-           Transport_failed
-             (Printf.sprintf
-                "consolidation provider clock unavailable; refusing provider call \
-                 without enforcing timeout_sec=%.1f"
-                timeout_sec)
-         | Completed (Error _) -> Transport_failed "consolidation provider transport error"
-         | Completed (Ok response) ->
+        let completion =
+          try `Completed (complete ~sw ~net ?clock ~config ~messages ()) with
+          | Eio.Time.Timeout -> `Timed_out
+        in
+        (match completion with
+         | `Timed_out -> Transport_timed_out
+         | `Completed (Error _) ->
+           Transport_failed "consolidation provider transport error"
+         | `Completed (Ok response) ->
            if String.trim (Agent_sdk_response.text_of_response response) = ""
            then Empty_response
            else

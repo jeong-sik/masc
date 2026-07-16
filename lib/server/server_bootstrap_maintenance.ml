@@ -118,14 +118,36 @@ let run_with_keeper_timeout ~clock ~timeout_sec ~keeper_id ~on_timeout f =
        on_timeout ())
 ;;
 
+type memory_os_consolidation_dispatch =
+  | Dispatch_started
+  | Dispatch_already_active
+  | Dispatch_executor_unavailable
+  | Dispatch_fork_failed
+
+let memory_os_consolidation_dispatch_label = function
+  | Dispatch_started -> "started"
+  | Dispatch_already_active -> "already_active"
+  | Dispatch_executor_unavailable -> "executor_unavailable"
+  | Dispatch_fork_failed -> "fork_failed"
+;;
+
+let record_memory_os_consolidation_dispatch ~keeper_id outcome =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string MemoryOsConsolidationDispatches)
+    ~labels:
+      [ "keeper", keeper_id
+      ; "outcome", memory_os_consolidation_dispatch_label outcome
+      ]
+    ()
+;;
+
 (* Run one consolidation pass over every keeper that currently has a fact store.
    The optional [complete] injection lets tests drive the loop with a fake model.
-   The optional [timeout_sec] lets tests exercise the per-keeper timeout without
-   waiting for the production default (300s). *)
+   Each keeper owns an independent fiber. No MASC wall deadline cancels a valid
+   provider call or its subsequent snapshot-checked writeback. *)
 let run_memory_os_consolidation_tick
       ?(complete = Keeper_memory_os_consolidation_runtime.default_complete)
-      ?(timeout_sec = 300.0)
-      ~sw
+      ~base_path
       ~net
       ?clock
       ~runtime_id
@@ -134,12 +156,12 @@ let run_memory_os_consolidation_tick
       ()
   =
   let keeper_ids = Keeper_memory_os_io.list_fact_store_keeper_ids () in
-  let consolidate_one keeper_id () =
+  let consolidate_one worker_sw keeper_id () =
     try
       match
         Keeper_memory_os_consolidation_runtime.consolidate_keeper
           ~complete
-          ~sw
+          ~sw:worker_sw
           ~net
           ?clock
           ~runtime_id
@@ -159,6 +181,10 @@ let run_memory_os_consolidation_tick
           "memory_os_keeper_consolidation: keeper=%s skipped_too_few=%d"
           keeper_id
           n
+      | Transport_timed_out ->
+        Log.Server.warn
+          "memory_os_keeper_consolidation: keeper=%s transport_timed_out"
+          keeper_id
       | Transport_failed msg ->
         Log.Server.warn
           "memory_os_keeper_consolidation: keeper=%s transport_failed: %s"
@@ -192,20 +218,37 @@ let run_memory_os_consolidation_tick
         keeper_id
         (Printexc.to_string exn)
   in
-  Eio.Fiber.all
-    (List.map
-       (fun keeper_id () ->
-          run_with_keeper_timeout
-            ~clock
-            ~timeout_sec
-            ~keeper_id
-            ~on_timeout:(fun () ->
-              Log.Server.warn
-                "memory_os_keeper_consolidation: keeper=%s timeout after %.0fs"
-                keeper_id
-                timeout_sec)
-            (consolidate_one keeper_id))
-       keeper_ids)
+  List.iter
+    (fun keeper_id ->
+       let outcome =
+         Keeper_memory_lane.submit_if_idle
+           ~base_path
+           ~keeper_name:keeper_id
+           (fun worker_sw -> consolidate_one worker_sw keeper_id ())
+       in
+       let dispatch, level, detail =
+         match outcome with
+         | Keeper_memory_lane.Idle_submitted ->
+           Dispatch_started, `Info, "started"
+         | Idle_already_active ->
+           Dispatch_already_active, `Info, "already_active"
+         | Idle_executor_unavailable ->
+           Dispatch_executor_unavailable, `Warn, "executor_unavailable"
+         | Idle_fork_failed -> Dispatch_fork_failed, `Warn, "fork_failed"
+       in
+       record_memory_os_consolidation_dispatch ~keeper_id dispatch;
+       match level with
+       | `Info ->
+         Log.Server.info
+           "memory_os_keeper_consolidation: keeper=%s dispatch=%s"
+           keeper_id
+           detail
+       | `Warn ->
+         Log.Server.warn
+           "memory_os_keeper_consolidation: keeper=%s dispatch=%s"
+           keeper_id
+           detail)
+    keeper_ids
 ;;
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
@@ -414,7 +457,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                "memory_os_keeper_consolidation: no runtime configured; skipping tick"
            | Some runtime ->
              run_memory_os_consolidation_tick
-               ~sw
+               ~base_path:(Mcp_server.workspace_config state).base_path
                ~net:env#net
                ~clock
                ~runtime_id:runtime.Runtime.id

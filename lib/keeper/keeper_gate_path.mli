@@ -4,3 +4,4 @@
 val dir : base_path:string -> string
 val mode : base_path:string -> string
 val pending : base_path:string -> string
+val pending_v2_archive : base_path:string -> source_hash:string -> string

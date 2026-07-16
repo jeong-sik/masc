@@ -54,6 +54,7 @@ type t =
   | WriteMetaFailures
   | MetaReadFailures
   | ApprovalQueueFailures
+  | ApprovalQueueCutovers
   | ApprovalResolutionSignal
   | ProfileLoadFailures
   | CompactAuditFailures

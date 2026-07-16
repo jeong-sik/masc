@@ -240,6 +240,22 @@ let install_exn ~base_path =
   | Error error -> Alcotest.fail (AQ.install_error_to_string error)
 ;;
 
+let test_v2_archive_probe_keeps_entries_opaque () =
+  let base_path = Filename.get_temp_dir_name () in
+  let path = AQ.For_testing.pending_store_path ~base_path in
+  let raw = {|{"version":2,"pending":["opaque"],"deliveries":[null,42]}|} in
+  match AQ.For_testing.v2_archive_probe base_path path raw (Yojson.Safe.from_string raw) with
+  | Error reason -> Alcotest.fail reason
+  | Ok evidence ->
+    let hash = Digestif.SHA256.(digest_string raw |> to_hex) in
+    Alcotest.(check string) "raw hash" hash evidence.source_hash;
+    Alcotest.(check int) "pending count" 1 evidence.pending_count;
+    Alcotest.(check int) "delivery count" 2 evidence.delivery_count;
+    Alcotest.(check string) "workspace archive path"
+      (Masc.Keeper_gate_path.pending_v2_archive ~base_path ~source_hash:hash)
+      evidence.archive_path
+;;
+
 let test_install_serializes_snapshot_read_with_same_base_mutation () =
   let base_path = temp_dir () in
   Fun.protect
@@ -1252,6 +1268,10 @@ let () =
             "install serializes snapshot read with mutation"
             `Quick
             test_install_serializes_snapshot_read_with_same_base_mutation
+        ; Alcotest.test_case
+            "v2 archive probe keeps entries opaque"
+            `Quick
+            test_v2_archive_probe_keeps_entries_opaque
         ; Alcotest.test_case
             "submit is nonblocking and exact"
             `Quick

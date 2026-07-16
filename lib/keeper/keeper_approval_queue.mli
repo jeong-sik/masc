@@ -42,13 +42,31 @@ type delivery_replay_failure =
   ; reason : string
   }
 
+type v2_archive_evidence =
+  { source_path : string
+  ; source_hash : string
+  ; pending_count : int
+  ; delivery_count : int
+  ; archive_path : string
+  }
+
 type install_report =
   { loaded_pending : int
   ; replayed_deliveries : int
   ; delivery_replay_failures : delivery_replay_failure list
+  ; v2_archive : v2_archive_evidence option
   }
 
-type install_error = Install_storage_failed of storage_error
+type install_error =
+  | Install_storage_failed of storage_error
+  | Install_v2_archive_failed of
+      { evidence : v2_archive_evidence
+      ; storage_error : storage_error
+      }
+  | Install_v3_initialization_failed of
+      { evidence : v2_archive_evidence
+      ; storage_error : storage_error
+      }
 
 val storage_error_to_string : storage_error -> string
 val grant_error_to_string : grant_error -> string
@@ -60,7 +78,12 @@ val install_error_to_string : install_error -> string
     Snapshot read and in-memory installation are one serialized transition, so
     a concurrent mutation for the same workspace cannot be overwritten by the
     loaded snapshot.
-    In-flight summaries retain their durable state. Independent delivery replay
+    An exact v2 top-level snapshot is archived byte-for-byte beside the source
+    before an empty v3 snapshot is published. Entry payloads are never decoded
+    or migrated. The typed report carries the archive evidence; a failed
+    archive or v3 publication leaves the source bytes at [source_path] or
+    [archive_path] and makes only this workspace's Gate unavailable.
+    In-flight v3 summaries retain their durable state. Independent delivery replay
     failures are returned in [delivery_replay_failures] and never prevent later
     journals or Gate recovery from being attempted. *)
 val install_persistence :
@@ -120,6 +143,8 @@ val list_recent_resolved_json :
   base_path:string -> ?n:int -> unit -> Yojson.Safe.t list
 
 module For_testing : sig
+  val v2_archive_probe :
+    string -> string -> string -> Yojson.Safe.t -> (v2_archive_evidence, string) result
   val reset_audit_store : unit -> unit
   val reset_runtime_state : unit -> unit
   val with_pending_store_lock : (unit -> 'a) -> 'a

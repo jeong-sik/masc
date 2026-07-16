@@ -87,13 +87,31 @@ type delivery_replay_failure =
   ; reason : string
   }
 
+type v2_archive_evidence =
+  { source_path : string
+  ; source_hash : string
+  ; pending_count : int
+  ; delivery_count : int
+  ; archive_path : string
+  }
+
 type install_report =
   { loaded_pending : int
   ; replayed_deliveries : int
   ; delivery_replay_failures : delivery_replay_failure list
+  ; v2_archive : v2_archive_evidence option
   }
 
-type install_error = Install_storage_failed of storage_error
+type install_error =
+  | Install_storage_failed of storage_error
+  | Install_v2_archive_failed of
+      { evidence : v2_archive_evidence
+      ; storage_error : storage_error
+      }
+  | Install_v3_initialization_failed of
+      { evidence : v2_archive_evidence
+      ; storage_error : storage_error
+      }
 
 type persisted_delivery =
   { entry : pending_approval
@@ -125,6 +143,17 @@ let grant_error_to_string = function
 
 let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
+  | Install_v2_archive_failed { evidence; storage_error } ->
+    Printf.sprintf
+      "Gate v2 archive failed source=%s archive=%s: %s"
+      evidence.source_path
+      evidence.archive_path
+      (storage_error_to_string storage_error)
+  | Install_v3_initialization_failed { evidence; storage_error } ->
+    Printf.sprintf
+      "Gate v3 initialization failed; v2 source is preserved at %s: %s"
+      evidence.archive_path
+      (storage_error_to_string storage_error)
 ;;
 
 let pending_store_version = 3
@@ -576,28 +605,89 @@ let snapshot_of_yojson ~base_path json =
   | _ -> Error "gate_pending snapshot must be a JSON object"
 ;;
 
+type loaded_snapshot =
+  | Current_snapshot of (pending_approval SMap.t * persisted_delivery SMap.t)
+  | V2_archive_required of v2_archive_evidence
+
+let v2_archive_candidate_of_json ~base_path ~path ~raw = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_pending_v2_archive" in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:[ "version"; "pending"; "deliveries" ]
+        fields
+    in
+    let* () =
+      match List.assoc_opt "version" fields with
+      | Some (`Int 2) -> Ok ()
+      | Some (`Int version) ->
+        Error (Printf.sprintf "%s.version %d is not v2" surface version)
+      | Some _ -> Error (surface ^ ".version must be an integer")
+      | None -> Error (surface ^ ".version is required")
+    in
+    let list_length field =
+      match List.assoc_opt field fields with
+      | Some (`List values) -> Ok (List.length values)
+      | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface field)
+      | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+    in
+    let* pending_count = list_length "pending" in
+    let* delivery_count = list_length "deliveries" in
+    let source_hash = Digestif.SHA256.(digest_string raw |> to_hex) in
+    Ok
+      { source_path = path
+      ; source_hash
+      ; pending_count
+      ; delivery_count
+      ; archive_path =
+          Keeper_gate_path.pending_v2_archive ~base_path ~source_hash
+      }
+  | _ -> Error "gate_pending v2 archive source must be a JSON object"
+;;
+
 let load_snapshot_unlocked ~base_path =
   let path = pending_store_path ~base_path in
   try
     if not (Sys.file_exists path)
-    then Ok (SMap.empty, SMap.empty)
+    then Ok (Current_snapshot (SMap.empty, SMap.empty))
     else (
-      match Safe_ops.read_json_file_safe path with
+      match Safe_ops.read_file_safe path with
       | Error reason ->
         report_pending_read_drop
           ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
           ~path
           ~detail:reason;
         Error { path; reason }
-      | Ok json ->
-        (match snapshot_of_yojson ~base_path json with
-         | Ok snapshot -> Ok snapshot
+      | Ok raw ->
+        (match Safe_ops.parse_json_safe ~context:path raw with
          | Error reason ->
            report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Safe_ops.persistence_read_drop_reason_json_syntax_error
              ~path
              ~detail:reason;
-           Error { path; reason }))
+           Error { path; reason }
+         | Ok json ->
+           (match Json_util.assoc_member_opt "version" json with
+            | Some (`Int 2) ->
+              (match v2_archive_candidate_of_json ~base_path ~path ~raw json with
+               | Ok candidate -> Ok (V2_archive_required candidate)
+               | Error reason ->
+                 report_pending_read_drop
+                   ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                   ~path
+                   ~detail:reason;
+                 Error { path; reason })
+            | Some (`Int _) | Some _ | None ->
+              (match snapshot_of_yojson ~base_path json with
+               | Ok snapshot -> Ok (Current_snapshot snapshot)
+               | Error reason ->
+                 report_pending_read_drop
+                   ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                   ~path
+                   ~detail:reason;
+                 Error { path; reason }))))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -773,6 +863,19 @@ let get_audit_store ~base_path () =
   | exn -> report_failure exn
 ;;
 
+let append_audit_record ~base_path ~keeper_name ~site ~id ~event_type json =
+  match get_audit_store ~base_path () with
+  | None -> ()
+  | Some store ->
+    Stdlib.Mutex.protect audit_io_mu (fun () ->
+      try
+        Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
+        invalidate_recent_audit_cache_for_store store
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> record_queue_failure ~keeper_name ~site ~id ~event_type exn)
+;;
+
 let audit_approval_event
       ~base_path
       ~event_type
@@ -796,12 +899,9 @@ let audit_approval_event
       let kind, reason = approval_decision_kind_and_reason decision in
       approval_decision_to_string decision, Some kind, reason
   in
-  match get_audit_store ~base_path () with
-  | None -> ()
-  | Some store ->
-    let json =
-      `Assoc
-        ([ "ts", `Float (Unix.gettimeofday ())
+  let json =
+    `Assoc
+      ([ "ts", `Float (Unix.gettimeofday ())
          ; "event", `String event_type
          ; "id", `String id
          ; "keeper", `String keeper_name
@@ -826,15 +926,15 @@ let audit_approval_event
          @ (match decision_reason with
             | Some reason -> [ "decision_reason", `String reason ]
             | None -> [])
-         )
-    in
-    Stdlib.Mutex.protect audit_io_mu (fun () ->
-      try
-        Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
-        invalidate_recent_audit_cache_for_store store
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
+       )
+  in
+  append_audit_record
+    ~base_path
+    ~keeper_name
+    ~site:"audit_append"
+    ~id
+    ~event_type
+    json
 ;;
 
 let audit_scan_window ?keeper_name n =
@@ -1863,6 +1963,145 @@ let complete_delivery delivery =
         | Ok () -> finish ()))
 ;;
 
+let v2_cutover_event = "gate_store_v2_cutover"
+
+let observe_v2_cutover ~base_path ~outcome ?detail evidence =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ApprovalQueueCutovers)
+    ~labels:[ "outcome", outcome ]
+    ();
+  let json =
+    `Assoc
+      [ "ts", `Float (Unix.gettimeofday ())
+      ; "event", `String v2_cutover_event
+      ; "outcome", `String outcome
+      ; "source_path", `String evidence.source_path
+      ; "source_hash", `String evidence.source_hash
+      ; "pending_count", `Int evidence.pending_count
+      ; "delivery_count", `Int evidence.delivery_count
+      ; "archive_path", `String evidence.archive_path
+      ; "detail", Json_util.string_opt_to_json detail
+      ]
+  in
+  append_audit_record
+    ~base_path
+    ~keeper_name:"aggregate"
+    ~site:"audit_v2_cutover"
+    ~id:evidence.source_hash
+    ~event_type:v2_cutover_event
+    json;
+  Log.Keeper.info
+    "approval_queue: v2 cutover outcome=%s source_hash=%s pending=%d deliveries=%d archive=%s%s"
+    outcome
+    evidence.source_hash
+    evidence.pending_count
+    evidence.delivery_count
+    evidence.archive_path
+    (match detail with None -> "" | Some reason -> " detail=" ^ reason)
+;;
+
+let fsync_directory path =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> Keeper_fs_durable_directory.fsync_directory path
+  | Eio_guard.Eio_fiber ->
+    Eio_unix.run_in_systhread (fun () ->
+      Keeper_fs_durable_directory.fsync_directory path)
+;;
+
+let install_v2_archive_error evidence ~path reason =
+  Error
+    (Install_v2_archive_failed
+       { evidence; storage_error = { path; reason } })
+;;
+
+let verify_v2_archive evidence source_raw =
+  match Safe_ops.read_file_safe evidence.archive_path with
+  | Error reason -> install_v2_archive_error evidence ~path:evidence.archive_path reason
+  | Ok archive_raw when String.equal archive_raw source_raw -> Ok ()
+  | Ok _ ->
+    install_v2_archive_error
+      evidence
+      ~path:evidence.archive_path
+      "Gate v2 archive conflicts with the source bytes"
+;;
+
+let ensure_v2_archive evidence source_raw source_dir =
+  let published =
+    if Sys.file_exists evidence.archive_path
+    then Ok ()
+    else Fs_compat.save_file_atomic evidence.archive_path source_raw
+  in
+  match published with
+  | Error reason -> install_v2_archive_error evidence ~path:evidence.archive_path reason
+  | Ok () ->
+    (match verify_v2_archive evidence source_raw with
+     | Error _ as error -> error
+     | Ok () ->
+       (try
+          fsync_directory source_dir;
+          Ok ()
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          install_v2_archive_error
+            evidence
+            ~path:evidence.archive_path
+            (Printexc.to_string exn)))
+;;
+
+let archive_v2_and_initialize_unlocked ~base_path evidence =
+  let source_dir = Filename.dirname evidence.source_path in
+  if not (String.equal source_dir (Filename.dirname evidence.archive_path))
+  then
+    install_v2_archive_error
+      evidence
+      ~path:evidence.archive_path
+      "Gate v2 archive path is not in the source directory"
+  else (
+    match Safe_ops.read_file_safe evidence.source_path with
+    | Error reason ->
+      install_v2_archive_error evidence ~path:evidence.source_path reason
+    | Ok current_raw ->
+      let current_hash = Digestif.SHA256.(digest_string current_raw |> to_hex) in
+      if not (String.equal current_hash evidence.source_hash)
+      then
+        install_v2_archive_error
+          evidence
+          ~path:evidence.source_path
+          "Gate v2 source changed before archive publication"
+      else
+        (match ensure_v2_archive evidence current_raw source_dir with
+         | Error _ as error -> error
+         | Ok () ->
+           (try
+              let empty_v3 =
+                snapshot_to_yojson
+                  ~base_path
+                  ~pending_map:SMap.empty
+                  ~delivery_map:SMap.empty
+              in
+              (match Keeper_fs.save_json_durable_atomic evidence.source_path empty_v3 with
+               | Ok () -> Ok evidence
+               | Error error ->
+                 Error
+                   (Install_v3_initialization_failed
+                      { evidence
+                      ; storage_error =
+                          { path = evidence.source_path
+                          ; reason = Keeper_fs.durable_write_error_to_string error
+                          }
+                      }))
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              Error
+                (Install_v3_initialization_failed
+                   { evidence
+                   ; storage_error =
+                       { path = evidence.source_path; reason = Printexc.to_string exn }
+                   }))))
+;;
+
 let install_persistence_internal ~after_load ~base_path =
   (* Snapshot read and installation are one transition. The hybrid pending
      store lock serializes Eio and non-Eio callers, cooperatively gates Eio
@@ -1876,8 +2115,29 @@ let install_persistence_internal ~after_load ~base_path =
       match loaded_snapshot with
       | Error storage_error ->
         mark_store_unavailable_unlocked ~base_path storage_error;
-        Error storage_error
-      | Ok (loaded_pending, loaded_deliveries) ->
+        Error (Install_storage_failed storage_error)
+      | Ok (V2_archive_required candidate) ->
+        (match archive_v2_and_initialize_unlocked ~base_path candidate with
+         | Error error ->
+           let storage_error =
+             match error with
+             | Install_storage_failed storage_error -> storage_error
+             | Install_v2_archive_failed { storage_error; _ }
+             | Install_v3_initialization_failed { storage_error; _ } -> storage_error
+           in
+           mark_store_unavailable_unlocked ~base_path storage_error;
+           Error error
+         | Ok evidence ->
+           clear_store_unavailable_unlocked ~base_path;
+           Atomic.set pending (remove_base_entries ~base_path (Atomic.get pending) Fun.id);
+           Atomic.set
+             deliveries
+             (remove_base_entries
+                ~base_path
+                (Atomic.get deliveries)
+                (fun delivery -> delivery.entry));
+           Ok (0, [], Some evidence))
+      | Ok (Current_snapshot (loaded_pending, loaded_deliveries)) ->
         let current_pending =
           remove_base_entries ~base_path (Atomic.get pending) Fun.id
         in
@@ -1905,7 +2165,7 @@ let install_persistence_internal ~after_load ~base_path =
              ~detail:reason;
            let error = { path; reason } in
            mark_store_unavailable_unlocked ~base_path error;
-           Error error
+           Error (Install_storage_failed error)
          | Ok pending_map, Ok delivery_map ->
            (match first_shared_id pending_map delivery_map with
             | Some id ->
@@ -1921,24 +2181,40 @@ let install_persistence_internal ~after_load ~base_path =
                 ~detail:reason;
               let error = { path; reason } in
               mark_store_unavailable_unlocked ~base_path error;
-              Error error
+              Error (Install_storage_failed error)
             | None ->
               clear_store_unavailable_unlocked ~base_path;
               Atomic.set pending pending_map;
               Atomic.set deliveries delivery_map;
               Ok
                 ( SMap.cardinal loaded_pending
-                , SMap.bindings loaded_deliveries |> List.map snd ))))
+                , SMap.bindings loaded_deliveries |> List.map snd
+                , None ))))
   in
   match installed with
-  | Error storage_error -> Error (Install_storage_failed storage_error)
-  | Ok (loaded_pending, loaded_deliveries) ->
+  | Error
+      ( (Install_v2_archive_failed { evidence; storage_error }
+        | Install_v3_initialization_failed { evidence; storage_error }) as error ) ->
+    observe_v2_cutover
+      ~base_path
+      ~outcome:
+        (match error with
+         | Install_v2_archive_failed _ -> "archive_failed"
+         | Install_v3_initialization_failed _ -> "initialization_failed"
+         | Install_storage_failed _ -> "storage_failed")
+      ~detail:(storage_error_to_string storage_error)
+      evidence;
+    Error error
+  | Error (Install_storage_failed _ as error) -> Error error
+  | Ok (loaded_pending, loaded_deliveries, v2_archive) ->
+    Option.iter (observe_v2_cutover ~base_path ~outcome:"success") v2_archive;
     let rec replay count failures = function
       | [] ->
         Ok
           { loaded_pending
           ; replayed_deliveries = count
           ; delivery_replay_failures = List.rev failures
+          ; v2_archive
           }
       | delivery :: rest ->
         if delivery.grant_consumed
@@ -1962,6 +2238,10 @@ let install_persistence ~base_path =
 ;;
 
 module For_testing = struct
+  let v2_archive_probe base_path path raw =
+    v2_archive_candidate_of_json ~base_path ~path ~raw
+  ;;
+
   let reset_audit_store () =
     Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
     Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->

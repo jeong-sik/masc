@@ -192,6 +192,7 @@ type workspace_runtime
 type server_state = private {
   workspace_runtime : workspace_runtime;
   session_registry : Session.registry;
+  keeper_compaction_wake_registry : Keeper_compaction_wake_registry.t;
   on_sse_broadcast :
     (Yojson.Safe.t -> unit) option Atomic.t;
   sw : Eio.Switch.t option;
@@ -213,6 +214,11 @@ val workspace_scope : server_state -> workspace_scope
 
 val workspace_config : server_state -> Workspace.config
 (** Current workspace configuration. *)
+
+val keeper_compaction_wake_registry :
+  server_state -> Keeper_compaction_wake_registry.t
+(** Stable process-lifetime wake-hint registry owned by this server state.
+    Durable compaction operations remain the sole work authority. *)
 
 val publication_recovery_availability_provider :
   server_state -> Keeper_publication_recovery_availability.provider

@@ -525,6 +525,7 @@ type workspace_runtime =
 type server_state = {
   workspace_runtime: workspace_runtime;
   session_registry: Session.registry;
+  keeper_compaction_wake_registry: Keeper_compaction_wake_registry.t;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
@@ -550,6 +551,9 @@ let workspace_switch_error_to_string = function
 
 let workspace_scope state = Atomic.get state.workspace_runtime.scope
 let workspace_config state = (workspace_scope state).config
+let keeper_compaction_wake_registry state =
+  state.keeper_compaction_wake_registry
+;;
 
 let workspace_scope_publication_recovery_registry scope =
   match Atomic.get scope.publication_recovery.state with
@@ -1134,6 +1138,8 @@ module For_testing = struct
                 }
           }
       ; session_registry = registry
+      ; keeper_compaction_wake_registry =
+          Keeper_compaction_wake_registry.create ()
       ; on_sse_broadcast = Atomic.make None
       ; sw = None
       ; proc_mgr = None
@@ -1233,6 +1239,8 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
             { config; publication_recovery }
       };
     session_registry = registry;
+    keeper_compaction_wake_registry =
+      Keeper_compaction_wake_registry.create ();
     on_sse_broadcast = Atomic.make None;
     sw = Some sw;
     proc_mgr = Some proc_mgr;

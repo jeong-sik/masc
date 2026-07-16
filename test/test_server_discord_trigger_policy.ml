@@ -178,6 +178,11 @@ let test_durable_accept_precedes_delivery_handoff () =
    | Some _ -> fail "Discord leaf emitted another connector projection"
    | None -> fail "Discord leaf did not emit a delivery projection");
   let failure = Eio.Promise.await observed in
+  check int "triggered receipt has no parallel attention lifecycle" 0
+    (List.length
+       (Keeper_external_attention.load_events
+          ~base_path:base_dir
+          ~keeper_name:"luna"));
   check string "exact Discord message id" "discord-exact-123"
     failure.Connector_ingress_lane.event_id.opaque_id;
   check string "typed source" "discord_triggered" failure.event_id.source;

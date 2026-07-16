@@ -162,21 +162,6 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
         channel_id keeper_name error;
       None
 
-let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
-  match
-    Keeper_external_attention.mark_resolved
-      ~base_path:base_dir
-      ~keeper_name
-      ~event_ids:[ event_id ]
-      ~reason
-      ()
-  with
-  | Ok () -> ()
-  | Error error ->
-      Log.Server.warn
-        "discord external attention resolve failed (keeper=%s event=%s): %s"
-        keeper_name event_id error
-
 let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
   match State.resolve_keeper_for_channel ~channel_id with
   | Some resolution -> Some (resolution, [])
@@ -203,7 +188,7 @@ let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
 let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(channel_id : string) ~(message_id : string)
       ~(guild_id : string option)
-      ~base_dir
+      ~base_dir:_
       ~(author_id : string) ~(author_name : string option)
       ~(content : string)
       ~(mentions_bot : bool)
@@ -250,18 +235,6 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
           message_reference_message_id
       @ metadata_opt "discord.referenced_message_author_id"
           referenced_message_author_id
-    in
-    let urgency =
-      if mentions_bot then Keeper_external_attention.Mention
-      else
-        match guild_id with
-        | None -> Keeper_external_attention.Direct_message
-        | Some _ -> Keeper_external_attention.Ambient
-    in
-    let attention_event_id =
-      record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
-        ~message_id ~author_id ~author_name ~content ~mentions_bot
-        ~route:"triggered" ~urgency
     in
     let msg : Channel_gate.inbound_message =
       { channel = State.channel
@@ -322,11 +295,6 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
             (Channel_gate.gate_error_to_string gate_err))
      | Ok out ->
        if String.equal out.content "" then begin
-         (match attention_event_id with
-          | Some event_id ->
-              mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                ~reason:"discord_empty_reply"
-          | None -> ());
          Discord_observability.record_inbound_dispatch
            Discord_observability.Empty_reply;
          Discord_observability.record_reply Discord_observability.Reply_empty
@@ -337,11 +305,6 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
               ~reply_to_message_id:message_id ()
           with
           | Ok _ ->
-            (match attention_event_id with
-             | Some event_id ->
-               mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                 ~reason:"discord_reply_sent"
-             | None -> ());
             Discord_observability.record_inbound_dispatch
               Discord_observability.Reply_sent;
             Discord_observability.record_reply

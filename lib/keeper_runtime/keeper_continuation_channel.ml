@@ -137,14 +137,18 @@ let assoc_fields = function
 
 let string_field name fields =
   match List.assoc_opt name fields with
-  | Some (`String s) -> Ok s
+  | Some (`String s) when not (String.equal (String.trim s) "") -> Ok s
+  | Some (`String _) ->
+    Error (Printf.sprintf "continuation_channel: field %s must not be blank" name)
   | Some _ -> Error (Printf.sprintf "continuation_channel: field %s must be a string" name)
   | None -> Error (Printf.sprintf "continuation_channel: missing field %s" name)
 
 let optional_string_field name fields =
   match List.assoc_opt name fields with
-  | Some (`String s) when String.trim s <> "" -> Ok (Some s)
-  | Some (`String _) | Some `Null | None -> Ok None
+  | Some (`String s) when not (String.equal (String.trim s) "") -> Ok (Some s)
+  | Some (`String _) ->
+    Error (Printf.sprintf "continuation_channel: field %s must not be blank" name)
+  | Some `Null | None -> Ok None
   | Some _ ->
     Error (Printf.sprintf "continuation_channel: field %s must be a string or null" name)
 

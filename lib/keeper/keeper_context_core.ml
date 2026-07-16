@@ -10,66 +10,6 @@ open Keeper_types_profile
 
 include Keeper_context_core_accessors
 
-let add_checkpoint_sanitize_stats
-    (a : checkpoint_sanitize_stats)
-    (b : checkpoint_sanitize_stats) : checkpoint_sanitize_stats =
-  {
-    dropped_messages = a.dropped_messages + b.dropped_messages;
-    dropped_blocks = a.dropped_blocks + b.dropped_blocks;
-    dropped_chars = a.dropped_chars + b.dropped_chars;
-    truncated_blocks = a.truncated_blocks + b.truncated_blocks;
-    truncated_chars = a.truncated_chars + b.truncated_chars;
-    tool_pair_repair =
-      add_tool_pair_repair_stats a.tool_pair_repair b.tool_pair_repair;
-  }
-
-let checkpoint_stats_of_tool_pair_repair repair_stats =
-  { empty_checkpoint_sanitize_stats with tool_pair_repair = repair_stats }
-
-let tool_pair_repair_stats_to_json (stats : tool_pair_repair_stats) =
-  let tool_use_samples =
-    List.map
-      (fun (tool_use_id, tool_name) ->
-         `Assoc
-           [ "tool_use_id", `String tool_use_id
-           ; "tool_name", `String tool_name
-           ])
-      stats.dropped_tool_use_samples
-  in
-  let tool_result_ids =
-    List.map (fun tool_use_id -> `String tool_use_id) stats.dropped_tool_result_ids
-  in
-  `Assoc
-    [ "dropped_tool_uses", `Int stats.dropped_tool_uses
-    ; "dropped_tool_results", `Int stats.dropped_tool_results
-    ; "dropped_tool_use_samples", `List tool_use_samples
-    ; "dropped_tool_result_ids", `List tool_result_ids
-    ]
-
-let truncate_checkpoint_text ~max_chars (text : string) : string * int =
-  let len = String.length text in
-  if len <= max_chars then (text, 0)
-  else if max_chars <= 0 then ("", len)
-  else
-    let marker_len = String.length checkpoint_text_cap_marker in
-    if max_chars <= marker_len then
-      (String.sub checkpoint_text_cap_marker 0 max_chars, len)
-    else
-      let kept = max_chars - marker_len in
-      ( String.sub text 0 kept ^ checkpoint_text_cap_marker,
-        len - kept )
-
-let sanitize_oas_checkpoint
-    ?(repair_orphans = true)
-    (cp : Agent_sdk.Checkpoint.t)
-  : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
-  if repair_orphans then (
-    let messages, tool_pair_repair =
-      repair_broken_tool_call_pairs_with_stats cp.messages
-    in
-    ({ cp with messages }, { empty_checkpoint_sanitize_stats with tool_pair_repair }))
-  else cp, empty_checkpoint_sanitize_stats
-
 let resume_checkpoint_of_context (ctx : working_context) : Agent_sdk.Checkpoint.t =
   let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   {

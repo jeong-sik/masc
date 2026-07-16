@@ -56,8 +56,8 @@ val same_route : t -> t -> bool
 val to_yojson : t -> Yojson.Safe.t
 
 (** [of_yojson json] parses a tagged object produced by {!to_yojson}. A
-    missing or unknown ["kind"], a missing required field, or a non-string
-    connector coordinate is an [Error]. Only absent, null, or empty optional
-    coordinates become [None]; there are no field aliases or permissive
-    defaults (RFC-0320 §2 fail-closed). *)
+    missing or unknown ["kind"], a missing or blank required field, or a
+    blank/non-string connector coordinate is an [Error]. Only absent or null
+    optional coordinates become [None]; there are no field aliases or
+    permissive defaults (RFC-0320 §2 fail-closed). *)
 val of_yojson : Yojson.Safe.t -> (t, string) result

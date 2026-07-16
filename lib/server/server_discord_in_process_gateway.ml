@@ -580,7 +580,9 @@ let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
          (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
      | Some ((resolution, _) as resolved_binding) ->
        (match
-          accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ev
+          accept_event
+            ~resolved_binding:(Some resolved_binding)
+            ~dispatch_for_delivery ~base_dir ev
         with
         | None -> ()
         | Some accepted_delivery ->

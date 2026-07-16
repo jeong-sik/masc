@@ -259,7 +259,7 @@ let test_bound_message_queues_exact_slack_ts () =
       check bool "accept completed before handoff" true !accepted_before_delivery;
       (match !observed_delivery with
        | Some
-           { Gate_keeper_backend.source =
+           { source =
                Keeper_chat_queue.Slack
                  { channel_id; user_id; user_name; team_id; thread_ts }
            ; surface =

@@ -214,25 +214,25 @@ let arm_switch_release ~keeper_name entry reservation sw =
 let run_unit ~keeper_name entry reservation f =
   let acquired = ref false in
   let in_flight = ref false in
-  Eio.Switch.run (fun cleanup_sw ->
-    Eio.Switch.on_release cleanup_sw (fun () ->
-      release_after_run ~keeper_name entry reservation ~acquired ~in_flight);
+  try
+    Eio.Switch.run (fun cleanup_sw ->
+      Eio.Switch.on_release cleanup_sw (fun () ->
+        release_after_run ~keeper_name entry reservation ~acquired ~in_flight);
       disarm_switch_hook reservation;
-      try
-        Eio.Mutex.lock entry.mem_mu;
-        (* No suspension point between [lock] returning and this assignment, so
-           cancellation cannot strand a held mutex with [acquired = false]. *)
-        acquired := true;
-        inc_in_flight ~keeper_name ();
-        in_flight := true;
-        Eio_context.with_turn_switch cleanup_sw (fun () -> f cleanup_sw)
-      with
-      | Eio.Cancel.Cancelled _ -> () (* shutdown: silent, cleanup runs above *)
-      | exn ->
-        record_counter ~keeper_name MemoryLaneUnitFailures;
-        Log.Keeper.warn ~keeper_name
-          "memory lane unit failed: %s"
-          (Printexc.to_string exn))
+      Eio.Mutex.lock entry.mem_mu;
+      (* No suspension point between [lock] returning and this assignment, so
+         cancellation cannot strand a held mutex with [acquired = false]. *)
+      acquired := true;
+      inc_in_flight ~keeper_name ();
+      in_flight := true;
+      Eio_context.with_turn_switch cleanup_sw (fun () -> f cleanup_sw))
+  with
+  | Eio.Cancel.Cancelled _ -> () (* shutdown: cleanup ran with child switch *)
+  | exn ->
+    record_counter ~keeper_name MemoryLaneUnitFailures;
+    Log.Keeper.warn ~keeper_name
+      "memory lane unit failed: %s"
+      (Printexc.to_string exn)
 ;;
 
 let start_reserved ~keeper_name entry sw f =

@@ -755,11 +755,18 @@ let collect_board_events_with_cursor_policy
         then (
           let ts, post_id = initial_cursor in
           Keeper_registry.set_board_cursor ~base_path meta.name ts post_id;
-          Log.Keeper.info
-            "board cursor initialized at current head for %s: (%f, %s)"
-            meta.name
-            ts
-            (Option.value ~default:"" post_id));
+          (match post_id with
+           | Some post_id ->
+             Log.Keeper.info
+               "board cursor initialized at current head for %s: (%f, %s)"
+               meta.name
+               ts
+               post_id
+           | None ->
+             Log.Keeper.info
+               "board cursor initialized at empty current head for %s: (%f, no post)"
+               meta.name
+               ts));
         None)
     in
     let posts =

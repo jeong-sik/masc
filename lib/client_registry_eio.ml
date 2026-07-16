@@ -70,17 +70,14 @@ let with_state_ro f =
 
 (** {1 Initialization} *)
 
-(** Reset registry for testing.
-    Replaces all state with a fresh empty record. *)
-let reset_for_testing () =
+(** Replace the registry and both session maps as one lifecycle operation. *)
+let clear_all () =
   Eio.Mutex.use_rw ~protect:true state_mu (fun () ->
     state := make_state ()
   )
 
-let clear_session_caches () =
-  with_state_rw (fun s ->
-    s := { !s with session_map = SMap.empty; resolved_map = SMap.empty }
-  )
+(** Reset registry for testing. *)
+let reset_for_testing () = clear_all ()
 
 (** {1 Internal helpers — must be called under [state_mu]} *)
 

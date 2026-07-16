@@ -314,8 +314,9 @@ let with_ide_server f =
          f ~base_path ~state ~router))
 ;;
 
-let presence_agent ?keeper_name ~status name : Masc_domain.agent =
+let presence_agent ?keeper_name ?last_seen ~status name : Masc_domain.agent =
   let now = Masc_domain.now_iso () in
+  let last_seen = Option.value last_seen ~default:now in
   let meta : Masc_domain.agent_meta =
     { session_id = "ide-presence:" ^ name
     ; agent_type = "test"
@@ -334,7 +335,7 @@ let presence_agent ?keeper_name ~status name : Masc_domain.agent =
   ; capabilities = []
   ; current_task = None
   ; session_bound_at = now
-  ; last_seen = now
+  ; last_seen
   ; meta = Some meta
   }
 ;;
@@ -355,7 +356,10 @@ let test_presence_projects_only_canonical_keeper_identity () =
     in
     List.iter
       write_agent
-      [ presence_agent ~keeper_name:"busy-keeper" ~status:Masc_domain.Busy
+      [ presence_agent
+          ~keeper_name:"busy-keeper"
+          ~last_seen:"2020-01-01T00:00:00Z"
+          ~status:Masc_domain.Busy
           "runtime-busy"
       ; presence_agent ~keeper_name:"idle-keeper" ~status:Masc_domain.Listening
           "runtime-idle"

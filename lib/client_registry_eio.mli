@@ -59,6 +59,10 @@ val total_count : unit -> int
 
 (** {1 Cleanup} *)
 
-val clear_session_caches : unit -> unit
+val clear_all : unit -> unit
+(** Atomically clears registered identities and all MCP-session mappings.
+    Intended for process shutdown; individual sessions must use
+    {!unregister_mcp_session}. *)
+
 val unregister_mcp_session : string -> unit
 (** Ends the registration owned by an MCP transport session. *)

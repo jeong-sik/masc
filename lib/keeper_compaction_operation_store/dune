@@ -1,0 +1,15 @@
+(include_subdirs no)
+(library
+ (name masc_keeper_compaction_operation_store)
+ (public_name masc.keeper_compaction_operation_store)
+ (wrapped false)
+ (modules keeper_compaction_operation_store)
+ (libraries
+  eio
+  masc.fs_compat
+  masc.keeper_compaction_operation
+  masc.keeper_compaction_operation_record
+  masc.keeper_compaction_operation_reducer
+  masc.keeper_registry
+  masc.masc_core
+  masc.tool_invocation_ref))

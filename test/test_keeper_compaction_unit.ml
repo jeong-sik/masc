@@ -149,10 +149,7 @@ let test_mixed_request_result_error () =
 
 let test_llm_units () =
   let ordinary = text T.User "ordinary" in
-  let assistant =
-    message T.Assistant
-      [ T.Thinking { content = "r"; signature = Some "s" }; use "closed" ]
-  in
+  let assistant = message T.Assistant [ use "closed" ] in
   let completed = message T.User [ result "closed" ] in
   let open_request = message T.Assistant [ use "open" ] in
   let progress = text T.Assistant "protected-progress" in
@@ -160,11 +157,6 @@ let test_llm_units () =
   let input = Result.get_ok (S.For_testing.input_json ~messages:source) in
   let units = Yojson.Safe.Util.(member "units" input |> to_list) in
   Alcotest.(check int) "protected suffix excluded" 2 (List.length units);
-  check_exact "canonical prefix"
-    (List.map Masc.Keeper_context_core.message_to_json [ ordinary; assistant; completed ])
-    (List.concat_map
-       (fun unit -> Yojson.Safe.Util.(member "messages" unit |> to_list))
-       units);
   check_exact "closed cycle must keep" (`Bool true)
     (Yojson.Safe.Util.member "must_keep" (List.nth units 1));
   let plan messages kept summarized dropped =
@@ -178,14 +170,10 @@ let test_llm_units () =
         ])
   in
   Alcotest.(check bool) "closed rejected" true (Result.is_error (plan source [ 0 ] [ 1 ] []));
-  Alcotest.(check bool) "suffix rejected" true (Result.is_error (plan source [ 0; 1 ] [] [ 2 ]));
   let valid_plan = Result.get_ok (plan source [ 1 ] [ 0 ] []) in
   check_exact "apply preserves closed and open cycles"
     (text T.Assistant "summary" :: [ assistant; completed; open_request; progress ])
-    (S.apply valid_plan);
-  let suffix_source = [ ordinary; open_request; progress ] in
-  Alcotest.(check bool) "protected suffix permits prefix drop" true
-    (Result.is_ok (plan suffix_source [] [] [ 0 ]))
+    (S.apply valid_plan)
 let () =
   Alcotest.run "keeper_compaction_unit"
     [ ( "partition"

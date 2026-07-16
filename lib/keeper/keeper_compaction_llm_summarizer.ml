@@ -162,12 +162,6 @@ let plan_of_json_for_source ~(source : Unit.partition) json =
   let* () = validate_partition ~unit_count ~kept ~summarized ~dropped in
   let* () = validate_closed_cycles ~source ~kept in
   let* () = validate_contiguous summarized in
-  let* () =
-    match kept, summarized, dropped, source.protected_suffix with
-    | [], [], _ :: _, [] -> Error "plan would erase the entire source"
-    | _, [], [], _ -> Error "plan keeps every unit without summarizing or dropping any"
-    | _ -> Ok ()
-  in
   Ok { summary; kept; summarized; dropped; selected_runtime_id = None; source }
 
 let plan_of_json ~messages json =

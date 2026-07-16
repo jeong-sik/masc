@@ -69,9 +69,9 @@ Important families:
 - scheduled automation: `masc_schedule_create`, `masc_schedule_list`,
   `masc_schedule_get`, `masc_schedule_cancel`, `masc_schedule_approve`,
   `masc_schedule_reject`
-- keeper management/messaging: `masc_keeper_list`, `masc_keeper_status`,
-  `masc_keeper_msg`, `masc_keeper_msg_result`, `masc_keeper_msg_queue`,
-  `masc_keeper_msg_cancel`
+- keeper management/delegation: `masc_keeper_list`, `masc_keeper_status`,
+  `masc_keeper_delegate`, `masc_keeper_delegate_status`,
+  `masc_keeper_delegate_list`, `masc_keeper_delegate_cancel`
 - operator/maintenance keeper controls: broader descriptors such as
   `masc_keeper_compact`, `masc_keeper_clear`, `masc_keeper_sandbox_start`,
   `masc_keeper_sandbox_stop`, `masc_keeper_reset`,
@@ -100,7 +100,7 @@ Excluded from keeper exposure:
 | Past decisions or shared references | memory and library tools | Writing scratch notes to durable memory |
 | Workspace planning, goal lifecycle, run logs, notes, deliverables | `masc_goal_*`, `masc_plan_*`, `masc_run_*`, `masc_note_add`, `masc_deliver` | Mutating goals/plans for ordinary status narration |
 | Durable future automation | `masc_schedule_*` | Assuming side-effecting schedules run without human approval |
-| Targeted async help from another keeper | `masc_keeper_list`, `masc_keeper_status`, `masc_keeper_msg`, result/queue/cancel tools | Broadcasting a private question, or messaging an unknown keeper without status/list evidence |
+| Targeted async help from another keeper | `masc_keeper_list`, `masc_keeper_status`, `masc_keeper_delegate`, status/list/cancel tools | Broadcasting a private question, or delegating to an unknown keeper without status/list evidence |
 | High-impact ambiguous decision needing independent perspectives | `masc_fusion` with self-contained context | Replacing cheap code inspection, exact status evidence, or blocker reporting |
 | Stored image artifact analysis | `analyze_image` | Treating visible chat attachments as hidden sandbox files |
 
@@ -110,7 +110,7 @@ Keeper continuity is a bounded advanced capability, not a general memory promise
 
 If productized, the continuity promise is:
 
-- `masc_keeper_msg` can continue a same-trace conversation when checkpoint restore is healthy
+- `masc_keeper_delegate` can continue a same-trace conversation when checkpoint restore is healthy
 - `masc_keeper_status` and `masc_keeper_list(detailed=true)` expose enough continuity state to diagnose restore and handoff behavior
 - validation should rely on OAS checkpoint truth plus live runtime evidence
 
@@ -151,7 +151,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition` |
 | 계획/런/산출물 기록 | `masc_plan_get`, `masc_plan_init`, `masc_plan_update`, `masc_plan_set_task`, `masc_plan_get_task`, `masc_plan_clear_task`, `masc_run_init`, `masc_run_list`, `masc_run_get`, `masc_run_plan`, `masc_note_add`, `masc_deliver` |
 | 예약 자동화 | `masc_schedule_create`, `masc_schedule_list`, `masc_schedule_get`, `masc_schedule_cancel`, `masc_schedule_approve`, `masc_schedule_reject` |
-| 다른 keeper 상태/메시지 | `masc_keeper_list`, `masc_keeper_status`, `masc_keeper_msg`, `masc_keeper_msg_result`, `masc_keeper_msg_queue`, `masc_keeper_msg_cancel` |
+| 다른 keeper 상태/위임 | `masc_keeper_list`, `masc_keeper_status`, `masc_keeper_delegate`, `masc_keeper_delegate_status`, `masc_keeper_delegate_list`, `masc_keeper_delegate_cancel` |
 | 패널 심의 / 비동기 판단 보강 | `masc_fusion`, `masc_fusion_status` |
 | 저장 이미지 artifact 분석 | `analyze_image` |
 | 코드 작성 / 수정 | `Read` / `Grep` -> `Edit` / `Write`, then `Execute` with typed `git` argv |

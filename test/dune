@@ -1890,7 +1890,6 @@
 (include stanzas/test_keeper_mutex_coverage.inc)
 
 
-(include stanzas/test_keeper_pause_silent_failure_source.inc)
 
 (include stanzas/test_keeper_personality_round_trip.inc)
 

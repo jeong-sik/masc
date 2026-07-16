@@ -679,7 +679,7 @@ let test_corrupt_chat_queue_snapshot_is_read_error () =
       (Filename.concat
          (Common.keepers_runtime_dir_of_base ~base_path)
          keeper_name)
-      "chat-queue.json"
+      "chat-queue.sqlite3"
   in
   save_text path "{not-json";
   let report = Keeper_chat_queue.configure_persistence ~base_path in

@@ -986,7 +986,8 @@ let test_parse_invalid_base_profile_fails_closed () =
   let keeper_path = Filename.concat keepers_dir "parse-base.toml" in
   let invalid_base_path = Filename.concat keepers_dir "base.toml" in
   write_file invalid_base_path "[broken";
-  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"test\"\n";
+  write_file keeper_path
+    "[keeper]\nbase = \"base.toml\"\ninstructions = \"test\"\n";
   ignore
     (expect_profile_load_error
        ~base_path
@@ -1000,13 +1001,14 @@ let test_profile_invalid_base_profile_fails_closed () =
   let invalid_base_path = Filename.concat keepers_dir "base.toml" in
   write_file
     invalid_base_path
-    "[keeper]\ngoal = [\n";
-  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"child\"\n";
+    "[keeper]\ngoal = \"removed\"\n";
+  write_file keeper_path
+    "[keeper]\nbase = \"base.toml\"\ninstructions = \"child\"\n";
   ignore
     (expect_profile_load_error
        ~base_path
        ~keeper_name:"profile-base"
-       ~kind:KTP.Parse_error
+       ~kind:KTP.Profile_error
        ~failing_path:invalid_base_path)
 
 let test_unreadable_base_profile_fails_closed () =
@@ -1014,7 +1016,8 @@ let test_unreadable_base_profile_fails_closed () =
   let keeper_path = Filename.concat keepers_dir "unreadable-base.toml" in
   let directory_base_path = Filename.concat keepers_dir "base.toml" in
   Unix.mkdir directory_base_path 0o755;
-  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"test\"\n";
+  write_file keeper_path
+    "[keeper]\nbase = \"base.toml\"\ninstructions = \"test\"\n";
   ignore
     (expect_profile_load_error
        ~base_path
@@ -1134,6 +1137,7 @@ let with_personas_dir f =
 
 let with_config_dir f =
   with_temp_dir "keeper-config" @@ fun config_dir ->
+  mkdir_p (Filename.concat config_dir "prompts");
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
@@ -1789,7 +1793,7 @@ let test_health_json_surfaces_typed_keeper_config_error () =
   let keeper_path = Filename.concat keepers_dir "broken.toml" in
   let base_path = Filename.concat keepers_dir "missing-base.toml" in
   write_file keeper_path
-    "[keeper]\nbase = \"missing-base.toml\"\ngoal = \"test\"\n";
+    "[keeper]\nbase = \"missing-base.toml\"\ninstructions = \"test\"\n";
   let request = health_request () in
   let json =
     Runtime.make_health_json

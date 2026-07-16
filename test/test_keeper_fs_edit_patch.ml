@@ -730,6 +730,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
   let outside = Filename.concat config.Workspace.base_path "leaf-swap-outside" in
   ensure_dir outside;
   let run_existing_case
+        ?(expected_success = true)
         ~label
         ~initial
         ~args
@@ -761,10 +762,12 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
         ~args:(`Assoc (("path", `String target) :: args))
         ()
     in
-    Alcotest.(check bool) (label ^ " succeeded") true (parse_ok raw);
-    Alcotest.(check (option string)) (label ^ " used sandbox backend")
-      (Some "docker")
-      (parse_string raw "via");
+    Alcotest.(check bool) (label ^ " success contract") expected_success (parse_ok raw);
+    if expected_success
+    then
+      Alcotest.(check (option string)) (label ^ " used sandbox backend")
+        (Some "docker")
+        (parse_string raw "via");
     Alcotest.(check string) (label ^ " outside resource unchanged")
       ("outside-" ^ label)
       (Fs_compat.load_file outside_target);
@@ -798,10 +801,11 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
     ~expected_leaf:"let leaf = 2\n"
     ~expected_leaf_kind:`Regular;
   run_existing_case
+    ~expected_success:false
     ~label:"append"
     ~initial:"inside-append\n"
     ~args:[ "mode", `String "append"; "content", `String "pinned-append\n" ]
-    ~expected_moved:"inside-append\npinned-append\n"
+    ~expected_moved:"inside-append\n"
     ~expected_leaf:"outside-append"
     ~expected_leaf_kind:`Symlink;
   let parent = Filename.concat playground "leaf-append-missing" in

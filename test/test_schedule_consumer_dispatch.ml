@@ -388,8 +388,9 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
          ~base_path:config.Workspace_utils.base_path)
       "schedule-keeper"
   in
-  mkdir_p (Filename.dirname keeper_owner_path);
-  write_empty_file keeper_owner_path;
+  mkdir_p keeper_owner_path;
+  let queue_path = Filename.concat keeper_owner_path "event-queue.json" in
+  mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
   let occurrence_id = single_occurrence_id result in
@@ -410,7 +411,7 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
        (Keeper_registry_event_queue.snapshot
           ~base_path:config.Workspace_utils.base_path
           "schedule-keeper"));
-  Sys.remove keeper_owner_path;
+  Unix.rmdir queue_path;
   let retried = tick_ok config ~now:202.0 in
   check int "signal log is not duplicated" 0 (List.length retried.emitted);
   (match List.hd retried.dispatches with

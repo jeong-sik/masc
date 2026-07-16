@@ -83,7 +83,9 @@ let prompt_tier_oas_provider_config () =
     ~base_url:"https://prompt-tier.invalid/v1"
     ~supports_structured_output_override:false
     ~model_capabilities_override:
-      Llm_provider.Capabilities.openai_compat_chat_extended_capabilities
+      { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
+        supports_structured_output = false
+      }
     ()
 ;;
 

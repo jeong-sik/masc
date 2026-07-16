@@ -80,7 +80,19 @@ let expect_invalid_transition label = function
 ;;
 
 let transition config ~agent_name ~task_id ~action ?(notes = "") ?(reason = "") () =
-  Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ()
+  let configured_llm_verdict =
+    match action with
+    | Masc_domain.Done_action ->
+      Some
+        { Masc_domain.decision = Masc_domain.Completion_pass
+        ; runtime_id = "test-completion-reviewer"
+        ; rationale = Some "lifecycle fixture approval"
+        ; evaluated_at = Masc_domain.now_iso ()
+        }
+    | _ -> None
+  in
+  Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason
+    ?configured_llm_verdict ()
 ;;
 
 let test_claim_start_done_path () =

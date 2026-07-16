@@ -4,9 +4,10 @@
 # workspaces. Existing live config roots are preserved and must be edited
 # explicitly through the dashboard/runtime config path.
 #
-# The public seed ships cloud/commercial providers only (Ollama Cloud, DeepSeek,
-# GLM Coding Plan). Private/local self-hosted runtimes (local Ollama, RunPod) are
-# not shipped here; keep the default on a cloud runtime.
+# Local Gemma 4 QAT is a canary runtime, not the fleet default. Keep the
+# default on the cloud runtime and pin only one keeper to local Ollama until
+# sustained turns prove the local box can absorb more load. OAS handles Gemma 4
+# thinking through the chat-template control token path, not Ollama think:true.
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
@@ -96,6 +97,14 @@ path = "/models"
 type = "env"
 key = "ZAI_API_KEY_SB"
 
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
+
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
 max-context = 1000000
@@ -148,6 +157,54 @@ supports-extended-thinking = true
 supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = false
+
+[models.gemma4-26b-a4b-qat]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# generic Ollama top-level think field for this model family.
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[models.gemma4-26b-a4b-qat.capabilities]
+# This runtime rides OAS native Ollama /api/chat, which does not serialize
+# tool_choice (oas backend_ollama.ml:24). Declaring true here would override
+# oas models.toml's supports_tool_choice=false (provider_runtime_binding.ml
+# applies this override last) while the transport silently drops forced tool
+# choice. Do not re-enable without a serializer path + model-side proof.
+supports-tool-choice = false
+thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
+supports-native-streaming = true
+supports-top-k = true
+supports-seed = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[models.gemma4-e2b-it-qat]
+api-name = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 131072
+tools-support = true
+# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# generic Ollama top-level think field for this model family.
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[models.gemma4-e2b-it-qat.capabilities]
+# This exact local model reports 131072 context and tools/vision/audio via
+# `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`.
+supports-tool-choice = false
+thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
+supports-native-streaming = true
+supports-top-k = true
+supports-seed = true
+supports-image-input = true
+supports-audio-input = true
+supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
 wizard-default = true
@@ -906,6 +963,13 @@ supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-rnj-1-8b]
 
+[ollama.gemma4-26b-a4b-qat]
+wizard-default = true
+max-concurrent = 1
+
+[ollama.gemma4-e2b-it-qat]
+max-concurrent = 1
+
 # ── Runtime lanes (ordered failover) ─────────────────────────────────
 # A lane is an ordered list of runtime candidates. When a keeper is assigned
 # to a lane, the turn attempts candidates in order until one succeeds or the
@@ -923,11 +987,12 @@ candidates = [
 # keepers fall back to [runtime].default. Per-keeper overrides in the
 # live config (<base>/.masc/config/runtime.toml) take precedence.
 #
-# No seed assignments ship in the public repo: every keeper rides
-# [runtime].default unless its live config overrides this seed.
+# Seed only nick0cave to the local Gemma 4 canary. Other keepers use the
+# fleet default unless their live config overrides this seed.
 # Do not assign general keeper lanes to Pro here. Pro is reserved for explicit
 # judge/evaluator lanes ([runtime].cross_verifier and [fusion].judge).
 [runtime.assignments]
+nick0cave = "ollama.gemma4-26b-a4b-qat"
 # example: route a test keeper through the failover lane
 # canary = "default"
 

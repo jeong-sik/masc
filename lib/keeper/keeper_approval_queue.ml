@@ -1106,7 +1106,7 @@ let create_entry
   ; input
   ; requested_at = Unix.gettimeofday ()
   ; turn_id
-  ; request_context = Option.map Keeper_gate_request_context.project request_context
+  ; request_context
   ; task_id
   ; goal_id
   ; goal_ids
@@ -1361,35 +1361,24 @@ let restart_failed_summaries ~base_path =
   let updated =
     with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
-      let reopened_ids, reopened, context_compacted =
+      let reopened_ids, reopened =
         SMap.fold
-          (fun id (entry : pending_approval) (ids, acc, compacted) ->
-             if String.equal entry.audit_base_path base_path
-             then (
-               let request_context =
-                 Option.map Keeper_gate_request_context.project entry.request_context
-               in
-               let context_changed =
-                 match entry.request_context, request_context with
-                 | Some before, Some after -> not (Yojson.Safe.equal before after)
-                 | None, None -> false
-                 | Some _, None | None, Some _ -> true
-               in
-               let entry = { entry with request_context } in
-               match entry.summary_status with
-               | Summary_failed _ ->
-                 ( id :: ids
-                 , SMap.add id { entry with summary_status = Summary_not_requested } acc
-                 , compacted || context_changed )
-               | Summary_not_requested | Summary_pending | Summary_available _ ->
-                 ids, SMap.add id entry acc, compacted || context_changed)
-             else ids, acc, compacted)
+          (fun id (entry : pending_approval) (ids, acc) ->
+             match entry.summary_status with
+             | Summary_failed _ when String.equal entry.audit_base_path base_path ->
+               ( id :: ids
+               , SMap.add id { entry with summary_status = Summary_not_requested } acc )
+             | Summary_not_requested
+             | Summary_pending
+             | Summary_available _
+             | Summary_failed _ ->
+               ids, acc)
           map
-          ([], map, false)
+          ([], map)
       in
-      match reopened_ids, context_compacted with
-      | [], false -> Ok []
-      | _ ->
+      match reopened_ids with
+      | [] -> Ok []
+      | _ :: _ ->
         (match
            persist_snapshot_unlocked
              ~base_path

@@ -11,8 +11,6 @@
     - [Keeper_memory_os_io.events_path] + file stat for events bytes.
     - [Keeper_memory_os_gc.run_gc ~dry_run:true] for explicitly expired rows
       without mutating the store.
-    - [Otel_metric_store] provider-slot-busy counters for skipped librarian
-      extraction attempts, grouped by keeper.
     - [Keeper_librarian_runtime.cadence_counter_entries] for the cadence table
       size (one fleet-wide value). *)
 
@@ -25,20 +23,17 @@ type keeper_health =
   ; events_to_facts_ratio : float
   ; ttl_expired_on_disk : int
   ; near_duplicate : int
-  ; provider_slot_busy : int
   }
 
 type alert_code =
   | Ttl_expired_on_disk
   | Near_duplicate
-  | Provider_slot_busy
 
 type alert_severity = Warn
 
 type alert_target =
   | Ttl_expired_on_disk_target
   | Near_duplicate_target
-  | Provider_slot_busy_target
 
 type keeper_alert =
   { code : alert_code
@@ -53,15 +48,9 @@ type keeper_alert =
 let ttl_expired_on_disk_threshold = 0.0
 let near_duplicate_threshold = 0.0
 
-let provider_slot_busy_threshold = 0.0
-
-let provider_slot_busy_metric = Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
-let provider_slot_busy_site = Keeper_librarian_runtime.memory_os_librarian_provider_slot_site
-
 let alert_code_to_string = function
   | Ttl_expired_on_disk -> "ttl_expired_on_disk"
   | Near_duplicate -> "near_duplicate"
-  | Provider_slot_busy -> "provider_slot_busy"
 ;;
 
 let alert_severity_to_string = function
@@ -71,7 +60,6 @@ let alert_severity_to_string = function
 let alert_target_to_string = function
   | Ttl_expired_on_disk_target -> "ttl_expired_on_disk"
   | Near_duplicate_target -> "near_duplicate"
-  | Provider_slot_busy_target -> "provider_slot_busy"
 ;;
 
 (* Alert labels are endpoint-owned wire copy for this backend-defined diagnostic
@@ -80,7 +68,6 @@ let alert_target_to_string = function
 let alert_label = function
   | Ttl_expired_on_disk -> "TTL"
   | Near_duplicate -> "중복"
-  | Provider_slot_busy -> "슬롯"
 ;;
 
 let alert ~code ~target ~message ~value ~threshold =
@@ -109,18 +96,6 @@ let keeper_alerts h =
         ~message:"Near-duplicate Memory OS fact rows remain on disk; GC dry-run would deduplicate them."
         ~value:(float_of_int h.near_duplicate)
         ~threshold:near_duplicate_threshold
-      :: alerts
-    else alerts)
-  |> (fun alerts ->
-    if h.provider_slot_busy > 0
-    then
-      alert
-        ~code:Provider_slot_busy
-        ~target:Provider_slot_busy_target
-        ~message:
-          "Memory OS librarian provider slot was busy; extraction was skipped and remains due."
-        ~value:(float_of_int h.provider_slot_busy)
-        ~threshold:provider_slot_busy_threshold
       :: alerts
     else alerts)
   |> List.rev
@@ -163,17 +138,6 @@ let count_lines_in_file path =
 let file_size_bytes path =
   (* NDT-OK: file size is a diagnostic metric. *)
   if not (Sys.file_exists path) then 0 else (Unix.stat path).Unix.st_size
-;;
-
-let provider_slot_busy_for_keeper keeper_id =
-  (* MemoryLaneProviderSlotBusy is emitted through [inc_counter], so values are
-     integral counts even though the metric store carries floats. Keep the JSON
-     field as an int to match the rest of this count-oriented health snapshot. *)
-  Otel_metric_store.metric_value_or_zero
-    provider_slot_busy_metric
-    ~labels:[ "keeper", keeper_id; "site", provider_slot_busy_site ]
-    ()
-  |> int_of_float
 ;;
 
 let duplicate_claim_identity_rows facts =
@@ -221,7 +185,6 @@ let keeper_health ~keepers_dir ~now keeper_id =
       float_of_int events_bytes /. float_of_int (max 1 facts_bytes)
   ; ttl_expired_on_disk = gc_report.ttl_expired
   ; near_duplicate = duplicate_claim_identity_rows facts
-  ; provider_slot_busy = provider_slot_busy_for_keeper keeper_id
   }
 ;;
 
@@ -235,7 +198,6 @@ let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
     ; "events_to_facts_ratio", `Float h.events_to_facts_ratio
     ; "ttl_expired_on_disk", `Int h.ttl_expired_on_disk
     ; "near_duplicate", `Int h.near_duplicate
-    ; "provider_slot_busy", `Int h.provider_slot_busy
     ; "alerts", `List (List.map keeper_alert_to_json alerts)
     ]
 ;;
@@ -282,7 +244,6 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
           ; "events_bytes", `Int (sum (fun h -> h.events_bytes))
           ; "ttl_expired_on_disk", `Int (sum (fun h -> h.ttl_expired_on_disk))
           ; "near_duplicate", `Int (sum (fun h -> h.near_duplicate))
-          ; "provider_slot_busy", `Int (sum (fun h -> h.provider_slot_busy))
           ] )
     ; ( "alert_summary"
       , `Assoc
@@ -299,12 +260,10 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
                    entries) )
           ; "ttl_expired_keepers", `Int (alert_count_by_code Ttl_expired_on_disk)
           ; "near_duplicate_keepers", `Int (alert_count_by_code Near_duplicate)
-          ; "provider_slot_busy_keepers", `Int (alert_count_by_code Provider_slot_busy)
           ; ( "thresholds"
             , `Assoc
                 [ "ttl_expired_on_disk", `Float ttl_expired_on_disk_threshold
                 ; "near_duplicate", `Float near_duplicate_threshold
-                ; "provider_slot_busy", `Float provider_slot_busy_threshold
                 ] )
           ] )
     ]

@@ -16,17 +16,7 @@ type compaction_plan =
 
 type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
 
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:Eio_context.eio_net ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
-
-let default_complete ~sw ~net ?clock ~config ~messages () =
-  Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 let is_direct_completion_provider (provider_cfg : Llm_provider.Provider_config.t) : bool =
   match provider_cfg.kind with
@@ -202,7 +192,7 @@ let plan_of_response ~message_count response =
   | Error detail -> Error ("invalid structured response: " ^ detail)
 
 let run_plan
-    ?(complete : complete_fn = default_complete)
+    ?complete
     ?clock
     ~(keeper_name : string)
     ~(runtime_id : string)
@@ -214,7 +204,10 @@ let run_plan
   let message_count = List.length messages in
   let provider_cfg = provider_for_plan provider_cfg in
   let request = messages_for_plan ~messages in
-  match complete ~sw ~net ?clock ~config:provider_cfg ~messages:request () with
+  match
+    Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
+      ~config:provider_cfg ~messages:request ()
+  with
   | Error err ->
     Log.Keeper.warn ~keeper_name
       "compaction LLM plan failed runtime=%s: %s"

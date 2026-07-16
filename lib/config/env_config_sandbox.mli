@@ -1,7 +1,6 @@
 (** Sandbox configuration SSOT.
 
-    Mirrors the {!Env_config_oas_bridge} precedent (#10094).  This module is the
-    authoritative source for sandbox env settings + hardcoded
+    This module is the authoritative source for sandbox env settings + hardcoded
     constants used by keeper sandbox and docker playground execution
     paths — one typed surface so:
 

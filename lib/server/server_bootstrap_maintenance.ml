@@ -101,30 +101,11 @@ let runtime_for_memory_os_consolidation () =
        default_runtime ())
 ;;
 
-(* P0-3: per-keeper maintenance timeout. One slow/corrupt keeper must not starve
-   the rest of the fleet. Each keeper fiber gets a bounded time budget; on
-   timeout we log the keeper and increment a metric so operators can see which
-   stores are stalling maintenance. *)
-let run_with_keeper_timeout ~clock ~timeout_sec ~keeper_id ~on_timeout f =
-  match clock with
-  | None -> f ()
-  | Some clock ->
-    (try Eio.Time.with_timeout_exn clock timeout_sec f with
-     | Eio.Time.Timeout ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string MemoryOsMaintenanceKeeperTimeout)
-         ~labels:[ "keeper", keeper_id ]
-         ();
-       on_timeout ())
-;;
-
 (* Run one consolidation pass over every keeper that currently has a fact store.
    The optional [complete] injection lets tests drive the loop with a fake model.
-   The optional [timeout_sec] lets tests exercise the per-keeper timeout without
-   waiting for the production default (300s). *)
+   Provider transport owns the only LLM timeout boundary. *)
 let run_memory_os_consolidation_tick
-      ?(complete = Keeper_memory_os_consolidation_runtime.default_complete)
-      ?(timeout_sec = 300.0)
+      ?complete
       ~sw
       ~net
       ?clock
@@ -138,7 +119,7 @@ let run_memory_os_consolidation_tick
     try
       match
         Keeper_memory_os_consolidation_runtime.consolidate_keeper
-          ~complete
+          ?complete
           ~sw
           ~net
           ?clock
@@ -194,17 +175,7 @@ let run_memory_os_consolidation_tick
   in
   Eio.Fiber.all
     (List.map
-       (fun keeper_id () ->
-          run_with_keeper_timeout
-            ~clock
-            ~timeout_sec
-            ~keeper_id
-            ~on_timeout:(fun () ->
-              Log.Server.warn
-                "memory_os_keeper_consolidation: keeper=%s timeout after %.0fs"
-                keeper_id
-                timeout_sec)
-            (consolidate_one keeper_id))
+       (fun keeper_id () -> consolidate_one keeper_id ())
        keeper_ids)
 ;;
 
@@ -340,8 +311,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      [interval]s it runs the deterministic per-keeper GC: facts whose explicit
      [valid_until] has passed are removed and every other row is preserved.
      Default ON; env var [MASC_KEEPER_MEMORY_OS_GC] is the kill switch. Per-keeper
-     fibers run in parallel with a bounded timeout so one slow/corrupt store
-     cannot starve the fleet. *)
+     fibers run in parallel. *)
   if Env_config.KeeperMemoryOs.gc_enabled () then
     fork_logged_fiber
       ~sw
@@ -378,16 +348,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         in
         Eio.Fiber.all
           (List.map
-             (fun keeper_id () ->
-                run_with_keeper_timeout
-                  ~clock:(Some clock)
-                  ~timeout_sec:120.0
-                  ~keeper_id
-                  ~on_timeout:(fun () ->
-                    Log.Server.warn
-                      "memory_os_gc: keeper=%s timeout after 120s"
-                      keeper_id)
-                  (gc_one keeper_id))
+             (fun keeper_id () -> gc_one keeper_id ())
              keeper_ids);
         Eio.Time.sleep clock interval;
         loop ()

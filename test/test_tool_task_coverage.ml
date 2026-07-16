@@ -480,35 +480,6 @@ let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () 
   | `List _ -> failwith "missing task should have no history events"
   | _ -> failwith "task history payload must be a JSON list"
 )
-let () = test "masc_oas_bridge_fails_closed_without_eio_env" (fun () ->
-  match Masc_eio_env.get_opt () with
-  | Some _ ->
-    failwith
-      "masc_oas_bridge_fails_closed_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
-  | None ->
-    let called = ref false in
-    match
-      Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
-        called := true;
-        Ok "ok")
-    with
-    | Error error ->
-        if !called then failwith "run_safe called fn without an Eio env";
-        (match Keeper_internal_error.classify_masc_internal_error error with
-         | Some (Keeper_internal_error.Internal_bridge_exception { caller; _ }) ->
-             if caller <> "test_tool_task_coverage" then
-               failwith ("unexpected bridge caller: " ^ caller)
-         | Some other ->
-             failwith
-               ( "unexpected internal error: "
-               ^ Keeper_internal_error.kind_of_masc_internal_error other )
-         | None ->
-             failwith
-               ("expected typed internal bridge error, got: "
-               ^ Agent_sdk.Error.to_string error))
-    | Ok other -> failwith ("unexpected success: " ^ other)
-)
-
 (* Test dispatch transition claim *)
 let () = test "dispatch_transition_claim" (fun () ->
   let ctx = make_test_ctx () in
@@ -613,7 +584,6 @@ let () = test "handle_done_empty_evidence_follows_llm_approval" (fun () ->
     failwith
       ("LLM approval must decide empty-evidence completion, got "
        ^ Masc_domain.task_status_to_string status))
-
 
 let () = test "handle_transition_passes_contract_to_llm_and_records_custom_evaluator" (fun () ->
   (
@@ -1461,7 +1431,6 @@ let () = test "handle_transition_done_rejects_llm_verdict" (fun () ->
       ("LLM-rejected task must remain InProgress, got "
        ^ Masc_domain.task_status_to_string status))
 
-
 let () = test "handle_transition_done_no_contract_follows_llm_approval" (fun () ->
   let ctx = make_test_ctx () in
   let add_message =
@@ -1491,7 +1460,6 @@ let () = test "handle_transition_done_no_contract_follows_llm_approval" (fun () 
     failwith
       ("expected Done after LLM approval, got "
        ^ Masc_domain.task_status_to_string status))
-
 
 let () = test "handle_transition_done_default_contract_follows_llm_approval" (fun () ->
   let ctx = make_test_ctx () in
@@ -1583,7 +1551,6 @@ let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
          failwith
            ("force argument on done must be rejected before completion review, got "
             ^ Masc_domain.task_status_to_string status)))
-
 
 let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun () ->
   (

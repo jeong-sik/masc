@@ -354,7 +354,6 @@ let lazy_startup_plan () =
           [
             "restore_sessions";
             "reconcile_active_agents";
-            "prompt_bootstrap";
             "keeper_history_migration";
           ];
       };
@@ -784,7 +783,6 @@ let start_owner_lazy_tasks ~sw state =
   let task_fn = function
     | "restore_sessions" -> fun () -> restore_persisted_sessions state
     | "reconcile_active_agents" -> fun () -> reconcile_active_agents_gauge state
-    | "prompt_bootstrap" -> fun () -> bootstrap_prompt_state state
     | "keeper_history_migration" -> fun () -> startup_migrate_keeper_histories state
     | "tool_metrics_restore" -> fun () -> restore_tool_metrics_from_disk state
     | "jsonl_prune" -> fun () -> startup_prune_jsonl state
@@ -943,6 +941,9 @@ let activate_owner_state
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own
      required transport surfaces are installed. *)
+  (* Auto Judge recovery renders prompts immediately. Prompt state is therefore
+     a recovery prerequisite, not an eventually-consistent lazy task. *)
+  bootstrap_prompt_state state;
   install_keeper_gate_persistence state;
   start_owner_lazy_tasks ~sw state;
   claim_and_start_keeper_persistence

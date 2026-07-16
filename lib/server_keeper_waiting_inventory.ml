@@ -556,6 +556,18 @@ let fusion_rows keeper_name runs =
     then None
     else
       match run.status with
+      | Fusion_run_registry.Completed
+          { receipt = Fusion_run_registry.Persistence_failed _; _ } ->
+        Some
+          { keeper_name = Some keeper_name
+          ; source = Fusion_recovery_required
+          ; waiting_on = run.run_id
+          ; wake_producer = Fusion_sink
+          ; since = Some run.started_at
+          ; due_at = None
+          ; next_action = "reconcile_fusion_completion_receipt"
+          ; detail = Fusion_run_registry.run_to_yojson run
+          }
       | Fusion_run_registry.Running ->
         Some
           { keeper_name = Some keeper_name
@@ -583,7 +595,7 @@ let fusion_rows keeper_name runs =
           ; next_action = "recover_fusion_run"
           ; detail = Fusion_run_registry.run_to_yojson run
           }
-      | Completed _ -> None)
+      | Completed { receipt = Fusion_run_registry.Durable; _ } -> None)
 ;;
 
 let background_task_rows keeper_name =

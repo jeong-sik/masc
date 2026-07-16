@@ -13,6 +13,19 @@ let status_result ~tool_name ~class_ ~ok fields =
     Tool_result.make_err ~tool_name ~class_ ~start_time:0.0 ~data message
 ;;
 
+let record_completion ~keeper ~run_id ?failure ?failure_code ~ok () =
+  match
+    Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~operation_id:run_id
+      ?failure ?failure_code ~ok ()
+  with
+  | Ok () -> ()
+  | Error error ->
+    Log.Keeper.error ~keeper_name:keeper
+      "fusion completion receipt error run_id=%s: %s"
+      run_id
+      (Fusion_run_registry.completion_error_to_string error)
+;;
+
 let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
   (* 실패 알림도 성공 결론(fusion_sink.emit)과 동일하게 키퍼 *메인* conversation에
      남긴다(conversation_id 생략). recent_direct_conversation observation 필터는
@@ -21,9 +34,9 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
      별도 "fusion/<run_id>" 스레드는 메인 오염을 막지 못하면서 한 run의 성공/실패만
      다른 lane으로 흩어지는 split-brain을 만든다. denied/sink_failed/aborted는 키퍼가
      다음 턴에 인지해야 할 운영 실패이므로 메인 lane이 옳다(run_id는 content에 포함). *)
-  (* RFC-0266 §7: 종료 상태(Completed{ok=false})를 *suspending append 이전* 에 확정한다.
-     [mark_completed]는 순수 in-memory CAS(suspension 없음)라 취소 컨텍스트에서도 안전한
-     반면, 아래 append는 Eio 파일 I/O라 셧다운/형제 fiber Switch.fail 시 Cancelled를
+  (* RFC-0266 §7: 종료 상태(Completed{ok=false})를 아래 chat append 이전에 확정한다.
+     completion receipt 실패는 registry의 typed [Persistence_failed]로 남고 명시 로그된다.
+     아래 append는 Eio 파일 I/O라 셧다운/형제 fiber Switch.fail 시 Cancelled를
      재전파(아래 with 분기)하며 함수를 빠져나간다. finalize를 append *뒤* 에 두면 그 경로에서
      run이 registry([global], 서버 수명)에 "running"으로 남는다(prune는 Running을 evict 안 함
      — fusion_run_registry.ml). 순수 프로세스 셧다운이면 global이 프로세스와 함께 소멸하므로,
@@ -31,8 +44,7 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
      orchestrator-level Cancelled(handle fork match)
      만 막았고 이 내부 append window는 못 막았다. Denied/Sink_failed/aborted 종료 분기가 모두
      이 함수를 경유하므로 같은 누수의 형제 경로다. *)
-  Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-    ~failure:content ~failure_code ~ok:false ();
+  record_completion ~keeper ~run_id ~failure:content ~failure_code ~ok:false ();
   (try
      Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
      Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
@@ -133,13 +145,14 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
         ; ("reason", `String (Fusion_types.deny_reason_label reason))
         ]
     | Fusion_types.Allow allowed ->
+      let operation : Fusion_types.fusion_operation = { request = allowed; topology } in
       (* RFC-0266 §7: 진행중 가시성을 위해 fork 직전 run을 Running으로 등록한다
          (sink/실패 경로가 Completed로 갱신). Durable register가 실패하면 worker를
          시작하지 않는다. 시작했지만 복구할 receipt가 없는 상태를 만들 수 없기
          때문이다. *)
       (match
-         Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
-           ~keeper ~preset ~started_at:now_unix
+         Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~operation
+           ~started_at:now_unix
        with
        | Error error ->
          status_result
@@ -186,12 +199,12 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
              masc_fusion_status가 거짓 "심의중"을 보인다(prune는 [Running]을 evict하지 않음 —
              fusion_run_registry.ml). 다른 종료 분기(Denied/Sink_failed/exception)는
              append_chat_failure 경유로 이미 mark_completed 하는데 이 분기만 빠져 있었다.
-             [mark_completed]는 순수 in-memory CAS(suspension 없음)라 취소 컨텍스트에서도
-             안전하다. broadcast는 [Sse.broadcast]가 mailbox에서 suspend/block할 수 있어
+             completion receipt 실패도 registry에 typed state로 남는다. broadcast는
+             [Sse.broadcast]가 mailbox에서 suspend/block할 수 있어
              취소/셧다운 캐스케이드를 deadlock시킬 위험이 있으므로 이 경로에선 생략한다 —
              registry가 정확해 다음 HTTP fetch / tab-refresh가 패널을 self-heal한다.
              그 뒤 구조적 취소는 흡수하지 않고 재전파한다 (Eio 규약). *)
-          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+          record_completion ~keeper ~run_id
             ~failure:"cancelled: structural cancellation (shutdown or sibling switch failure)"
             ~failure_code:"cancelled" ~ok:false ();
           (* No completion wake fires on this path, so drop the reply route

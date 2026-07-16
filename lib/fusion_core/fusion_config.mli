@@ -23,8 +23,6 @@ type config_error =
       (** preset의 panel/judge system prompt가 비어있음 (코드 default 금지) *)
   | Missing_judge_model of string
       (** preset의 judge 모델 id가 비어있음 (필수, 빈 문자열 default 거부) *)
-  | Invalid_staged_judge_group_size of int
-      (** staged_judge_group_size < Fusion_policy.min_staged_judge_group_size *)
   | Missing_default_preset of string
       (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자엏도 거부 —
           preset 생략 호출이 default_preset로 폭빽하는데 ""는 항상 Preset_unknown로
@@ -54,9 +52,8 @@ val disabled : Fusion_policy.t
       같은 model이라도 통과(same-model-different-prompt, RFC-0278).
     - panel/judge system prompt 누락 → [Error [Missing_prompt _]].
     - judge 모델 id 누락 → [Error [Missing_judge_model _]].
-    - staged_judge_group_size < 2 → [Error [Invalid_staged_judge_group_size _]].
     - default_preset가 presets에 없음 → [Error [Missing_default_preset _]].
-    - 알 수 없는 preset/panel/judge 필드 → [Error [Unexpected_field _]].
+    - 알 수 없는 fusion/preset/panel/judge 필드 → [Error [Unexpected_field _]].
     - 필드 타입 불일치 → [Error [Toml_type_error _]].
     여러 에러는 누적되어 한 번에 반환된다. *)
 val of_toml : Otoml.t -> (Fusion_policy.t, config_error list) result

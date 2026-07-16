@@ -2,20 +2,12 @@
     produces a structured {!compaction_plan}; unavailable providers and invalid
     plans fail explicitly as [None]. *)
 
-(** A validated compaction plan over a working set of [n] messages. Every
-    index in [kept]/[summarized]/[dropped] is in [\[0, n)], the three sets are
-    pairwise disjoint, and together they cover every index exactly once. For
-    non-empty inputs, at least one [kept] or [summarized] index is required so
-    applying the plan cannot erase the entire working set. At least one
-    [summarized] or [dropped] index is required, so all-kept no-ops are invalid. *)
-type compaction_plan = private
-  { summary : string
-  ; kept : int list
-  ; summarized : int list
-  ; dropped : int list
-  ; selected_runtime_id : string option
-    (** Exact Runtime candidate that produced this plan. [None] only for a
-        plan parsed directly through {!plan_of_json} before provider binding. *)
+type compaction_plan
+
+type observation =
+  { selected_runtime_id : string option
+  ; summarized_message_count : int
+  ; dropped_message_count : int
   }
 
 type planning_outcome =
@@ -46,27 +38,15 @@ val make
   -> unit
   -> summarizer option
 
-(** Parse+validate a raw structured response into a plan over [message_count]
-    messages. Exposed for tests. Returns [Error] with a reason on any
-    structural violation (out-of-range / negative / duplicate / non-covering
-    indices, empty output for a non-empty working set, or a missing/empty
-    summary). *)
 val plan_of_json
-  :  message_count:int
+  :  messages:Agent_sdk.Types.message list
   -> Yojson.Safe.t
   -> (compaction_plan, string) result
 
-(** [apply plan ~messages] rebuilds the working set from a validated [plan]:
-    [kept] indices survive verbatim, the [summarized] indices are replaced by a
-    single assistant memory-summary message ([plan.summary]), and [dropped]
-    indices are removed. Original message order is preserved; the summary is
-    inserted at the position of the first summarized index. [plan] is assumed
-    to have been validated against [List.length messages] (it partitions the
-    index space), so this is total. *)
-val apply
-  :  compaction_plan
-  -> messages:Agent_sdk.Types.message list
-  -> Agent_sdk.Types.message list
+val apply : compaction_plan -> Agent_sdk.Types.message list
+(** Rebuild the bound source chronologically and append its protected suffix. *)
+
+val observation : compaction_plan -> observation
 
 module For_testing : sig
   val with_make_override

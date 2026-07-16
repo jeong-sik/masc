@@ -283,14 +283,19 @@ let test_manual_compaction_serializes_owner_lane () =
       (match Eio.Promise.await finished with
        | `Ran () -> ()
        | `Rejected _ -> fail "simulated owner turn was rejected");
-      let plan =
+      let plan messages =
         Masc.Keeper_compaction_llm_summarizer.plan_of_json
-          ~message_count:4
+          ~messages
           (`Assoc
-            [ "summary", `String "owner-lane compacted context"
-            ; "kept_indices", `List [ `Int 0 ]
-            ; "summarized_indices", `List [ `Int 1; `Int 2; `Int 3 ]
-            ; "dropped_indices", `List []
+            [ "kept_indices", `List [ `Int 0 ]
+            ; "dropped_indices", `List [ `Int 1; `Int 2 ]
+            ; ( "summarized_units"
+              , `List
+                  [ `Assoc
+                      [ "unit_index", `Int 3
+                      ; "summary", `String "owner-lane compacted context"
+                      ]
+                  ] )
             ])
         |> Result.get_ok
       in
@@ -299,8 +304,10 @@ let test_manual_compaction_serializes_owner_lane () =
         Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
           (fun ~runtime_id:_ ~keeper_name:_ () ->
              Some
-               (fun ~messages:_ ->
-                  Some (Masc.Keeper_compaction_llm_summarizer.Planned plan)))
+               (fun ~messages ->
+                  Some
+                    (Masc.Keeper_compaction_llm_summarizer.Planned
+                       (plan messages))))
           run_cycle
       in
       (match outcome with

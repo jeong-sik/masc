@@ -233,15 +233,13 @@ let requested_messages (meta : keeper_meta) messages =
         | Some Keeper_compaction_llm_summarizer.No_compaction ->
           Error Structurally_unchanged
         | Some (Keeper_compaction_llm_summarizer.Planned plan) ->
-          if plan.summarized = [] && plan.dropped = []
-          then Error Structurally_unchanged
-          else
-            Ok
-              { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
-              ; selected_runtime_id = plan.selected_runtime_id
-              ; summarized_message_count = List.length plan.summarized
-              ; dropped_message_count = List.length plan.dropped
-              }))
+          let observed = Keeper_compaction_llm_summarizer.observation plan in
+          Ok
+            { messages = Keeper_compaction_llm_summarizer.apply plan
+            ; selected_runtime_id = observed.selected_runtime_id
+            ; summarized_message_count = observed.summarized_message_count
+            ; dropped_message_count = observed.dropped_message_count
+            }))
 ;;
 
 let tool_block_counts messages =
@@ -314,9 +312,7 @@ let compact_for_request_typed
       ~message_count:before_messages;
     { context = ctx; decision = Rejected (trigger, reason); evidence = None }
   | Ok requested ->
-    let messages, pair_repair_stats =
-      Keeper_context_core.repair_broken_tool_call_pairs_with_stats requested.messages
-    in
+    let messages = requested.messages in
     let compacted_ctx =
       sync_oas_context
         { ctx with checkpoint = { (checkpoint_of_context ctx) with messages } }
@@ -343,20 +339,6 @@ let compact_for_request_typed
       let after_tool_use_count, after_tool_result_count =
         tool_block_counts (messages_of_context compacted_ctx)
       in
-      let tool_use_sample_json =
-        List.map
-          (fun (tool_use_id, tool_name) ->
-             `Assoc
-               [ "tool_use_id", `String tool_use_id
-               ; "tool_name", `String tool_name
-               ])
-          pair_repair_stats.dropped_tool_use_samples
-      in
-      let tool_result_id_json =
-        List.map
-          (fun tool_use_id -> `String tool_use_id)
-          pair_repair_stats.dropped_tool_result_ids
-      in
       Log.Harness.emit
         Log.Info
         ~details:
@@ -369,15 +351,6 @@ let compact_for_request_typed
               ; "saved_checkpoint_bytes", `Int (before_bytes - after_bytes)
               ; "before_messages", `Int before_messages
               ; "after_messages", `Int after_messages
-              ; ( "tool_pair_repair"
-                , `Assoc
-                    [ ( "dropped_tool_uses"
-                      , `Int pair_repair_stats.dropped_tool_uses )
-                    ; ( "dropped_tool_results"
-                      , `Int pair_repair_stats.dropped_tool_results )
-                    ; "dropped_tool_use_samples", `List tool_use_sample_json
-                    ; "dropped_tool_result_ids", `List tool_result_id_json
-                    ] )
               ])
         (Printf.sprintf
            "context compaction prepared keeper=%s saved_checkpoint_bytes=%d"

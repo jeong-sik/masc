@@ -53,7 +53,6 @@ let all_provider_native_schema_cases =
   [ "librarian_episode", Keeper_structured_output_schema.librarian_episode_output_schema
   ; "consolidation_plan", Keeper_structured_output_schema.consolidation_plan_output_schema
   ; "memory_bank_summary", Keeper_structured_output_schema.memory_bank_summary_output_schema
-  ; "compaction_plan", Keeper_structured_output_schema.compaction_plan_output_schema
   ; ( "compaction_unit_plan"
     , Keeper_structured_output_schema.compaction_unit_plan_output_schema )
   ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema

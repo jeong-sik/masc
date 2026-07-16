@@ -25,6 +25,7 @@ let execute_tool_eio
       ~(workspace_scope : Mcp_server.workspace_scope)
       ?(profile = Mcp_server_eio_tool_profile.Full)
       ?mcp_session_id
+      ?invocation_ref
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
@@ -234,6 +235,7 @@ let execute_tool_eio
             (* Helper: create keeper tool boundary context (shared by goals) *)
             let make_keeper_tool_ctx () =
               Keeper_tool_boundary.create
+                ?invocation_ref
                 ~config
                 ~agent_name
                 ~sw
@@ -242,6 +244,7 @@ let execute_tool_eio
                 ~net:state.Mcp_server.net
                 ~publication_recovery_provider:
                   (Mcp_server.publication_recovery_availability_provider state)
+                ()
             in
             (* Dispatch a single module by tag — creates only that module's context.
      Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
@@ -254,6 +257,20 @@ let execute_tool_eio
                 (match tag with
                  | Mod_plan -> Tool_plan.dispatch { config } ~name ~args:coerced_args
                  | Mod_operator ->
+                   let delegated_dispatch =
+                     Keeper_tool_boundary.delegated_dispatch
+                       ?invocation_ref
+                       ~config
+                       ~agent_name
+                       ~sw
+                       ~clock
+                       ~proc_mgr:state.Mcp_server.proc_mgr
+                       ~net:state.Mcp_server.net
+                       ~publication_recovery_provider:
+                         (Mcp_server.publication_recovery_availability_provider
+                            state)
+                       ()
+                   in
                    let ctx =
                      { Tool_operator.config
                      ; agent_name
@@ -261,18 +278,7 @@ let execute_tool_eio
                      ; clock
                      ; proc_mgr = state.Mcp_server.proc_mgr
                      ; net = state.Mcp_server.net
-                     ; delegated_dispatch =
-                         Some
-                           (Keeper_tool_boundary.delegated_dispatch
-                              ~config
-                              ~agent_name
-                              ~sw
-                              ~clock
-                              ~proc_mgr:state.Mcp_server.proc_mgr
-                              ~net:state.Mcp_server.net
-                              ~publication_recovery_provider:
-                                (Mcp_server.publication_recovery_availability_provider
-                                   state))
+                     ; delegated_dispatch = Some delegated_dispatch
                      ; mcp_session_id
                      }
                    in

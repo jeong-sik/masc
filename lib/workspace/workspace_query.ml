@@ -87,16 +87,10 @@ let load_agents_from_dir config dir ~include_inactive =
              Some agent
          | Ok _ | Error _ -> None)
 
-let agent_type_of_state_agent_name name =
-  if Workspace_resilience.Zombie.is_keeper_name name
-  then "keeper"
-  else (
-    match Nickname.extract_agent_type name with
-    | Some agent_type -> agent_type
-    | None -> name)
+let state_backed_agent_type = "workspace-state"
 
 let state_backed_agent state (name : string) : Masc_domain.agent =
-  let agent_type = agent_type_of_state_agent_name name in
+  let agent_type = state_backed_agent_type in
   let timestamp = state.started_at in
   let meta : Masc_domain.agent_meta =
     { session_id = "workspace-state:" ^ name

@@ -39,13 +39,13 @@ let classify_completion_path ~(action : Masc_domain.task_action) =
     "not_completion"
 ;;
 
-let task_actor_kind agent_name =
-  let normalized = String.lowercase_ascii (String.trim agent_name) in
-  if normalized = "" || normalized = "system"
-  then "system"
-  else if Workspace_resilience.Zombie.is_keeper_name normalized
-  then "keeper"
-  else "agent"
+type task_actor_kind =
+  | Agent
+  | System
+
+let task_actor_kind_to_string = function
+  | Agent -> "agent"
+  | System -> "system"
 ;;
 
 let trim_opt = Env_config_core.trim_opt
@@ -269,12 +269,25 @@ let merge_envelope_into_payload ?correlation_id ?run_id payload =
       payload)
 ;;
 
-let emit_task_activity ?correlation_id ?run_id config ~agent_name ~task_id ~kind ~payload =
+let emit_task_activity
+    ?correlation_id
+    ?run_id
+    ?(actor_kind = Agent)
+    config
+    ~agent_name
+    ~task_id
+    ~kind
+    ~payload
+  =
   let payload = merge_envelope_into_payload ?correlation_id ?run_id payload in
   try
     (Atomic.get Workspace_hooks.activity_emit_fn)
       config
-      ~actor:Workspace_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
+      ~actor:
+        Workspace_hooks.
+          { kind = task_actor_kind_to_string actor_kind
+          ; id = agent_name
+          }
       ~subject:Workspace_hooks.{ kind = "task"; id = task_id }
       ~kind
       ~payload
@@ -443,7 +456,7 @@ let transition_log_event
   `Assoc
     ([ "type", `String (transition_event_type_to_string event_type)
      ; "agent", `String agent_name
-     ; "actor_kind", `String (task_actor_kind agent_name)
+     ; "actor_kind", `String (task_actor_kind_to_string Agent)
      ; "task", `String task_id
      ; "from_status", `String (task_status_to_string from_status)
      ; "to_status", `String (task_status_to_string to_status)

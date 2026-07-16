@@ -1887,7 +1887,7 @@ let test_get_active_agents_falls_back_to_state_when_agent_files_missing () =
     match agents with
     | [ agent ] ->
       Alcotest.(check string) "agent name" "keeper-albini-agent" agent.name;
-      Alcotest.(check string) "agent type" "keeper" agent.agent_type;
+      Alcotest.(check string) "agent type" "workspace-state" agent.agent_type;
       Alcotest.(check string)
         "agent status"
         "active"

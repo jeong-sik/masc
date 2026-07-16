@@ -60,10 +60,11 @@ export file, or notify the dashboard.
 ### 1.2 One production hard cut
 
 There is no dual-write comparison interval. Inert, unwired foundations may land
-on `main` in sub-400-line PRs. One sub-400-line activation PR exposes the new
-writer while removing every old live call path and publicly selectable writer.
-Later sub-400-line PRs delete unreachable source, tests, and docs. No release or
-deployment occurs until that physical cleanup is complete.
+independently. The activation change exposes the new writer while removing every
+old live call path and publicly selectable writer. Unreachable source, tests,
+and docs are deleted as explicit cleanup work. Change size and line count are
+review observations only; they do not decide admission, sequencing, release, or
+completion.
 
 Temporary adapters may decode a committed event into a projection. They may not
 append the same fact to an old store.
@@ -377,6 +378,6 @@ authority. Do not recreate them under new names.
 12. Prove mixed-Keeper restart, projection replay, Gate, compaction,
     reinjection, and dashboard causality in CI.
 
-Each implementation PR stays below 400 changed lines. A replacement consumer
+Each implementation PR follows one explicit contract. A replacement consumer
 and deletion of its old authority land together; no fake green, Stub, silent
 fallback, or compatibility writer is accepted.

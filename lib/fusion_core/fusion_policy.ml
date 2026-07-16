@@ -1,7 +1,7 @@
 (* Fusion — 결정론적 발동 게이트 (구현).
    계약/문서: fusion_policy.mli, docs/rfc/RFC-0252 §6 *)
 
-(* 한 패널 그룹 — 공통 system_prompt/web_tools/timeout으로 실행되는
+(* 한 패널 그룹 — 공통 system_prompt/web_tools 설정으로 실행되는
    모델 묶음. 한 preset이 이종(heterogeneous) 그룹 여럿을 가질 수 있다(RFC-0252-A).
    닫힌 record (option-dual 없음); preset이 [panel_group list]를 deriving하므로
    nested deriving 필수. *)
@@ -14,7 +14,6 @@ type panel_group =
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부 *)
   ; max_output_tokens : int option  (** 그룹 모델당 출력 토큰 예산 override *)
-  ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초) *)
   }
 [@@deriving show, eq]
 
@@ -27,9 +26,6 @@ type judge_spec =
   ; jsystem_prompt : string  (** 이 1차 심판의 lens (config 필수) *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부 *)
   ; jmax_output_tokens : int option  (** 출력 토큰 예산 override *)
-  ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초) *)
-  ; jmax_timeout_s : float option
-      (** Legacy observed value. No runtime path extends a Provider timeout. *)
   }
 [@@deriving show, eq]
 
@@ -39,19 +35,12 @@ type preset =
   ; judge : string
       (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0283) *)
   ; judge_system_prompt : string
-  ; judge_timeout_s : float
   ; judge_max_output_tokens : int option
-  ; meta_timeout_s : float
-      (** meta/stage-meta/final-meta 호출 구조적 타임아웃 (초). *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   ; min_answered : int
       (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
-  ; judge_wave_budget_s : float
-      (** Legacy observed value. It never gates or skips Provider work. *)
-  ; adaptive_timeout_factor : float
-      (** Legacy observed value. It never extends Provider work. *)
   ; fallback_judge_model : string option
       (** Legacy observed value. Failures never trigger an automatic fallback call. *)
   }
@@ -68,10 +57,6 @@ let default_staged_judge_group_size = 3
 let valid_max_output_tokens = function
   | None -> true
   | Some n -> n > 0
-
-(* 패널/심판 호출 구조적 타임아웃 기본값 (preset이 명시 안 할 때). 운영 노브 —
-   행동 휴리스틱이 아니므로 named SSOT 상수로 둔다 (Magic Number 회피). *)
-let default_timeout_s = 300.0
 
 (* 모든 그룹의 모델을 평탄화 — 그룹순 × 그룹내 모델순 보존 (패널 fan-out 순서와 동일). *)
 let preset_models (p : preset) =
@@ -246,13 +231,6 @@ module Validated_preset = struct
         (** [min_answered]가 하한 [min_answered_floor] 미만. *)
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
-    | Bad_meta_timeout of float
-        (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_judge_wave_budget of float
-        (** [judge_wave_budget_s]가 0 미만이거나, 양수인데 최장 1차 심판 타임아웃 또는
-            [meta_timeout_s]보다 작음. *)
-    | Bad_adaptive_factor of float
-        (** [adaptive_timeout_factor]가 1.0 미만. *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
@@ -294,24 +272,6 @@ module Validated_preset = struct
                   then Error (Min_answered_below_min p.min_answered)
                   else if p.min_answered > total
                   then Error (Min_answered_above_max p.min_answered)
-                  else if
-                    not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
-                  then Error (Bad_meta_timeout p.meta_timeout_s)
-                  else if p.adaptive_timeout_factor < 1.0
-                  then Error (Bad_adaptive_factor p.adaptive_timeout_factor)
-                  else if p.judge_wave_budget_s < 0.0
-                  then Error (Bad_judge_wave_budget p.judge_wave_budget_s)
-                  else if
-                    p.judge_wave_budget_s > 0.0
-                    && Float.is_finite p.judge_wave_budget_s
-                    && (let longest_judge =
-                          List.fold_left
-                            (fun acc (j : judge_spec) -> Float.max acc j.jtimeout_s)
-                            0.0 p.judges
-                        in
-                        p.judge_wave_budget_s < longest_judge
-                        || p.judge_wave_budget_s < p.meta_timeout_s)
-                  then Error (Bad_judge_wave_budget p.judge_wave_budget_s)
                   else Ok p)))
 
   let preset (t : t) : preset = t

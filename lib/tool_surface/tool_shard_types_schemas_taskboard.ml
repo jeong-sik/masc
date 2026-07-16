@@ -45,9 +45,9 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_tasks_audit"
     ; description =
-        "Find orphaned tasks reported by workspace lifecycle observation. Returns \
-         the task status and assignee. This audit is read-only: it never releases \
-         or reassigns tasks."
+        "Find tasks whose exact assignee identity is absent from explicit active \
+         workspace/session membership. Returns the task status and assignee. This \
+         audit is read-only: it never releases or reassigns tasks."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

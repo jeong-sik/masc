@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-04-17
+last_verified: 2026-07-16
 code_refs:
   - lib/keeper/keeper_keepalive.ml
   - lib/keeper/keeper_supervisor.ml
@@ -13,9 +13,12 @@ code_refs:
 ## 현재 상태
 
 ### ✅ 있는 것
-- `resilience.ml` - ZeroZombie (좀비 에이전트 정리)
+- `workspace_resilience.ml` - 시간 파싱과 관찰 헬퍼
 - `rate_limit.ml` - 요청 제한
 - `cancellation.ml` - 취소 처리
+
+### 제거된 레거시
+- `ZeroZombie` - 경과 시간 기반 Agent/Task 생명주기 mutation 프로토콜
 
 ### ❌ 없거나 부족한 것
 - Supervision Tree

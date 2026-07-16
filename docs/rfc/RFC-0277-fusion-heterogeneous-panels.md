@@ -22,17 +22,16 @@ type preset =
   ; panel_system_prompt : string  (* 패널 전체 공유 *)
   ; web_tools : bool              (* 패널 전체 공유 *)
   ; max_tool_calls_per_panel : int
-  ; panel_timeout_s : float
   ; ... }
 ```
 
-`panel_system_prompt`/`web_tools`/`max_tool_calls_per_panel`/`panel_timeout_s`가 패널 전체에 **하나씩** 적용되므로, 한 preset 안에서 "tool 없는 빠른 그룹 + web tool 켠 신중한 그룹"처럼 **이질적(heterogeneous)** 구성을 표현할 수 없다. 근거: Self-MoA 비판은 *동질·중복* 패널이 다양성 이득을 깎는다는 것이므로, 이질 패널이 그 비판을 피하는 방향이다.
+`panel_system_prompt`/`web_tools`/`max_tool_calls_per_panel`가 패널 전체에 **하나씩** 적용되므로, 한 preset 안에서 "tool 없는 빠른 그룹 + web tool 켠 신중한 그룹"처럼 **이질적(heterogeneous)** 구성을 표현할 수 없다. 근거: Self-MoA 비판은 *동질·중복* 패널이 다양성 이득을 깎는다는 것이므로, 이질 패널이 그 비판을 피하는 방향이다.
 
 둘째, RFC-0252 §6의 발동 예산(`per_hour_budget`)은 시간당 fusion **activation** 횟수 cap이다 — gate 통과 후 `Fusion_budget.try_incr_if_under`로 소비했다 (`lib/fusion/fusion_orchestrator.ml:17`, `lib/fusion_core/fusion_policy.ml:44`). 이 cap은 운영상 의미가 없다(아래 §3): fusion은 키퍼가 명시적으로 호출하는 out-of-band 심의이고, activation 빈도는 cap이 아니라 키퍼 판단·턴 구조가 이미 bound한다.
 
 ### 1.2 이 RFC가 하는 것
 
-1. **이종 패널 그룹**: `preset.panel : string list` → `preset.panels : panel_group list`. 각 그룹이 자기 `system_prompt`/`web_tools`/`max_tool_calls`/`timeout_s`를 갖는다. 모든 그룹의 에이전트를 **하나의 `Async_agent.all`**에 union으로 던진다 (동시성/격리 경계 무변경). judge/sink는 평면 `panel_outcome list`만 보므로 **무변경**.
+1. **이종 패널 그룹**: `preset.panel : string list` → `preset.panels : panel_group list`. 각 그룹이 자기 `system_prompt`/`web_tools`/`max_tool_calls`를 갖는다. 모든 그룹의 에이전트를 **하나의 `Async_agent.all`**에 union으로 던진다 (동시성/격리 경계 무변경). judge/sink는 평면 `panel_outcome list`만 보므로 **무변경**.
 2. **legacy 무변경**: 기존 flat `panel=[...]` 문법을 **정확히 길이-1 그룹으로 desugar** (`lib/fusion_core/fusion_config.ml:55`). 운영자 TOML 0줄 변경, 단일 그룹이면 오늘과 **byte-identical** 동작.
 3. **발동 예산 제거**: `per_hour_budget`/`Fusion_budget`/`Over_hourly_budget`/gate 소비를 전부 제거. cost-control cap을 두지 않는다 (§3).
 
@@ -52,13 +51,12 @@ type panel_group =
   ; system_prompt : string
   ; web_tools : bool
   ; max_tool_calls : int   (* 0 = 무제한 *)
-  ; timeout_s : float
   }
 [@@deriving show, eq]
 
 type preset =
   { name : string; panels : panel_group list
-  ; judge : string; judge_system_prompt : string; judge_timeout_s : float }
+  ; judge : string; judge_system_prompt : string }
 [@@deriving show, eq]
 ```
 
@@ -80,7 +78,6 @@ panel = ["careful1"]
 web_tools = true
 max_tool_calls_per_panel = 4
 max_output_tokens_per_panel = 4096
-panel_timeout_s = 180.0
 ```
 
 legacy flat `panel=[...]`는 같은 `parse_group` 함수를 preset 테이블 자체에 적용해 길이-1 그룹으로 desugar한다(코드 재사용). 두 문법이 같은 키 이름을 쓰기 때문이다.
@@ -108,9 +105,8 @@ RFC-0252 §6은 비용을 예측 가능하게 통제하려고 `per_hour_budget`(
 
 ## 4. byte-identity 복구 (실행축)
 
-`preset.web_tools`/`max_tool_calls_per_panel`/`panel_timeout_s`는 오늘 패널뿐 아니라 **심판 호출과 외곽 run_safe 타임아웃**에도 쓰인다 (`lib/fusion/fusion_orchestrator.ml:29-48`). 이 값들을 per-group으로 옮기면 심판/외곽-timeout이 대표값을 잃는다. 단일 그룹에서 오늘과 byte-identical을 보장하기 위해 순수 derive 함수를 둔다:
+`preset.web_tools`/`max_tool_calls_per_panel`는 심판 호출에도 쓰인다. 이 값들을 per-group으로 옮기면 심판이 대표값을 잃는다. 단일 그룹에서 오늘과 byte-identical을 보장하기 위해 순수 derive 함수를 둔다:
 
-- `panel_outer_timeout_of groups` = 그룹 timeout 중 max (단일이면 그 그룹 timeout = `panel_timeout_s`).
 - `judge_web_tools_of ~req_web_tools groups` = `req || (어느 그룹이든 web_tools)` (단일이면 `req || group.web_tools` = 오늘).
 - `judge_tool_budget_of groups` = 0(무제한)이 흡수자, 그 외 그룹 max (단일이면 그 그룹 값 = 오늘).
 - `max_output_tokens_per_panel`은 group-local이다. 심판 출력 예산은 `judge_max_output_tokens`와 `[[...judges]].max_output_tokens`가 소유하므로, 그룹별 패널 예산이 심판 호출에 암묵 전파되지 않는다.

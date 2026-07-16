@@ -472,9 +472,20 @@ module KeeperGeneratedMedia = struct
   ;;
 end
 
-(** Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. *)
+(** Shared keepalive interval, read early so WorkAsHeartbeat can reference it.
+    Any positive interval is valid; the scheduler must not silently rewrite an
+    operator-selected cadence.
+
+    @category Thresholds
+    @ops_class operator *)
 let keepalive_interval_sec_ =
-  max 5 (min 300 (get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"))
+  let interval_sec = get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
+  if interval_sec > 0
+  then interval_sec
+  else
+    raise
+      (Config_error
+         "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC must be a positive integer")
 ;;
 
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
@@ -515,14 +526,10 @@ end
 
 module KeeperKeepalive = struct
   (** Heartbeat cycle interval in seconds. Default: 30.
-      Range: [5, 300]. This is the foundational timing constant — every
-      keeper cycle (presence, snapshot, board scan, turn, recurring) runs
-      at this cadence. *)
+      Every positive operator-selected cadence is preserved exactly. This is
+      the foundational timing constant — every keeper cycle (presence,
+      snapshot, board scan, turn, recurring) runs at this cadence. *)
   let interval_sec = keepalive_interval_sec_
-
-  (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
-      wakeups from the same board post. Default: 60.0.
-      Range: [5, 300]. *)
 
   (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
       response but more CPU polling. Default: 2.0.

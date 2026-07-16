@@ -2,7 +2,7 @@
 
     Tests for:
     - Dashboard: section types, formatting, constants, timestamp parsing
-    - Resilience: Time utilities, Zombie detection, ZeroZombie protocol
+    - Resilience: Time utilities and Zombie detection
 *)
 
 open Alcotest
@@ -194,34 +194,6 @@ let test_zombie_is_zombie_custom_threshold () =
     (Workspace_resilience.Zombie.is_zombie ~threshold:1.0 old)
 
 (* ============================================================
-   Workspace_resilience.ZeroZombie Tests
-   ============================================================ *)
-
-let test_zero_zombie_global_stats () =
-  let stats = Workspace_resilience.ZeroZombie.global_stats in
-  check bool "total_cleanups non-negative" true (stats.total_cleanups >= 0)
-
-let test_zero_zombie_cleanup () =
-  (* Mock cleanup function that returns empty list *)
-  let cleanup_fn () = [] in
-  let cleaned = Workspace_resilience.ZeroZombie.cleanup ~cleanup_fn in
-  check int "no cleaned agents" 0 (List.length cleaned)
-
-let test_zero_zombie_cleanup_with_agents () =
-  (* Mock cleanup function that returns some agents *)
-  let cleanup_fn () = ["zombie1"; "zombie2"] in
-  let cleaned = Workspace_resilience.ZeroZombie.cleanup ~cleanup_fn in
-  check int "2 cleaned agents" 2 (List.length cleaned)
-
-let test_zero_zombie_stats_update () =
-  let initial_cleanups = Workspace_resilience.ZeroZombie.global_stats.total_cleanups in
-  let cleanup_fn () = ["agent1"] in
-  ignore (Workspace_resilience.ZeroZombie.cleanup ~cleanup_fn);
-  check bool "cleanups incremented" true
-    (Workspace_resilience.ZeroZombie.global_stats.total_cleanups > initial_cleanups ||
-     Workspace_resilience.ZeroZombie.global_stats.total_cleanups = initial_cleanups + 1)
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -268,11 +240,5 @@ let () =
       test_case "is_zombie old" `Quick test_zombie_is_zombie_old;
       test_case "is_zombie recent" `Quick test_zombie_is_zombie_recent;
       test_case "is_zombie custom threshold" `Quick test_zombie_is_zombie_custom_threshold;
-    ];
-    "resilience.zero_zombie", [
-      test_case "global stats" `Quick test_zero_zombie_global_stats;
-      test_case "cleanup empty" `Quick test_zero_zombie_cleanup;
-      test_case "cleanup with agents" `Quick test_zero_zombie_cleanup_with_agents;
-      test_case "stats update" `Quick test_zero_zombie_stats_update;
     ];
   ]

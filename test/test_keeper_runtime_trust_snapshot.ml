@@ -83,7 +83,6 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
       (`Assoc
           [ "name", `String name
           ; "trace_id", `String ("trace-" ^ name)
-          ; "goal", `String "test goal"
           ])
   with
   | Ok meta -> meta

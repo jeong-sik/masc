@@ -9,7 +9,6 @@ let make_meta ~name ~sandbox_profile ~network_mode =
       [ "name", `String name
       ; "agent_name", `String ("agent-" ^ name)
       ; "trace_id", `String ("trace-" ^ name)
-      ; "goal", `String "local profile routing regression"
       ; "sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
       ; "network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
       ]

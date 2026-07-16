@@ -501,7 +501,12 @@ let manual_compaction_wakeup_observation ~base_path keeper_name =
 
 (** Queue an operator compaction for the target Keeper's owning lane. *)
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_compact_body ~(config : Workspace.config) args : tool_result =
+let keeper_compact_body
+      ?invocation_ref
+      ~(config : Workspace.config)
+      args
+  : tool_result
+  =
   match resolve_keeper_name_config ~config args with
   | Error err -> tool_result_error err
   | Ok name ->
@@ -535,6 +540,11 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
             ; "queued", `Bool true
             ; "queue_outcome", `String queue_outcome
             ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+            ; ( "producer_invocation"
+              , Option.fold
+                  ~none:`Null
+                  ~some:Tool_invocation_ref.to_yojson
+                  invocation_ref )
             ; ( "wake"
               , manual_compaction_wakeup_observation
                   ~base_path:config.base_path
@@ -557,8 +567,8 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
        | Stimulus_enqueued -> queued "enqueued"
        | Stimulus_already_present -> queued "already_present")
 
-let handle_keeper_compact ctx args : tool_result =
-  keeper_compact_body ~config:ctx.config args
+let handle_keeper_compact ?invocation_ref ctx args : tool_result =
+  keeper_compact_body ?invocation_ref ~config:ctx.config args
 
 (** Last-resort context clear.
 
@@ -697,7 +707,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
 
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
@@ -740,7 +750,11 @@ let dispatch ctx ~name ~args : tool_result option =
            ~tool_name:name
            (handle_keeper_sandbox_status ctx args))
   | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
-  | "masc_keeper_compact" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_compact ctx args))
+  | "masc_keeper_compact" ->
+    Some
+      (tool_result_with_tool_name
+         ~tool_name:name
+         (handle_keeper_compact ?invocation_ref ctx args))
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
   | _ -> None
 

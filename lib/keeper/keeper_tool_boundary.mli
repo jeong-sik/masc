@@ -10,11 +10,13 @@ type 'a context = {
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
+  invocation_ref : Tool_invocation_ref.t option;
   publication_recovery_provider :
     Keeper_publication_recovery_availability.provider;
 }
 
 val create :
+  ?invocation_ref:Tool_invocation_ref.t ->
   config:Workspace.config ->
   agent_name:string ->
   sw:Eio.Switch.t ->
@@ -23,12 +25,14 @@ val create :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
   publication_recovery_provider:
     Keeper_publication_recovery_availability.provider ->
+  unit ->
   'a context
 
 val dispatch :
   _ context -> name:string -> args:Yojson.Safe.t -> Keeper_types_profile.tool_result option
 
 val delegated_dispatch :
+  ?invocation_ref:Tool_invocation_ref.t ->
   config:Workspace.config ->
   agent_name:string ->
   sw:Eio.Switch.t ->
@@ -37,6 +41,7 @@ val delegated_dispatch :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
   publication_recovery_provider:
     Keeper_publication_recovery_availability.provider ->
+  unit ->
   name:string ->
   args:Yojson.Safe.t ->
   Keeper_types_profile.tool_result option

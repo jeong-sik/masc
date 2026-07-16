@@ -77,7 +77,8 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
            ~clock:(Eio.Stdenv.clock env)
            ~proc_mgr:(Some (Eio.Stdenv.process_mgr env))
            ~net:(Some (Eio.Stdenv.net env))
-           ~publication_recovery_provider);
+           ~publication_recovery_provider
+           ());
     mcp_session_id;
   }
 

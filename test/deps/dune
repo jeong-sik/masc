@@ -112,6 +112,7 @@
   (re_export masc.masc_compression)
   (re_export masc.mcp_session)
   (re_export masc.mcp_transport_protocol)
+  (re_export masc.tool_invocation_ref)
   (re_export masc.multimodal)
   (re_export masc.prompt_registry)
   (re_export masc.pulse)

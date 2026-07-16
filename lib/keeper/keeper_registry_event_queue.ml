@@ -2,7 +2,7 @@
 
     Extracted from keeper_registry.ml (lines 1854-1900) as part of the
     godfile decomp campaign. Each [registry_entry] carries its own
-    [event_queue : Keeper_event_queue.t Atomic.t].  The durable v2 envelope is
+    [event_queue : Keeper_event_queue.t Atomic.t].  The durable v3 envelope is
     the mutation authority; these wrappers publish its pending projection to
     that per-entry Atomic only after commit.  No coupling to the central
     registry Atomic state primitive. *)
@@ -40,10 +40,15 @@ type settlement = Keeper_event_queue_persistence.settlement =
 
 type transition_receipt = Keeper_event_queue_persistence.transition_receipt
 type outbox_entry = Keeper_event_queue_persistence.outbox_entry
+type parked_entry = Keeper_event_queue_persistence.parked_entry
 
 type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+
+type resume_result = Keeper_event_queue_persistence.resume_result =
+  | Resumed of Keeper_event_queue.stimulus list
+  | Already_resumed
 
 let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
 let lease_kind = Keeper_event_queue_persistence.lease_kind
@@ -59,6 +64,12 @@ let active_lease_result ~base_path name =
 
 let transition_outbox_result ~base_path name =
   Keeper_event_queue_persistence.transition_outbox_result
+    ~base_path
+    ~keeper_name:name
+;;
+
+let parked_entries_result ~base_path name =
+  Keeper_event_queue_persistence.parked_entries_result
     ~base_path
     ~keeper_name:name
 ;;
@@ -343,6 +354,32 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
     ~settled_at
     ~lease
     ~settlement
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let park_for_compaction_result
+    ~base_path
+    name
+    ~settled_at
+    ~lease
+    ~operation_id
+  =
+  Keeper_event_queue_persistence.park_for_compaction_result
+    ~base_path
+    ~keeper_name:name
+    ~settled_at
+    ~lease
+    ~operation_id
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let resume_parked_result ~base_path name ~operation_id =
+  Keeper_event_queue_persistence.resume_parked_result
+    ~base_path
+    ~keeper_name:name
+    ~operation_id
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;

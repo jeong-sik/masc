@@ -1,6 +1,6 @@
 (** Durable per-Keeper Event Layer state.
 
-    [event-queue.json] uses one v2 envelope containing pending stimuli, active
+    [event-queue.json] uses one v3 envelope containing pending stimuli, active
     typed leases, the monotonic lease sequence and the transition outbox.
     [event-queue-inflight.json] is accepted only as a one-time v1 migration
     input; it is never a second runtime authority. *)
@@ -43,9 +43,19 @@ type lease = Keeper_event_queue_state.lease
 type transition_receipt = Keeper_event_queue_state.transition_receipt
 type outbox_entry = Keeper_event_queue_state.outbox_entry
 
+type parked_phase = Keeper_event_queue_state.parked_phase =
+  | Parked
+  | Resumed
+
+type parked_entry = Keeper_event_queue_state.parked_entry
+
 type settle_result = Keeper_event_queue_state.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+
+type resume_result = Keeper_event_queue_state.resume_result =
+  | Resumed of Keeper_event_queue.stimulus list
+  | Already_resumed
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
 val lease_kind : lease -> lease_kind
@@ -57,6 +67,9 @@ val transition_outbox_result :
   base_path:string -> keeper_name:string -> (outbox_entry list, string) result
 (** Read the single pending projection entry for this Keeper lane.  The state
     machine blocks new claims until this list is drained. *)
+
+val parked_entries_result :
+  base_path:string -> keeper_name:string -> (parked_entry list, string) result
 
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Compatibility replay projection: pending followed by active lease stimuli.
@@ -111,8 +124,8 @@ val load_snapshot_pair_with_errors :
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Strict state read used by tests and operator projection.  A malformed v2
-    envelope or v2-plus-legacy residue is an [Error], never an empty queue. *)
+(** Strict state read used by tests and operator projection.  A malformed v3
+    envelope or v3-plus-legacy residue is an [Error], never an empty queue. *)
 
 val claim_when_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -140,6 +153,24 @@ val settle_result :
   settlement:settlement ->
   unit ->
   (settle_result, string) result
+
+val park_for_compaction_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  settled_at:float ->
+  lease:lease ->
+  operation_id:Keeper_compaction_operation_identity.Operation_id.t ->
+  unit ->
+  (settle_result, string) result
+
+val resume_parked_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  operation_id:Keeper_compaction_operation_identity.Operation_id.t ->
+  unit ->
+  (resume_result, string) result
 
 val prepare_registration_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -198,7 +229,7 @@ val persist_snapshot :
 val record_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
 (** Legacy source/test adapter.  Writes a typed [Legacy_inflight] lease into the
-    v2 envelope; it never creates [event-queue-inflight.json]. *)
+    v3 envelope; it never creates [event-queue-inflight.json]. *)
 
 val ack_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit

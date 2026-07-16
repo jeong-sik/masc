@@ -13,6 +13,10 @@ type source = private
       { revision : int64
       ; entry : Keeper_event_queue_state.outbox_entry
       }
+  | Event_queue_parked of
+      { revision : int64
+      ; entry : Keeper_event_queue_state.parked_entry
+      }
   | Async_request of Keeper_msg_async.entry
 
 type t =

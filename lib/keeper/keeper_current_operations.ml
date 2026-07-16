@@ -11,6 +11,10 @@ type source =
       { revision : int64
       ; entry : Keeper_event_queue_state.outbox_entry
       }
+  | Event_queue_parked of
+      { revision : int64
+      ; entry : Keeper_event_queue_state.parked_entry
+      }
   | Async_request of Keeper_msg_async.entry
 
 type t =
@@ -79,7 +83,18 @@ let project_event_queue_state ~keeper_name state =
       ; source = Event_queue_outbox { revision; entry }
       })
   in
-  leases @ pending @ outbox
+  let parked =
+    Keeper_event_queue_state.parked_entries state
+    |> List.filter_map (fun (entry : Keeper_event_queue_state.parked_entry) ->
+      match entry.phase with
+      | Parked ->
+        Some
+          { keeper_name
+          ; source = Event_queue_parked { revision; entry }
+          }
+      | Resumed -> None)
+  in
+  leases @ parked @ pending @ outbox
 ;;
 
 let project_async_entries ~keeper_name entries =
@@ -182,6 +197,10 @@ let source_to_yojson = function
     `Assoc [ "kind", `String "event_queue_outbox"
            ; "revision", `String (Int64.to_string revision)
            ; "value", outbox_to_yojson entry ]
+  | Event_queue_parked { revision; entry } ->
+    `Assoc [ "kind", `String "event_queue_parked"
+           ; "revision", `String (Int64.to_string revision)
+           ; "value", Keeper_event_queue_state.parked_entry_to_yojson entry ]
   | Async_request entry ->
     `Assoc [ "kind", `String "async_request"; "value", async_entry_to_yojson entry ]
 ;;

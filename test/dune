@@ -676,7 +676,7 @@
 (test
  (name test_keeper_current_operations)
  (modules test_keeper_current_operations)
- (libraries alcotest masc_test_deps))
+ (libraries alcotest masc_test_deps masc.keeper_compaction_operation_identity))
 
 (test
  (name test_keeper_failure_judgment_contract)

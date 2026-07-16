@@ -39,9 +39,19 @@ type lease = State.lease
 type transition_receipt = State.transition_receipt
 type outbox_entry = State.outbox_entry
 
+type parked_phase = State.parked_phase =
+  | Parked
+  | Resumed
+
+type parked_entry = State.parked_entry
+
 type settle_result = State.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+
+type resume_result = State.resume_result =
+  | Resumed of Keeper_event_queue.stimulus list
+  | Already_resumed
 
 let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
@@ -147,7 +157,7 @@ let schema_field = function
 type primary_snapshot =
   | Primary_missing
   | Primary_v1 of Keeper_event_queue.t
-  | Primary_v2 of State.t
+  | Primary_current of State.t
 
 let read_primary_unlocked owner =
   let path = snapshot_path_of_owner owner in
@@ -159,7 +169,7 @@ let read_primary_unlocked owner =
      | Error message -> Error (Printf.sprintf "%s: %s" path message)
      | Ok schema when String.equal schema State.schema ->
        (match State.of_yojson json with
-        | Ok state -> Ok (Primary_v2 state)
+        | Ok state -> Ok (Primary_current state)
         | Error message -> Error (Printf.sprintf "%s: %s" path message))
      | Ok schema when String.equal schema "keeper.event_queue.v1" ->
        (match Keeper_event_queue.queue_of_yojson json with
@@ -190,7 +200,7 @@ let remove_legacy_inflight_unlocked owner =
   | exn ->
     Error
       (Printf.sprintf
-         "v2 state committed but failed to remove legacy inflight input %s: %s"
+         "current state committed but failed to remove legacy inflight input %s: %s"
          path
          (Printexc.to_string exn))
 ;;
@@ -230,27 +240,33 @@ let state_accounts_for_stimulus state stimulus =
   || List.exists
        (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
        (State.transition_outbox state)
+  || List.exists
+       (fun (entry : parked_entry) ->
+          match entry.phase with
+          | Parked -> List.exists same entry.source_lease.stimuli
+          | Resumed -> false)
+       (State.parked_entries state)
 ;;
 
-let reconcile_v2_legacy_residue_unlocked owner state legacy =
+let reconcile_current_legacy_residue_unlocked owner state legacy =
   let legacy_stimuli = Keeper_event_queue.to_list legacy in
   if List.for_all (state_accounts_for_stimulus state) legacy_stimuli
   then remove_legacy_inflight_unlocked owner |> Result.map (fun () -> state)
   else
     Error
       (Printf.sprintf
-         "v2 event queue conflicts with legacy inflight residue: %s"
+         "current event queue conflicts with legacy inflight residue: %s"
          (legacy_inflight_path_of_owner owner))
 ;;
 
 let load_state_unlocked owner =
   match read_primary_unlocked owner with
   | Error _ as error -> error
-  | Ok (Primary_v2 state) ->
+  | Ok (Primary_current state) ->
     (match read_legacy_inflight_unlocked owner with
      | Error _ as error -> error
      | Ok None -> Ok state
-     | Ok (Some legacy) -> reconcile_v2_legacy_residue_unlocked owner state legacy)
+     | Ok (Some legacy) -> reconcile_current_legacy_residue_unlocked owner state legacy)
   | Ok Primary_missing ->
     (match read_legacy_inflight_unlocked owner with
      | Error _ as error -> error
@@ -284,6 +300,10 @@ let active_lease_result ~base_path ~keeper_name =
 
 let transition_outbox_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.transition_outbox
+;;
+
+let parked_entries_result ~base_path ~keeper_name =
+  load_state_result ~base_path ~keeper_name |> Result.map State.parked_entries
 ;;
 
 let queue_of_stimuli stimuli =
@@ -600,6 +620,32 @@ let settle_result
   =
   commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
     State.settle ~settled_at ~lease ~settlement state)
+;;
+
+let park_for_compaction_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ~lease
+      ~operation_id
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    State.park_for_compaction ~settled_at ~lease ~operation_id state
+    |> Result.map_error State.parking_error_to_string)
+;;
+
+let resume_parked_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~operation_id
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    State.resume_parked ~operation_id state
+    |> Result.map_error State.parking_error_to_string)
 ;;
 
 let prepare_registration_result

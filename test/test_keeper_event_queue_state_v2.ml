@@ -668,6 +668,112 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
 ;;
 
+let test_compaction_parking_persistence_facade () =
+  with_temp_dir "keeper-event-queue-v3-parking-facade" (fun base_path ->
+    let keeper_name = "parking_facade_keeper" in
+    let source = stimulus "overflow-source" 1.0 in
+    let unrelated = stimulus "unrelated" 2.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      List.fold_left Queue.enqueue pending [ source; unrelated ])
+    |> require_ok "seed parking facade";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:3.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim overflow source"
+      |> require_some "overflow source lease"
+    in
+    let operation_id =
+      Keeper_compaction_operation_identity.Operation_id.generate ()
+    in
+    let published = ref [] in
+    let receipt =
+      match
+        Persistence.park_for_compaction_result
+          ~base_path
+          ~keeper_name
+          ~settled_at:4.0
+          ~lease
+          ~operation_id
+          ~after_commit:(fun pending -> published := post_ids pending :: !published)
+          ()
+        |> require_ok "park through persistence"
+      with
+      | Persistence.Settled receipt -> receipt
+      | Persistence.Already_settled _ ->
+        Alcotest.fail "first durable park was already settled"
+    in
+    (match
+       Persistence.parked_entries_result ~base_path ~keeper_name
+       |> require_ok "load parked entries"
+     with
+     | [ entry ] ->
+       Alcotest.(check bool)
+         "exact operation id"
+         true
+         (Keeper_compaction_operation_identity.Operation_id.equal
+            operation_id
+            entry.operation_id);
+       Alcotest.(check string)
+         "exact source lease"
+         lease.lease_id
+         entry.source_lease.lease_id;
+       Alcotest.(check bool) "parked phase" true (entry.phase = State.Parked)
+     | entries ->
+       Alcotest.failf "expected one parked entry, got %d" (List.length entries));
+    Persistence.mark_transition_projected_result
+      ~base_path
+      ~keeper_name
+      ~transition_id:receipt.transition_id
+    |> require_ok "project park transition";
+    (match
+       Persistence.enqueue_stimulus_if_absent_result
+         ~base_path
+         ~keeper_name
+         source
+       |> require_ok "deduplicate parked source"
+     with
+     | Persistence.Already_present -> ()
+     | Persistence.Enqueued ->
+       Alcotest.fail "parked source escaped durable identity accounting");
+    (match
+       Persistence.resume_parked_result
+         ~base_path
+         ~keeper_name
+         ~operation_id
+         ~after_commit:(fun pending -> published := post_ids pending :: !published)
+         ()
+       |> require_ok "resume through persistence"
+     with
+     | Persistence.Resumed [ resumed ] ->
+       Alcotest.(check string) "resumed exact source" source.post_id resumed.post_id
+     | Persistence.Resumed _ | Persistence.Already_resumed ->
+       Alcotest.fail "first durable resume changed the source");
+    (match
+       Persistence.resume_parked_result
+         ~base_path
+         ~keeper_name
+         ~operation_id
+         ()
+       |> require_ok "repeat resume through persistence"
+     with
+     | Persistence.Already_resumed -> ()
+     | Persistence.Resumed _ -> Alcotest.fail "durable resume was not idempotent");
+    Alcotest.(check (list string))
+      "resumed FIFO"
+      [ unrelated.post_id; source.post_id ]
+      (Persistence.load_pending_result ~base_path ~keeper_name
+       |> require_ok "load resumed pending"
+       |> post_ids);
+    Alcotest.(check int)
+      "only state-changing commits publish"
+      2
+      (List.length !published))
+;;
+
 let keeper_dir ~base_path ~keeper_name =
   Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
 ;;
@@ -1086,6 +1192,10 @@ let () =
             `Quick
             test_unconsumed_approval_requeues_behind_other_work
         ; Alcotest.test_case "compaction parking" `Quick test_compaction_parking_is_exact_and_idempotent
+        ; Alcotest.test_case
+            "compaction parking persistence facade"
+            `Quick
+            test_compaction_parking_persistence_facade
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case

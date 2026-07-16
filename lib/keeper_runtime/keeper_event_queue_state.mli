@@ -66,6 +66,17 @@ type outbox_entry =
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
+type parked_phase =
+  | Parked
+  | Resumed
+
+type parked_entry =
+  { operation_id : Keeper_compaction_operation_identity.Operation_id.t
+  ; source_lease : lease
+  ; settled_at : float
+  ; phase : parked_phase
+  }
+
 type t
 
 type settle_result =
@@ -93,6 +104,7 @@ val pending : t -> Keeper_event_queue.t
 val leases : t -> lease list
 val last_settlement : t -> transition_receipt option
 val transition_outbox : t -> outbox_entry list
+val parked_entries : t -> parked_entry list
 val lease_kind : lease -> lease_kind
 
 val with_pending : Keeper_event_queue.t -> t -> t
@@ -168,6 +180,7 @@ val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
+val parked_entry_to_yojson : parked_entry -> Yojson.Safe.t
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 

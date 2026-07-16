@@ -32,6 +32,47 @@ let test_event_queue_exact_state () =
   | operations -> failf "unexpected outbox operation count=%d" (List.length operations)
 ;;
 
+let test_event_queue_parked_is_exact_and_nonterminal_only () =
+  let source = stimulus "overflow-source" 1.0 in
+  let state = S.empty |> S.with_pending (queue [ source ]) |> S.with_revision 23L in
+  let state, lease = S.claim_when ~claimed_at:2.0 ~ready:(fun _ -> true) state |> ok in
+  let lease = Option.get lease in
+  let operation_id = Keeper_compaction_operation_identity.Operation_id.generate () in
+  let state, settlement =
+    S.park_for_compaction ~settled_at:3.0 ~lease ~operation_id state
+    |> Result.map_error S.parking_error_to_string
+    |> ok
+  in
+  let receipt =
+    match settlement with
+    | S.Settled receipt -> receipt
+    | S.Already_settled _ -> fail "first park was already settled"
+  in
+  let state =
+    S.mark_transition_projected ~transition_id:receipt.transition_id state |> ok
+  in
+  (match O.project_event_queue_state ~keeper_name:"keeper-a" state with
+   | [ ({ source = Event_queue_parked { revision; entry }; _ } as operation) ] ->
+     check int64 "revision" 23L revision;
+     check bool "operation id" true
+       (Keeper_compaction_operation_identity.Operation_id.equal
+          operation_id
+          entry.operation_id);
+     check string "source lease" lease.lease_id entry.source_lease.lease_id;
+     check string "projection kind" "event_queue_parked"
+       J.(O.to_yojson operation |> member "source" |> member "kind" |> to_string)
+   | operations -> failf "unexpected parked operation count=%d" (List.length operations));
+  let resumed, _ =
+    S.resume_parked ~operation_id state
+    |> Result.map_error S.parking_error_to_string
+    |> ok
+  in
+  match O.project_event_queue_state ~keeper_name:"keeper-a" resumed with
+  | [ { source = Event_queue_pending _; _ } ] -> ()
+  | operations ->
+    failf "resumed audit row remained current count=%d" (List.length operations)
+;;
+
 let test_async_active_and_unavailable () =
   let entry : A.entry =
     { request_id = "request-1"; keeper_name = "keeper-a"; base_path = "/workspace"
@@ -102,6 +143,10 @@ let () =
   run "keeper_current_operations"
     [ "projection",
       [ test_case "event queue exact state" `Quick test_event_queue_exact_state
+      ; test_case
+          "event queue parked exact state"
+          `Quick
+          test_event_queue_parked_is_exact_and_nonterminal_only
       ; test_case "async active and unavailable" `Quick test_async_active_and_unavailable
       ; test_case "terminal async is not current" `Quick
           test_terminal_async_entry_is_not_current

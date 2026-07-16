@@ -215,7 +215,7 @@ let test_phase0_record_always_emits_observation () =
     Masc.Keeper_keepalive_signal.register_record_wake_payload
       (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~context_window:_
         ~system_prompt_bytes:_ ~tool_schema_json_bytes:_ ~message_content_bytes:_
-        ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ())
+        ~message_count:_ ~role_counts:_ ~tool_count:_ -> ())
   in
   Fun.protect
     ~finally:restore
@@ -223,7 +223,7 @@ let test_phase0_record_always_emits_observation () =
        Masc.Keeper_keepalive_signal.register_record_wake_payload
          (fun ~keeper_name ~trace_id:_ ~turn_index:_ ~context_window:_
            ~system_prompt_bytes ~tool_schema_json_bytes:_ ~message_content_bytes:_
-           ~message_count ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ ->
+           ~message_count ~role_counts:_ ~tool_count:_ ->
             observed := Some (keeper_name, system_prompt_bytes, message_count));
        Masc.Keeper_agent_run_phase0_telemetry.record
          ~meta
@@ -233,7 +233,6 @@ let test_phase0_record_always_emits_observation () =
          ~user_message:"next"
          ~start_turn_count:3
          ~max_context:4096
-         ~pre_dispatch_compacted:false
          ();
        check
          (option (triple string int int))

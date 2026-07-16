@@ -1,6 +1,7 @@
 open Alcotest
 
 module KEC = Masc.Keeper_context_runtime
+module KMC = Masc.Keeper_manual_compaction
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
@@ -154,27 +155,6 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
-let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_lifecycle =
-  {
-    updated_meta = meta;
-    checkpoint = None;
-    handoff_json = None;
-    handoff_attempted = false;
-    handoff_failure_reason = None;
-    compaction =
-      {
-        attempted = false;
-        applied = false;
-        started_dispatched = false;
-        failure_reason = None;
-        trigger = None;
-        decision = KEC.Not_requested;
-    };
-    turn_generation = meta.runtime.generation;
-    checkpoint_bytes = 0;
-    message_count = 0;
-  }
-
 let test_registry_rejects_meta_name_mismatch_update () =
   let base_dir = temp_dir "keeper_lifecycle_registry_meta_mismatch" in
   Fun.protect
@@ -271,7 +251,7 @@ let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after compaction dispatch")
 
-let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
+let test_dispatch_compaction_completed_uses_workspace_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_outcome" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -287,31 +267,18 @@ let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
         ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
         KST.Compaction_started;
-      let lifecycle =
-        {
-          (base_lifecycle ~meta) with
-          compaction =
-            {
-              attempted = true;
-              applied = true;
-              started_dispatched = true;
-              failure_reason = None;
-              trigger = Some Compaction_trigger.Manual;
-              decision = KEC.Applied Compaction_trigger.Manual;
-            };
-        }
-      in
-      KEC.dispatch_post_turn_lifecycle_events
+      KEC.dispatch_compaction_completed
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
-        lifecycle;
+      |> Result.get_ok;
       match KR.get ~base_path:config.base_path meta.name with
       | Some entry ->
           check string "compaction completion reaches registry" "running"
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after lifecycle dispatch")
 
-let test_post_turn_compaction_runs_from_failing_health_lane () =
+let test_compaction_runs_from_failing_health_lane () =
   let base_dir = temp_dir "keeper_lifecycle_registry_failing_compaction" in
   Fun.protect
     ~finally:(fun () ->
@@ -343,24 +310,11 @@ let test_post_turn_compaction_runs_from_failing_health_lane () =
            check string "post-turn compaction starts while failing" "compacting"
              (KST.phase_to_string entry.phase)
        | None -> fail "expected registered keeper after compaction start");
-      let lifecycle =
-        {
-          (base_lifecycle ~meta) with
-          compaction =
-            {
-              attempted = true;
-              applied = true;
-              started_dispatched = true;
-              failure_reason = None;
-              trigger = Some Compaction_trigger.Manual;
-              decision = KEC.Applied Compaction_trigger.Manual;
-            };
-        }
-      in
-      KEC.dispatch_post_turn_lifecycle_events
+      KEC.dispatch_compaction_completed
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
-        lifecycle;
+      |> Result.get_ok;
       match KR.get ~base_path:config.base_path meta.name with
       | Some entry ->
           check string "compaction completion preserves failing health lane" "failing"
@@ -389,24 +343,11 @@ let test_compaction_completion_without_started_is_nonfatal () =
           ~labels ()
         |> Option.value ~default:0.0
       in
-      let lifecycle =
-        {
-          (base_lifecycle ~meta) with
-          compaction =
-            {
-              attempted = true;
-              applied = true;
-              started_dispatched = true;
-              failure_reason = None;
-              trigger = Some Compaction_trigger.Manual;
-              decision = KEC.Applied Compaction_trigger.Manual;
-            };
-        }
-      in
-      KEC.dispatch_post_turn_lifecycle_events
+      KEC.dispatch_compaction_completed
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
-        lifecycle;
+      |> ignore;
       let after =
         Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -420,7 +361,7 @@ let test_compaction_completion_without_started_is_nonfatal () =
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after rejected completion")
 
-let test_post_turn_compaction_restarts_after_done_stage () =
+let test_compaction_restarts_after_done_stage () =
   let base_dir = temp_dir "keeper_lifecycle_registry_repeat_compaction" in
   Fun.protect
     ~finally:(fun () ->
@@ -433,20 +374,6 @@ let test_post_turn_compaction_restarts_after_done_stage () =
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-repeat-compaction" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
-      let lifecycle =
-        {
-          (base_lifecycle ~meta) with
-          compaction =
-            {
-              attempted = true;
-              applied = true;
-              started_dispatched = true;
-              failure_reason = None;
-              trigger = Some Compaction_trigger.Manual;
-              decision = KEC.Applied Compaction_trigger.Manual;
-            };
-        }
-      in
       let run_compaction label =
         KEC.dispatch_keeper_phase_event
           ~config
@@ -458,10 +385,11 @@ let test_post_turn_compaction_restarts_after_done_stage () =
              check string (label ^ " start reaches compacting") "compacting"
                (KST.phase_to_string entry.phase)
          | None -> fail "expected registered keeper after compaction start");
-        KEC.dispatch_post_turn_lifecycle_events
+        KEC.dispatch_compaction_completed
           ~config
+          ~origin:KR.Post_turn_lifecycle
           ~keeper_name:meta.name
-          lifecycle;
+        |> Result.get_ok;
         match KR.get ~base_path:config.base_path meta.name with
         | Some entry ->
             check string (label ^ " completion returns running") "running"
@@ -544,6 +472,39 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         |> Option.value ~default:0.0
       in
       check bool "rejection metric increments" true (after > before))
+
+let test_manual_compaction_preserves_failed_failure_dispatch () =
+  let primary =
+    KEC.Transition_rejected
+      (KST.Precondition_violation
+         { event = "compaction_started"; reason = "primary rejection" })
+  in
+  let failure_dispatch =
+    KEC.Transition_rejected
+      (KST.Precondition_violation
+         { event = "compaction_failed"; reason = "failure dispatch rejection" })
+  in
+  let failure =
+    KMC.Lifecycle_with_failure_dispatch
+      { stage = KMC.Compaction_started
+      ; checkpoint_applied = false
+      ; error = primary
+      ; failure_dispatch = Error failure_dispatch
+      }
+  in
+  let detail = KMC.failure_to_string failure in
+  check bool "primary rejection is rendered" true
+    (Astring.String.is_infix ~affix:"primary rejection" detail);
+  check bool "failure dispatch rejection is rendered" true
+    (Astring.String.is_infix ~affix:"failure dispatch rejection" detail);
+  let recovery_detail =
+    KMC.failure_to_string
+      (KMC.Recovery
+         ( Masc.Keeper_post_turn.Compaction_evidence_missing
+         , Error failure_dispatch ))
+  in
+  check bool "recovery failure dispatch rejection is rendered" true
+    (Astring.String.is_infix ~affix:"failure dispatch rejection" recovery_detail)
 
 let test_keepalive_dispatch_event_rejection_increments_metric () =
   let base_dir = temp_dir "keeper_lifecycle_keepalive_rejection" in
@@ -701,18 +662,20 @@ let () =
         [
           test_case "phase event uses workspace base_path" `Quick
             test_dispatch_keeper_phase_event_uses_workspace_base_path;
-          test_case "post-turn lifecycle events use workspace base_path" `Quick
-            test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path;
-          test_case "post-turn compaction runs from failing health lane" `Quick
-            test_post_turn_compaction_runs_from_failing_health_lane;
+          test_case "compaction completion uses workspace base_path" `Quick
+            test_dispatch_compaction_completed_uses_workspace_base_path;
+          test_case "compaction runs from failing health lane" `Quick
+            test_compaction_runs_from_failing_health_lane;
           test_case "compaction completion without started is nonfatal" `Quick
             test_compaction_completion_without_started_is_nonfatal;
-          test_case "post-turn compaction restarts after done stage" `Quick
-            test_post_turn_compaction_restarts_after_done_stage;
+          test_case "compaction restarts after done stage" `Quick
+            test_compaction_restarts_after_done_stage;
           test_case "unscoped lifecycle event is rejected" `Quick
             test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event;
           test_case "phase event rejection increments metric" `Quick
             test_dispatch_keeper_phase_event_rejection_increments_metric;
+          test_case "manual compaction preserves failed failure dispatch" `Quick
+            test_manual_compaction_preserves_failed_failure_dispatch;
           test_case "keepalive event rejection increments metric" `Quick
             test_keepalive_dispatch_event_rejection_increments_metric;
           test_case "publication recovery turn resolution is filesystem idle" `Quick

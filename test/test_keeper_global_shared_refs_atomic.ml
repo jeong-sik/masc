@@ -109,7 +109,6 @@ let test_keepalive_signal_callbacks () =
       ~message_count:_
       ~role_counts:_
       ~tool_count:_
-      ~has_compact_happened:_
     -> wake_called := true);
   Keeper_keepalive_signal.record_wake_payload
     ~keeper_name:"k"
@@ -121,8 +120,7 @@ let test_keepalive_signal_callbacks () =
     ~message_content_bytes:0
     ~message_count:0
     ~role_counts:[]
-    ~tool_count:0
-    ~has_compact_happened:false;
+    ~tool_count:0;
   check bool "wake payload callback invoked" true !wake_called;
   Keeper_keepalive_signal.register_record_wake_payload
     (fun
@@ -136,7 +134,6 @@ let test_keepalive_signal_callbacks () =
       ~message_count:_
       ~role_counts:_
       ~tool_count:_
-      ~has_compact_happened:_
     -> ());
   let skipped = ref false in
   Keeper_keepalive_signal.register_record_tool_skipped

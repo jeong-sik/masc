@@ -10,28 +10,6 @@ module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue
 module WO = Masc.Keeper_world_observation
 
-let test_prepared_becomes_applied_only_after_save () =
-  let trigger = Compaction_trigger.Manual in
-  check bool "Prepared is not Applied" false
-    (Compact_policy.compaction_decision_applied
-       (Compact_policy.Prepared trigger));
-  (match
-     Post_turn.For_testing.commit_prepared_after_save
-       ~trigger
-       ~save:(fun () -> Error "checkpoint unavailable")
-   with
-   | Error detail -> check string "save failure preserved" "checkpoint unavailable" detail
-   | Ok _ -> fail "failed checkpoint save promoted Prepared to Applied");
-  match
-    Post_turn.For_testing.commit_prepared_after_save
-      ~trigger
-      ~save:(fun () -> Ok "durable-checkpoint")
-  with
-  | Error detail -> failf "successful checkpoint save failed: %s" detail
-  | Ok (checkpoint, Compact_policy.Applied Compaction_trigger.Manual) ->
-    check string "saved checkpoint returned" "durable-checkpoint" checkpoint
-  | Ok _ -> fail "successful checkpoint save did not produce Applied Manual"
-
 let test_compaction_rejection_tag_is_stable () =
   let error =
     Post_turn.Compaction_rejected
@@ -100,25 +78,14 @@ let test_regular_post_turn_does_not_auto_compact () =
   Eio_main.run @@ fun _env ->
   let meta = make_meta () in
   let checkpoint = make_checkpoint () in
-  let unexpected_callback () = fail "regular post-turn invoked a compaction callback" in
   let result =
     Post_turn.apply_post_turn_lifecycle_with_resilience_handles
       ~resilience_audit_store:None
       ~resilience_strategy_executor:None
-      ~on_compaction_started:unexpected_callback
-      ~on_handoff_started:unexpected_callback
-      ~base_dir:"unused"
       ~meta
-      ~model:"test-model"
       ~primary_model_max_tokens:8192
-      ~current_turn_blocker_info:None
       ~checkpoint:(Some checkpoint)
   in
-  check bool "compaction not attempted" false result.compaction.attempted;
-  check bool "compaction not applied" false result.compaction.applied;
-  (match result.compaction.decision with
-   | Compact_policy.Not_requested -> ()
-   | _ -> fail "regular post-turn returned a compaction decision");
   match result.checkpoint with
   | None -> fail "regular post-turn discarded the checkpoint"
   | Some retained ->
@@ -358,8 +325,6 @@ let test_manual_compaction_serializes_owner_lane () =
 let () =
   run "post-turn durability" [
     "durable compaction", [
-      test_case "Prepared requires a successful checkpoint save"
-        `Quick test_prepared_becomes_applied_only_after_save;
       test_case "compaction rejection tag is stable"
         `Quick test_compaction_rejection_tag_is_stable;
       test_case "regular post-turn does not auto-compact"

@@ -162,7 +162,6 @@ val append_metrics_snapshot :
   snapshot_source:string ->
   checkpoint_bytes:int ->
   message_count:int ->
-  compaction:Keeper_context_runtime.compaction_event ->
   handoff_json:Yojson.Safe.t option ->
   ?count_completed_turn:bool ->
   ?deliberation_execution:Keeper_deliberation.execution_result ->
@@ -190,9 +189,11 @@ val append_decision_record :
 val broadcast_lifecycle_events :
   name:string ->
   turn_generation:int ->
-  compaction:Keeper_context_runtime.compaction_event ->
   handoff_json:Yojson.Safe.t option ->
   unit
+
+val broadcast_compaction :
+  name:string -> Keeper_context_runtime.compaction_recovery -> unit
 
 val has_substantive_tool_calls : string list -> bool
 

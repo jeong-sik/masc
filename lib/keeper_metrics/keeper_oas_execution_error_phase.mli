@@ -19,7 +19,7 @@ type t =
   | Cycle_failed
   | Persistent_escalation
   | Resilience_audit_store
-  | Overflow_retry_oas_load
+  | Compaction_checkpoint_load
   | Provider_context_overflow
 
 val to_label : t -> string

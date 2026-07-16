@@ -5,7 +5,7 @@ type t =
   | Cycle_failed
   | Persistent_escalation
   | Resilience_audit_store
-  | Overflow_retry_oas_load
+  | Compaction_checkpoint_load
   | Provider_context_overflow
 
 let to_label = function
@@ -15,6 +15,6 @@ let to_label = function
   | Cycle_failed -> "cycle_failed"
   | Persistent_escalation -> "persistent_escalation"
   | Resilience_audit_store -> "resilience_audit_store"
-  | Overflow_retry_oas_load -> "overflow_retry_oas_load"
+  | Compaction_checkpoint_load -> "compaction_checkpoint_load"
   | Provider_context_overflow -> "provider_context_overflow"
 ;;

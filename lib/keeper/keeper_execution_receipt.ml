@@ -395,13 +395,6 @@ let to_json_with_operator_disposition
       , Json_util.int_opt_to_json receipt.extra_system_context_injected_size )
     ; ( "extra_system_context_computed_size"
       , Json_util.int_opt_to_json receipt.extra_system_context_computed_size )
-    ; ( "pre_dispatch_compacted", `Bool receipt.pre_dispatch_compacted )
-    ; ( "pre_dispatch_compaction_trigger"
-      , string_opt_json receipt.pre_dispatch_compaction_trigger )
-    ; ( "pre_dispatch_compaction_before_tokens"
-      , Json_util.int_opt_to_json receipt.pre_dispatch_compaction_before_tokens )
-    ; ( "pre_dispatch_compaction_after_tokens"
-      , Json_util.int_opt_to_json receipt.pre_dispatch_compaction_after_tokens )
     ]
 ;;
 

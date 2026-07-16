@@ -211,10 +211,6 @@ let finalize
     ~usage
     ~receipt_response_text_present_ref
     ~history_assistant_source
-    ~pre_dispatch_compacted
-    ~pre_dispatch_compaction_trigger
-    ~pre_dispatch_compaction_before_tokens
-    ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
     ~capture_replay_response
     ?continuation_delivery_channel:_
@@ -395,9 +391,5 @@ let finalize
       ; stop_reason = result.stop_reason
       ; inference_telemetry = result.response.telemetry
       ; tool_surface = acc.tool_surface
-      ; pre_dispatch_compacted
-      ; pre_dispatch_compaction_trigger
-      ; pre_dispatch_compaction_before_tokens
-      ; pre_dispatch_compaction_after_tokens
       }
 ;;

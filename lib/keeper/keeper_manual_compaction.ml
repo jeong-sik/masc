@@ -1,10 +1,27 @@
 open Keeper_meta_contract
 type success =
-  { recovery : Keeper_context_runtime.overflow_retry_recovery
+  { recovery : Keeper_context_runtime.compaction_recovery
   ; manifest : (unit, string) result
   }
+
+type lifecycle_stage =
+  | Operator_request
+  | Compaction_started
+  | Compaction_completed
+
 type failure =
-  | Lifecycle of string * bool * Keeper_context_runtime.lifecycle_dispatch_error
+  | Lifecycle of
+      { stage : lifecycle_stage
+      ; checkpoint_applied : bool
+      ; error : Keeper_context_runtime.lifecycle_dispatch_error
+      }
+  | Lifecycle_with_failure_dispatch of
+      { stage : lifecycle_stage
+      ; checkpoint_applied : bool
+      ; error : Keeper_context_runtime.lifecycle_dispatch_error
+      ; failure_dispatch :
+          (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
+      }
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
@@ -13,9 +30,7 @@ let primary_max_context meta =
   resolution.effective_budget
 ;;
 let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
-  match recovery.Keeper_context_runtime.compaction.trigger with
-  | None -> Error "manual compaction completed without its typed trigger"
-  | Some trigger ->
+  let trigger = recovery.Keeper_context_runtime.trigger in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let context : Keeper_runtime_manifest.turn_context =
       { manifest_keeper_name = meta.name
@@ -58,14 +73,12 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
     |> Keeper_runtime_manifest.append config
 ;;
 let run ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let dispatch stage event =
+  let dispatch event =
     Keeper_context_runtime.dispatch_keeper_phase_event_result
       ~config
       ~origin:Keeper_registry.Operator_compact
       ~keeper_name:meta.name
       event
-    |> Result.map_error (fun error ->
-      Lifecycle (stage, false, error))
   in
   let dispatch_failed reason =
     Keeper_context_runtime.dispatch_keeper_phase_event_result
@@ -74,17 +87,24 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
       ~keeper_name:meta.name
       (Keeper_state_machine.Compaction_failed { reason })
   in
-  match dispatch "operator_request" Keeper_state_machine.Operator_compact_requested with
-  | Error _ as error -> error
+  match dispatch Keeper_state_machine.Operator_compact_requested with
+  | Error error ->
+    Error (Lifecycle { stage = Operator_request; checkpoint_applied = false; error })
   | Ok () ->
-    (match dispatch "compaction_started" Keeper_state_machine.Compaction_started with
-     | Error _ as error ->
-       dispatch_failed "compaction_start_rejected" |> ignore;
-       error
+    (match dispatch Keeper_state_machine.Compaction_started with
+     | Error error ->
+       let failure_dispatch = dispatch_failed "compaction_start_rejected" in
+       Error
+         (Lifecycle_with_failure_dispatch
+            { stage = Compaction_started
+            ; checkpoint_applied = false
+            ; error
+            ; failure_dispatch
+            })
      | Ok () ->
        let base_dir = Keeper_types_profile.session_base_dir config in
        (match
-          Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
+          Keeper_context_runtime.recover_latest_checkpoint_for_compaction
             ~base_dir
             ~meta
             ~trigger:Compaction_trigger.Manual
@@ -104,18 +124,51 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
                ~origin:Keeper_registry.Operator_compact
            with
            | Error error ->
-             Error (Lifecycle ("compaction_completed", true, error))
-           | Ok () -> Ok { recovery; manifest })))
+             Error
+               (Lifecycle
+                  { stage = Compaction_completed
+                  ; checkpoint_applied = true
+                  ; error
+                  })
+           | Ok () ->
+             Keeper_unified_metrics.broadcast_compaction
+               ~name:meta.name
+               recovery;
+             Ok { recovery; manifest })))
+;;
+
+let lifecycle_stage_to_string = function
+  | Operator_request -> "operator_request"
+  | Compaction_started -> "compaction_started"
+  | Compaction_completed -> "compaction_completed"
+;;
+
+let failure_dispatch_to_string = function
+  | Ok () -> "applied"
+  | Error error ->
+    "rejected:" ^ Keeper_context_runtime.lifecycle_dispatch_error_to_string error
 ;;
 
 let failure_to_string = function
-  | Lifecycle (stage, checkpoint_applied, error) ->
+  | Lifecycle { stage; checkpoint_applied; error } ->
     Printf.sprintf
       "stage=%s checkpoint_applied=%b error=%s"
-      stage
+      (lifecycle_stage_to_string stage)
       checkpoint_applied
       (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
-  | Recovery (error, _) -> Keeper_post_turn.compaction_recovery_error_to_string error
+  | Lifecycle_with_failure_dispatch
+      { stage; checkpoint_applied; error; failure_dispatch } ->
+    Printf.sprintf
+      "stage=%s checkpoint_applied=%b error=%s failure_dispatch=%s"
+      (lifecycle_stage_to_string stage)
+      checkpoint_applied
+      (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
+      (failure_dispatch_to_string failure_dispatch)
+  | Recovery (error, failure_dispatch) ->
+    Printf.sprintf
+      "recovery_error=%s failure_dispatch=%s"
+      (Keeper_post_turn.compaction_recovery_error_to_string error)
+      (failure_dispatch_to_string failure_dispatch)
 ;;
 
 let observe_manifest ~keeper_name = function

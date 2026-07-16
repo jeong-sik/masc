@@ -877,23 +877,8 @@ let run_keeper_invocation_turn_admitted
                     resilience_handles.resilience_audit_store
                   ~resilience_strategy_executor:
                     resilience_handles.resilience_strategy_executor
-                  ~base_dir
-                  ~on_compaction_started:(fun () ->
-                    Keeper_context_runtime.dispatch_keeper_phase_event
-                      ~config:ctx.config
-                      ~origin:Keeper_registry.Post_turn_lifecycle
-                      ~keeper_name:meta.name
-                      Keeper_state_machine.Compaction_started)
-                  ~on_handoff_started:(fun () ->
-                    Keeper_context_runtime.dispatch_keeper_phase_event
-                      ~config:ctx.config
-                      ~origin:Keeper_registry.Post_turn_lifecycle
-                      ~keeper_name:meta.name
-                      Keeper_state_machine.Handoff_started)
 	                  ~meta
-	                  ~model:result.model_used
 	                  ~primary_model_max_tokens:final_max_runtime_context
-                  ~current_turn_blocker_info:None
                   ~checkpoint:result.checkpoint
                 |> resilience_handles.sync_lifecycle_meta
               in
@@ -950,7 +935,6 @@ let run_keeper_invocation_turn_admitted
                    ~snapshot_source:"keeper_turn_msg"
                    ~checkpoint_bytes:lifecycle.checkpoint_bytes
                    ~message_count:lifecycle.message_count
-                   ~compaction:lifecycle.compaction
                    ~handoff_json:lifecycle.handoff_json
                    ()
                with
@@ -978,7 +962,6 @@ let run_keeper_invocation_turn_admitted
               Keeper_unified_metrics.broadcast_lifecycle_events
                 ~name:updated_meta.name
                 ~turn_generation:lifecycle.turn_generation
-                ~compaction:lifecycle.compaction
                 ~handoff_json:lifecycle.handoff_json;
               restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker

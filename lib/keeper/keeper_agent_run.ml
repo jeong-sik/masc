@@ -323,8 +323,6 @@ let run_turn
   let session = ctx.session in
   let base_system_prompt = ctx.base_system_prompt in
   let resume_oas_checkpoint = ctx.resume_oas_checkpoint in
-  let pre_dispatch_compacted = ctx.pre_dispatch_compacted in
-  let pre_dispatch_checkpoint_error = ctx.pre_dispatch_checkpoint_error in
   let start_turn_count = ctx.start_turn_count in
   let receipt_started_at = ctx.receipt_started_at in
   let config_root = ctx.config_root in
@@ -366,32 +364,8 @@ let run_turn
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Checkpoint
         (`Assoc
-          [
-            ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
-            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-            ( "pre_dispatch_checkpoint_error",
-              match pre_dispatch_checkpoint_error with
-              | None -> `Null
-              | Some err -> `String (Agent_sdk.Error.to_string err) );
-          ]))
+          [ "loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
-  append_manifest ~site:"context_compacted"
-    ~keeper_turn_id:manifest_keeper_turn_id
-    ?compaction_source:
-      (if pre_dispatch_compacted then Some "pre_dispatch_hygiene" else None)
-    ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
-    ~decision:
-      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
-        (`Assoc
-          [
-            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-            ( "pre_dispatch_checkpoint_error",
-              match pre_dispatch_checkpoint_error with
-              | None -> `Null
-              | Some err -> `String (Agent_sdk.Error.to_string err) );
-            ("checkpoint_path", `String checkpoint_path);
-          ]))
-    Keeper_runtime_manifest.Context_compacted;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_ctx =
@@ -539,15 +513,10 @@ let run_turn
          ~user_message
          ~start_turn_count
          ~max_context
-         ~pre_dispatch_compacted
          ();
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
-       let pre_dispatch_error = pre_dispatch_checkpoint_error in
        let turn_result =
-         match pre_dispatch_error with
-         | Some err -> Error err
-         | None ->
-              let cooperative_yield_probe =
+         let cooperative_yield_probe =
                 match autonomous_yield_requested with
                 | None -> None
                 | Some requested ->
@@ -571,11 +540,11 @@ let run_turn
                               (Printf.sprintf
                                  "keeper cooperative-yield probe failed: %s"
                                  (Printexc.to_string exn))))
-              in
-              let checkpoint_sidecar =
+         in
+         let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context
-              in
-              let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
+         in
+         let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
                 (* OAS's per-turn pipeline builds checkpoints with an empty
                    session_id (the OAS agent carries no session field), so the
@@ -600,8 +569,8 @@ let run_turn
                 with
                 | Ok _ -> Ok ()
                 | Error _ as error -> error
-              in
-              let call_run_named ?raw_trace ~initial_messages () =
+         in
+         let call_run_named ?raw_trace ~initial_messages () =
                 (* Keeper does not impose a cumulative turn, time, token, or cost
                    budget. Explicit cancellation and provider/tool progress
                    boundaries settle the lane, while usage remains observational. *)
@@ -650,11 +619,11 @@ let run_turn
                       (fun observation ->
                          receipt_runtime_observation_ref := Some observation)
                     ()
-              in
-              (* Trace-store failure isolation: [raw_trace_for_dispatch]
+         in
+         (* Trace-store failure isolation: [raw_trace_for_dispatch]
                  degrades to [None] (turn runs untraced, typed record
                  emitted) — sink trouble never fails the turn pre-dispatch. *)
-              (match
+         (match
                  call_run_named
                    ?raw_trace:(raw_trace_for_dispatch ~config ~meta)
                    ~initial_messages:history_messages
@@ -745,10 +714,6 @@ let run_turn
                             ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context
                           ~prompt_metrics ~ctx_composition ~usage
                           ~receipt_response_text_present_ref ~history_assistant_source
-                          ~pre_dispatch_compacted:ctx.pre_dispatch_compacted
-                          ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
-                          ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
-                          ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
                           ?continuation_delivery_channel
                           ~capture_replay_response:
@@ -781,10 +746,6 @@ let run_turn
            ~receipt_started_at
            ~runtime_manifest_context
            ~acc
-           ~pre_dispatch_compacted
-           ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
-           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
-           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
            ~degraded_retry_applied
            ~degraded_retry_runtime
            ~fallback_reason

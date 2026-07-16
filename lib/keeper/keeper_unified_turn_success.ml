@@ -13,29 +13,19 @@ let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime
 let turn_cost result = KUM.estimate_usage_cost_usd result.Keeper_agent_run.usage
 ;;
 
-let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_blocker_info result =
+let apply_lifecycle
+      ~config
+      ~meta
+      ~final_execution
+      (result : Keeper_agent_run.run_result)
+  =
   let resilience_handles = KCB.post_turn_resilience_handles ~config ~meta in
   let lifecycle : KEC.post_turn_lifecycle =
     KEC.apply_post_turn_lifecycle_with_resilience_handles
-      ~base_dir
       ~resilience_audit_store:resilience_handles.resilience_audit_store
       ~resilience_strategy_executor:resilience_handles.resilience_strategy_executor
-      ~on_compaction_started:(fun () ->
-        KEC.dispatch_keeper_phase_event
-          ~config
-          ~origin:Keeper_registry.Post_turn_lifecycle
-          ~keeper_name:meta.name
-          Keeper_state_machine.Compaction_started)
-      ~on_handoff_started:(fun () ->
-        KEC.dispatch_keeper_phase_event
-          ~config
-          ~origin:Keeper_registry.Post_turn_lifecycle
-          ~keeper_name:meta.name
-          Keeper_state_machine.Handoff_started)
       ~meta
-      ~model:result.Keeper_agent_run.model_used
       ~primary_model_max_tokens:final_execution.KCB.max_context
-      ~current_turn_blocker_info
       ~checkpoint:result.checkpoint
     |> resilience_handles.sync_lifecycle_meta
   in
@@ -133,7 +123,6 @@ let append_metrics_snapshot
       ~snapshot_source:"keeper_unified_turn"
       ~checkpoint_bytes:lifecycle.checkpoint_bytes
       ~message_count:lifecycle.message_count
-      ~compaction:lifecycle.compaction
       ~handoff_json:lifecycle.handoff_json
       ~count_completed_turn:(terminal_outcome_is_completed_turn terminal_outcome)
       ()
@@ -527,7 +516,6 @@ let emit_terminal_fsm
 
 let handle
       ~config
-      ~base_dir
       ~meta
       ~turn_ctx_cell
       ~observation
@@ -536,7 +524,6 @@ let handle
       ~degraded_retry_applied
       ~degraded_retry_runtime
       ~fallback_reason
-      ~current_turn_blocker_info
       ~keeper_turn_id
       result
   =
@@ -544,10 +531,8 @@ let handle
   let lifecycle =
     apply_lifecycle
       ~config
-      ~base_dir
       ~meta
       ~final_execution
-      ~current_turn_blocker_info
       result
   in
   let updated_meta =
@@ -598,7 +583,6 @@ let handle
   KUM.broadcast_lifecycle_events
     ~name:updated_meta.name
     ~turn_generation:lifecycle.turn_generation
-    ~compaction:lifecycle.compaction
     ~handoff_json:lifecycle.handoff_json;
   KUM.append_decision_record
     ~config

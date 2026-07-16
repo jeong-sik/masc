@@ -43,7 +43,6 @@ let record_wake_payload ~trace_id =
     ~message_count:3
     ~role_counts:[ "user", 1; "assistant", 2 ]
     ~tool_count:4
-    ~has_compact_happened:false
 
 let test_wake_payload_store_round_trip () =
   reset_after @@ fun () ->
@@ -60,8 +59,7 @@ let test_wake_payload_store_round_trip () =
     check int "system prompt bytes" 10 event.system_prompt_bytes;
     check int "tool schema JSON bytes" 20 event.tool_schema_json_bytes;
     check int "message content bytes" 70 event.message_content_bytes;
-    check int "tool count" 4 event.tool_count;
-    check bool "compact flag" false event.has_compact_happened
+    check int "tool count" 4 event.tool_count
   | events ->
     failf "expected one wake payload event, got %d" (List.length events)
 
@@ -95,7 +93,6 @@ let test_wake_payload_reader_rejects_malformed_exact_records () =
     ; "message_count", `Int 3
     ; "role_counts", `Assoc [ "user", `Int 1; "assistant", `Int 2 ]
     ; "tool_count", `Int 4
-    ; "has_compact_happened", `Bool false
     ]
   in
   let replace key value fields =

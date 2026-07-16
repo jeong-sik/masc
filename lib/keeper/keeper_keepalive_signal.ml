@@ -38,7 +38,6 @@ let record_wake_payload_callback
        message_count:int ->
        role_counts:(string * int) list ->
        tool_count:int ->
-       has_compact_happened:bool ->
        unit)
       Atomic.t
   =
@@ -52,8 +51,7 @@ let record_wake_payload_callback
       ~message_content_bytes:_
       ~message_count:_
       ~role_counts:_
-      ~tool_count:_
-      ~has_compact_happened:_ ->
+      ~tool_count:_ ->
       Log.Keeper.warn "wake-payload observer unavailable: keeper=%s" keeper_name)
 
 let record_wake_payload
@@ -67,7 +65,6 @@ let record_wake_payload
     ~message_count
     ~role_counts
     ~tool_count
-    ~has_compact_happened
   =
   (Atomic.get record_wake_payload_callback)
     ~keeper_name
@@ -80,7 +77,6 @@ let record_wake_payload
     ~message_count
     ~role_counts
     ~tool_count
-    ~has_compact_happened
 ;;
 
 let register_record_wake_payload f = Atomic.set record_wake_payload_callback f

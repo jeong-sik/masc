@@ -19,11 +19,6 @@ type run_context =
   ; base_system_prompt : string
   ; ctx_work : working_context
   ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
-  ; pre_dispatch_compacted : bool
-  ; pre_dispatch_compaction_trigger : string option
-  ; pre_dispatch_compaction_before_tokens : int option
-  ; pre_dispatch_compaction_after_tokens : int option
-  ; pre_dispatch_checkpoint_error : Agent_sdk.Error.sdk_error option
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
@@ -157,11 +152,6 @@ let prepare_run_context
     then Some (Keeper_context_runtime.checkpoint_of_context ctx_work)
     else None
   in
-  let pre_dispatch_compacted = false in
-  let pre_dispatch_compaction_trigger = None in
-  let pre_dispatch_compaction_before_tokens = None in
-  let pre_dispatch_compaction_after_tokens = None in
-  let pre_dispatch_checkpoint_error = None in
   let start_turn_count =
     match resume_oas_checkpoint with
     | Some cp -> cp.turn_count
@@ -177,11 +167,6 @@ let prepare_run_context
   ; base_system_prompt
   ; ctx_work
   ; resume_oas_checkpoint
-  ; pre_dispatch_compacted
-  ; pre_dispatch_compaction_trigger
-  ; pre_dispatch_compaction_before_tokens
-  ; pre_dispatch_compaction_after_tokens
-  ; pre_dispatch_checkpoint_error
   ; start_turn_count
   ; receipt_started_at
   ; config_root

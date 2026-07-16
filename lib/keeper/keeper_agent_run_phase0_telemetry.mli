@@ -9,7 +9,6 @@ val record :
   user_message:string ->
   start_turn_count:int ->
   max_context:int ->
-  pre_dispatch_compacted:bool ->
   unit ->
   unit
 (** Record exact wake-time component bytes on every turn.

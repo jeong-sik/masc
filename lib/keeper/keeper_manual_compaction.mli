@@ -1,9 +1,26 @@
 type success =
-  { recovery : Keeper_context_runtime.overflow_retry_recovery
+  { recovery : Keeper_context_runtime.compaction_recovery
   ; manifest : (unit, string) result
   }
+
+type lifecycle_stage =
+  | Operator_request
+  | Compaction_started
+  | Compaction_completed
+
 type failure =
-  | Lifecycle of string * bool * Keeper_context_runtime.lifecycle_dispatch_error
+  | Lifecycle of
+      { stage : lifecycle_stage
+      ; checkpoint_applied : bool
+      ; error : Keeper_context_runtime.lifecycle_dispatch_error
+      }
+  | Lifecycle_with_failure_dispatch of
+      { stage : lifecycle_stage
+      ; checkpoint_applied : bool
+      ; error : Keeper_context_runtime.lifecycle_dispatch_error
+      ; failure_dispatch :
+          (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
+      }
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result

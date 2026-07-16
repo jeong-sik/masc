@@ -11,7 +11,7 @@ import wake_payload_stats as stats
 
 def valid_record():
     return json.loads(
-        '{"record_type":"wake_payload","timestamp":1.5,"keeper_name":"k","trace_id":"t","turn_index":1,"context_window":4096,"system_prompt_bytes":3,"tool_schema_json_bytes":4,"message_content_bytes":5,"message_count":2,"tool_count":1,"role_counts":{"user":1,"assistant":1},"has_compact_happened":false}'
+        '{"record_type":"wake_payload","timestamp":1.5,"keeper_name":"k","trace_id":"t","turn_index":1,"context_window":4096,"system_prompt_bytes":3,"tool_schema_json_bytes":4,"message_content_bytes":5,"message_count":2,"tool_count":1,"role_counts":{"user":1,"assistant":1}}'
     )
 
 

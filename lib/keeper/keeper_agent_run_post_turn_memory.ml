@@ -2,9 +2,97 @@
 
     Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-4). *)
 
+let record_librarian_failure ~keeper_name error =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string EpisodeCreateFailures)
+    ~labels:[ "keeper", keeper_name; "site", "memory_os_librarian" ]
+    ();
+  Keeper_librarian_runtime.operation_error_to_string error
+;;
+
+let execute_request ~base_path request =
+  let keeper_name = Keeper_memory_work_request.keeper_name request in
+  try
+    let config = Workspace.default_config base_path in
+    let meta = Keeper_memory_work_request.meta request in
+    let turn = Keeper_memory_work_request.turn request in
+    let notes_written =
+      Memory.append_from_tool_results
+        config
+        meta
+        ~turn
+        ~results:(Keeper_memory_work_request.tool_results request)
+    in
+    if notes_written > 0
+    then
+      Keeper_turn_telemetry.log_keeper_memory_write
+        ~keeper_name
+        ~notes_written
+        ~kinds_written:[ "long_term" ];
+    let input : Keeper_librarian.input =
+      { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      ; generation = Keeper_memory_work_request.generation request
+      ; messages = Keeper_memory_work_request.librarian_messages request
+      }
+    in
+    let operation : Keeper_librarian_runtime.operation_request =
+      { runtime_id = Keeper_memory_work_request.runtime_id request
+      ; keeper_id = keeper_name
+      ; input
+      }
+    in
+    (match Keeper_librarian_runtime.execute_operation operation with
+     | Error error -> Error (record_librarian_failure ~keeper_name error)
+     | Ok episode ->
+       Log.Keeper.info ~keeper_name
+         "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
+         episode.Keeper_memory_os_types.trace_id
+         episode.generation
+         (List.length episode.claims);
+       Ok ())
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MemoryWriteFailures)
+      ~labels:[ "keeper", keeper_name ]
+      ();
+    Error (Printexc.to_string exn)
+;;
+
+let drain_keeper ~base_path ~keeper_name =
+  match
+    Keeper_memory_work_drain.drain
+      ~base_path
+      ~keeper_name
+      ~execute:(execute_request ~base_path)
+  with
+  | Ok report ->
+    Log.Keeper.info ~keeper_name
+      "memory owner drain recovered=%d claimed=%d completed=%d failed=%d"
+      report.recovered
+      report.claimed
+      report.completed
+      report.failed
+  | Error error ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string DispatchEventFailures)
+      ~labels:[ "keeper", keeper_name; "site", "memory_owner_drain" ]
+      ();
+    Log.Keeper.error ~keeper_name
+      "memory owner drain failed: %s"
+      (Keeper_memory_work_drain.error_to_string error)
+;;
+
+let schedule_drain ~base_path ~keeper_name =
+  Keeper_memory_lane.submit
+    ~base_path
+    ~keeper_name
+    (fun () -> drain_keeper ~base_path ~keeper_name)
+;;
 
 let run
-  ~config
+  ~(config : Workspace.config)
   ~meta
   ~generation
   ~turn
@@ -27,80 +115,54 @@ let run
       (Keeper_tool_emission_hook.accumulator_for_keeper
          meta.Keeper_meta_contract.name)
   in
-  (* (1) deterministic write and (2) LLM librarian extraction run on this
-     keeper's memory lane (RFC-0257), detached from the turn lane. Both may
-     touch the keeper's memory stores; the per-keeper FIFO worker serializes
-     them. meta/config are immutable snapshots, so
-     using them after the turn returns does not race a later turn.
-     See RFC #3646 Section 3: Det/NonDet boundary. *)
-  let memory_series () =
-  (try
-     let notes_written =
-       Memory.append_from_tool_results
-         config
-         meta
-         ~turn
-         ~results:tool_results_snapshot
-     in
-     let kinds_written =
-       if notes_written > 0 then [ "long_term" ] else []
-     in
-     if notes_written > 0
-     then
-       Keeper_turn_telemetry.log_keeper_memory_write
-         ~keeper_name:meta.name
-         ~notes_written
-         ~kinds_written
+  let deliberation_execution_json =
+    Option.map Keeper_deliberation.execution_result_to_json deliberation_execution
+  in
+  (match
+     Keeper_memory_work_request.make
+       ~keeper_name:meta.name
+       ~generation
+       ~turn
+       ~runtime_id
+       ~meta
+       ~tool_results:tool_results_snapshot
+       ~librarian_messages
+       ~deliberation_execution:deliberation_execution_json
    with
-   | exn ->
-     Log.Keeper.error ~keeper_name:meta.name
-       "memory_write failed: %s"
-       (Printexc.to_string exn);
+   | Error detail ->
      Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string MemoryWriteFailures)
-       ~labels:[ "keeper", meta.name ]
-       ());
-
-  (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. *)
-  let librarian_input : Keeper_librarian.input =
-    { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-    ; generation
-    ; messages = librarian_messages
-    }
-  in
-  let librarian_request : Keeper_librarian_runtime.operation_request =
-    { runtime_id; keeper_id = meta.name; input = librarian_input }
-  in
-  (match Keeper_librarian_runtime.execute_operation librarian_request with
-   | Ok episode ->
-     Log.Keeper.info ~keeper_name:meta.name
-       "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
-       episode.Keeper_memory_os_types.trace_id
-       episode.generation
-       (List.length episode.claims)
-   | Error error ->
-     (match error with
-      | Keeper_librarian_runtime.Provider_slot_busy _ ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
-          ~labels:
-            [ "keeper", meta.name
-            ; "site", Keeper_librarian_runtime.memory_os_librarian_provider_slot_site
-            ]
-          ()
-      | _ -> ());
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string EpisodeCreateFailures)
-       ~labels:[ "keeper", meta.name; "site", "memory_os_librarian" ]
+       Keeper_metrics.(to_string DispatchEventFailures)
+       ~labels:[ "keeper", meta.name; "site", "memory_work_request" ]
        ();
      Log.Keeper.error ~keeper_name:meta.name
-       "memory os librarian operation failed runtime=%s: %s"
-       runtime_id
-       (Keeper_librarian_runtime.operation_error_to_string error));
+       "memory work request rejected: %s"
+       detail
+   | Ok request ->
+     (match Keeper_memory_work_store.enqueue ~base_path:config.base_path request with
+      | Error error ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string DispatchEventFailures)
+          ~labels:[ "keeper", meta.name; "site", "memory_work_enqueue" ]
+          ();
+        Log.Keeper.error ~keeper_name:meta.name
+          "memory work durable enqueue failed: %s"
+          (Keeper_memory_work_store.error_to_string error)
+      | Ok
+          ( Keeper_memory_work_store.Enqueued
+          | Keeper_memory_work_store.Already_present ) ->
+        (match schedule_drain ~base_path:config.base_path ~keeper_name:meta.name with
+         | Ok () -> ()
+         | Error error ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string DispatchEventFailures)
+             ~labels:[ "keeper", meta.name; "site", "memory_owner_drain_admission" ]
+             ();
+           Log.Keeper.error ~keeper_name:meta.name
+             "memory work is durable but owner drain admission failed: %s"
+             (Keeper_memory_lane.admission_error_to_string error))));
 
-  (* Advisory delegation request drafts: keep review artifact persistence on the
-     same bounded post-turn memory lane as draft-skill projection, not on the
-     decision-record append path. *)
+  (* Delegation projection remains an explicit artifact boundary; it is not a
+     Memory work settlement. *)
   (try
      match deliberation_execution with
      | None -> ()
@@ -137,29 +199,6 @@ let run
        "delegation_requests failed: %s"
        (Printexc.to_string exn));
 
-  in
-  (* RFC-0257: detach (1)-(2) onto the per-keeper memory lane. Admission failure
-     is explicit and observable; provider-backed work never falls back into the
-     submitting turn fiber. *)
-  (match
-     Keeper_memory_lane.submit
-       ~base_path:config.base_path
-       ~keeper_name:meta.name
-       memory_series
-   with
-   | Ok () -> ()
-   | Error error ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string DispatchEventFailures)
-       ~labels:
-         [ "keeper", meta.name
-         ; "site", "memory_lane_admission"
-         ; "reason", Keeper_memory_lane.admission_error_code error
-         ]
-       ();
-     Log.Keeper.error ~keeper_name:meta.name
-       "post-turn memory lane admission failed: %s"
-       (Keeper_memory_lane.admission_error_to_string error));
   (* Post-turn memory recall evidence is logged to decisions.jsonl. *)
   (try
      let used_search =

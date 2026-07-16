@@ -4,6 +4,7 @@ module Runtime = Masc.Keeper_tool_memory_runtime
 module Bank = Masc.Keeper_memory_bank
 module Work_request = Masc.Keeper_memory_work_request
 module Work_store = Masc.Keeper_memory_work_store
+module Work_drain = Masc.Keeper_memory_work_drain
 
 let make_args ~kind ~title ~content =
   `Assoc
@@ -416,6 +417,56 @@ let test_memory_work_store_claim_settle_recovery () =
       Alcotest.fail "third request did not progress after failure")
 ;;
 
+let test_memory_work_drain_exact_settlement () =
+  with_temp_dir (fun base_path ->
+    let meta = make_meta "durable-memory-drain" in
+    let make_request turn =
+      Work_request.make
+        ~keeper_name:meta.name
+        ~generation:meta.runtime.generation
+        ~turn
+        ~runtime_id:(Printf.sprintf "runtime.drain.%d" turn)
+        ~meta
+        ~tool_results:[]
+        ~librarian_messages:[]
+        ~deliberation_execution:None
+      |> Result.get_ok
+    in
+    let first, second = make_request 1, make_request 2 in
+    List.iter
+      (fun request ->
+         Work_store.enqueue ~base_path request
+         |> Result.map_error Work_store.error_to_string
+         |> Result.get_ok
+         |> ignore)
+      [ first; second ];
+    let observed = ref [] in
+    let execute request =
+      observed := Work_request.request_id request :: !observed;
+      if Work_request.turn request = 2 then Error "provider unavailable" else Ok ()
+    in
+    let report =
+      Work_drain.drain ~base_path ~keeper_name:meta.name ~execute
+      |> Result.map_error Work_drain.error_to_string
+      |> Result.get_ok
+    in
+    Alcotest.(check (list string))
+      "exact execution order"
+      (List.map Work_request.request_id [ first; second ])
+      (List.rev !observed);
+    Alcotest.(check int) "completed" 1 report.completed;
+    Alcotest.(check int) "failed" 1 report.failed;
+    let terminal =
+      Work_store.terminal ~base_path ~keeper_name:meta.name
+      |> Result.map_error Work_store.error_to_string
+      |> Result.get_ok
+    in
+    (match List.map (fun item -> item.Work_store.outcome) terminal with
+     | [ Work_store.Completed; Work_store.Failed "provider unavailable" ] -> ()
+     | _ -> Alcotest.fail "terminal outcome or order mismatch");
+    Alcotest.(check int) "both outcomes durable" 2 (List.length terminal))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -448,6 +499,10 @@ let () =
             "durable work store claim settle recovery"
             `Quick
             test_memory_work_store_claim_settle_recovery
+        ; Alcotest.test_case
+            "durable work drain exact settlement"
+            `Quick
+            test_memory_work_drain_exact_settlement
         ] )
     ]
 ;;

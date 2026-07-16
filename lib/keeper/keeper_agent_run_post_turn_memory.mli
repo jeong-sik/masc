@@ -5,8 +5,13 @@
     memory-bank rows: semantic consolidation requires an explicit typed LLM
     Memory operation, never a storage-pressure survival rule.
 
-    Each sub-stage is best-effort: non-cancel exceptions are logged and
-    counted, never propagated.  [Eio.Cancel.Cancelled] is re-raised. *)
+    Memory work is durably admitted before the owner lane is signalled. *)
+
+val schedule_drain
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit, Keeper_memory_lane.admission_error) result
+(** Signal the per-Keeper owner lane to drain already-durable Memory work. *)
 
 val run :
   config:Workspace.config ->
@@ -32,6 +37,5 @@ val run :
     [inference_telemetry] is [result.response.telemetry] from the OAS
     result; it is optional because some providers do not emit telemetry.
 
-    [deliberation_execution], when available, is persisted as advisory
-    delegation request artifacts on this post-turn memory lane rather than on
-    the decision-record append path. *)
+    [deliberation_execution], when available, is persisted at the separate
+    delegation artifact boundary. *)

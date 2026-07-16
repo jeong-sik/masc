@@ -142,7 +142,6 @@ type t =
   | MemoryLaneCancelledUnits
   | MemoryLanePending
   | MemoryLaneInFlight
-  | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
   | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures

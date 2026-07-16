@@ -124,7 +124,7 @@ let write_agent ctx agent =
 ;;
 
 let seed_stale_current_task ctx =
-  let old_last_seen = Masc_domain.iso8601_of_unix_seconds (Time_compat.now () -. 10.0) in
+  let old_last_seen = "2020-01-01T00:00:00Z" in
   let agent = read_agent ctx in
   write_agent
     ctx
@@ -275,7 +275,7 @@ let () =
         | Some result ->
           assert (Tool_result.is_success result);
           let message = Tool_result.message result in
-          assert_contains message "Snapshot: agents=2 zombies=0";
+          assert_contains message "Snapshot: agents=2";
           assert_contains message "keeper-runtime-visible-agent -> active"
         | None -> failwith "dispatch returned None"))
 ;;

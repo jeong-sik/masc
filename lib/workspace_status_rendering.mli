@@ -53,7 +53,7 @@ val status_summary_string :
   credential_blocked:bool ->
   current_task:string option ->
   effective_cluster_name:string ->
-  agents_with_state:(Masc_domain.agent * bool) list ->
+  agents:Masc_domain.agent list ->
   active_tasks:Masc_domain.task list ->
   todo_count:int ->
   claimed_count:int ->
@@ -79,7 +79,7 @@ val status_summary_string :
 
     {2 Display caps}
 
-    - [agents_with_state]: capped at 40 displayed (with "and N
+    - [agents]: capped at 40 displayed (with "and N
       more" footer when exceeded).
     - [active_tasks]: capped at 30 displayed (with "and N more"
       footer).

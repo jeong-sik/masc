@@ -37,13 +37,6 @@ let status config =
   let agents =
     Workspace_query.get_active_agents config
     |> List.filter_map (fun (agent : Masc_domain.agent) ->
-           let is_zombie =
-             is_zombie_agent
-               ~agent_type:agent.agent_type
-               ?agent_meta:agent.meta
-               ~agent_name:agent.name
-               agent.last_seen
-           in
            let stale_current_task =
              match agent.current_task with
              | Some task_id ->
@@ -61,17 +54,14 @@ let status config =
                agent.status
            in
            let icon =
-             if is_zombie then "💀"
-             else
-               match display_status with
-               | Busy -> "🔴"
-               | Active -> "🟢"
-               | Listening -> "🎧"
-               | Inactive -> "⚫"
+             match display_status with
+             | Busy -> "🔴"
+             | Active -> "🟢"
+             | Listening -> "🎧"
+             | Inactive -> "⚫"
            in
            let task =
-             if is_zombie then "zombie"
-             else if stale_current_task then "idle"
+             if stale_current_task then "idle"
              else
                match agent.current_task with
                | Some task_id -> task_id

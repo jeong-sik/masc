@@ -78,16 +78,16 @@ let add_unique table key value =
 let active_assigned_task_ids_lookup
     ~(actual_name : string)
     ~(ctx_agent_name : string)
-    ~(agents_with_state : (Masc_domain.agent * bool) list)
+    ~(agents : Masc_domain.agent list)
     ~(active_tasks : Masc_domain.task list) =
-  let assignee_to_agents = Hashtbl.create (List.length agents_with_state * 2) in
+  let assignee_to_agents = Hashtbl.create (List.length agents * 2) in
   List.iter
-    (fun ((agent : Masc_domain.agent), _) ->
+    (fun (agent : Masc_domain.agent) ->
       add_unique assignee_to_agents agent.name agent.name;
       if String.equal agent.name actual_name then
         add_unique assignee_to_agents ctx_agent_name agent.name)
-    agents_with_state;
-  let task_ids_by_agent = Hashtbl.create (List.length agents_with_state) in
+    agents;
+  let task_ids_by_agent = Hashtbl.create (List.length agents) in
   List.iter
     (fun (task : Masc_domain.task) ->
       match active_task_assignee task.task_status with
@@ -110,31 +110,27 @@ let active_assigned_task_ids_lookup
     Option.value (Hashtbl.find_opt task_ids_by_agent agent_name) ~default:[]
     |> List.rev
 
-let agent_status_icon ~is_zombie = function
-  | _ when is_zombie -> "💀"
+let agent_status_icon = function
   | Masc_domain.Busy -> "🔴"
   | Masc_domain.Active -> "🟢"
   | Masc_domain.Listening -> "🎧"
   | Masc_domain.Inactive -> "⚫"
 
-let agent_focus_label ~is_zombie ~active_assigned_task_ids
-    (agent : Masc_domain.agent) =
-  if is_zombie then "stale"
-  else
-    match active_assigned_task_ids with
-    | task :: [] -> task
-    | task :: rest -> Printf.sprintf "%s (+%d)" task (List.length rest)
-    | [] -> (
-        match agent.current_task with
-        | Some raw_task ->
-            let task = raw_task |> String.trim |> first_line in
-            if String.equal task "" then
-              Masc_domain.agent_status_to_string agent.status
-            else
-              Printf.sprintf "%s (stale:%s)"
-                (Masc_domain.agent_status_to_string agent.status)
-                task
-        | _ -> Masc_domain.agent_status_to_string agent.status)
+let agent_focus_label ~active_assigned_task_ids (agent : Masc_domain.agent) =
+  match active_assigned_task_ids with
+  | task :: [] -> task
+  | task :: rest -> Printf.sprintf "%s (+%d)" task (List.length rest)
+  | [] -> (
+      match agent.current_task with
+      | Some raw_task ->
+          let task = raw_task |> String.trim |> first_line in
+          if String.equal task "" then
+            Masc_domain.agent_status_to_string agent.status
+          else
+            Printf.sprintf "%s (stale:%s)"
+              (Masc_domain.agent_status_to_string agent.status)
+              task
+      | _ -> Masc_domain.agent_status_to_string agent.status)
 
 let task_id_list_label = function
   | [] -> "[]"
@@ -149,7 +145,7 @@ let status_summary_string
     ~credential_blocked:_
     ~(current_task : string option)
     ~(effective_cluster_name : string)
-    ~(agents_with_state : (Masc_domain.agent * bool) list)
+    ~(agents : Masc_domain.agent list)
     ~(active_tasks : Masc_domain.task list)
     ~(todo_count : int)
     ~(claimed_count : int)
@@ -168,13 +164,8 @@ let status_summary_string
   in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
-  let shown_agents = take_items max_agents_display agents_with_state in
-  let agent_count = List.length agents_with_state in
-  let zombie_count =
-    List.fold_left
-      (fun acc (_, is_zombie) -> if is_zombie then acc + 1 else acc)
-      0 agents_with_state
-  in
+  let shown_agents = take_items max_agents_display agents in
+  let agent_count = List.length agents in
   let shown_active_tasks = take_items max_active_tasks_display active_tasks in
   let buf = Buffer.create 256 in
   Printf.bprintf buf "🏢 Cluster: %s\n" effective_cluster_name;
@@ -185,8 +176,8 @@ let status_summary_string
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf
     (Printf.sprintf
-       "Snapshot: agents=%d zombies=%d | tasks active=%d todo=%d claimed=%d in_progress=%d | messages=%d\n"
-       agent_count zombie_count (List.length active_tasks) todo_count claimed_count
+       "Snapshot: agents=%d | tasks active=%d todo=%d claimed=%d in_progress=%d | messages=%d\n"
+       agent_count (List.length active_tasks) todo_count claimed_count
        in_progress_count (max 0 state.message_seq));
   Buffer.add_string buf
     (Printf.sprintf
@@ -240,13 +231,13 @@ let status_summary_string
         active_assigned_task_ids_lookup
           ~actual_name
           ~ctx_agent_name:ctx.agent_name
-          ~agents_with_state:shown_agents
+          ~agents:shown_agents
           ~active_tasks
       in
       List.iter
-        (fun ((agent : Masc_domain.agent), is_zombie) ->
+        (fun (agent : Masc_domain.agent) ->
           Workspace_query.safe_yield ();
-          let icon = agent_status_icon ~is_zombie agent.status in
+          let icon = agent_status_icon agent.status in
           let active_assigned_task_ids =
             active_assigned_task_ids_for_agent agent.name
           in
@@ -255,7 +246,7 @@ let status_summary_string
           in
           Buffer.add_string buf
             (Printf.sprintf "  %s %s%s -> %s\n" icon agent.name you_marker
-               (agent_focus_label ~is_zombie ~active_assigned_task_ids agent)))
+               (agent_focus_label ~active_assigned_task_ids agent)))
         shown_agents;
       if agent_count > max_agents_display then
         Buffer.add_string buf

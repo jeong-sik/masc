@@ -22,6 +22,164 @@ let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_contex
     ()
 ;;
 
+type operator_task_recovery_result =
+  { task_id : string
+  ; previous_status : Masc_domain.task_status
+  ; previous_assignee : string
+  ; backlog_version : int
+  }
+
+let recover_owned_task_to_todo_r
+      config
+      ~operator_actor
+      ~task_id
+      ~expected_assignee
+      ~expected_version
+      ~reason
+      ()
+  : operator_task_recovery_result Masc_domain.masc_result
+  =
+  let open Result.Syntax in
+  let* () =
+    if not (is_initialized config)
+    then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
+    else Ok ()
+  in
+  let* _task_id = validate_task_id_r task_id in
+  let* _expected_assignee = validate_agent_name_r expected_assignee in
+  let* () =
+    if String.equal operator_actor (String.trim operator_actor)
+       && not (String.equal operator_actor "")
+    then Ok ()
+    else
+      Error
+        (Masc_domain.System
+           (Masc_domain.System_error.ValidationError
+              "operator_actor must be non-empty without surrounding whitespace"))
+  in
+  let* () =
+    if String.equal reason (String.trim reason) && not (String.equal reason "")
+    then Ok ()
+    else
+      Error
+        (Masc_domain.System
+           (Masc_domain.System_error.ValidationError
+              "reason must be non-empty without surrounding whitespace"))
+  in
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock_r config backlog_path (fun () ->
+    let open Result.Syntax in
+    let* backlog =
+      read_backlog_r config
+      |> Result.map_error (fun message ->
+        Masc_domain.System (Masc_domain.System_error.IoError message))
+    in
+    let* () =
+      if backlog.version = expected_version
+      then Ok ()
+      else
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task recovery version mismatch (expected %d, got %d)"
+                   expected_version
+                   backlog.version)))
+    in
+    let* task =
+      match List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks with
+      | Some task -> Ok task
+      | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+    in
+    let* previous_assignee =
+      match task.task_status with
+      | Masc_domain.Claimed { assignee; _ }
+      | Masc_domain.InProgress { assignee; _ } ->
+        Ok assignee
+      | Masc_domain.Todo
+      | Masc_domain.AwaitingVerification _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ ->
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task %s status %s is not operator-recoverable"
+                   task_id
+                   (Masc_domain.task_status_to_string task.task_status))))
+    in
+    let* () =
+      if String.equal previous_assignee expected_assignee
+      then Ok ()
+      else
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task %s assignee mismatch (expected %s, got %s)"
+                   task_id
+                   expected_assignee
+                   previous_assignee)))
+    in
+    let tasks =
+      List.map
+        (fun (candidate : task) ->
+           if String.equal candidate.id task_id
+           then
+             { candidate with
+               task_status = Masc_domain.Todo
+             ; reclaim_policy = None
+             ; do_not_reclaim_reason = None
+             }
+           else candidate)
+        backlog.tasks
+    in
+    let backlog_version = backlog.version + 1 in
+    let* () =
+      write_backlog_result
+        ~after_commit:(fun () ->
+          Task_cache_invariant.clear_stale_agent_task
+            config
+            ~agent_name:previous_assignee
+            ~task_id
+            ~status:Masc_domain.Todo
+            ~module_name:"recover_owned_task_to_todo_r")
+        config
+        { tasks; last_updated = now_iso (); version = backlog_version }
+      |> Result.map_error (fun message ->
+        Masc_domain.System (Masc_domain.System_error.IoError message))
+    in
+    (try
+       log_event
+         config
+         (`Assoc
+           [ "type", `String "task_operator_recovered"
+           ; "operator_actor", `String operator_actor
+           ; "task_id", `String task_id
+           ; "expected_assignee", `String expected_assignee
+           ; "from_status", `String (Masc_domain.task_status_to_string task.task_status)
+           ; "to_status", `String "todo"
+           ; "reason", `String reason
+           ; "backlog_version", `Int backlog_version
+           ; "ts", `String (now_iso ())
+           ])
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.TaskState.error
+         "task operator recovery event append failed task=%s version=%d error=%s"
+         task_id
+         backlog_version
+         (Printexc.to_string exn));
+    Ok
+      { task_id
+      ; previous_status = task.task_status
+      ; previous_assignee
+      ; backlog_version
+      })
+  |> Workspace_task_verification.flatten_lock_result
+;;
+
 let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)

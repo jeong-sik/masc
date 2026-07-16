@@ -167,6 +167,115 @@ let test_operator_action_rejects_legacy_action_aliases () =
                 message)
         retired_actions)
 
+let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> cleanup_dir base_dir);
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:(Some "claude"));
+  let claude =
+    match Workspace.get_agents_raw config with
+    | [ agent ] -> agent.Masc_domain.name
+    | agents ->
+      Alcotest.failf "expected one initialized agent, got %d" (List.length agents)
+  in
+  ignore
+    (Workspace.add_task
+       config
+       ~title:"Operator tool recovery"
+       ~priority:1
+       ~description:"");
+  (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+   | Ok _ -> ()
+   | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+  let ctx : _ Operator_tool.context =
+    { config
+    ; agent_name = "operator"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+    ; net = Some (Eio.Stdenv.net env)
+    ; delegated_dispatch = None
+    ; mcp_session_id = None
+    }
+  in
+  let snapshot =
+    match
+      Operator_tool.dispatch
+        ctx
+        ~name:"masc_operator_snapshot"
+        ~args:(`Assoc [])
+    with
+    | Some result when Tool_result.is_success result -> Tool_result.data result
+    | Some result -> Alcotest.fail (Tool_result.message result)
+    | None -> Alcotest.fail "operator snapshot dispatch missing"
+  in
+  let task_ownership =
+    Yojson.Safe.Util.(snapshot |> member "workspace" |> member "task_ownership")
+  in
+  let observed_version =
+    Yojson.Safe.Util.(task_ownership |> member "backlog_version" |> to_int)
+  in
+  let observed_assignee =
+    match Yojson.Safe.Util.(task_ownership |> member "items" |> to_list) with
+    | [ item ] -> Yojson.Safe.Util.(item |> member "assignee" |> to_string)
+    | items ->
+      Alcotest.failf
+        "expected one operator-visible owned task, got %d"
+        (List.length items)
+  in
+  Alcotest.(check string) "snapshot exposes exact persisted owner" claude
+    observed_assignee;
+  let command extra_fields =
+    `Assoc
+      ([ "schema", `String Operator_task_recovery_command.tool_command_schema
+       ; "task_id", `String "task-001"
+       ; "expected_assignee", `String observed_assignee
+       ; "expected_version", `Int observed_version
+       ; "reason", `String "owner runtime cannot resume"
+       ]
+       @ extra_fields)
+  in
+  let invalid =
+    match
+      Operator_tool.dispatch
+        ctx
+        ~name:"masc_operator_task_recovery_resolve"
+        ~args:(command [ "heuristic_timeout_sec", `Int 300 ])
+    with
+    | Some result -> result
+    | None -> Alcotest.fail "operator task recovery dispatch missing"
+  in
+  Alcotest.(check bool) "unknown heuristic field rejected" true
+    (Tool_result.is_failed invalid);
+  let valid =
+    match
+      Operator_tool.dispatch
+        ctx
+        ~name:"masc_operator_task_recovery_resolve"
+        ~args:(command [])
+    with
+    | Some result -> result
+    | None -> Alcotest.fail "operator task recovery dispatch missing"
+  in
+  Alcotest.(check bool) "exact recovery succeeds" true
+    (Tool_result.is_success valid);
+  Alcotest.(check string) "tool reports todo" "todo"
+    Yojson.Safe.Util.(Tool_result.data valid |> member "status" |> to_string);
+  Alcotest.(check bool) "operator recovery audit recorded" true
+    Yojson.Safe.Util.
+      (Tool_result.data valid |> member "audit" |> member "recorded" |> to_bool);
+  let task =
+    match Workspace.get_tasks_raw config with
+    | [ task ] -> task
+    | tasks ->
+      Alcotest.failf "expected one task after recovery, got %d" (List.length tasks)
+  in
+  Alcotest.(check string) "task recovered to todo" "todo"
+    (Masc_domain.task_status_to_string task.task_status)
+
 (* review_queue / deferred_queue / review_summary fields were emitted for
    a retired dashboard surface; the producers (split_review_items,
    *_review_item) were also removed. Review decisions still reach the UI
@@ -188,6 +297,10 @@ let () =
             "legacy action aliases are rejected"
             `Quick
             test_operator_action_rejects_legacy_action_aliases
+        ; Alcotest.test_case
+            "task recovery tool is strict and exact"
+            `Quick
+            test_operator_task_recovery_tool_is_strict_and_executes_exact_cas
         ] )
     ; ( "confirmation"
       , [ Alcotest.test_case

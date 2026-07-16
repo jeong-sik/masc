@@ -133,12 +133,6 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
        | _ :: _ :: _ -> Ok None)
 ;;
 
-(* RFC-0034.v2: per-goal task creation cap moved to
-   [Workspace_task_capacity] so all 5 task creation entrypoints share the
-   same guard. Pre-RFC-0034.v2, these helpers (and the constant
-   [keeper_task_create_goal_open_limit]) lived here as introduced by
-   #13981. *)
-
 let active_goal_scope_json
       ~(meta : keeper_meta)
       ?matched_goal_id
@@ -495,24 +489,10 @@ let handle_keeper_task_tool_with_outcome
                ~class_:Tool_result.Policy_rejection
                (validation_error_json message)
            | Ok contract ->
-              let capacity_error =
-                let backlog = Workspace.read_backlog config in
-                Workspace_task_capacity.check_for_config config ?goal_id backlog
-              in
-              (match capacity_error with
-               | Some error ->
-                 Keeper_tool_execution.failure
-                   ~class_:Tool_result.Workflow_rejection
-                   (Workspace_task_capacity.error_to_json_string error)
-               | None ->
               let result =
                 Workspace_task.add_task
                   ?contract
                   ?goal_id
-                  ~reject_if:
-                    (Workspace_task_capacity.rejection_for_add_task_for_config
-                       config
-                       ?goal_id)
                   config
                   ~title
                   ~priority
@@ -527,7 +507,7 @@ let handle_keeper_task_tool_with_outcome
                        "goal_id", Json_util.string_opt_to_json goal_id;
                        ( "typed_outcome"
                        , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
-                     ])))))
+                     ]))))
     | Task_claim ->
     let claim_goal_scope =
       Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()

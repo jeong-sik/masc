@@ -90,7 +90,6 @@ type t =
   | TransitionAuditFailures
   | ExecutionReceiptFailures
   | OperatorBroadcastSuppressed
-  | LlmBridgeFailures
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures
@@ -119,8 +118,6 @@ type t =
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures
-  | PromptUnknownToolTokens
-  | PromptTokenStripped
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
@@ -153,7 +150,6 @@ type t =
   | MemoryLaneInFlight
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
-  | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures
   | AlertPersistFailures
   | MetricsSseFailures
@@ -313,7 +309,6 @@ let to_string = function
   | TransitionAuditFailures -> "masc_keeper_transition_audit_failures_total"
   | ExecutionReceiptFailures -> "masc_keeper_execution_receipt_failures_total"
   | OperatorBroadcastSuppressed -> "masc_keeper_operator_broadcast_suppressed_total"
-  | LlmBridgeFailures -> "masc_keeper_llm_bridge_failures_total"
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
   | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
@@ -343,10 +338,6 @@ let to_string = function
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotReadFailures -> "masc_keeper_snapshot_read_failures_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
-  | PromptUnknownToolTokens ->
-    "masc_keeper_prompt_unknown_tool_tokens_total"
-  | PromptTokenStripped ->
-    "masc_keeper_prompt_token_stripped_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
   | TurnMetricsSnapshotFailures -> "masc_keeper_turn_metrics_snapshot_failures_total"
@@ -380,7 +371,6 @@ let to_string = function
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
   | MemoryLaneProviderSlotBusy -> "masc_keeper_memory_lane_provider_slot_busy_total"
   | MemoryBankCompactionFailures -> "masc_keeper_memory_bank_compaction_failures_total"
-  | MemoryOsMaintenanceKeeperTimeout -> "masc_keeper_memory_os_maintenance_keeper_timeout_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
   | AlertPersistFailures -> "masc_keeper_alert_persist_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"

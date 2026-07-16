@@ -9,6 +9,7 @@
  (libraries
   masc
   masc.auth
+  masc.crypto_rng
   masc.dashboard
   masc.operator
   masc.server
@@ -43,7 +44,6 @@
   fmt
   yojson
   str
-  mirage-crypto-rng.unix
   cohttp
   cohttp-eio
   masc.prompt_registry
@@ -58,6 +58,7 @@
  (package masc)
  (libraries
   masc
+  masc.crypto_rng
   masc.server
   masc.config
   masc.host_config
@@ -65,7 +66,6 @@
   cmdliner
   eio
   eio_main
-  mirage-crypto-rng.unix
   dune-build-info
   masc_types
   fs_compat
@@ -111,7 +111,6 @@
   str
   eio_main
   eio
-  mirage-crypto-rng.unix
   httpun
   cohttp
   cohttp-eio
@@ -225,7 +224,6 @@
   str
   eio_main
   eio
-  mirage-crypto-rng.unix
   httpun
   cohttp
   cohttp-eio
@@ -241,6 +239,7 @@
  (package masc)
  (libraries
   masc
+  masc.crypto_rng
   masc.dashboard
   masc.server
   masc.worker_execution_spec
@@ -259,7 +258,6 @@
   masc_eio_context
   fmt
   str
-  mirage-crypto-rng.unix
   httpun
   cohttp
   cohttp-eio
@@ -298,6 +296,7 @@
  (package masc)
  (libraries
   masc
+  masc.crypto_rng
   masc.fusion_core
   masc.runtime
   masc.config_dir_resolver
@@ -310,7 +309,6 @@
   eio_main
   time_compat
   masc_eio_context
-  mirage-crypto-rng.unix
   httpun
   cohttp
   cohttp-eio

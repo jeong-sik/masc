@@ -7,7 +7,7 @@ let keeper_tool_call_event_json
       ~keeper_name
       ~tool_name
       ~duration_ms
-      ~success
+      ~disposition
       ?error_text
       ?(extra_fields = [])
       ~ts
@@ -18,7 +18,7 @@ let keeper_tool_call_event_json
     ; "name", `String keeper_name
     ; "tool_name", `String tool_name
     ; "duration_ms", `Int duration_ms
-    ; "success", `Bool success
+    ; "disposition", `String (Tool_result.string_of_disposition disposition)
     ; "ts_unix", `Float ts
     ]
   in
@@ -63,7 +63,7 @@ let broadcast_keeper_tool_call_event
       ~keeper_name
       ~tool_name
       ~duration_ms
-      ~success
+      ~disposition
       ?error_text
       ?(extra_fields = [])
       ~site
@@ -76,7 +76,7 @@ let broadcast_keeper_tool_call_event
          ~keeper_name
          ~tool_name
          ~duration_ms
-         ~success
+         ~disposition
          ?error_text
          ~extra_fields
          ~ts

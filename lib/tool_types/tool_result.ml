@@ -15,13 +15,7 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Structured tool result type for MASC
-
-    RFC-0189 PR-2 (2026-05-26): the legacy [t] record and its
-    [to_legacy]/[of_legacy] converters are gone.  [result] is the SSOT;
-    every constructor returns [result] and every accessor takes
-    [result].  Callers pattern-match on [Ok | Error] instead of reading
-    [.success] / [.failure_class] off a record. *)
+(** Structured tool result type for MASC. *)
 
 type tool_failure_class =
   | Transient_error (** Network/timeout/rate-limit — retryable *)
@@ -57,9 +51,9 @@ let log_level_of_failure_class = function
   | Runtime_failure -> Log.Error
 ;;
 
-(** Lightweight outcome classification for MCP/keeper tool call logging.
-    Unlike {!tool_failure_class} (which carries retry/telemetry semantics),
-    this tri-state maps directly from the wire format or result variant. *)
+(** Lightweight observation of an MCP/OAS wire response.  This is not a MASC
+    execution disposition: the external protocol cannot represent [Deferred],
+    so callers must never use this projection as the internal outcome SSOT. *)
 type tool_call_outcome = Ok | Error | Unknown
 
 let string_of_tool_call_outcome = function
@@ -85,9 +79,27 @@ let classify_from_exception (exn : exn) : tool_failure_class =
   | _ -> Runtime_failure
 ;;
 
-(** Payload carried by a successful tool invocation. *)
-type success_payload =
+type ('completed, 'deferred, 'failed) disposition =
+  | Completed of 'completed
+  | Deferred of 'deferred
+  | Failed of 'failed
+
+let string_of_disposition = function
+  | Completed _ -> "completed"
+  | Deferred _ -> "deferred"
+  | Failed _ -> "failed"
+;;
+
+let unit_disposition_of_string = function
+  | "completed" -> Result.Ok (Completed ())
+  | "deferred" -> Result.Ok (Deferred ())
+  | "failed" -> Result.Ok (Failed ())
+  | value -> Result.Error (Printf.sprintf "unknown tool disposition: %S" value)
+;;
+
+type output_payload =
   { data : Yojson.Safe.t
+  ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float
   }
@@ -103,40 +115,50 @@ type failure_payload =
   ; duration_ms : float
   }
 
-(** Typed result of a tool invocation.  Pattern-match on [Ok] / [Error]
-    rather than reading [.success] + [.failure_class] off a record. *)
-type result = (success_payload, failure_payload) Result.t
+type result =
+  (output_payload, output_payload, failure_payload) disposition
 
 (** {1 Accessors}
 
-    Take [result] directly; pattern-match on [Ok | Error] internally so
+    Take [result] directly; pattern-match on its canonical disposition so
     callers can keep the bare [Tool_result.message r] form. *)
 
 let message : result -> string = function
-  | Ok { data; _ } ->
+  | Completed { data; _ } | Deferred { data; _ } ->
     (match data with
      | `String s -> s
      | other -> Yojson.Safe.to_string other)
-  | Error { message; _ } -> message
+  | Failed { message; _ } -> message
 ;;
 
 let failure_class : result -> tool_failure_class option = function
-  | Ok _ -> None
-  | Error { class_; _ } -> Some class_
+  | Completed _ | Deferred _ -> None
+  | Failed { class_; _ } -> Some class_
 ;;
 
-let to_json : result -> Yojson.Safe.t = function
-  | Ok { data; tool_name; duration_ms } ->
+let to_json (result : result) : Yojson.Safe.t =
+  let disposition = string_of_disposition result in
+  match result with
+  | Completed { data; metadata; tool_name; duration_ms } ->
     `Assoc
-      [ "success", `Bool true
+      ([ "disposition", `String disposition
       ; "data", data
       ; "tool_name", `String tool_name
       ; "duration_ms", `Float duration_ms
       ]
-  | Error { class_; message; data; tool_name; duration_ms } ->
+       @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
+  | Deferred { data; metadata; tool_name; duration_ms } ->
+    `Assoc
+      ([ "disposition", `String disposition
+       ; "data", data
+       ; "tool_name", `String tool_name
+       ; "duration_ms", `Float duration_ms
+       ]
+       @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
+  | Failed { class_; message; data; tool_name; duration_ms } ->
     `Assoc
       [ "failure_class", `String (tool_failure_class_to_string class_)
-      ; "success", `Bool false
+      ; "disposition", `String disposition
       ; "data", data
       ; "message", `String message
       ; "tool_name", `String tool_name
@@ -145,23 +167,39 @@ let to_json : result -> Yojson.Safe.t = function
 ;;
 
 let tool_name : result -> string = function
-  | Ok { tool_name; _ } -> tool_name
-  | Error { tool_name; _ } -> tool_name
+  | Completed { tool_name; _ }
+  | Deferred { tool_name; _ }
+  | Failed { tool_name; _ } -> tool_name
 ;;
 
 let duration_ms : result -> float = function
-  | Ok { duration_ms; _ } -> duration_ms
-  | Error { duration_ms; _ } -> duration_ms
+  | Completed { duration_ms; _ }
+  | Deferred { duration_ms; _ }
+  | Failed { duration_ms; _ } -> duration_ms
 ;;
 
 let data : result -> Yojson.Safe.t = function
-  | Ok { data; _ } -> data
-  | Error { data; _ } -> data
+  | Completed { data; _ } | Deferred { data; _ } | Failed { data; _ } -> data
+;;
+
+let metadata : result -> Yojson.Safe.t option = function
+  | Completed { metadata; _ } | Deferred { metadata; _ } -> metadata
+  | Failed _ -> None
 ;;
 
 let is_success : result -> bool = function
-  | Ok _ -> true
-  | Error _ -> false
+  | Completed _ -> true
+  | Deferred _ | Failed _ -> false
+;;
+
+let is_deferred : result -> bool = function
+  | Deferred _ -> true
+  | Completed _ | Failed _ -> false
+;;
+
+let is_failed : result -> bool = function
+  | Failed _ -> true
+  | Completed _ | Deferred _ -> false
 ;;
 
 (** {1 Constructors}
@@ -173,14 +211,14 @@ let is_success : result -> bool = function
 let ok ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  Ok { data = `String message_str; tool_name; duration_ms }
+  Completed { data = `String message_str; metadata = None; tool_name; duration_ms }
 ;;
 
 let error ?(failure_class = None) ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
   let class_ = Option.value ~default:Runtime_failure failure_class in
-  Error
+  Failed
     { class_
     ; message = message_str
     ; data = `String message_str
@@ -203,7 +241,7 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
       tool_name
       (Stdlib.Printexc.to_string exn)
   in
-  Error { class_; message; data = `String message; tool_name; duration_ms }
+  Failed { class_; message; data = `String message; tool_name; duration_ms }
 ;;
 
 (** {1 Typed constructors (RFC-0189)}
@@ -212,14 +250,19 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
     enforced positionally for new code that wants to commit to a
     classification at the catch boundary. *)
 
-let make_ok ~tool_name ~start_time ?(data = `Null) () : result =
+let make_ok ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Ok { data; tool_name; duration_ms }
+  Completed { data; metadata; tool_name; duration_ms }
+;;
+
+let make_deferred ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
+  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  Deferred { data; metadata; tool_name; duration_ms }
 ;;
 
 let make_err ~tool_name ~class_ ~start_time ?(data = `Null) message_str : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Error { class_; message = message_str; data; tool_name; duration_ms }
+  Failed { class_; message = message_str; data; tool_name; duration_ms }
 ;;
 
 let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
@@ -235,5 +278,5 @@ let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
       tool_name
       (Stdlib.Printexc.to_string exn)
   in
-  Error { class_; message; data = `String message; tool_name; duration_ms }
+  Failed { class_; message; data = `String message; tool_name; duration_ms }
 ;;

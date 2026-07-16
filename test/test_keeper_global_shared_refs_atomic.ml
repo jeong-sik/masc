@@ -78,25 +78,6 @@ let test_meta_store_hook () =
   Keeper_meta_store.register_runtime_meta_write_sync (fun _config _meta -> ())
 ;;
 
-let test_tool_dispatch_runtime () =
-  let open Masc in
-  let recorded = ref None in
-  Keeper_tool_dispatch_runtime.For_testing.set_on_keeper_tool_call
-    (fun ~tool_name ~success ~duration_ms ->
-       recorded := Some (tool_name, success, duration_ms));
-  Keeper_tool_dispatch_runtime.For_testing.record_keeper_tool_call
-    ~tool_name:"t"
-    ~success:true
-    ~duration_ms:42;
-  check
-    (option (triple string bool int))
-    "recorder received call"
-    (Some ("t", true, 42))
-    !recorded;
-  Keeper_tool_dispatch_runtime.For_testing.set_on_keeper_tool_call
-    (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
-;;
-
 let test_keepalive_signal_callbacks () =
   let open Masc in
   let started = ref false in
@@ -260,9 +241,6 @@ let () =
         ] )
     ; ( "meta-store"
       , [ test_case "runtime_meta_write_sync_hook registration" `Quick test_meta_store_hook
-        ] )
-    ; ( "tool-dispatch-runtime"
-      , [ test_case "recorder and searcher registration" `Quick test_tool_dispatch_runtime
         ] )
     ; ( "keepalive-signal"
       , [ test_case

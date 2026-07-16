@@ -1,6 +1,6 @@
 (** Cryptographically random identifier helper.
 
-    Wraps [Mirage_crypto_rng.generate] + hex encoding — the same
+    Wraps the process-wide [Crypto_rng] boundary + hex encoding — the same
     5-line pattern that had been copy-pasted across 6 call-sites
     (verification, board post/comment, workspace
     task, streamable HTTP session, ...). Centralising removes the
@@ -11,7 +11,7 @@
 
 val hex : bytes:int -> string
 (** [hex ~bytes:n] returns [2 * n] hex characters sourced from
-    [Mirage_crypto_rng.generate n]. Call-sites that need a prefix
+    [Crypto_rng.generate n]. Call-sites that need a prefix
     concatenate it themselves — keeping this helper prefix-agnostic
     means the "what kind of id" decision stays at the call-site,
     not here. *)

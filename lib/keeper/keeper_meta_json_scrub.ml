@@ -26,7 +26,6 @@ let config_field_names =
     (* tool_heavy_* fields were removed with the tool_heavy compaction
        trigger; kept here so legacy persisted JSON sheds the dead keys. *)
   ; "tool_heavy_msg_threshold"; "tool_heavy_ratio_floor"
-  ; "auto_handoff"; "handoff_threshold"; "handoff_cooldown_sec"
   ; "always_allow"
     (* NOTE: multimodal_policy is a PERSISTED runtime field: meta_to_json emits
        it (keeper_meta_json.ml) and it is a canonical key. It must NOT be in this

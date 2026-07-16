@@ -89,6 +89,26 @@ type compaction_decision =
   | Not_requested
   | Skipped_no_checkpoint
 
+type compaction_evidence =
+  { selected_runtime_id : string option
+  ; before_checkpoint_bytes : int
+  ; after_checkpoint_bytes : int
+  ; before_message_count : int
+  ; after_message_count : int
+  ; summarized_message_count : int
+  ; dropped_message_count : int
+  ; before_tool_use_count : int
+  ; after_tool_use_count : int
+  ; before_tool_result_count : int
+  ; after_tool_result_count : int
+  }
+
+type compaction_preparation =
+  { context : working_context
+  ; decision : compaction_decision
+  ; evidence : compaction_evidence option
+  }
+
 let compaction_decision_to_string = function
   | Applied trigger -> "applied:" ^ Compaction_trigger.to_human trigger
   | Prepared trigger -> "prepared:" ^ Compaction_trigger.to_human trigger
@@ -171,6 +191,13 @@ let record_pre_compact
          (Printexc.to_string exn))
 ;;
 
+type requested_compaction =
+  { messages : Agent_sdk.Types.message list
+  ; selected_runtime_id : string option
+  ; summarized_message_count : int
+  ; dropped_message_count : int
+  }
+
 let requested_messages (meta : keeper_meta) messages =
   match meta.compaction.mode with
   | Keeper_config.Deterministic -> Error Retired_deterministic_mode
@@ -201,7 +228,38 @@ let requested_messages (meta : keeper_meta) messages =
              if plan.summarized = [] && plan.dropped = []
              then Error Structurally_unchanged
              else
-               Ok (Keeper_compaction_llm_summarizer.apply plan ~messages))))
+               Ok
+                 { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
+                 ; selected_runtime_id = plan.selected_runtime_id
+                 ; summarized_message_count = List.length plan.summarized
+                 ; dropped_message_count = List.length plan.dropped
+                 })))
+;;
+
+let tool_block_counts messages =
+  let rec count_blocks (uses, results) blocks =
+    List.fold_left
+      (fun (uses, results) -> function
+         | Agent_sdk.Types.ToolUse _ -> uses + 1, results
+         | Agent_sdk.Types.ToolResult { content_blocks; _ } ->
+           let counts = uses, results + 1 in
+           Option.fold ~none:counts ~some:(count_blocks counts) content_blocks
+         | Agent_sdk.Types.Text _
+         | Agent_sdk.Types.Thinking _
+         | Agent_sdk.Types.ReasoningDetails _
+         | Agent_sdk.Types.RedactedThinking _
+         | Agent_sdk.Types.Image _
+         | Agent_sdk.Types.Document _
+         | Agent_sdk.Types.Audio _ ->
+           uses, results)
+      (uses, results)
+      blocks
+  in
+  List.fold_left
+    (fun counts (message : Agent_sdk.Types.message) ->
+       count_blocks counts message.content)
+    (0, 0)
+    messages
 ;;
 
 let log_rejection ~meta ~trigger ~reason ~checkpoint_bytes ~message_count =
@@ -228,7 +286,7 @@ let compact_for_request_typed
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
       (ctx : working_context)
-  : working_context * compaction_decision
+  : compaction_preparation
   =
   let before_bytes = serialized_bytes ctx in
   let before_messages = message_count ctx in
@@ -246,10 +304,10 @@ let compact_for_request_typed
       ~reason
       ~checkpoint_bytes:before_bytes
       ~message_count:before_messages;
-    ctx, Rejected (trigger, reason)
+    { context = ctx; decision = Rejected (trigger, reason); evidence = None }
   | Ok requested ->
     let messages, pair_repair_stats =
-      Keeper_context_core.repair_broken_tool_call_pairs_with_stats requested
+      Keeper_context_core.repair_broken_tool_call_pairs_with_stats requested.messages
     in
     let compacted_ctx =
       sync_oas_context
@@ -263,7 +321,7 @@ let compact_for_request_typed
         ~reason
         ~checkpoint_bytes:before_bytes
         ~message_count:before_messages;
-      ctx, Rejected (trigger, reason)
+      { context = ctx; decision = Rejected (trigger, reason); evidence = None }
     in
     if after_bytes = before_bytes
     then reject Structurally_unchanged
@@ -271,6 +329,12 @@ let compact_for_request_typed
     then reject Checkpoint_not_reduced
     else (
       let after_messages = message_count compacted_ctx in
+      let before_tool_use_count, before_tool_result_count =
+        tool_block_counts (messages_of_context ctx)
+      in
+      let after_tool_use_count, after_tool_result_count =
+        tool_block_counts (messages_of_context compacted_ctx)
+      in
       let tool_use_sample_json =
         List.map
           (fun (tool_use_id, tool_name) ->
@@ -311,5 +375,21 @@ let compact_for_request_typed
            "context compaction prepared keeper=%s saved_checkpoint_bytes=%d"
            meta.name
            (before_bytes - after_bytes));
-      compacted_ctx, Prepared trigger)
+      { context = compacted_ctx
+      ; decision = Prepared trigger
+      ; evidence =
+          Some
+            { selected_runtime_id = requested.selected_runtime_id
+            ; before_checkpoint_bytes = before_bytes
+            ; after_checkpoint_bytes = after_bytes
+            ; before_message_count = before_messages
+            ; after_message_count = after_messages
+            ; summarized_message_count = requested.summarized_message_count
+            ; dropped_message_count = requested.dropped_message_count
+            ; before_tool_use_count
+            ; after_tool_use_count
+            ; before_tool_result_count
+            ; after_tool_result_count
+            }
+      })
 ;;

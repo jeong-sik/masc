@@ -562,6 +562,8 @@ type compaction_snapshot_item =
   ; compaction_source : string option
   ; status : string
   ; links : Yojson.Safe.t
+  ; exact_evidence : Yojson.Safe.t option
+  ; reinjection_observation : Yojson.Safe.t
   }
 
 let compaction_snapshot_item_json (item : compaction_snapshot_item) =
@@ -589,7 +591,130 @@ let compaction_snapshot_item_json (item : compaction_snapshot_item) =
     ; "compaction_source", Json_util.string_opt_to_json item.compaction_source
     ; "status", `String item.status
     ; "links", item.links
+    ; ( "exact_evidence"
+      , match item.exact_evidence with
+        | Some evidence -> evidence
+        | None -> `Null )
+    ; "reinjection_observation", item.reinjection_observation
     ]
+;;
+
+type compaction_reinjection_state =
+  | Not_linked
+  | Awaiting_load
+  | Checkpoint_not_loaded
+  | Loaded_not_injected
+  | Reinserted
+  | Sequence_incomplete
+  | Sequence_reversed
+  | Duplicate_receipt
+
+let compaction_reinjection_state_to_string = function
+  | Not_linked -> "not_linked"
+  | Awaiting_load -> "awaiting_load"
+  | Checkpoint_not_loaded -> "checkpoint_not_loaded"
+  | Loaded_not_injected -> "loaded_not_injected"
+  | Reinserted -> "reinserted"
+  | Sequence_incomplete -> "sequence_incomplete"
+  | Sequence_reversed -> "sequence_reversed"
+  | Duplicate_receipt -> "duplicate_receipt"
+;;
+
+let compaction_not_linked_observation_json =
+  `Assoc
+    [ "state", `String (compaction_reinjection_state_to_string Not_linked)
+    ; "keeper_turn_id", `Null
+    ; "checkpoint_loaded_receipts", `Int 0
+    ; "context_injected_receipts", `Int 0
+    ]
+;;
+
+type compaction_receipt_kind =
+  | Checkpoint_load of bool option
+  | Context_injection
+
+type compaction_receipt =
+  { index : int
+  ; keeper_turn_id : int option
+  ; kind : compaction_receipt_kind
+  }
+
+let compaction_reinjection_observation_json ~manifest_rows ~row_index row =
+  let observation state ?keeper_turn_id ~loads ~injections () =
+    `Assoc
+      [ "state", `String (compaction_reinjection_state_to_string state)
+      ; "keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id
+      ; "checkpoint_loaded_receipts", `Int loads
+      ; "context_injected_receipts", `Int injections
+      ]
+  in
+  match row.Keeper_runtime_manifest.links.checkpoint_path with
+  | None -> compaction_not_linked_observation_json
+  | Some checkpoint_path ->
+    let receipts =
+      manifest_rows
+      |> List.filter_map (fun (index, (candidate : Keeper_runtime_manifest.t)) ->
+        if index <= row_index
+           || not (String.equal candidate.Keeper_runtime_manifest.trace_id row.trace_id)
+           || candidate.links.checkpoint_path <> Some checkpoint_path
+        then None
+        else
+          match candidate.event with
+          | Keeper_runtime_manifest.Checkpoint_loaded ->
+            Some
+              { index
+              ; keeper_turn_id = candidate.keeper_turn_id
+              ; kind =
+                  Checkpoint_load
+                    (Json_util.get_bool
+                       candidate.decision
+                       "loaded_checkpoint_present")
+              }
+          | Keeper_runtime_manifest.Context_injected ->
+            Some
+              { index
+              ; keeper_turn_id = candidate.keeper_turn_id
+              ; kind = Context_injection
+              }
+          | _ -> None)
+    in
+    (match receipts with
+     | [] -> observation Awaiting_load ~loads:0 ~injections:0 ()
+     | first :: _ ->
+       let turn_receipts =
+         List.filter
+           (fun receipt -> receipt.keeper_turn_id = first.keeper_turn_id)
+           receipts
+       in
+       let loads, injections =
+         List.fold_left
+           (fun (loads, injections) receipt ->
+             match receipt.kind with
+             | Checkpoint_load _ -> receipt :: loads, injections
+             | Context_injection -> loads, receipt :: injections)
+           ([], [])
+           turn_receipts
+       in
+       let state =
+         match loads, injections, first.keeper_turn_id with
+         | _, _, None -> Sequence_incomplete
+         | _ :: _ :: _, _, _ | _, _ :: _ :: _, _ -> Duplicate_receipt
+         | [ { kind = Checkpoint_load (Some true); index = load_index; _ } ]
+         , [ { index = injection_index; _ } ]
+         , _ ->
+           if load_index < injection_index then Reinserted else Sequence_reversed
+         | [ { kind = Checkpoint_load (Some true); _ } ], [], _ ->
+           Loaded_not_injected
+         | [ { kind = Checkpoint_load (Some false); _ } ], [], _ ->
+           Checkpoint_not_loaded
+         | _ -> Sequence_incomplete
+       in
+       observation
+         state
+         ?keeper_turn_id:first.keeper_turn_id
+         ~loads:(List.length loads)
+         ~injections:(List.length injections)
+         ())
 ;;
 
 let compaction_saved_tokens before_tokens after_tokens =
@@ -636,6 +761,8 @@ let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest
              compaction_snapshot_clock_string row.decision "compaction_source"
          ; status = row.status
          ; links = compaction_snapshot_links_json row.links
+         ; exact_evidence = None
+         ; reinjection_observation = compaction_not_linked_observation_json
          })
   | _ ->
     (match Json_util.get_int row.decision "context_compacted_count" with
@@ -667,11 +794,18 @@ let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest
             ; compaction_source
             ; status = row.status
             ; links = compaction_snapshot_links_json row.links
+            ; exact_evidence = None
+            ; reinjection_observation = compaction_not_linked_observation_json
             })
      | Some _ | None -> None)
 ;;
 
-let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t) =
+let compaction_context_snapshot_json
+      ~keeper_id
+      ~manifest_rows
+      ~row_index
+      (row : Keeper_runtime_manifest.t)
+  =
   (* TEL-OK: read-only dashboard projection; compaction telemetry is emitted by
      the keeper runtime/event bridge that produced the manifest row. *)
   let pre_dispatch_compacted =
@@ -716,15 +850,25 @@ let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t
          ; compaction_source
          ; status = row.status
          ; links = compaction_snapshot_links_json row.links
+         ; exact_evidence = Json_util.assoc_member_opt "exact_evidence" row.decision
+         ; reinjection_observation =
+             compaction_reinjection_observation_json
+               ~manifest_rows
+               ~row_index
+               row
          })
 ;;
 
-let compaction_snapshot_of_manifest_row ~keeper_id (row : Keeper_runtime_manifest.t) =
+let compaction_snapshot_of_manifest_row
+      ~keeper_id
+      ~manifest_rows
+      (row_index, (row : Keeper_runtime_manifest.t))
+  =
   match row.event with
   | Keeper_runtime_manifest.Event_bus_correlated ->
     compaction_event_bus_snapshot_json ~keeper_id row
   | Keeper_runtime_manifest.Context_compacted ->
-    compaction_context_snapshot_json ~keeper_id row
+    compaction_context_snapshot_json ~keeper_id ~manifest_rows ~row_index row
   | _ -> None
 ;;
 
@@ -766,6 +910,8 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
              ; compaction_source = None
              ; status = "latest"
              ; links = `Assoc []
+             ; exact_evidence = None
+             ; reinjection_observation = compaction_not_linked_observation_json
              })
       , [] )
   | Ok None -> None, []
@@ -798,12 +944,14 @@ let compaction_snapshots_json ~config ~keeper_id ~limit =
   in
   let scan_truncated = path_scan_truncated || tail_scan_truncated in
   let manifest_items =
+    let manifest_rows = List.mapi (fun index row -> index, row) manifest_rows in
     manifest_rows
     |> List.sort (fun a b ->
       Float.compare
-        (compaction_snapshot_manifest_sort_value b)
-        (compaction_snapshot_manifest_sort_value a))
-    |> List.filter_map (compaction_snapshot_of_manifest_row ~keeper_id)
+        (compaction_snapshot_manifest_sort_value (snd b))
+        (compaction_snapshot_manifest_sort_value (snd a)))
+    |> List.filter_map
+         (compaction_snapshot_of_manifest_row ~keeper_id ~manifest_rows)
     |> compaction_snapshot_take limit
   in
   let items, read_errors =

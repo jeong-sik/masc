@@ -6,6 +6,7 @@
 module Wire = Masc.Keeper_wire_capture
 module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store
+module Secret_projection = Masc.Keeper_secret_projection
 
 let flag = "MASC_KEEPER_WIRE_CAPTURE"
 
@@ -175,10 +176,19 @@ let last_line_of path needle =
        loop 1 None)
 ;;
 
-(* Built at runtime so no literal secret appears in the source (the pre-commit
-   secret scanner rejects literal [ghp_...] tokens). Secret_redactor detects the
-   [ghp_] prefix regardless. *)
-let fake_github_token = "ghp_" ^ String.make 36 '7'
+let projected_secret = "wire-capture-projected-secret-value"
+
+let install_projected_secret ~base_path ~keeper_name =
+  match
+    Secret_projection.set_env_entry
+      ~base_path
+      ~keeper_name
+      ~scope:Secret_projection.Keeper_secret
+      ~name:"WIRE_CAPTURE_TEST_SECRET"
+      ~value:projected_secret
+  with
+  | Ok () -> ()
+  | Error detail -> Alcotest.failf "failed to install projected secret: %s" detail
 
 let check_enabled_value label value expected =
   with_flag value (fun () -> Alcotest.(check bool) label expected (Wire.enabled ()))
@@ -202,7 +212,8 @@ let env_is_restored () =
 let disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_off" "" in
-    Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
+    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+      ~turn_id:1
       ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"u" ~history_messages:[] ();
     Alcotest.(check (list string))
@@ -211,23 +222,25 @@ let disabled_is_noop () =
 let enabled_writes_redacted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_on" "" in
+    install_projected_secret ~base_path:base ~keeper_name:"sangsu";
     let history =
       [
         Agent_sdk.Types.assistant_msg "좋아, 연구 시작한다";
         Agent_sdk.Types.user_msg "continue";
       ]
     in
-    Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:7
+    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+      ~turn_id:7
       ~sdk_turn:3
-      ~system_prompt:("token " ^ fake_github_token ^ " end")
+      ~system_prompt:("token " ^ projected_secret ^ " end")
       ~extra_system_context:(Some "dynamic context")
       ~user_message:"hello world" ~history_messages:history ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     let json = parse_single_jsonl content in
-    Alcotest.(check bool) "raw github token is redacted" false
-      (contains ~needle:fake_github_token content);
+    Alcotest.(check bool) "projected secret is redacted" false
+      (contains ~needle:projected_secret content);
     Alcotest.(check bool) "redaction marker present" true
       (contains ~needle:"[REDACTED]" (json_string "system_prompt" json));
     check_json_string "request kind recorded" "kind" "request" json;
@@ -257,7 +270,8 @@ let request_trace_id_emitted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_req_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-req-abc" in
-    Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
+    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+      ~turn_id:1
       ~trace_id ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ();
     let json = read_single_json_record base in
@@ -277,14 +291,16 @@ let request_capture_failure_is_best_effort () =
     in
     check_metric_delta "request write failure metric increments"
       write_failures_metric ~labels (fun () ->
-        Wire.capture_request ~masc_root:root_file ~keeper_name ~turn_id
+        Wire.capture_request ~base_path:root_file ~masc_root:root_file ~keeper_name
+          ~turn_id
           ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
           ~user_message:"hello" ~history_messages:[] ()))
 
 let response_disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_off" "" in
-    Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
+    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+      ~turn_id:1
       ~sdk_turn:2 ~response_text:"anything" ();
     Alcotest.(check (list string))
       "no jsonl written when disabled" [] (find_jsonl base))
@@ -292,15 +308,17 @@ let response_disabled_is_noop () =
 let response_capture_writes_redacted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_on" "" in
-    Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:9
-      ~sdk_turn:4 ~response_text:("out " ^ fake_github_token ^ " done") ();
+    install_projected_secret ~base_path:base ~keeper_name:"sangsu";
+    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+      ~turn_id:9
+      ~sdk_turn:4 ~response_text:("out " ^ projected_secret ^ " done") ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     let json = parse_single_jsonl content in
     check_json_string "response kind recorded" "kind" "response" json;
-    Alcotest.(check bool) "raw github token is redacted" false
-      (contains ~needle:fake_github_token content);
+    Alcotest.(check bool) "projected secret is redacted" false
+      (contains ~needle:projected_secret content);
     Alcotest.(check bool) "redaction marker present" true
       (contains ~needle:"[REDACTED]" (json_string "response_text" json));
     check_json_string "keeper name recorded" "keeper" "sangsu" json;
@@ -321,14 +339,16 @@ let response_capture_failure_is_best_effort () =
     in
     check_metric_delta "response write failure metric increments"
       write_failures_metric ~labels (fun () ->
-        Wire.capture_response ~masc_root:root_file ~keeper_name ~turn_id
+        Wire.capture_response ~base_path:root_file ~masc_root:root_file ~keeper_name
+          ~turn_id
           ~sdk_turn:1 ~response_text:"ok" ()))
 
 let response_trace_id_emitted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-resp-xyz" in
-    Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:2
+    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+      ~turn_id:2
       ~sdk_turn:1 ~trace_id ~response_text:"ok" ();
     let json = read_single_json_record base in
     check_json_string "response trace_id string recorded" "trace_id"
@@ -345,7 +365,8 @@ let capture_prunes_old_files () =
         ensure_dir old_month;
         let old_file = Filename.concat old_month "01.jsonl" in
         write_file old_file (String.make 1024 'x');
-        Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:10
+        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+          ~turn_id:10
           ~sdk_turn:1 ~response_text:"bounded" ();
         Alcotest.(check bool) "old capture file pruned" false
           (Sys.file_exists old_file);
@@ -371,12 +392,14 @@ let capture_cache_reloads_when_retention_changes () =
       let old_file = Filename.concat old_month old_day_name in
       write_file old_file (String.make 1024 'x');
       with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "30" (fun () ->
-        Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:20
+        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+          ~turn_id:20
           ~sdk_turn:1 ~response_text:"cache warmup" ());
       Alcotest.(check bool) "old capture retained by warm cache" true
         (Sys.file_exists old_file);
       with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-        Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:21
+        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+          ~turn_id:21
           ~sdk_turn:1 ~response_text:"cache reload" ());
       Alcotest.(check bool) "old capture pruned after retention change" false
         (Sys.file_exists old_file)))
@@ -386,7 +409,7 @@ let capture_skips_when_current_file_cap_would_be_exceeded () =
     with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "512" (fun () ->
       let base = Filename.temp_dir "wirecap_cap" "" in
       let keeper_name = "wirecap_cap_metric" in
-      Wire.capture_response ~masc_root:base ~keeper_name ~turn_id:11
+      Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name ~turn_id:11
         ~sdk_turn:1 ~response_text:"small" ();
       let files = find_jsonl base in
       Alcotest.(check int) "small record written" 1 (List.length files);
@@ -403,7 +426,8 @@ let capture_skips_when_current_file_cap_would_be_exceeded () =
       let legacy_before = metric_value record_skipped_metric ~labels:legacy_labels in
       check_metric_delta "current-file cap skip metric increments"
         record_skipped_metric ~labels (fun () ->
-          Wire.capture_response ~masc_root:base ~keeper_name ~turn_id:12
+          Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name
+            ~turn_id:12
             ~sdk_turn:1 ~response_text:(String.make 4096 'x') ());
       let after = read_file (List.hd files) in
       Alcotest.(check string)
@@ -432,6 +456,7 @@ let response_capture_matches_replayed_history_text () =
         Alcotest.fail "normalization should synthesize text when tools are present"
     in
     Wire.capture_response
+      ~base_path:base
       ~masc_root:base
       ~keeper_name:"history_keeper"
       ~turn_id:5

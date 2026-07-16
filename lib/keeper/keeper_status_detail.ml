@@ -213,11 +213,15 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
   let opt_int = Option.fold ~none:"" ~some:string_of_int in
   let fields =
     [
+      ("persona", opt_string meta.persona);
+      ("instructions", meta.instructions);
       ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
       ("sandbox_image", opt_string meta.sandbox_image);
       ("network_mode", network_mode_to_string meta.network_mode);
       ("allowed_paths", cache_fingerprint_list meta.allowed_paths);
       ("mention_targets", cache_fingerprint_list meta.mention_targets);
+      ( "multimodal_policy",
+        multimodal_policy_to_string meta.multimodal_policy );
       ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
       ("proactive_enabled", string_of_bool meta.proactive.enabled);
       ("autoboot_enabled", string_of_bool meta.autoboot_enabled);

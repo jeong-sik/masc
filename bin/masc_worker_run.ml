@@ -36,7 +36,7 @@ let main_result () =
             },
           1 )
     | Ok spec ->
-        Mirage_crypto_rng_unix.use_default ();
+        Crypto_rng.ensure_default ();
         Eio_main.run @@ fun env ->
         Eio_guard.enable ();
         Fs_compat.set_fs (Eio.Stdenv.fs env);

@@ -222,6 +222,36 @@ export type KeeperCompactionSnapshotLinks = {
   readonly tool_call_log_path: string | null
 }
 
+export type KeeperCompactionExactEvidence = {
+  readonly before_checkpoint_bytes: number
+  readonly after_checkpoint_bytes: number
+  readonly before_message_count: number
+  readonly after_message_count: number
+  readonly summarized_message_count: number
+  readonly dropped_message_count: number
+  readonly before_tool_use_count: number
+  readonly after_tool_use_count: number
+  readonly before_tool_result_count: number
+  readonly after_tool_result_count: number
+}
+
+export type KeeperCompactionReinjectionState =
+  | 'not_linked'
+  | 'awaiting_load'
+  | 'checkpoint_not_loaded'
+  | 'loaded_not_injected'
+  | 'reinserted'
+  | 'sequence_incomplete'
+  | 'sequence_reversed'
+  | 'duplicate_receipt'
+
+export type KeeperCompactionReinjectionObservation = {
+  readonly state: KeeperCompactionReinjectionState
+  readonly keeper_turn_id: number | null
+  readonly checkpoint_loaded_receipts: number
+  readonly context_injected_receipts: number
+}
+
 export type KeeperCompactionSnapshot = {
   readonly id: string
   readonly keeper: string
@@ -240,6 +270,8 @@ export type KeeperCompactionSnapshot = {
   readonly compaction_source: string | null
   readonly status: string
   readonly links: KeeperCompactionSnapshotLinks
+  readonly exact_evidence: KeeperCompactionExactEvidence | null
+  readonly reinjection_observation: KeeperCompactionReinjectionObservation
 }
 
 export type KeeperCompactionSnapshotsResponse = {
@@ -542,6 +574,54 @@ function nullableNumber(raw: unknown): number | null {
   return asNumber(raw) ?? null
 }
 
+function decodeCompactionExactEvidence(raw: unknown): KeeperCompactionExactEvidence | null | undefined {
+  if (raw === null) return null
+  if (!isRecord(raw)) return undefined
+  const evidence = {
+    before_checkpoint_bytes: asNumber(raw.before_checkpoint_bytes),
+    after_checkpoint_bytes: asNumber(raw.after_checkpoint_bytes),
+    before_message_count: asNumber(raw.before_message_count),
+    after_message_count: asNumber(raw.after_message_count),
+    summarized_message_count: asNumber(raw.summarized_message_count),
+    dropped_message_count: asNumber(raw.dropped_message_count),
+    before_tool_use_count: asNumber(raw.before_tool_use_count),
+    after_tool_use_count: asNumber(raw.after_tool_use_count),
+    before_tool_result_count: asNumber(raw.before_tool_result_count),
+    after_tool_result_count: asNumber(raw.after_tool_result_count),
+  }
+  return Object.values(evidence).some(value => value === undefined)
+    ? undefined
+    : evidence as KeeperCompactionExactEvidence
+}
+
+const COMPACTION_REINJECTION_STATES: readonly KeeperCompactionReinjectionState[] = [
+  'not_linked',
+  'awaiting_load',
+  'checkpoint_not_loaded',
+  'loaded_not_injected',
+  'reinserted',
+  'sequence_incomplete',
+  'sequence_reversed',
+  'duplicate_receipt',
+]
+
+function decodeCompactionReinjectionObservation(
+  raw: unknown,
+): KeeperCompactionReinjectionObservation | undefined {
+  if (!isRecord(raw)) return undefined
+  const state = asString(raw.state) as KeeperCompactionReinjectionState | undefined
+  const loaded = asNumber(raw.checkpoint_loaded_receipts)
+  const injected = asNumber(raw.context_injected_receipts)
+  if (!state || !COMPACTION_REINJECTION_STATES.includes(state)
+      || loaded === undefined || injected === undefined) return undefined
+  return {
+    state,
+    keeper_turn_id: nullableNumber(raw.keeper_turn_id),
+    checkpoint_loaded_receipts: loaded,
+    context_injected_receipts: injected,
+  }
+}
+
 function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
@@ -553,6 +633,10 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
   if (!id || !keeper || !ts_iso || !source || !trigger || !status) return null
   const runtimeId = asNullableString(raw.runtime_id)
   const compactionSource = asNullableString(raw.compaction_source)
+  const exactEvidence = decodeCompactionExactEvidence(raw.exact_evidence)
+  const reinjectionObservation =
+    decodeCompactionReinjectionObservation(raw.reinjection_observation)
+  if (exactEvidence === undefined || reinjectionObservation === undefined) return null
   return {
     id,
     keeper,
@@ -571,6 +655,8 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
     compaction_source: compactionSource,
     status,
     links: decodeKeeperCompactionSnapshotLinks(raw.links),
+    exact_evidence: exactEvidence,
+    reinjection_observation: reinjectionObservation,
   }
 }
 

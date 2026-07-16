@@ -11,13 +11,6 @@ module Io = Masc.Keeper_memory_os_io
 module Recall = Masc.Keeper_memory_os_recall
 module Atypes = Agent_sdk.Types
 
-let message_text (m : Atypes.message) =
-  m.content
-  |> List.filter_map (function
-    | Atypes.Text s -> Some s
-    | _ -> None)
-  |> String.concat "\n"
-
 let now = 1_000_000.0
 let unconfigured_runtime_id = "test.unconfigured"
 
@@ -156,56 +149,6 @@ let test_skips_when_too_few () =
           Alcotest.(check int) "store unchanged when too few facts" 1 after_count))))
 ;;
 
-let test_parallel_timeout_per_keeper () =
-  Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      with_prompts (fun () ->
-        with_temp_keepers (fun () ->
-          (* Two keepers each have enough facts to be considered for consolidation. *)
-          List.iter (Io.append_fact ~keeper_id:"keeper-slow") [ fact "slow 1"; fact "slow 2" ];
-          List.iter (Io.append_fact ~keeper_id:"keeper-fast") [ fact "fast 1"; fact "fast 2" ];
-          let slow_count_before = List.length (Io.read_facts_all ~keeper_id:"keeper-slow") in
-          let fast_count_before = List.length (Io.read_facts_all ~keeper_id:"keeper-fast") in
-          Alcotest.(check int) "slow keeper accumulated" 2 slow_count_before;
-          Alcotest.(check int) "fast keeper accumulated" 2 fast_count_before;
-          let slow_complete ~sw:_ ~net:_ ?clock ~config:_ ~messages:_ () =
-            (match clock with
-             | Some clock -> Eio.Time.sleep clock 2.0
-             | None -> ());
-            Ok (fake_response "{\"groups\":[],\"drop_indices\":[]}")
-          in
-          let fast_complete = fake_complete "{\"groups\":[],\"drop_indices\":[]}" in
-          let complete ~sw ~net ?clock ~config ~messages () =
-            if List.exists
-                 (fun (m : Agent_sdk.Types.message) ->
-                    String.contains (message_text m) 'f')
-                 messages
-            then fast_complete ~sw ~net ?clock ~config ~messages ()
-            else slow_complete ~sw ~net ?clock ~config ~messages ()
-          in
-          let start = Unix.gettimeofday () in
-          Server_bootstrap_maintenance.run_memory_os_consolidation_tick
-            ~complete
-            ~timeout_sec:0.1
-            ~sw
-            ~net:(Eio.Stdenv.net env)
-            ~clock:(Eio.Stdenv.clock env)
-            ~runtime_id:unconfigured_runtime_id
-            ~provider_cfg:(provider_cfg ())
-            ~now
-            ();
-          let elapsed = Unix.gettimeofday () -. start in
-          (* The slow keeper should hit the 0.1s timeout and the fast keeper should
-             complete; the total elapsed time must be far below the slow keeper's
-             2.0s sleep, proving per-keeper timeout and parallel scheduling. *)
-          Alcotest.(check bool) "tick returns before slow keeper sleep" true (elapsed < 1.0);
-          (* The fast keeper store should be unchanged (no groups). The slow keeper
-             may or may not have been rewritten depending on timing; we only assert
-             that the fast path completed. *)
-          let fast_count_after = List.length (Io.read_facts_all ~keeper_id:"keeper-fast") in
-          Alcotest.(check int) "fast keeper unchanged" fast_count_before fast_count_after))))
-;;
-
 let () =
   Alcotest.run
     "server_bootstrap_maintenance_memory_os"
@@ -218,10 +161,6 @@ let () =
             "skips when too few facts"
             `Quick
             test_skips_when_too_few
-        ; Alcotest.test_case
-            "parallel per-keeper timeout"
-            `Quick
-            test_parallel_timeout_per_keeper
         ] )
     ]
 ;;

@@ -969,12 +969,12 @@ function DurableSignalItem({
   return html`
     <li
       class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 sm:grid-cols-[3.25rem_minmax(0,1fr)_auto]"
-      data-schedule-signal-id=${signal.signal_id}
+      data-schedule-signal-id=${signal.occurrence_id}
     >
       <span
         class="font-mono text-3xs text-[var(--color-fg-muted)]"
         title=${formatDateTimeKo(emittedIso)}
-        data-schedule-signal-at=${signal.signal_id}
+        data-schedule-signal-at=${signal.occurrence_id}
       >
         ${compactTimeLabel(emittedIso)}
       </span>
@@ -994,7 +994,7 @@ function DurableSignalItem({
           </button>
         </div>
         <div class="mt-1 grid gap-0.5 text-3xs text-[var(--color-fg-disabled)]">
-          <div class="truncate font-mono" title=${signal.signal_id}>${signal.signal_id}</div>
+          <div class="truncate font-mono" title=${signal.occurrence_id}>${signal.occurrence_id}</div>
           <div class="truncate" title=${formatDateTimeKo(dueIso)}>
             due ${formatDateTimeKo(dueIso)}
           </div>
@@ -1910,8 +1910,8 @@ function SchedulePrototypeSurface({
                 ${durableSignals.map(signal => {
                   const spec = statusSpecForLive(signal.kind)
                   return html`
-                    <div class="sch-sig" data-schedule-signal-id=${signal.signal_id}>
-                      <span class="sch-sig-at mono" data-schedule-signal-at=${signal.signal_id}>${compactTimeLabel(signal.emitted_at_iso ?? signal.due_at_iso ?? null)}</span>
+                    <div class="sch-sig" data-schedule-signal-id=${signal.occurrence_id}>
+                      <span class="sch-sig-at mono" data-schedule-signal-at=${signal.occurrence_id}>${compactTimeLabel(signal.emitted_at_iso ?? signal.due_at_iso ?? null)}</span>
                       <span class=${`sch-sig-kind ${spec.cls}`} data-schedule-signal-kind=${signal.kind}>${enumLabel(signal.kind || signal.event_type)}</span>
                       <button
                         type="button"

@@ -45,6 +45,69 @@ let assets_root () =
 let index_path () =
   Filename.concat (Filename.concat (assets_root ()) "dashboard") "index.html"
 
+let build_stamp_path () =
+  Filename.concat (Filename.concat (assets_root ()) "dashboard") ".build-stamp"
+
+let mtime_of path =
+  try Some (Unix.stat path).Unix.st_mtime with
+  | Unix.Unix_error _ -> None
+
+(* Same "%04d-%02d-%02dT%02d:%02d:%02dZ" idiom as
+   Types_core.iso8601_of_unix_seconds / Log.timestamp_iso — duplicated here
+   rather than depended on to keep this module's dependency footprint
+   unchanged. *)
+let iso8601_of_unix_seconds ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+type bundle_freshness =
+  | Fresh
+  | Stale of { stamp_mtime : float; binary_mtime : float }
+  | Missing_stamp
+
+(** Compare the dashboard bundle's [.build-stamp] mtime (touched by
+    [scripts/build-dashboard-if-needed.sh] on every successful build) against
+    the running server binary's mtime. A stamp older than the binary means a
+    new server was shipped without rebuilding the SPA — the exact drift that
+    let a removed HTTP route (#24332) keep getting called by a still-stale
+    bundle. [Missing_stamp] covers both "never built" and any stat failure on
+    the stamp path, so a broken assets_root resolution is never silently
+    treated as fresh. *)
+let bundle_freshness () =
+  match mtime_of (build_stamp_path ()) with
+  | None -> Missing_stamp
+  | Some stamp_mtime ->
+    (match mtime_of Sys.executable_name with
+     | None ->
+       (* Can't stat our own binary (unusual, e.g. exec'd via a symlink the
+          OS deleted from under us) — nothing to compare against, so this is
+          not evidence of staleness either way. *)
+       Fresh
+     | Some binary_mtime ->
+       if stamp_mtime < binary_mtime then Stale { stamp_mtime; binary_mtime }
+       else Fresh)
+
+(** Log a boot-time WARN when the served bundle is stale or missing. Never
+    silent: a missing stamp warns just as loudly as a stale one. Intended to
+    be called once during server startup (see
+    Server_runtime_bootstrap.run). *)
+let log_bundle_freshness_warning () =
+  match bundle_freshness () with
+  | Fresh -> ()
+  | Missing_stamp ->
+    Log.Dashboard.warn
+      "bundle build-stamp not found at %s — dashboard assets may be missing \
+       or unbuilt; run: cd dashboard && pnpm run build"
+      (build_stamp_path ())
+  | Stale { stamp_mtime; binary_mtime } ->
+    Log.Dashboard.warn
+      "bundle build-stamp %s older than server binary %s — run: cd dashboard \
+       && pnpm run build"
+      (iso8601_of_unix_seconds stamp_mtime)
+      (iso8601_of_unix_seconds binary_mtime)
+
 let html () =
   try
     Fs_compat.load_file (index_path ())

@@ -241,8 +241,8 @@ let test_hitl_resolution_steers_continuation () =
   in
   check bool "fixture: hitl decision runs" true decision.WO.should_run;
   let threaded = user_message ~turn_decision:decision base_observation in
-  check bool "continuation steers a keeper_surface_post reply" true
-    (contains ~needle:"keeper_surface_post" threaded);
+  check bool "continuation steers a connected-surface reply" true
+    (contains ~needle:"visible connected-surface capability" threaded);
   check bool "continuation names the resolved approval" true
     (contains ~needle:"approval you were waiting on was just resolved" threaded)
 

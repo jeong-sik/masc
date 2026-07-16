@@ -78,7 +78,7 @@ runs:
     # This explanation stays a YAML comment on purpose. GitHub echoes the whole
     # `run:` script into the job log, so a shell comment quoting the linker and
     # disk-space messages would plant those exact strings in every job log —
-    # scripts/ci-run-tests.sh matches them in disk_full_detected().
+    # scripts/ci-run-tests.sh preserves them in failure diagnostics.
     - name: Enable dune cache (Linux)
       if: runner.os == 'Linux' && inputs.dune-cache == 'true'
       shell: bash

@@ -31,7 +31,6 @@ type keeper = {
   k_compaction_ratio_gate : float;
   k_trigger_mode : string;
   k_context_budget : int;
-  k_handoff_threshold : float;
   k_drift_enabled : bool;
   k_verify : bool;
   k_created_at : string;

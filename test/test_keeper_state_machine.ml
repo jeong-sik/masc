@@ -4,15 +4,11 @@
     - derive_phase priority ordering
     - apply_event valid/invalid transitions
     - can_transition matrix completeness
-    - Terminal state properties (Stopped, Dead)
-    - Guard evaluation
-    - Guard evaluation (pure, snapshot-based) *)
+    - Terminal state properties (Stopped, Dead) *)
 
 open Alcotest
 module SM = Keeper_state_machine
 module SM_json = Keeper_state_machine_json
-module Meas = Keeper_measurement
-module Guard = Masc.Keeper_guard
 module KSP = Test_keeper_state_machine_preconditions
 
 let phase_t = testable (Fmt.of_to_string SM.phase_to_string) ( = )
@@ -750,169 +746,6 @@ let test_can_execute_turn_blocks_other_phases () =
     ; SM.Restarting
     ; SM.Dead
     ]
-;;
-
-(* ── Guard evaluation tests ────────────────────────────── *)
-
-let base_thresholds : Meas.threshold_params =
-  { compaction_ratio_gate = 0.50
-  ; compaction_message_gate = 100
-  ; compaction_token_gate = 50000
-  ; compaction_cooldown_sec = 60
-  ; handoff_threshold = 0.85
-  ; handoff_cooldown_sec = 300
-  ; auto_handoff_enabled = true
-  ; model_ratio_multiplier = 1.0
-  ; model_handoff_multiplier = 1.0
-  }
-;;
-
-let healthy_snapshot : Meas.measurement_snapshot =
-  { snapshot_id = "test-001"
-  ; keeper_name = "alpha"
-  ; generation = 1
-  ; timestamp = 1000.0
-  ; thresholds = base_thresholds
-  ; context =
-      { context_ratio = 0.30
-      ; message_count = 20
-      ; token_count = 15000
-      ; max_tokens = 100000
-      }
-  ; timing =
-      { now_ts = 1000.0
-      ; idle_seconds = 10
-      ; since_last_compaction_sec = 600.0
-      ; since_last_handoff_sec = 600.0
-      ; proactive_warmup_elapsed = true
-      }
-  ; failures = { consecutive_hb_failures = 0; consecutive_turn_failures = 0 }
-  }
-;;
-
-let test_guard_healthy_no_crash_events () =
-  let events = Guard.evaluate healthy_snapshot in
-  let has_crash =
-    List.exists
-      (function
-        | SM.Heartbeat_failed _
-        | SM.Turn_failed _
-        | SM.Compaction_started
-        | SM.Handoff_started -> true
-        | _ -> false)
-      events
-  in
-  check bool "no crash/action events" false has_crash
-;;
-
-let test_guard_compaction_triggers () =
-  let snap =
-    { healthy_snapshot with
-      context = { healthy_snapshot.context with context_ratio = 0.55 }
-    }
-  in
-  let events = Guard.evaluate snap in
-  let has_compact =
-    List.exists
-      (function
-        | SM.Compaction_started -> true
-        | _ -> false)
-      events
-  in
-  check bool "compaction triggered" true has_compact
-;;
-
-let test_guard_zero_gates_do_not_force_compaction () =
-  let snap =
-    { healthy_snapshot with
-      thresholds =
-        { healthy_snapshot.thresholds with
-          compaction_message_gate = 0
-        ; compaction_token_gate = 0
-        }
-    }
-  in
-  let events = Guard.evaluate snap in
-  let has_compact =
-    List.exists
-      (function
-        | SM.Compaction_started -> true
-        | _ -> false)
-      events
-  in
-  check bool "zero gates disabled" false has_compact
-;;
-
-let test_guard_compaction_respects_cooldown () =
-  let snap =
-    { healthy_snapshot with
-      context = { healthy_snapshot.context with context_ratio = 0.55 }
-    ; timing = { healthy_snapshot.timing with since_last_compaction_sec = 30.0 }
-    }
-  in
-  let events = Guard.evaluate snap in
-  let has_compact =
-    List.exists
-      (function
-        | SM.Compaction_started -> true
-        | _ -> false)
-      events
-  in
-  check bool "cooldown blocks compaction" false has_compact
-;;
-
-let test_guard_handoff_triggers () =
-  let snap =
-    { healthy_snapshot with
-      context = { healthy_snapshot.context with context_ratio = 0.90 }
-    }
-  in
-  let events = Guard.evaluate snap in
-  let has_handoff =
-    List.exists
-      (function
-        | SM.Handoff_started -> true
-        | _ -> false)
-      events
-  in
-  check bool "handoff triggered" true has_handoff
-;;
-
-let test_guard_context_actions_are_typed () =
-  let snap =
-    { healthy_snapshot with
-      context = { healthy_snapshot.context with context_ratio = 0.90 }
-    }
-  in
-  let events = Guard.evaluate snap in
-  match
-    List.find_opt
-      (function
-        | SM.Context_measured _ -> true
-        | _ -> false)
-      events
-  with
-  | Some (SM.Context_measured { context_actions; _ }) ->
-    check bool "compact action" true context_actions.compact;
-    check bool "handoff action" true context_actions.handoff
-  | Some _ | None -> fail "missing Context_measured event"
-;;
-
-let test_guard_hb_failure_observation () =
-  let snap =
-    { healthy_snapshot with
-      failures = { healthy_snapshot.failures with consecutive_hb_failures = 5 }
-    }
-  in
-  let events = Guard.evaluate snap in
-  let has_hb_fail =
-    List.exists
-      (function
-        | SM.Heartbeat_failed { consecutive = 5 } -> true
-        | _ -> false)
-      events
-  in
-  check bool "heartbeat failure observed" true has_hb_fail
 ;;
 
 (* ── Phase roundtrip tests ─────────────────────────────── *)
@@ -2295,21 +2128,6 @@ let () =
             "other phases skip turns"
             `Quick
             test_can_execute_turn_blocks_other_phases
-        ] )
-    ; ( "guard"
-      , [ test_case "healthy = no action events" `Quick test_guard_healthy_no_crash_events
-        ; test_case "compaction triggers" `Quick test_guard_compaction_triggers
-        ; test_case
-            "zero gates disable compaction"
-            `Quick
-            test_guard_zero_gates_do_not_force_compaction
-        ; test_case
-            "compaction cooldown respected"
-            `Quick
-            test_guard_compaction_respects_cooldown
-        ; test_case "handoff triggers" `Quick test_guard_handoff_triggers
-        ; test_case "typed context actions" `Quick test_guard_context_actions_are_typed
-        ; test_case "hb failure observation" `Quick test_guard_hb_failure_observation
         ] )
     ; ( "roundtrip"
       , [ test_case "phase string roundtrip" `Quick test_phase_string_roundtrip

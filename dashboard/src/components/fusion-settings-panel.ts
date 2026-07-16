@@ -324,7 +324,7 @@ export function FusionSettingsPanel() {
   const checked = (e: Event) => (e.target as HTMLInputElement).checked
 
   // Read-only view of the active preset's composition (panel models · judge ·
-  // timeouts · max_tool_calls), parsed from the same runtime.toml source the
+  // timeouts), parsed from the same runtime.toml source the
   // editor already loaded. Shown only when the default_preset resolves to a real
   // [fusion.presets.<preset>] table that actually declares panel models — a
   // preset with no panel has no composition worth displaying. The editor scalars
@@ -418,7 +418,7 @@ export function FusionSettingsPanel() {
               </div>
             </div>
             <div class="set-mcp-detail mono" data-testid="fusion-preset-timing" style=${{ marginTop: 10 }}>
-              panel_timeout ${timeoutLabel(presetView.panelTimeoutS)} · judge_timeout ${timeoutLabel(presetView.judgeTimeoutS)} · max_tool_calls_per_panel ${presetView.maxToolCallsPerPanel ?? '—'} (0 = 무제한)
+              panel_timeout ${timeoutLabel(presetView.panelTimeoutS)} · judge_timeout ${timeoutLabel(presetView.judgeTimeoutS)}
             </div>
           `
         : null}

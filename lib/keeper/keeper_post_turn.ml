@@ -71,12 +71,14 @@ type post_turn_lifecycle = {
 type overflow_retry_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
   compaction : compaction_event;
+  evidence : Keeper_compact_policy.compaction_evidence;
   turn_generation : int;
 } [@@warning "-69"]
 
 type compaction_recovery_error =
   | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
+  | Compaction_evidence_missing
   | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
   | Checkpoint_superseded of {
       incoming_turn_count : int;
@@ -90,6 +92,7 @@ let compaction_recovery_error_to_tag = function
   | Checkpoint_load_failed _ -> "checkpoint_load_failed"
   | Compaction_rejected reason ->
     Keeper_compact_policy.compaction_rejection_to_string reason
+  | Compaction_evidence_missing -> "compaction_evidence_missing"
   | Unexpected_compaction_decision _ -> "unexpected_compaction_decision"
   | Checkpoint_superseded _ -> "checkpoint_superseded"
   | Checkpoint_save_failed _ -> "checkpoint_save_failed"
@@ -106,6 +109,8 @@ let compaction_recovery_error_to_string = function
   | Compaction_rejected reason ->
     "compaction rejected: "
     ^ Keeper_compact_policy.compaction_rejection_to_string reason
+  | Compaction_evidence_missing ->
+    "prepared compaction did not carry structural evidence"
   | Unexpected_compaction_decision decision ->
     "unexpected compaction decision: "
     ^ Keeper_compact_policy.compaction_decision_to_string decision
@@ -152,92 +157,16 @@ let log_tool_pair_repair
          stats.dropped_tool_uses
          stats.dropped_tool_results)
 
-(* ── Tier A5: autonomous post-turn wire-in (Cycle 22) ──────────────
-   Feature-flag-gated, non-invasive layer. When [MASC_AUTONOMOUS] is
-   off (default), this is a pure pass-through — zero impact on the
-   existing post-turn lifecycle. When on, an [Autonomous_bridge] tick
-   is taken at the tail and the suspended state is upserted into
-   [working_context["autonomous_meta"]] of the OAS Checkpoint.
-
-   Failures inside the wire-in (resume parse error, tick exception)
-   do not propagate — they are logged and the unmodified lifecycle
-   result is returned, preserving the keeper's primary turn outcome. *)
-
-(* The two pure helpers ([masc_autonomous_enabled] / [upsert_autonomous_meta])
-   live in [lib/autonomous/wirein_helpers.{mli,ml}] so unit tests can
-   call them without depending on the full [masc] library. The
-   wire-in below dispatches through [Autonomous.Wirein_helpers]. *)
-
-let bridge_after_tick (bridge : Autonomous.Autonomous_bridge.t) ~now :
-    Autonomous.Autonomous_bridge.t =
-  match Autonomous.Autonomous_bridge.tick bridge ~now with
-  | Shared_types.Resilience_outcome.FullSuccess { value; _ } -> value
-  | Shared_types.Resilience_outcome.PartialSuccess { value; _ } -> value
-  | Shared_types.Resilience_outcome.GracefulFailure _ -> bridge
-
-let apply_autonomous_wirein
-    ~(now : float)
-    (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
-  if not (Autonomous.Wirein_helpers.masc_autonomous_enabled ()) then lifecycle
-  else
-    match lifecycle.checkpoint with
-    | None ->
-        (* No checkpoint to enrich; autonomous_meta has no host. *)
-        lifecycle
-    | Some cp -> (
-        try
-          let prev_meta_opt =
-            match cp.Agent_sdk.Checkpoint.working_context with
-            | Some (`Assoc kv) -> List.assoc_opt "autonomous_meta" kv
-            | _ -> None
-          in
-          let witness =
-            Autonomous.Autonomous_bridge.Witness.running_witness
-          in
-          let bridge =
-            match prev_meta_opt with
-            | Some prev_json -> (
-                match
-                  Autonomous.Autonomous_bridge.resume witness prev_json ~now
-                with
-                | Ok b -> b
-                | Error _ ->
-                    Autonomous.Autonomous_bridge.create witness ~now ())
-            | None -> Autonomous.Autonomous_bridge.create witness ~now ()
-          in
-          let bridge' = bridge_after_tick bridge ~now in
-          let suspended = Autonomous.Autonomous_bridge.suspend bridge' in
-          let new_wc =
-            Autonomous.Wirein_helpers.upsert_autonomous_meta
-              cp.Agent_sdk.Checkpoint.working_context suspended
-          in
-          let new_cp =
-            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
-          in
-          { lifecycle with checkpoint = Some new_cp }
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Keeper.warn
-            "keeper:%s autonomous wire-in failed: %s"
-            lifecycle.updated_meta.name (Printexc.to_string exn);
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string PostTurnWireinFailures)
-            ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "autonomous")]
-            ();
-          lifecycle)
-
 (* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
-   Feature-flag-gated layer that runs IMMEDIATELY AFTER the A5
-   autonomous wire-in. The strict ordering [autonomous → resilience]
-   is hard-coded at the call site below — do not reorder.
+   Feature-flag-gated layer that runs before tool emission and
+   multimodal hydration. The strict ordering is explicit at the call
+   site below — do not reorder.
 
    When [MASC_RESILIENCE] is off (default), this is a pure pass-
    through. When on, [Recovery.classify_string] runs against any
    error signal surfaced by the turn's compaction or handoff steps,
    and a [`Assoc] meta tree is upserted into
-   [working_context["resilience_meta"]] alongside any A5
-   ["autonomous_meta"] entry.
+   [working_context["resilience_meta"]].
 
    Failures inside the wire-in do not propagate — they are logged
    and the unmodified lifecycle result is returned, preserving the
@@ -541,15 +470,11 @@ let apply_post_turn_lifecycle_with_resilience_handles
         message_count = message_count ctx;
       }
   in
-  (* Strict ordering: autonomous tick → resilience classification
-     → tool emission drain (K4b) → multimodal hydration (K1). Do
-     not reorder — A6/K1 pinned the autonomous→resilience→multimodal
-     sequence; K4b inserts between resilience and multimodal because
-     it is the producer that K1 consumes. The multimodal pass runs
-     last because it persists a [workspace_meta] summary that
-     depends on whether prior passes have already mutated
-     [working_context]. *)
-  let body = apply_autonomous_wirein ~now:now_ts body in
+  (* Strict ordering: resilience classification → tool emission drain (K4b)
+     → multimodal hydration (K1). K4b precedes multimodal because it is the
+     producer that K1 consumes. The multimodal pass runs last because it
+     persists a [workspace_meta] summary that depends on whether prior passes
+     have already mutated [working_context]. *)
   let body =
     apply_resilience_wirein
       ?audit_store:resilience_audit_store
@@ -618,14 +543,16 @@ let recover_latest_checkpoint_for_overflow_retry
       if turn_generation = meta.runtime.generation then meta
       else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
     in
-    let compacted_ctx, base_decision =
+    let preparation =
       Keeper_compact_policy.compact_for_request_typed
         ~meta:retry_meta
         ~trigger
         ctx
     in
-    (match base_decision with
-     | Keeper_compact_policy.Prepared prepared_trigger ->
+    (match preparation.decision, preparation.evidence with
+     | Keeper_compact_policy.Prepared _, None ->
+       Error Compaction_evidence_missing
+     | Keeper_compact_policy.Prepared prepared_trigger, Some evidence ->
        (try
           match
             commit_prepared_after_save
@@ -636,7 +563,7 @@ let recover_latest_checkpoint_for_overflow_retry
                   ~keeper_name:meta.name
                   ~session
                   ~agent_name:retry_meta.agent_name
-                  ~ctx:compacted_ctx
+                  ~ctx:preparation.context
                   ~generation:turn_generation
                 |> checkpoint_of_save_outcome)
           with
@@ -655,6 +582,7 @@ let recover_latest_checkpoint_for_overflow_retry
                   ; trigger = Some prepared_trigger
                   ; decision
                   }
+              ; evidence
               ; turn_generation
               }
           | Error
@@ -686,11 +614,11 @@ let recover_latest_checkpoint_for_overflow_retry
             ~label:"overflow retry checkpoint save exception"
             exn;
           Error (Checkpoint_save_failed detail))
-     | Keeper_compact_policy.Rejected (_, reason) ->
+     | Keeper_compact_policy.Rejected (_, reason), _ ->
        Error (Compaction_rejected reason)
      | (Keeper_compact_policy.Applied _
        | Keeper_compact_policy.Not_requested
-       | Keeper_compact_policy.Skipped_no_checkpoint) as decision ->
+       | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _ ->
        Error (Unexpected_compaction_decision decision))
 
 module For_testing = struct

@@ -7,11 +7,13 @@ type 'a context = {
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
+  invocation_ref : Tool_invocation_ref.t option;
   publication_recovery_provider :
     Keeper_publication_recovery_availability.provider;
 }
 
 let create
+      ?invocation_ref
       ~config
       ~agent_name
       ~sw
@@ -19,6 +21,7 @@ let create
       ~proc_mgr
       ~net
       ~publication_recovery_provider
+      ()
   =
   { config
   ; agent_name
@@ -26,6 +29,7 @@ let create
   ; clock
   ; proc_mgr
   ; net
+  ; invocation_ref
   ; publication_recovery_provider
   }
 
@@ -41,10 +45,15 @@ let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
   }
 
 let dispatch ctx ~name ~args =
-  Keeper_tool_surface.dispatch (to_tool_keeper_context ctx) ~name ~args
+  Keeper_tool_surface.dispatch
+    ?invocation_ref:ctx.invocation_ref
+    (to_tool_keeper_context ctx)
+    ~name
+    ~args
 
 (* TEL-OK: this only closes over Keeper-owned context; dispatch remains observed downstream. *)
 let delegated_dispatch
+      ?invocation_ref
       ~config
       ~agent_name
       ~sw
@@ -52,9 +61,11 @@ let delegated_dispatch
       ~proc_mgr
       ~net
       ~publication_recovery_provider
+      ()
   =
   let ctx =
     create
+      ?invocation_ref
       ~config
       ~agent_name
       ~sw
@@ -62,6 +73,7 @@ let delegated_dispatch
       ~proc_mgr
       ~net
       ~publication_recovery_provider
+      ()
   in
   fun ~name ~args -> dispatch ctx ~name ~args
 ;;

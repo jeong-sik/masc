@@ -753,13 +753,7 @@ let handle_request
         | Ok req ->
           let id = get_id req in
           let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-          if not (is_valid_request_id id)
-          then
-            make_error_typed
-              ~id:`Null
-              Mcp_error_code.Invalid_request
-              "Invalid Request: id must be string, number, or null"
-          else if Mcp_transport_protocol.is_notification req
+          if Mcp_transport_protocol.is_notification req
           then (
             match req.method_ with
             | "dashboard/ack" ->
@@ -771,6 +765,12 @@ let handle_request
                 (fun _auth_token ->
                    handle_dashboard_ack_notification ?mcp_session_id req.params)
             | _ -> `Null)
+          else if not (is_valid_request_id id)
+          then
+            make_error_typed
+              ~id:`Null
+              Mcp_error_code.Invalid_request
+              "Invalid Request: MCP id must be a string or integer"
           else (
             try
               match req.method_ with

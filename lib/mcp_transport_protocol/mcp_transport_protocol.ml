@@ -17,6 +17,71 @@ type jsonrpc_request = {
   params : Yojson.Safe.t option; [@default None]
 } [@@deriving yojson { strict = false }]
 
+type request_id =
+  | String_id of string
+  | Integer_id of string
+
+type request_id_error =
+  | Null_request_id
+  | Non_lossless_number
+  | Invalid_integer_lexeme of string
+  | Invalid_request_id_kind
+
+let is_digit c = c >= '0' && c <= '9'
+
+let is_json_integer_lexeme value =
+  let length = String.length value in
+  let first_digit =
+    if length > 0 && value.[0] = '-' then 1 else 0
+  in
+  if first_digit >= length
+  then false
+  else
+    let first = value.[first_digit] in
+    if first = '0'
+    then first_digit + 1 = length
+    else
+      first >= '1'
+      && first <= '9'
+      &&
+      let rec all_digits index =
+        index = length
+        || (is_digit value.[index] && all_digits (index + 1))
+      in
+      all_digits (first_digit + 1)
+;;
+
+let request_id_of_yojson = function
+  | `String value -> Ok (String_id value)
+  | `Int value -> Ok (Integer_id (string_of_int value))
+  | `Intlit value when is_json_integer_lexeme value -> Ok (Integer_id value)
+  | `Intlit value -> Error (Invalid_integer_lexeme value)
+  | `Float _ -> Error Non_lossless_number
+  | `Null -> Error Null_request_id
+  | `Assoc _ | `List _ | `Bool _ -> Error Invalid_request_id_kind
+;;
+
+let request_id_to_yojson = function
+  | String_id value -> `String value
+  | Integer_id value -> `Intlit value
+;;
+
+let request_id_equal left right =
+  match left, right with
+  | String_id left, String_id right
+  | Integer_id left, Integer_id right -> String.equal left right
+  | String_id _, Integer_id _ | Integer_id _, String_id _ -> false
+;;
+
+let request_id_error_to_string = function
+  | Null_request_id -> "MCP request id must not be null"
+  | Non_lossless_number ->
+    "MCP request id must be an integer; floating JSON numbers are not lossless"
+  | Invalid_integer_lexeme value ->
+    Printf.sprintf "invalid MCP integer request id lexeme: %S" value
+  | Invalid_request_id_kind -> "MCP request id must be a string or integer"
+;;
+
 let has_field key = function
   | `Assoc fields -> List.exists (fun (k, _) -> k = key) fields
   | _ -> false
@@ -44,9 +109,7 @@ let is_notification req = req.id = None
 
 let get_id req = match req.id with Some id -> id | None -> `Null
 
-let is_valid_request_id = function
-  | `Null | `String _ | `Int _ | `Intlit _ | `Float _ -> true
-  | _ -> false
+let is_valid_request_id value = Result.is_ok (request_id_of_yojson value)
 
 let validate_initialize_params params =
   let ( let* ) = Result.bind in

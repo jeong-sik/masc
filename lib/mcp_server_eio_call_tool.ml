@@ -489,6 +489,25 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let config = workspace_scope.config in
   let make_response = Mcp_transport_protocol.make_response in
+  let request_id =
+    match Mcp_transport_protocol.request_id_of_yojson id with
+    | Ok request_id -> request_id
+    | Error error ->
+      invalid_arg
+        ("handle_call_tool_eio admitted an invalid MCP request id: "
+         ^ Mcp_transport_protocol.request_id_error_to_string error)
+  in
+  let invocation_ref =
+    match mcp_session_id with
+    | None -> None
+    | Some session_id ->
+      (match Tool_invocation_ref.external_mcp ~request_id ~session_id with
+       | Ok invocation_ref -> Some invocation_ref
+       | Error error ->
+         invalid_arg
+           ("handle_call_tool_eio admitted an invalid MCP invocation scope: "
+            ^ Tool_invocation_ref.error_to_string error))
+  in
   let (name, arguments) =
     match profile with
     | Managed_agent -> (
@@ -512,6 +531,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ~workspace_scope
         ?profile:(Some profile)
         ?mcp_session_id
+        ?invocation_ref
         ?auth_token
         ?internal_keeper_runtime:(Some internal_keeper_runtime)
         state
@@ -550,14 +570,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
-  let jsonrpc_id_str =
-    match id with
-    | `String s -> s
-    | `Int i -> string_of_int i
-    | `Intlit s -> s
-    | `Float f -> Printf.sprintf "%0.0f" f
-    | _ -> "unknown"
+  let request_id_json =
+    Mcp_transport_protocol.request_id_to_yojson request_id
   in
+  let request_id_trace_fallback = Yojson.Safe.to_string request_id_json in
   let mcp_session_detail = Json_util.string_opt_to_json mcp_session_id in
 
   (* Resolve caller identity for telemetry.  HTTP auth injects [_agent_name];
@@ -609,7 +625,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               `String (Tool_result.tool_failure_class_to_string failure_class) );
             ("tool_name", `String name);
             ("phase", `String "failure");
-            ("request_id", `String jsonrpc_id_str);
+            ("request_id", request_id_json);
             ("session_id", mcp_session_detail);
             ("outcome", `String "error");
             ("agent_name", `String agent_name);
@@ -755,7 +771,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let trace_id =
     match otel_trace_id with
     | Some tid -> tid
-    | None -> jsonrpc_id_str
+    | None -> request_id_trace_fallback
   in
   (match keeper_entry with
    | Some entry ->
@@ -835,7 +851,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
           ("event_family", `String "tool_call");
           ("tool_name", `String name);
           ("phase", `String "result");
-          ("request_id", `String jsonrpc_id_str);
+          ("request_id", request_id_json);
           ("session_id", mcp_session_detail);
           ("agent_name", `String agent_name);
           ("outcome", `String (Tool_result.string_of_tool_call_outcome outcome));

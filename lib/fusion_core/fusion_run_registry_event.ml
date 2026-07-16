@@ -1,37 +1,33 @@
 (* JSONL event type for fusion run registry persistence (RFC-0266 §7 Phase D).
    Each [register_running] / [mark_completed] appends one line so run history
-   survives server restart. The event type is intentionally minimal and stable;
-   adding new fields is safe because replay ignores unknown JSON keys. *)
+   survives server restart. [Register] contains the complete canonical operation;
+   replay never reconstructs an execution request from metadata or defaults. *)
 
 type t =
   | Register of
-      { run_id : string
-      ; keeper : string
-      ; preset : string
+      { operation : Fusion_types.fusion_operation
       ; started_at : float
       }
   | Complete of
-      { run_id : string
+      { operation_id : string
       ; ok : bool
       ; failure : string option
       ; failure_code : string option
       }
 
 let to_yojson = function
-  | Register { run_id; keeper; preset; started_at } ->
+  | Register { operation; started_at } ->
     `Assoc
       [ ("event", `String "register")
-      ; ("run_id", `String run_id)
-      ; ("keeper", `String keeper)
-      ; ("preset", `String preset)
+      ; ("operation", Fusion_types.fusion_operation_to_yojson operation)
       ; ("started_at", `Float started_at)
       ]
-  | Complete { run_id; ok; failure; failure_code } ->
+  | Complete { operation_id; ok; failure; failure_code } ->
     `Assoc
       (List.filter_map
          (fun (k, v) -> Option.map (fun value -> (k, value)) v)
          [ "event", Some (`String "complete")
-         ; "run_id", Some (`String run_id)
+         ; "operation_id", Some (`String operation_id)
          ; "ok", Some (`Bool ok)
          ; "failure", Option.map (fun s -> `String s) failure
          ; "failure_code", Option.map (fun s -> `String s) failure_code
@@ -84,23 +80,27 @@ let optional_string_field name fields =
          (Yojson.Safe.to_string json))
 ;;
 
+let operation_field fields =
+  let ( let* ) = Result.bind in
+  let* json = field "operation" fields in
+  Fusion_types.fusion_operation_of_yojson json
+;;
+
 let of_yojson json =
   let ( let* ) = Result.bind in
   let* fields = object_fields json in
   let* event = string_field "event" fields in
   match event with
   | "register" ->
-    let* run_id = string_field "run_id" fields in
-    let* keeper = string_field "keeper" fields in
-    let* preset = string_field "preset" fields in
+    let* operation = operation_field fields in
     let* started_at = float_field "started_at" fields in
-    Ok (Register { run_id; keeper; preset; started_at })
+    Ok (Register { operation; started_at })
   | "complete" ->
-    let* run_id = string_field "run_id" fields in
+    let* operation_id = string_field "operation_id" fields in
     let* ok = bool_field "ok" fields in
     let* failure = optional_string_field "failure" fields in
     let* failure_code = optional_string_field "failure_code" fields in
-    Ok (Complete { run_id; ok; failure; failure_code })
+    Ok (Complete { operation_id; ok; failure; failure_code })
   | other -> Error (Printf.sprintf "unknown fusion registry event %S" other)
 ;;
 

@@ -1017,8 +1017,6 @@ trigger_policy = "mention_or_thread"
 [fusion]
 enabled = true
 default_preset = "trio"
-# - staged_judge_group_size: staged_judge_of_judges의 고정 reducer group 크기.
-staged_judge_group_size = 3
 
 # 패널 프리셋. 패널 답변은 free text다. 2026-07-01 사고(ollama.com cloud가 json_schema를
 # 조용히 무시 → 패널 전멸) 이후 패널의 provider-native structured output 요구는 제거됐다
@@ -1053,17 +1051,14 @@ judge_timeout_s = 300.0
 web_tools = false
 
 # ── JoJ-capable preset (RFC-0283 judge-of-judges) ───────────────────────────
-# masc_fusion topology="judge_of_judges"는 preset에 1차 심판 >= 2명을 요구한다
-# (fusion_orchestrator.run_judge_of_judges). trio는 단일 judge라 JoJ 호출이 항상
-# "requires >= 2 judges"로 fail-closed된다 → 키퍼가 JoJ topology를 쓸 수 없었다.
-# quorum은 서로 다른 렌즈(evidence/coverage)의 1차 심판 2명을 두고, meta judge(judge=)가
-# 두 종합을 재조정한다. 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
+# masc_fusion topology="judge_of_judges"는 preset의 typed judge 목록 전체를
+# 설정 순서대로 실행하고 meta judge(judge=)가 그 종합을 재조정한다.
+# quorum은 서로 다른 evidence/coverage 렌즈를 제공한다.
+# 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
 # Panel models and Fusion judge/refine/meta paths request provider-native
 # structured output, so every panel and judge runtime below must declare
 # supports-structured-output=true. Distinct labels preserve lens identity while
 # the schema contract prevents config drift back to JSON-mode-only runtimes.
-# staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)의 정확한 배수
-# 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
 [fusion.presets.quorum]
 panel = [
   "ollama_cloud.ollama-cloud-devstral-2-123b",
@@ -1086,11 +1081,11 @@ one resolved answer. Respond with ONLY the requested JSON object, no prose and n
 """
 panel_timeout_s = 300.0
 judge_timeout_s = 300.0
-# meta/stage-meta reducer 구조적 타임아웃. 미지정 시 judge_timeout_s와 동일.
+# meta reducer 구조적 타임아웃. 미지정 시 judge_timeout_s와 동일.
 meta_timeout_s = 300.0
 web_tools = false
 
-# 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다 (JoJ requires >= 2; RFC-0283).
+# 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다.
 # label이 정체성을 주므로 distinct lens는 distinct identity가 된다 (Duplicate_judge 회피).
 # Strict structured-output support is mandatory for panel and judge runtimes in
 # this seed. Some model families overlap across panel and judge lanes because the
@@ -1118,24 +1113,10 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 timeout_s = 300.0
 
-# ── Staged-JoJ-capable preset (RFC-0283 staged_judge_of_judges) ──────────────
-# staged_judge_of_judges는 judge 수가 [fusion].staged_judge_group_size(=3)의
-# 정확한 배수이면서 group_size*2(=6) 이상이어야 한다 (fusion_policy.staged_judge_groups).
-# 지금까지 충족 preset이 0이라 topology가 도구 스키마에 노출되고도 모든 호출이
-# config 에러로 fail-closed되는 죽은 옵션이었다. council은 6개 lens 심판을
-# 3개씩 2 stage로 나눈다: stage 1 = evidence/coverage/risk, stage 2 =
-# feasibility/simplicity/adversarial. 각 stage meta가 그룹 종합을 만들고 최종
-# meta judge(judge=)가 stage 종합들을 재조정한다. label이 정체성을 주므로
-# 같은 모델이 다른 lens로 반복 등장해도 Duplicate_judge가 아니다 (quorum 주석과
-# 동일 계약). judge/meta 경로는 provider-native structured output을 요구하므로
-# 심판 런타임은 전부 supports-structured-output=true 선언 모델만 쓴다.
-# 비용/지연: LLM 호출 12회(panel 3 + 1차 심판 6 + stage meta 2 + 최종 meta 1).
-# 실행은 4단 순차 파이프라인(panel → 1차 심판 병렬 → stage meta 병렬 → 최종
-# meta, fusion_orchestrator run_staged_judge_of_judges)이라 각 단의
-# timeout(300s)이 누적된다 — 동시성 캡이 각 단을 한 웨이브로 소화할 때 최악
-# ~20분. 빠른 종합이 필요하면 단이 짧은 quorum/judge_of_judges 계열을 쓴다.
-# 키퍼 사용: masc_fusion preset="council" topology="staged_judge_of_judges"
-# (judge_of_judges topology도 동일 preset으로 사용 가능 — 6 lens 병렬 후 meta).
+# ── Multi-lens council preset ────────────────────────────────────────────────
+# council은 여섯 typed lens를 선언 순서대로 모두 실행한다. label이 정체성을
+# 부여하므로 같은 모델이 다른 lens로 반복 등장해도 Duplicate_judge가 아니다.
+# 키퍼 사용: masc_fusion preset="council" topology="judge_of_judges".
 [fusion.presets.council]
 panel = [
   "ollama_cloud.ollama-cloud-devstral-2-123b",
@@ -1149,10 +1130,10 @@ own view.
 """
 judge = "ollama_cloud.ollama-cloud-ministral-3-14b"
 judge_system_prompt = """
-You are the meta-judge. You are given stage syntheses, each produced by a group \
-of judges evaluating the same panel of model answers through different lenses. \
-Reconcile them: where the stages agree, state the consensus; where they diverge, \
-adjudicate with reasons; surface any blind spot that a single stage missed. \
+You are the meta-judge. You are given judge syntheses evaluating the same panel \
+of model answers through different lenses. Reconcile them: where the judges \
+agree, state the consensus; where they diverge, adjudicate with reasons; surface \
+any blind spot that a single lens missed. \
 Produce one resolved answer. Respond with ONLY the requested JSON object, no \
 prose and no code fences.
 """

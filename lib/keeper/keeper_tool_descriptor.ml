@@ -1076,12 +1076,7 @@ let masc_fusion_schema =
          judge could not decide (verdict insufficient); otherwise returns the \
          first synthesis. \"judge_of_judges\": several distinct judges each \
          synthesise the panel independently and a meta-judge reconciles them \
-         (requires the preset to configure >= 2 judges). \
-         \"staged_judge_of_judges\": first judges are grouped by \
-         [fusion].staged_judge_group_size, each group is reconciled by a \
-         stage meta-judge, then a final meta-judge reconciles the stage \
-         results (requires at least two exact groups; ragged counts are \
-         rejected). Unknown values are rejected."
+         in their configured order. Unknown values are rejected."
     ]
 ;;
 

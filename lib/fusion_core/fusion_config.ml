@@ -9,7 +9,6 @@ type config_error =
   | Duplicate_panelist of string * string
   | Missing_prompt of string
   | Missing_judge_model of string
-  | Invalid_staged_judge_group_size of int
   | Missing_default_preset of string
   | Unexpected_field of string * string
       (** (config location, field): Fusion schema에 없는 필드. *)
@@ -23,7 +22,6 @@ type config_error =
 let disabled : Fusion_policy.t =
   { enabled = false
   ; default_preset = ""
-  ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets = []
   }
 
@@ -197,10 +195,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   let default_preset =
     Otoml.find_or ~default:"" toml Otoml.get_string [ "fusion"; "default_preset" ]
   in
-  let staged_judge_group_size =
-    Otoml.find_or ~default:Fusion_policy.default_staged_judge_group_size toml
-      Otoml.get_integer [ "fusion"; "staged_judge_group_size" ]
-  in
   let preset_entries =
     match Otoml.find_opt toml Otoml.get_table [ "fusion"; "presets" ] with
     | Some entries -> entries
@@ -212,13 +206,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   (* 추가 검증 — enabled일 때만 강제 (disabled면 빈 config 허용). *)
   let errors =
     if enabled && presets = [] then Empty_presets :: errors else errors
-  in
-  (* Staged JOJ uses this as an exact reducer group size.  Values below 2
-     silently degenerate the tree into pass-through, so reject them at load. *)
-  let errors =
-    if staged_judge_group_size < Fusion_policy.min_staged_judge_group_size
-    then Invalid_staged_judge_group_size staged_judge_group_size :: errors
-    else errors
   in
   (* enabled면 default_preset가 비어있지 않고 presets에 존재해야 한다. preset 생략
      호출이 default_preset로 폭빽하는데, ""는 find_preset에서 항상 None→Preset_unknown
@@ -239,14 +226,20 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
     Ok
       { Fusion_policy.enabled
       ; default_preset
-      ; staged_judge_group_size
       ; presets
       }
 
 let of_toml (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =
   match Otoml.find_opt toml Fun.id [ "fusion" ] with
   | None -> Ok disabled
-  | Some _ ->
-    (match parse_enabled toml with
-     | result -> result
-     | exception Otoml.Type_error msg -> Error [ Toml_type_error msg ])
+  | Some fusion ->
+    (match
+       unexpected_field ~location:"fusion"
+         ~allowed:[ "enabled"; "default_preset"; "presets" ]
+         fusion
+     with
+     | Some error -> Error [ error ]
+     | None ->
+       (match parse_enabled toml with
+        | result -> result
+        | exception Otoml.Type_error msg -> Error [ Toml_type_error msg ]))

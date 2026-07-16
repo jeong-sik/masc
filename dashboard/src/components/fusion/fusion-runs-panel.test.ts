@@ -60,6 +60,32 @@ describe('parseFusionRunsResponse', () => {
     expect(parsed.runs[1]?.error).toBeUndefined()
     expect(parsed.runs[1]?.failureCode).toBeUndefined()
   })
+
+  it('carries completion receipt persistence failure without rewriting run outcome', () => {
+    const parsed = parseFusionRunsResponse({
+      runs: [{
+        run_id: 'r-receipt',
+        keeper: 'k',
+        preset: 'deep',
+        started_at: 1,
+        status: 'completed',
+        receipt_status: 'persistence_failed',
+        receipt_error: 'disk unavailable',
+      }],
+    })
+    expect(parsed.runs[0]).toMatchObject({
+      runId: 'r-receipt',
+      status: 'completed',
+      receiptStatus: 'persistence_failed',
+      receiptError: 'disk unavailable',
+    })
+  })
+
+  it('fails loudly on an unknown completion receipt status', () => {
+    expect(() => parseFusionRunsResponse({
+      runs: [{ run_id: 'r', keeper: 'k', preset: 'p', started_at: 1, status: 'completed', receipt_status: 'maybe' }],
+    })).toThrow('unknown fusion completion receipt status: maybe')
+  })
 })
 
 // The FusionRunsPanel component was merged into the FusionSurface master list, so

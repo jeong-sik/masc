@@ -101,9 +101,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           let successful_syntheses =
             Fusion_orchestrator_judge_wave.successful_syntheses
           in
-          let successful_pair_syntheses =
-            Fusion_orchestrator_judge_wave.successful_pair_syntheses
-          in
           let firsts_usage = Fusion_orchestrator_judge_wave.firsts_usage in
           let all_fail_error_of_runs =
             Fusion_orchestrator_judge_wave.all_fail_error_of_runs
@@ -124,10 +121,10 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           in
           let run_judge_of_judges () =
             match preset.Fusion_policy.judges with
-            | [] | [ _ ] ->
+            | [] ->
               ( Error
                   ( Fusion_types.Internal_error
-                      "judge_of_judges requires >= 2 judges configured in the preset ([[fusion.presets.<name>.judges]])"
+                      "judge_of_judges requires a configured judge ([[fusion.presets.<name>.judges]])"
                   , Fusion_types.zero_usage )
               , [] )
             | judges ->
@@ -179,145 +176,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                                { Fusion_types.failed_role = Meta
                                ; failure
                                ; usage = meta_u
-                               ; elapsed_s
-                               }
-                           ] )))
-          in
-          let run_staged_judge_of_judges () =
-            let group_size = policy.Fusion_policy.staged_judge_group_size in
-            match
-              Fusion_policy.staged_judge_groups ~group_size preset.Fusion_policy.judges
-            with
-            | Error e ->
-              ( Error
-                  ( Fusion_types.Internal_error (Fusion_policy.staged_judge_group_error_message e)
-                  , Fusion_types.zero_usage )
-              , [] )
-            | Ok _groups ->
-              let firsts =
-                run_first_judges preset.Fusion_policy.judges
-                |> with_timeout_fallback ~run_fallback_judge
-              in
-              let rec take n acc rest =
-                if n = 0
-                then (List.rev acc, rest)
-                else
-                  match rest with
-                  | [] -> (List.rev acc, [])
-                  | x :: xs -> take (n - 1) (x :: acc) xs
-              in
-              let rec chunk_firsts acc rest =
-                match rest with
-                | [] -> List.rev acc
-                | _ ->
-                  let group, rest = take group_size [] rest in
-                  chunk_firsts (group :: acc) rest
-              in
-              let first_groups = chunk_firsts [] firsts in
-              let run_stage_meta (stage_num, stage_firsts) =
-                let stage_id = Printf.sprintf "stage-%d" stage_num in
-                let first_nodes = first_judge_nodes stage_firsts in
-                let ok_priors = successful_syntheses stage_firsts in
-                match ok_priors with
-                | [] ->
-                  let err =
-                    all_fail_error_of_runs
-                      ~fallback:
-                        (Fusion_types.Internal_error
-                           (Printf.sprintf
-                              "staged_judge_of_judges %s: no judge produced a synthesis"
-                              stage_id))
-                      stage_firsts
-                  in
-                  ((stage_id, Error err), first_nodes)
-                | (_, first_s, _) :: _ ->
-                  let firsts_usage = firsts_usage stage_firsts in
-                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
-                  (match
-                        Fusion_judge.run_meta ~sw ~net
-                          ~timeout_s:preset.Fusion_policy.meta_timeout_s
-                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
-                          ~judge_model:preset.Fusion_policy.judge
-                          ~question:req.Fusion_types.prompt ~panel ~priors
-                          ~web_tools:judge_web_tools ()
-                      with
-                      | Ok (stage_s, stage_u) ->
-                        ( ( stage_id
-                          , Ok (stage_s, Fusion_types.add_usage firsts_usage stage_u) )
-                        , first_nodes
-                          @ [ Fusion_types.Synthesized
-                                { Fusion_types.role = Stage_meta stage_num
-                                ; synthesis = stage_s
-                                ; usage = stage_u
-                                }
-                            ] )
-                      | Error (failure, stage_u) ->
-                        Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
-                          "fusion run %s staged JOJ %s meta judge failed, keeping first judge synthesis: %s"
-                          req.Fusion_types.run_id stage_id
-                          (Fusion_types.judge_failure_text failure);
-                        let elapsed_s = elapsed_since_t0 () in
-                        ( ( stage_id
-                          , Ok (first_s, Fusion_types.add_usage firsts_usage stage_u) )
-                        , first_nodes
-                          @ [ Fusion_types.Judge_failed
-                                { Fusion_types.failed_role = Stage_meta stage_num
-                                ; failure
-                                ; usage = stage_u
-                                ; elapsed_s
-                                }
-                            ] ))
-              in
-              let indexed_groups = List.mapi (fun i group -> (i + 1, group)) first_groups in
-              let stage_runs =
-                Eio.Fiber.List.map
-                  ~max_fibers:(max 1 (List.length indexed_groups))
-                  run_stage_meta indexed_groups
-              in
-              let stage_results = List.map fst stage_runs in
-              let stage_nodes = List.concat_map snd stage_runs in
-              let ok_stages = successful_pair_syntheses stage_results in
-              (match ok_stages with
-               | [] ->
-                 let err =
-                   Fusion_types.all_fail_error
-                     ~fallback:
-                       (Fusion_types.Internal_error "staged_judge_of_judges: no stage produced a synthesis")
-                     stage_results
-                 in
-                 (Error err, stage_nodes)
-               | (_, first_stage_s, _) :: _ ->
-                 let stage_usage = Fusion_types.sum_all_usage stage_results in
-                 let priors = List.map (fun (id, s, _) -> (id, s)) ok_stages in
-                 (match
-                       Fusion_judge.run_meta ~sw ~net
-                         ~timeout_s:preset.Fusion_policy.meta_timeout_s
-                         ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
-                         ~judge_model:preset.Fusion_policy.judge
-                         ~question:req.Fusion_types.prompt ~panel ~priors
-                         ~web_tools:judge_web_tools ()
-                     with
-                     | Ok (final_s, final_u) ->
-                       ( Ok (final_s, Fusion_types.add_usage stage_usage final_u)
-                       , stage_nodes
-                         @ [ Fusion_types.Synthesized
-                               { Fusion_types.role = Final_meta
-                               ; synthesis = final_s
-                               ; usage = final_u
-                               }
-                           ] )
-                     | Error (failure, final_u) ->
-                       Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
-                         "fusion run %s staged JOJ final meta judge failed, keeping first stage synthesis: %s"
-                         req.Fusion_types.run_id
-                         (Fusion_types.judge_failure_text failure);
-                       let elapsed_s = elapsed_since_t0 () in
-                       ( Ok (first_stage_s, Fusion_types.add_usage stage_usage final_u)
-                       , stage_nodes
-                         @ [ Fusion_types.Judge_failed
-                               { Fusion_types.failed_role = Final_meta
-                               ; failure
-                               ; usage = final_u
                                ; elapsed_s
                                }
                            ] )))
@@ -381,7 +239,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                          { Fusion_types.role = Single; synthesis = s1; usage = u1 }
                      ] ))
             | Fusion_types.Judge_of_judges -> run_judge_of_judges ()
-            | Fusion_types.Staged_judge_of_judges -> run_staged_judge_of_judges ()
           in
           let judge = judge_full |> Result.map fst |> Result.map_error fst in
           let judge_usage =

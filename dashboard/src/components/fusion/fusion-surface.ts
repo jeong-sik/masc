@@ -975,7 +975,9 @@ function FusionRegistryRow({ record, active }: { record: FusionRunRecord; active
           <span class="nm">${keeper}</span>
         </span>
         <span class="spacer"></span>
-        ${record.status === 'running'
+        ${record.receiptStatus === 'persistence_failed'
+          ? html`<span class="fus-dec-badge bad">receipt 복구</span>`
+          : record.status === 'running'
           ? html`<span class="fus-dec-badge run">심의 중</span>`
           : record.status === 'recovery_required'
             ? html`<span class="fus-dec-badge bad">복구 필요</span>`
@@ -1309,7 +1311,9 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
           레지스트리 관측
         </div>
         <div class="fus-judge-wait">
-          ${record.status === 'running'
+          ${record.receiptStatus === 'persistence_failed'
+            ? html`실행은 종료됐지만 completion receipt 저장에 실패했습니다.${record.receiptError ? html` · ${record.receiptError}` : null}`
+            : record.status === 'running'
             ? html`<span class="fus-rdot run"></span>심의 진행 중 — 패널·심판 상세는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 이 자리에 나타납니다.`
             : record.status === 'recovery_required'
               ? html`재시작 전 실행이 완료되지 않았습니다.${record.failureCode ? html` <span class="mono">${record.failureCode}</span>` : null}${record.error ? html` · ${record.error}` : null}`

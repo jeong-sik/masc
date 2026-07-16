@@ -17,6 +17,20 @@
 
 type recovery_reason = Worker_process_restarted
 
+type persistence_error =
+  | Append_failed of
+      { path : string
+      ; detail : string
+      }
+
+type completion_receipt =
+  | Durable
+  | Persistence_failed of persistence_error
+
+type completion_error =
+  | Unknown_run of string
+  | Completion_persistence_failed of persistence_error
+
 type run_status =
   | Running
   | Recovery_required of { reason : recovery_reason }
@@ -27,12 +41,11 @@ type run_status =
          키퍼가 원인을 얻을 tool-reachable 경로가 없었다 (mli 참조). *)
       failure : string option;
       failure_code : string option;
+      receipt : completion_receipt;
     }
 
 type run = {
-  run_id : string;
-  keeper : string;
-  preset : string;
+  operation : Fusion_types.fusion_operation;
   started_at : float;  (* unix seconds from the keeper clock at fork start *)
   status : run_status;
 }
@@ -51,12 +64,13 @@ let create ?path () : t = { runs = Atomic.make []; path }
 
 let is_unresolved (r : run) =
   match r.status with
-  | Running | Recovery_required _ -> true
-  | Completed _ -> false
+  | Running | Recovery_required _
+  | Completed { receipt = Persistence_failed _; _ } -> true
+  | Completed { receipt = Durable; _ } -> false
 ;;
 
-(* Keep every unresolved run plus the [max_completed_retained] most recent
-   [Completed] runs (newest [started_at] first). *)
+(* Keep every live/recovery/undurable-receipt run plus the
+   [max_completed_retained] most recent durably completed runs. *)
 let prune (runs : run list) : run list =
   let unresolved, completed = List.partition is_unresolved runs in
   let recent_completed =
@@ -73,47 +87,92 @@ let rec update (t : t) (f : run list -> run list) =
   if not (Atomic.compare_and_set t.runs cur next) then update t f
 ;;
 
+let persistence_error_to_string = function
+  | Append_failed { path; detail } ->
+    Printf.sprintf "fusion registry append failed for %s: %s" path detail
+;;
+
+let completion_error_to_string = function
+  | Unknown_run operation_id ->
+    Printf.sprintf "unknown fusion run %s" operation_id
+  | Completion_persistence_failed error -> persistence_error_to_string error
+;;
+
+let run_operation_id (run : run) = Fusion_types.fusion_operation_id run.operation
+let operation_id = run_operation_id
+let keeper (run : run) = run.operation.request.keeper
+let preset (run : run) = run.operation.request.preset
+
 let append_event t event =
   match t.path with
-  | None -> ()
+  | None -> Ok ()
   | Some path ->
-    (try Fs_compat.append_jsonl path (Fusion_run_registry_event.to_yojson event) with
+    (try
+       Fs_compat.append_jsonl path (Fusion_run_registry_event.to_yojson event);
+       Ok ()
+     with
      | exn ->
-       Log.Misc.warn
-         "fusion_run_registry: append failed for %s: %s"
-         path
-         (Printexc.to_string exn))
+       let error = Append_failed { path; detail = Printexc.to_string exn } in
+       Log.Misc.warn "%s" (persistence_error_to_string error);
+       Error error)
 ;;
 
-let register_running t ~run_id ~keeper ~preset ~started_at =
-  append_event
-    t
-    (Fusion_run_registry_event.Register { run_id; keeper; preset; started_at });
-  update t (fun runs ->
-    let run = { run_id; keeper; preset; started_at; status = Running } in
-    (* defensive: a re-registered run_id replaces its prior entry *)
-    let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
-    prune (run :: without_dup))
-;;
-
-let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
-  append_event t
-    (Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code });
-  update t (fun runs ->
-    runs
-    |> List.map (fun r ->
-         if String.equal r.run_id run_id
-         then { r with status = Completed { ok; failure; failure_code } }
-         else r)
-    |> prune)
+let register_running t ~operation ~started_at =
+  let id = Fusion_types.fusion_operation_id operation in
+  match
+    append_event
+      t
+      (Fusion_run_registry_event.Register { operation; started_at })
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    update t (fun runs ->
+      let run = { operation; started_at; status = Running } in
+      (* defensive: a re-registered operation id replaces its prior entry *)
+      let without_dup =
+        List.filter
+          (fun run ->
+             not
+               (String.equal (run_operation_id run) id))
+          runs
+      in
+      prune (run :: without_dup));
+    Ok ()
 ;;
 
 let list_runs (t : t) : run list =
   Atomic.get t.runs |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
 ;;
 
-let get (t : t) ~run_id : run option =
-  List.find_opt (fun r -> String.equal r.run_id run_id) (Atomic.get t.runs)
+let get (t : t) ~operation_id:expected : run option =
+  List.find_opt
+    (fun run -> String.equal (run_operation_id run) expected)
+    (Atomic.get t.runs)
+;;
+
+let mark_completed (t : t) ~operation_id ?failure ?failure_code ~ok () =
+  match get t ~operation_id with
+  | None -> Error (Unknown_run operation_id)
+  | Some _ ->
+    let persisted =
+      append_event t
+        (Fusion_run_registry_event.Complete { operation_id; ok; failure; failure_code })
+    in
+    let receipt =
+      match persisted with
+      | Ok () -> Durable
+      | Error error -> Persistence_failed error
+    in
+    update t (fun runs ->
+      runs
+      |> List.map (fun r ->
+           if String.equal (run_operation_id r) operation_id
+           then { r with status = Completed { ok; failure; failure_code; receipt } }
+           else r)
+      |> prune);
+    (match persisted with
+     | Ok () -> Ok ()
+     | Error error -> Error (Completion_persistence_failed error))
 ;;
 
 (* Stable status vocabulary shared by every fusion-run surface (Phase 3 keeper
@@ -132,10 +191,12 @@ let status_label = function
    keeper status tool all serialize a run through here so the field set and the
    status label never drift between surfaces. *)
 let run_to_yojson (r : run) : Yojson.Safe.t =
+  let request = r.operation.Fusion_types.request in
   let base =
-    [ ("run_id", `String r.run_id)
-    ; ("keeper", `String r.keeper)
-    ; ("preset", `String r.preset)
+    [ ("run_id", `String request.run_id)
+    ; ("keeper", `String request.keeper)
+    ; ("preset", `String request.preset)
+    ; ("topology", `String (Fusion_types.fusion_topology_to_string r.operation.topology))
     ; ("started_at", `Float r.started_at)
     ; ("status", `String (status_label r.status))
     ]
@@ -149,25 +210,39 @@ let run_to_yojson (r : run) : Yojson.Safe.t =
       [ ("error", `String "worker process restarted before fusion completion")
       ; ("failure_code", `String "worker_process_restarted")
       ]
-    | Completed { ok = false; failure; failure_code } ->
+    | Completed { ok = false; failure; failure_code; _ } ->
       List.filter_map
         (fun (k, v) -> Option.map (fun s -> (k, `String s)) v)
         [ ("error", failure); ("failure_code", failure_code) ]
   in
-  `Assoc (base @ failure_fields)
+  let receipt_fields =
+    match r.status with
+    | Running | Recovery_required _ -> []
+    | Completed { receipt = Durable; _ } -> [ "receipt_status", `String "durable" ]
+    | Completed { receipt = Persistence_failed error; _ } ->
+      [ ("receipt_status", `String "persistence_failed")
+      ; ("receipt_error", `String (persistence_error_to_string error))
+      ]
+  in
+  `Assoc (base @ failure_fields @ receipt_fields)
 ;;
 
 (* Replay helpers — used to hydrate the in-memory table from disk at boot. *)
 let apply_event runs = function
-  | Fusion_run_registry_event.Register { run_id; keeper; preset; started_at } ->
-    let run = { run_id; keeper; preset; started_at; status = Running } in
-    let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
+  | Fusion_run_registry_event.Register { operation; started_at } ->
+    let id = Fusion_types.fusion_operation_id operation in
+    let run = { operation; started_at; status = Running } in
+    let without_dup =
+      List.filter
+        (fun run -> not (String.equal (run_operation_id run) id))
+        runs
+    in
     run :: without_dup
-  | Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code } ->
+  | Fusion_run_registry_event.Complete { operation_id = completed_id; ok; failure; failure_code } ->
     List.map
       (fun r ->
-         if String.equal r.run_id run_id
-         then { r with status = Completed { ok; failure; failure_code } }
+         if String.equal (run_operation_id r) completed_id
+         then { r with status = Completed { ok; failure; failure_code; receipt = Durable } }
          else r)
       runs
 ;;
@@ -222,18 +297,17 @@ let parse_event_line ~path ~line_no line =
 let events_of_run (run : run) =
   let register =
     Fusion_run_registry_event.Register
-      { run_id = run.run_id
-      ; keeper = run.keeper
-      ; preset = run.preset
+      { operation = run.operation
       ; started_at = run.started_at
       }
   in
   match run.status with
   | Running | Recovery_required _ -> [ register ]
-  | Completed { ok; failure; failure_code } ->
+  | Completed { receipt = Persistence_failed _; _ } -> [ register ]
+  | Completed { ok; failure; failure_code; receipt = Durable } ->
     [ register
     ; Fusion_run_registry_event.Complete
-        { run_id = run.run_id; ok; failure; failure_code }
+        { operation_id = run_operation_id run; ok; failure; failure_code }
     ]
 ;;
 

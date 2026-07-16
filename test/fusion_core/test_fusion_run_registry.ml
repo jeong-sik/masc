@@ -2,7 +2,46 @@
    Pure in-memory state; tested on isolated [create ()] instances. *)
 
 open Alcotest
-module R = Fusion_run_registry
+module Registry = Fusion_run_registry
+module R = struct
+  include Registry
+
+  let operation ~run_id ~keeper ~preset : Fusion_types.fusion_operation =
+    { request =
+        { run_id
+        ; keeper
+        ; prompt = "registry test"
+        ; preset
+        ; web_tools = false
+        ; depth = Fusion_types.Fusion_depth.Top
+        ; trigger = Fusion_types.Harness_eval
+        }
+    ; topology = Fusion_types.Simple
+    }
+  ;;
+
+  let register_running_result t ~run_id ~keeper ~preset ~started_at =
+    Registry.register_running t ~operation:(operation ~run_id ~keeper ~preset) ~started_at
+  ;;
+
+  let mark_completed_result t ~run_id ?failure ?failure_code ~ok () =
+    Registry.mark_completed t ~operation_id:run_id ?failure ?failure_code ~ok ()
+  ;;
+
+  let get t ~run_id = Registry.get t ~operation_id:run_id
+
+  let register_running t ~run_id ~keeper ~preset ~started_at =
+    match register_running_result t ~run_id ~keeper ~preset ~started_at with
+    | Ok () -> ()
+    | Error error -> fail (Registry.persistence_error_to_string error)
+  ;;
+
+  let mark_completed t ~run_id ?failure ?failure_code ~ok () =
+    match mark_completed_result t ~run_id ?failure ?failure_code ~ok () with
+    | Ok () -> ()
+    | Error error -> fail (Registry.completion_error_to_string error)
+  ;;
+end
 
 let status_running = function
   | R.Running -> true
@@ -31,11 +70,30 @@ let test_register_then_query () =
   R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"balanced" ~started_at:10.0;
   (match R.get t ~run_id:"r1" with
    | Some run ->
-     check string "keeper" "k" run.R.keeper;
-     check string "preset" "balanced" run.R.preset;
+     check string "keeper" "k" (R.keeper run);
+     check string "preset" "balanced" (R.preset run);
      check bool "is running" true (status_running run.R.status)
    | None -> fail "registered run must be retrievable");
   check int "one run tracked" 1 (List.length (R.list_runs t))
+;;
+
+let test_register_persistence_failure_is_not_published () =
+  let path = Filename.temp_file "fusion-registry-dir" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir path)
+    (fun () ->
+       let t = R.create ~path () in
+       match
+         R.register_running_result t ~run_id:"r-no-receipt" ~keeper:"k"
+           ~preset:"balanced" ~started_at:10.0
+       with
+       | Ok () -> fail "register must fail when its durable event cannot be appended"
+       | Error (R.Append_failed { path = failed_path; _ }) ->
+         check string "failed path" path failed_path;
+         check bool "failed durable register is not published" true
+           (Option.is_none (R.get t ~run_id:"r-no-receipt")))
 ;;
 
 let test_mark_completed () =
@@ -93,9 +151,12 @@ let test_finalize_before_suspend_keeps_completed () =
   | None -> fail "run must remain visible"
 ;;
 
-let test_mark_unknown_is_noop () =
+let test_mark_unknown_is_explicit_error () =
   let t = R.create () in
-  R.mark_completed t ~run_id:"ghost" ~ok:true ();
+  (match R.mark_completed_result t ~run_id:"ghost" ~ok:true () with
+   | Error (R.Unknown_run "ghost") -> ()
+   | Error error -> fail (R.completion_error_to_string error)
+   | Ok () -> fail "unknown completion must not succeed");
   check int "unknown run_id does not create an entry" 0 (List.length (R.list_runs t))
 ;;
 
@@ -104,7 +165,7 @@ let test_list_newest_first () =
   R.register_running t ~run_id:"old" ~keeper:"k" ~preset:"p" ~started_at:1.0;
   R.register_running t ~run_id:"new" ~keeper:"k" ~preset:"p" ~started_at:9.0;
   match R.list_runs t with
-  | first :: _ -> check string "newest started_at first" "new" first.R.run_id
+  | first :: _ -> check string "newest started_at first" "new" (Registry.operation_id first)
   | [] -> fail "expected runs"
 ;;
 
@@ -136,7 +197,14 @@ let test_status_label () =
   check string "recovery label" "recovery_required"
     (R.status_label
        (R.Recovery_required { reason = R.Worker_process_restarted }));
-  check string "completed label" "completed" (R.status_label (R.Completed { ok = true; failure = None; failure_code = None }));
+  check string "completed label" "completed"
+    (R.status_label
+       (R.Completed
+          { ok = true
+          ; failure = None
+          ; failure_code = None
+          ; receipt = R.Durable
+          }));
   check string "failed label" "failed" (R.status_label
        (R.Completed
           { ok = false
@@ -151,8 +219,11 @@ let test_run_to_yojson_recovery_shape () =
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        Fs_compat.save_file path
-         {|{"event":"register","run_id":"r-recovery","keeper":"kx","preset":"deep","started_at":42.0}
-|};
+         (Fusion_run_registry_event.to_jsonl
+            (Fusion_run_registry_event.Register
+               { operation = R.operation ~run_id:"r-recovery" ~keeper:"kx" ~preset:"deep"
+               ; started_at = 42.0
+               }));
        let replayed = R.replay path in
        match R.get replayed ~run_id:"r-recovery" with
        | None -> fail "unfinished run must remain in recovery inventory"
@@ -179,6 +250,7 @@ let test_run_to_yojson_shape () =
     check string "run_id" "r-ser" (yojson_str j "run_id");
     check string "keeper" "kx" (yojson_str j "keeper");
     check string "preset" "deep" (yojson_str j "preset");
+    check string "topology" "simple" (yojson_str j "topology");
     check string "status label (ok=false -> failed)" "failed" (yojson_str j "status");
     (match yojson_field j "started_at" with
      | Some (`Float f) -> check (float 0.001) "started_at" 42.0 f
@@ -211,11 +283,14 @@ let () =
     [ ( "rfc-0266-phase2"
       , [ test_case "register then query" `Quick test_register_then_query
         ; test_case "mark completed (ok true/false)" `Quick test_mark_completed
+        ; test_case "durable register failure is not published" `Quick
+            test_register_persistence_failure_is_not_published
         ; test_case
             "finalize before suspend keeps Completed (buggy order leaks Running)"
             `Quick
             test_finalize_before_suspend_keeps_completed
-        ; test_case "mark unknown run_id is a no-op" `Quick test_mark_unknown_is_noop
+        ; test_case "mark unknown run_id is an explicit error" `Quick
+            test_mark_unknown_is_explicit_error
         ; test_case "list_runs is newest-first" `Quick test_list_newest_first
         ; test_case "prune keeps Running + recent completed" `Quick test_prune_keeps_running_and_recent
         ] )

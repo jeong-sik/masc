@@ -2049,7 +2049,7 @@ let ensure_v2_archive evidence source_raw source_dir =
             (Printexc.to_string exn)))
 ;;
 
-let archive_v2_and_initialize_unlocked ~base_path evidence =
+let archive_v2_and_initialize_unlocked ~before_initialize ~base_path evidence =
   let source_dir = Filename.dirname evidence.source_path in
   if not (String.equal source_dir (Filename.dirname evidence.archive_path))
   then
@@ -2074,6 +2074,7 @@ let archive_v2_and_initialize_unlocked ~base_path evidence =
          | Error _ as error -> error
          | Ok () ->
            (try
+              before_initialize ();
               let empty_v3 =
                 snapshot_to_yojson
                   ~base_path
@@ -2102,7 +2103,7 @@ let archive_v2_and_initialize_unlocked ~base_path evidence =
                    }))))
 ;;
 
-let install_persistence_internal ~after_load ~base_path =
+let install_persistence_internal ~after_load ~before_initialize ~base_path =
   (* Snapshot read and installation are one transition. The hybrid pending
      store lock serializes Eio and non-Eio callers, cooperatively gates Eio
      waiters, and protects cancellation across the durable transition. Keeping
@@ -2117,7 +2118,12 @@ let install_persistence_internal ~after_load ~base_path =
         mark_store_unavailable_unlocked ~base_path storage_error;
         Error (Install_storage_failed storage_error)
       | Ok (V2_archive_required candidate) ->
-        (match archive_v2_and_initialize_unlocked ~base_path candidate with
+        (match
+           archive_v2_and_initialize_unlocked
+             ~before_initialize
+             ~base_path
+             candidate
+         with
          | Error error ->
            let storage_error =
              match error with
@@ -2234,7 +2240,10 @@ let install_persistence_internal ~after_load ~base_path =
 ;;
 
 let install_persistence ~base_path =
-  install_persistence_internal ~after_load:(fun () -> ()) ~base_path
+  install_persistence_internal
+    ~after_load:(fun () -> ())
+    ~before_initialize:(fun () -> ())
+    ~base_path
 ;;
 
 module For_testing = struct
@@ -2259,7 +2268,17 @@ module For_testing = struct
   ;;
 
   let install_persistence_with_after_load_hook ~base_path ~after_load =
-    install_persistence_internal ~after_load ~base_path
+    install_persistence_internal
+      ~after_load
+      ~before_initialize:(fun () -> ())
+      ~base_path
+  ;;
+
+  let install_persistence_with_v3_initialization_hook ~base_path ~before_initialize =
+    install_persistence_internal
+      ~after_load:(fun () -> ())
+      ~before_initialize
+      ~base_path
   ;;
 
   let pending_store_path = pending_store_path

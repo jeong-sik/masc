@@ -256,6 +256,164 @@ let test_v2_archive_probe_keeps_entries_opaque () =
       evidence.archive_path
 ;;
 
+let v2_snapshot_raw =
+  {|{"version":2,"pending":[{"retired":"opaque"},"legacy"],"deliveries":[null]}|}
+;;
+
+let sha256 raw = Digestif.SHA256.(digest_string raw |> to_hex)
+
+let write_raw path raw =
+  ensure_dir (Filename.dirname path);
+  Out_channel.with_open_bin path (fun channel -> output_string channel raw)
+;;
+
+let read_raw path = In_channel.with_open_bin path In_channel.input_all
+
+let with_isolated_queue test =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       test base_path)
+;;
+
+let v2_paths ~base_path =
+  let source_path = AQ.For_testing.pending_store_path ~base_path in
+  let source_hash = sha256 v2_snapshot_raw in
+  let archive_path =
+    Masc.Keeper_gate_path.pending_v2_archive ~base_path ~source_hash
+  in
+  source_path, source_hash, archive_path
+;;
+
+let check_empty_v3 ~base_path =
+  Alcotest.check
+    yojson
+    "source is empty v3"
+    (`Assoc
+       [ "version", `Int 3
+       ; "pending", `List []
+       ; "deliveries", `List []
+       ])
+    (read_pending_snapshot ~base_path)
+;;
+
+let test_v2_cutover_archives_exact_bytes_before_empty_v3 () =
+  with_isolated_queue @@ fun base_path ->
+  let source_path, source_hash, archive_path = v2_paths ~base_path in
+  write_raw source_path v2_snapshot_raw;
+  let report = install_exn ~base_path in
+  let evidence = require_some "cutover report omitted archive evidence" report.v2_archive in
+  Alcotest.(check int) "no legacy pending restored" 0 report.loaded_pending;
+  Alcotest.(check string) "source path" source_path evidence.source_path;
+  Alcotest.(check string) "source hash" source_hash evidence.source_hash;
+  Alcotest.(check int) "opaque pending count" 2 evidence.pending_count;
+  Alcotest.(check int) "opaque delivery count" 1 evidence.delivery_count;
+  Alcotest.(check string) "archive path" archive_path evidence.archive_path;
+  Alcotest.(check string) "archive bytes" v2_snapshot_raw (read_raw archive_path);
+  check_empty_v3 ~base_path;
+  let event =
+    AQ.read_recent_audit ~base_path ~n:8 ()
+    |> List.find_opt (function
+      | `Assoc fields ->
+        List.assoc_opt "event" fields = Some (`String "gate_store_v2_cutover")
+      | _ -> false)
+    |> require_some "cutover audit evidence was not published"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "audit outcome" "success"
+    (event |> member "outcome" |> to_string);
+  Alcotest.(check string) "audit source hash" source_hash
+    (event |> member "source_hash" |> to_string);
+  Alcotest.(check int) "audit pending count" 2
+    (event |> member "pending_count" |> to_int);
+  Alcotest.(check int) "audit delivery count" 1
+    (event |> member "delivery_count" |> to_int);
+  Alcotest.(check string) "audit archive path" archive_path
+    (event |> member "archive_path" |> to_string)
+;;
+
+let test_v2_cutover_reuses_identical_archive () =
+  with_isolated_queue @@ fun base_path ->
+  let source_path, _, archive_path = v2_paths ~base_path in
+  write_raw source_path v2_snapshot_raw;
+  write_raw archive_path v2_snapshot_raw;
+  let report = install_exn ~base_path in
+  ignore (require_some "idempotent cutover omitted archive evidence" report.v2_archive);
+  Alcotest.(check string) "identical archive preserved" v2_snapshot_raw
+    (read_raw archive_path);
+  check_empty_v3 ~base_path
+;;
+
+let test_v2_cutover_rejects_conflicting_archive () =
+  with_isolated_queue @@ fun base_path ->
+  let source_path, _, archive_path = v2_paths ~base_path in
+  let conflicting = "conflicting archive bytes" in
+  write_raw source_path v2_snapshot_raw;
+  write_raw archive_path conflicting;
+  (match AQ.install_persistence ~base_path with
+   | Error (AQ.Install_v2_archive_failed _) -> ()
+   | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+   | Ok _ -> Alcotest.fail "conflicting archive must not cut over");
+  Alcotest.(check string) "v2 source unchanged" v2_snapshot_raw (read_raw source_path);
+  Alcotest.(check string) "conflict not overwritten" conflicting (read_raw archive_path);
+  (match
+     AQ.submit_pending
+       ~keeper_name:"conflict-lane"
+       ~tool_name:"external-effect"
+       ~input:(`Assoc [])
+       ~base_path
+       ()
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "conflicting workspace Gate became available")
+;;
+
+let test_v2_cutover_initialization_failure_is_lane_local_and_retryable () =
+  with_isolated_queue @@ fun base_path ->
+  let other_base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir other_base_path)
+    (fun () ->
+       let source_path, _, archive_path = v2_paths ~base_path in
+       write_raw source_path v2_snapshot_raw;
+       (match
+          AQ.For_testing.install_persistence_with_v3_initialization_hook
+            ~base_path
+            ~before_initialize:(fun () -> failwith "injected v3 publication failure")
+        with
+        | Error (AQ.Install_v3_initialization_failed _) -> ()
+        | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+        | Ok _ -> Alcotest.fail "injected v3 publication failure was ignored");
+       Alcotest.(check string) "failed source remains v2" v2_snapshot_raw
+         (read_raw source_path);
+       Alcotest.(check string) "durable archive remains exact" v2_snapshot_raw
+         (read_raw archive_path);
+       (match
+          AQ.submit_pending
+            ~keeper_name:"failed-lane"
+            ~tool_name:"external-effect"
+            ~input:(`Assoc [])
+            ~base_path
+            ()
+        with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "failed workspace Gate became available");
+       let other_id =
+         submit
+           ~base_path:other_base_path
+           ~keeper_name:"independent-lane"
+           ~input:(`Assoc [ "operation", `String "still-live" ])
+       in
+       reject_and_cleanup other_id;
+       ignore (install_exn ~base_path);
+       check_empty_v3 ~base_path)
+;;
+
 let test_install_serializes_snapshot_read_with_same_base_mutation () =
   let base_path = temp_dir () in
   Fun.protect
@@ -1272,6 +1430,22 @@ let () =
             "v2 archive probe keeps entries opaque"
             `Quick
             test_v2_archive_probe_keeps_entries_opaque
+        ; Alcotest.test_case
+            "v2 cutover archives exact bytes before v3"
+            `Quick
+            test_v2_cutover_archives_exact_bytes_before_empty_v3
+        ; Alcotest.test_case
+            "v2 cutover reuses identical archive"
+            `Quick
+            test_v2_cutover_reuses_identical_archive
+        ; Alcotest.test_case
+            "v2 cutover rejects conflicting archive"
+            `Quick
+            test_v2_cutover_rejects_conflicting_archive
+        ; Alcotest.test_case
+            "v2 cutover init failure is lane-local and retryable"
+            `Quick
+            test_v2_cutover_initialization_failure_is_lane_local_and_retryable
         ; Alcotest.test_case
             "submit is nonblocking and exact"
             `Quick

@@ -152,6 +152,10 @@ module For_testing : sig
     base_path:string ->
     after_load:(unit -> unit) ->
     (install_report, install_error) result
+  val install_persistence_with_v3_initialization_hook :
+    base_path:string ->
+    before_initialize:(unit -> unit) ->
+    (install_report, install_error) result
   val pending_store_path : base_path:string -> string
 end
 

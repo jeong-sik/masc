@@ -2,63 +2,10 @@
 
 let enabled () = Env_config_keeper.KeeperWireCapture.enabled ()
 
-(* OAS 0.212 (oas@6f3648d6) narrowed Secret_redactor to header-shaped
-   secrets and deliberately stopped classifying bare provider token
-   strings. Wire captures persist raw prompts/responses to disk, so masc
-   restores GitHub-token masking here at its own boundary. GitHub token
-   prefixes are designed for detection (secret-scanning contract), so a
-   prefix scan is the intended mechanism, not a heuristic. *)
-let github_token_prefixes =
-  [ "github_pat_"; "ghp_"; "gho_"; "ghu_"; "ghs_"; "ghr_" ]
-
-let is_github_token_char = function
-  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
-  | _ -> false
-
-(* Classic PATs carry 36 random characters after the prefix; requiring a
-   minimum run keeps prose like "ghp_" or "ghs_test" readable. *)
-let min_github_token_suffix = 16
-
-let redact_github_tokens text =
-  let length = String.length text in
-  let buffer = Buffer.create length in
-  let prefix_at index =
-    List.find_opt
-      (fun prefix ->
-         let plen = String.length prefix in
-         index + plen <= length
-         && String.equal (String.sub text index plen) prefix
-         && (index = 0 || not (is_github_token_char text.[index - 1])))
-      github_token_prefixes
-  in
-  let rec scan index =
-    if index >= length
-    then Buffer.contents buffer
-    else (
-      match prefix_at index with
-      | None ->
-        Buffer.add_char buffer text.[index];
-        scan (index + 1)
-      | Some prefix ->
-        let start_of_suffix = index + String.length prefix in
-        let rec run_end at =
-          if at < length && is_github_token_char text.[at]
-          then run_end (at + 1)
-          else at
-        in
-        let stop = run_end start_of_suffix in
-        if stop - start_of_suffix >= min_github_token_suffix
-        then (
-          Buffer.add_string buffer "[REDACTED]";
-          scan stop)
-        else (
-          Buffer.add_string buffer prefix;
-          scan start_of_suffix))
-  in
-  scan 0
-
-let redact text =
-  redact_github_tokens (Llm_provider.Secret_redactor.redact_string text)
+let redact redaction text =
+  text
+  |> Llm_provider.Secret_redactor.redact_string
+  |> Keeper_secret_redaction.redact_text redaction
 
 (* Dated per-day store, mirroring the cost-ledger appender
    ([Keeper_hooks_oas_cost_events.emit_cost_event]); concurrent keepers
@@ -153,21 +100,25 @@ let best_effort ~site ~masc_root ~keeper_name ~turn_id f =
     Log.Keeper.error "keeper_wire_capture: write failed to %s: %s" base_dir
       (Printexc.to_string exn)
 
-let json_string_opt = function
-  | Some value -> `String (redact value)
+let json_string_opt redaction = function
+  | Some value -> `String (redact redaction value)
   | None -> `Null
 
-let capture_request ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
-    ~extra_system_context ~user_message ~history_messages ?trace_id () =
+let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
+    ~system_prompt ~extra_system_context ~user_message ~history_messages ?trace_id
+    () =
   if not (enabled ()) then ()
   else
     best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_id (fun () ->
+      let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let history =
         List.map
           (fun (m : Agent_sdk.Types.message) ->
              `Assoc
                [ ("role", `String (Agent_sdk.Types.role_to_string m.role))
-               ; ("text", `String (redact (Agent_sdk.Types.text_of_message m)))
+               ; ( "text"
+                 , `String
+                     (redact redaction (Agent_sdk.Types.text_of_message m)) )
                ])
           history_messages
       in
@@ -182,22 +133,24 @@ let capture_request ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
               | Some t -> `String (Keeper_id.Trace_id.to_string t)
               | None -> `Null )
           ; ("sdk_turn", `Int sdk_turn)
-          ; ("system_prompt", `String (redact system_prompt))
-          ; ("extra_system_context", json_string_opt extra_system_context)
+          ; ("system_prompt", `String (redact redaction system_prompt))
+          ; ( "extra_system_context"
+            , json_string_opt redaction extra_system_context )
           ; ( "extra_system_context_present"
             , `Bool (Option.is_some extra_system_context) )
-          ; ("user_message", `String (redact user_message))
+          ; ("user_message", `String (redact redaction user_message))
           ; ("history_message_count", `Int (List.length history_messages))
           ; ("history", `List history)
           ]
       in
       write_payload ~masc_root ~keeper_name ~turn_id payload)
 
-let capture_response ~masc_root ~keeper_name ~turn_id ~sdk_turn ~response_text
-    ?trace_id () =
+let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
+    ~response_text ?trace_id () =
   if not (enabled ()) then ()
   else
     best_effort ~site:Response_capture ~masc_root ~keeper_name ~turn_id (fun () ->
+      let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let payload : Yojson.Safe.t =
         `Assoc
           [ ("ts", `String (Masc_domain.now_iso ()))
@@ -209,7 +162,7 @@ let capture_response ~masc_root ~keeper_name ~turn_id ~sdk_turn ~response_text
               | Some t -> `String (Keeper_id.Trace_id.to_string t)
               | None -> `Null )
           ; ("sdk_turn", `Int sdk_turn)
-          ; ("response_text", `String (redact response_text))
+          ; ("response_text", `String (redact redaction response_text))
           ]
       in
       write_payload ~masc_root ~keeper_name ~turn_id payload)

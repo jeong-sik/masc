@@ -377,6 +377,7 @@ let rec spawn_claimed_auto_judge_entry
          ~on_failure
          ~on_finish:(fun () ->
            release_auto_judge approval_id;
+           (* fire-and-forget: the queue owns subsequent worker completion. *)
            ignore (drain_auto_judges ~base_path:entry.audit_base_path))
          ();
        Ok Started

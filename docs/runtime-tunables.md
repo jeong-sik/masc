@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 264 unique knobs across 8 modules.
+**Total**: 260 unique knobs across 8 modules.
 
-**Typed getter classification**: 39/148 tagged (`operator`: 39, `algorithm`: 0, `unclassified`: 109).
+**Typed getter classification**: 38/145 tagged (`operator`: 38, `algorithm`: 0, `unclassified`: 107).
 
 ## Env_config_core (25 knobs; typed classification 2/6)
 
@@ -194,7 +194,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 239 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
 | `MASC_WS_PORT` | string_literal | n/a | n/a | 235 | WebSocket server port. Default: 8937. |
 
-## Env_config_runtime_services (25 knobs; typed classification 3/19)
+## Env_config_runtime_services (21 knobs; typed classification 2/16)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -204,22 +204,18 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_AUTONOMY_STARVATION_BONUS_COEF` | typed:float | unclassified | unclassified | 70 |  |
 | `MASC_AUTONOMY_THOMPSON_WEIGHT` | typed:float | unclassified | unclassified | 73 |  |
 | `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 76 |  |
-| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 137 | Dashboard fixture name override. |
-| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 133 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 146 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
+| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 123 | Dashboard fixture name override. |
+| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 119 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 132 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
 | `MASC_INFERENCE_CACHE_ENABLED` | feature_flag | n/a | n/a | 8 | Enable inference response cache (L1+L2). |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | typed:int | unclassified | unclassified | 26 | L1 in-memory entry cap. BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default caused excessive mem... |
 | `MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS` | typed:int | unclassified | unclassified | 16 | Skip caching for oversized prompts (character count). |
 | `MASC_INFERENCE_CACHE_MAX_TEMP` | typed:float | unclassified | unclassified | 20 | Cache only deterministic temperatures (default exact 0.0). |
 | `MASC_INFERENCE_CACHE_TTL_SEC` | typed:int | unclassified | unclassified | 12 | Default TTL for inference response cache (seconds). |
 | `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 89 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers. Clamped to >= 1.0 ... |
-| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 124 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
-| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 118 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
-| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 110 | Operator snapshot cache TTL (seconds). Default: 30. |
-| `MASC_OPERATOR_JUDGE_ENABLED` | feature_flag | n/a | n/a | 96 | Whether operator judge background loop is enabled. Default: true. |
-| `MASC_OPERATOR_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 99 | Operator judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 107 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
-| `MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC` | typed:int | Timeouts | operator | 104 | Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60. @category Timeouts @ops_class operator |
+| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 110 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
+| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 104 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
+| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 96 | Operator snapshot cache TTL (seconds). Default: 30. |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 42 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 46 | Max age for rate limit entries before cleanup (seconds) |
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 32 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
@@ -256,9 +252,9 @@ the categorization roadmap. Newly-added typed getters in
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 29 |  |
-| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 557 |  |
-| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 561 |  |
-| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 563 |  |
+| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 549 |  |
+| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 553 |  |
+| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 555 |  |
 | `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 184 |  |
 | `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 270 |  |
 | `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 272 |  |
@@ -280,7 +276,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_ECONOMY_REWARD_MENTION_RESPONSE` | string_literal | n/a | n/a | 339 |  |
 | `MASC_ECONOMY_REWARD_TASK_DONE` | string_literal | n/a | n/a | 341 |  |
 | `MASC_ECONOMY_REWARD_UPVOTE` | string_literal | n/a | n/a | 343 |  |
-| `MASC_EVENT_BUFFER_SIZE` | string_literal | n/a | n/a | 635 |  |
+| `MASC_EVENT_BUFFER_SIZE` | string_literal | n/a | n/a | 627 |  |
 | `MASC_GOAL_DISPATCH_RUNTIME` | string_literal | n/a | n/a | 517 |  |
 | `MASC_GRPC_STREAM_MAX_BUFFER` | string_literal | n/a | n/a | 78 |  |
 | `MASC_HEBBIAN_DECAY` | string_literal | n/a | n/a | 177 |  |
@@ -296,25 +292,25 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 151 |  |
 | `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 150 |  |
 | `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 178 |  |
-| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 611 |  |
-| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 645 |  |
+| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 603 |  |
+| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 637 |  |
 | `MASC_ROUTING_RUNTIME` | string_literal | n/a | n/a | 519 |  |
 | `MASC_RUNTIME_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 373 |  |
-| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 653 |  |
-| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 585 |  |
-| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 587 |  |
-| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 589 |  |
-| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 591 |  |
-| `MASC_SSE_KEEPALIVE_SEC` | string_literal | n/a | n/a | 637 |  |
-| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 597 |  |
+| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 645 |  |
+| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 577 |  |
+| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 579 |  |
+| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 581 |  |
+| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 583 |  |
+| `MASC_SSE_KEEPALIVE_SEC` | string_literal | n/a | n/a | 629 |  |
+| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 589 |  |
 | `MASC_TELEMETRY_MAX_BYTES` | string_literal | n/a | n/a | 48 |  |
 | `MASC_TELEMETRY_RETENTION_DAYS` | string_literal | n/a | n/a | 45 |  |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 627 |  |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 629 |  |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 619 |  |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 621 |  |
 | `MASC_TLA_TRACE` | string_literal | n/a | n/a | 138 |  |
-| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 679 |  |
-| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 681 |  |
-| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 683 |  |
+| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 671 |  |
+| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 673 |  |
+| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 675 |  |
 | `MASC_WS_ACK_STALE_THRESHOLD_SEC` | string_literal | n/a | n/a | 88 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 85 |  |
 | `MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION` | string_literal | n/a | n/a | 112 |  |

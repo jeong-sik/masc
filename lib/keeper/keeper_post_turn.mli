@@ -12,17 +12,22 @@
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
-(** Outcome of the compaction step. [applied] iff an explicit compaction
-    request ran. *)
+type compaction_outcome =
+  | Not_attempted
+  | Applied_checkpoint
+  | Failed_compaction of string option
+
+val compaction_outcome_to_string : compaction_outcome -> string
+
+(** Typed outcome of the compaction step; invalid bool combinations are not
+    representable. *)
 type compaction_event =
-  { attempted : bool
-  ; applied : bool
+  { outcome : compaction_outcome
   ; started_dispatched : bool
         (** [true] when [on_compaction_started] completed without raising,
             meaning the FSM is at [Compaction_compacting].  [false] when
             the callback failed or was never called (recovery path), so
             the FSM is still at [Compaction_accumulating]. *)
-  ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
   }

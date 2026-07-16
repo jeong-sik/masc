@@ -14,7 +14,11 @@ let broadcast_lifecycle_events ~(name : string)
     ~(compaction : Keeper_context_runtime.compaction_event)
     ~(handoff_json : Yojson.Safe.t option) : unit =
   let now_ts = Time_compat.now () in
-  (if compaction.applied then
+  (if
+     match compaction.outcome with
+     | Applied_checkpoint -> true
+     | Not_attempted | Failed_compaction _ -> false
+   then
      try
        Sse.broadcast
          (`Assoc
@@ -22,6 +26,10 @@ let broadcast_lifecycle_events ~(name : string)
              ("type", `String "keeper_compaction");
              ("name", `String name);
              ("generation", `Int turn_generation);
+             ( "outcome",
+               `String
+                 (Keeper_context_runtime.compaction_outcome_to_string
+                    compaction.outcome) );
              ( "trigger",
                match compaction.trigger with
                | Some trigger -> `String (Compaction_trigger.to_label trigger)

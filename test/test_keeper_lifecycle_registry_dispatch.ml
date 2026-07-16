@@ -163,10 +163,8 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
     handoff_failure_reason = None;
     compaction =
       {
-        attempted = false;
-        applied = false;
+        outcome = KEC.Not_attempted;
         started_dispatched = false;
-        failure_reason = None;
         trigger = None;
         decision = KEC.Not_requested;
     };
@@ -292,10 +290,8 @@ let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
           (base_lifecycle ~meta) with
           compaction =
             {
-              attempted = true;
-              applied = true;
+              outcome = KEC.Applied_checkpoint;
               started_dispatched = true;
-              failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
             };
@@ -348,10 +344,8 @@ let test_post_turn_compaction_runs_from_failing_health_lane () =
           (base_lifecycle ~meta) with
           compaction =
             {
-              attempted = true;
-              applied = true;
+              outcome = KEC.Applied_checkpoint;
               started_dispatched = true;
-              failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
             };
@@ -394,10 +388,8 @@ let test_compaction_completion_without_started_is_nonfatal () =
           (base_lifecycle ~meta) with
           compaction =
             {
-              attempted = true;
-              applied = true;
+              outcome = KEC.Applied_checkpoint;
               started_dispatched = true;
-              failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
             };
@@ -438,10 +430,8 @@ let test_post_turn_compaction_restarts_after_done_stage () =
           (base_lifecycle ~meta) with
           compaction =
             {
-              attempted = true;
-              applied = true;
+              outcome = KEC.Applied_checkpoint;
               started_dispatched = true;
-              failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
             };

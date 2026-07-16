@@ -40,9 +40,18 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_core
 
+type compaction_outcome =
+  | Not_attempted
+  | Applied_checkpoint
+  | Failed_compaction of string option
+
+let compaction_outcome_to_string = function
+  | Not_attempted -> "not_attempted"
+  | Applied_checkpoint -> "applied_checkpoint"
+  | Failed_compaction _ -> "failed"
+
 type compaction_event = {
-  attempted : bool;
-  applied : bool;
+  outcome : compaction_outcome;
   (** [started_dispatched] is [true] when the [on_compaction_started] callback
       successfully dispatched [Compaction_started] to the registry, placing the
       FSM in [Compaction_compacting].  When [false] (callback failed, skipped,
@@ -51,7 +60,6 @@ type compaction_event = {
       before [Compaction_completed] to avoid the forbidden
       accumulating -> done transition. *)
   started_dispatched : bool;
-  failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
 }
@@ -188,9 +196,10 @@ let apply_resilience_wirein
           let maybe_error =
             (* First non-None error signal from this turn's
                compaction or handoff steps. *)
-            match lifecycle.compaction.failure_reason with
-            | Some _ as r -> r
-            | None -> lifecycle.handoff_failure_reason
+            match lifecycle.compaction.outcome with
+            | Failed_compaction (Some _ as reason) -> reason
+            | Not_attempted | Applied_checkpoint | Failed_compaction None ->
+              lifecycle.handoff_failure_reason
           in
           let witness = Resilience.Keeper_bridge.running_witness in
           let outcome =
@@ -405,10 +414,8 @@ let apply_post_turn_lifecycle_with_resilience_handles
         handoff_failure_reason = None;
         compaction =
           {
-            attempted = false;
-            applied = false;
+            outcome = Not_attempted;
             started_dispatched = false;
-            failure_reason = None;
             trigger = None;
             decision = no_checkpoint_decision;
         };
@@ -458,10 +465,8 @@ let apply_post_turn_lifecycle_with_resilience_handles
         handoff_failure_reason = None;
         compaction =
           {
-            attempted = false;
-            applied = false;
+            outcome = Not_attempted;
             started_dispatched = false;
-            failure_reason = None;
             trigger = None;
             decision;
         };
@@ -575,10 +580,8 @@ let recover_latest_checkpoint_for_overflow_retry
             Ok
               { checkpoint = saved_checkpoint
               ; compaction =
-                  { attempted = true
-                  ; applied = true
+                  { outcome = Applied_checkpoint
                   ; started_dispatched = false
-                  ; failure_reason = None
                   ; trigger = Some prepared_trigger
                   ; decision
                   }

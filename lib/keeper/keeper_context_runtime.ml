@@ -84,11 +84,16 @@ let compaction_decision_prepared =
 (* Re-export from Keeper_post_turn                                   *)
 (* ================================================================ *)
 
+type compaction_outcome = Keeper_post_turn.compaction_outcome =
+  | Not_attempted
+  | Applied_checkpoint
+  | Failed_compaction of string option
+
+let compaction_outcome_to_string = Keeper_post_turn.compaction_outcome_to_string
+
 type compaction_event = Keeper_post_turn.compaction_event = {
-  attempted : bool;
-  applied : bool;
+  outcome : compaction_outcome;
   started_dispatched : bool;
-  failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
 }
@@ -240,8 +245,8 @@ let dispatch_post_turn_lifecycle_events
     ~(config : Workspace.config)
     ~keeper_name
     (lifecycle : post_turn_lifecycle) =
-  if lifecycle.compaction.attempted then
-    if lifecycle.compaction.applied then begin
+  (match lifecycle.compaction.outcome with
+   | Applied_checkpoint ->
       (* FSM boundary: compaction_stage must be Compaction_compacting
          before we dispatch Compaction_completed.  If the
          on_compaction_started callback succeeded (started_dispatched =
@@ -269,20 +274,17 @@ let dispatch_post_turn_lifecycle_events
         ~origin:Keeper_registry.Post_turn_lifecycle
         ~keeper_name
       |> ignore
-    end
-    else
-      dispatch_keeper_phase_event
-        ~config
-        ~origin:Keeper_registry.Post_turn_lifecycle
-        ~keeper_name
-        (Keeper_state_machine.Compaction_failed
-           {
-             reason =
-               Option.value lifecycle.compaction.failure_reason
-                 ~default:
-                   (compaction_decision_to_string
-                      lifecycle.compaction.decision);
-           });
+   | Failed_compaction failure_reason ->
+     dispatch_keeper_phase_event
+       ~config
+       ~origin:Keeper_registry.Post_turn_lifecycle
+       ~keeper_name
+       (Keeper_state_machine.Compaction_failed
+          { reason =
+              Option.value failure_reason
+                ~default:(compaction_decision_to_string lifecycle.compaction.decision)
+          })
+   | Not_attempted -> ());
   match lifecycle.handoff_attempted, lifecycle.handoff_json with
   | true, Some _json ->
       dispatch_keeper_phase_event

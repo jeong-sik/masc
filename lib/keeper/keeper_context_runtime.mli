@@ -74,11 +74,16 @@ val save_oas_checkpoint
   -> generation:int
   -> (Agent_sdk.Checkpoint.t, string) result
 
+type compaction_outcome = Keeper_post_turn.compaction_outcome =
+  | Not_attempted
+  | Applied_checkpoint
+  | Failed_compaction of string option
+
+val compaction_outcome_to_string : compaction_outcome -> string
+
 type compaction_event =
-  { attempted : bool
-  ; applied : bool
+  { outcome : compaction_outcome
   ; started_dispatched : bool
-  ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
   }

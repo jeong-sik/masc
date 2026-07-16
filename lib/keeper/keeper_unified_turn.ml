@@ -212,10 +212,17 @@ let recover_provider_context_overflow_in_lane
                     ~keeper_name:meta.name
                 with
                 | Ok () ->
-                    Log.Keeper.info
-                      ~keeper_name:meta.name
-                      "provider overflow compaction committed; source stimulus will be requeued";
-                    Provider_overflow_applied { trigger; recovery }
+                  (match recovery.compaction.outcome with
+                   | Keeper_context_runtime.Applied_checkpoint ->
+                     Log.Keeper.info
+                       ~keeper_name:meta.name
+                       "provider overflow compaction committed; source stimulus will be requeued";
+                     Provider_overflow_applied { trigger; recovery }
+                   | Keeper_context_runtime.Not_attempted
+                   | Keeper_context_runtime.Failed_compaction _ ->
+                     retry_after_started
+                       ~recovery
+                       "provider overflow recovery returned a non-terminal compaction outcome")
                 | Error error ->
                   retry_after_started
                     ~recovery

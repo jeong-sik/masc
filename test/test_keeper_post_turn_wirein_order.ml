@@ -99,8 +99,9 @@ let test_regular_post_turn_does_not_auto_compact () =
       ~current_turn_blocker_info:None
       ~checkpoint:(Some checkpoint)
   in
-  check bool "compaction not attempted" false result.compaction.attempted;
-  check bool "compaction not applied" false result.compaction.applied;
+  (match result.compaction.outcome with
+   | Post_turn.Not_attempted -> ()
+   | _ -> fail "regular post-turn reported a compaction terminal outcome");
   (match result.compaction.decision with
    | Compact_policy.Not_requested -> ()
    | _ -> fail "regular post-turn returned a compaction decision");

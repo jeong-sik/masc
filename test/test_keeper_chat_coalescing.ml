@@ -854,6 +854,29 @@ let test_reconcile_absent_lane_and_stage_order () =
        ; Before_close
        ])
 
+let test_finalize_statement_total () =
+  Printf.printf "Test: statement finalize is total on both rc and raise channels\n%!";
+  let db = Sqlite3.db_open ":memory:" in
+  let stmt = Sqlite3.prepare db "SELECT 1" in
+  (match Keeper_chat_queue.For_testing.finalize_statement db stmt with
+   | Ok () -> check "healthy statement finalize returns Ok" true
+   | Error detail -> fail "healthy statement finalize returns Ok" detail);
+  (* Sqlite3.finalize raises SqliteError on an already-finalized statement;
+     the wrapper must fold that raise into Error instead of letting it
+     escape cleanup. *)
+  (match Keeper_chat_queue.For_testing.finalize_statement db stmt with
+   | Error detail ->
+     check "already-finalized statement folds to Error without raising"
+       (detail <> "");
+     check "the Error comes from the raise channel, not an error rc"
+       (String.starts_with ~prefix:"SQLite statement finalize raised:" detail)
+   | Ok () ->
+     check "already-finalized statement folds to Error without raising" false
+   | exception exn ->
+     fail "already-finalized statement folds to Error without raising"
+       (Printexc.to_string exn));
+  ignore (Sqlite3.db_close db : bool)
+
 let () =
   Eio_main.run @@ fun _environment ->
   test_first_enqueue_with_runtime_eio_guard ();
@@ -873,6 +896,7 @@ let () =
   test_runtime_root_child_replacement_during_inventory_is_rejected ();
   test_foreign_database_and_symlink_are_quarantined ();
   test_reconcile_absent_lane_and_stage_order ();
+  test_finalize_statement_total ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

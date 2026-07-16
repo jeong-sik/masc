@@ -7,7 +7,6 @@
     - Time.parse_iso8601_opt: ISO timestamp parsing
     - Time.is_stale: staleness check
     - Zombie.is_zombie: zombie detection
-    - ZeroZombie.global_stats: statistics
 *)
 
 open Alcotest
@@ -144,23 +143,6 @@ let test_keeper_zombie_threshold_matches_env_config () =
        old_ts)
 
 (* ============================================================
-   ZeroZombie.global_stats Tests
-   ============================================================ *)
-
-let test_global_stats_total_cleanups () =
-  let stats = Workspace_resilience.ZeroZombie.global_stats in
-  check bool "total_cleanups nonnegative" true (stats.total_cleanups >= 0)
-
-let test_global_stats_last_cleanup_ts () =
-  let stats = Workspace_resilience.ZeroZombie.global_stats in
-  check bool "last_cleanup_ts nonnegative" true (stats.last_cleanup_ts >= 0.0)
-
-let test_global_stats_last_cleaned_agents () =
-  let stats = Workspace_resilience.ZeroZombie.global_stats in
-  check bool "last_cleaned_agents is list" true
-    (List.length stats.last_cleaned_agents >= 0)
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -198,10 +180,5 @@ let () =
       test_case "invalid timestamp" `Quick test_zombie_invalid_timestamp;
       test_case "custom threshold" `Quick test_zombie_custom_threshold;
       test_case "keeper threshold matches env config" `Quick test_keeper_zombie_threshold_matches_env_config;
-    ];
-    "global_stats", [
-      test_case "total_cleanups" `Quick test_global_stats_total_cleanups;
-      test_case "last_cleanup_ts" `Quick test_global_stats_last_cleanup_ts;
-      test_case "last_cleaned_agents" `Quick test_global_stats_last_cleaned_agents;
     ];
   ]

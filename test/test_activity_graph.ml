@@ -631,6 +631,108 @@ let test_task_approved_completes_graph_and_span () =
             (s |> member "agent" |> to_string)
       | None -> Alcotest.fail "task span missing")
 
+(* ── P0-4 current-day incremental parse cache (masc perf root-cause
+   report 2026-07-15, item (1)) ──────────────────────────────────── *)
+
+let emit_n config n =
+  for i = 1 to n do
+    ignore
+      (Activity_graph.emit config ~kind:"message.broadcast"
+         ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+         ~payload:(`Assoc [ ("seq_hint", `Int i) ])
+         ())
+  done
+
+(* Strips the wall-clock [generated_at_iso] field so two [json_response]
+   calls made moments apart can be compared for structural equality. *)
+let strip_generated_at_iso json =
+  match json with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (k, v) -> if String.equal k "generated_at_iso" then (k, `Null) else (k, v))
+         fields)
+  | other -> other
+
+let test_current_day_cache_reparses_only_appended_delta () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 10;
+      let first = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      check int "first read sees 10 events" 10 (List.length first);
+      check int "cold-miss full parse does not touch the delta counter" 0
+        (Activity_graph.For_testing.current_day_parsed_line_count ());
+      emit_n config 5;
+      let second = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      check int "second read sees all 15 events" 15 (List.length second);
+      check int "warm cache re-parses only the 5 appended lines" 5
+        (Activity_graph.For_testing.current_day_parsed_line_count ()))
+
+let test_current_day_cache_matches_uncached_golden () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 4;
+      ignore (Activity_graph.json_response config ~after_seq:0 ~limit:100 ());
+      (* Grow behind the now-warm cache so the next read exercises the
+         incremental delta-fold path, not a cold full parse. *)
+      emit_n config 3;
+      let incremental =
+        Activity_graph.json_response config ~after_seq:0 ~limit:100 ()
+        |> strip_generated_at_iso
+      in
+      (* Force the reference path: an empty cache means the very next
+         read is a full, repair-aware [parse_events_from_file] call. *)
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      let uncached =
+        Activity_graph.json_response config ~after_seq:0 ~limit:100 ()
+        |> strip_generated_at_iso
+      in
+      check string "incremental path output matches full-reparse reference"
+        (Yojson.Safe.to_string uncached) (Yojson.Safe.to_string incremental))
+
+let test_current_day_cache_rescans_from_zero_on_truncation () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 6;
+      let baseline = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      check int "baseline has 6 events" 6 (List.length baseline);
+      (* Simulate rotation/truncation: rewrite the current-day file
+         smaller than the cached boundary. *)
+      let path = Activity_graph.For_testing.current_day_path config in
+      let raw_line seq =
+        Printf.sprintf
+          "{\"seq\":%d,\"ts_ms\":%d,\"ts_iso\":\"2026-01-01T00:00:00Z\",\
+           \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
+           \"payload\":{},\"tags\":[]}\n"
+          seq seq
+      in
+      Fs_compat.save_file path (raw_line 1 ^ raw_line 2);
+      let after_truncate = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      check int "truncated file rescanned from zero, not merged with stale cache"
+        2 (List.length after_truncate))
+
+let test_past_day_cache_evicts_entries_for_deleted_files () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      let baseline_count = Activity_graph.For_testing.past_day_cache_entry_count () in
+      let root = Filename.concat (Workspace_utils.masc_dir config) "activity-events" in
+      let month_dir = Filename.concat root "2000-01" in
+      Unix.mkdir root 0o755;
+      Unix.mkdir month_dir 0o755;
+      let day_path = Filename.concat month_dir "01.jsonl" in
+      Fs_compat.save_file day_path
+        "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
+         \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"payload\":{},\"tags\":[]}\n";
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ());
+      check bool "past-day file is now cached" true
+        (Activity_graph.For_testing.past_day_cache_entry_count () > baseline_count);
+      Sys.remove day_path;
+      Unix.rmdir month_dir;
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ());
+      check int "cache entry evicted once the backing file is gone"
+        baseline_count (Activity_graph.For_testing.past_day_cache_entry_count ()))
+
 let test_parse_since_ms_supports_minutes () =
   check (option int) "5m parses" (Some (5 * 60 * 1000))
     (Server_activity_http.parse_since_ms "5m");
@@ -688,5 +790,16 @@ let () =
             test_parse_since_ms_supports_minutes;
           test_case "span_status_opt None for unknown" `Quick
             test_span_status_of_string_opt_returns_none_for_unknown;
+        ] );
+      ( "current_day_cache",
+        [
+          test_case "warm cache re-parses only the appended delta" `Quick
+            test_current_day_cache_reparses_only_appended_delta;
+          test_case "incremental path output matches full-reparse reference"
+            `Quick test_current_day_cache_matches_uncached_golden;
+          test_case "truncated file rescans from zero" `Quick
+            test_current_day_cache_rescans_from_zero_on_truncation;
+          test_case "past-day cache evicts entries for deleted files" `Quick
+            test_past_day_cache_evicts_entries_for_deleted_files;
         ] );
     ]

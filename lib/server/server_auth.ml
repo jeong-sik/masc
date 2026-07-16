@@ -71,26 +71,60 @@ let bearer_token_from_header value =
 let authorization_header_name = "authorization"
 let internal_token_header_name = "x-masc-internal-token"
 
-let auth_token_from_request request =
-  match
+type request_auth_credential =
+  | Absent_credential
+  | Parsed_credential of string
+  | Malformed_credential of string
+
+let request_auth_credential_from_request request =
+  let authorization =
+    Httpun.Headers.get request.Httpun.Request.headers authorization_header_name
+  in
+  let internal =
+    Httpun.Headers.get request.Httpun.Request.headers internal_token_header_name
+  in
+  let bearer =
     Option.bind
-      (Httpun.Headers.get request.Httpun.Request.headers authorization_header_name)
-      bearer_token_from_header
-  with
-  | Some _ as token -> token
+      (Option.bind authorization bearer_token_from_header)
+      (fun token -> trim_opt (Some token))
+  in
+  match bearer with
+  | Some token -> Parsed_credential token
   | None ->
-      trim_opt
-        (Httpun.Headers.get request.Httpun.Request.headers internal_token_header_name)
+      (match internal, authorization with
+       | Some token, _ ->
+           (match trim_opt (Some token) with
+            | Some token -> Parsed_credential token
+            | None -> Malformed_credential token)
+       | None, Some raw -> Malformed_credential raw
+       | None, None -> Absent_credential)
+
+let token_of_request_auth_credential = function
+  | Parsed_credential token -> Some token
+  | Absent_credential | Malformed_credential _ -> None
+
+let auth_token_from_request request =
+  request_auth_credential_from_request request
+  |> token_of_request_auth_credential
 
 let request_carries_auth_credential request =
-  match
-    ( Httpun.Headers.get request.Httpun.Request.headers authorization_header_name
-    , Httpun.Headers.get request.Httpun.Request.headers internal_token_header_name )
-  with
-  | None, None -> false
-  | None, Some _ | Some _, None | Some _, Some _ -> true
+  match request_auth_credential_from_request request with
+  | Absent_credential -> false
+  | Parsed_credential _ | Malformed_credential _ -> true
 
-let observer_sse_query_token_from_request request =
+let malformed_request_credential_error () =
+  Masc_domain.Auth
+    (Masc_domain.Auth_error.Unauthorized
+       { reason = Missing_token
+       ; message =
+           "Request credential header did not contain a bearer or internal token."
+       })
+
+let reject_malformed_request_credential = function
+  | Malformed_credential _ -> Error (malformed_request_credential_error ())
+  | Absent_credential | Parsed_credential _ -> Ok ()
+
+let observer_sse_query_credential_from_request request =
   let path = Http_server_eio.Request.path request in
   let observer_stream_requested =
     match query_param request "sse_kind" with
@@ -103,13 +137,26 @@ let observer_sse_query_token_from_request request =
     when (observer_stream_requested && String.equal path "/mcp")
          || String.equal path "/events/presence"
          || String.equal path "/api/v1/ide/cursors/stream" ->
-      trim_opt (query_param request "token")
-  | _ -> None
+      (match query_param request "token" with
+       | None -> Absent_credential
+       | Some raw ->
+           (match trim_opt (Some raw) with
+            | Some token -> Parsed_credential token
+            | None -> Malformed_credential raw))
+  | _ -> Absent_credential
+
+let observer_sse_query_token_from_request request =
+  observer_sse_query_credential_from_request request
+  |> token_of_request_auth_credential
+
+let observer_sse_auth_credential_from_request request =
+  match request_auth_credential_from_request request with
+  | (Parsed_credential _ | Malformed_credential _) as credential -> credential
+  | Absent_credential -> observer_sse_query_credential_from_request request
 
 let observer_sse_auth_token_from_request request =
-  match auth_token_from_request request with
-  | Some _ as token -> token
-  | None -> observer_sse_query_token_from_request request
+  observer_sse_auth_credential_from_request request
+  |> token_of_request_auth_credential
 
 let agent_from_request request =
   let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
@@ -175,11 +222,16 @@ let resolve_agent_name_for_auth_raw ~base_path request ~token :
 (** Verify Bearer token for MCP endpoints *)
 let verify_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
+  let credential = request_auth_credential_from_request request in
   let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
+  let* () =
+    reject_malformed_request_credential credential
+    |> Result.map_error Masc_domain.masc_error_to_string
+  in
   if not auth_config.Masc_domain.enabled then
     Ok None  (* Auth disabled - allow all *)
   else
-    match auth_token_from_request request with
+    match token_of_request_auth_credential credential with
     | None when not auth_config.require_token ->
         Ok None  (* Token not required *)
     | None ->
@@ -209,11 +261,16 @@ let verify_mcp_auth ~base_path request =
 
 let verify_mcp_observer_stream_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
+  let credential = observer_sse_auth_credential_from_request request in
   let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
+  let* () =
+    reject_malformed_request_credential credential
+    |> Result.map_error Masc_domain.masc_error_to_string
+  in
   if not auth_config.Masc_domain.enabled then
     Ok None
   else
-    match observer_sse_auth_token_from_request request with
+    match token_of_request_auth_credential credential with
     | None when not auth_config.require_token ->
         Ok None
     | None ->
@@ -239,16 +296,19 @@ let verify_mcp_observer_stream_auth ~base_path request =
 
 let verify_operator_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
+  let credential = request_auth_credential_from_request request in
   if not auth_config.Masc_domain.enabled then
     Error
       "/mcp/operator requires workspace auth enabled with require_token=true."
   else if not auth_config.require_token then
     Error "/mcp/operator requires bearer token auth (require_token=true)."
   else
-    match auth_token_from_request request with
-    | None ->
+    match credential with
+    | Malformed_credential _ ->
+        Error (malformed_request_credential_error () |> Masc_domain.masc_error_to_string)
+    | Absent_credential ->
         Error "Authentication required. Use 'Authorization: Bearer <token>' header."
-    | Some token -> (
+    | Parsed_credential token -> (
         let* agent_name =
           resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
           |> Result.map_error Masc_domain.masc_error_to_string
@@ -346,41 +406,45 @@ let stale_token_warn_log_entry_count () =
   Eio.Mutex.use_ro stale_token_warn_mu @@ fun () ->
   Hashtbl.length stale_token_warn_log
 
-let dashboard_actor_for_request ~base_path request =
-  match auth_token_from_request request with
-  | Some token -> (
+type dashboard_actor_resolution =
+  | Authenticated_actor of string
+  | Anonymous_actor_hint of string option
+  | Rejected_credential of Auth_error_kind.dashboard_actor_fallback_outcome
+
+let dashboard_token_hash_prefix_length = 8
+
+let dashboard_token_hash_prefix raw_credential =
+  String.sub
+    (Auth.sha256_hash raw_credential)
+    0
+    dashboard_token_hash_prefix_length
+
+let dashboard_actor_resolution_for_request ~base_path request =
+  match request_auth_credential_from_request request with
+  | Parsed_credential token -> (
       (* First 8 hex chars of the bearer token's SHA-256. Lets operators
-         correlate a token-mismatch fallback with the keeper credential
+         correlate a token-mismatch rejection with the keeper credential
          that holds the matching hash (see [auth.ml:677] credential
          storage). The hash itself is one-way; the prefix alone is
          insufficient to reconstruct the token but unique enough to
          pinpoint a specific credential rotation event in production
          logs (2026-04-27 incident: same hash prefix observed firing
          twice in the same second, masking which keeper was affected). *)
-      let token_hash_prefix =
-        String.sub (Auth.sha256_hash token) 0 8
-      in
+      let token_hash_prefix = dashboard_token_hash_prefix token in
       match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
-      | Ok (Some agent_name) -> Some agent_name
+      | Ok (Some agent_name) -> Authenticated_actor agent_name
       | Ok None ->
-          (* PR-I: surface the silent fallback. Token did not resolve to any
-             agent, so we drop to the request actor hint (header / query
-             param), masking identity drift in the HTTP transport.
-
-             WORKAROUND-CARRYOVER: the fallback path itself is retained as a
-             production safety net — the dashboard cannot go dark on token
-             churn — but the two warn sites here and at the [Error] arm now
-             flow through [Auth_error_kind.dashboard_actor_fallback], giving
-             callers a typed handle on *why* the fallback fired. The
-             string emitted by [dashboard_actor_fallback_log_message] is
-             byte-equivalent to the prior inline format so otel_metric_store log
-             alerts keyed on the literal prefix continue to fire.
-             Reference: Reverse Engineering Design Map §개선 #2. *)
+          (* An explicit credential and an anonymous actor hint are distinct
+             trust states. Preserve the public-read availability contract by
+             returning a typed rejection that projects to the unparameterized
+             dashboard namespace; never turn the unauthenticated hint into an
+             authenticated actor. The historical metric/log key is retained so
+             existing alerts continue to surface stale credential churn. *)
           let fb : Auth_error_kind.dashboard_actor_fallback =
             { outcome = Auth_error_kind.Outcome_none; token_hash_prefix }
           in
           record_dashboard_actor_fallback fb;
-          request_actor_hint request
+          Rejected_credential Auth_error_kind.Outcome_none
       | Error err ->
           (* The previous warn line elided the actual error string and the
              request actor hint, leaving operators with a counter that only
@@ -402,8 +466,28 @@ let dashboard_actor_for_request ~base_path request =
             }
           in
           record_dashboard_actor_fallback fb;
-          request_actor_hint request)
-  | None -> request_actor_hint request
+          Rejected_credential fb.outcome)
+  | Malformed_credential raw_credential ->
+      let err = malformed_request_credential_error () in
+      let outcome =
+        Auth_error_kind.Outcome_error
+          { err
+          ; err_kind = Auth_error_kind.classify err
+          ; actor_hint = request_actor_hint request
+          }
+      in
+      record_dashboard_actor_fallback
+        { outcome
+        ; token_hash_prefix = dashboard_token_hash_prefix raw_credential
+        };
+      Rejected_credential outcome
+  | Absent_credential -> Anonymous_actor_hint (request_actor_hint request)
+
+let dashboard_actor_for_request ~base_path request =
+  match dashboard_actor_resolution_for_request ~base_path request with
+  | Authenticated_actor actor -> Some actor
+  | Anonymous_actor_hint actor_hint -> actor_hint
+  | Rejected_credential _ -> None
 
 let is_verified_internal_keeper_request ~base_path request =
   match auth_token_from_request request with
@@ -855,7 +939,8 @@ let resolve_agent_name_for_auth ~base_path request ~token :
 let authorize_permission_request ~base_path ~permission request :
     (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
-  let token = auth_token_from_request request in
+  let credential = request_auth_credential_from_request request in
+  let token = token_of_request_auth_credential credential in
   let* auth_cfg =
     ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg
     |> Result.map_error (fun msg ->
@@ -863,6 +948,7 @@ let authorize_permission_request ~base_path ~permission request :
             (Masc_domain.Auth_error.Unauthorized
                { reason = Generic; message = msg }))
   in
+  let* () = reject_malformed_request_credential credential in
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
   (* NDT-OK: pre-existing dashboard fallback for non-token dashboard reads.
      Token-bound requests without a resolved agent fail closed in the guard below. *)
@@ -888,7 +974,9 @@ let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) r
 let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority request :
     (string, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
-  let token = auth_token_from_request request in
+  let credential = request_auth_credential_from_request request in
+  let token = token_of_request_auth_credential credential in
+  let* () = reject_malformed_request_credential credential in
   let* () =
     if Option.is_some token then Ok ()
     else ensure_same_origin_browser_request ~request_authority request

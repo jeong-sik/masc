@@ -428,8 +428,13 @@ let () =
         Alcotest.(check bool) "has description"
           true (String.length meta.Runtime_params.description > 0);
         Alcotest.(check string) "value_type" "int" meta.value_type;
-        Alcotest.(check bool) "has min_value" true (meta.min_value <> None);
-        Alcotest.(check bool) "has max_value" true (meta.max_value <> None)
+        Alcotest.(check (option int))
+          "positive integer minimum"
+          (Some 1)
+          (Option.bind meta.min_value (function
+             | `Int value -> Some value
+             | _ -> None));
+        Alcotest.(check bool) "has no implicit maximum" true (meta.max_value = None)
     | Some (_, _, _, _, None) -> Alcotest.fail "meta is None"
     | None -> Alcotest.fail "keeper keepalive param not found"
   in
@@ -438,19 +443,22 @@ let () =
     let tmp_dir = Filename.temp_dir "masc_keeper_restore_" "" in
     let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
     (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
-    (* Override a keeper timing param. *)
-    (match Runtime_params.set Runtime_settings.keeper_keepalive_interval_sec 31 with
+    (match Runtime_params.set Runtime_settings.keeper_keepalive_interval_sec 0 with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "non-positive heartbeat interval was accepted");
+    (* Preserve a valid operator cadence beyond the removed 300-second cap. *)
+    (match Runtime_params.set Runtime_settings.keeper_keepalive_interval_sec 3600 with
      | Ok () -> ()
      | Error msg -> Alcotest.fail msg);
-    Alcotest.(check int) "overridden" 31
+    Alcotest.(check int) "overridden without upper clamp" 3600
       (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec);
     (* Persist, clear, restore *)
     Runtime_params.persist ~base_path:tmp_dir;
     Runtime_params.clear Runtime_settings.keeper_keepalive_interval_sec;
     Alcotest.(check bool) "cleared to default" true
-      (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec <> 31);
+      (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec <> 3600);
     Runtime_params.restore ~base_path:tmp_dir;
-    Alcotest.(check int) "restored from disk" 31
+    Alcotest.(check int) "restored from disk" 3600
       (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec);
     (* Restore default for other tests *)
     Runtime_params.clear Runtime_settings.keeper_keepalive_interval_sec;

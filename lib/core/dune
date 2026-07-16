@@ -16,7 +16,7 @@
   safe_ops
   common
   validation
-  circuit_breaker
+  failure_observation
   cross_context_mutex
   eio_guard
   executor_pool_ref

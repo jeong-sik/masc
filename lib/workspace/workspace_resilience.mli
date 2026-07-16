@@ -1,12 +1,10 @@
 (** Workspace_resilience — single source of truth for failure handling.
 
-    Three sub-modules organise the resilience helpers:
+    Two sub-modules organise the resilience helpers:
 
     - {!Time}: monotonic-clock + ISO 8601 parsing.
     - {!Zombie}: agent-staleness detection with per-class thresholds
       (regular vs keeper agents).
-    - {!ZeroZombie}: cleanup-loop bookkeeping for the zero-zombie
-      protocol that runs in the background.
 
     Renamed from [Resilience] (cycle 100 / fix #11709) so the module
     name does not shadow the [masc.resilience] sub-library that
@@ -92,73 +90,4 @@ module Zombie : sig
       override both thresholds for deterministic tests or one-off cleanup
       windows. This is the canonical "should I evict this agent" predicate for
       audit, status, and cleanup consumers. *)
-end
-
-(** {1 Zero-Zombie protocol}
-
-    Background cleanup loop that runs periodically, invoking a
-    caller-supplied [cleanup_fn] and recording stats.  Used by the
-    bootstrap code to ensure stale agents do not accumulate. *)
-
-module ZeroZombie : sig
-  type stats = {
-    mutable total_cleanups : int;
-    mutable last_cleanup_ts : float;
-    mutable last_cleaned_agents : string list;
-  }
-  (** Concrete record because the global [global_stats] is exposed
-      and dashboards mutate it in place.  All fields are mutable
-      to avoid allocation in the cleanup hot path. *)
-
-  val global_stats : stats
-  (** Singleton stats record updated by every {!cleanup} call.
-      Operators inspect this through the dashboard's
-      "zero-zombie protocol" surface card. *)
-
-  val cleanup : cleanup_fn:(unit -> string list) -> string list
-  (** [cleanup ~cleanup_fn] runs [cleanup_fn ()].  When the result
-      is non-empty:
-      - increments [global_stats.total_cleanups],
-      - sets [last_cleanup_ts] to current time,
-      - replaces [last_cleaned_agents] with the result.
-
-      Returns the cleaned-agents list verbatim. *)
-
-  val is_benign_error : exn -> bool
-  (** [is_benign_error exn] returns [true] for two transient
-      patterns operators expect at startup:
-      - [Invalid_argument("MASC...")] — MASC not initialized yet.
-      - [Sys_error("No such file...")] — transient race during
-        directory creation.
-
-      The two prefixes are pinned at 20 / 14 chars respectively;
-      the prefix-match approach is intentional so a future
-      exception-message tweak does not reopen the noisy-warning
-      surface. *)
-
-  val run_loop :
-    ?interval:float ->
-    clock:_ Eio.Time.clock ->
-    cleanup_fn:(unit -> string list) ->
-    unit ->
-    unit
-  (** [run_loop ?interval ~clock ~cleanup_fn ()] is the long-lived
-      background fiber: sleep [interval] seconds (default
-      [60.0]), call {!cleanup}, repeat.
-
-      {2 Cancellation}
-
-      [Eio.Cancel.Cancelled] is re-raised from every nesting
-      level so a switch teardown propagates immediately.
-
-      {2 Error policy}
-
-      Sleep failures are logged at {!Log.Misc.error} but the loop
-      continues.  Cleanup failures are split:
-      - {!is_benign_error} → silently ignored (no log noise)
-      - other → {!Log.Misc.error} but the loop continues
-
-      The "loop continues despite errors" stance is deliberate:
-      the zero-zombie cleanup is best-effort, not strict — a
-      transient FS race must not stop the cycle. *)
 end

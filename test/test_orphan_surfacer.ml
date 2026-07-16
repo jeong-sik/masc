@@ -4,9 +4,8 @@
    orchestrator pulse emits as the [masc_orphan_tasks] gauge:
    - Every status class in [orphan_status_classes] is reported (0 when empty), so
      a cleared class resets the gauge instead of going stale.
-   - An AwaitingVerification orphan is counted under "awaiting_verification" — the
-     class [cleanup_zombies] Phase 3 never releases (RFC-0220 §5), which R1g made
-     invisible at the keeper wake-driver. T6.
+   - An AwaitingVerification orphan is counted under "awaiting_verification";
+     observation does not mutate or reassign the obligation. T6.
    - Drift guard: the fixed class labels equal [task_status_to_string] of the
      orphan-eligible statuses, so a rename of the canonical strings fails here
      rather than silently splitting the metric vocabulary. *)

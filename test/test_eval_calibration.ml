@@ -97,46 +97,6 @@ let test_record_verdict_reject () =
   check string "verdict = reject:vague notes" "reject:vague notes" v;
   Cal.reset_store_for_testing ()
 
-(* Prove that [AR.review]'s [on_verdict] callback composes with
-   [Cal.record_verdict] without requiring a live judge LLM. *)
-let test_review_on_verdict_records () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Prompt_registry.set_markdown_dir
-    (Filename.concat (Sys.getcwd ()) "config/prompts");
-  let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
-  let saved = Atomic.get AR.run_llm_reviewer_fn in
-  Fun.protect
-    ~finally:(fun () ->
-      Atomic.set AR.run_llm_reviewer_fn saved;
-      Cal.reset_store_for_testing ())
-    (fun () ->
-      (* Fake judge: a structured Reject, no live LLM. *)
-      Atomic.set AR.run_llm_reviewer_fn
-        (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
-          Ok (Some (AR.Reject "fabricated evidence")));
-      let req =
-        make_req ~notes:"Implemented the change and verified it end to end." ()
-      in
-      let result =
-        AR.review ~evaluator_runtime:"judge-runtime"
-          ~generator_runtime:"keeper-runtime"
-          ~on_verdict:(fun result ->
-            Cal.record_verdict ~task_id:req.AR.task_id ~req ~result ())
-          req
-      in
-      check bool "judge rejected" true
-        (match result.AR.verdict with Some (AR.Reject _) -> true | _ -> false);
-      let records = Dated_jsonl.read_recent (Cal.get_store ()) 10 in
-      check bool "verdict recorded via on_verdict" true
-        (List.length records >= 1);
-      let v =
-        Yojson.Safe.Util.(List.hd records |> member "verdict" |> to_string)
-      in
-      check string "recorded the fake judge's reject" "reject:fabricated evidence"
-        v)
-
 let test_record_verdict_hash_matches () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -653,7 +613,6 @@ let () =
       test_case "writes to store" `Quick test_record_verdict_writes;
       test_case "reject verdict" `Quick test_record_verdict_reject;
       test_case "hash matches" `Quick test_record_verdict_hash_matches;
-      test_case "review on_verdict records" `Quick test_review_on_verdict_records;
     ];
     "human_label", [
       test_case "writes label" `Quick test_record_human_label;

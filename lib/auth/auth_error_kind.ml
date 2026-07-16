@@ -64,11 +64,9 @@ let all =
   ]
 
 (* ----- Dashboard actor fallback typed surface ------------------------ *)
-(* See .mli for rationale. The two warn-message templates below are
-   byte-equivalent to the prior inline format strings in
-   [lib/server/server_auth.ml:298-302] (Outcome_none) and
-   [lib/server/server_auth.ml:340-344] (Outcome_error). The
-   token_mismatch remediation tail is reproduced verbatim because
+(* See .mli for rationale. The historical event key remains stable for
+   operational continuity, while the message now states that the actor hint
+   was rejected. The token_mismatch remediation tail is reproduced verbatim because
    operators key alerts on the literal "Remediation:" substring
    (server_auth.ml:332-339 inline rationale). *)
 
@@ -88,14 +86,12 @@ type dashboard_actor_fallback =
 let dashboard_actor_fallback_log_message fb =
   match fb.outcome with
   | Outcome_none ->
-      (* Byte-equivalent to the prior inline Printf format. The continuation
-         lines were OCaml string-literal continuations (backslash-newline +
-         leading whitespace), which the compiler concatenates into a single
-         space-joined sentence — preserved here without leading whitespace. *)
+      (* Keep the historical event prefix while stating the fail-closed
+         disposition explicitly. *)
       Printf.sprintf
         "[silent:dashboard_actor_fallback] outcome=none token_hash_prefix=%s \
-         \xe2\x80\x94 bearer token resolved to no agent, falling back to \
-         request actor hint"
+         \xe2\x80\x94 bearer token resolved to no agent; request actor hint \
+         ignored"
         fb.token_hash_prefix
   | Outcome_error { err; err_kind; actor_hint } ->
       let err_str = Masc_domain.masc_error_to_string err in
@@ -123,7 +119,7 @@ let dashboard_actor_fallback_log_message fb =
       Printf.sprintf
         "[silent:dashboard_actor_fallback] outcome=error \
          token_hash_prefix=%s err_kind=%s actor_hint=%s err=%s \xe2\x80\x94 \
-         falling back to request actor hint.%s"
+         request actor hint ignored.%s"
         fb.token_hash_prefix err_kind_label hint err_str extra_hint
 
 let dashboard_actor_fallback_metric_labels fb =

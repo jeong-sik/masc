@@ -3,6 +3,7 @@ open Alcotest
 module Q = Masc.Keeper_approval_queue
 module Worker = Masc.Hitl_summary_worker
 module Schema = Masc.Keeper_structured_output_schema
+module Runtime_resolved = Masc.Keeper_runtime_resolved
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
@@ -22,7 +23,17 @@ let sample_entry : Q.pending_approval =
   ; request_context =
       Some
         (`Assoc
-           [ "user_message", `String "inspect the exact requested operation" ])
+           [ ( "initial"
+             , `Assoc
+                 [ "history_messages", `List [ `String "older turn" ]
+                 ; "base_system_prompt", `String "base policy"
+                 ; "turn_system_prompt", `String "turn policy"
+                 ; "user_message", `String "inspect the exact requested operation"
+                 ; "dynamic_context", `String "current context"
+                 ; "runtime_id", `String "runtime"
+                 ] )
+           ; "completed_tool_calls", `List []
+           ])
   ; task_id = None
   ; goal_id = None
   ; goal_ids = []
@@ -106,12 +117,51 @@ let test_context_bundle_contains_exact_input_without_derived_classification () =
   let bundle = Worker.For_testing.build_context_bundle ~entry:sample_entry in
   let open Yojson.Safe.Util in
   check yojson "exact input" sample_entry.input (bundle |> member "input");
-  check yojson
-    "exact outer-turn context"
-    (Option.get sample_entry.request_context)
-    (bundle |> member "request_context");
+  let initial = bundle |> member "request_context" |> member "initial" in
+  check string "exact current user message"
+    "inspect the exact requested operation"
+    (initial |> member "user_message" |> to_string);
+  check yojson "executing-agent turn policy omitted" `Null
+    (initial |> member "turn_system_prompt");
+  let turn_policy_evidence = initial |> member "turn_system_prompt_evidence" in
+  check int "turn policy byte count" 11
+    (turn_policy_evidence |> member "bytes" |> to_int);
+  check int "turn policy digest is sha256" 64
+    (turn_policy_evidence |> member "sha256" |> to_string |> String.length);
+  check yojson "historical messages omitted" `Null
+    (initial |> member "history_messages");
+  let evidence = initial |> member "history_messages_evidence" in
+  check bool "historical omission is explicit" false
+    (evidence |> member "included" |> to_bool);
+  check string "historical evidence schema"
+    "masc.keeper_gate.history_evidence.v1"
+    (evidence |> member "schema" |> to_string);
+  check int "historical message count" 1
+    (evidence |> member "count" |> to_int);
+  check int "historical digest is sha256" 64
+    (evidence |> member "sha256" |> to_string |> String.length);
   check yojson "no derived classification" `Null (bundle |> member "classification");
   check yojson "no derived level" `Null (bundle |> member "level")
+;;
+
+let test_request_context_projection_is_idempotent () =
+  let projected =
+    Option.get sample_entry.request_context
+    |> Masc.Keeper_gate_request_context.project
+  in
+  check yojson "projection is idempotent" projected
+    (Masc.Keeper_gate_request_context.project projected)
+;;
+
+let test_concurrency_respects_runtime_binding () =
+  check int "runtime binding narrows subsystem cap" 1
+    (Worker.For_testing.effective_max_concurrency
+       ~configured:4
+       ~runtime_limit:(Some 1));
+  check int "subsystem cap remains when runtime omits a limit" 4
+    (Worker.For_testing.effective_max_concurrency
+       ~configured:4
+       ~runtime_limit:None)
 ;;
 
 let test_plain_json_requires_exact_object () =
@@ -126,13 +176,115 @@ let test_plain_json_requires_exact_object () =
             ("```json\n" ^ Yojson.Safe.to_string expected ^ "\n```")))
 ;;
 
+let test_typed_llm_retryability () =
+  check bool "context overflow is terminal for the exact request" false
+    (Worker.For_testing.summary_llm_error_retryable
+       (Agent_sdk.Error.Api
+          (ContextOverflow { message = "too large"; limit = Some 131072 })));
+  check bool "network failure remains retryable" true
+    (Worker.For_testing.summary_llm_error_retryable
+       (Agent_sdk.Error.Api
+          (NetworkError
+             { message = "refused"
+             ; kind = Llm_provider.Http_client.Connection_refused
+             })))
+;;
+
+let test_http_error_mapping_preserves_typed_domain () =
+  check bool "transport timeout stays typed" true
+    (match
+       Worker.For_testing.sdk_error_of_http_error
+         (Llm_provider.Http_client.TimeoutError
+            { message = "deadline"; phase = Non_streaming_body })
+     with
+     | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
+     | _ -> false);
+  check bool "network failure stays typed" true
+    (match
+       Worker.For_testing.sdk_error_of_http_error
+         (Llm_provider.Http_client.NetworkError
+            { message = "refused"; kind = Connection_refused })
+     with
+     | Agent_sdk.Error.Api (NetworkError _) -> true
+     | _ -> false)
+;;
+
 let test_gate_judgment_prompt_comes_from_registry () =
   Prompt_registry.set_markdown_dir
-    (Filename.concat (Sys.getcwd ()) "config/prompts");
+    (Masc_test_deps.source_path "config/prompts");
   match Worker.For_testing.system_prompt () with
   | Error detail -> fail ("Gate judgment prompt unavailable: " ^ detail)
   | Ok prompt ->
     check bool "prompt is non-empty" true (String.trim prompt <> "")
+;;
+
+let test_readiness_fails_when_gate_prompt_is_missing () =
+  let original_dir = Masc_test_deps.source_path "config/prompts" in
+  let empty_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      ("masc-hitl-prompt-readiness-" ^ string_of_int (Random.bits ()))
+  in
+  Unix.mkdir empty_dir 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.set_markdown_dir original_dir;
+      Unix.rmdir empty_dir)
+    (fun () ->
+       Prompt_registry.set_markdown_dir empty_dir;
+       match Worker.readiness () with
+       | Ok () -> fail "missing Gate prompt reported ready"
+       | Error detail ->
+         check bool "missing prompt is explicit" true
+           (Astring.String.is_infix ~affix:"keeper.gate_judgment" detail);
+          let open Yojson.Safe.Util in
+          let status = Masc.Keeper_gate_mode.status_json ~base_path:empty_dir in
+          check string "dashboard status is unavailable" "unavailable"
+            (status |> member "state" |> to_string);
+          check bool "dashboard status carries readiness error" true
+            (status |> member "read_error" |> to_string |> String.trim <> ""))
+;;
+
+let with_body_timeout_env value f =
+  let name = "MASC_KEEPER_BODY_TIMEOUT_SEC" in
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Runtime_resolved.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous with
+       | Some previous -> Unix.putenv name previous
+       | None -> Unix.unsetenv name);
+      Runtime_resolved.reset_for_tests ())
+    f
+;;
+
+let with_root_eio_context f =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () -> f clock)
+;;
+
+let test_unset_body_timeout_does_not_forward_root_clock () =
+  with_root_eio_context @@ fun _root_clock ->
+  with_body_timeout_env "" @@ fun () ->
+  check
+    bool
+    "unset body timeout keeps provider clock absent"
+    true
+    (Option.is_none (Worker.For_testing.body_timeout_clock ()))
+;;
+
+let test_explicit_body_timeout_forwards_root_clock () =
+  with_root_eio_context @@ fun root_clock ->
+  with_body_timeout_env "30" @@ fun () ->
+  match Worker.For_testing.body_timeout_clock () with
+  | Some actual ->
+    check bool "explicit body timeout uses the exact root clock" true (actual == root_clock)
+  | None -> fail "explicit body timeout dropped the root clock"
 ;;
 
 let () =
@@ -154,13 +306,41 @@ let () =
             `Quick
             test_context_bundle_contains_exact_input_without_derived_classification
         ; test_case
+            "runtime binding caps judge concurrency"
+            `Quick
+            test_concurrency_respects_runtime_binding
+        ; test_case
+            "request context projection is idempotent"
+            `Quick
+            test_request_context_projection_is_idempotent
+        ; test_case
             "plain JSON requires exact object"
             `Quick
             test_plain_json_requires_exact_object
         ; test_case
+            "LLM retryability uses typed SDK domain"
+            `Quick
+            test_typed_llm_retryability
+        ; test_case
+            "HTTP errors preserve typed SDK domains"
+            `Quick
+            test_http_error_mapping_preserves_typed_domain
+        ; test_case
             "Gate judgment prompt is registry-owned"
             `Quick
             test_gate_judgment_prompt_comes_from_registry
+        ; test_case
+            "Gate judgment readiness fails when missing"
+            `Quick
+            test_readiness_fails_when_gate_prompt_is_missing
+        ; test_case
+            "unset body timeout does not forward root clock"
+            `Quick
+            test_unset_body_timeout_does_not_forward_root_clock
+        ; test_case
+            "explicit body timeout forwards root clock"
+            `Quick
+            test_explicit_body_timeout_forwards_root_clock
         ] )
     ]
 ;;

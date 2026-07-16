@@ -83,11 +83,14 @@ end
 (** {1 Timeouts & Buffer Sizes} *)
 
 module Timeouts = struct
-  (** Neo4j / zombie-cleanup interval (seconds).
-      Controls the zero-zombie Pulse rhythm in the orchestrator.
-      Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
-  let neo4j_timeout_sec =
-    Float.max 1.0 (get_float ~default:60.0 "MASC_NEO4J_TIMEOUT_SEC")
+  (** Maintenance Pulse interval (seconds).
+      Controls the orphan-observation and channel-dedup consumers.
+      Clamped to >= 1.0 to prevent tight-loop when misconfigured.
+      @category Runtime
+      @ops_class operator *)
+  let maintenance_pulse_interval_sec =
+    Float.max 1.0
+      (get_float ~default:60.0 "MASC_MAINTENANCE_PULSE_INTERVAL_SEC")
 end
 
 (** {1 Operator Judge Configuration} *)

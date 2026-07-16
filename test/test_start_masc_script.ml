@@ -1202,7 +1202,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
       check bool "loopback honors explicit keeper autoboot opt-in" true
         (contains_substring captured_override "MASC_KEEPER_BOOTSTRAP_ENABLED=true"))
 
-let test_supervisor_preserves_child_exit_status_across_restart_policy () =
+let test_supervisor_restarts_without_exit_limit_and_preserves_status () =
   with_temp_dir "start-masc-supervised-script" (fun repo_root ->
       let scripts_dir = Filename.concat repo_root "scripts" in
       let supervisor_script =
@@ -1223,6 +1223,12 @@ if [ -f %s ]; then
 fi
 count=$((count + 1))
 printf '%%s\n' "$count" > %s
+if [ "$count" -ge 6 ]; then
+  kill -TERM "$PPID"
+  while true; do
+    sleep 1
+  done
+fi
 exit 23
 |}
            (quote invocation_count) (quote invocation_count)
@@ -1232,14 +1238,12 @@ exit 23
           ~env:
             [
               ("MASC_SUPERVISOR_LOG", log_file);
-              ("MASC_RESTART_WINDOW_SEC", "300");
-              ("MASC_MAX_RESTARTS_IN_WINDOW", "2");
               ("MASC_RESTART_COOLDOWN_SEC", "0");
             ]
           []
       in
-      check int "crash-loop breaker exit status" 1 code;
-      check string "child restarted until configured exit limit" "2\n"
+      check int "external stop signal remains explicit" 143 code;
+      check string "child keeps restarting after repeated failures" "6\n"
         (read_file invocation_count);
       let log = read_file log_file in
       check bool "real child exit status is recorded" true
@@ -1247,8 +1251,10 @@ exit 23
       check bool "child failure is not rewritten as success" false
         (contains_substring log "masc exited code=0");
       check string "supervisor writes no stdout" "" stdout;
-      check bool "abort remains explicit" true
-        (contains_substring stderr "ABORT: 2 exits in 300s window"))
+      check bool "external stop is logged" true
+        (contains_substring stderr "supervisor received SIGTERM");
+      check bool "finite crash-loop abort is absent" false
+        (contains_substring stderr "ABORT:"))
 
 let () =
   run "start_masc_script"
@@ -1321,8 +1327,8 @@ let () =
             `Quick
             test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in;
           test_case
-            "supervisor preserves child exit status across restart policy"
+            "supervisor restarts without exit limit and preserves status"
             `Quick
-            test_supervisor_preserves_child_exit_status_across_restart_policy;
+            test_supervisor_restarts_without_exit_limit_and_preserves_status;
         ] );
     ]

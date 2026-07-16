@@ -97,6 +97,18 @@ val retry_failed_auto_judge : requested_by:string -> string -> (unit, string) re
     classification is diagnostic only; operator authority controls this state
     transition. No cadence, restart hook, or retry budget calls it. *)
 
+type operator_recovery_report =
+  { reopened_ids : string list
+  ; started_ids : string list
+  ; queued : int
+  }
+
+(** Reopen failed request-local judgments after an explicit operator selection
+    of Auto Judge, then start a concurrency-bounded drain of every unresolved
+    judgment for the workspace. *)
+val request_operator_auto_judge_recovery :
+  base_path:string -> (operator_recovery_report, string) result
+
 val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string

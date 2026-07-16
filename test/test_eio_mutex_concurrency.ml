@@ -5,7 +5,7 @@
 
     Modules tested:
     - Rate_limit (token bucket under contention)
-    - Circuit_breaker (state transitions under contention)
+    - Failure_observation (outcome recording under contention)
     - Otel_metric_store (metric increments under contention)
     - Streamable_http.Session (session CRUD under contention)
     - Client_registry_eio (identity resolution under contention)
@@ -14,7 +14,7 @@
 open Alcotest
 
 module RL = Masc.Rate_limit
-module CB = Circuit_breaker
+module Observation = Failure_observation
 module Metrics = Masc.Otel_metric_store
 module SH = Masc.Streamable_http
 
@@ -49,38 +49,32 @@ let test_rate_limit_independent_keys () =
     check bool (Printf.sprintf "%s remaining >= 0" key) true (rem >= 0)
   ) (List.init 10 Fun.id)
 
-(** {1 Circuit Breaker Concurrency} *)
+(** {1 Failure Observation Concurrency} *)
 
-let test_circuit_breaker_concurrent () =
-  let cb = CB.create ~failure_threshold:50 ~cooldown:1.0 () in
-  (* Concurrent failure recording + status checking *)
+let test_failure_observation_concurrent () =
+  let observations = Observation.create () in
+  (* Concurrent failure recording + observation reads. *)
   Eio.Fiber.all [
     (fun () -> for _ = 1 to 30 do
-      CB.record_failure cb ~agent_id:"test-agent" ~reason:"concurrent-test"
+      Observation.record_failure observations ~agent_id:"test-agent" ~reason:"concurrent-test"
     done);
     (fun () -> for _ = 1 to 30 do
-      ignore (CB.check cb ~agent_id:"test-agent")
-    done);
-    (fun () -> for _ = 1 to 30 do
-      let _s = CB.get_status cb ~agent_id:"test-agent" in ()
+      let _s = Observation.get_observation observations ~agent_id:"test-agent" in ()
     done);
   ];
-  (* State must be one of the valid states *)
-  let status = CB.get_status cb ~agent_id:"test-agent" in
-  check bool "state is valid"
-    true (List.mem status.state_name ["closed"; "open"; "half_open"])
+  let observation = Observation.get_observation observations ~agent_id:"test-agent" in
+  check int "all failures observed" 30 observation.failure_count
 
-let test_circuit_breaker_multi_agent () =
-  let cb = CB.create () in
+let test_failure_observation_multi_agent () =
+  let observations = Observation.create () in
   (* Different agents recording failures concurrently *)
   Eio.Fiber.all (List.init 5 (fun i -> fun () ->
     let agent_id = Printf.sprintf "agent-%d" i in
     for _ = 1 to 20 do
-      CB.record_failure cb ~agent_id ~reason:"test";
-      ignore (CB.check cb ~agent_id)
+      Observation.record_failure observations ~agent_id ~reason:"test";
     done
   ));
-  let all = CB.list_all_breakers cb in
+  let all = Observation.list_all observations in
   check int "5 breakers exist" 5 (List.length all)
 
 (** {1 Otel_metric_store Concurrency} *)
@@ -133,9 +127,11 @@ let () =
       test_case "concurrent same key" `Quick test_rate_limit_concurrent;
       test_case "concurrent independent keys" `Quick test_rate_limit_independent_keys;
     ];
-    "Circuit Breaker", [
-      test_case "concurrent failure/check" `Quick test_circuit_breaker_concurrent;
-      test_case "concurrent multi-agent" `Quick test_circuit_breaker_multi_agent;
+    "Failure observation", [
+      test_case "concurrent failure observation" `Quick
+        test_failure_observation_concurrent;
+      test_case "concurrent multi-agent" `Quick
+        test_failure_observation_multi_agent;
     ];
     "Otel_metric_store", [
       test_case "concurrent counter" `Quick test_otel_metric_store_concurrent;

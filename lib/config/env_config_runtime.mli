@@ -233,7 +233,6 @@ module InternalTimers : sig
   val label_quiet_threshold_sec : float
   val label_stuck_threshold_sec : float
   val briefing_cache_ttl_sec : float
-  val bootstrap_window_sec : float
   val sse_buffer_ttl_sec : float
   val stalled_session_threshold_sec : float
   val janitor_interval_sec : float

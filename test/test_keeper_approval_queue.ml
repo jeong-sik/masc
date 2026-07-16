@@ -545,7 +545,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         with
         | Gate.Keeper_always_allow -> ()
         | Gate.One_shot_resolution _
-        | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow ->
           Alcotest.fail "different exact input consumed the grant");
        (match
@@ -560,7 +559,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         with
         | Gate.One_shot_resolution actual_id ->
           Alcotest.(check string) "exact approval id" approval_id actual_id
-        | Gate.Exact_always_rule _
         | Gate.Keeper_always_allow
         | Gate.Workspace_always_allow ->
           Alcotest.fail "exact effect did not consume its one-shot grant");
@@ -573,7 +571,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         with
         | Gate.Keeper_always_allow -> ()
         | Gate.One_shot_resolution _
-        | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow ->
           Alcotest.fail "one-shot grant was consumed more than once");
        (match

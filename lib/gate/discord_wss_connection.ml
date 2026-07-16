@@ -73,13 +73,27 @@ let close_code_no_status = 1005
    buffering inbound frames without limit. The gateway reader drains promptly. *)
 let inbound_capacity = 64
 
+(* Process-wide cache. [Ca_certs.authenticator] loads the system trust
+   store on every call (macOS: one `security find-certificate` subprocess
+   per keychain plus a full PEM parse of the anchor set), and this runs on
+   every gateway (re)connect. The first successful config is reused for
+   the process lifetime; certificate validity is still evaluated per
+   handshake via the authenticator's clock closure. Failures are not
+   cached — the next reconnect retries the load. *)
+let cached_client_tls_config : Tls.Config.client option Atomic.t = Atomic.make None
+
 let client_tls_config () =
-  match Ca_certs.authenticator () with
-  | Error (`Msg m) -> failwith ("discord_wss_connection: ca-certs: " ^ m)
-  | Ok authenticator ->
-    (match Tls.Config.client ~authenticator () with
-     | Error (`Msg m) -> failwith ("discord_wss_connection: Tls.Config.client: " ^ m)
-     | Ok cfg -> cfg)
+  match Atomic.get cached_client_tls_config with
+  | Some cfg -> cfg
+  | None ->
+    (match Ca_certs.authenticator () with
+     | Error (`Msg m) -> failwith ("discord_wss_connection: ca-certs: " ^ m)
+     | Ok authenticator ->
+       (match Tls.Config.client ~authenticator () with
+        | Error (`Msg m) -> failwith ("discord_wss_connection: Tls.Config.client: " ^ m)
+        | Ok cfg ->
+          Atomic.set cached_client_tls_config (Some cfg);
+          cfg))
 ;;
 
 let host_domain host =

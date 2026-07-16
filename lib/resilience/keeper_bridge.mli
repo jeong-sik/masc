@@ -6,17 +6,13 @@
 
     A6 wires the {!Recovery} classifier and the canonical
     {!Recovery.default_strategy} mapping into the keeper post-turn
-    lifecycle. It runs {b immediately after} the A5 autonomous
-    wire-in: the keeper-side dispatch enforces the strict ordering
-    [autonomous tick → resilience classification → audit log entry].
+    lifecycle before tool-emission and multimodal hydration.
 
     {1 Two surfaces}
 
     - {b Pure helpers} ({!masc_resilience_enabled},
-      {!upsert_resilience_meta}): mirror the A5
-      [Autonomous.Wirein_helpers] pattern so [Keeper_post_turn]
-      dispatches through this module without pulling the full
-      Resilience implementation into the keeper sub-library closure.
+      {!upsert_resilience_meta}) keep [Keeper_post_turn] independent
+      from the full Resilience implementation.
     - {b Main pipeline} ({!apply_post_turn_resilience}): given an
       optional error string surfaced by the just-completed turn,
       classify it via {!Recovery.classify_string}, derive the
@@ -28,11 +24,8 @@
 
     {1 Feature flag contract}
 
-    [MASC_RESILIENCE] is independent from A5's [MASC_AUTONOMOUS].
-    A5 wire-in may be active without A6, and vice versa. The
-    keeper-side dispatch enforces the [autonomous → resilience]
-    ordering only when both are enabled; either flag being off
-    short-circuits its pipeline to a no-op pass-through.
+    When [MASC_RESILIENCE] is disabled the pipeline is a no-op
+    pass-through.
 
     {1 Phantom witness}
 
@@ -60,8 +53,7 @@ val upsert_resilience_meta :
     - [wc = None] → fresh [`Assoc] with one entry.
     - [wc = Some (`Assoc kv)] → preserves all keys other than
       ["resilience_meta"] and replaces (or adds) that single entry.
-      Critically, this preserves an A5-emitted ["autonomous_meta"]
-      entry — the two wire-ins coexist in the same working_context.
+      Every unrelated association is preserved.
     - [wc = Some other] (non-[`Assoc] payload) → wraps under a fresh
       [`Assoc] holding only ["resilience_meta"]. The caller is
       expected to use [`Assoc] working_contexts; this branch exists

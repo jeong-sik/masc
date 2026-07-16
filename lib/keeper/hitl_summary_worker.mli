@@ -86,5 +86,10 @@ module For_testing : sig
   val effective_max_concurrency
     : configured:int -> runtime_limit:int option -> int
 
+  val body_timeout_clock
+    : unit -> float Eio.Time.clock_ty Eio.Resource.t option
+  (** Resolve the server root clock only when the non-streaming body timeout is
+      explicitly configured. [None] leaves the body-read deadline disabled. *)
+
   val summary_version : int
 end

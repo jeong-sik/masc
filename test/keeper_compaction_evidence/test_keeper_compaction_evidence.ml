@@ -1,16 +1,17 @@
 let evidence : Keeper_compaction_evidence.t =
-  { selected_runtime_id = Some "compact-runtime"
-  ; before_checkpoint_bytes = 4096
-  ; after_checkpoint_bytes = 1024
-  ; before_message_count = 12
-  ; after_message_count = 6
-  ; summarized_message_count = 6
-  ; dropped_message_count = 1
-  ; before_tool_use_count = 3
-  ; after_tool_use_count = 1
-  ; before_tool_result_count = 3
-  ; after_tool_result_count = 1
-  }
+  Keeper_compaction_evidence.create
+    ~selected_runtime_id:(Some "compact-runtime")
+    ~before_checkpoint_bytes:4096
+    ~after_checkpoint_bytes:1024
+    ~before_message_count:12
+    ~after_message_count:6
+    ~summarized_message_count:6
+    ~dropped_message_count:1
+    ~before_tool_use_count:3
+    ~after_tool_use_count:1
+    ~before_tool_result_count:3
+    ~after_tool_result_count:1
+  |> Result.get_ok
 ;;
 
 let canonical = Keeper_compaction_evidence.to_json evidence

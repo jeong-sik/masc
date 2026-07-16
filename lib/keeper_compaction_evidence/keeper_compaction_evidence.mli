@@ -1,5 +1,6 @@
 (** Exact structural evidence for one LLM compaction result. *)
 type t =
+  private
   { selected_runtime_id : string option
   ; before_checkpoint_bytes : int
   ; after_checkpoint_bytes : int
@@ -50,6 +51,22 @@ type decode_error =
       ; dropped_message_count : int
       }
   | No_messages_compacted
+
+val create
+  :  selected_runtime_id:string option
+  -> before_checkpoint_bytes:int
+  -> after_checkpoint_bytes:int
+  -> before_message_count:int
+  -> after_message_count:int
+  -> summarized_message_count:int
+  -> dropped_message_count:int
+  -> before_tool_use_count:int
+  -> after_tool_use_count:int
+  -> before_tool_result_count:int
+  -> after_tool_result_count:int
+  -> (t, decode_error) result
+(** Construct evidence through the same closed validation boundary used by
+    persisted JSON restoration. *)
 
 val to_json : t -> Yojson.Safe.t
 (** Structural observation projection of the exact measured counts.

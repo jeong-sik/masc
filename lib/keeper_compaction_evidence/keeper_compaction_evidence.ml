@@ -101,6 +101,92 @@ let decode_nonnegative_integer fields field =
   | _ -> Error (Invalid_field (field, Duplicate))
 ;;
 
+let create
+      ~selected_runtime_id
+      ~before_checkpoint_bytes
+      ~after_checkpoint_bytes
+      ~before_message_count
+      ~after_message_count
+      ~summarized_message_count
+      ~dropped_message_count
+      ~before_tool_use_count
+      ~after_tool_use_count
+      ~before_tool_result_count
+      ~after_tool_result_count
+  =
+  let values =
+    [ Before_checkpoint_bytes, before_checkpoint_bytes
+    ; After_checkpoint_bytes, after_checkpoint_bytes
+    ; Before_message_count, before_message_count
+    ; After_message_count, after_message_count
+    ; Summarized_message_count, summarized_message_count
+    ; Dropped_message_count, dropped_message_count
+    ; Before_tool_use_count, before_tool_use_count
+    ; After_tool_use_count, after_tool_use_count
+    ; Before_tool_result_count, before_tool_result_count
+    ; After_tool_result_count, after_tool_result_count
+    ]
+  in
+  match List.find_opt (fun (_, value) -> value < 0) values with
+  | Some (field, _) -> Error (Invalid_field (field, Negative_integer))
+  | None ->
+    (match selected_runtime_id with
+     | Some runtime_id when String.trim runtime_id = "" ->
+       Error Empty_selected_runtime_id
+     | Some _ | None ->
+       if after_checkpoint_bytes >= before_checkpoint_bytes
+       then
+         Error
+           (Invalid_transition
+              (Checkpoint_bytes, before_checkpoint_bytes, after_checkpoint_bytes))
+       else if after_message_count > before_message_count
+       then
+         Error
+           (Invalid_transition
+              (Messages, before_message_count, after_message_count))
+       else if after_tool_use_count > before_tool_use_count
+       then
+         Error
+           (Invalid_transition
+              (Tool_uses, before_tool_use_count, after_tool_use_count))
+       else if after_tool_result_count > before_tool_result_count
+       then
+         Error
+           (Invalid_transition
+              (Tool_results, before_tool_result_count, after_tool_result_count))
+       else if summarized_message_count = 0 && dropped_message_count = 0
+       then Error No_messages_compacted
+       else if
+         not
+           (message_accounting_is_possible
+              ~before_message_count
+              ~after_message_count
+              ~summarized_message_count
+              ~dropped_message_count)
+       then
+         Error
+           (Invalid_message_accounting
+              { before_message_count
+              ; after_message_count
+              ; summarized_message_count
+              ; dropped_message_count
+              })
+       else
+         Ok
+           { selected_runtime_id
+           ; before_checkpoint_bytes
+           ; after_checkpoint_bytes
+           ; before_message_count
+           ; after_message_count
+           ; summarized_message_count
+           ; dropped_message_count
+           ; before_tool_use_count
+           ; after_tool_use_count
+           ; before_tool_result_count
+           ; after_tool_result_count
+           })
+;;
+
 let of_json ~selected_runtime_id = function
   | `Assoc fields ->
     let* () =
@@ -111,12 +197,6 @@ let of_json ~selected_runtime_id = function
       with
       | None -> Ok ()
       | Some (name, _) -> Error (Unknown_field name)
-    in
-    let* () =
-      match selected_runtime_id with
-      | Some runtime_id when String.trim runtime_id = "" ->
-        Error Empty_selected_runtime_id
-      | Some _ | None -> Ok ()
     in
     let integer = decode_nonnegative_integer fields in
     let* before_checkpoint_bytes = integer Before_checkpoint_bytes in
@@ -129,48 +209,18 @@ let of_json ~selected_runtime_id = function
     let* after_tool_use_count = integer After_tool_use_count in
     let* before_tool_result_count = integer Before_tool_result_count in
     let* after_tool_result_count = integer After_tool_result_count in
-    if after_checkpoint_bytes >= before_checkpoint_bytes
-    then Error (Invalid_transition (Checkpoint_bytes, before_checkpoint_bytes, after_checkpoint_bytes))
-    else if after_message_count > before_message_count
-    then Error (Invalid_transition (Messages, before_message_count, after_message_count))
-    else if after_tool_use_count > before_tool_use_count
-    then Error (Invalid_transition (Tool_uses, before_tool_use_count, after_tool_use_count))
-    else if after_tool_result_count > before_tool_result_count
-    then
-      Error
-        (Invalid_transition
-           (Tool_results, before_tool_result_count, after_tool_result_count))
-    else if summarized_message_count = 0 && dropped_message_count = 0
-    then Error No_messages_compacted
-    else if
-      not
-        (message_accounting_is_possible
-           ~before_message_count
-           ~after_message_count
-           ~summarized_message_count
-           ~dropped_message_count)
-    then
-      Error
-        (Invalid_message_accounting
-           { before_message_count
-           ; after_message_count
-           ; summarized_message_count
-           ; dropped_message_count
-           })
-    else
-      Ok
-        { selected_runtime_id
-        ; before_checkpoint_bytes
-        ; after_checkpoint_bytes
-        ; before_message_count
-        ; after_message_count
-        ; summarized_message_count
-        ; dropped_message_count
-        ; before_tool_use_count
-        ; after_tool_use_count
-        ; before_tool_result_count
-        ; after_tool_result_count
-        }
+    create
+      ~selected_runtime_id
+      ~before_checkpoint_bytes
+      ~after_checkpoint_bytes
+      ~before_message_count
+      ~after_message_count
+      ~summarized_message_count
+      ~dropped_message_count
+      ~before_tool_use_count
+      ~after_tool_use_count
+      ~before_tool_result_count
+      ~after_tool_result_count
   | _ -> Error Expected_object
 ;;
 

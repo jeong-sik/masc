@@ -71,6 +71,7 @@ type compaction_rejection =
   | Plan_unavailable_or_invalid
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Invalid_structural_evidence
 
 let compaction_rejection_to_string = function
   | Runtime_identity_unavailable -> "runtime_identity_unavailable"
@@ -78,6 +79,7 @@ let compaction_rejection_to_string = function
   | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
+  | Invalid_structural_evidence -> "invalid_structural_evidence"
 ;;
 
 type compaction_decision =
@@ -312,61 +314,64 @@ let compact_for_request_typed
       let after_tool_use_count, after_tool_result_count =
         tool_block_counts (messages_of_context compacted_ctx)
       in
-      let tool_use_sample_json =
-        List.map
-          (fun (tool_use_id, tool_name) ->
-             `Assoc
-               [ "tool_use_id", `String tool_use_id
-               ; "tool_name", `String tool_name
-               ])
-          pair_repair_stats.dropped_tool_use_samples
-      in
-      let tool_result_id_json =
-        List.map
-          (fun tool_use_id -> `String tool_use_id)
-          pair_repair_stats.dropped_tool_result_ids
-      in
-      Log.Harness.emit
-        Log.Info
-        ~details:
-          (`Assoc
-              [ "keeper_name", `String meta.name
-              ; "trigger", `String (Compaction_trigger.to_label trigger)
-              ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-              ; "before_checkpoint_bytes", `Int before_bytes
-              ; "after_checkpoint_bytes", `Int after_bytes
-              ; "saved_checkpoint_bytes", `Int (before_bytes - after_bytes)
-              ; "before_messages", `Int before_messages
-              ; "after_messages", `Int after_messages
-              ; ( "tool_pair_repair"
-                , `Assoc
-                    [ ( "dropped_tool_uses"
-                      , `Int pair_repair_stats.dropped_tool_uses )
-                    ; ( "dropped_tool_results"
-                      , `Int pair_repair_stats.dropped_tool_results )
-                    ; "dropped_tool_use_samples", `List tool_use_sample_json
-                    ; "dropped_tool_result_ids", `List tool_result_id_json
-                    ] )
-              ])
-        (Printf.sprintf
-           "context compaction prepared keeper=%s saved_checkpoint_bytes=%d"
-           meta.name
-           (before_bytes - after_bytes));
-      { context = compacted_ctx
-      ; decision = Prepared trigger
-      ; evidence =
-          Some
-            { selected_runtime_id = requested.selected_runtime_id
-            ; before_checkpoint_bytes = before_bytes
-            ; after_checkpoint_bytes = after_bytes
-            ; before_message_count = before_messages
-            ; after_message_count = after_messages
-            ; summarized_message_count = requested.summarized_message_count
-            ; dropped_message_count = requested.dropped_message_count
-            ; before_tool_use_count
-            ; after_tool_use_count
-            ; before_tool_result_count
-            ; after_tool_result_count
-            }
-      })
+      match
+        Keeper_compaction_evidence.create
+          ~selected_runtime_id:requested.selected_runtime_id
+          ~before_checkpoint_bytes:before_bytes
+          ~after_checkpoint_bytes:after_bytes
+          ~before_message_count:before_messages
+          ~after_message_count:after_messages
+          ~summarized_message_count:requested.summarized_message_count
+          ~dropped_message_count:requested.dropped_message_count
+          ~before_tool_use_count
+          ~after_tool_use_count
+          ~before_tool_result_count
+          ~after_tool_result_count
+      with
+      | Error _ -> reject Invalid_structural_evidence
+      | Ok evidence ->
+        let tool_use_sample_json =
+          List.map
+            (fun (tool_use_id, tool_name) ->
+               `Assoc
+                 [ "tool_use_id", `String tool_use_id
+                 ; "tool_name", `String tool_name
+                 ])
+            pair_repair_stats.dropped_tool_use_samples
+        in
+        let tool_result_id_json =
+          List.map
+            (fun tool_use_id -> `String tool_use_id)
+            pair_repair_stats.dropped_tool_result_ids
+        in
+        Log.Harness.emit
+          Log.Info
+          ~details:
+            (`Assoc
+                [ "keeper_name", `String meta.name
+                ; "trigger", `String (Compaction_trigger.to_label trigger)
+                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+                ; "before_checkpoint_bytes", `Int before_bytes
+                ; "after_checkpoint_bytes", `Int after_bytes
+                ; "saved_checkpoint_bytes", `Int (before_bytes - after_bytes)
+                ; "before_messages", `Int before_messages
+                ; "after_messages", `Int after_messages
+                ; ( "tool_pair_repair"
+                  , `Assoc
+                      [ ( "dropped_tool_uses"
+                        , `Int pair_repair_stats.dropped_tool_uses )
+                      ; ( "dropped_tool_results"
+                        , `Int pair_repair_stats.dropped_tool_results )
+                      ; "dropped_tool_use_samples", `List tool_use_sample_json
+                      ; "dropped_tool_result_ids", `List tool_result_id_json
+                      ] )
+                ])
+          (Printf.sprintf
+             "context compaction prepared keeper=%s saved_checkpoint_bytes=%d"
+             meta.name
+             (before_bytes - after_bytes));
+        { context = compacted_ctx
+        ; decision = Prepared trigger
+        ; evidence = Some evidence
+        })
 ;;

@@ -252,6 +252,51 @@ let test_submit_if_idle_is_keeper_local () =
       Eio.Promise.resolve set_release ()))
 ;;
 
+let rec await_pending keeper_name expected =
+  match Lane.For_testing.pending ~base_path ~keeper_name with
+  | Some actual when actual = expected -> ()
+  | None | Some _ ->
+    Eio.Fiber.yield ();
+    await_pending keeper_name expected
+;;
+
+(* A child fiber attached to a maintenance unit can fail the unit-local switch,
+   but must not fail the executor switch. Cleanup releases the original lane,
+   after which both that Keeper and a peer can run again. *)
+let test_child_failure_is_lane_local () =
+  Lane.For_testing.reset ();
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let child_started, set_child_started = Eio.Promise.create () in
+      let failed_unit =
+        Lane.submit_if_idle ~base_path ~keeper_name:"k1" (fun unit_sw ->
+          Eio.Fiber.fork ~sw:unit_sw (fun () ->
+            Eio.Promise.resolve set_child_started ();
+            raise Test_boom))
+      in
+      (match failed_unit with
+       | Lane.Idle_submitted -> ()
+       | _ -> Alcotest.fail "child-failure unit was not submitted");
+      Eio.Promise.await child_started;
+      await_pending "k1" 0;
+      let same_done, set_same_done = Eio.Promise.create () in
+      let peer_done, set_peer_done = Eio.Promise.create () in
+      let same =
+        Lane.submit_if_idle ~base_path ~keeper_name:"k1" (fun _sw ->
+          Eio.Promise.resolve set_same_done ())
+      in
+      let peer =
+        Lane.submit_if_idle ~base_path ~keeper_name:"k2" (fun _sw ->
+          Eio.Promise.resolve set_peer_done ())
+      in
+      (match same, peer with
+       | Lane.Idle_submitted, Lane.Idle_submitted -> ()
+       | _ -> Alcotest.fail "child failure stopped a Keeper lane or its peer");
+      Eio.Promise.await same_done;
+      Eio.Promise.await peer_done))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
@@ -283,6 +328,10 @@ let () =
             "idle maintenance is Keeper-local"
             `Quick
             test_submit_if_idle_is_keeper_local
+        ; Alcotest.test_case
+            "child failure is Keeper-local"
+            `Quick
+            test_child_failure_is_lane_local
         ] )
     ]
 ;;

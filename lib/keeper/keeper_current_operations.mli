@@ -1,6 +1,6 @@
 (** Immutable Keeper work projection with no inferred progress, ETA, or store. *)
 
-type source =
+type source = private
   | Event_queue_pending of
       { revision : int64
       ; stimulus : Keeper_event_queue.stimulus
@@ -27,6 +27,19 @@ type source_name =
 type read_error =
   | Durable_read_failed of string
   | Access_rejected of Keeper_msg_async.access_rejection
+  | Async_keeper_mismatch of
+      { request_id : string
+      ; expected_keeper : string
+      ; actual_keeper : string
+      }
+  | Async_terminal_entry of
+      { request_id : string
+      ; status : Keeper_msg_async.request_status
+      }
+  | Async_active_entry_has_completion_time of
+      { request_id : string
+      ; completed_at : float
+      }
 
 type unavailable =
   { source : source_name
@@ -47,7 +60,8 @@ type snapshot =
 val project_event_queue_state :
   keeper_name:string -> Keeper_event_queue_state.t -> t list
 
-val project_async_entries : Keeper_msg_async.entry list -> t list
+val project_async_entries :
+  keeper_name:string -> Keeper_msg_async.entry list -> (t list, read_error) result
 
 val project_snapshot :
   keeper_name:string ->

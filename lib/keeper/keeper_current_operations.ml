@@ -69,17 +69,40 @@ let project_event_queue_state ~keeper_name state =
   leases @ pending @ outbox
 ;;
 
-let project_async_entries entries =
-  List.map
-    (fun (entry : Keeper_msg_async.entry) ->
-       { keeper_name = entry.keeper_name
-       ; source = Async_request entry
-       })
-    entries
+let project_async_entries ~keeper_name entries =
+  let rec loop projected_rev = function
+    | [] -> Ok (List.rev projected_rev)
+    | (entry : Keeper_msg_async.entry) :: rest ->
+      if not (String.equal entry.keeper_name keeper_name)
+      then
+        Error
+          (Async_keeper_mismatch
+             { request_id = entry.request_id
+             ; expected_keeper = keeper_name
+             ; actual_keeper = entry.keeper_name
+             })
+      else
+        (match entry.status with
+         | Lost _ | Cancelled _ | Persistence_failed _ | Done _ ->
+           Error
+             (Async_terminal_entry
+                { request_id = entry.request_id; status = entry.status })
+         | Queued | Running | Cancelling _ ->
+           (match entry.completed_at with
+            | Some completed_at ->
+              Error
+                (Async_active_entry_has_completion_time
+                   { request_id = entry.request_id; completed_at })
+            | None ->
+              loop
+                ({ keeper_name; source = Async_request entry } :: projected_rev)
+                rest))
+  in
+  loop [] entries
 ;;
 
-let availability ~source ~keeper_name project = function
-  | Ok value -> Available (project value)
+let availability ~source ~keeper_name = function
+  | Ok value -> Available value
   | Error error -> Unavailable { source; keeper_name; error }
 ;;
 
@@ -87,10 +110,10 @@ let project_snapshot ~keeper_name ~event_queue ~async_requests =
   { keeper_name
   ; event_queue =
       availability ~source:Event_queue_source ~keeper_name
-        (project_event_queue_state ~keeper_name) event_queue
+        (Result.map (project_event_queue_state ~keeper_name) event_queue)
   ; async_requests =
       availability ~source:Async_request_source ~keeper_name
-        project_async_entries async_requests
+        (Result.bind async_requests (project_async_entries ~keeper_name))
   }
 ;;
 
@@ -170,6 +193,25 @@ let unavailable_to_yojson unavailable =
     | Access_rejected rejection ->
       `Assoc [ "kind", `String "access_rejected"
              ; "detail", Keeper_msg_async.access_rejection_to_json rejection ]
+    | Async_keeper_mismatch { request_id; expected_keeper; actual_keeper } ->
+      `Assoc
+        [ "kind", `String "async_keeper_mismatch"
+        ; "request_id", `String request_id
+        ; "expected_keeper", `String expected_keeper
+        ; "actual_keeper", `String actual_keeper
+        ]
+    | Async_terminal_entry { request_id; status } ->
+      `Assoc
+        [ "kind", `String "async_terminal_entry"
+        ; "request_id", `String request_id
+        ; "status", status_to_yojson status
+        ]
+    | Async_active_entry_has_completion_time { request_id; completed_at } ->
+      `Assoc
+        [ "kind", `String "async_active_entry_has_completion_time"
+        ; "request_id", `String request_id
+        ; "completed_at", `Float completed_at
+        ]
   in
   `Assoc [ "source", `String source; "keeper_name", `String unavailable.keeper_name
          ; "error", error ]

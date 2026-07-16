@@ -648,19 +648,6 @@ let resume_parked_result
     |> Result.map_error State.parking_error_to_string)
 ;;
 
-let prepare_registration_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ()
-  =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.recover_leases ~settled_at state with
-    | Error _ as error -> error
-    | Ok state -> Ok (state, State.pending state))
-;;
-
 let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
   commit_transform
     ~base_path

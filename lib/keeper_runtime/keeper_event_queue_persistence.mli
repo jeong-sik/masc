@@ -73,9 +73,10 @@ val parked_entries_result :
 
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Compatibility replay projection: pending followed by active lease stimuli.
-    New live registry code should use {!load_pending} after explicitly
-    recovering abandoned leases at registration. Raises [Failure] when the
-    durable state is unavailable; it never substitutes an empty queue. *)
+    New live registry code should use {!load_pending_result}; an active lease is
+    resumed through {!active_lease_result} without changing its identity.
+    Raises [Failure] when the durable state is unavailable; it never substitutes
+    an empty queue. *)
 
 val load_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
@@ -171,18 +172,6 @@ val resume_parked_result :
   operation_id:Keeper_compaction_operation_identity.Operation_id.t ->
   unit ->
   (resume_result, string) result
-
-val prepare_registration_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  settled_at:float ->
-  unit ->
-  (Keeper_event_queue.t, string) result
-(** Registration boundary for a newly-owned lane. Requeues an abandoned lease,
-    records its stable [Registration_recovery] transition, and returns the
-    resulting pending projection from the same durable transaction. A malformed
-    state is an [Error]; registration must not substitute an empty queue. *)
 
 val mark_transition_projected_result :
   base_path:string ->

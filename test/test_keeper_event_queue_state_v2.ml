@@ -1051,14 +1051,14 @@ let test_transition_outbox_projects_with_stable_identity () =
     |> require_ok "empty outbox projection is idempotent")
 ;;
 
-let test_registration_preparation_is_atomic_and_fail_closed () =
+let test_registration_preserves_active_lease_and_fails_closed () =
   with_temp_dir "keeper-event-queue-v2-registration" (fun base_path ->
     let keeper_name = "registration_keeper" in
-    let source = stimulus "abandoned" 1.0 in
+    let source = stimulus "active" 1.0 in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
       Queue.enqueue pending source)
     |> require_ok "seed registration source";
-    ignore
+    let claimed =
       (Persistence.claim_when_result
          ~base_path
          ~keeper_name
@@ -1066,48 +1066,62 @@ let test_registration_preparation_is_atomic_and_fail_closed () =
          ~ready:(fun _ -> true)
          ()
        |> require_ok "claim registration source"
-       |> require_some "registration lease");
+       |> require_some "registration lease")
+    in
+    let before =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load state before registration"
+    in
     let pending =
-      Persistence.prepare_registration_result
+      Persistence.load_pending_result
         ~base_path
         ~keeper_name
-        ~settled_at:3.0
-        ()
-      |> require_ok "prepare registration"
+      |> require_ok "load registration pending projection"
     in
     Alcotest.(check (list string))
-      "abandoned lease returned to pending"
-      [ "abandoned" ]
+      "active lease is not duplicated into pending"
+      []
       (post_ids pending);
     let prepared =
       Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "load prepared registration state"
+      |> require_ok "load registration state"
     in
-    Alcotest.(check int) "registration leaves no active lease" 0 (List.length (State.leases prepared));
+    (match State.leases prepared with
+     | [ active ] ->
+       Alcotest.(check (testable Yojson.Safe.pp Yojson.Safe.equal))
+         "registration preserves the exact lease"
+         (State.lease_to_yojson claimed)
+         (State.lease_to_yojson active)
+     | _ -> Alcotest.fail "registration changed the active lease cardinality");
     Alcotest.(check int)
-      "registration records one recovery transition"
-      1
+      "registration synthesizes no recovery transition"
+      0
       (List.length (State.transition_outbox prepared));
-    let prepared_revision = State.revision prepared in
+    Alcotest.(check int64)
+      "registration is read-only"
+      (State.revision before)
+      (State.revision prepared);
+    Alcotest.(check (testable Yojson.Safe.pp Yojson.Safe.equal))
+      "registration leaves durable state unchanged"
+      (State.to_yojson before)
+      (State.to_yojson prepared);
     ignore
-      (Persistence.prepare_registration_result
+      (Persistence.load_pending_result
          ~base_path
          ~keeper_name
-         ~settled_at:4.0
-         ()
-       |> require_ok "repeat prepared registration");
+       |> require_ok "repeat registration projection");
     let repeated =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load repeated registration state"
     in
     Alcotest.(check int64)
-      "repeat registration does not synthesize a transition"
-      prepared_revision
+      "repeat registration remains read-only"
+      (State.revision before)
       (State.revision repeated);
     Alcotest.(check int)
-      "repeat registration retains one recovery transition"
+      "repeat registration preserves active lease"
       1
-      (List.length (State.transition_outbox repeated));
+      (List.length (State.leases repeated));
 
     let malformed_keeper = "malformed_registration_keeper" in
     let malformed_path =
@@ -1119,11 +1133,9 @@ let test_registration_preparation_is_atomic_and_fail_closed () =
     Fs_compat.save_file_atomic malformed_path "{}"
     |> require_ok "write malformed registration state";
     (match
-       Persistence.prepare_registration_result
+       Persistence.load_pending_result
          ~base_path
          ~keeper_name:malformed_keeper
-         ~settled_at:5.0
-         ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "malformed registration state became an empty queue"))
@@ -1208,9 +1220,9 @@ let () =
             `Quick
             test_transition_outbox_projects_with_stable_identity
         ; Alcotest.test_case
-            "registration preparation"
+            "registration preserves active lease"
             `Quick
-            test_registration_preparation_is_atomic_and_fail_closed
+            test_registration_preserves_active_lease_and_fails_closed
         ; Alcotest.test_case
             "lane write fault isolation"
             `Quick

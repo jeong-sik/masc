@@ -1272,7 +1272,7 @@ let sqlite_finalize db stmt =
      and 2026-07-17 01:31 crash reports. Keeping [stmt] reachable past
      the call closes the window; the true fix (null the pointer before
      releasing the runtime) belongs upstream in the binding. *)
-  ignore (Sys.opaque_identity stmt);
+  ignore (Sys.opaque_identity stmt) (* See GC-liveness pin note above. *);
   result
 
 let combine_cleanup_error primary cleanup =
@@ -1501,7 +1501,7 @@ let close_database handle =
      wrap's pointer only afterwards. [handle] happens to stay reachable
      through [identity_result] below today; pin it explicitly so the
      safety does not depend on that incidental use. *)
-  ignore (Sys.opaque_identity handle.db);
+  ignore (Sys.opaque_identity handle.db) (* See GC-liveness pin note above. *);
   let identity_result =
     let* () = validate_owned_parent ~ownership_root:handle.ownership_root handle.path in
     match inspect_regular_or_absent handle.path with

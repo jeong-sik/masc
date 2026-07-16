@@ -1328,10 +1328,6 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
           <div class="font-mono text-[var(--color-fg-primary)]">${ch.error_count}</div>
         </div>
         <div>
-          <div class="text-[var(--color-fg-disabled)]">duplicates</div>
-          <div class="font-mono text-[var(--color-fg-primary)]">${ch.duplicate_count}</div>
-        </div>
-        <div>
           <div class="text-[var(--color-fg-disabled)]">namespaces</div>
           <div class="font-mono text-[var(--color-fg-primary)]">${ch.workspace_count}</div>
         </div>
@@ -1515,20 +1511,16 @@ function GateAnalyticsSection({
               <div class="mb-3">
                 <${KpiStripView}
                   ariaLabel="connector gate 통계"
-                  cols=${4}
+                  cols=${3}
                   cells=${[
                     { variant: 'stacked', label: '메시지', value: gate.total_messages },
                     { variant: 'stacked', label: '성공', value: gate.total_success },
                     { variant: 'stacked', label: '오류', value: gate.total_errors },
-                    { variant: 'stacked', label: '중복 제거 키', value: gate.dedup_table_size },
                   ] satisfies KpiStripViewData['cells']}
                 />
               </div>
 
-              <div class="mb-4 grid grid-cols-2 gap-2 text-2xs text-[var(--color-fg-disabled)] max-[720px]:grid-cols-1">
-                <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2">duplicate suppressions
-                  <span class="ml-2 font-mono text-[var(--color-fg-primary)]">${gate.total_duplicates}</span>
-                <//>
+              <div class="mb-4 grid grid-cols-1 gap-2 text-2xs text-[var(--color-fg-disabled)]">
                 <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2">active connectors
                   <span class="ml-2 font-mono text-[var(--color-fg-primary)]">${gate.channels.length}</span>
                 <//>

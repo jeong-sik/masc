@@ -28,7 +28,6 @@ const ChannelInfoRawSchema = object({
   message_count: fallback(number(), 0),
   success_count: fallback(number(), 0),
   error_count: fallback(number(), 0),
-  duplicate_count: fallback(number(), 0),
   validation_error_count: fallback(number(), 0),
   keeper_error_count: fallback(number(), 0),
   dispatch_unavailable_count: fallback(number(), 0),
@@ -59,7 +58,6 @@ const BindingInfoRawSchema = object({
   message_count: fallback(number(), 0),
   success_count: fallback(number(), 0),
   error_count: fallback(number(), 0),
-  duplicate_count: fallback(number(), 0),
   last_activity: fallback(string(), ''),
   last_success: fallback(string(), ''),
   last_error_at: fallback(string(), ''),
@@ -95,9 +93,7 @@ const GateStatusOuterSchema = object({
   total_messages: fallback(number(), 0),
   total_success: fallback(number(), 0),
   total_errors: fallback(number(), 0),
-  total_duplicates: fallback(number(), 0),
   success_rate_pct: fallback(number(), 0),
-  dedup_table_size: fallback(number(), 0),
   uptime_seconds: fallback(number(), 0),
 })
 
@@ -108,9 +104,7 @@ export interface GateStatusData {
   total_messages: number
   total_success: number
   total_errors: number
-  total_duplicates: number
   success_rate_pct: number
-  dedup_table_size: number
   uptime_seconds: number
 }
 
@@ -156,9 +150,7 @@ export function parseGateStatusData(data: unknown): GateStatusData {
     total_messages: outer.output.total_messages,
     total_success: outer.output.total_success,
     total_errors: outer.output.total_errors,
-    total_duplicates: outer.output.total_duplicates,
     success_rate_pct: outer.output.success_rate_pct,
-    dedup_table_size: outer.output.dedup_table_size,
     uptime_seconds: outer.output.uptime_seconds,
   }
 }

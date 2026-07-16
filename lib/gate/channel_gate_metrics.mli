@@ -1,7 +1,7 @@
 (** Channel_gate_metrics -- connector diagnostics, outcomes, latency, and status.
 
     Thread-safe via [Eio_guard.with_mutex]. Call [record_attempt]
-    for every gate ingress, including validation failures and duplicates,
+    for every gate ingress, including validation failures,
     then read state via [snapshot_json].
 
     @since 2.218.0 *)
@@ -9,7 +9,6 @@
 (** Ingress outcome classification for connector diagnostics. *)
 type outcome =
   | Success
-  | Duplicate
   | Validation_error of string
   | Keeper_error of string
   | Dispatch_unavailable
@@ -17,8 +16,7 @@ type outcome =
 
 (** Connector error-kind labels. Closed set mirroring the in-module
     producer surface: validation / keeper / dispatch_unavailable /
-    internal, plus [Ek_none] as the marker used by [Success] and
-    [Duplicate] outcomes (previously the empty-string [Error_kind ""]).
+    internal, plus [Ek_none] as the marker used by [Success].
 
     JSON/status surfaces render via [error_kind_to_string]; wire output
     is byte-compatible with the prior [private Error_kind of string]
@@ -45,7 +43,6 @@ type channel_stats = {
   message_count : int;
   success_count : int;
   error_count : int;
-  duplicate_count : int;
   validation_error_count : int;
   keeper_error_count : int;
   dispatch_unavailable_count : int;
@@ -73,7 +70,6 @@ type binding_stats = {
   message_count : int;
   success_count : int;
   error_count : int;
-  duplicate_count : int;
   last_activity_ts : float;
   last_success_ts : float;
   last_error_ts : float;
@@ -139,10 +135,3 @@ val events_json :
 
 val total_messages : unit -> int
 (** Sum of all channels' message counts. *)
-
-val dedup_table_size : unit -> int
-(** Current dedup hashtable occupancy. *)
-
-val register_dedup_size_fn : (unit -> int) -> unit
-(** Register the dedup table size callback.  Called by [Channel_gate]
-    at module init to break the dependency cycle. *)

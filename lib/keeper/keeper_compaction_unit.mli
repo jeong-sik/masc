@@ -2,9 +2,10 @@
 
     Tool protocol cycles remain byte- and constructor-exact units. This module
     inspects only top-level content blocks; nested ToolResult payload blocks are
-    never interpreted as protocol anchors. *)
+    never interpreted as protocol anchors. Presence in [closed_prefix] does not
+    by itself authorize a unit for LLM summarization. *)
 
-type compactable_unit =
+type closed_unit =
   | Ordinary_message of Agent_sdk.Types.message
   | Closed_tool_cycle of Agent_sdk.Types.message list
 
@@ -43,7 +44,7 @@ type structural_error =
       }
 
 type partition =
-  { compactable_prefix : compactable_unit list
+  { closed_prefix : closed_unit list
   ; protected_suffix : Agent_sdk.Types.message list
   }
 

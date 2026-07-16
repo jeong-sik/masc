@@ -43,10 +43,10 @@ let test_signed_parallel_cycle_is_atomic () =
   let result_a = message T.Tool [ result "call-a" ] in
   let cycle = [ assistant; result_b; result_a ] in
   let output = U.partition cycle |> require_ok in
-  Alcotest.(check int) "one atomic unit" 1 (List.length output.compactable_prefix);
+  Alcotest.(check int) "one atomic unit" 1 (List.length output.closed_prefix);
   check_exact "closed cycle exact"
     [ U.Closed_tool_cycle cycle ]
-    output.compactable_prefix;
+    output.closed_prefix;
   check_exact "no protected suffix" [] output.protected_suffix;
   match assistant.content with
   | T.Thinking { signature; content } :: _ ->
@@ -61,7 +61,7 @@ let test_open_after_assistant_is_protected () =
   let output = U.partition [ prefix; assistant ] |> require_ok in
   check_exact "ordinary prefix"
     [ U.Ordinary_message prefix ]
-    output.compactable_prefix;
+    output.closed_prefix;
   check_exact "assistant suffix exact" [ assistant ] output.protected_suffix
 
 let test_open_interstitial_suffix_is_exact () =
@@ -70,7 +70,7 @@ let test_open_interstitial_suffix_is_exact () =
   let middle_assistant = text T.Assistant "progress prose" in
   let suffix = [ assistant; middle_user; middle_assistant ] in
   let output = U.partition suffix |> require_ok in
-  check_exact "no compactable unit" [] output.compactable_prefix;
+  check_exact "no closed unit" [] output.closed_prefix;
   check_exact "interstitial suffix exact" suffix output.protected_suffix
 
 let test_closed_interstitial_cycle_is_atomic () =
@@ -81,7 +81,7 @@ let test_closed_interstitial_cycle_is_atomic () =
   let output = U.partition cycle |> require_ok in
   check_exact "closed interstitial cycle"
     [ U.Closed_tool_cycle cycle ]
-    output.compactable_prefix;
+    output.closed_prefix;
   check_exact "no protected suffix" [] output.protected_suffix
 
 let test_ordinary_prefix_order () =
@@ -91,7 +91,7 @@ let test_ordinary_prefix_order () =
   let output = U.partition messages |> require_ok in
   check_exact "ordinary order"
     (List.map (fun msg -> U.Ordinary_message msg) messages)
-    output.compactable_prefix;
+    output.closed_prefix;
   check_exact "empty suffix" [] output.protected_suffix
 
 let test_orphan_result_error () =

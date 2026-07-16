@@ -1,7 +1,7 @@
 module T = Agent_sdk.Types
 module Id_set = Set.Make (String)
 
-type compactable_unit =
+type closed_unit =
   | Ordinary_message of T.message
   | Closed_tool_cycle of T.message list
 
@@ -40,7 +40,7 @@ type structural_error =
       }
 
 type partition =
-  { compactable_prefix : compactable_unit list
+  { closed_prefix : closed_unit list
   ; protected_suffix : T.message list
   }
 
@@ -97,7 +97,7 @@ let partition messages =
           | None -> []
           | Some cycle -> List.rev cycle.messages_rev
         in
-        Ok { compactable_prefix = List.rev units_rev; protected_suffix }
+        Ok { closed_prefix = List.rev units_rev; protected_suffix }
     | (message : T.message) :: rest ->
         let tool_ids, result_ids = top_level_anchors message.content in
         (match message.role, tool_ids with

@@ -155,7 +155,6 @@ let build_agent
     ~system_prompt
     ?(tools = [])
     ?timeout_s
-    ?max_tokens
     ?name
     ?provider_config_transform
     (model : string)
@@ -196,26 +195,16 @@ let build_agent
            ~system_prompt
            ~tools
        in
-       let base_config = apply_timeout_budget ?timeout_s base_config in
-       let config =
-         match max_tokens with
-         | None -> Ok base_config
-         | Some n when Fusion_policy.valid_max_output_tokens (Some n) ->
-           Ok { base_config with max_tokens = Some n }
-         | Some n -> Error (Fusion_types.Invalid_max_output_tokens n)
-       in
-       match config with
-       | Error _ as err -> err
-       | Ok config ->
-         (match Runtime_agent.build ~sw ~net ~config with
-           | Ok agent -> Ok agent
-           | Error e ->
-             Error
-               ((Fusion_types.Provider_error
-                   (provider_error_detail
-                      ~runtime_id:model
-                      (Agent_sdk.Error.to_string e))
-                 : Fusion_types.panel_failure))))
+       let config = apply_timeout_budget ?timeout_s base_config in
+       (match Runtime_agent.build ~sw ~net ~config with
+        | Ok agent -> Ok agent
+        | Error e ->
+          Error
+            ((Fusion_types.Provider_error
+                (provider_error_detail
+                   ~runtime_id:model
+                   (Agent_sdk.Error.to_string e))
+              : Fusion_types.panel_failure))))
 
 module For_testing = struct
   let apply_timeout_budget = apply_timeout_budget

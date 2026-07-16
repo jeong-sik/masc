@@ -37,10 +37,8 @@ let outcome_of_result ~(panelist : string) ~(model : string)
       Fusion_types.Answered
         { model = panelist; answer; usage = Fusion_oas.usage_of resp }
   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _)) ->
-    (* per-agent HTTP 타임아웃을 typed [Timeout]으로. 이전에는 to_string 직렬화로
-       [Provider_error]에 뭉개져, 외곽 붕괴(전 패널 동시 [Timeout])와 개별 HTTP
-       타임아웃을 board 증거에서 구분할 수 없었다. [bridge_failure_of_error]·
-       [Fusion_judge.failure_of_sdk_error]와 대칭. *)
+    (* runtime이 반환한 per-agent HTTP 타임아웃을 typed [Timeout]으로 보존한다.
+       Fusion은 별도 deadline을 합성하지 않는다. *)
     Fusion_types.Failed { failed_model = panelist; reason = Fusion_types.Timeout }
   | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->
     (* provider-level 타임아웃. 비스트리밍 sync 경로의 connect_timeout(기본 60s)이
@@ -51,7 +49,7 @@ let outcome_of_result ~(panelist : string) ~(model : string)
        않았다. 타임아웃은 타임아웃으로 분류한다 (CLAUDE.md §Unknown→Permissive/
        catch-all 회피). *)
     Fusion_types.Failed { failed_model = panelist; reason = Fusion_types.Timeout }
-  | Error e ->
+  | Error ((Agent_sdk.Error.Api _ | Agent_sdk.Error.Provider _) as e) ->
     Fusion_types.Failed
       { failed_model = panelist
       ; reason =
@@ -59,17 +57,23 @@ let outcome_of_result ~(panelist : string) ~(model : string)
             (Fusion_oas.provider_error_detail ~runtime_id:model
                (Agent_sdk.Error.to_string e))
       }
+  | Error
+      ( ( Agent_sdk.Error.Agent _
+        | Agent_sdk.Error.Mcp _
+        | Agent_sdk.Error.Config _
+        | Agent_sdk.Error.Serialization _
+        | Agent_sdk.Error.Io _
+        | Agent_sdk.Error.Orchestration _
+        | Agent_sdk.Error.Internal _ ) as e ) ->
+    Fusion_types.Failed
+      { failed_model = panelist
+      ; reason = Fusion_types.Bridge_error (Agent_sdk.Error.to_string e)
+      }
 
-let bridge_failure_of_error (error : Agent_sdk.Error.sdk_error) : Fusion_types.panel_failure =
-  match error with
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _)
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
-  | _ -> Fusion_types.Bridge_error (Agent_sdk.Error.to_string error)
-
-let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
+let run ~sw ~net ~max_fibers ~groups ~prompt ()
   : Fusion_types.panel_outcome list
   =
-  (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/timeout)으로
+  (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools)으로
         에이전트 빌드. 빌드 실패는 격리. 그룹순 × 그룹내 모델순으로 평탄화 —
         순서 보존(단일 그룹이면 원 모델 순서 = 오늘과 동일). *)
   let built, build_failures =
@@ -83,7 +87,6 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
             let panelist = Fusion_policy.panelist_id ~label:g.label ~model in
             match
               Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
-                ~timeout_s:g.timeout_s
                 ?max_tokens:g.max_output_tokens
                 ~name:panelist model
             with
@@ -99,32 +102,22 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
   let _ = max_fibers in
   let max_fibers = max 1 (List.length built) in
   (* 2. 모든 그룹을 하나의 Async_agent.all에 union으로 던진다 — 이종 설정은 이미 각
-        agent에 baked되어 있으므로 단일 fan-out으로 충분. 외곽 run_safe는 그룹 timeout
-        중 max로 전체 멈춤을 막는 상한.
-        [Async_agent.all]은 [Eio.Fiber.List.map] 기반이라 결과를 입력 순서대로 돌려준다.
+        agent에 baked되어 있으므로 단일 fan-out으로 충분. Fusion은 fan-out timeout을
+        합성하지 않는다. [Async_agent.all]은 agent 실행의 ordinary exception과 provider
+        실패를 각 SDK result로 격리하고 parent cancellation만 전파한다. 결과는 입력
+        순서대로 돌아온다.
         그래서 반환 name(=카드명=정체성)에 의존하지 않고 [built]와 위치로 짝지어
         (panelist, model) 둘 다 확보한다 — provider 에러 attribution에 정체성이 아닌
         raw model을 쓰기 위함 (RFC-0278). *)
+  let run_results =
+    Agent_sdk.Async_agent.all ~sw ~max_fibers
+      (List.map (fun (agent, _panelist, _model) -> agent, prompt) built)
+  in
   let answered =
-    match
-      Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s:outer_timeout_s (fun () ->
-        Ok
-          (Agent_sdk.Async_agent.all ~sw ~max_fibers
-             (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))
-    with
-    | Ok run_results ->
-      List.map2
-        (fun (_agent, panelist, model) (_name, res) ->
-          outcome_of_result ~panelist ~model res)
-        built run_results
-    | Error error ->
-      (* 구조적 타임아웃은 패널 전체 Timeout. 다른 bridge/bootstrap 오류는
-         Timeout으로 오분류하지 않는다. *)
-      let reason = bridge_failure_of_error error in
-      List.map
-        (fun (_agent, panelist, _model) ->
-          Fusion_types.Failed { failed_model = panelist; reason })
-        built
+    List.map2
+      (fun (_agent, panelist, model) (_name, res) ->
+        outcome_of_result ~panelist ~model res)
+      built run_results
   in
   build_failures @ answered
 

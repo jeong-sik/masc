@@ -115,7 +115,6 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
   Masc.Fusion_judge.run
     ~sw
     ~net
-    ~timeout_s:preset.Fusion_policy.judge_timeout_s
     ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
     ~judge_model:preset.Fusion_policy.judge
     ~question:prompt
@@ -157,7 +156,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
   let n = List.length models_all in
   let max_fibers = max 1 n in
   (* 하네스는 동질 arm 비교 도구다(RFC-0252 §11). 이종 preset이면 첫 그룹의 plumbing
-     (system_prompt/web_tools/timeout)을 대표로 써 모든 arm을 같은
+     (system_prompt/web_tools)을 대표로 써 모든 arm을 같은
      설정으로 돌린다 — arm 차이는 모델 집합·judge이지 plumbing이 아니다(legacy 단일
      그룹이면 그 그룹 값 = 오늘과 동일). *)
   let g0 = List.hd preset.Fusion_policy.panels in
@@ -180,7 +179,6 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
       ~sw
       ~net
       ~max_fibers
-      ~outer_timeout_s:(Fusion_policy.panel_outer_timeout_of ~max_fibers groups)
       ~groups
       ~prompt
       ()
@@ -382,20 +380,16 @@ let () =
   Eio_main.run @@ fun env ->
   Mirage_crypto_rng_unix.use_default ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  (* Register the ambient Eio clock the agent runtime resolves via
-     [Process_eio.get_clock]. Without this, any runtime config that sets
-     [stream_idle_timeout_s] fails closed at agent build time ("no clock
-     resolvable ... refusing to run with a silently disarmed stream idle
-     timeout") and every panel/judge call aborts before the first request. *)
+  (* Register the ambient Eio clock for resolved runtime transport behavior.
+     A runtime/provider may own an idle timeout; Fusion does not add one. *)
   Process_eio.init
     ~cwd_default:(Eio.Stdenv.fs env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
-  (* Capture the Eio handles the OAS/fusion call path reads via
-     [Masc_eio_env.get_opt]. Without this, [Masc_oas_bridge.run_safe] fails
-     closed before starting panel/judge calls. *)
+  (* Capture the Eio handles used by Fusion runtime dependencies and elapsed
+     telemetry. This does not install a Fusion-owned execution deadline. *)
   Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   (match Runtime.init_default_strict ~config_path with

@@ -189,7 +189,7 @@ val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
        -> (string * (Types.api_response, Error.sdk_error) Result.t) list
 ```
 - per-agent 에러 격리(한 패널 실패가 나머지 안 죽임), 부모 switch 취소 전파.
-- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → `Async_agent.all ~max_fibers:policy.max_concurrent_panels` → 결과를 `panel_outcome list`로 매핑. 각 호출은 `Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s`로 감싼다.
+- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → `Async_agent.all ~max_fibers:policy.max_concurrent_panels` → 결과를 `panel_outcome list`로 매핑. Fusion은 별도 deadline을 합성하지 않으며 provider/runtime의 typed timeout은 개별 `panel_outcome` 관측으로 보존한다.
 
 ### 7.2 심판 — `Structured.extract`
 
@@ -346,7 +346,7 @@ test/fusion/
 4. **chat lane author 필드**: v1 content-prefix. 구조화 author는 코어 스키마 변경(코덱 마이그레이션 필요) → v2.
 5. **action fusion(v2)**: 패널이 tool-call 제안 → 심판 선택·실행. tool-call consensus + side-effect atomicity 필요. 별도 RFC.
 6. **provider 동시성**: qwen36 max-concurrent=2 등 → `max_concurrent_panels`로 존중, 초과 패널은 queue.
-7. **`run_with_caller` vs `run_safe`**: v1은 string caller `run_safe`. 타입드 `Env_config_oas_bridge.caller` 변형 추가는 후속(해당 모듈 침습).
+7. **liveness ownership**: provider/runtime이 transport liveness를 소유한다. Fusion은 wall-clock·idle·body timeout을 덧씌우지 않고 typed 실패와 경과시간만 관측한다.
 
 ---
 

@@ -249,8 +249,6 @@ spawn 시 인자로 직접 설정하는 필드.
 | `name` | string | (필수) | keeper 고유 이름. `[A-Za-z0-9._-]`만 허용하며 경로 예약값 `.`/`..`는 제외 | 재생성 필요 |
 | `instructions` | string | `""` | 커스텀 시스템 프롬프트 | `masc_keeper_up`의 `instructions` 인자 |
 | `proactive_enabled` | bool | 기본 `false` | 자발적 메시지 생성 활성화 | `masc_keeper_up`의 `proactive_enabled` 인자 |
-| `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
-| `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
 | `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
 | `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none`이고 hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
@@ -691,19 +689,15 @@ flowchart TD
 |------|------|----------|
 | 정상 | < 50% | 없음 |
 | Compact 트리거 | >= `compaction_ratio_gate` (기본 50%) | 4-step compaction 실행 |
-| Handoff 준비 | >= 70% | capsule/checkpoint 준비 |
-| 강제 Handoff | >= `handoff_threshold` (기본 85%) | successor 에이전트로 handoff |
 
-수동 대응: `masc_keeper_status`에서 `context_ratio` 확인 후, 필요하면 `compaction_ratio_gate`를 낮추거나 `handoff_threshold`를 조정.
+수동 대응: `masc_keeper_status`에서 `context_ratio` 확인 후, 필요하면 명시적인 compaction을 요청한다.
 
 ### 7.4 Handoff 실패
 
 | 증상 | 확인 사항 | 대응 |
 |------|----------|------|
-| generation이 안 올라감 | `auto_handoff` 설정 확인 | `auto_handoff: true` 확인 |
 | capsule/checkpoint 준비 실패 | 메트릭에서 `handoff.performed` 확인 | checkpoint 상태 확인 → 재생성 |
 | successor 시작 실패 | `next_model_hint` 확인 | 해당 모델의 API 접근 가능 여부 확인 |
-| handoff 쿨다운 | `handoff_cooldown_sec` (기본 300초) | 쿨다운 대기 또는 값 조정 |
 
 ### 7.5 Runtime Assignment 확인
 

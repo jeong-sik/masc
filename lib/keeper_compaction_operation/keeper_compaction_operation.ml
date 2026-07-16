@@ -13,12 +13,26 @@ type reconciliation_reason =
   | Commit_durability_unknown
   | Transaction_outcome_unknown
 
+type producer_ref =
+  | Tool_invocation of Tool_invocation_ref.t
+  | Provider_overflow of
+      { source_checkpoint : Keeper_checkpoint_ref.t
+      ; source_delivery_sha256 : string
+      }
+
+type producer_ref_error =
+  | Invalid_source_delivery_sha256_length of int
+  | Invalid_source_delivery_sha256_character of
+      { index : int
+      ; found : char
+      }
+
 type request =
   { keeper_name : Keeper_id.Keeper_name.t
   ; source_checkpoint : Keeper_checkpoint_ref.t
   ; trigger : Compaction_trigger.t
   ; cause : Cause.t
-  ; producer_invocation : Tool_invocation_ref.t option
+  ; producer : producer_ref option
   }
 
 type candidate =
@@ -51,16 +65,66 @@ type event =
 let operation_id event = event.operation_id
 let view event = event.view
 
+let tool_invocation_producer_ref invocation = Tool_invocation invocation
+
+let validate_source_delivery_sha256 value =
+  let length = String.length value in
+  if length <> 64
+  then Error (Invalid_source_delivery_sha256_length length)
+  else
+    let rec loop index =
+      if index = length
+      then Ok ()
+      else
+        match value.[index] with
+        | '0' .. '9' | 'a' .. 'f' -> loop (index + 1)
+        | found ->
+          Error
+            (Invalid_source_delivery_sha256_character { index; found })
+    in
+    loop 0
+;;
+
+let provider_overflow_producer_ref_of_persisted
+      ~source_checkpoint
+      ~source_delivery_sha256
+  =
+  validate_source_delivery_sha256 source_delivery_sha256
+  |> Result.map (fun () ->
+    Provider_overflow { source_checkpoint; source_delivery_sha256 })
+;;
+
+let provider_overflow_producer_ref ~source_checkpoint ~source_delivery_identity =
+  let source_delivery_sha256 =
+    Digestif.SHA256.(digest_string source_delivery_identity |> to_hex)
+  in
+  Provider_overflow { source_checkpoint; source_delivery_sha256 }
+;;
+
+let producer_ref_equal left right =
+  match left, right with
+  | Tool_invocation left, Tool_invocation right ->
+    Tool_invocation_ref.equal left right
+  | ( Provider_overflow left
+    , Provider_overflow right ) ->
+    Keeper_checkpoint_ref.equal left.source_checkpoint right.source_checkpoint
+    && String.equal
+         left.source_delivery_sha256
+         right.source_delivery_sha256
+  | Tool_invocation _, Provider_overflow _
+  | Provider_overflow _, Tool_invocation _ -> false
+;;
+
 let candidate ~attempt_id ~source_checkpoint ~candidate_checkpoint ~evidence =
   { attempt_id; source_checkpoint; candidate_checkpoint; evidence }
 ;;
 
 let requested ~operation_id ~keeper_name ~source_checkpoint ~trigger ~cause
-    ~producer_invocation =
+    ~producer =
   { operation_id
   ; view =
       Requested
-        { keeper_name; source_checkpoint; trigger; cause; producer_invocation }
+        { keeper_name; source_checkpoint; trigger; cause; producer }
   }
 ;;
 

@@ -12,13 +12,21 @@ let source =
        ~turn_count:3
        ~canonical_checkpoint_bytes:"source")
 ;;
+let next_source =
+  ok
+    (Keeper_checkpoint_ref.create
+       ~trace_id
+       ~generation:1
+       ~turn_count:4
+       ~canonical_checkpoint_bytes:"next-source")
+;;
 let id value = ok (Operation.Operation_id.of_string value)
 let op1 = id "00000000-0000-4000-8000-000000000001"
 let op2 = id "00000000-0000-4000-8000-000000000002"
 let attempt = ok (Operation.Attempt_id.of_string "00000000-0000-4000-8000-000000000011")
 let request ?producer operation_id =
   Operation.requested ~operation_id ~keeper_name ~source_checkpoint:source
-    ~trigger:Compaction_trigger.Manual ~cause ~producer_invocation:producer
+    ~trigger:Compaction_trigger.Manual ~cause ~producer
 ;;
 let rec remove path =
   if Sys.file_exists path then if Sys.is_directory path
@@ -58,6 +66,7 @@ let test_append_replay_and_slice () =
 let producer () =
   let request_id = ok (Mcp_transport_protocol.request_id_of_yojson (`Int 7)) in
   ok (Tool_invocation_ref.external_mcp ~request_id ~session_id:"store-session")
+  |> Operation.tool_invocation_producer_ref
 ;;
 let test_rejections_do_not_write () =
   with_base @@ fun base ->
@@ -75,12 +84,46 @@ let test_rejections_do_not_write () =
   let other = ok (Keeper_id.Keeper_name.of_string "other-keeper") in
   let wrong =
     Operation.requested ~operation_id:op2 ~keeper_name:other ~source_checkpoint:source
-      ~trigger:Compaction_trigger.Manual ~cause ~producer_invocation:None
+      ~trigger:Compaction_trigger.Manual ~cause ~producer:None
   in
   (match Store.append ~base_path:base ~keeper_name ~recorded_at:4.0 wrong with
    | Error (Store.Event_rejected (Store.Keeper_mismatch _)) -> ()
    | _ -> Alcotest.fail "cross-Keeper request was not rejected");
   Alcotest.(check string) "rejections wrote no bytes" before (Fs_compat.load_file path)
+;;
+let provider_request operation_id source_checkpoint =
+  let producer =
+    Operation.provider_overflow_producer_ref
+      ~source_checkpoint
+      ~source_delivery_identity:"same-delivery"
+  in
+  Operation.requested
+    ~operation_id
+    ~keeper_name
+    ~source_checkpoint
+    ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+    ~cause
+    ~producer:(Some producer)
+;;
+let test_provider_binding_includes_exact_source () =
+  with_base @@ fun base ->
+  ignore (append base 1.0 (provider_request op1 source));
+  (match
+     Store.append
+       ~base_path:base
+       ~keeper_name
+       ~recorded_at:2.0
+       (provider_request op2 source)
+   with
+   | Error
+       (Store.Event_rejected
+          (Store.Producer_already_bound { existing_operation_id; _ }))
+     when Operation.Operation_id.equal existing_operation_id op1 -> ()
+   | _ -> Alcotest.fail "same source delivery created a second operation");
+  ignore (append base 3.0 (provider_request op2 next_source));
+  match Store.replay ~base_path:base ~keeper_name with
+  | Ok { operations = [ _; _ ]; _ } -> ()
+  | _ -> Alcotest.fail "advanced source did not create a distinct operation"
 ;;
 let test_malformed_history_fails_loud () =
   with_base @@ fun base ->
@@ -100,6 +143,10 @@ let () =
     [ "journal",
       [ Alcotest.test_case "append replay slice" `Quick test_append_replay_and_slice
       ; Alcotest.test_case "rejections no write" `Quick test_rejections_do_not_write
+      ; Alcotest.test_case
+          "provider binding includes exact source"
+          `Quick
+          test_provider_binding_includes_exact_source
       ; Alcotest.test_case "malformed history" `Quick test_malformed_history_fails_loud
       ] ]
 ;;

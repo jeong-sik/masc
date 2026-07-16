@@ -32,7 +32,9 @@ type decode_error =
   | Invalid_cause of Keeper_compaction_operation_identity.Cause.error
   | Invalid_checkpoint of Keeper_checkpoint_ref.create_error
   | Invalid_trigger of Compaction_trigger.decode_error
-  | Invalid_producer of Tool_invocation_ref.decode_error
+  | Unknown_producer_kind of string
+  | Invalid_tool_producer of Tool_invocation_ref.decode_error
+  | Invalid_provider_producer of Operation.producer_ref_error
   | Invalid_evidence of Keeper_compaction_evidence.decode_error
   | Invalid_turn_ref of string
 
@@ -153,12 +155,46 @@ let trigger ~path json =
   Ok trigger
 ;;
 
-let producer_invocation = function
+let producer ~source_checkpoint = function
   | `Null -> Ok None
   | json ->
-    Tool_invocation_ref.of_yojson json
-    |> Result.map_error (fun error -> Invalid_producer error)
-    |> Result.map Option.some
+    let path = "payload.producer" in
+    let allowed = [ "kind"; "invocation"; "source_delivery_sha256" ] in
+    let* values = exact_object ~path ~allowed ~required:[ "kind" ] json in
+    let* kind_json = required_field ~path "kind" values in
+    let* kind = string_field ~path "kind" kind_json in
+    (match kind with
+     | "tool_invocation" ->
+       let* values =
+         exact_object
+           ~path
+           ~allowed:[ "kind"; "invocation" ]
+           ~required:[ "kind"; "invocation" ]
+           json
+       in
+       let* invocation = required_field ~path "invocation" values in
+       Tool_invocation_ref.of_yojson invocation
+       |> Result.map_error (fun error -> Invalid_tool_producer error)
+       |> Result.map (fun value ->
+         Some (Operation.tool_invocation_producer_ref value))
+     | "provider_overflow" ->
+       let* values =
+         exact_object
+           ~path
+           ~allowed:[ "kind"; "source_delivery_sha256" ]
+           ~required:[ "kind"; "source_delivery_sha256" ]
+           json
+       in
+       let* digest_json = required_field ~path "source_delivery_sha256" values in
+       let* source_delivery_sha256 =
+         string_field ~path "source_delivery_sha256" digest_json
+       in
+       Operation.provider_overflow_producer_ref_of_persisted
+         ~source_checkpoint
+         ~source_delivery_sha256
+       |> Result.map_error (fun error -> Invalid_provider_producer error)
+       |> Result.map Option.some
+     | unknown -> Error (Unknown_producer_kind unknown))
 ;;
 
 let turn_ref json =

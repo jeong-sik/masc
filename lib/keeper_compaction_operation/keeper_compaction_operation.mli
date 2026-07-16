@@ -15,12 +15,38 @@ type reconciliation_reason =
   | Commit_durability_unknown
   | Transaction_outcome_unknown
 
+type producer_ref = private
+  | Tool_invocation of Tool_invocation_ref.t
+  | Provider_overflow of
+      { source_checkpoint : Keeper_checkpoint_ref.t
+      ; source_delivery_sha256 : string
+      }
+
+type producer_ref_error =
+  | Invalid_source_delivery_sha256_length of int
+  | Invalid_source_delivery_sha256_character of
+      { index : int
+      ; found : char
+      }
+
+val tool_invocation_producer_ref : Tool_invocation_ref.t -> producer_ref
+val provider_overflow_producer_ref :
+  source_checkpoint:Keeper_checkpoint_ref.t ->
+  source_delivery_identity:string ->
+  producer_ref
+val provider_overflow_producer_ref_of_persisted :
+  source_checkpoint:Keeper_checkpoint_ref.t ->
+  source_delivery_sha256:string ->
+  (producer_ref, producer_ref_error) result
+
+val producer_ref_equal : producer_ref -> producer_ref -> bool
+
 type request =
   { keeper_name : Keeper_id.Keeper_name.t
   ; source_checkpoint : Keeper_checkpoint_ref.t
   ; trigger : Compaction_trigger.t
   ; cause : Cause.t
-  ; producer_invocation : Tool_invocation_ref.t option
+  ; producer : producer_ref option
   }
 
 type candidate =
@@ -55,7 +81,7 @@ val requested :
   source_checkpoint:Keeper_checkpoint_ref.t ->
   trigger:Compaction_trigger.t ->
   cause:Cause.t ->
-  producer_invocation:Tool_invocation_ref.t option ->
+  producer:producer_ref option ->
   event
 val attempt_started : operation_id:Operation_id.t -> attempt_id:Attempt_id.t -> event
 val candidate_prepared :

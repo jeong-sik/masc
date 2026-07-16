@@ -48,7 +48,7 @@ let requested operation_id =
     ~source_checkpoint:source
     ~trigger:Compaction_trigger.Manual
     ~cause
-    ~producer_invocation:None
+    ~producer:None
 
 let prepared operation_id =
   [ Operation.attempt_started ~operation_id ~attempt_id:attempt

@@ -53,7 +53,7 @@ let decode_requested ~operation_id payload =
     ; "source_checkpoint"
     ; "trigger"
     ; "cause"
-    ; "producer_invocation"
+    ; "producer"
     ]
   in
   let* values = Support.exact_object ~path ~allowed:fields ~required:fields payload in
@@ -63,8 +63,8 @@ let decode_requested ~operation_id payload =
   in
   let* trigger = nested ~path "trigger" Support.trigger values in
   let* cause = field ~path "cause" Support.cause values in
-  let* producer_json = Support.required_field ~path "producer_invocation" values in
-  let* producer_invocation = Support.producer_invocation producer_json in
+  let* producer_json = Support.required_field ~path "producer" values in
+  let* producer = Support.producer ~source_checkpoint producer_json in
   Ok
     (Operation.requested
        ~operation_id
@@ -72,7 +72,7 @@ let decode_requested ~operation_id payload =
        ~source_checkpoint
        ~trigger
        ~cause
-       ~producer_invocation)
+       ~producer)
 ;;
 
 let decode_attempt_started ~operation_id payload =

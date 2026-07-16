@@ -25,6 +25,7 @@
   masc.masc_core
   masc.masc_types
   masc.tool_invocation_ref
+  digestif
   threads
   uuidm
   yojson))

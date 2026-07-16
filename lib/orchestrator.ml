@@ -106,10 +106,10 @@ let make_orchestrator_prompt ~port:_ =
 let fixed_rhythm base_s =
   { Pulse.base_s; min_s = base_s; max_s = base_s; quiet = (0, 0) }
 
-(** Pulse instances for orchestrator and zombie cleanup.
+(** Pulse instances for orchestrator checks and maintenance observation.
     Stored in refs for shutdown access. *)
 let orchestrator_pulse : Pulse.t option ref = ref None
-let zombie_pulse : Pulse.t option ref = ref None
+let maintenance_pulse : Pulse.t option ref = ref None
 
 let pulse_mu = Eio.Mutex.create ()
 let with_pulse_rw f = Eio_guard.with_mutex pulse_mu f
@@ -156,13 +156,12 @@ let surface_orphan_tasks_gauge workspace_config =
          (Float.of_int count))
     counts
 
-(** Build the legacy zero-zombie pulse consumer as an observation-only orphan
-    surfacer. Inactivity is not an objective lifecycle transition, so a pulse
-    must never stop a keeper, release its task, or delete its registry file. *)
-let make_zero_zombie_consumer ~sw:_ ~workspace_config
+(** Build the observation-only orphan-task metric consumer. Observation must
+    never stop a keeper, release its task, or delete its registry file. *)
+let make_orphan_observation_consumer ~sw:_ ~workspace_config
     : (module Pulse.Consumer) =
   (module struct
-    let name = "zero-zombie-cleanup"
+    let name = "orphan-task-observation"
     let should_act _beat = true
     let on_beat _beat =
       (try surface_orphan_tasks_gauge workspace_config; Ok () with
@@ -180,19 +179,30 @@ let make_zero_zombie_consumer ~sw:_ ~workspace_config
 let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
   let config = load_config () in
 
-  (* Zero-Zombie cleanup: always enabled, configurable interval *)
-  let neo4j_interval = Env_config_runtime_services.Timeouts.neo4j_timeout_sec in
-  Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
-  let zombie_consumer = make_zero_zombie_consumer ~sw ~workspace_config in
+  let maintenance_interval =
+    Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec
+  in
+  Log.Orchestrator.debug
+    "maintenance observation enabled (interval: %.0fs)"
+    maintenance_interval;
+  let orphan_observation_consumer =
+    make_orphan_observation_consumer ~sw ~workspace_config
+  in
   let dedup_consumer = Channel_gate.make_dedup_cleanup_consumer () in
-  let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Always_on ~consumers:[zombie_consumer; dedup_consumer] in
-  with_pulse_rw (fun () -> zombie_pulse := Some zp);
+  let mp =
+    Pulse.create
+      ~clock
+      ~rhythm:(fixed_rhythm maintenance_interval)
+      ~lifecycle:Always_on
+      ~consumers:[ orphan_observation_consumer; dedup_consumer ]
+  in
+  with_pulse_rw (fun () -> maintenance_pulse := Some mp);
   Eio.Fiber.fork ~sw (fun () ->
-    try Pulse.run ~sw zp
+    try Pulse.run ~sw mp
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Log.Orchestrator.error "zombie cleanup pulse crashed: %s"
+      Log.Orchestrator.error "maintenance observation pulse crashed: %s"
         (Printexc.to_string exn));
 
   (* Orchestrator check: respects enabled flag via should_act *)
@@ -218,4 +228,4 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
     with_pulse_ro (fun () ->
       (match !orchestrator_pulse with Some p -> Pulse.shutdown p | None -> ()));
     with_pulse_ro (fun () ->
-      (match !zombie_pulse with Some p -> Pulse.shutdown p | None -> ()))
+      (match !maintenance_pulse with Some p -> Pulse.shutdown p | None -> ()))

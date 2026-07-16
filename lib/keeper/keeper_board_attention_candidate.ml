@@ -880,7 +880,8 @@ type scheduled_work =
   ; candidate : candidate
   }
 
-let scheduled_work = Eio.Stream.create max_int
+let max_scheduled_workspace_queue = 1
+let scheduled_work = Eio.Stream.create max_scheduled_workspace_queue
 let worker_running = Atomic.make false
 let active_workspaces = Atomic.make Active_set.empty
 

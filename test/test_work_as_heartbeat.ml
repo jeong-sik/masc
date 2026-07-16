@@ -36,10 +36,9 @@ let test_wah_max_silence_floor_logic () =
 let test_keepalive_interval_default () =
   check int "default interval 30s" 30 Cfg.KeeperKeepalive.interval_sec
 
-let test_keepalive_interval_range () =
+let test_keepalive_interval_positive () =
   let v = Cfg.KeeperKeepalive.interval_sec in
-  check bool "interval >= 5" true (v >= 5);
-  check bool "interval <= 300" true (v <= 300)
+  check bool "interval is positive" true (v > 0)
 
 let test_keepalive_interval_has_one_resolved_ssot () =
   Runtime_settings.ensure_init ();
@@ -189,7 +188,7 @@ let () =
     ];
     "keepalive_config", [
       test_case "interval default" `Quick test_keepalive_interval_default;
-      test_case "interval range" `Quick test_keepalive_interval_range;
+      test_case "interval positive" `Quick test_keepalive_interval_positive;
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;

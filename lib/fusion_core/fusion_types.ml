@@ -197,7 +197,7 @@ type judge_node =
 [@@deriving yojson, show, eq]
 
 (* 심판(judge) 실패의 닫힌 합. {!panel_failure}와 동형이되 심판 도메인 전용 사유
-   ([Empty_result]/[Build_error]/[Parse_error]/[Budget_exceeded])를 추가한다.
+   ([Empty_result]/[Build_error]/[Parse_error])를 추가한다.
    [Fusion_judge] 계열이 {!Agent_sdk.Error}의 [Timeout] variant를 match에서 잡아 typed로
    반환하므로, 호출자는 string substring 분류 없이 exhaustive match로 분류한다
    (CLAUDE.md §string-classifier 안티패턴 회피). [panel_failure]를 공유하지 않는 이유는
@@ -209,16 +209,11 @@ type judge_failure =
   | Empty_result
   | Build_error of string
   | Parse_error of string
-  | Budget_exceeded of string
   | Panels_unavailable of skip_reason
   | Internal_error of string
 [@@deriving yojson, show, eq]
 
 let judge_failure_is_timeout = function Timeout -> true | _ -> false
-
-let judge_failure_is_timeout_or_budget = function
-  | Timeout | Budget_exceeded _ -> true
-  | _ -> false
 
 let judge_failure_text = function
   | Timeout -> "timeout"
@@ -227,7 +222,6 @@ let judge_failure_text = function
   | Empty_result -> "judge: empty result"
   | Build_error detail -> detail
   | Parse_error detail -> detail
-  | Budget_exceeded detail -> detail
   | Panels_unavailable reason -> render_skip_reason reason
   | Internal_error detail -> detail
 
@@ -238,7 +232,6 @@ let judge_failure_tag = function
   | Empty_result -> "empty_result"
   | Build_error _ -> "build_error"
   | Parse_error _ -> "parse_error"
-  | Budget_exceeded _ -> "budget_exceeded"
   | Panels_unavailable _ -> "panels_unavailable"
   | Internal_error _ -> "internal_error"
 

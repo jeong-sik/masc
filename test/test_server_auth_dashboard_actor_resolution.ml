@@ -61,8 +61,8 @@ let test_rejected_credential_cannot_supply_actor_hint () =
   let request = request ~token:"stale-token" ~actor:"forged-actor" () in
   (match resolve ~base_path request with
    | Server_auth.Rejected_credential
-       (Masc.Auth_error_kind.Outcome_error
-          { err_kind = Masc.Auth_error_kind.Token_mismatch
+       (Auth_error_kind.Outcome_error
+          { err_kind = Auth_error_kind.Token_mismatch
           ; actor_hint = Some actor_hint
           ; _
           }) ->
@@ -100,8 +100,8 @@ let test_malformed_credential_cannot_become_anonymous () =
   in
   (match resolve ~base_path request with
    | Server_auth.Rejected_credential
-       (Masc.Auth_error_kind.Outcome_error
-          { err_kind = Masc.Auth_error_kind.Unauthorized
+       (Auth_error_kind.Outcome_error
+          { err_kind = Auth_error_kind.Unauthorized
           ; actor_hint = Some actor_hint
           ; _
           }) ->

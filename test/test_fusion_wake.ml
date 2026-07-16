@@ -186,7 +186,6 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; system_prompt = "panel system prompt"
     ; web_tools = false
     ; max_output_tokens = None
-    ; timeout_s = Fusion_policy.default_timeout_s
     }
   in
   let preset : Fusion_policy.preset =
@@ -194,13 +193,9 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; panels = [ panel_group ]
     ; judge = "judge.model"
     ; judge_system_prompt = "judge system prompt"
-    ; judge_timeout_s = Fusion_policy.default_timeout_s
     ; judge_max_output_tokens = None
-    ; meta_timeout_s = Fusion_policy.default_timeout_s
     ; judges = []
     ; min_answered = Fusion_policy.default_min_answered
-    ; judge_wave_budget_s = Float.max_float
-    ; adaptive_timeout_factor = 1.0
     ; fallback_judge_model = None
     }
   in

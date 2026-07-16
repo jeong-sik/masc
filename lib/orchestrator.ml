@@ -4,7 +4,6 @@
 type config = {
   check_interval_s: float;      (* How often to check (default: 300s = 5min) *)
   min_priority: int;            (* Minimum task priority to trigger (default: 1) *)
-  agent_timeout_s: int;         (* Timeout for spawned orchestrator (default: 300) *)
   orchestrator_agent: string;   (* Which agent to spawn as orchestrator (env: MASC_ORCHESTRATOR_AGENT) *)
   enabled: bool;                (* Is auto-orchestration enabled *)
   port: int;                    (* MASC HTTP port for API calls *)
@@ -17,8 +16,6 @@ let load_config () =
       Env_config_core.get_float ~default:300.0 "MASC_ORCHESTRATOR_INTERVAL";
     min_priority =
       Env_config_core.get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY";
-    agent_timeout_s =
-      Env_config_core.get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT";
     orchestrator_agent = Env_config.Orchestrator.agent_name;
     enabled =
       Env_config_core.get_bool ~default:false
@@ -46,11 +43,9 @@ let should_orchestrate ~min_priority workspace_config =
         task.task_status = Masc_domain.Todo && task.priority <= min_priority
       ) backlog.tasks in
 
-      (* Get active (non-zombie) agents *)
-      let agents = Workspace.get_agents_raw workspace_config in
-      let active_agents = List.filter (fun (agent: Masc_domain.agent) ->
-        not (Workspace_resilience.Zombie.is_zombie agent.last_seen)
-      ) agents in
+      (* Active membership is declared by workspace/session state. [last_seen]
+         remains telemetry and cannot trigger orchestration by elapsed time. *)
+      let active_agents = Workspace.get_active_agents workspace_config in
 
       (* Need orchestration if: important tasks exist AND no active agents *)
       let needs_orchestration =
@@ -109,10 +104,10 @@ let make_orchestrator_prompt ~port:_ =
 let fixed_rhythm base_s =
   { Pulse.base_s; min_s = base_s; max_s = base_s; quiet = (0, 0) }
 
-(** Pulse instances for orchestrator and zombie cleanup.
+(** Pulse instances for orchestrator checks and maintenance observation.
     Stored in refs for shutdown access. *)
 let orchestrator_pulse : Pulse.t option ref = ref None
-let zombie_pulse : Pulse.t option ref = ref None
+let maintenance_pulse : Pulse.t option ref = ref None
 
 let pulse_mu = Eio.Mutex.create ()
 let with_pulse_rw f = Eio_guard.with_mutex pulse_mu f
@@ -138,15 +133,11 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~workspac
 
 (** RFC-0294 PR-4: single-owner orphan-task surfacer.
 
-    R1g (RFC-0294) removed [audit_orphan_tasks] from the keeper wake-driver, so
-    orphaned tasks would become silently invisible without an independent
-    observation path (broken-but-visible regression). This refreshes
-    [masc_orphan_tasks] (gauge, labeled by status_class) each pulse beat from the
-    same audit, independent of the keeper actor. It is an alertable metric, not
-    an actor wake: if the reaper/pulse itself stalls (the 2026-06-21/22
-    reaper-not-running incident) the gauge goes stale, which is itself alertable.
-    Every class in [Workspace.orphan_status_classes] is emitted (0 when empty) so
-    a cleared class resets rather than leaving a stale value. *)
+    Refreshes [masc_orphan_tasks] (gauge, labeled by status_class) each pulse
+    beat from the explicit workspace membership audit, independent of the
+    keeper actor. It is an alertable metric, not lifecycle authority. Every
+    class in [Workspace.orphan_status_classes] is emitted (0 when empty) so a
+    cleared class resets rather than leaving a stale value. *)
 let surface_orphan_tasks_gauge workspace_config =
   let counts =
     Workspace.orphan_counts_by_status_class
@@ -159,13 +150,12 @@ let surface_orphan_tasks_gauge workspace_config =
          (Float.of_int count))
     counts
 
-(** Build the legacy zero-zombie pulse consumer as an observation-only orphan
-    surfacer. Inactivity is not an objective lifecycle transition, so a pulse
-    must never stop a keeper, release its task, or delete its registry file. *)
-let make_zero_zombie_consumer ~sw:_ ~workspace_config
+(** Build the observation-only orphan-task metric consumer. Observation must
+    never stop a keeper, release its task, or delete its registry file. *)
+let make_orphan_observation_consumer ~sw:_ ~workspace_config
     : (module Pulse.Consumer) =
   (module struct
-    let name = "zero-zombie-cleanup"
+    let name = "orphan-task-observation"
     let should_act _beat = true
     let on_beat _beat =
       (try surface_orphan_tasks_gauge workspace_config; Ok () with
@@ -183,19 +173,30 @@ let make_zero_zombie_consumer ~sw:_ ~workspace_config
 let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
   let config = load_config () in
 
-  (* Zero-Zombie cleanup: always enabled, configurable interval *)
-  let neo4j_interval = Env_config_runtime_services.Timeouts.neo4j_timeout_sec in
-  Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
-  let zombie_consumer = make_zero_zombie_consumer ~sw ~workspace_config in
+  let maintenance_interval =
+    Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec
+  in
+  Log.Orchestrator.debug
+    "maintenance observation enabled (interval: %.0fs)"
+    maintenance_interval;
+  let orphan_observation_consumer =
+    make_orphan_observation_consumer ~sw ~workspace_config
+  in
   let dedup_consumer = Channel_gate.make_dedup_cleanup_consumer () in
-  let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Always_on ~consumers:[zombie_consumer; dedup_consumer] in
-  with_pulse_rw (fun () -> zombie_pulse := Some zp);
+  let mp =
+    Pulse.create
+      ~clock
+      ~rhythm:(fixed_rhythm maintenance_interval)
+      ~lifecycle:Always_on
+      ~consumers:[ orphan_observation_consumer; dedup_consumer ]
+  in
+  with_pulse_rw (fun () -> maintenance_pulse := Some mp);
   Eio.Fiber.fork ~sw (fun () ->
-    try Pulse.run ~sw zp
+    try Pulse.run ~sw mp
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Log.Orchestrator.error "zombie cleanup pulse crashed: %s"
+      Log.Orchestrator.error "maintenance observation pulse crashed: %s"
         (Printexc.to_string exn));
 
   (* Orchestrator check: respects enabled flag via should_act *)
@@ -221,4 +222,4 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
     with_pulse_ro (fun () ->
       (match !orchestrator_pulse with Some p -> Pulse.shutdown p | None -> ()));
     with_pulse_ro (fun () ->
-      (match !zombie_pulse with Some p -> Pulse.shutdown p | None -> ()))
+      (match !maintenance_pulse with Some p -> Pulse.shutdown p | None -> ()))

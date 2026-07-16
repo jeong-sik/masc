@@ -171,6 +171,9 @@ export interface SetGateModeResponse {
   previous_mode: GateMode | null
   actor: string
   changed_at: string
+  reopened?: number
+  started?: number
+  queued?: number
 }
 
 export function setGateMode(mode: GateMode): Promise<SetGateModeResponse> {

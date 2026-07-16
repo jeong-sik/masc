@@ -78,7 +78,15 @@ let definitions : definition list =
                           `String
                             "Adaptive thinking policy for Ollama reasoning models. auto defaults to response-oriented non-thinking probes; enabled measures thinking path explicitly." );
                       ] );
-                  ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
+                  ( "timeout_sec",
+                    `Assoc
+                      [
+                        ("type", `String "integer");
+                        ("minimum", `Int 1);
+                        ( "description",
+                          `String
+                            "Explicit probe timeout in seconds. Every positive value is passed through unchanged." );
+                      ] );
                   ("generate_when_unloaded", `Assoc [ ("type", `String "boolean") ]);
                   ("run_generate", `Assoc [ ("type", `String "boolean") ]);
                 ] );

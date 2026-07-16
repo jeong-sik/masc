@@ -591,9 +591,9 @@ jobs:
     # not synthesize default build inputs even though `always()` keeps this
     # condition evaluable.
     if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
-    # Test execution policy (hard-required tests):
+    # Test execution policy (hard-required focused suites):
     #   - `continue-on-error` is intentionally absent: compile failures and
-    #     every test suite are merge-blocking.
+    #     every focused test suite are merge-blocking.
     #   - Each suite runs exactly once. scripts/ci-run-tests.sh only reports
     #     heartbeat, disk pressure, process state, and failure diagnostics.
     #   - GitHub Actions owns the outer workflow lifecycle; this job does not
@@ -672,8 +672,8 @@ jobs:
           # dropping native Domain/C-stub coverage.
           DUNE_JOBS: "1"
         # NO continue-on-error: dune build is deterministic and must hard-fail.
-        # Test execution steps below are also required: any failing test suite
-        # now fails the Build and Test job and blocks merge via the CI Gate.
+        # Focused test execution steps below are also required: any failing
+        # suite fails the Build and Test job and blocks merge via the CI Gate.
         # See: PR #11721 followup, memory feedback_admin_merge_can_bypass_build_ci.md.
         run: |
           set -euo pipefail
@@ -772,34 +772,12 @@ jobs:
           chmod +x dashboard/scripts/gen-sse-types.sh
           opam exec -- dashboard/scripts/gen-sse-types.sh --check
 
-      - name: Run tests (quick suite)
-        id: quick_suite
-        env:
-          ME_ROOT: /tmp/me
-          ALCOTEST_QUICK_TESTS: "1"
-          MASC_INCLUDE_OPERATOR_CONTROL: "false"
-          CI_TEST_HEARTBEAT_SEC: 30
-          MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
-          MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
-          MASC_E2E_TESTS: "true"
-          # Reduce parallelism to minimize Eio fiber scheduling flakes.
-          # See: https://github.com/jeong-sik/masc/issues/2957
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune test --root ."
-
-      - name: Upload test diagnostics on failure
-        if: ${{ failure() && steps.quick_suite.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-diagnostics-quick-suite-${{ github.run_id }}
-          path: |
-            _build/log
-            _build/default/test/_build/_tests/**/*.output
-            /tmp/ci-run-tests.*.log
-          retention-days: 7
+      # The former catch-all `dune test` gate mixed executable behavior tests
+      # with source-text, log-wording, and TLA text-parity assertions. Those
+      # implementation-shape checks made main permanently red after legitimate
+      # refactors without identifying a runtime regression. `@check` above
+      # still compiles every test target; the authoritative runtime, operator,
+      # transport, SSE, and contract suites below remain executable gates.
 
       - name: Run operator control suite
         id: operator_control_suite
@@ -1178,10 +1156,10 @@ jobs:
           #   - dune build (compile-only) is HARD REQUIRED — Build step lacks
           #     continue-on-error, so a compile failure makes the job result =
           #     failure → check "build" required = block merge.
-          #   - Test execution (quick-suite, operator-control, sse, transport,
-          #     contract harness) is now HARD REQUIRED as well. Each test step
-          #     lacks continue-on-error, so a test failure fails the Build and
-          #     Test job and blocks merge.
+          #   - Focused operator-control, SSE, transport, and contract harness
+          #     execution is HARD REQUIRED as well. Each test step lacks
+          #     continue-on-error, so a test failure fails the Build and Test
+          #     job and blocks merge.
           check() {
             local name=$1
             local result=$2

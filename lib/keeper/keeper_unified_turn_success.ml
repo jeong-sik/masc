@@ -69,11 +69,7 @@ let acknowledge_pending_messages
 
 let terminal_outcome_of_result result =
   match result.Keeper_agent_run.stop_reason with
-  | Runtime_agent.Completed
-  | Runtime_agent.TurnLimitObserved _
-  | Runtime_agent.ExecutionTimeoutObserved _
-  | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
-    Terminal_done
+  | Runtime_agent.Completed -> Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
@@ -269,12 +265,6 @@ let emit_usage_metrics_and_log
   let outcome_str =
     match result.Keeper_agent_run.stop_reason with
     | Runtime_agent.Completed -> "completed"
-    | Runtime_agent.TurnLimitObserved { turns_used; limit; _ } ->
-      Printf.sprintf "turn_limit_observed(%d/%d)" turns_used limit
-    | Runtime_agent.ExecutionTimeoutObserved { elapsed_sec; turn_count; _ } ->
-      Printf.sprintf "execution_timeout_observed(%.1fs/%d)" elapsed_sec turn_count
-    | Runtime_agent.ExecutionIdleTimeoutObserved { idle_sec; turn_count; _ } ->
-      Printf.sprintf "execution_idle_timeout_observed(%.1fs/%d)" idle_sec turn_count
     | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
@@ -292,10 +282,7 @@ let emit_usage_metrics_and_log
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
        | Runtime_agent.InputRequired _ -> "input_required"
-       | Runtime_agent.Completed
-       | Runtime_agent.TurnLimitObserved _
-       | Runtime_agent.ExecutionTimeoutObserved _
-       | Runtime_agent.ExecutionIdleTimeoutObserved _ -> "success")
+       | Runtime_agent.Completed -> "success")
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string Turns)
@@ -413,11 +400,7 @@ let terminal_reason_of_outcome result = function
        Keeper_turn_terminal.of_disposition
          ~source:"runtime_stop_reason"
          Keeper_turn_disposition.Input_required
-     | Runtime_agent.Completed
-     | Runtime_agent.TurnLimitObserved _
-     | Runtime_agent.ExecutionTimeoutObserved _
-     | Runtime_agent.ExecutionIdleTimeoutObserved _ ->
-       Keeper_turn_terminal.success ())
+     | Runtime_agent.Completed -> Keeper_turn_terminal.success ())
 
 let persist_terminal_turn_meta
       ~config
@@ -473,28 +456,6 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with
-  | Runtime_agent.TurnLimitObserved { turns_used; limit } ->
-    Log.Keeper.warn ~keeper_name:updated_meta.name
-      "runtime reported unexpected turn-limit observation (%d/%d); no Keeper checkpoint, blocker, retry, or follow-up action was created"
-      turns_used
-      limit;
-    reset_failure_state ()
-  | Runtime_agent.ExecutionTimeoutObserved
-      { elapsed_sec; timeout_sec; turn_count; _ } ->
-    Log.Keeper.warn ~keeper_name:updated_meta.name
-      "runtime reported unexpected execution timeout observation (elapsed=%.1fs timeout=%.1fs turns=%d); no Keeper blocker, retry, or follow-up action was created"
-      elapsed_sec
-      timeout_sec
-      turn_count;
-    reset_failure_state ()
-  | Runtime_agent.ExecutionIdleTimeoutObserved
-      { idle_sec; idle_timeout_sec; turn_count; _ } ->
-    Log.Keeper.warn ~keeper_name:updated_meta.name
-      "runtime reported unexpected execution idle-timeout observation (idle=%.1fs timeout=%.1fs turns=%d); no Keeper blocker, retry, or follow-up action was created"
-      idle_sec
-      idle_timeout_sec
-      turn_count;
-    reset_failure_state ()
   | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
     (* A clean, intentional yield to a parked chat, not a degraded outcome:
        clear turn-failure state and record health success, like a completed

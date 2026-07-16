@@ -413,8 +413,9 @@ let test_records_mcp_server_operation_duration_metric () =
     }
   in
   let result : Tool_result.result =
-    Ok
+    Tool_result.Completed
       { Tool_result.data = `String "ok"
+      ; metadata = None
       ; tool_name = "get-weather"
       ; duration_ms = 123.0
       }
@@ -593,7 +594,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
               ("session_id", `String "session-explicit");
             ])
         ~message:"command exited 1"
-        ~success:false
+        ~disposition:(Tool_result.Failed Tool_result.Runtime_failure)
         ~duration_ms:87;
       let rows =
         Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()
@@ -704,8 +705,10 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (sse_payload |> U.member "name" |> U.to_string);
       check string "sse tool name" "tool_execute"
         (sse_payload |> U.member "tool_name" |> U.to_string);
-      check bool "sse success" false
-        (sse_payload |> U.member "success" |> U.to_bool);
+      check string "sse disposition" "failed"
+        (sse_payload |> U.member "disposition" |> U.to_string);
+      check bool "sse omits legacy success bool" true
+        (sse_payload |> U.member "success" = `Null);
       check string "sse error text" "command exited 1"
         (sse_payload |> U.member "error_text" |> U.to_string);
       check string "sse args structured input" "false"

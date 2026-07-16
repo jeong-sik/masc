@@ -10,31 +10,12 @@
    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS] (floor 1). *)
 let librarian_max_tokens () = Env_config.KeeperMemoryOs.librarian_max_tokens ()
 
-(* Memory extraction runs against a JSON-capable model with a long context
-   window and is not constrained by the generic inference API budget (30s).
-   600s aligns with the keeper turn budget so that provider cold starts or
-   model loading do not silently drop episodes. *)
-let librarian_default_timeout_sec =
-  Env_config.KeeperMemoryOs.librarian_timeout_sec_default
-;;
-
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
-
-let default_complete ~sw ~net ?clock ~config ~messages () =
-  Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
-;;
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 (* RFC-0257 / P0-4 adversarial hardening: per-keeper librarian provider slot.
    The previous process-global slot allowed one slow keeper to starve the fleet.
    Capacity is still read from [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT]
-   (default 1), but the semaphore is now keyed by [keeper_id] so each keeper
+   (default 1), but the nonblocking slot is keyed by [keeper_id] so each keeper
    gets its own concurrency budget. A capacity of 0 disables the gate entirely. *)
 let per_keeper_slot_capacity () =
   Env_config.KeeperMemoryOs.librarian_global_slot ()
@@ -42,11 +23,9 @@ let per_keeper_slot_capacity () =
 
 let memory_os_librarian_provider_slot_site = "memory_os_librarian_provider_slot"
 
-let provider_slot_wait_sec = 0.25
-
 type provider_slot =
   { capacity : int
-  ; sem : Eio.Semaphore.t option
+  ; mutable in_use : int
   }
 
 let provider_slots_mu = Eio.Mutex.create ()
@@ -57,46 +36,33 @@ let provider_slot_for_keeper ~keeper_id capacity =
     match Hashtbl.find_opt provider_slots keeper_id with
     | Some slot when slot.capacity = capacity -> slot
     | _ ->
-      let slot =
-        { capacity
-        ; sem =
-            (match capacity with
-             | 0 -> None
-             | n -> Some (Eio.Semaphore.make n))
-        }
-      in
+      let slot = { capacity; in_use = 0 } in
       Hashtbl.replace provider_slots keeper_id slot;
       slot)
 ;;
 
-let with_provider_slot ~keeper_id ~clock f =
+let with_provider_slot ~keeper_id ~clock:_ f =
   let capacity = per_keeper_slot_capacity () in
   let slot = provider_slot_for_keeper ~keeper_id capacity in
-  match slot.sem with
-  | None -> Some (f ())
-  | Some sem ->
-    let acquired = ref false in
-    (try
-       (try
-          Eio.Time.with_timeout_exn clock provider_slot_wait_sec (fun () ->
-            Eio.Semaphore.acquire sem);
-         acquired := true
-        with
-        | Eio.Time.Timeout -> ())
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.warn
-         "librarian provider slot acquisition failed keeper=%s: %s"
-         keeper_id
-         (Printexc.to_string exn));
-    if !acquired
-    then
-      Some
-        (Eio.Switch.run (fun cleanup_sw ->
-           Eio.Switch.on_release cleanup_sw (fun () -> Eio.Semaphore.release sem);
-           f ()))
-    else None
+  if capacity = 0
+  then Some (f ())
+  else
+    let acquired =
+      Eio_guard.with_mutex provider_slots_mu (fun () ->
+        if slot.in_use >= slot.capacity
+        then false
+        else (
+          slot.in_use <- slot.in_use + 1;
+          true))
+    in
+    if not acquired
+    then None
+    else
+      Fun.protect
+        ~finally:(fun () ->
+          Eio_guard.with_mutex provider_slots_mu (fun () ->
+            slot.in_use <- Int.max 0 (slot.in_use - 1)))
+        (fun () -> Some (f ()))
 ;;
 
 let enabled () =
@@ -229,10 +195,6 @@ let max_messages () =
 let prompt_max_messages () = max_messages () * cadence_turns ()
 ;;
 
-let default_timeout_sec () =
-  Env_config.KeeperMemoryOs.librarian_timeout_sec ()
-;;
-
 let runtime_id_for_librarian ~runtime_id =
   Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
 ;;
@@ -273,9 +235,8 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
   in
   (* Native json_schema when the provider declares it; otherwise fall back to the
      schema-free tuned config so json_object / free-text providers (GLM, MiMo,
-     ollama cloud) can still serve the librarian. The schema gate is NOT the
-     silent-failure safety net — the parse-retry loop below plus WARN on
-     permanent failure is. *)
+     ollama cloud) can still serve the librarian. Invalid structured output is
+     surfaced as a typed failure after the single provider attempt. *)
   Keeper_structured_output_schema.apply_schema_or_prompt_tier
     ~log_label:"keeper librarian output contract"
     Keeper_structured_output_schema.librarian_episode_output_schema
@@ -285,105 +246,6 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
 let message role text =
   Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
 ;;
-
-(* Bounded parse-retry for librarian extraction (typed-harness contract C6).
-
-   The librarian asks a provider for a JSON episode. When the provider returns a
-   non-empty response that does not parse into the typed episode
-   ([Keeper_librarian.episode_of_output] -> None), the prior behavior dropped the
-   episode and only incremented [EpisodeCreateFailures]: a counter makes the loss
-   visible but does not recover it (the telemetry-as-fix shape CLAUDE.md rejects).
-   Instead, re-ask the provider with a corrective nudge up to
-   [librarian_max_parse_retries] times before giving up. Transport failures
-   (timeout / HTTP error) are NOT retried here — they are a provider-availability
-   problem, not the model-output problem this bound addresses. *)
-let librarian_max_parse_retries = 2
-
-type retry_field_shape =
-  { name : string
-  ; shape : string
-  }
-
-let parse_retry_claim_categories =
-  Keeper_memory_os_types.all_categories
-  |> List.map Keeper_memory_os_types.category_to_string
-;;
-
-let parse_retry_claim_kinds =
-  Keeper_memory_os_types.librarian_claim_kinds
-  |> List.map Keeper_memory_os_types.claim_kind_to_string
-;;
-
-let quoted value = Printf.sprintf "\"%s\"" value
-let union_shape values = values |> String.concat "|" |> quoted
-let render_retry_field field = Printf.sprintf "\"%s\": %s" field.name field.shape
-
-let retry_shape_string = quoted "string"
-let retry_shape_integer = quoted "integer"
-let retry_shape_optional_string = quoted "optional-string"
-let retry_shape_string_list = Printf.sprintf "[%s]" retry_shape_string
-
-let parse_retry_claim_field_shapes =
-  [ { name = Keeper_librarian.wire_field_claim; shape = retry_shape_string }
-  ; { name = Keeper_librarian.wire_field_category
-    ; shape = union_shape parse_retry_claim_categories
-    }
-  ; { name = Keeper_librarian.wire_field_source_turn; shape = retry_shape_integer }
-  ; { name = Keeper_librarian.wire_field_source_tool_call_id
-    ; shape = retry_shape_optional_string
-    }
-  ; { name = Keeper_librarian.wire_field_claim_id; shape = retry_shape_optional_string }
-  ; { name = Keeper_librarian.wire_field_claim_kind
-    ; shape = union_shape parse_retry_claim_kinds
-    }
-  ]
-;;
-
-let parse_retry_claim_fields =
-  List.map (fun field -> field.name) parse_retry_claim_field_shapes
-;;
-
-let parse_retry_claim_shape =
-  parse_retry_claim_field_shapes
-  |> List.map render_retry_field
-  |> String.concat ", "
-  |> Printf.sprintf "{%s}"
-;;
-
-let parse_retry_episode_field_shapes =
-  [ { name = Keeper_librarian.wire_field_episode_summary; shape = retry_shape_string }
-  ; { name = Keeper_librarian.wire_field_claims
-    ; shape = Printf.sprintf "[%s]" parse_retry_claim_shape
-    }
-  ; { name = Keeper_librarian.wire_field_open_items; shape = retry_shape_string_list }
-  ; { name = Keeper_librarian.wire_field_constraints; shape = retry_shape_string_list }
-  ; { name = Keeper_librarian.wire_field_preserved_tool_refs
-    ; shape = retry_shape_string_list
-    }
-  ]
-;;
-
-let parse_retry_episode_fields =
-  List.map (fun field -> field.name) parse_retry_episode_field_shapes
-;;
-
-let parse_retry_episode_shape =
-  parse_retry_episode_field_shapes
-  |> List.map render_retry_field
-  |> String.concat ",\n"
-  |> Printf.sprintf "{%s}"
-;;
-
-let parse_retry_nudge =
-  String.concat
-    "\n"
-    [ "Your previous response could not be parsed as the required JSON episode object. Respond with ONLY a single JSON object — no markdown fences, no prose."
-    ; "Required shape:"
-    ; parse_retry_episode_shape
-    ; Printf.sprintf
-        "%s must be an integer. Do not include a confidence field and do not add any fields not shown above."
-        Keeper_librarian.wire_field_source_turn
-    ]
 
 type extraction_error =
   | Prompt_render_failed of string
@@ -411,23 +273,6 @@ let extraction_error_to_string = function
   | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
 ;;
 
-type unparseable_response =
-  { reason : string
-  ; raw_evidence : string option
-  }
-
-let unparseable_response ?raw_evidence reason = { reason; raw_evidence }
-
-type attempt_outcome =
-  | Parsed of Keeper_memory_os_types.episode
-  | Unparseable of unparseable_response
-    (* provider returned output we could not parse into an episode — retryable *)
-  | Transport_failed of extraction_error (* timeout / HTTP error — not retried here *)
-
-type parse_retry_error =
-  | Retry_exhausted_unparseable of unparseable_response
-  | Retry_transport_failed of extraction_error
-
 let should_record_cadence_backoff_after_error = function
   | Provider_timeout
   | Provider_transport_failed _
@@ -439,34 +284,6 @@ let should_record_cadence_backoff_after_error = function
   | Prompt_render_failed _
   | Memory_fact_upsert_failed _ ->
     false
-;;
-
-let prefer_unparseable_response prior current =
-  match current.raw_evidence with
-  | Some raw when not (String.equal (String.trim raw) "") -> current
-  | Some _ | None ->
-    (match prior with
-     | Some best -> best
-     | None -> current)
-;;
-
-let run_with_parse_retries ~max_retries ~attempt messages =
-  let rec loop ~remaining_retries ~best_unparseable messages =
-    match attempt messages with
-    | Parsed episode -> Ok episode
-    | Transport_failed msg -> Error (Retry_transport_failed msg)
-    | Unparseable diagnostic ->
-      let selected = prefer_unparseable_response best_unparseable diagnostic in
-      let best_unparseable = Some selected in
-      if remaining_retries <= 0
-      then Error (Retry_exhausted_unparseable selected)
-      else
-        loop
-          ~remaining_retries:(remaining_retries - 1)
-          ~best_unparseable
-          (messages @ [ message Agent_sdk.Types.User parse_retry_nudge ])
-  in
-  loop ~remaining_retries:max_retries ~best_unparseable:None messages
 ;;
 
 let render_prompt key variables =
@@ -502,26 +319,9 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
    2026-06-24): four byte-for-output-identical copies unified. *)
 
-(* WHY: run the librarian extraction to completion instead of force-killing it
-   on a wall-clock budget. Killing a legitimate in-flight provider call on a
-   deadline produced kill -> retry churn without recovering the turn. Per
-   RFC-0156 (Withdraw MASC turn-budget timeout policy) total attempt time stays
-   observable but is not a lifecycle/admission decision; a protocol-level
-   timeout is local to the call. [clock]/[timeout_sec] are retained in the
-   signature for the surrounding transport plumbing but no longer gate
-   execution — this helper no longer imposes a timeout despite its name.
-   The [Eio.Time.Timeout -> None] arm is kept so an inner-transport
-   (connect/idle/HTTP) timeout still maps to the typed [Provider_timeout];
-   [Eio.Cancel.Cancelled] is not caught here and so still propagates. *)
-let with_timeout ~clock:_ ~timeout_sec:_ f =
-  try Some (f ()) with
-  | Eio.Time.Timeout -> None
-;;
-
 let extract_with_provider_classified
-    ?(complete = default_complete)
+    ?complete
     ?clock
-    ?(timeout_sec = librarian_default_timeout_sec)
     ~sw
     ~net
     ~runtime_id
@@ -543,60 +343,41 @@ let extract_with_provider_classified
         | Ok () ->
           let attempt messages =
             match
-              with_timeout ~clock ~timeout_sec (fun () ->
-                complete ~sw ~net ~clock ~config:provider_cfg ~messages ())
+              Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
+                ~config:provider_cfg ~messages ()
             with
-            | None -> Transport_failed Provider_timeout
-            | Some (Error err) ->
-              Transport_failed
-                (Provider_transport_failed (Provider_http_error.to_message err))
-            | Some (Ok response) ->
-              let raw_evidence = Agent_sdk_response.text_of_response response |> String.trim in
+            | Error (Llm_provider.Http_client.TimeoutError _) ->
+              Error Provider_timeout
+            | Error err ->
+              Error (Provider_transport_failed (Provider_http_error.to_message err))
+            | Ok response ->
               (match
                  Agent_sdk_response.structured_json_of_response
                    ~schema_name:"keeper_librarian_episode"
                    response
                with
                | Error detail ->
-                 let raw_evidence =
-                   if String.equal raw_evidence "" then None else Some raw_evidence
-                 in
-                 Unparseable
-                   (unparseable_response
-                      ?raw_evidence
+                 Error
+                   (Provider_unparseable_response
                       (Printf.sprintf
                          "librarian provider returned invalid structured JSON (%s)"
                          detail))
                | Ok json ->
                  (match Keeper_librarian.episode_of_json_result ~generation inp json with
-                  | Ok episode -> Parsed episode
+                  | Ok episode -> Ok episode
                   | Error error ->
-                    let raw_evidence =
-                      if String.equal raw_evidence "" then None else Some raw_evidence
-                    in
-                    Unparseable
-                      (unparseable_response
-                         ?raw_evidence
+                    Error
+                      (Provider_unparseable_response
                          (Printf.sprintf
                             "librarian provider returned invalid episode JSON (%s)"
                             (Keeper_librarian.parse_error_to_string error)))))
           in
-          (match
-             run_with_parse_retries
-               ~max_retries:librarian_max_parse_retries
-               ~attempt
-               messages
-           with
-           | Ok episode -> Ok episode
-           | Error (Retry_transport_failed err) -> Error err
-           | Error (Retry_exhausted_unparseable diagnostic) ->
-             Error (Provider_unparseable_response diagnostic.reason))))
+          attempt messages))
 ;;
 
 let extract_with_provider
     ?complete
     ?clock
-    ?timeout_sec
     ~sw
     ~net
     ~runtime_id
@@ -608,7 +389,6 @@ let extract_with_provider
     extract_with_provider_classified
       ?complete
       ?clock
-      ?timeout_sec
       ~sw
       ~net
       ~runtime_id
@@ -623,7 +403,6 @@ let extract_with_provider
 let extract_and_append_with_provider_classified
     ?complete
     ?clock
-    ?timeout_sec
     ~sw
     ~net
     ~keeper_id
@@ -644,7 +423,6 @@ let extract_and_append_with_provider_classified
        extract_with_provider_classified
          ?complete
          ?clock
-         ?timeout_sec
          ~sw
          ~net
          ~runtime_id
@@ -711,7 +489,6 @@ let extract_and_append_with_provider_classified
 let extract_and_append_with_provider
     ?complete
     ?clock
-    ?timeout_sec
     ~sw
     ~net
     ~keeper_id
@@ -723,7 +500,6 @@ let extract_and_append_with_provider
     extract_and_append_with_provider_classified
       ?complete
       ?clock
-      ?timeout_sec
       ~sw
       ~net
       ~keeper_id
@@ -739,7 +515,7 @@ let provider_for_runtime ~runtime_id =
   Keeper_memory_runtime_resolution.provider_for_runtime ~runtime_id
 ;;
 
-let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_librarian.input) =
+let run_best_effort ?complete ~runtime_id ~keeper_id (inp : Keeper_librarian.input) =
   (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
      advances its cadence counter, and a not-due turn skips extraction entirely
      (the messages remain in the window for the next due turn). The cadence
@@ -765,9 +541,6 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                runtime_id
            else (
              let clock = Eio_context.get_clock_opt () in
-             let timeout_sec =
-               Option.value timeout_sec ~default:(default_timeout_sec ())
-             in
              match clock with
              | None ->
                Otel_metric_store.inc_counter
@@ -784,7 +557,6 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  extract_and_append_with_provider_classified
                    ?complete
                    ~clock
-                   ~timeout_sec
                    ~sw
                    ~net
                    ~keeper_id

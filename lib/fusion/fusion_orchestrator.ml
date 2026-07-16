@@ -34,24 +34,19 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             let panel_count = max 1 (List.length (Fusion_policy.preset_models preset)) in
             Fusion_panel.run ~sw ~net
               ~max_fibers:panel_count
-              ~outer_timeout_s:
-                (Fusion_policy.panel_outer_timeout_of
-                   ~max_fibers:panel_count groups)
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
           let judge_web_tools =
             Fusion_policy.judge_web_tools_of ~req_web_tools:req.Fusion_types.web_tools
               groups
           in
-          let judge_max_tool_calls = Fusion_policy.judge_tool_budget_of groups in
           let run_single_judge () =
             Fusion_judge.run ~sw ~net
               ~timeout_s:preset.Fusion_policy.judge_timeout_s
               ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
               ~judge_model:preset.Fusion_policy.judge
-              ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools
-              ~max_tool_calls:judge_max_tool_calls ()
+              ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools ()
           in
           let refine_over (s1, u1) =
             let single_node =
@@ -65,7 +60,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                 ~judge_model:preset.Fusion_policy.judge
                 ~question:req.Fusion_types.prompt ~panel ~prior:s1
-                ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
+                ~web_tools:judge_web_tools ()
             with
             | Ok (s2, u2) ->
               ( Ok (s2, Fusion_types.add_usage u1 u2)
@@ -89,10 +84,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 ] )
           in
           let clock =
-            Fusion_orchestrator_judge_wave.make_runtime_clock
-              ~missing_clock_failure:
-                (Fusion_types.Internal_error
-                   "fusion adaptive timeout requires a wall clock; initialise Masc_eio_env with ~clock")
+            Fusion_orchestrator_judge_wave.make_runtime_clock ()
           in
           let elapsed_since_t0 () =
             Fusion_orchestrator_judge_wave.elapsed_since_t0 clock
@@ -107,7 +99,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               ~question:req.Fusion_types.prompt
               ~clock
               ~judge_web_tools
-              ~judge_max_tool_calls
               judges
           in
           let first_judge_nodes =
@@ -123,23 +114,8 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           let all_fail_error_of_runs =
             Fusion_orchestrator_judge_wave.all_fail_error_of_runs
           in
-          let with_timeout_budget_fallback =
-            Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
-          in
-          let meta_budget_check () =
-            Fusion_orchestrator_judge_wave.meta_budget_check ~preset clock
-          in
-          let run_fallback_judge () =
-            Fusion_orchestrator_judge_wave.run_fallback_judge
-              ~sw
-              ~net
-              ~preset
-              ~panel
-              ~question:req.Fusion_types.prompt
-              ~clock
-              ~judge_web_tools
-              ~judge_max_tool_calls
-              ()
+          let meta_provider_timeout () =
+            Fusion_orchestrator_judge_wave.meta_provider_timeout ~preset clock
           in
           let run_judge_of_judges () =
             match preset.Fusion_policy.judges with
@@ -151,23 +127,20 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               , [] )
             | judges ->
               let firsts = run_first_judges judges in
-              let firsts_with_fallback =
-                with_timeout_budget_fallback ~run_fallback_judge firsts
-              in
-              let first_nodes = first_judge_nodes firsts_with_fallback in
-              let ok_priors = successful_syntheses firsts_with_fallback in
+              let first_nodes = first_judge_nodes firsts in
+              let ok_priors = successful_syntheses firsts in
               (match ok_priors with
                | [] ->
                  let err =
                    all_fail_error_of_runs
                      ~fallback:
                        (Fusion_types.Internal_error "judge_of_judges: no judge produced a synthesis")
-                     firsts_with_fallback
+                     firsts
                  in
                  (Error err, first_nodes)
                | (_, first_s, _) :: _ ->
-                 let firsts_usage = firsts_usage firsts_with_fallback in
-                 (match meta_budget_check () with
+                 let firsts_usage = firsts_usage firsts in
+                 (match meta_provider_timeout () with
                   | Error (failure, _) ->
                     let elapsed_s = elapsed_since_t0 () in
                     ( Ok (first_s, firsts_usage)
@@ -188,7 +161,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge
                          ~question:req.Fusion_types.prompt ~panel ~priors
-                         ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
+                         ~web_tools:judge_web_tools ()
                      with
                      | Ok (meta_s, meta_u) ->
                        ( Ok (meta_s, Fusion_types.add_usage firsts_usage meta_u)
@@ -227,10 +200,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                   , Fusion_types.zero_usage )
               , [] )
             | Ok _groups ->
-              let firsts =
-                run_first_judges preset.Fusion_policy.judges
-                |> with_timeout_budget_fallback ~run_fallback_judge
-              in
+              let firsts = run_first_judges preset.Fusion_policy.judges in
               let rec take n acc rest =
                 if n = 0
                 then (List.rev acc, rest)
@@ -266,7 +236,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 | (_, first_s, _) :: _ ->
                   let firsts_usage = firsts_usage stage_firsts in
                   let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
-                  (match meta_budget_check () with
+                  (match meta_provider_timeout () with
                    | Error (failure, _) ->
                      let elapsed_s = elapsed_since_t0 () in
                      ( (stage_id, Ok (first_s, firsts_usage))
@@ -286,7 +256,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                           ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                           ~judge_model:preset.Fusion_policy.judge
                           ~question:req.Fusion_types.prompt ~panel ~priors
-                          ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
+                          ~web_tools:judge_web_tools ()
                       with
                       | Ok (stage_s, stage_u) ->
                         ( ( stage_id
@@ -336,7 +306,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                | (_, first_stage_s, _) :: _ ->
                  let stage_usage = Fusion_types.sum_all_usage stage_results in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_stages in
-                 (match meta_budget_check () with
+                 (match meta_provider_timeout () with
                   | Error (failure, _) ->
                     let elapsed_s = elapsed_since_t0 () in
                     ( Ok (first_stage_s, stage_usage)
@@ -356,7 +326,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge
                          ~question:req.Fusion_types.prompt ~panel ~priors
-                         ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
+                         ~web_tools:judge_web_tools ()
                      with
                      | Ok (final_s, final_u) ->
                        ( Ok (final_s, Fusion_types.add_usage stage_usage final_u)

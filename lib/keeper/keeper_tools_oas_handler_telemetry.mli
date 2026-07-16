@@ -5,7 +5,7 @@ val keeper_tool_call_event_json
   :  keeper_name:string
   -> tool_name:string
   -> duration_ms:int
-  -> success:bool
+  -> disposition:('completed, 'deferred, 'failed) Tool_result.disposition
   -> ?error_text:string
   -> ?extra_fields:(string * Yojson.Safe.t) list
   -> ts:float
@@ -29,7 +29,7 @@ val broadcast_keeper_tool_call_event
   :  keeper_name:string
   -> tool_name:string
   -> duration_ms:int
-  -> success:bool
+  -> disposition:('completed, 'deferred, 'failed) Tool_result.disposition
   -> ?error_text:string
   -> ?extra_fields:(string * Yojson.Safe.t) list
   -> site:string

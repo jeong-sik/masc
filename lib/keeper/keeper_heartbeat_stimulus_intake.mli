@@ -1,8 +1,8 @@
 (** Event-Layer stimulus intake for the keeper heartbeat loop.
 
-    Drains at most one Event Layer stimulus per turn following
-    RFC-0020 §3 Rule 4. Board signals are coalesced by a debounce
-    window before falling back to a single non-board queue dequeue. *)
+    Leases the earliest ready Event Layer stimulus per turn following
+    RFC-0020 §3 Rule 4. Payload families share one order; an unready input
+    remains queued without blocking later ready work in the same Keeper lane. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -65,8 +65,8 @@ val consume_board_stimulus_batch
     drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges
     newly-consumed board events with the [pending_board_events] already
     accumulated by the caller, deduplicating by [post_id]. A
-    [Hitl_resolved] head remains queued until its exact approval id has left
-    the pending map, so domain callbacks complete before continuation intake.
+    [Hitl_resolved] stimulus remains queued until its exact approval id has
+    left the pending map, while later ready stimuli can still be leased.
     Runtime/provider availability cannot defer a durable claim; boundary
     failures settle explicitly through the existing failure route. *)
 val heartbeat_event_intake

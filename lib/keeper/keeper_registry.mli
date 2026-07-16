@@ -522,7 +522,8 @@ val set_board_cursor :
 
 (** Record a tool call for a keeper. No-op if not found. *)
 val record_tool_use :
-  base_path:string -> string -> tool_name:string -> success:bool -> unit
+  base_path:string -> string -> tool_name:string ->
+  disposition:('completed, 'deferred, 'failed) Tool_result.disposition -> unit
 
 (** Get tool usage sorted by call count descending. *)
 val tool_usage_of : base_path:string -> string ->

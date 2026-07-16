@@ -35,6 +35,10 @@ type submission_owner =
   | Authenticated_caller of string
   | Channel_actor
 
+type durable_connector =
+  | Discord_connector
+  | Slack_connector
+
 (* [route_busy_connector] decides where a connector message goes when the keeper
    is already in flight. Pure and exhaustive over [connector_kind] so a new
    connector forces a routing decision at compile time (no catch-all). [Discord]
@@ -478,6 +482,212 @@ let ensure_metadata key value metadata =
       if Option.is_some (List.assoc_opt key metadata) then metadata
       else metadata @ [ (key, value) ]
 
+let connector_kind_of_durable = function
+  | Discord_connector -> Discord
+  | Slack_connector -> Slack
+
+let delivery_key_of_receipt receipt_id =
+  match Keeper_chat_delivery_identity.Receipt_ids.of_list [ receipt_id ] with
+  | Ok receipt_ids ->
+    Ok (Keeper_chat_delivery_identity.Queue_receipts receipt_ids)
+  | Error error ->
+    Error (Keeper_chat_delivery_identity.Receipt_ids.error_to_string error)
+
+let rejection_snapshot ~base_path ~keeper_name =
+  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+  { Keeper_turn_admission.waiting = snapshot.snapshot_waiting
+  ; in_flight = snapshot.snapshot_in_flight
+  ; shutdown_operation_id = snapshot.snapshot_shutdown_operation_id
+  }
+
+let terminal_request_status = function
+  | Keeper_chat_queue.Delivered _ -> Gate_protocol.Done
+  | Keeper_chat_queue.Failed { kind = Keeper_chat_queue.Cancelled; _ } ->
+    Gate_protocol.Cancelled
+  | Keeper_chat_queue.Failed _ -> Gate_protocol.Failed
+  | Keeper_chat_queue.Pending -> Gate_protocol.Queued
+  | Keeper_chat_queue.Inflight _ -> Gate_protocol.Running
+  | Keeper_chat_queue.Recovery_required _ ->
+    Gate_protocol.Acceptance_uncertain
+
+let extra_mentions_for_metadata ~keeper_name metadata =
+  match metadata_value "mentions_bound_keeper" metadata with
+  | Some "true" ->
+    Option.to_list (Keeper_identity.Keeper_id.of_string keeper_name)
+  | Some _ | None -> []
+
+let terminal_connector_reply ~redact_text ~channel ~channel_user_id
+    ~keeper_name ~metadata ~receipt_id ~revision state =
+  let request_id = Keeper_chat_queue.Receipt_id.to_string receipt_id in
+  let status = terminal_request_status state in
+  let status_text = Gate_protocol.message_request_status_to_string status in
+  let message_request : Gate_protocol.message_request =
+    { request_id
+    ; destination_type = "keeper"
+    ; destination_id = keeper_name
+    ; channel
+    ; actor_id = non_empty_opt channel_user_id
+    ; status
+    ; modalities = [ "text" ]
+    ; transport = non_empty_opt channel
+    ; metadata =
+        [ "status_source", "keeper_chat_queue"
+        ; "receipt_id", request_id
+        ; "queue_revision", Int64.to_string revision
+        ; "source_event_replayed", "true"
+        ]
+        @ metadata
+    }
+  in
+  Gate_protocol.Reply
+    { content =
+        redact_text
+          (Printf.sprintf
+             "%s already settled this exact source event (receipt_id=%s, status=%s)."
+             keeper_name request_id status_text)
+    ; structured = None
+    ; stats = None
+    ; message_request = Some message_request
+    }
+
+let accept_connector ~connector ~clock ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+    ~metadata ~content =
+  let keeper_name = String.trim keeper_name in
+  let connector_kind = connector_kind_of_durable connector in
+  let redaction =
+    Keeper_secret_redaction.snapshot
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+  in
+  let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let conversation_id =
+    conversation_id_for_channel_context ~connector_kind ~channel
+      ~channel_workspace_id ~metadata
+  in
+  let external_message_id =
+    external_message_id_for_channel_context ~idempotency_key ~metadata
+  in
+  let metadata =
+    metadata
+    |> ensure_metadata "conversation_id" conversation_id
+    |> ensure_metadata "external_message_id" external_message_id
+  in
+  let surface =
+    surface_for_channel_context ~connector_kind ~channel ~channel_workspace_id
+      ~metadata ?conversation_id ?external_message_id ()
+  in
+  let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
+  let slack_reply_thread_ts =
+    match slack_thread_ts metadata with
+    | Some thread_ts -> Some thread_ts
+    | None ->
+      metadata_value_any [ "slack.message_ts"; "slack_message_ts" ] metadata
+  in
+  let source =
+    match
+      route_busy_connector connector_kind
+        ~channel_id:channel_workspace_id ~user_id:channel_user_id
+        ~user_name:channel_user_name ~team_id:(slack_team_id metadata)
+        ~thread_ts:slack_reply_thread_ts
+    with
+    | `Enqueue_chat_queue source -> Ok source
+    | `Async_poll ->
+      Error "durable connector resolved to the async poll route"
+  in
+  match
+    Keeper_chat_delivery_identity.Request_id.of_string idempotency_key,
+    source
+  with
+  | Error detail, _ | _, Error detail ->
+    Gate_protocol.Keeper_error_result (redact_text detail)
+  | Ok request_id, Ok source ->
+    let receipt_id = Keeper_chat_queue.Receipt_id.of_request_id request_id in
+    (match delivery_key_of_receipt receipt_id with
+     | Error detail ->
+       Gate_protocol.Keeper_error_result (redact_text detail)
+     | Ok delivery_key ->
+       let opt value =
+         match String.trim value with
+         | "" -> None
+         | value -> Some value
+       in
+       (match
+          Keeper_chat_store.append_user_message_once
+            ~base_dir:config.Workspace.base_path ~keeper_name ~delivery_key
+            ~content:(String.trim content) ~surface ?conversation_id
+            ?external_message_id
+            ~speaker:
+              { Keeper_chat_store.speaker_id = opt channel_user_id
+              ; speaker_name = opt channel_user_name
+              ; speaker_authority = Keeper_chat_store.External
+              }
+            ~extra_mentions ()
+        with
+        | Error detail ->
+          Gate_protocol.Keeper_error_result (redact_text detail)
+        | Ok append_result ->
+          let row_id, appended =
+            match append_result with
+            | Keeper_chat_store.Appended { row_id } -> row_id, true
+            | Already_present { row_id } -> row_id, false
+          in
+          if appended then
+            Keeper_chat_broadcast.chat_appended
+              ~keeper_name ~source:(String.trim channel) ();
+          (match
+             Keeper_chat_queue.enqueue_with_receipt ~keeper_name ~receipt_id
+               { Keeper_chat_queue.content = String.trim content
+               ; user_blocks = []
+               ; attachments = []
+               ; timestamp = Eio.Time.now clock
+               ; source
+               ; user_row_origin =
+                   Keeper_chat_store.Already_persisted { row_id }
+               }
+           with
+           | Ok receipt ->
+             let admission_rejection =
+               rejection_snapshot
+                 ~base_path:config.Workspace.base_path
+                 ~keeper_name
+             in
+             let message_request =
+               chat_queue_message_request ~channel ~channel_user_id
+                 ~keeper_name ~admission_rejection ~metadata receipt
+             in
+             Gate_protocol.Reply
+               { content =
+                   redact_text
+                     (busy_ack_reply_text_queued ~admission_rejection
+                        ~keeper_name ~receipt_id:message_request.request_id
+                        ~recovery_required_count:
+                          receipt.recovery_required_count)
+               ; structured = None
+               ; stats = None
+               ; message_request = Some message_request
+               }
+           | Error
+               (Keeper_chat_queue.Receipt_already_terminal
+                  { receipt_id; state }) ->
+             (match Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id with
+              | Ok { revision; receipt = Some _ } ->
+                terminal_connector_reply ~redact_text ~channel
+                  ~channel_user_id ~keeper_name ~metadata ~receipt_id
+                  ~revision state
+              | Ok { receipt = None; _ } ->
+                Gate_protocol.Keeper_error_result
+                  (redact_text
+                     "terminal connector receipt disappeared during lookup")
+              | Error error ->
+                Gate_protocol.Keeper_error_result
+                  (redact_text
+                     (Keeper_chat_queue.mutation_error_to_string error)))
+           | Error error ->
+             Gate_protocol.Keeper_error_result
+               (redact_text
+                  (Keeper_chat_queue.mutation_error_to_string error)))))
+
 let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
     ?conversation_id ?turn_ref ~reply () =
   let content = String.trim reply in
@@ -558,12 +768,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
      channel's bound keeper (e.g. Discord <@snowflake>, invisible to
      the content token parser), so the recorder persists it as an
      explicit mention of the lane owner. *)
-  let extra_mentions =
-    match metadata_value "mentions_bound_keeper" metadata with
-    | Some "true" ->
-        Option.to_list (Keeper_identity.Keeper_id.of_string keeper_name)
-    | Some _ | None -> []
-  in
+  let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
   Keeper_chat_store.append_user_message
     ~base_dir:config.Workspace.base_path
     ~keeper_name
@@ -682,7 +887,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
       defer_to_existing_work admission_rejection
   in
   match dispatch_result with
-  | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->
+  | `Async_ack (in_flight, Some result) when not (Tool_result.is_failed result) ->
       let body = Tool_result.message result in
       let duration_ms =
         Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
@@ -772,7 +977,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
               "%s is busy; your message was not queued because the durable chat queue rejected it: %s"
               keeper_name
               (Keeper_chat_queue.mutation_error_to_string error)))
-  | `Streaming (Some result) when Tool_result.is_success result ->
+  | `Streaming (Some result) when not (Tool_result.is_failed result) ->
       let body = Tool_result.message result in
       let duration_ms =
         Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
@@ -814,17 +1019,36 @@ let dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
     ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content =
-  dispatch_core ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
-    ~publication_recovery_provider ~config
-    ~channel
-    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-    ~idempotency_key ~metadata ~content ()
+  match connector_kind with
+  | Discord ->
+    accept_connector ~connector:Discord_connector ~clock ~config ~channel
+      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+      ~idempotency_key ~metadata ~content
+  | Slack ->
+    accept_connector ~connector:Slack_connector ~clock ~config ~channel
+      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+      ~idempotency_key ~metadata ~content
+  | Generic ->
+    dispatch_core ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
+      ~publication_recovery_provider ~config ~channel ~channel_user_id
+      ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+      ~metadata ~content ()
 
 let dispatch_with_text_snapshot ~connector_kind ~submission_owner
     ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~publication_recovery_provider
     ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~idempotency_key ~metadata ~content =
-  dispatch_core ~connector_kind ~submission_owner ~on_text_snapshot ~sw ~clock
-    ~proc_mgr ~net ~publication_recovery_provider ~config ~channel
-    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-    ~idempotency_key ~metadata ~content ()
+  match connector_kind with
+  | Discord ->
+    accept_connector ~connector:Discord_connector ~clock ~config ~channel
+      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+      ~idempotency_key ~metadata ~content
+  | Slack ->
+    accept_connector ~connector:Slack_connector ~clock ~config ~channel
+      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+      ~idempotency_key ~metadata ~content
+  | Generic ->
+    dispatch_core ~connector_kind ~submission_owner ~on_text_snapshot ~sw
+      ~clock ~proc_mgr ~net ~publication_recovery_provider ~config ~channel
+      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+      ~idempotency_key ~metadata ~content ()

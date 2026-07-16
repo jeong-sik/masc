@@ -31,7 +31,6 @@ let make_meta name =
       (`Assoc
         [ "name", `String name
         ; "trace_id", `String ("trace-" ^ name)
-        ; "goal", `String "surface live tool audit evidence"
         ; "updated_at", `String "2026-06-03T00:00:00Z"
         ])
   with

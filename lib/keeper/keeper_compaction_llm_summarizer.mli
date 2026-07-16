@@ -13,34 +13,32 @@ type compaction_plan = private
   ; kept : int list
   ; summarized : int list
   ; dropped : int list
+  ; selected_runtime_id : string option
+    (** Exact Runtime candidate that produced this plan. [None] only for a
+        plan parsed directly through {!plan_of_json} before provider binding. *)
   }
 
 (** [summarizer ~messages] returns [Some plan] when the LLM produced a valid
-    plan over [messages], or [None] on any failure (timeout, http error, empty
+    plan over [messages], or [None] on any failure (provider error, empty
     or invalid structured response). Total and synchronous; the effect is
     hidden in the closure captured by {!make}. *)
 type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
 
 (** The low-level provider completion the summarizer drives. Defaulted to
     {!Llm_provider.Complete.complete}; overridable in tests. *)
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:Eio_context.eio_net ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 (** [make ~runtime_id ~keeper_name ()] resolves [runtime_id] as a Runtime or
     Runtime Lane. A Runtime contributes its exact provider config; a Lane tries
     its configured Runtime candidates in declared order until one returns a
     valid plan. Missing, ineligible, and failed candidates are logged with
-    their Runtime id. No default Runtime is substituted. [complete]/
-    [timeout_sec] override the call in tests. *)
+    their Runtime id. No default Runtime is substituted. [complete] overrides
+    the Provider boundary in tests.
+
+    The compaction owner imposes no wall-clock deadline. Cancellation belongs
+    to the owning Keeper lane or to the Provider transport boundary. *)
 val make
   :  ?complete:complete_fn
-  -> ?timeout_sec:float
   -> runtime_id:string
   -> keeper_name:string
   -> unit

@@ -10,6 +10,7 @@
  (wrapped false)
  (modules
   schedule_domain
+  schedule_occurrence_id
   schedule_supported_kinds
   schedule_store
   schedule_service

@@ -66,12 +66,23 @@ while true; do
   log "starting masc"
   start_epoch=$(date +%s)
 
-  "$REPO_ROOT/start-masc.sh" "$@" || true
+  # No `set -e` is active, so a failing start-masc.sh does not abort this
+  # loop; `|| true` here would make `$?` observe `true` and record every
+  # exit — including SIGSEGV (139) and SIGTERM (143) — as code=0.
+  "$REPO_ROOT/start-masc.sh" "$@"
   exit_code=$?
   end_epoch=$(date +%s)
   uptime_s=$((end_epoch - start_epoch))
 
-  log "masc exited code=$exit_code uptime=${uptime_s}s"
+  exit_detail=""
+  if [ "$exit_code" -gt 128 ]; then
+    signal_name=$(kill -l $((exit_code - 128)) 2>/dev/null || true)
+    if [ -n "$signal_name" ]; then
+      exit_detail=" signal=SIG${signal_name}"
+    fi
+  fi
+
+  log "masc exited code=${exit_code}${exit_detail} uptime=${uptime_s}s"
 
   # Trim restart_timestamps to the sliding window.
   cutoff=$((end_epoch - WINDOW_SEC))

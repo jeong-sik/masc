@@ -25,13 +25,6 @@ let contains_substring haystack needle =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
-let write_file path content =
-  Out_channel.with_open_bin path (fun oc -> output_string oc content)
-
-let write_executable path content =
-  write_file path content;
-  Unix.chmod path 0o755
-
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -47,13 +40,6 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-(* Each scenario below asserts exact Dune environment transitions. Start from
-   an explicit baseline instead of inheriting the runner's values: the Build
-   and Test job exports [DUNE_CACHE=enabled], while scenarios that exercise the
-   first attempt intentionally expect no cache override. Explicit scenario
-   overrides are applied after this removal and therefore still win. *)
-let dune_vars_controlled_by_test = [ "DUNE_BUILD_DIR"; "DUNE_CACHE"; "DUNE_RPC" ]
-
 let env_array overrides =
   let table = Hashtbl.create 64 in
   Unix.environment ()
@@ -66,7 +52,6 @@ let env_array overrides =
                String.sub entry (idx + 1) (String.length entry - idx - 1)
              in
              Hashtbl.replace table key value);
-  List.iter (Hashtbl.remove table) dune_vars_controlled_by_test;
   List.iter (fun (key, value) -> Hashtbl.replace table key value) overrides;
   Hashtbl.fold
     (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
@@ -106,676 +91,127 @@ let run_process ?(env = []) ~cwd prog argv =
   Sys.remove err;
   (code, stdout, stderr)
 
-let make_fake_dune dir =
-  let bin_dir = Filename.concat dir "bin" in
-  Unix.mkdir bin_dir 0o755;
-  let dune_path = Filename.concat bin_dir "dune" in
-  write_file dune_path
-    {|#!/bin/sh
-set -eu
-log_file="${FAKE_DUNE_LOG:?}"
-printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
-if [ "${1:-}" = "--version" ]; then
-  printf '3.21.0\n'
-  exit 0
-fi
-if [ "${1:-}" = "clean" ]; then
-  exit 0
-fi
-if [ -z "${DUNE_BUILD_DIR:-}" ] || [ "${DUNE_BUILD_DIR}" = "_build" ]; then
-  printf '  [OK]          classify_exn             2   ENOSPC.\n' >&2
-  printf 'Error: RPC server not running.\n' >&2
-  exit 1
-fi
-mkdir -p "${DUNE_BUILD_DIR}/default/test/_build/_tests"
-printf 'fake ok\n' > "${DUNE_BUILD_DIR}/default/test/_build/_tests/fake.output"
-printf 'Testing `fake`.\n'
-exit 0
-|}
-  ;
-  Unix.chmod dune_path 0o755;
-  bin_dir
-
-let make_dune_test_command ~dir =
-  Printf.sprintf "dune test --root %s" dir
-
-let make_sleep_command ~dir =
-  let path = Filename.concat dir "sleep-long.sh" in
-  write_executable path "#!/bin/sh\nset -eu\nsleep 10\n";
-  path
-
 let run_ci ?(env = []) ~cwd command =
   let script = script_path () in
   run_process ~cwd ~env script [| script; command |]
 
-let make_fake_dune_flaky_then_agent_sdk_artifact_failure dir =
-  let bin_dir = Filename.concat dir "bin-interface" in
-  Unix.mkdir bin_dir 0o755;
-  let dune_path = Filename.concat bin_dir "dune" in
-  write_file dune_path
-    {|#!/bin/sh
-set -eu
-log_file="${FAKE_DUNE_LOG:?}"
-printf '%s|%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "${DUNE_CACHE:-}" "$(pwd)" >>"$log_file"
-if [ "${1:-}" = "--version" ]; then
-  printf '3.21.0\n'
-  exit 0
-fi
-if [ "${1:-}" = "clean" ]; then
-  exit 0
-fi
-if [ -z "${DUNE_BUILD_DIR:-}" ] || [ "${DUNE_BUILD_DIR}" = "_build" ]; then
-  printf 'plain failure\n' >&2
-  exit 1
-fi
-if [ "${DUNE_BUILD_DIR}" = ".ci_build_flaky" ] && [ "${DUNE_CACHE:-}" != "disabled" ]; then
-  printf 'Error: File unavailable:\n' >&2
-  printf '/tmp/opam/lib/agent_sdk/llm_provider/llm_provider.cmxa\n' >&2
-  printf 'Error: Unbound module Llm_provider\n' >&2
-  exit 1
-fi
-mkdir -p "${DUNE_BUILD_DIR}/default/test/_build/_tests"
-printf 'fake ok\n' > "${DUNE_BUILD_DIR}/default/test/_build/_tests/fake.output"
-printf 'Testing `fake`.\n'
-exit 0
-|}
-  ;
-  Unix.chmod dune_path 0o755;
-  bin_dir
+let base_env log_file =
+  [
+    ("CI_TEST_HEARTBEAT_SEC", "1");
+    ("CI_TEST_DISK_MIN_AVAILABLE_MB", "0");
+    ("CI_TEST_LOG_FILE", log_file);
+    ("CI_CONTRACT_HARNESS_ENABLED", "0");
+  ]
 
-let make_fake_dune_disk_full dir =
-  let bin_dir = Filename.concat dir "bin-disk-full" in
-  Unix.mkdir bin_dir 0o755;
-  let dune_path = Filename.concat bin_dir "dune" in
-  write_file dune_path
-    {|#!/bin/sh
-set -eu
-log_file="${FAKE_DUNE_LOG:?}"
-printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
-if [ "${1:-}" = "--version" ]; then
-  printf '3.21.0\n'
-  exit 0
-fi
-if [ "${1:-}" = "clean" ]; then
-  exit 0
-fi
-printf 'Error: dune_trace_write(): No space left on device\n' >&2
-exit 1
-|}
-  ;
-  Unix.chmod dune_path 0o755;
-  bin_dir
+let count_lines path =
+  if not (Sys.file_exists path) then
+    0
+  else
+    read_file path |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.length
 
-let make_fake_dune_deterministic_failure dir =
-  let bin_dir = Filename.concat dir "bin-deterministic-failure" in
-  Unix.mkdir bin_dir 0o755;
-  let dune_path = Filename.concat bin_dir "dune" in
-  write_file dune_path
-    {|#!/bin/sh
-set -eu
-log_file="${FAKE_DUNE_LOG:?}"
-printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
-if [ "${1:-}" = "--version" ]; then
-  printf '3.21.0\n'
-  exit 0
-fi
-if [ "${1:-}" = "clean" ]; then
-  exit 0
-fi
-printf '  [FAIL]        module-init          3   keeper all complete.\n' >&2
-printf 'ASSERT Keeper_metrics.all covers every constructor\n' >&2
-printf '1 failure! in 0.000s. 6 tests run.\n' >&2
-i=0
-while [ "$i" -lt 5000 ]; do
-  printf 'deterministic failure context %s\n' "$i" >&2
-  i=$((i + 1))
-done
-exit 1
-|}
-  ;
-  Unix.chmod dune_path 0o755;
-  bin_dir
-
-let make_fake_dune_native_link_failure dir =
-  let bin_dir = Filename.concat dir "bin-native-link-failure" in
-  Unix.mkdir bin_dir 0o755;
-  let dune_path = Filename.concat bin_dir "dune" in
-  write_file dune_path
-    {|#!/bin/sh
-set -eu
-log_file="${FAKE_DUNE_LOG:?}"
-printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
-if [ "${1:-}" = "--version" ]; then
-  printf '3.21.0\n'
-  exit 0
-fi
-if [ "${1:-}" = "clean" ]; then
-  exit 0
-fi
-printf 'collect2: error: ld returned 1 exit status\n' >&2
-printf 'File "caml_startup", line 1:\n' >&2
-printf 'Error: Error during linking (exit code 1)\n' >&2
-exit 1
-|}
-  ;
-  Unix.chmod dune_path 0o755;
-  bin_dir
-
-let make_fake_dune_github_disk_warning dir =
-  let bin_dir = Filename.concat dir "bin-github-disk-warning" in
-  Unix.mkdir bin_dir 0o755;
-  let dune_path = Filename.concat bin_dir "dune" in
-  write_file dune_path
-    {|#!/bin/sh
-set -eu
-log_file="${FAKE_DUNE_LOG:?}"
-printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
-if [ "${1:-}" = "--version" ]; then
-  printf '3.21.0\n'
-  exit 0
-fi
-if [ "${1:-}" = "clean" ]; then
-  exit 0
-fi
-printf 'collect2: error: ld returned 1 exit status\n' >&2
-printf 'Error: Error during linking (exit code 1)\n' >&2
-printf '##[warning]You are running out of disk space. The runner will stop working when the machine runs out of disk space. Free space left: 14 MB\n' >&2
-exit 1
-|}
-  ;
-  Unix.chmod dune_path 0o755;
-  bin_dir
-
-let make_fake_dune_with_low_disk_df dir =
-  let bin_dir = Filename.concat dir "bin-low-disk-df" in
-  Unix.mkdir bin_dir 0o755;
-  let dune_path = Filename.concat bin_dir "dune" in
-  write_file dune_path
-    {|#!/bin/sh
-set -eu
-log_file="${FAKE_DUNE_LOG:?}"
-printf '%s|%s|%s\n' "${1:-}" "${DUNE_BUILD_DIR:-}" "$(pwd)" >>"$log_file"
-if [ "${1:-}" = "--version" ]; then
-  printf '3.21.0\n'
-  exit 0
-fi
-if [ "${1:-}" = "clean" ]; then
-  exit 0
-fi
-trap 'exit 143' TERM
-sleep 10
-exit 0
-|}
-  ;
-  Unix.chmod dune_path 0o755;
-  let df_path = Filename.concat bin_dir "df" in
-  write_file df_path
-    {|#!/bin/sh
-case "${1:-}" in
-  -Pm)
-    printf 'Filesystem 1048576-blocks Used Available Capacity Mounted on\n'
-    printf '/dev/root 100 99 14 99%% /\n'
-    ;;
-  -h)
-    printf 'Filesystem Size Used Avail Use%% Mounted on\n'
-    printf '/dev/root 100G 99G 14M 99%% /\n'
-    ;;
-  *)
-    /bin/df "$@"
-    ;;
-esac
-|}
-  ;
-  Unix.chmod df_path 0o755;
-  bin_dir
-
-let test_rpc_retry_uses_isolated_build_dir () =
-  with_temp_dir "ci-run-tests-retry" (fun dir ->
-      let cwd = Unix.realpath dir in
-      let repo_dir = Filename.concat dir "repo" in
-      Unix.mkdir repo_dir 0o755;
-      let fake_log = Filename.concat dir "fake-dune.log" in
-      let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let fake_bin = make_fake_dune dir in
-      let path =
-        Printf.sprintf "%s:%s" fake_bin
-          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
-      in
-      let env =
-        [
-          ("PATH", path);
-          ("DUNE_BUILD_DIR", "");
-          ("FAKE_DUNE_LOG", fake_log);
-          ("CI_TEST_HEARTBEAT_SEC", "1");
-          ("CI_TEST_TIMEOUT_SEC", "30");
-          ("CI_TEST_LOG_FILE", ci_log);
-          ("CI_CONTRACT_HARNESS_ENABLED", "0");
-        ]
+let test_dune_command_is_observed_once_and_sanitized () =
+  with_temp_dir "ci-run-tests-once" (fun dir ->
+      let ci_log = Filename.concat dir "ci.log" in
+      let rpc_log = Filename.concat dir "rpc.log" in
+      let command =
+        Printf.sprintf "printf '%%s' \"${DUNE_RPC-unset}\" > %s; # dune test"
+          (Filename.quote rpc_log)
       in
       let code, stdout, stderr =
-        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
+        run_ci ~cwd:dir
+          ~env:(("DUNE_RPC", "stale-rpc") :: base_env ci_log)
+          command
       in
-      if code <> 0 then
-        failf "ci-run-tests failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
-          stderr;
-      let ci_log_contents = read_file ci_log in
-      let observed_output =
-        String.concat "\n" [ ci_log_contents; stdout; stderr ]
-      in
-      check bool "retry warning present" true
-        (contains_substring observed_output
-           "detected dune RPC/lock failure; retrying once with isolated build dir .ci_build");
-      check bool "passing ENOSPC test name ignored" false
-        (contains_substring observed_output
-           "detected disk exhaustion during dune build");
-      check bool "isolated command exports build dir" true
-        (contains_substring observed_output
-           "isolated_command: export DUNE_BUILD_DIR=.ci_build; unset DUNE_RPC;");
-      check bool "success message present" true
-        (contains_substring stdout "tests completed successfully");
-      let log_lines =
-        read_file fake_log
-        |> String.split_on_char '\n'
-        |> List.filter (fun line -> String.trim line <> "")
-      in
-      match log_lines with
-      | [ first; second ] ->
-          check string "first attempt uses default build dir and repo cwd"
-            (Printf.sprintf "test||%s" cwd)
-            first;
-          check string "second attempt uses isolated build dir and repo cwd"
-            (Printf.sprintf "test|.ci_build|%s" cwd)
-            second
-      | _ ->
-          failf "expected exactly two dune invocations, got:\n%s"
-            (String.concat "\n" log_lines))
+      check int "success" 0 code;
+      check string "DUNE_RPC removed" "unset" (read_file rpc_log);
+      let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
+      check bool "success reported" true
+        (contains_substring observed "tests completed successfully"))
 
-let test_deterministic_failure_skips_flaky_retry () =
-  with_temp_dir "ci-run-tests-deterministic-failure" (fun dir ->
-      let cwd = Unix.realpath dir in
-      let repo_dir = Filename.concat dir "repo" in
-      Unix.mkdir repo_dir 0o755;
-      let fake_log = Filename.concat dir "fake-dune.log" in
-      let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let fake_bin = make_fake_dune_deterministic_failure dir in
-      let path =
-        Printf.sprintf "%s:%s" fake_bin
-          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+let test_failure_is_not_retried () =
+  with_temp_dir "ci-run-tests-failure" (fun dir ->
+      let ci_log = Filename.concat dir "ci.log" in
+      let count_log = Filename.concat dir "count.log" in
+      let command =
+        Printf.sprintf "printf 'attempt\\n' >> %s; exit 7"
+          (Filename.quote count_log)
       in
       let env =
-        [
-          ("PATH", path);
-          ("DUNE_BUILD_DIR", "");
-          ("FAKE_DUNE_LOG", fake_log);
-          ("CI_TEST_HEARTBEAT_SEC", "1");
-          ("CI_TEST_TIMEOUT_SEC", "30");
-          ("CI_TEST_LOG_FILE", ci_log);
-          ("CI_CONTRACT_HARNESS_ENABLED", "0");
-          ("CI_TEST_ALLOW_FLAKY_RETRY", "1");
-        ]
+        ("CI_TEST_ALLOW_FLAKY_RETRY", "1")
+        :: ("CI_TEST_ALLOW_RPC_RETRY", "1")
+        :: ("CI_TEST_ALLOW_CLEAN_RETRY", "1")
+        :: base_env ci_log
       in
-      let code, stdout, stderr =
-        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
-      in
-      check int "deterministic failure exit code" 1 code;
-      let ci_log_contents = read_file ci_log in
-      let observed_output =
-        String.concat "\n" [ ci_log_contents; stdout; stderr ]
-      in
-      check bool "deterministic retry skip logged" true
-        (contains_substring observed_output
-           "explicit test failure detected; skipping isolated flaky retry");
-      check bool "flaky retry skipped" false
-        (contains_substring observed_output "flaky-test mitigation");
-      let log_lines =
-        read_file fake_log
-        |> String.split_on_char '\n'
-        |> List.filter (fun line -> String.trim line <> "")
-      in
-      match log_lines with
-      | [ first ] ->
-          check string "single attempt uses repo cwd"
-            (Printf.sprintf "test||%s" cwd)
-            first
-      | _ ->
-          failf "expected exactly one dune invocation, got:\n%s"
-            (String.concat "\n" log_lines))
+      let code, stdout, stderr = run_ci ~cwd:dir ~env command in
+      check int "original exit code" 7 code;
+      check int "one attempt" 1 (count_lines count_log);
+      let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
+      check bool "failure diagnostics" true
+        (contains_substring observed "[ci-diag] reason=nonzero_exit_7");
+      check bool "failure reported" true
+        (contains_substring observed "test command failed with exit=7"))
 
-let test_native_link_failure_skips_flaky_retry () =
-  with_temp_dir "ci-run-tests-native-link-failure" (fun dir ->
-      let cwd = Unix.realpath dir in
-      let repo_dir = Filename.concat dir "repo" in
-      Unix.mkdir repo_dir 0o755;
-      let fake_log = Filename.concat dir "fake-dune.log" in
-      let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let fake_bin = make_fake_dune_native_link_failure dir in
-      let path =
-        Printf.sprintf "%s:%s" fake_bin
-          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+let test_legacy_deadline_knob_does_not_terminate_command () =
+  with_temp_dir "ci-run-tests-no-deadline" (fun dir ->
+      let ci_log = Filename.concat dir "ci.log" in
+      let done_log = Filename.concat dir "done.log" in
+      let command =
+        Printf.sprintf "sleep 2; printf 'done' > %s" (Filename.quote done_log)
+      in
+      let env = ("CI_TEST_TIMEOUT_SEC", "1") :: base_env ci_log in
+      let code, _, _ = run_ci ~cwd:dir ~env command in
+      check int "command completes" 0 code;
+      check string "completion evidence" "done" (read_file done_log))
+
+let test_contract_harness_runs_once () =
+  with_temp_dir "ci-run-tests-contract" (fun dir ->
+      let ci_log = Filename.concat dir "ci.log" in
+      let count_log = Filename.concat dir "contract.log" in
+      let contract_cmd =
+        Printf.sprintf "printf 'contract\\n' >> %s" (Filename.quote count_log)
       in
       let env =
-        [
-          ("PATH", path);
-          ("DUNE_BUILD_DIR", "");
-          ("FAKE_DUNE_LOG", fake_log);
-          ("CI_TEST_HEARTBEAT_SEC", "1");
-          ("CI_TEST_TIMEOUT_SEC", "30");
-          ("CI_TEST_LOG_FILE", ci_log);
-          ("CI_CONTRACT_HARNESS_ENABLED", "0");
-          ("CI_TEST_ALLOW_FLAKY_RETRY", "1");
-        ]
+        ("CI_CONTRACT_HARNESS_ENABLED", "1")
+        :: ("CI_CONTRACT_HARNESS_CMD", contract_cmd)
+        :: List.remove_assoc "CI_CONTRACT_HARNESS_ENABLED" (base_env ci_log)
       in
-      let code, stdout, stderr =
-        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
-      in
-      check int "native link failure exit code" 1 code;
-      let ci_log_contents = read_file ci_log in
-      let observed_output =
-        String.concat "\n" [ ci_log_contents; stdout; stderr ]
-      in
-      check bool "native link retry skip logged" true
-        (contains_substring observed_output
-           "native linker failure detected; skipping isolated flaky retry");
-      check bool "flaky retry skipped" false
-        (contains_substring observed_output "flaky-test mitigation");
-      let log_lines =
-        read_file fake_log
-        |> String.split_on_char '\n'
-        |> List.filter (fun line -> String.trim line <> "")
-      in
-      match log_lines with
-      | [ first ] ->
-          check string "single attempt uses repo cwd"
-            (Printf.sprintf "test||%s" cwd)
-            first
-      | _ ->
-          failf "expected exactly one dune invocation, got:\n%s"
-            (String.concat "\n" log_lines))
+      let code, stdout, stderr = run_ci ~cwd:dir ~env "true" in
+      check int "success" 0 code;
+      check int "one contract attempt" 1 (count_lines count_log);
+      let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
+      check bool "contract success reported" true
+        (contains_substring observed "contract harness completed successfully"))
 
-let test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache () =
-  with_temp_dir "ci-run-tests-interface" (fun dir ->
-      let cwd = Unix.realpath dir in
-      let repo_dir = Filename.concat dir "repo" in
-      Unix.mkdir repo_dir 0o755;
-      let fake_log = Filename.concat dir "fake-dune.log" in
-      let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let fake_bin = make_fake_dune_flaky_then_agent_sdk_artifact_failure dir in
-      let path =
-        Printf.sprintf "%s:%s" fake_bin
-          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
-      in
-      let env =
-        [
-          ("PATH", path);
-          ("DUNE_BUILD_DIR", "");
-          ("FAKE_DUNE_LOG", fake_log);
-          ("CI_TEST_HEARTBEAT_SEC", "1");
-          ("CI_TEST_TIMEOUT_SEC", "30");
-          ("CI_TEST_LOG_FILE", ci_log);
-          ("CI_CONTRACT_HARNESS_ENABLED", "0");
-        ]
-      in
-      let code, stdout, stderr =
-        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
-      in
-      if code <> 0 then
-        failf "ci-run-tests failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
-          stderr;
-      let ci_log_contents = read_file ci_log in
-      let observed_output =
-        String.concat "\n" [ ci_log_contents; stdout; stderr ]
-      in
-      check bool "flaky retry warning present" true
-        (contains_substring observed_output
-           "test failed (exit=1); retrying once with isolated build dir .ci_build_flaky");
-      check bool "agent sdk artifact warning present" true
-        (contains_substring observed_output
-           "detected Agent_sdk/OAS artifact or interface mismatch; running dune clean and retrying once with DUNE_CACHE=disabled");
-      check bool "retry command disables cache" true
-        (contains_substring observed_output
-           "retry_command: export DUNE_CACHE=disabled; export DUNE_BUILD_DIR=.ci_build_flaky; unset DUNE_RPC;");
-      let log_lines =
-        read_file fake_log
-        |> String.split_on_char '\n'
-        |> List.filter (fun line -> String.trim line <> "")
-      in
-      match log_lines with
-      | [ first; second; third; fourth ] ->
-          check string "first attempt uses default build dir"
-            (Printf.sprintf "test|||%s" cwd)
-            first;
-          check string "flaky retry uses isolated build dir without cache override"
-            (Printf.sprintf "test|.ci_build_flaky||%s" cwd)
-            second;
-          check string "clean uses isolated build dir"
-            (Printf.sprintf "clean|.ci_build_flaky||%s" cwd)
-            third;
-          check string "clean retry disables dune cache"
-            (Printf.sprintf "test|.ci_build_flaky|disabled|%s" cwd)
-            fourth
-      | _ ->
-          failf "expected exactly four dune invocations, got:\n%s"
-            (String.concat "\n" log_lines))
-
-let test_disk_full_failure_skips_flaky_retry () =
-  with_temp_dir "ci-run-tests-disk-full" (fun dir ->
-      let cwd = Unix.realpath dir in
-      let repo_dir = Filename.concat dir "repo" in
-      Unix.mkdir repo_dir 0o755;
-      let fake_log = Filename.concat dir "fake-dune.log" in
-      let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let fake_bin = make_fake_dune_disk_full dir in
-      let path =
-        Printf.sprintf "%s:%s" fake_bin
-          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
-      in
-      let env =
-        [
-          ("PATH", path);
-          ("DUNE_BUILD_DIR", "");
-          ("FAKE_DUNE_LOG", fake_log);
-          ("CI_TEST_HEARTBEAT_SEC", "1");
-          ("CI_TEST_TIMEOUT_SEC", "30");
-          ("CI_TEST_LOG_FILE", ci_log);
-          ("CI_CONTRACT_HARNESS_ENABLED", "0");
-          ("CI_TEST_ALLOW_FLAKY_RETRY", "1");
-        ]
-      in
-      let code, stdout, stderr =
-        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
-      in
-      check int "disk full exit code" 1 code;
-      let ci_log_contents = read_file ci_log in
-      let observed_output =
-        String.concat "\n" [ ci_log_contents; stdout; stderr ]
-      in
-      check bool "disk guidance present" true
-        (contains_substring observed_output
-           "detected disk exhaustion during dune build");
-      check bool "disk hygiene repair present" true
-        (contains_substring observed_output
-           "bash scripts/disk-hygiene.sh --fix");
-      check bool "flaky retry skipped" false
-        (contains_substring observed_output "flaky-test mitigation");
-      let log_lines =
-        read_file fake_log
-        |> String.split_on_char '\n'
-        |> List.filter (fun line -> String.trim line <> "")
-      in
-      match log_lines with
-      | [ first ] ->
-          check string "single attempt uses repo cwd"
-            (Printf.sprintf "test||%s" cwd)
-            first
-      | _ ->
-          failf "expected exactly one dune invocation, got:\n%s"
-            (String.concat "\n" log_lines))
-
-let test_github_disk_warning_skips_flaky_retry () =
-  with_temp_dir "ci-run-tests-gh-disk-warning" (fun dir ->
-      let cwd = Unix.realpath dir in
-      let repo_dir = Filename.concat dir "repo" in
-      Unix.mkdir repo_dir 0o755;
-      let fake_log = Filename.concat dir "fake-dune.log" in
-      let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let fake_bin = make_fake_dune_github_disk_warning dir in
-      let path =
-        Printf.sprintf "%s:%s" fake_bin
-          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
-      in
-      let env =
-        [
-          ("PATH", path);
-          ("DUNE_BUILD_DIR", "");
-          ("FAKE_DUNE_LOG", fake_log);
-          ("CI_TEST_HEARTBEAT_SEC", "1");
-          ("CI_TEST_TIMEOUT_SEC", "30");
-          ("CI_TEST_LOG_FILE", ci_log);
-          ("CI_CONTRACT_HARNESS_ENABLED", "0");
-          ("CI_TEST_ALLOW_FLAKY_RETRY", "1");
-        ]
-      in
-      let code, stdout, stderr =
-        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
-      in
-      check int "github disk warning exit code" 1 code;
-      let ci_log_contents = read_file ci_log in
-      let observed_output =
-        String.concat "\n" [ ci_log_contents; stdout; stderr ]
-      in
-      check bool "disk guidance present" true
-        (contains_substring observed_output
-           "detected disk exhaustion during dune build");
-      check bool "github runner warning preserved" true
-        (contains_substring observed_output "Free space left: 14 MB");
-      check bool "flaky retry skipped" false
-        (contains_substring observed_output "flaky-test mitigation");
-      let log_lines =
-        read_file fake_log
-        |> String.split_on_char '\n'
-        |> List.filter (fun line -> String.trim line <> "")
-      in
-      match log_lines with
-      | [ first ] ->
-          check string "single attempt uses repo cwd"
-            (Printf.sprintf "test||%s" cwd)
-            first
-      | _ ->
-          failf "expected exactly one dune invocation, got:\n%s"
-            (String.concat "\n" log_lines))
-
-let test_low_disk_df_stops_before_flaky_retry () =
-  with_temp_dir "ci-run-tests-low-disk-df" (fun dir ->
-      let cwd = Unix.realpath dir in
-      let repo_dir = Filename.concat dir "repo" in
-      Unix.mkdir repo_dir 0o755;
-      let fake_log = Filename.concat dir "fake-dune.log" in
-      let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let fake_bin = make_fake_dune_with_low_disk_df dir in
-      let path =
-        Printf.sprintf "%s:%s" fake_bin
-          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
-      in
-      let env =
-        [
-          ("PATH", path);
-          ("DUNE_BUILD_DIR", "");
-          ("FAKE_DUNE_LOG", fake_log);
-          ("CI_TEST_HEARTBEAT_SEC", "1");
-          ("CI_TEST_TIMEOUT_SEC", "30");
-          ("CI_TEST_DISK_CHECK_SEC", "1");
-          ("CI_TEST_DISK_MIN_AVAILABLE_MB", "1024");
-          ("CI_TEST_LOG_FILE", ci_log);
-          ("CI_CONTRACT_HARNESS_ENABLED", "0");
-          ("CI_TEST_ALLOW_FLAKY_RETRY", "1");
-        ]
-      in
-      let code, stdout, stderr =
-        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
-      in
-      check int "low disk pressure exit code" 75 code;
-      let ci_log_contents = read_file ci_log in
-      let observed_output =
-        String.concat "\n" [ ci_log_contents; stdout; stderr ]
-      in
-      check bool "disk pressure detail present" true
-        (contains_substring observed_output
-           "available_mb=14 min_available_mb=1024");
-      check bool "disk diagnostics present" true
-        (contains_substring observed_output "[ci-diag] reason=disk_pressure");
-      check bool "disk guidance present" true
-        (contains_substring observed_output
-           "detected disk exhaustion during dune build");
-      check bool "flaky retry skipped" false
-        (contains_substring observed_output "flaky-test mitigation");
-      let log_lines =
-        read_file fake_log
-        |> String.split_on_char '\n'
-        |> List.filter (fun line -> String.trim line <> "")
-      in
-      match log_lines with
-      | [ first ] ->
-          check string "single attempt uses repo cwd"
-            (Printf.sprintf "test||%s" cwd)
-            first
-      | _ ->
-          failf "expected exactly one dune invocation, got:\n%s"
-            (String.concat "\n" log_lines))
-
-let test_timeout_diagnostics_capture_active_process_group () =
-  with_temp_dir "ci-run-tests-timeout" (fun dir ->
-      let ci_log = Filename.concat dir "ci-run-tests.log" in
-      let env =
-        [
-          ("CI_TEST_HEARTBEAT_SEC", "1");
-          ("CI_TEST_TIMEOUT_SEC", "2");
-          ("CI_TEST_LOG_FILE", ci_log);
-          ("CI_CONTRACT_HARNESS_ENABLED", "0");
-        ]
-      in
-      let code, stdout, stderr =
-        run_ci ~cwd:dir ~env (make_sleep_command ~dir)
-      in
-      check int "timeout exit code" 124 code;
-      let ci_log_contents = read_file ci_log in
-      let observed_output =
-        String.concat "\n" [ ci_log_contents; stdout; stderr ]
-      in
-      check bool "active command pid recorded" true
-        (contains_substring observed_output "active_cmd_pid=");
-      check bool "active command pgid recorded" true
-        (contains_substring observed_output "active_cmd_pgid=");
-      check bool "process tree snapshot recorded" true
-        (contains_substring observed_output
-           "active command process tree snapshot:");
-      check bool "sleeping process captured" true
-        (contains_substring observed_output "sleep 10"
-        || contains_substring observed_output "sleep-long.sh");
-      check bool "timeout error present" true
-        (contains_substring observed_output
-           "[ci-run] ERROR: test command timed out after 2s"))
+let test_control_layers_are_absent () =
+  let script = read_file (script_path ()) in
+  List.iter
+    (fun forbidden ->
+      check bool ("absent: " ^ forbidden) false
+        (contains_substring script forbidden))
+    [
+      "CI_TEST_TIMEOUT_SEC";
+      "CI_TEST_ALLOW_FLAKY_RETRY";
+      "CI_TEST_ALLOW_RPC_RETRY";
+      "CI_TEST_ALLOW_CLEAN_RETRY";
+      "run_with_timeout";
+      "retrying once";
+    ]
 
 let () =
   run "ci_run_tests_script"
     [
       ( "script",
         [
-          test_case "rpc retry uses isolated build dir" `Quick
-            test_rpc_retry_uses_isolated_build_dir;
-          test_case "deterministic failure skips flaky retry" `Quick
-            test_deterministic_failure_skips_flaky_retry;
-          test_case "native link failure skips flaky retry" `Quick
-            test_native_link_failure_skips_flaky_retry;
-          test_case "agent sdk artifact failure after flaky retry disables cache"
-            `Quick
-            test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache;
-          test_case "disk full failure skips flaky retry" `Quick
-            test_disk_full_failure_skips_flaky_retry;
-          test_case "github disk warning skips flaky retry" `Quick
-            test_github_disk_warning_skips_flaky_retry;
-          test_case "low disk df stops before flaky retry" `Quick
-            test_low_disk_df_stops_before_flaky_retry;
-          test_case "timeout diagnostics capture active process group" `Quick
-            test_timeout_diagnostics_capture_active_process_group;
+          test_case "dune command observed once and sanitized" `Quick
+            test_dune_command_is_observed_once_and_sanitized;
+          test_case "failure is not retried" `Quick test_failure_is_not_retried;
+          test_case "legacy deadline knob does not terminate command" `Quick
+            test_legacy_deadline_knob_does_not_terminate_command;
+          test_case "contract harness runs once" `Quick
+            test_contract_harness_runs_once;
+          test_case "control layers are absent" `Quick
+            test_control_layers_are_absent;
         ] );
     ]

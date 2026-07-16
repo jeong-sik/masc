@@ -339,7 +339,7 @@ let dispatch_keeper_wake
     }
   in
   let stimulus : Keeper_event_queue.stimulus =
-    { post_id = signal.signal_id
+    { post_id = Schedule_occurrence_id.to_string signal.occurrence_id
     ; urgency
     ; arrived_at = now
     ; payload = Keeper_event_queue.Schedule_due wake

@@ -111,6 +111,48 @@ val acquire_pid_lock :
   int ->
   acquire_result
 
+(** Path of the takeover forensics breadcrumb derived from [lock_path]
+    (the pid-lock file the takeover contends on). *)
+val takeover_breadcrumb_path : lock_path:string -> string
+
+(** Written by the killer immediately before signalling an unresponsive
+    incumbent during [acquire_pid_lock], so the victim's SIGTERM path (or the
+    next boot, after a SIGKILL escalation) can attribute the shutdown to this
+    takeover instead of an unknown external sender. Best-effort: a write
+    failure logs a warning and never blocks lock acquisition. *)
+val write_takeover_breadcrumb :
+  lock_path:string -> port:int -> target_pid:int -> signal_name:string -> unit
+
+type takeover_breadcrumb =
+  { breadcrumb_path : string
+  ; age_sec : float
+  ; killer_pid : int option
+      (** Parsed from the payload for self-filtering at boot; [None] when the
+          payload is not the expected JSON shape. The raw [payload] is always
+          preserved for logging. *)
+  ; payload : string
+  }
+
+type takeover_breadcrumb_read =
+  | Breadcrumb_found of takeover_breadcrumb
+  | Breadcrumb_stale of
+      { breadcrumb_path : string
+      ; age_sec : float
+      }
+  | Breadcrumb_absent
+  | Breadcrumb_unreadable of
+      { breadcrumb_path : string
+      ; reason : string
+      }
+
+(** Reads the breadcrumb next to [lock_path]. [max_age_sec] (default 600 s,
+    covering the supervisor restart cooldown plus a slow boot) bounds how old
+    a breadcrumb may be to still explain the current signal; older files are
+    reported as [Breadcrumb_stale] so a previous incident is never mistaken
+    for the present one. *)
+val read_takeover_breadcrumb :
+  ?max_age_sec:float -> lock_path:string -> unit -> takeover_breadcrumb_read
+
 (** Acquire the process-lifetime owner lease below a current-UID-owned [0700]
     private directory in the explicitly supplied host run root, then establish
     and validate [<base_path>/.masc]. A group- or world-writable [run_dir] is

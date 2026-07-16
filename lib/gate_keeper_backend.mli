@@ -30,6 +30,28 @@ type submission_owner =
     the external actor's deterministic gate identity. [Authenticated_caller]
     keeps poll/cancel authority with the already-authenticated HTTP principal. *)
 
+type durable_connector =
+  | Discord_connector
+  | Slack_connector
+
+val accept_connector :
+  connector:durable_connector ->
+  clock:_ Eio.Time.clock ->
+  config:Workspace.config ->
+  channel:string ->
+  channel_user_id:string ->
+  channel_user_name:string ->
+  channel_workspace_id:string ->
+  keeper_name:string ->
+  idempotency_key:string ->
+  metadata:(string * string) list ->
+  content:string ->
+  Gate_protocol.dispatch_result
+(** Commit one in-process connector event to the existing per-Keeper durable
+    chat queue before returning. The producer's typed request identity is the
+    queue receipt and transcript delivery key; retries converge without a
+    derived hash namespace. *)
+
 val route_busy_connector :
   connector_kind ->
   channel_id:string ->
@@ -64,12 +86,10 @@ val dispatch :
   metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
-(** Build a keeper context, call the keeper surface, and parse the response.
-    When the target keeper already has an admitted turn in flight, the busy
-    message is routed per {!route_busy_connector}: a [Discord]/[Slack]
-    [connector_kind] enqueues onto [Keeper_chat_queue] for deferred delivery via
-    the serial consumer's outbound adapter
-    (RFC-connector-deferred-reply-via-chat-queue). The enqueue is acknowledged
+(** [Discord]/[Slack] delegates to {!accept_connector}: every message enters
+    [Keeper_chat_queue] before this call returns, regardless of current Keeper
+    admission. [Generic] builds a keeper context and retains the HTTP/poll
+    contract. The durable connector enqueue is acknowledged
     only after its durable snapshot commits; the reply's [message_request]
     carries the queue receipt id and revision. When admission is fenced by a
     typed Keeper shutdown operation, the same envelope carries

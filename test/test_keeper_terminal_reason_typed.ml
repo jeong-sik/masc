@@ -275,9 +275,6 @@ let () =
     [ "unrelated authentication failed"
     ; "not_a_config_error"
     ; "API_ERROR_Auth"
-    ; "agent_error_max_turns_exceeded:turns=8,limit=8"
-    ; "agent_error_execution_timeout:elapsed_sec=120.0,timeout_sec=120.0,turn_count=7,max_turns=8"
-    ; "agent_error_idle_timeout:idle_sec=120.0,idle_timeout_sec=120.0,turn_count=7,max_turns=8"
     ];
   let canonical =
     R.operator_disposition
@@ -717,7 +714,6 @@ let () =
         [ "name", `String keeper_name
         ; "agent_name", `String keeper_name
         ; "trace_id", `String "trace-checkpoint-turn-persist"
-        ; "goal", `String "Persist checkpoint turn usage"
         ])
   in
   write_meta_exn config meta;
@@ -761,7 +757,6 @@ let () =
         [ "name", `String keeper_name
         ; "agent_name", `String keeper_name
         ; "trace_id", `String "trace-success-clears-stale-provider-failure"
-        ; "goal", `String "Clear stale provider runtime failure after success"
         ])
   in
   let run_result ?(stop_reason = Runtime_agent.Completed) ()

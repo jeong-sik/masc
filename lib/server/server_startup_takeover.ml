@@ -405,6 +405,114 @@ let claim_pid_file path =
   Acquired
 ;;
 
+(* ── Takeover forensics breadcrumb ──────────────────────────────────────
+   When this process signals an unresponsive incumbent to reclaim the pid
+   lock, only the killer's stderr records the decision; the victim's log ends
+   with a bare "Received SIGTERM" and the operator cannot distinguish an
+   intentional takeover from an external kill (user, pkill, system). The
+   killer therefore writes a JSON breadcrumb next to the pid lock immediately
+   before signalling. The victim reads it in its SIGTERM path, and the next
+   boot reports it after a SIGKILL escalation (a SIGKILLed victim cannot
+   log). A write failure is reported to stderr and never blocks lock
+   acquisition. *)
+
+let takeover_breadcrumb_path ~lock_path = lock_path ^ ".takeover-kill.json"
+
+let write_takeover_breadcrumb ~lock_path ~port ~target_pid ~signal_name =
+  let path = takeover_breadcrumb_path ~lock_path in
+  let payload =
+    `Assoc
+      [ (* NDT-OK: forensic evidence records the killer's identity and
+           wall-clock; no deterministic logic branches on these fields. *)
+        "killer_pid", `Int (Unix.getpid ())
+      ; "killer_argv", `String (String.concat " " (Array.to_list Sys.argv))
+      ; "target_pid", `Int target_pid
+      ; "port", `Int port
+      ; "signal", `String signal_name
+      ; "reason", `String "pid_alive_but_liveness_probe_failed"
+      ; (* NDT-OK: forensic wall-clock evidence, never branched on. *)
+        "written_at_epoch", `Float (Unix.gettimeofday ())
+      ]
+  in
+  match open_out path with
+  | oc ->
+    Eio_guard.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc (Yojson.Safe.to_string payload))
+  | exception Sys_error reason ->
+    Log.legacy_stderr
+      ~level:Log.Warn
+      ~module_name:"Server"
+      (Printf.sprintf "[WARN] takeover breadcrumb write failed at %s: %s" path reason)
+;;
+
+type takeover_breadcrumb =
+  { breadcrumb_path : string
+  ; age_sec : float
+  ; killer_pid : int option
+  ; payload : string
+  }
+
+type takeover_breadcrumb_read =
+  | Breadcrumb_found of takeover_breadcrumb
+  | Breadcrumb_stale of
+      { breadcrumb_path : string
+      ; age_sec : float
+      }
+  | Breadcrumb_absent
+  | Breadcrumb_unreadable of
+      { breadcrumb_path : string
+      ; reason : string
+      }
+
+(* Freshness bound for attributing a shutdown to a takeover breadcrumb.
+   Covers the supervisor restart cooldown (5 s) plus a slow boot with wide
+   margin; anything older describes a previous incident, not this signal. *)
+let takeover_breadcrumb_max_age_sec = 600.0
+
+let read_takeover_breadcrumb
+      ?(max_age_sec = takeover_breadcrumb_max_age_sec)
+      ~lock_path
+      ()
+  =
+  let path = takeover_breadcrumb_path ~lock_path in
+  match Unix.stat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Breadcrumb_absent
+  | exception Unix.Unix_error (code, _, _) ->
+    Breadcrumb_unreadable { breadcrumb_path = path; reason = Unix.error_message code }
+  | st ->
+    (* Freshness answers "could this breadcrumb explain the signal just
+       received" — inherently a wall-clock question. *)
+    let age_sec = (* NDT-OK: forensic freshness, no replay determinism. *)
+      Unix.gettimeofday () -. st.Unix.st_mtime
+    in
+    if age_sec > max_age_sec
+    then Breadcrumb_stale { breadcrumb_path = path; age_sec }
+    else (
+      match Fs_compat.load_file path with
+      | payload ->
+        (* [killer_pid] is best-effort structure over the verbatim payload:
+           the raw JSON is always preserved and logged by callers, so a parse
+           miss degrades self-filtering, not evidence. *)
+        let killer_pid =
+          match Yojson.Safe.from_string payload with
+          | `Assoc fields ->
+            (match List.assoc_opt "killer_pid" fields with
+             | Some (`Int pid) -> Some pid
+             | _ -> None)
+          | _ -> None
+          | exception Yojson.Json_error _ -> None
+        in
+        Breadcrumb_found { breadcrumb_path = path; age_sec; killer_pid; payload }
+      | exception Sys_error reason ->
+        Breadcrumb_unreadable { breadcrumb_path = path; reason }
+      | exception End_of_file ->
+        (* [Fs_compat.load_file] sizes then reads the file; a concurrent
+           truncation between the two surfaces as [End_of_file]. *)
+        Breadcrumb_unreadable
+          { breadcrumb_path = path; reason = "truncated while reading" })
+;;
+
 let acquire_pid_lock
       ?lock_path
       ?(probe_timeout_sec = 3.0)
@@ -448,6 +556,11 @@ let acquire_pid_lock
                   reclaim"
                  pid
                  port);
+            write_takeover_breadcrumb
+              ~lock_path:path
+              ~port
+              ~target_pid:pid
+              ~signal_name:"SIGTERM";
             Safe_ops.protect ~default:() (fun () -> Unix.kill pid Sys.sigterm);
             if
               not (wait_for_pid_exit ~poll_interval_sec ~timeout_sec:term_timeout_sec pid)
@@ -456,6 +569,11 @@ let acquire_pid_lock
                 ~level:Log.Warn
                 ~module_name:"Server"
                 (Printf.sprintf "[WARN] PID %d did not exit; sending SIGKILL" pid);
+              write_takeover_breadcrumb
+                ~lock_path:path
+                ~port
+                ~target_pid:pid
+                ~signal_name:"SIGKILL";
               Safe_ops.protect ~default:() (fun () -> Unix.kill pid Sys.sigkill);
               if not (wait_for_pid_exit ~poll_interval_sec ~timeout_sec:kill_wait_sec pid)
               then

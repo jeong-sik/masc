@@ -54,7 +54,6 @@ let make_meta name =
       (`Assoc
         [ "name", `String name
         ; "trace_id", `String ("trace-" ^ name)
-        ; "goal", `String "memory contract test"
         ])
   with
   | Error error -> Alcotest.fail ("meta fixture failed: " ^ error)

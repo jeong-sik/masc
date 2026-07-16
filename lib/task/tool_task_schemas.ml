@@ -31,12 +31,14 @@ let handoff_context_description =
   Printf.sprintf
     "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
      actions (submit_for_verification / done / release / cancel). On \
-     action='submit_for_verification' or 'done', include 'evidence_refs' with \
-     at least one locally validated reference: an existing base-path artifact \
+     action='submit_for_verification' or 'done', 'evidence_refs' entries \
+     strengthen the completion review: an existing base-path artifact \
      file/file:// URI, a commit hash present in the local git repo, or a %s \
-     trace/turn/receipt ref that resolves on disk. Completion notes, URLs, PR \
-     numbers, and trace-shaped labels alone do NOT satisfy the gate. Example: \
-     {\"summary\": \"tests green, local proof saved\", \"evidence_refs\": [\"%s\"]}."
+     trace/turn/receipt ref that resolves on disk. Entries must be non-empty \
+     strings, but the list itself is optional — the configured LLM completion \
+     verdict decides the outcome (RFC-0337 withdrew the mandatory evidence \
+     floor). Example: {\"summary\": \"tests green, local proof saved\", \
+     \"evidence_refs\": [\"%s\"]}."
     Common.masc_dirname
     handoff_example_evidence_ref
 

@@ -260,7 +260,7 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event () =
                delay_ms stays deterministic for testability; jitter belongs
                in the I/O layer per RFC-0203 to prevent thundering herd. *)
             let jitter_factor =
-              let raw = Mirage_crypto_rng.generate 1 in
+              let raw = Crypto_rng.generate 1 in
               let byte = Char.code raw.[0] in
               0.75 +. (0.5 *. (float_of_int byte /. 255.0))
             in

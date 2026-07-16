@@ -46,20 +46,6 @@ val keeper_keepalive_interval_sec : int Runtime_params.param
 val keeper_dead_ttl_sec : float Runtime_params.param
 (** Dead-state retention (seconds).  Range \[60.0, 1 day]. *)
 
-(** {1 Keeper handoff} *)
-
-val keeper_handoff_threshold : float Runtime_params.param
-(** Default handoff context-ratio threshold.
-    Range \[0.5, 0.99].  Default 0.85. *)
-
-val keeper_handoff_cooldown_sec : int Runtime_params.param
-(** Post-handoff suppression window (seconds).
-    Range \[30, 3600].  Default 300. *)
-
-val keeper_handoff_pressure_threshold : float Runtime_params.param
-(** Context ratio above which handoff-pressure alert fires.
-    Range \[0.5, 0.99].  Default 0.88. *)
-
 (** {1 Keeper diagnostics} *)
 
 val keeper_snapshot_sec : int Runtime_params.param

@@ -42,6 +42,7 @@ type keeper_continuity =
 type tool_call_entry =
   { count : int
   ; successes : int
+  ; deferred : int
   ; failures : int
   ; last_used_at : float
   }

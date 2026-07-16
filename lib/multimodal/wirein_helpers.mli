@@ -56,7 +56,5 @@ val extract_raw_artifacts :
 val upsert_workspace_meta :
   Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
 (** [upsert_workspace_meta wc meta] stores [meta] under the
-    ["workspace_meta"] key of an [`Assoc] working_context. Same
-    semantics as
-    {!Autonomous.Wirein_helpers.upsert_autonomous_meta} for the
-    autonomous_meta key. *)
+    ["workspace_meta"] key of an [`Assoc] working_context while preserving
+    every other existing association. *)

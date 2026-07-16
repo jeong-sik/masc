@@ -1327,14 +1327,12 @@ let mark_summary_failed ~id ~reason ~retryable =
   publish_summary_transition ~id updated
 ;;
 
-let restart_retryable_summary ~id =
+let restart_failed_summary ~id =
   let updated =
     with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
       match SMap.find_opt id map with
-      | Some
-          ({ summary_status = Summary_failed { retryable = true; _ }; _ } as entry)
-        ->
+      | Some ({ summary_status = Summary_failed _; _ } as entry) ->
         let updated = SMap.add id { entry with summary_status = Summary_pending } map in
         (match
            persist_snapshot_unlocked
@@ -1351,8 +1349,7 @@ let restart_retryable_summary ~id =
           { summary_status =
               ( Summary_not_requested
               | Summary_pending
-              | Summary_available _
-              | Summary_failed { retryable = false; _ } )
+              | Summary_available _ )
           ; _
           } ->
         Ok false)

@@ -34,10 +34,11 @@ val maybe_externalize : ?mime:string -> string -> string
 (** {1 Result Conversion} *)
 
 val to_oas_typed_result : Tool_result.result -> Agent_sdk.Types.tool_result
-(** Convert a {!Tool_result.result} to OAS [tool_result].
-    Maps the producer's typed [failure_class] directly to OAS
-    [recoverable]/[error_class] and applies externalization. Message payloads
-    never alter the typed failure metadata. *)
+(** Convert a {!Tool_result.result} to OAS [tool_result].  [Completed] and
+    [Deferred] project one-way to OAS [Ok]; [Deferred] carries an opaque MASC
+    disposition marker in [_meta].  The adapter never parses that metadata
+    back into MASC semantics.  [Failed] maps its typed [failure_class] directly
+    to OAS [recoverable]/[error_class]. *)
 
 (** {1 Schema Conversion} *)
 

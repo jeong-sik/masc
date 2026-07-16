@@ -400,6 +400,72 @@ let test_busy_slack_preserves_thread_context () =
           (thread_ts = Some "171.001")
       | _ -> check "one typed Slack receipt is pending" false)
 
+let test_exact_source_identity_converges () =
+  Printf.printf
+    "Test: durable connector acceptance converges on the producer request id\n%!";
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-connector-accept-%d-%d" (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base))))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:(Some keeper_name));
+      configure_queue ~base;
+      let accept () =
+        Gate_keeper_backend.accept_connector
+          ~connector:Gate_keeper_backend.Discord_connector ~clock ~config
+          ~channel:"discord" ~channel_user_id:"user-exact"
+          ~channel_user_name:"Exact User"
+          ~channel_workspace_id:"channel-exact" ~keeper_name
+          ~idempotency_key:"discord-msg-source-123"
+          ~metadata:[ "external_message_id", "source-123" ]
+          ~content:"deliver exactly once"
+      in
+      let request_of_reply = function
+        | Gate_protocol.Reply { message_request = Some request; _ } -> request
+        | Gate_protocol.Reply { message_request = None; _ }
+        | Gate_protocol.Keeper_error_result _
+        | Gate_protocol.Unavailable_result ->
+          failwith "durable connector acceptance did not return a receipt"
+      in
+      let first = request_of_reply (accept ()) in
+      let repeated = request_of_reply (accept ()) in
+      check "receipt is the exact producer request identity"
+        (first.request_id = "discord-msg-source-123");
+      check "active replay returns the same receipt"
+        (repeated.request_id = first.request_id);
+      let pending = (Keeper_chat_queue.snapshot ~keeper_name).pending in
+      check "active replay keeps one FIFO receipt" (List.length pending = 1);
+      check "accepted user transcript row is idempotent"
+        (count_user_lines ~base = 1);
+      (match Keeper_chat_queue.lease_next ~keeper_name with
+       | `Leased lease ->
+         ignore
+           (Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
+              ~outcome:
+                (Keeper_chat_queue.Mark_delivered
+                   { completed_at = Time_compat.now (); outcome_ref = None })
+             : [ `Finalized of Keeper_chat_queue.Receipt_id.t
+               | `Unknown_lease
+               | `Error of Keeper_chat_queue.mutation_error
+               ])
+       | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+         check "source receipt leases before terminal replay" false);
+      let terminal = request_of_reply (accept ()) in
+      check "terminal replay reports done without redispatch"
+        (terminal.status = Gate_protocol.Done);
+      let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+      check "terminal replay does not create pending work"
+        (snapshot.pending = [] && Int64.equal snapshot.terminal_count 1L))
+
 let test_shutdown_fenced_connector_ack
     ~label ~connector_kind ~channel ~channel_user_id ~channel_user_name
     ~channel_workspace_id ~metadata ~content ~source_matches =
@@ -526,6 +592,7 @@ let () =
   test_busy_discord_persist_failure_is_explicit ();
   test_pending_receipt_prevents_direct_overtake ();
   test_busy_slack_preserves_thread_context ();
+  test_exact_source_identity_converges ();
   test_shutdown_fenced_discord_ack ();
   test_shutdown_fenced_slack_ack ();
   if !failures > 0 then (

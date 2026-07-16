@@ -2075,9 +2075,12 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
     (fun () ->
       let keeper_name = "sangsu" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
+      let keeper_meta =
+        make_keeper_meta ~agent_name:keeper_agent_name keeper_name
+      in
       ignore
         (Keeper_registry.register ~base_path keeper_name
-           (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
+           keeper_meta);
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
       let request =
@@ -2103,6 +2106,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
       | Some entry ->
           Alcotest.(check int) "tool count" 1 entry.count;
           Alcotest.(check int) "tool successes" 1 entry.successes;
+          Alcotest.(check int) "tool deferred" 0 entry.deferred;
           Alcotest.(check int) "tool failures" 0 entry.failures;
           Masc.Keeper_registry_tool_usage_persistence.flush ~base_path keeper_name;
           let persisted =
@@ -2110,8 +2114,43 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
               (Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json")
           in
           let open Yojson.Safe.Util in
+          Alcotest.(check int) "persisted schema version" 2
+            (persisted |> member "schema_version" |> to_int);
           Alcotest.(check string) "persisted tool name" "masc_status"
-            (persisted |> member "tools" |> index 0 |> member "tool" |> to_string)
+            (persisted |> member "tools" |> index 0 |> member "tool" |> to_string);
+          Alcotest.(check int) "persisted deferred count" 0
+            (persisted |> member "tools" |> index 0 |> member "deferred" |> to_int);
+          Keeper_registry.unregister ~base_path keeper_name;
+          ignore (Keeper_registry.register ~base_path keeper_name keeper_meta);
+          Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
+          let restored =
+            List.assoc_opt
+              "masc_status"
+              (Keeper_registry.tool_usage_of ~base_path keeper_name)
+          in
+          Alcotest.(check (option int))
+            "current schema restores exact count"
+            (Some 1)
+            (Option.map (fun restored -> restored.Keeper_types.count) restored);
+          let persisted_path =
+            Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json"
+          in
+          Fs_compat.save_file
+            persisted_path
+            (Yojson.Safe.to_string
+               (`Assoc
+                 [ "keeper", `String keeper_name
+                 ; "tools", `List []
+                 ])
+             ^ "\n");
+          Keeper_registry.unregister ~base_path keeper_name;
+          ignore (Keeper_registry.register ~base_path keeper_name keeper_meta);
+          Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
+          Alcotest.(check (list string))
+            "legacy schema is rejected without migration"
+            []
+            (Keeper_registry.tool_usage_of ~base_path keeper_name
+             |> List.map fst)
       | None -> Alcotest.fail "expected keeper tool usage for masc_status")
 
 let test_handle_request_tools_call_blocks_keeper_internal_tool () =

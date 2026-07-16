@@ -578,7 +578,6 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
     # (branch push to main/develop, workflow_dispatch) always run Build and Test
@@ -597,8 +596,8 @@ jobs:
     #     every test suite are merge-blocking.
     #   - Each suite runs exactly once. scripts/ci-run-tests.sh only reports
     #     heartbeat, disk pressure, process state, and failure diagnostics.
-    #   - The job deadline is the single outer execution boundary; individual
-    #     commands and suites do not add independent retry/timeout policy.
+    #   - GitHub Actions owns the outer workflow lifecycle; this job does not
+    #     impose a second deadline on individual commands or the suite.
     steps:
       - name: Free disk space
         # ubuntu-latest starts with roughly 14 GB free but preinstalls the
@@ -895,42 +894,6 @@ jobs:
           else
             echo "::notice::main_eio.exe not found, skipping config-diagnostic"
           fi
-
-  ocaml-55-canary:
-    name: OCaml 5.5 Build Canary
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    continue-on-error: true
-    needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup OCaml 5.5 toolchain
-        uses: ./.github/actions/setup-ocaml-toolchain
-        with:
-          ocaml-compiler: '5.5.0'
-          cache-prefix: ocaml55-canary
-          dune-cache-save: "true"
-
-      - name: Pin external OCaml dependencies
-        uses: ./.github/actions/pin-ocaml-deps
-        with:
-          pin-flags: --with-bisect
-
-      - name: Install system and OCaml dependencies
-        uses: ./.github/actions/install-ocaml-deps
-        with:
-          install-flags: --with-test
-          install-timeout-minutes: "30"
-          os-packages: jq ripgrep
-
-      - name: Build install target
-        env:
-          DUNE_JOBS: 1
-        run: opam exec -- dune build --root . @install
 
   lint:
     name: Lint

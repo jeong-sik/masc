@@ -216,38 +216,41 @@ let slack_message ~ts =
 
 let test_bound_message_queues_exact_slack_ts () =
   with_temp_base (fun () ->
-    match
-      State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test"
-    with
-    | Error detail -> fail detail
-    | Ok _ ->
-      Eio_main.run @@ fun env ->
-      Eio.Switch.run @@ fun sw ->
-      let observed, resolve_observed = Eio.Promise.create () in
-      let ingress =
-        Connector_ingress_lane.create ~sw
-          ~on_failure:(fun failure ->
-            Eio.Promise.resolve resolve_observed failure)
-          ()
-      in
-      let dispatch ~on_text_snapshot:_ ~channel:_ ~channel_user_id:_
-          ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
-          ~idempotency_key:_ ~metadata:_ ~content:_ =
-        failwith "observe Slack ingress identity"
-      in
-      G.For_testing.submit_event ingress ~dispatch
-        ~clock:(Eio.Stdenv.clock env)
-        (slack_message ~ts:"1710000000.123456");
-      let failure = Eio.Promise.await observed in
-      check string "exact Slack event ts" "1710000000.123456"
-        failure.Connector_ingress_lane.event_id.opaque_id;
-      check string "typed source" "slack_triggered"
-        failure.event_id.source;
-      match failure.lane with
-      | Connector_ingress_lane.Keeper_lane keeper_name ->
-        check string "resolved Keeper lane" "luna" keeper_name
-      | Connector_ingress_lane.Connector_lane connector_id ->
-        failf "expected Keeper lane, got connector:%s" connector_id)
+    try
+      match
+        State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test"
+      with
+      | Error detail -> fail detail
+      | Ok _ ->
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        let observed, resolve_observed = Eio.Promise.create () in
+        let ingress =
+          Connector_ingress_lane.create ~sw
+            ~on_failure:(fun failure ->
+              Eio.Promise.resolve resolve_observed failure)
+            ()
+        in
+        let dispatch ~on_text_snapshot:_ ~channel:_ ~channel_user_id:_
+            ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
+            ~idempotency_key:_ ~metadata:_ ~content:_ =
+          failwith "observe Slack ingress identity"
+        in
+        G.For_testing.submit_event ingress ~dispatch
+          ~clock:(Eio.Stdenv.clock env)
+          (slack_message ~ts:"1710000000.123456");
+        let failure = Eio.Promise.await observed in
+        check string "exact Slack event ts" "1710000000.123456"
+          failure.Connector_ingress_lane.event_id.opaque_id;
+        check string "typed source" "slack_triggered"
+          failure.event_id.source;
+        (match failure.lane with
+         | Connector_ingress_lane.Keeper_lane keeper_name ->
+           check string "resolved Keeper lane" "luna" keeper_name
+         | Connector_ingress_lane.Connector_lane connector_id ->
+           failf "expected Keeper lane, got connector:%s" connector_id);
+        Eio.Switch.fail sw Exit
+    with Exit -> ())
 ;;
 
 let test_binding_store_failure_does_not_enqueue () =
@@ -262,25 +265,28 @@ let test_binding_store_failure_does_not_enqueue () =
     Fun.protect
       ~finally:(fun () -> close_out_noerr out)
       (fun () -> output_string out "{not-json");
-    Eio_main.run @@ fun env ->
-    Eio.Switch.run @@ fun sw ->
-    let dispatch_called = ref false in
-    let ingress =
-      Connector_ingress_lane.create ~sw
-        ~on_failure:(fun _ -> fail "binding failure must not enqueue")
-        ()
-    in
-    let dispatch ~on_text_snapshot:_ ~channel:_ ~channel_user_id:_
-        ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
-        ~idempotency_key:_ ~metadata:_ ~content:_ =
-      dispatch_called := true;
-      Gate_protocol.Unavailable_result
-    in
-    G.For_testing.submit_event ingress ~dispatch
-      ~clock:(Eio.Stdenv.clock env)
-      (slack_message ~ts:"1710000000.654321");
-    Eio.Fiber.yield ();
-    check bool "no volatile job accepted" false !dispatch_called)
+    try
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let dispatch_called = ref false in
+      let ingress =
+        Connector_ingress_lane.create ~sw
+          ~on_failure:(fun _ -> fail "binding failure must not enqueue")
+          ()
+      in
+      let dispatch ~on_text_snapshot:_ ~channel:_ ~channel_user_id:_
+          ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_
+          ~idempotency_key:_ ~metadata:_ ~content:_ =
+        dispatch_called := true;
+        Gate_protocol.Unavailable_result
+      in
+      G.For_testing.submit_event ingress ~dispatch
+        ~clock:(Eio.Stdenv.clock env)
+        (slack_message ~ts:"1710000000.654321");
+      Eio.Fiber.yield ();
+      check bool "no volatile job accepted" false !dispatch_called;
+      Eio.Switch.fail sw Exit
+    with Exit -> ())
 ;;
 
 let () =

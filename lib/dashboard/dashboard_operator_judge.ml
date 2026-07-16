@@ -251,11 +251,7 @@ let compute_judgments
     Runtime.runtime_id_for_structured_judge ()
   in
   match
-    (* #9629: caller uses run_with_caller so this judge inherits
-       Operator_judge's per-caller default and surfaces in the
-       Otel_metric_store counter. *)
-    Masc_oas_bridge.run_with_caller
-      ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
+    Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Operator_judge (fun () ->
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
         ~base_path ~goal:prompt ~masc_tools ~dispatch
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress

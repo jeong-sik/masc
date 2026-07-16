@@ -10,8 +10,6 @@ open Keeper_types_profile
 
 include Keeper_context_core_accessors
 
-module Canonical_tool = Agent_sdk.Canonical_tool
-
 let add_checkpoint_sanitize_stats
     (a : checkpoint_sanitize_stats)
     (b : checkpoint_sanitize_stats) : checkpoint_sanitize_stats =
@@ -144,10 +142,9 @@ let sanitize_checkpoint_text_block (text : string)
 let sanitize_checkpoint_message
     (msg : Agent_sdk.Types.message)
   : Agent_sdk.Types.message option * checkpoint_sanitize_stats =
-  let kept_rev, _, _, _, _, stats =
+  let kept_rev, _, _, stats =
     List.fold_left
-      (fun (kept_rev, kept_text_blocks, kept_text_chars,
-            kept_tool_results, kept_tool_result_chars, stats) block ->
+      (fun (kept_rev, kept_text_blocks, kept_text_chars, stats) block ->
          match block with
          | Agent_sdk.Types.Text text ->
              let sanitized_text, text_stats =
@@ -158,7 +155,6 @@ let sanitize_checkpoint_message
                   ( kept_rev,
                     kept_text_blocks,
                     kept_text_chars,
-                    kept_tool_results, kept_tool_result_chars,
                     add_checkpoint_sanitize_stats stats text_stats )
               | Some text ->
                   if kept_text_blocks
@@ -167,7 +163,6 @@ let sanitize_checkpoint_message
                     ( kept_rev,
                       kept_text_blocks,
                       kept_text_chars,
-                      kept_tool_results, kept_tool_result_chars,
                       add_checkpoint_sanitize_stats
                         (add_checkpoint_sanitize_stats stats text_stats)
                         {
@@ -184,7 +179,6 @@ let sanitize_checkpoint_message
                       ( kept_rev,
                         kept_text_blocks,
                         kept_text_chars,
-                        kept_tool_results, kept_tool_result_chars,
                         add_checkpoint_sanitize_stats
                           (add_checkpoint_sanitize_stats stats text_stats)
                           {
@@ -208,123 +202,15 @@ let sanitize_checkpoint_message
                       ( Agent_sdk.Types.Text capped_text :: kept_rev,
                         kept_text_blocks + 1,
                         kept_text_chars + String.length capped_text,
-                        kept_tool_results, kept_tool_result_chars,
                         add_checkpoint_sanitize_stats
                           (add_checkpoint_sanitize_stats stats text_stats)
                           block_stats ))
-         | Agent_sdk.Types.ToolResult _ ->
-             let result =
-               match Canonical_tool.tool_result_of_block block with
-               | Some result -> result
-               | None ->
-                   invalid_arg
-                     "keeper_context_core: OAS canonical tool-result projection unavailable"
-             in
-             let tool_use_id = result.Canonical_tool.call_id in
-             let content = result.Canonical_tool.content in
-             let tool_chars = String.length content in
-             if kept_tool_results
-                >= default_max_checkpoint_tool_results_per_message
-                || kept_tool_result_chars + tool_chars
-                   > default_max_checkpoint_tool_result_total_chars
-             then
-               (* Over count or aggregate byte budget: stub the result.
-                  The two triggers are split into separate [reason]
-                  labels (and named in [stub_content]) so operators
-                  reading the Otel_metric_store rate or inspecting a stubbed
-                  checkpoint know which cap to revisit, and so an
-                  LLM that later reads the checkpoint can tell that a
-                  payload was removed (and why) rather than silently
-                  reasoning over the placeholder. *)
-               let stub_reason =
-                 if kept_tool_results
-                    >= default_max_checkpoint_tool_results_per_message
-                 then "over_count"
-                 else "over_aggregate_bytes"
-               in
-               let stub_content =
-                 Printf.sprintf
-                   "[tool result cleared: reason=%s tool_use_id=%s \
-                    original_bytes=%d; removed by \
-                    Keeper_context_core.sanitize_checkpoint_message \
-                    to fit checkpoint budget]"
-                   stub_reason
-                   tool_use_id
-                   tool_chars
-               in
-               let () =
-                 Otel_metric_store.inc_counter
-                   Otel_metric_store.metric_keeper_context_tool_result_compacted
-                   ~labels:[ "action", "stubbed"; "reason", stub_reason ]
-                   ()
-               in
-               let stub =
-                 Agent_sdk.Types.ToolResult
-                   { tool_use_id;
-                     content = stub_content;
-                     outcome = result.Canonical_tool.outcome;
-                     json = None;
-                     content_blocks = None }
-               in
-               ( stub :: kept_rev,
-                 kept_text_blocks, kept_text_chars,
-                 kept_tool_results + 1,
-                 kept_tool_result_chars + String.length stub_content,
-                 add_checkpoint_sanitize_stats stats
-                   { empty_checkpoint_sanitize_stats with
-                     dropped_blocks = 1;
-                     dropped_chars = tool_chars } )
-             else if tool_chars > default_max_checkpoint_tool_result_chars
-             then
-               (* Individual result too large: truncate.  The cap
-                  marker already advertises truncation in the content
-                  itself; the counter increment is what surfaces the
-                  rate to operators without log scraping. *)
-               let () =
-                 Otel_metric_store.inc_counter
-                   Otel_metric_store.metric_keeper_context_tool_result_compacted
-                   ~labels:
-                     [ "action", "truncated"; "reason", "over_single_byte" ]
-                   ()
-               in
-               let capped =
-                 String.sub content 0
-                   default_max_checkpoint_tool_result_chars
-                 ^ checkpoint_text_cap_marker
-               in
-               let block =
-                 Agent_sdk.Types.ToolResult
-                   { tool_use_id
-                   ; content = capped
-                   ; outcome = result.Canonical_tool.outcome
-                   ; json = None
-                   ; content_blocks = None
-                   }
-               in
-               ( block :: kept_rev,
-                 kept_text_blocks, kept_text_chars,
-                 kept_tool_results + 1,
-                 kept_tool_result_chars
-                 + default_max_checkpoint_tool_result_chars,
-                 add_checkpoint_sanitize_stats stats
-                   { empty_checkpoint_sanitize_stats with
-                     truncated_blocks = 1;
-                     truncated_chars =
-                       tool_chars
-                       - default_max_checkpoint_tool_result_chars } )
-             else
-               (* Within budget: keep as-is *)
-               ( block :: kept_rev,
-                 kept_text_blocks, kept_text_chars,
-                 kept_tool_results + 1,
-                 kept_tool_result_chars + tool_chars,
-                 stats )
          | _ ->
              ( block :: kept_rev,
-               kept_text_blocks, kept_text_chars,
-               kept_tool_results, kept_tool_result_chars,
+               kept_text_blocks,
+               kept_text_chars,
                stats ))
-      ([], 0, 0, 0, 0, empty_checkpoint_sanitize_stats)
+      ([], 0, 0, empty_checkpoint_sanitize_stats)
       msg.content
   in
   let kept = List.rev kept_rev in
@@ -341,19 +227,17 @@ let reasoning_details_chars
   |> String.length
 
 let checkpoint_content_chars_of_block block =
-  match Canonical_tool.tool_result_of_block block with
-  | Some result -> String.length result.Canonical_tool.content
-  | None -> (
-      match block with
-      | Agent_sdk.Types.Text text -> String.length text
-      | Agent_sdk.Types.Thinking { content; _ } -> String.length content
-      | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
-          reasoning_details_chars ~reasoning_content ~details
-      | Agent_sdk.Types.RedactedThinking text -> String.length text
-      | Agent_sdk.Types.ToolResult _ ->
-          invalid_arg
-            "keeper_context_core: OAS canonical tool-result projection unavailable"
-      | _ -> 0)
+  match block with
+  | Agent_sdk.Types.Text text -> String.length text
+  | Agent_sdk.Types.Thinking { content; _ } -> String.length content
+  | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+      reasoning_details_chars ~reasoning_content ~details
+  | Agent_sdk.Types.RedactedThinking text -> String.length text
+  | Agent_sdk.Types.ToolResult _
+  | Agent_sdk.Types.ToolUse _
+  | Agent_sdk.Types.Image _
+  | Agent_sdk.Types.Document _
+  | Agent_sdk.Types.Audio _ -> 0
 
 let checkpoint_content_chars_of_message (msg : Agent_sdk.Types.message) : int =
   List.fold_left
@@ -417,24 +301,6 @@ let cap_checkpoint_message_to_remaining_content
            match block with
            | Agent_sdk.Types.Text text ->
                cap_content (fun text -> Agent_sdk.Types.Text text) text
-           | Agent_sdk.Types.ToolResult _ ->
-               let result =
-                 match Canonical_tool.tool_result_of_block block with
-                 | Some result -> result
-                 | None ->
-                     invalid_arg
-                       "keeper_context_core: OAS canonical tool-result projection unavailable"
-               in
-               cap_content
-                 (fun content ->
-                   Agent_sdk.Types.ToolResult
-                     { tool_use_id = result.Canonical_tool.call_id
-                     ; content
-                     ; outcome = result.Canonical_tool.outcome
-                     ; json = None
-                     ; content_blocks = result.Canonical_tool.content_blocks
-                     })
-                 result.Canonical_tool.content
            | Agent_sdk.Types.Thinking t ->
                let len = String.length t.content in
                if len = 0 then

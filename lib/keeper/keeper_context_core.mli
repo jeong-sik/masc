@@ -211,37 +211,17 @@ val sanitize_oas_checkpoint :
 val checkpoint_sanitize_changed : checkpoint_sanitize_stats -> bool
 (** [true] iff any of the counters in [stats] is non-zero. *)
 
-val default_max_checkpoint_tool_result_chars : int
-(** Per-tool-result text cap (in chars) applied when projecting
-    Anthropic [tool_result] blocks into a checkpoint. Beyond this
-    threshold the payload collapses to a stub so a single
-    orphan-repair pass cannot inflate one block to multi-MB. *)
-
 val default_max_checkpoint_content_chars_total : int
-(** Total persisted Text/tool_result content budget across the retained
-    checkpoint message list. The newest messages are kept first; older
-    messages are truncated or dropped once this budget is exhausted. *)
-
-val tool_result_text_of_block :
-  tool_use_id:string ->
-  content:string ->
-  json:Yojson.Safe.t option ->
-  string
-(** Project a [tool_result] block to its on-checkpoint string form,
-    applying {!default_max_checkpoint_tool_result_chars}. Exposed so
-    [test_keeper_context_core_dedup] can pin the dedup contract
-    without re-implementing the projection. *)
+(** Total persisted text/reasoning content budget. Typed ToolResult blocks are
+    preserved exactly and remain outside this legacy text cap. *)
 
 val sanitize_checkpoint_message :
   Agent_sdk.Types.message -> Agent_sdk.Types.message option * checkpoint_sanitize_stats
-(** Apply the per-message portion of {!sanitize_oas_checkpoint}: cap
-    Text and tool_result blocks, drop empties, return the cleaned
-    message (or [None] if every block was dropped) plus its stats.
-    Exposed so [test_keeper_lifecycle] can pin the sanitization
-    contract block-by-block. *)
+(** Cap Text blocks while preserving typed ToolResult blocks exactly. Returns
+    [None] only when every block was dropped, plus its stats. *)
 
 val checkpoint_text_cap_marker : string
-(** Marker suffix appended to a Text or tool_result block when the
+(** Marker suffix appended to a Text block when the
     sanitizer truncates it (newline followed by the [capped] marker).
     Tests assert against this literal so the marker is part of the
     public contract. *)

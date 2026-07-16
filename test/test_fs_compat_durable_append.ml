@@ -239,6 +239,23 @@ let test_private_jsonl_append_preserves_complete_history () =
     (Fs_compat.load_file path)
 ;;
 
+let test_private_jsonl_append_returns_committed_end_offset () =
+  let original = "{\"row\":1}\n" in
+  let suffix = "{\"row\":2}\n{\"row\":3}\n" in
+  with_temp_jsonl original @@ fun path ->
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_with_end_offset_result
+       path
+       suffix
+   with
+   | Ok end_offset ->
+     check int
+       "committed newline-end byte offset"
+       (String.length original + String.length suffix)
+       end_offset
+   | Error error -> fail (Fs_compat.private_jsonl_append_error_to_string error))
+;;
+
 let test_private_jsonl_append_rejects_incomplete_tail () =
   with_temp_jsonl "{\"row\":1}" @@ fun path ->
   (match
@@ -287,6 +304,10 @@ let () =
             "private JSONL append preserves complete history"
             `Quick
             test_private_jsonl_append_preserves_complete_history
+        ; test_case
+            "private JSONL append returns committed end offset"
+            `Quick
+            test_private_jsonl_append_returns_committed_end_offset
         ; test_case
             "private JSONL append rejects incomplete tail"
             `Quick

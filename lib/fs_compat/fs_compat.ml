@@ -1770,7 +1770,7 @@ let private_jsonl_append_error_to_string = function
   | Durable_jsonl_append_failed error -> durable_append_error_to_string error
 ;;
 
-let append_private_jsonl_durable_locked_result path suffix =
+let append_private_jsonl_durable_locked_with_end_offset_result path suffix =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_jsonl_suffix
@@ -1821,7 +1821,13 @@ let append_private_jsonl_durable_locked_result path suffix =
                  ~fd
                  ~original_length
                  suffix
-               |> Result.map_error (fun error -> Durable_jsonl_append_failed error))))))
+               |> Result.map_error (fun error -> Durable_jsonl_append_failed error)
+               |> Result.map (fun () -> original_length + String.length suffix))))))
+;;
+
+let append_private_jsonl_durable_locked_result path suffix =
+  append_private_jsonl_durable_locked_with_end_offset_result path suffix
+  |> Result.map ignore
 ;;
 
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =

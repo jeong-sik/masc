@@ -438,11 +438,13 @@ Runtime selects Text, Voice, Image, Audio, Judge, and compaction models from
 typed provider/model catalogs. Fallback follows explicit candidate order and
 declared capability, never names, URLs, or vendor strings.
 
-MASC owns application-lifetime CPU execution resources and injects only the
-generic capability OAS needs. Journal codec, recovery scan, and projection work
-cannot create a pool per lane/event or silently fall back onto the Keeper or
-server scheduling domain. Resource exhaustion is a typed lane-local result, not
-a fleet stop or a reason to discard committed progress.
+MASC owns the application-lifetime switch and the single host CPU-allocation
+policy. It creates and shares one opaque OAS execution runtime with an explicit
+allocation; OAS encapsulates its internal pool and exposes no raw pool or
+allocation heuristic. Journal codec, recovery scan, and projection work cannot
+create a pool per lane/event or silently fall back onto the Keeper or server
+scheduling domain. Resource exhaustion is a typed lane-local result, not a
+fleet stop or a reason to discard committed progress.
 
 Dashboard chat preserves causal interleaving of thinking, output, ToolUse,
 progress, ToolResult, multimodal blocks, child operations, compaction, and

@@ -159,9 +159,10 @@ must implement the hierarchy in the normative Goal without adding
 Keeper/Fusion/MASC node kinds to OAS.
 
 Every scope admits one top-level Agent run, owns one logical sequence, and
-closes at lifecycle completion. Store directory, switch, and shared CPU
-executor are caller-owned. No Keeper, Gate, Task, or MASC type appears in this
-layer.
+closes at lifecycle completion. Store directory, application switch, and CPU
+allocation policy are caller-owned. One opaque `Execution_runtime` encapsulates
+the raw shared pool under that switch; ordinary callers and codecs never receive
+the pool directly. No Keeper, Gate, Task, or MASC type appears in this layer.
 
 | Private module | Exact responsibility |
 |---|---|

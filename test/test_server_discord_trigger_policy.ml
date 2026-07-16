@@ -108,6 +108,8 @@ let discord_message ~message_id =
 
 let test_durable_accept_precedes_delivery_handoff () =
   with_temp_dir @@ fun base_dir ->
+  with_env Env_config_core.base_path_env_key base_dir @@ fun () ->
+  with_env Env_config_core.base_path_input_env_key base_dir @@ fun () ->
   with_env "MASC_DISCORD_BINDING_STORE_PATH"
     (Filename.concat base_dir "bindings.json")
   @@ fun () ->

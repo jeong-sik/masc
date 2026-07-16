@@ -605,6 +605,7 @@ type checkpoint_cas_error =
       { source_turn : int
       ; candidate_turn : int
       }
+  | Watermark_invalidation_failed of Keeper_fs.durable_remove_error
   | Commit_not_installed of Keeper_fs.durable_write_error
   | Commit_durability_unknown of
       { installed_ref : Keeper_checkpoint_ref.t
@@ -744,25 +745,45 @@ let save_oas_if_source
                ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
            in
            let ownership_root = Filename.dirname session_dir in
+           let sidecar_path = watermark_sidecar_path canonical_path in
            (match
-              Keeper_fs.save_json_durable_atomic
-                ~ownership_root
-                ~pretty:false
-                canonical_path
-                candidate_json
+              Keeper_fs.remove_file_durable ~ownership_root sidecar_path
             with
-            | Error error when error.Keeper_fs.renamed ->
-              Error
-                (Commit_durability_unknown
-                   { installed_ref = candidate_ref; error })
-            | Error error -> Error (Commit_not_installed error)
+            | Error error -> Error (Watermark_invalidation_failed error)
             | Ok () ->
-              (* [candidate_bytes] and [save_json_durable_atomic ~pretty:false]
-                 use the same [Yojson.Safe.to_string candidate_json] contract.
-                 Once the writer returns [Ok], rename and both durability
-                 fsyncs have completed; a post-commit read cannot downgrade
-                 that committed outcome to a retryable failure. *)
-              Ok candidate_ref))
+              (match
+                 Keeper_fs.save_json_durable_atomic
+                   ~ownership_root
+                   ~pretty:false
+                   canonical_path
+                   candidate_json
+               with
+               | Error error when error.Keeper_fs.renamed ->
+                 Error
+                   (Commit_durability_unknown
+                      { installed_ref = candidate_ref; error })
+               | Error error -> Error (Commit_not_installed error)
+               | Ok () ->
+                 (match canonical_fingerprint canonical_path with
+                  | Some (size, mtime) ->
+                    save_sidecar_watermark_best_effort sidecar_path
+                      { session_id =
+                          Keeper_id.Trace_id.to_string expected_session_id
+                      ; turn_count = candidate.turn_count
+                      ; canonical_size = size
+                      ; canonical_mtime = mtime
+                      }
+                  | None -> ());
+                 (* [candidate_bytes] and
+                    [save_json_durable_atomic ~pretty:false] use the same
+                    [Yojson.Safe.to_string candidate_json] contract. Once
+                    the writer returns [Ok], rename and both durability
+                    fsyncs have completed; a post-commit read cannot
+                    downgrade that committed outcome to a retryable
+                    failure. The old watermark was durably removed before
+                    the commit, so a failed best-effort refresh leaves a
+                    miss, never stale matching metadata. *)
+                 Ok candidate_ref)))
 
 let save_oas_classified_typed
     ~(session_dir : string)

@@ -169,6 +169,7 @@ type checkpoint_cas_error =
       { source_turn : int
       ; candidate_turn : int
       }
+  | Watermark_invalidation_failed of Keeper_fs.durable_remove_error
   | Commit_not_installed of Keeper_fs.durable_write_error
   | Commit_durability_unknown of
       { installed_ref : Keeper_checkpoint_ref.t
@@ -184,7 +185,11 @@ type checkpoint_cas_error =
     current bytes are re-read and hashed, and an equal-turn checkpoint with
     different content is rejected as [Source_changed]. On success the returned
     ref is derived from the exact compact bytes passed to the durable atomic
-    JSON writer. A writer error after atomic rename is
+    JSON writer. The previous watermark sidecar is durably invalidated before
+    the canonical commit and refreshed from the installed candidate, so a
+    same-size, same-mtime replacement cannot reuse stale admission metadata.
+    A sidecar invalidation failure refuses the canonical write. A writer error
+    after atomic rename is
     [Commit_durability_unknown], never a retryable not-installed failure. This
     same rule applies when releasing the stable lock fails after the body:
     [Transaction_outcome_unknown] requires reconciliation rather than retry. The

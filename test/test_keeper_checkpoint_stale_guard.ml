@@ -502,6 +502,53 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
            checkpoint.messages)
     | _ -> fail "CAS winner did not round-trip")
 
+let test_exact_source_cas_invalidates_stale_watermark () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "sess-cas-watermark" in
+    save_ok ~session_dir
+      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source"
+       |> with_generation 3)
+      "CAS watermark seed save";
+    let canonical_path =
+      Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id
+    in
+    let seed_mtime = (Unix.stat canonical_path).st_mtime in
+    let source_ref =
+      match
+        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+      with
+      | Ok (_, reference) -> reference
+      | Error _ -> fail "CAS watermark source load failed"
+    in
+    (match
+       Keeper_checkpoint_store.save_oas_if_source
+         ~session_dir
+         ~expected_source_ref:source_ref
+         (make_checkpoint ~session_id ~turn_count:9 ~marker:"target"
+          |> with_generation 3)
+     with
+     | Ok _ -> ()
+     | Error _ -> fail "CAS watermark candidate did not commit");
+    (* The source and candidate encodings have equal byte length. Restoring
+       the source mtime deterministically recreates the exact fingerprint
+       collision under which an untouched source sidecar would still look
+       valid for the candidate canonical file. *)
+    Unix.utimes canonical_path seed_mtime seed_mtime;
+    match
+      Keeper_checkpoint_store.save_oas_classified ~session_dir
+        (make_checkpoint ~session_id ~turn_count:8 ~marker:"stale!")
+    with
+    | Ok
+        (Keeper_checkpoint_store.Stale_noop
+           { incoming_turn_count; known_turn_count }) ->
+      check int "colliding stale input turn" 8 incoming_turn_count;
+      check int "CAS candidate remains the admission watermark" 9
+        known_turn_count
+    | Ok (Keeper_checkpoint_store.Saved _) ->
+      fail "stale save passed through a source sidecar after CAS"
+    | Error error -> fail ("post-CAS stale classification failed: " ^ error))
+
 let test_checkpoint_ref_requires_generation () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
@@ -542,6 +589,8 @@ let () =
             test_canonical_checkpoint_is_written_compact;
           test_case "exact source CAS permits one equal-turn writer" `Quick
             test_exact_source_cas_allows_one_equal_turn_writer;
+          test_case "exact source CAS invalidates stale watermark metadata" `Quick
+            test_exact_source_cas_invalidates_stale_watermark;
           test_case "checkpoint refs require keeper generation" `Quick
             test_checkpoint_ref_requires_generation;
         ] );

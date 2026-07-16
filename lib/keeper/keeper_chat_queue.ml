@@ -1242,11 +1242,21 @@ let sqlite_expect_done db stmt ~operation =
   | Sqlite3.Rc.DONE -> Ok ()
   | rc -> Error (sqlite_error ~operation db rc)
 
+(* Total: [Sqlite3.finalize] may raise SqliteError (documented in the
+   binding's mli) in addition to returning an error rc. A raise here has
+   two bad escapes in [with_statement]: on the normal path it would erase
+   [body_result], and on the cancellation path it would replace
+   [Eio.Cancel.Cancelled] with SqliteError, breaking cancellation
+   propagation. [Sqlite3.finalize] is a non-suspending C call, so the
+   catch-all cannot swallow Cancelled itself. *)
 let sqlite_finalize db stmt =
-  let rc = Sqlite3.finalize stmt in
-  if Sqlite3.Rc.is_success rc
-  then Ok ()
-  else Error (sqlite_error ~operation:"statement finalize" db rc)
+  match Sqlite3.finalize stmt with
+  | rc ->
+    if Sqlite3.Rc.is_success rc
+    then Ok ()
+    else Error (sqlite_error ~operation:"statement finalize" db rc)
+  | exception exn ->
+    Error ("SQLite statement finalize raised: " ^ Printexc.to_string exn)
 
 let combine_cleanup_error primary cleanup =
   match primary, cleanup with

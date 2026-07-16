@@ -227,13 +227,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let drift =
         drift_surface_json ~unknown_toml_keys:defaults.unknown_toml_keys
       in
-      let handoff =
-        `Assoc [
-          ("auto", `Bool m.auto_handoff);
-          ("threshold", `Float m.handoff_threshold);
-          ("cooldown_sec", `Int m.handoff_cooldown_sec);
-        ]
-      in
       let metrics =
         `Assoc [
           ("generation", `Int m.runtime.generation);
@@ -316,7 +309,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("proactive", proactive);
          ("drift", drift);
          ("auto_execution_session", auto_execution_session_surface_json ());
-         ("handoff", handoff);
          ("hooks", Keeper_hooks_oas.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);

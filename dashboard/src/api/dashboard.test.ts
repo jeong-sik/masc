@@ -1823,11 +1823,6 @@ describe('fetchKeeperConfig', () => {
         count_total: '2',
         last_reason: 'board quiet',
       },
-      handoff: {
-        auto: 'true',
-        threshold: '0.85',
-        cooldown_sec: '300',
-      },
       hooks: {
         slots: {
           pre_tool_use: {

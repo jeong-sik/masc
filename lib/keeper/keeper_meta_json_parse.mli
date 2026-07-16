@@ -27,9 +27,6 @@ type parsed_keeper_policy =
   ; pp_mention_targets : string list
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
-  ; pp_auto_handoff : bool
-  ; pp_handoff_threshold : float
-  ; pp_handoff_cooldown_sec : int
   ; pp_always_allow : bool option
   }
 

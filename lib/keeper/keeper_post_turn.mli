@@ -70,8 +70,7 @@ val compaction_recovery_error_to_string : compaction_recovery_error -> string
 
 (** End-of-turn pipeline. Preserves the checkpoint and persists the result to
     the keeper meta and dashboard surface. Explicit compaction is a separate
-    request path. Keeper autonomy is owned by the per-Keeper heartbeat/turn
-    lane; this pipeline does not run a second autonomous state machine. *)
+    request path; Keeper autonomy remains owned by its heartbeat/turn lane. *)
 val apply_post_turn_lifecycle_with_resilience_handles :
   resilience_audit_store:Shared_audit.Store.t option ->
   resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->

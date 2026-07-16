@@ -3,7 +3,7 @@
 > Status: implementation deletion and replacement contract
 > Normative goal: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
 > Live map: [`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md)
-> Source checkpoint: MASC `8ac235307b`, OAS `3a6c92c715`
+> Source checkpoint: MASC `dbf140cbdc`, OAS `3a6c92c715`
 > Checked: 2026-07-16 KST
 
 This manifest names what must die, what must be rewritten, and what is an
@@ -59,12 +59,11 @@ export file, or notify the dashboard.
 
 ### 1.2 One production hard cut
 
-There is no dual-write comparison interval. Sub-400-line PRs may accumulate on
-an unreleased integration branch, but that branch does not reach `main` until
-the complete cut is present. Its activation removes every live call path and
-publicly selectable old writer. Unreachable source, tests, and docs may be
-physically deleted in later PRs in the same stack, and no release is cut until
-that deletion is complete.
+There is no dual-write comparison interval. Inert, unwired foundations may land
+on `main` in sub-400-line PRs. One sub-400-line activation PR exposes the new
+writer while removing every old live call path and publicly selectable writer.
+Later sub-400-line PRs delete unreachable source, tests, and docs. No release or
+deployment occurs until that physical cleanup is complete.
 
 Temporary adapters may decode a committed event into a projection. They may not
 append the same fact to an old store.
@@ -105,6 +104,11 @@ execution reference returned by the finite run, an opaque cursor, and an
 immutable cursor-backed projection reader or caller-owned projection sink.
 Journal reducer, WAL bytes, writer actor, and reconciliation internals remain
 private. MASC never imports a private `Execution_*` module.
+
+MASC selects the OAS scope store under its BasePath and owns its retention
+lease. A scope referenced by a durable operation or checkpoint cannot be
+garbage-collected. Projection caches are disposable read models, never recovery
+history.
 
 ### 2.3 Delete independent legacy writes
 
@@ -183,10 +187,12 @@ Nested-run state must come from the committed OAS Journal cursor or an exact
 synchronous invocation boundary during the hard cut. Event_bus may notify the
 UI, but it cannot decide whether a Keeper is waiting or runnable.
 
-`keeper_event_bridge` and `keeper_telemetry_consumer` must replay from cursors
-after restart. Remove finite retry-drop queues, synthetic `relay_dropped`
-history, and kind-only fallback payloads. Preserve an unknown event losslessly
-as typed data or reject it explicitly.
+`keeper_event_bridge` and `keeper_telemetry_consumer` must replay from their
+typed source authority after restart: OAS finite-run facts use an OAS execution
+cursor; MASC-originated product telemetry uses a MASC Operation cursor. Never
+merge the cursor families. Remove finite retry-drop queues, synthetic
+`relay_dropped` history, and kind-only fallback payloads. Preserve an unknown
+event losslessly as typed data or reject it explicitly.
 
 ### 3.3 Rewrite volatile audit writers
 
@@ -265,9 +271,9 @@ The replacement is exact:
 - every canonical result carries a payload digest, byte length, media type, and
   provenance;
 - bytes remain typed inline or are stored as a content-addressed Artifact
-  according to the producer's typed contract or exact provider capability;
-- unknown capacity uses an explicit Artifact reference and fetch operation,
-  never a guessed inline threshold;
+  according to a provider-independent producer/content contract;
+- provider capability decides only the model-visible projection; unknown
+  capacity uses an explicit Artifact reference and fetch operation;
 - the compaction LLM decides semantic presentation, not storage identity;
 - no threshold or latest-N rule decides semantic importance;
 - store failure is typed and visible, never silent inline substitution.
@@ -285,6 +291,12 @@ drop, inline fallback, and `MASC_KEEPER_MEMORY_LANE_MAX_PENDING` from
 
 Use durable typed work per Keeper. Backpressure may delay that Keeper's Memory
 work, but cannot drop it, execute it under another owner, or stop other lanes.
+
+Also delete Memory OS cadence-turn gates, recent-N message windows,
+fleet-global admission slot `1`, and their environment knobs/tests. Replace the
+global slot with independent durable owner work. Delete the synthesized
+`max_tokens=4096` default; keep only an explicit provider request bounded by the
+selected model's declared capability.
 
 ### 6.2 Delete the legacy Memory Bank semantics
 

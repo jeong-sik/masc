@@ -23,30 +23,10 @@ val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_prepared : compaction_decision -> bool
 val compaction_decision_applied : compaction_decision -> bool
 
-type compaction_evidence =
-  { selected_runtime_id : string option
-  ; before_checkpoint_bytes : int
-  ; after_checkpoint_bytes : int
-  ; before_message_count : int
-  ; after_message_count : int
-  ; summarized_message_count : int
-  ; dropped_message_count : int
-  ; before_tool_use_count : int
-  ; after_tool_use_count : int
-  ; before_tool_result_count : int
-  ; after_tool_result_count : int
-  }
-(** Exact structural evidence from the LLM-selected plan. Byte, message, and
-    tool-block counts are measured from the actual checkpoint on both sides;
-    no token estimate is synthesized. *)
-
-val compaction_evidence_to_json : compaction_evidence -> Yojson.Safe.t
-(** Lossless wire projection shared by every MASC compaction producer. *)
-
 type compaction_preparation =
   { context : Keeper_context_core.working_context
   ; decision : compaction_decision
-  ; evidence : compaction_evidence option
+  ; evidence : Keeper_compaction_evidence.t option
   }
 
 (** Legacy configuration projection retained until the unused ratio/message/

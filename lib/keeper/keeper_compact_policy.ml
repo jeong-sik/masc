@@ -87,39 +87,10 @@ type compaction_decision =
   | Not_requested
   | Skipped_no_checkpoint
 
-type compaction_evidence =
-  { selected_runtime_id : string option
-  ; before_checkpoint_bytes : int
-  ; after_checkpoint_bytes : int
-  ; before_message_count : int
-  ; after_message_count : int
-  ; summarized_message_count : int
-  ; dropped_message_count : int
-  ; before_tool_use_count : int
-  ; after_tool_use_count : int
-  ; before_tool_result_count : int
-  ; after_tool_result_count : int
-  }
-
-let compaction_evidence_to_json evidence =
-  `Assoc
-    [ "before_checkpoint_bytes", `Int evidence.before_checkpoint_bytes
-    ; "after_checkpoint_bytes", `Int evidence.after_checkpoint_bytes
-    ; "before_message_count", `Int evidence.before_message_count
-    ; "after_message_count", `Int evidence.after_message_count
-    ; "summarized_message_count", `Int evidence.summarized_message_count
-    ; "dropped_message_count", `Int evidence.dropped_message_count
-    ; "before_tool_use_count", `Int evidence.before_tool_use_count
-    ; "after_tool_use_count", `Int evidence.after_tool_use_count
-    ; "before_tool_result_count", `Int evidence.before_tool_result_count
-    ; "after_tool_result_count", `Int evidence.after_tool_result_count
-    ]
-;;
-
 type compaction_preparation =
   { context : working_context
   ; decision : compaction_decision
-  ; evidence : compaction_evidence option
+  ; evidence : Keeper_compaction_evidence.t option
   }
 
 let compaction_decision_to_string = function

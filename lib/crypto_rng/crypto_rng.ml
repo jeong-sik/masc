@@ -14,4 +14,4 @@ let default () =
 
 let ensure_default () = ignore (default ())
 
-let generate bytes = Mirage_crypto_rng.generate ~g:(default ()) bytes
+let generate = Mirage_crypto_rng_unix.getrandom

@@ -1,15 +1,9 @@
-(** Failure observation for MASC agents
+(** Failure observation for MASC agents.
 
-    Legacy status projection:
-    - 3 failures in 1 minute → 5 minute cooldown
-    - No execution gate, wrapper, or suspension API
-
-    Research basis:
-    - Trust-Vulnerability Paradox (TVP) - arxiv:2510.18563v1
-    - "3+ failures/min" threshold from operational experience
+    Recorded outcomes never classify, delay, or suppress execution.
 
     Implementation: all breaker records are immutable and stored in a
-    persistent [StringMap].  The single mutable field [breakers] in [t]
+    persistent [StringMap].  The single mutable field [observations] in [t]
     is protected by [Eio.Mutex].
 
     @since 0.6.0 - MASC Social v4 Tier 1
@@ -19,55 +13,27 @@ module StringMap = Set_util.StringMap
 
 (** {1 Types} *)
 
-type state =
-  | Closed        (** Normal operation *)
-  | Open of {
-      until: float;     (** Unix timestamp when to retry *)
-      reason: string;   (** Why the breaker opened *)
-      failure_count: int; (** Number of failures that triggered open *)
-    }
-  | HalfOpen      (** Testing if service recovered *)
-
 type failure_record = {
   timestamp: float;
   reason: string;
 }
 
-type breaker = {
+type observation = {
   agent_id: string;
-  state: state;
-  failures: failure_record list;
-  last_check: float;
+  failure_count: int;
+  last_failure: failure_record option;
+  last_success_at: float option;
 }
 
 type t = {
-  mutable breakers: breaker StringMap.t;
+  mutable observations: observation StringMap.t;
   mutex: Eio.Mutex.t;
-  failure_threshold: int;     (** Failures before opening (default: 3) *)
-  failure_window_sec: float;  (** Window to count failures (default: 60s) *)
-  cooldown_sec: float;        (** How long to stay open (default: 300s) *)
 }
-
-(** {1 Configuration} *)
-
-let default_failure_threshold = 3
-let default_failure_window = 60.0    (* 1 minute *)
-let default_cooldown = 300.0         (* 5 minutes *)
 
 (** {1 Creation} *)
 
-let create
-    ?(failure_threshold = default_failure_threshold)
-    ?(failure_window = default_failure_window)
-    ?(cooldown = default_cooldown)
-    () =
-  {
-    breakers = StringMap.empty;
-    mutex = Eio.Mutex.create ();
-    failure_threshold;
-    failure_window_sec = failure_window;
-    cooldown_sec = cooldown;
-  }
+let create () =
+  { observations = StringMap.empty; mutex = Eio.Mutex.create () }
 
 let create_default () = create ()
 
@@ -76,125 +42,60 @@ let create_default () = create ()
 let with_lock t f =
   Eio_guard.with_mutex t.mutex f
 
-(** Write a breaker back to the map. *)
-let put_breaker t breaker =
-  t.breakers <- StringMap.add breaker.agent_id breaker t.breakers
+let put_observation t observation =
+  t.observations <-
+    StringMap.add observation.agent_id observation t.observations
 
-let get_or_create_breaker t ~agent_id =
-  match StringMap.find_opt agent_id t.breakers with
-  | Some b -> b
+let get_or_create_observation t ~agent_id =
+  match StringMap.find_opt agent_id t.observations with
+  | Some observation -> observation
   | None ->
-      let b = {
-        agent_id;
-        state = Closed;
-        failures = [];
-        last_check = Time_compat.now ();
-      } in
-      t.breakers <- StringMap.add agent_id b t.breakers;
-      b
-
-(** Return a new breaker with expired failures removed. *)
-let prune_old_failures t breaker =
-  let threshold = Time_compat.now () -. t.failure_window_sec in
-  { breaker with failures = List.filter (fun f -> f.timestamp > threshold) breaker.failures }
+      let observation =
+        { agent_id; failure_count = 0; last_failure = None; last_success_at = None }
+      in
+      put_observation t observation;
+      observation
 
 (** {1 Core Operations} *)
 
 (** Record a failure for an agent *)
 let record_failure t ~agent_id ~reason =
   with_lock t (fun () ->
-    let breaker = get_or_create_breaker t ~agent_id in
+    let observation = get_or_create_observation t ~agent_id in
     let now = Time_compat.now () in
-    let breaker = { breaker with
-      failures = { timestamp = now; reason } :: breaker.failures } in
-    let breaker = prune_old_failures t breaker in
-    let failure_count = List.length breaker.failures in
-    let breaker =
-      if failure_count >= t.failure_threshold then begin
-        Log.Session.warn "[CircuitBreaker] OPENED for %s: %d failures" agent_id failure_count;
-        { breaker with state = Open {
-          until = now +. t.cooldown_sec;
-          reason = Printf.sprintf "%d failures in %.0fs: %s"
-                     failure_count t.failure_window_sec reason;
-          failure_count;
-        } }
-      end else breaker
+    let observation =
+      { observation with
+        failure_count = observation.failure_count + 1
+      ; last_failure = Some { timestamp = now; reason }
+      }
     in
-    put_breaker t breaker
+    put_observation t observation
   )
 
-(** Record a success - helps transition from HalfOpen to Closed *)
 let record_success t ~agent_id =
   with_lock t (fun () ->
-    let breaker = get_or_create_breaker t ~agent_id in
-    match breaker.state with
-    | HalfOpen ->
-        Log.Session.info "[CircuitBreaker] CLOSED for %s after recovery" agent_id;
-        put_breaker t { breaker with state = Closed; failures = [] }
-    | Closed ->
-        put_breaker t (prune_old_failures t breaker)
-    | Open _ ->
-        ()
+    let observation = get_or_create_observation t ~agent_id in
+    let now = Time_compat.now () in
+    put_observation t { observation with last_success_at = Some now }
   )
 
 (** {1 Status & Statistics} *)
 
-type breaker_status = {
-  agent_id: string;
-  state_name: string;
-  recent_failures: int;
-  open_until: float option;
-  open_reason: string option;
-}
-
-let get_status t ~agent_id =
+let get_observation t ~agent_id =
   with_lock t (fun () ->
-    match StringMap.find_opt agent_id t.breakers with
-    | None -> {
-        agent_id;
-        state_name = "closed";
-        recent_failures = 0;
-        open_until = None;
-        open_reason = None;
-      }
-    | Some breaker ->
-        let breaker = prune_old_failures t breaker in
-        put_breaker t breaker;
-        let state_name, open_until, open_reason = match breaker.state with
-          | Closed -> ("closed", None, None)
-          | HalfOpen -> ("half_open", None, None)
-          | Open { until; reason; _ } -> ("open", Some until, Some reason)
-        in
-        {
-          agent_id;
-          state_name;
-          recent_failures = List.length breaker.failures;
-          open_until;
-          open_reason;
-        }
+    match StringMap.find_opt agent_id t.observations with
+    | None ->
+      { agent_id; failure_count = 0; last_failure = None; last_success_at = None }
+    | Some observation -> observation
   )
 
-let list_all_breakers t =
+let list_all t =
   with_lock t (fun () ->
-    StringMap.fold (fun agent_id breaker acc ->
-      let breaker = prune_old_failures t breaker in
-      put_breaker t breaker;
-      let state_name, open_until, open_reason = match breaker.state with
-        | Closed -> ("closed", None, None)
-        | HalfOpen -> ("half_open", None, None)
-        | Open { until; reason; _ } -> ("open", Some until, Some reason)
-      in
-      let status = {
-        agent_id;
-        state_name;
-        recent_failures = List.length breaker.failures;
-        open_until;
-        open_reason;
-      } in
-      status :: acc
-    ) t.breakers []
+    StringMap.fold
+      (fun _ observation acc -> observation :: acc)
+      t.observations
+      []
   )
-
 
 (** {1 Global Instance}
 
@@ -219,4 +120,4 @@ let global () =
 
 let record_failure_global ~agent_id ~reason = record_failure (global ()) ~agent_id ~reason
 let record_success_global ~agent_id = record_success (global ()) ~agent_id
-let get_status_global ~agent_id = get_status (global ()) ~agent_id
+let get_observation_global ~agent_id = get_observation (global ()) ~agent_id

@@ -52,18 +52,18 @@ let test_rate_limit_independent_keys () =
 (** {1 Circuit Breaker Concurrency} *)
 
 let test_failure_observation_concurrent () =
-  let cb = CB.create ~failure_threshold:50 ~cooldown:1.0 () in
+  let cb = CB.create () in
   (* Concurrent failure recording + observation reads. *)
   Eio.Fiber.all [
     (fun () -> for _ = 1 to 30 do
       CB.record_failure cb ~agent_id:"test-agent" ~reason:"concurrent-test"
     done);
     (fun () -> for _ = 1 to 30 do
-      let _s = CB.get_status cb ~agent_id:"test-agent" in ()
+      let _s = CB.get_observation cb ~agent_id:"test-agent" in ()
     done);
   ];
-  let status = CB.get_status cb ~agent_id:"test-agent" in
-  check int "all failures observed" 30 status.recent_failures
+  let observation = CB.get_observation cb ~agent_id:"test-agent" in
+  check int "all failures observed" 30 observation.failure_count
 
 let test_circuit_breaker_multi_agent () =
   let cb = CB.create () in
@@ -74,7 +74,7 @@ let test_circuit_breaker_multi_agent () =
       CB.record_failure cb ~agent_id ~reason:"test";
     done
   ));
-  let all = CB.list_all_breakers cb in
+  let all = CB.list_all cb in
   check int "5 breakers exist" 5 (List.length all)
 
 (** {1 Otel_metric_store Concurrency} *)

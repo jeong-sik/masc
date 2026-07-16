@@ -1559,7 +1559,7 @@ describe('SettingsSurface', () => {
       ok: true,
       path: MOCK_RUNTIME_PATH,
       file_name: 'runtime.toml',
-      source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\nmax_concurrent_panels = 2\n\n[fusion.presets.trio]\nmin_answered = 2\n',
+      source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\n\n[fusion.presets.trio]\nmin_answered = 2\n',
       reloaded: false,
     })
     render(html`<${SettingsSurface} />`, container)

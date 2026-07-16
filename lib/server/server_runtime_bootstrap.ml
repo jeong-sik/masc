@@ -694,16 +694,22 @@ let sync_prompt_assets_from_binary () =
       ~prompts_dir:(Config_dir_resolver.prompts_dir ())
       ()
   in
-  (match sync.Prompt_defaults.copied, sync.Prompt_defaults.overwritten with
-   | [], [] -> ()
-   | copied, overwritten ->
-       let names = copied @ overwritten in
+  (match
+     sync.Prompt_defaults.copied,
+     sync.Prompt_defaults.overwritten,
+     sync.Prompt_defaults.removed
+   with
+   | [], [], [] -> ()
+   | copied, overwritten, removed ->
+       let names = copied @ overwritten @ removed in
        let shown =
          List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
        in
        Log.Misc.info
-         "prompt assets synced from binary: %d copied, %d overwritten [%s%s]"
-         (List.length copied) (List.length overwritten)
+         "prompt assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
+         (List.length copied)
+         (List.length overwritten)
+         (List.length removed)
          (String.concat ", " shown)
          (if List.length names > max_logged_prompt_sync_entries then ", …"
           else ""));

@@ -53,14 +53,6 @@ module RateLimit : sig
   (** [MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC] (default [3600.0]). *)
 end
 
-(** {1 Client registry observation} *)
-
-module ClientRegistry : sig
-  val active_window_seconds : float
-  (** [MASC_CLIENT_REGISTRY_ACTIVE_WINDOW_SEC] (default [300.0]). Floor [1.0].
-      Active-presence observation window used by HTTP projections. *)
-end
-
 (** {1 Agent autonomy quiet hours} *)
 
 module Autonomy : sig

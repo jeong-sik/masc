@@ -6,9 +6,6 @@
 open Alcotest
 open Masc
 
-let active_window_seconds =
-  Env_config_runtime_services.ClientRegistry.active_window_seconds
-
 (** Test identity extraction from MCP-like params *)
 let test_identity_from_mcp_params () =
   Eio_main.run @@ fun env ->
@@ -70,8 +67,7 @@ let test_multi_agent_isolation () =
   check int "all unique" 3 (List.length unique_keys);
   
   (* Verify agent count *)
-  check int "3 active agents" 3
-    (Client_registry_eio.active_count ~within_seconds:active_window_seconds ())
+  check int "3 registered agents" 3 (Client_registry_eio.total_count ())
 
 (** Test identity display string *)
 let test_display_string () =

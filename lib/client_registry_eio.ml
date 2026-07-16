@@ -188,20 +188,14 @@ let set_resolved_name sid name ~is_ephemeral =
 
 (** {1 Statistics} *)
 
-(** Get count of active agents *)
-let active_count ~within_seconds () =
-  with_state_ro (fun s ->
-    List.length (Client_identity.Registry.list_active s.registry ~within_seconds)
-  )
-
 (** Get total registered count *)
 let total_count () =
   with_state_ro (fun s -> Client_identity.Registry.count s.registry)
 
-(** List all active identities *)
-let list_active ~within_seconds () =
+(** List all explicitly registered identities. *)
+let list_registered () =
   with_state_ro (fun s ->
-    Client_identity.Registry.list_active s.registry ~within_seconds
+    Client_identity.Registry.list_all s.registry
   )
 
 (** {1 Cleanup} *)

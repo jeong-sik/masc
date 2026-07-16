@@ -251,7 +251,7 @@ module RegistryTests = struct
         check bool "last_seen updated" true (updated.last_seen > old_time)
     | None -> fail "identity not found after touch"
 
-  let test_list_active () =
+  let test_list_all () =
     Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let reg = Client_identity.Registry.create () in
@@ -265,9 +265,18 @@ module RegistryTests = struct
     let _ = Client_identity.Registry.register reg id1 in
     let _ = Client_identity.Registry.register reg id2 in
     
-    let active = Client_identity.Registry.list_active reg ~within_seconds:60.0 in
-    check int "only active agents" 1 (List.length active);
-    check string "active agent name" "active-agent" (List.hd active).agent_name
+    let registered = Client_identity.Registry.list_all reg in
+    check int "all registered agents" 2 (List.length registered);
+    check bool "contains active agent" true
+      (List.exists
+         (fun (identity : Client_identity.t) ->
+            String.equal identity.agent_name "active-agent")
+         registered);
+    check bool "contains stale observation" true
+      (List.exists
+         (fun (identity : Client_identity.t) ->
+            String.equal identity.agent_name "stale-agent")
+         registered)
 end
 
 let () =
@@ -294,6 +303,6 @@ let () =
       test_case "register_and_find" `Quick RegistryTests.test_register_and_find;
       test_case "unregister" `Quick RegistryTests.test_unregister;
       test_case "touch" `Quick RegistryTests.test_touch;
-      test_case "list_active" `Quick RegistryTests.test_list_active;
+      test_case "list_all" `Quick RegistryTests.test_list_all;
     ];
   ]

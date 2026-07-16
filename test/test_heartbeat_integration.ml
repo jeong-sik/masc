@@ -1498,9 +1498,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; compaction_cooldown_sec_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
-        ; auto_handoff_opt = None
-        ; handoff_threshold_opt = None
-        ; handoff_cooldown_sec_opt = None
         ; instructions_arg = Some "new operator intent"
         ; profile_defaults
         ; instructions_opt = profile_defaults.instructions

@@ -30,9 +30,6 @@ type parsed_args =
   ; compaction_cooldown_sec_opt : int option
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
-  ; auto_handoff_opt : bool option
-  ; handoff_threshold_opt : float option
-  ; handoff_cooldown_sec_opt : int option
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
   ; instructions_opt : string option

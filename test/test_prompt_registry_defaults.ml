@@ -33,7 +33,6 @@ let prompt_metadata key =
   | "keeper.deliberation" ->
       ("test prompt for " ^ key,
        [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
-  | "dashboard.operator_judge"
   | "dashboard.gate_judge" ->
       ("test prompt for " ^ key, [ "facts_json" ])
   | "keeper.board_attention_judgment" ->
@@ -69,7 +68,6 @@ let fixtures =
     ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
     ("deliberation.decision", "structured deliberation prompt");
     ("analysis.dry_run", "DRY RUN analysis prompt");
-    ("dashboard.operator_judge", "operator facts {{facts_json}}");
     ("dashboard.gate_judge", "Gate facts {{facts_json}}");
     ( "keeper.board_attention_judgment"
     , "Board attention {{judgment_request_json}}" );
@@ -190,7 +188,7 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match
-                Prompt_registry.render_prompt_template "dashboard.operator_judge"
+                Prompt_registry.render_prompt_template "dashboard.gate_judge"
                   [ ("facts_json", {|{"template":"{{ .Release.Name }}"}|}) ]
               with
               | Ok rendered ->
@@ -236,11 +234,11 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir ->
               write_file
-                (Filename.concat prompts_dir "dashboard.operator_judge.md")
-                (markdown_fixture "dashboard.operator_judge"
-                   "operator facts {{runtime_only}}");
+                (Filename.concat prompts_dir "dashboard.gate_judge.md")
+                (markdown_fixture "dashboard.gate_judge"
+                   "Gate facts {{runtime_only}}");
               match
-                Prompt_registry.render_prompt_template "dashboard.operator_judge"
+                Prompt_registry.render_prompt_template "dashboard.gate_judge"
                   [ ("facts_json", "{}") ]
               with
               | Error msg ->
@@ -387,15 +385,15 @@ let () =
             `Quick (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
               (match
-                 Prompt_registry.set_override "dashboard.operator_judge"
+                 Prompt_registry.set_override "dashboard.gate_judge"
                    "persisted facts {{facts_json}}"
                with
               | Ok () -> ()
               | Error message -> fail message);
               persist_overrides_or_fail dir;
-              let body = fixture "dashboard.operator_judge" in
+              let body = fixture "dashboard.gate_judge" in
               write_file
-                (Filename.concat prompts_dir "dashboard.operator_judge.md")
+                (Filename.concat prompts_dir "dashboard.gate_judge.md")
                 (String.concat "\n"
                    [
                      "---";
@@ -412,9 +410,9 @@ let () =
                 (before +. 1.0)
                 (override_restore_failure_count ());
               check string "variable drift falls back to file" body
-                (Prompt_registry.get_prompt "dashboard.operator_judge");
+                (Prompt_registry.get_prompt "dashboard.gate_judge");
               check string "variable drift source" "file"
-                (Prompt_registry.prompt_source "dashboard.operator_judge"));
+                (Prompt_registry.prompt_source "dashboard.gate_judge"));
           test_case "malformed versioned envelopes fail closed observably" `Quick
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->

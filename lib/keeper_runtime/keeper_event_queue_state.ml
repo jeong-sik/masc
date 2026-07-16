@@ -181,12 +181,20 @@ let lease_admission_blocked state =
   state.leases <> [] || state.transition_outbox <> []
 ;;
 
+let rec dequeue_first_ready ~ready skipped pending =
+  match Keeper_event_queue.dequeue pending with
+  | None -> None
+  | Some (stimulus, rest) when ready stimulus ->
+    Some (stimulus, Keeper_event_queue.prepend_list (List.rev skipped) rest)
+  | Some (stimulus, rest) ->
+    dequeue_first_ready ~ready (stimulus :: skipped) rest
+;;
+
 let claim_when ~claimed_at ~ready state =
   if lease_admission_blocked state
   then Ok (state, None)
-  else match Keeper_event_queue.dequeue state.pending with
+  else match dequeue_first_ready ~ready [] state.pending with
   | None -> Ok (state, None)
-  | Some (stimulus, _) when not (ready stimulus) -> Ok (state, None)
   | Some (stimulus, pending) ->
     make_lease
       ~kind:Single

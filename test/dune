@@ -1021,7 +1021,6 @@
   test_state_product
   test_tool_result
   test_tool_hooks
-  test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
   test_webrtc_signaling
@@ -1195,7 +1194,6 @@
   test_state_product
   test_tool_result
   test_tool_hooks
-  test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
   test_webrtc_signaling
@@ -1230,7 +1228,7 @@
   test_board_core_payload
   test_board_attachment_meta
   test_board_moderation)
- (libraries masc_test_deps bigstringaf)
+ (libraries masc_test_deps masc.embedded_config bigstringaf)
  (deps ../bin/main_eio.exe))
 
 (test

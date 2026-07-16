@@ -821,6 +821,20 @@ let canonical_message_wire message =
         (fun canonical -> Yojson.Safe.to_string (queued_message_to_yojson canonical))
         (queued_message_of_yojson json))
 
+let canonical_delivery_payload_wire message =
+  let json =
+    `Assoc
+      [ "content", `String message.content
+      ; "user_blocks", Keeper_multimodal_input.user_blocks_to_yojson message.user_blocks
+      ; "attachments", Keeper_multimodal_input.attachments_to_yojson message.attachments
+      ; "source", source_to_yojson message.source
+      ; "user_row_origin", user_row_origin_to_yojson message.user_row_origin
+      ]
+  in
+  Result.map
+    (fun () -> Yojson.Safe.to_string json)
+    (validate_json_utf8 "message" json)
+
 let canonical_queued_message message =
   Result.bind (canonical_message_wire message) (fun wire ->
       try queued_message_of_yojson (Yojson.Safe.from_string wire) with
@@ -2377,8 +2391,8 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
                                "active receipt has no canonical message payload")
                         | Some stored_message ->
                           (match
-                             canonical_message_wire stored_message,
-                             canonical_message_wire message
+                             canonical_delivery_payload_wire stored_message,
+                             canonical_delivery_payload_wire message
                            with
                            | Ok stored, Ok requested when String.equal stored requested ->
                              Ok
@@ -3564,21 +3578,15 @@ let classify_keeper_directory_entries_blocking entries_path entries =
          ; observed_entries = (entry_name, stats) :: inventory.observed_entries
          }
        | ({ Unix.st_kind = Unix.S_REG; _ } as stats) ->
-         (match Keeper_runtime_root_entry.classify_basename entry_name with
-          | _ :: _ ->
-            { inventory with
-              observed_entries = (entry_name, stats) :: inventory.observed_entries
-            }
-          | [] ->
-            { inventory with
-              rejected_entries =
-                ( entry_name
-                , load_error Invalid_path ~path:entry_path
-                    "Keeper chat queue inventory found an unowned regular entry"
-                )
-                :: inventory.rejected_entries
-            ; observed_entries = (entry_name, stats) :: inventory.observed_entries
-            })
+         (* A regular file in the shared Keeper runtime root is not a chat
+            queue lane. Other subsystems own their canonical artifacts and may
+            retain operator-created backups or diagnostics here. Keep the
+            inode in the inventory snapshot so replacement is still detected,
+            but do not classify or reject a file outside this directory-only
+            queue authority. *)
+         { inventory with
+           observed_entries = (entry_name, stats) :: inventory.observed_entries
+         }
        | ({ Unix.st_kind = st_kind; _ } as stats) ->
          { inventory with
            rejected_entries =

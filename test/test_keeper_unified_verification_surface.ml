@@ -247,8 +247,8 @@ let test_observation_tool_names_are_preserved () =
     (contains_sub "keeper_turn_id=turn-1" user_msg);
   check bool "OAS diagnostic token remains in observation" true
     (contains_sub "masc_oas_error=provider-timeout" user_msg);
-  check bool "observation does not receive stale-token placeholder" false
-    (contains_sub "<stale_tool_token>" user_msg)
+  check bool "observation remains intact" true
+    (contains_sub event.preview user_msg)
 ;;
 
 let test_task_claim_requires_matched_backlog () =

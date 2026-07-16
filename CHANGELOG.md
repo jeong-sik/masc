@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+- The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.
+
 ### Removed
 - Removed automatic config-root, cwd-parent, executable-parent, and `MASC_MODEL_CATALOG` full-catalog discovery. OAS's embedded catalog is now the only base; `oas-models-overlay.toml` carries deployment-local rows, while `OAS_MODEL_CATALOG` remains an explicit operator override.
+- Removed the per-turn prefix/string heuristic that rewrote unknown-looking
+  prompt tokens. Keeper prompt prose now describes behaviour, while the active
+  typed tool schema is the sole authority for tool names and availability.
 - Removed the generic Governance pipeline, risk taxonomy, unconditional deny/operator floors, command/tool-name authorization heuristics, global resource admission blockers, and failure-derived Keeper pauses. External effects now converge on exact Always Allowed, configured LLM Auto Judge, or nonblocking HITL; objective typed input/path/sandbox invariants remain at execution boundaries.
 - Removed product-specific credential/JWT wiring and direct continuation-delivery bypasses from the Keeper runtime. Connectors and credentials remain outside the product-neutral Gate boundary.
 - Removed the no-op Keeper cost guard and arbitrary per-Keeper waiting cap. Cost, token, turn, FD, disk, provider health, and queue depth remain observable without becoming authorization or fleet-wide stop conditions.

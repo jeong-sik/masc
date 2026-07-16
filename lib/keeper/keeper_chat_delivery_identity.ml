@@ -44,19 +44,23 @@ module Receipt_id = struct
     prefix ^ Uuidm.to_string uuid
   ;;
 
+  let of_request_id request_id = Request_id.to_string request_id
+
   let of_string value =
     let prefix_length = String.length prefix in
     if
-      String.length value <= prefix_length
-      || not (String.equal (String.sub value 0 prefix_length) prefix)
-    then Error "chat queue receipt id must start with chatq_"
-    else
+      String.length value > prefix_length
+      && String.equal (String.sub value 0 prefix_length) prefix
+    then
       let uuid =
         String.sub value prefix_length (String.length value - prefix_length)
       in
-      match Uuidm.of_string uuid with
-      | Some _ -> Ok value
-      | None -> Error "chat queue receipt id must contain a UUID"
+      (match Uuidm.of_string uuid with
+       | Some _ -> Ok value
+       | None -> Error "chat queue receipt id must contain a UUID")
+    else
+      Request_id.of_string value
+      |> Result.map of_request_id
   ;;
 
   let to_string value = value

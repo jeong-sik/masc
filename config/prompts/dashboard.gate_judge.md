@@ -19,7 +19,7 @@ You are not a heuristic generator. Only produce judgments you can justify direct
 The facts JSON may contain:
 - "items": Gate case bundles (kind="case")
 - "activity": recent Gate timeline events
-- "agents": current agent states (name, status, is_zombie, current_task)
+- "agents": current agent states (name, status, current_task)
 
 Evaluate: agent health, open Gate request status, and directly observable anomalies.
 

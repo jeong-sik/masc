@@ -85,7 +85,6 @@ let of_termination_code (c : Code.t) : t =
   | Code.Heartbeat_failures
   | Code.Turn_failures
   | Code.Stale_termination_storm
-  | Code.Stale_fleet_batch
   | Code.Turn_overflow_failure
   | Code.Operator_interrupt
   | Code.Provider_runtime_error _

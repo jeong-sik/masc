@@ -39,13 +39,15 @@ let classify_completion_path ~(action : Masc_domain.task_action) =
     "not_completion"
 ;;
 
-let task_actor_kind agent_name =
-  let normalized = String.lowercase_ascii (String.trim agent_name) in
-  if normalized = "" || normalized = "system"
-  then "system"
-  else if Workspace_resilience.Zombie.is_keeper_name normalized
-  then "keeper"
-  else "agent"
+type task_actor_kind =
+  | Agent
+  | Operator
+  | System
+
+let task_actor_kind_to_string = function
+  | Agent -> "agent"
+  | Operator -> "operator"
+  | System -> "system"
 ;;
 
 let trim_opt = Env_config_core.trim_opt
@@ -101,49 +103,8 @@ let update_local_agent_state config ~agent_name f =
         Log.Misc.error "update_local_agent_state: parse failed for %s: %s" agent_name msg)
 ;;
 
-(** Tighter variant of [resolve_agent_name] for task ownership guards.
-    Only accepts the resolved identity when it is the exact [-agent] suffix
-    form of the normalised input (e.g. "keeper-bob" -> "keeper-bob-agent").
-    Arbitrary prefix matches from [resolve_agent_name] that do not conform to
-    this pattern are silently discarded and the normalised input is returned
-    unchanged, preventing one caller from being mistakenly mapped to a
-    different agent's identity. *)
-let resolve_agent_name_strict config agent_name =
-  let normalized = String.lowercase_ascii (String.trim agent_name) in
-  let resolved = resolve_agent_name config normalized in
-  if resolved = normalized
-  then normalized
-  else if resolved = normalized ^ "-agent"
-  then resolved
-  else normalized
-;;
-
-let keeper_transport_alias_key name =
-  let prefix = "keeper-" in
-  let suffix = "-agent" in
-  let prefix_len = String.length prefix in
-  let suffix_len = String.length suffix in
-  let len = String.length name in
-  if
-    len > prefix_len + suffix_len
-    && String.starts_with ~prefix name
-    && String.ends_with ~suffix name
-  then Some (String.sub name prefix_len (len - prefix_len - suffix_len))
-  else None
-;;
-
-let task_identity_key config name =
-  let resolved = resolve_agent_name_strict config name in
-  match keeper_transport_alias_key resolved with
-  | Some keeper -> keeper
-  | None ->
-    if Nickname.is_dictionary_generated_nickname resolved
-    then Option.value (Nickname.extract_agent_type resolved) ~default:resolved
-    else resolved
-;;
-
-let same_task_actor config left right =
-  String.equal (task_identity_key config left) (task_identity_key config right)
+let same_task_actor _config left right =
+  String.equal left right
 ;;
 
 let normalize_execution_links (links : Masc_domain.task_execution_links) =
@@ -169,7 +130,6 @@ let empty_task_contract =
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
   ; evidence_claims = []
-  ; stale_claim_timeout_sec = 0
   ; links = { operation_id = None; session_id = None }
   }
 ;;
@@ -269,12 +229,25 @@ let merge_envelope_into_payload ?correlation_id ?run_id payload =
       payload)
 ;;
 
-let emit_task_activity ?correlation_id ?run_id config ~agent_name ~task_id ~kind ~payload =
+let emit_task_activity
+    ?correlation_id
+    ?run_id
+    ?(actor_kind = Agent)
+    config
+    ~agent_name
+    ~task_id
+    ~kind
+    ~payload
+  =
   let payload = merge_envelope_into_payload ?correlation_id ?run_id payload in
   try
     (Atomic.get Workspace_hooks.activity_emit_fn)
       config
-      ~actor:Workspace_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
+      ~actor:
+        Workspace_hooks.
+          { kind = task_actor_kind_to_string actor_kind
+          ; id = agent_name
+          }
       ~subject:Workspace_hooks.{ kind = "task"; id = task_id }
       ~kind
       ~payload
@@ -417,10 +390,10 @@ let transition_event_type_to_string = function
 (** SSOT structured event for [log_event] sink. Wraps [task_transition_details]
     with an envelope (type/agent/actor_kind/task/from_status/to_status/ts) so
     every transition log line carries the same schema. Optional [?action]
-    preserves the legacy "action" field used by the unified transition path
-    so existing dashboard readers do not break. *)
+    carries the typed transition label used by the unified transition path. *)
 let transition_log_event
       ~(event_type : transition_event_type)
+      ?(actor_kind = Agent)
       ~agent_name
       ~task_id
       ~from_status
@@ -443,7 +416,7 @@ let transition_log_event
   `Assoc
     ([ "type", `String (transition_event_type_to_string event_type)
      ; "agent", `String agent_name
-     ; "actor_kind", `String (task_actor_kind agent_name)
+     ; "actor_kind", `String (task_actor_kind_to_string actor_kind)
      ; "task", `String task_id
      ; "from_status", `String (task_status_to_string from_status)
      ; "to_status", `String (task_status_to_string to_status)

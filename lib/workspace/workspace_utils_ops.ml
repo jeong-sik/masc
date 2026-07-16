@@ -175,9 +175,13 @@ let json_to_pretty_utf8 json =
   json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
 
 let write_json_local path json =
-  mkdir_p (Filename.dirname path);
-  let content = json_to_pretty_utf8 json in
-  Fs_compat.save_file_atomic path content
+  try
+    mkdir_p (Filename.dirname path);
+    let content = json_to_pretty_utf8 json in
+    Fs_compat.save_file_atomic path content
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 
 (* Root-scoped JSON helpers for shared root metadata. *)
 let read_json_root config path =
@@ -302,32 +306,45 @@ let should_dual_write_local (config : config) =
   | FileSystem _ -> false
   | Memory _ -> true
 
-let write_json_result config path json =
+type write_json_commit = { mirror_error : string option }
+
+let write_json_commit_result config path json =
   match key_of_path config path with
   | Some key ->
       let content = json_to_pretty_utf8 json in
-      let backend_result =
-        backend_set config ~key ~value:content
-        |> Result.map_error (fun e ->
-             Printf.sprintf "backend_set failed for %s: %s" key
-               (Backend_types.show_error e))
-      in
-      let mirror_result =
-        if should_dual_write_local config then
-          write_json_local path json
-          |> Result.map_error (fun msg ->
-               Printf.sprintf "local mirror write failed for %s: %s" path msg)
-        else Ok ()
-      in
-      (match backend_result, mirror_result with
-       | Ok (), Ok () -> Ok ()
-       | Error msg, Ok () | Ok (), Error msg -> Error msg
-       | Error backend_msg, Error mirror_msg ->
-           Error (backend_msg ^ "; " ^ mirror_msg))
+      (match backend_set config ~key ~value:content with
+       | Error error ->
+         Error
+           (Printf.sprintf
+              "backend_set failed for %s: %s"
+              key
+              (Backend_types.show_error error))
+       | Ok () ->
+         let mirror_error =
+           if should_dual_write_local config
+           then
+             match write_json_local path json with
+             | Ok () -> None
+             | Error message ->
+               Some
+                 (Printf.sprintf
+                    "local mirror write failed for %s: %s"
+                    path
+                    message)
+           else None
+         in
+         Ok { mirror_error })
   | None ->
       write_json_local path json
       |> Result.map_error (fun msg ->
            Printf.sprintf "local write failed for %s: %s" path msg)
+      |> Result.map (fun () -> { mirror_error = None })
+
+let write_json_result config path json =
+  match write_json_commit_result config path json with
+  | Error message -> Error message
+  | Ok { mirror_error = None } -> Ok ()
+  | Ok { mirror_error = Some message } -> Error message
 
 let write_json config path json =
   match write_json_result config path json with

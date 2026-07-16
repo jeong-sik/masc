@@ -2,21 +2,12 @@
 
     Surface flows through [include Env_config_runtime] in
     {!Env_config}, so callers reach values as
-    [Env_config.<Module>.<field>] (e.g.
-    [Env_config.Zombie.threshold_seconds]).
+    [Env_config.<Module>.<field>].
 
     Most fields are module-level [let] bindings cached at process
     startup; the few [unit ->] thunks document re-readable values
     that operators may flip at runtime (feature flags via
     {!Feature_flag_registry}, optional env-vars). *)
-
-(** {1 Zombie detection / cleanup} *)
-
-module Zombie : sig
-  val threshold_seconds : float
-  val keeper_threshold_seconds : float
-  val cleanup_interval_seconds : float
-end
 
 (** {1 Lock} *)
 
@@ -57,12 +48,6 @@ module Executor : sig
       Reads [MASC_EXECUTOR_DOMAIN_COUNT].  Unset, non-integer, zero, and
       negative values return [None], letting {!Domain_pool} choose its
       recommended count. *)
-end
-
-(** {1 Task claim} *)
-
-module Claim : sig
-  val ttl_seconds : float
 end
 
 (** {1 Orchestrator} *)

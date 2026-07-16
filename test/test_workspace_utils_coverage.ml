@@ -573,6 +573,35 @@ let test_list_dir_prefers_backend_for_memory_keys () =
       check (list string) "memory backend ignores local-only stale files"
         [ "backend.json" ] listed)
 
+let test_memory_commit_distinguishes_local_mirror_failure () =
+  let scratch = Filename.temp_dir "workspace-utils-commit-result" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
+      let masc_dir = Workspace_utils.masc_root_dir cfg in
+      Unix.mkdir masc_dir 0o700;
+      let tasks_path = Filename.concat masc_dir "tasks" in
+      write_file tasks_path "blocks local mirror directory creation";
+      let path = Filename.concat tasks_path "backlog.json" in
+      let json = `Assoc [ "version", `Int 2 ] in
+      (match Workspace_utils.write_json_commit_result cfg path json with
+       | Error message ->
+         failf "memory backend commit was misreported as failed: %s" message
+       | Ok { mirror_error = None } ->
+         fail "blocked local mirror did not surface an explicit mirror error"
+       | Ok { mirror_error = Some _ } -> ());
+      check
+        string
+        "authoritative memory backend contains the committed value"
+        (Yojson.Safe.to_string json)
+        (Workspace_utils.read_json_result cfg path
+         |> Result.get_ok
+         |> Yojson.Safe.to_string);
+      match Workspace_utils.write_json_result cfg path json with
+      | Ok () -> fail "aggregate result hid the local mirror failure"
+      | Error _ -> ())
+
 let test_default_config_memory_fallback_isolated_by_base_path () =
   let first = Filename.temp_dir "workspace-utils-memory-first" "" in
   let second = Filename.temp_dir "workspace-utils-memory-second" "" in
@@ -752,6 +781,8 @@ let () =
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "list_dir prefers backend for memory keys" `Quick
         test_list_dir_prefers_backend_for_memory_keys;
+      test_case "memory commit distinguishes local mirror failure" `Quick
+        test_memory_commit_distinguishes_local_mirror_failure;
       test_case "memory fallback isolated by base path" `Quick
         test_default_config_memory_fallback_isolated_by_base_path;
       test_case "memory fallback keys by backend base path" `Quick

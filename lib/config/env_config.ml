@@ -10,9 +10,6 @@ include Env_config_runtime_services
 include Env_config_keeper
 
 let print_summary () =
-  Log.Env.info "Zombie: threshold=%.0fs cleanup_interval=%.0fs"
-    Env_config_runtime.Zombie.threshold_seconds
-    Env_config_runtime.Zombie.cleanup_interval_seconds;
   Log.Env.warn "Lock: timeout=%.0fs expiry_warning=%.0fs"
     Env_config_runtime.Lock.timeout_seconds
     Env_config_runtime.Lock.expiry_warning_seconds;

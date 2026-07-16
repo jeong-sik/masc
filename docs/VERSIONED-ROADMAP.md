@@ -152,7 +152,7 @@ Tracking issue: `#1009 v2.89.0 closeout: Visible Swarm`
 Includes:
 
 - heartbeat latency and drift tracking
-- zombie agent detection and automatic retire
+- typed keeper fiber health and lifecycle surfacing
 - final marker warning and assisted-marker accounting
 - dashboard health surfacing for agent heartbeat state
 - Swarm coverage gate in CI
@@ -164,7 +164,7 @@ User-visible effect:
 
 Exit criteria:
 
-- zombie agent detection is test-proven
+- typed fiber termination detection is test-proven
 - marker anomalies are broadcast and summarized
 - coverage report is produced in CI for Swarm-critical modules
 

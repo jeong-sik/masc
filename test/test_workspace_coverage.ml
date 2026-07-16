@@ -573,29 +573,24 @@ let test_claim_next_preserved_task_not_claimable_by_others () =
     Alcotest.(check bool) "gemini gets task-002" true (str_contains r "task-002"))
 ;;
 
-(** claim_next_r keeps the legacy released_task_id field but no longer sets it
-    for repeated owner calls. *)
-let test_claim_next_r_preserved_task_field () =
+(** Repeated owner calls preserve the current task instead of releasing it. *)
+let test_claim_next_r_preserves_current_task () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Beta" ~priority:2 ~description:"" in
     let r1 = Workspace.claim_next_r config ~agent_name:"claude" () in
     (match r1 with
-     | Workspace.Claim_next_claimed { released_task_id = None; task_id; _ } ->
+     | Workspace.Claim_next_claimed { task_id; _ } ->
        Alcotest.(check string) "first claim is task-001" "task-001" task_id
-     | Workspace.Claim_next_claimed { released_task_id = Some _; _ } ->
-       Alcotest.fail "first claim should not release anything"
      | _ -> Alcotest.fail "first claim should succeed");
     let r2 = Workspace.claim_next_r config ~agent_name:"claude" () in
     match r2 with
-    | Workspace.Claim_next_claimed { released_task_id = None; task_id; message; _ } ->
+    | Workspace.Claim_next_claimed { task_id; message; _ } ->
       Alcotest.(check string) "still task-001" "task-001" task_id;
       Alcotest.(check bool)
         "message says already holds"
         true
         (str_contains message "already holds")
-    | Workspace.Claim_next_claimed { released_task_id = Some _; _ } ->
-      Alcotest.fail "second claim should not report a released task"
     | _ -> Alcotest.fail "second claim should succeed")
 ;;
 
@@ -784,10 +779,8 @@ let test_claim_next_done_allow_reclaim_is_terminal () =
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
-(* RFC-0323 G-10: Block_reclaim on a Done task is equally moot — Done is
-   terminal, and the blocked-by-reclaim scan is a literal empty list
-   (workspace_task_schedule.ml [blocked_reclaim]), so the task is simply
-   invisible to claim_next rather than "blocked". *)
+(* RFC-0323 G-10: Block_reclaim on a Done task is moot because Done is
+   terminal and never enters the claim pool. *)
 let test_claim_next_done_block_reclaim_is_terminal () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
@@ -815,7 +808,7 @@ let test_claim_next_done_block_reclaim_is_terminal () =
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
-let test_claim_next_ignores_legacy_auto_cycle_text () =
+let test_claim_next_ignores_non_authoritative_auto_cycle_text () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ =
@@ -834,14 +827,17 @@ let test_claim_next_ignores_legacy_auto_cycle_text () =
     write_tasks config tasks;
     match Workspace.claim_next_r config ~agent_name:claude () with
     | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "legacy text does not block claim" "task-001" task_id;
+      Alcotest.(check string)
+        "narrative text does not block claim"
+        "task-001"
+        task_id;
       let task = task_by_id config task_id in
       Alcotest.(check (option string))
-        "legacy text cleared after claim"
+        "narrative text cleared after claim"
         None
         task.do_not_reclaim_reason
     | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "legacy auto-cycle text should be claimable"
+      Alcotest.fail "non-authoritative auto-cycle text should be claimable"
     | Workspace.Claim_next_no_unclaimed ->
       Alcotest.fail "expected one claimable task"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
@@ -883,7 +879,7 @@ let test_claim_next_ignores_routing_handoff_text () =
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
-let test_claim_next_does_not_deprioritize_legacy_text () =
+let test_claim_next_does_not_deprioritize_narrative_text () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ =
@@ -913,7 +909,10 @@ let test_claim_next_does_not_deprioritize_legacy_text () =
     write_tasks config tasks;
     match Workspace.claim_next_r config ~agent_name:claude () with
     | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "priority still wins despite legacy text" "task-001" task_id
+      Alcotest.(check string)
+        "priority still wins despite narrative text"
+        "task-001"
+        task_id
     | Workspace.Claim_next_no_eligible _ ->
       Alcotest.fail "normal unblocked task should be claimed before fallback"
     | Workspace.Claim_next_no_unclaimed -> Alcotest.fail "expected claimable tasks"
@@ -1222,34 +1221,104 @@ let test_transition_release () =
     | Error _ -> Alcotest.fail "Expected Ok")
 ;;
 
-let test_transition_release_keeper_transport_alias () =
+let test_transition_release_rejects_non_owner () =
   with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    match
-      Workspace.release_task_r config ~agent_name:"keeper-claude-agent" ~task_id:"task-001" ()
-    with
-    | Ok msg ->
-      Alcotest.(check bool)
-        "release via keeper transport alias"
-        true
-        (str_contains msg "todo")
-    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
+    let bind_result =
+      Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[ "test" ] ()
+    in
+    Alcotest.(check bool) "second agent bind succeeds" true (contains_check bind_result);
+    let claude = find_agent_name_by_prefix config "claude" in
+    let gemini = find_agent_name_by_prefix config "gemini" in
+    let _ = Workspace.add_task config ~title:"Owned task" ~priority:1 ~description:"" in
+    (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    (match Workspace.release_task_r config ~agent_name:gemini ~task_id:"task-001" () with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+     | Ok _ -> Alcotest.fail "non-owner released another agent's task"
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    assert_claimed_by config "task-001" claude)
 ;;
 
-let test_transition_release_generated_nickname_alias () =
+let test_operator_task_recovery_requires_exact_owner_and_version () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ =
+      Workspace.add_task config ~title:"Operator recovery task" ~priority:1 ~description:""
+    in
+    (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    let observed_version = (Workspace.read_backlog config).version in
+    (match
+       Workspace.recover_owned_task_to_todo_r
+         config
+         ~operator_actor:"operator"
+         ~task_id:"task-001"
+         ~expected_assignee:claude
+         ~expected_version:(observed_version + 1)
+         ~reason:"owner session is irrecoverable"
+         ()
+     with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+     | Ok _ -> Alcotest.fail "recovery accepted a stale backlog version"
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    assert_claimed_by config "task-001" claude;
+    (match
+       Workspace.recover_owned_task_to_todo_r
+         config
+         ~operator_actor:"operator"
+         ~task_id:"task-001"
+         ~expected_assignee:"different-owner"
+         ~expected_version:observed_version
+         ~reason:"owner session is irrecoverable"
+         ()
+     with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+     | Ok _ -> Alcotest.fail "recovery accepted a different persisted owner"
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    assert_claimed_by config "task-001" claude;
+    let recovered =
+      match
+        Workspace.recover_owned_task_to_todo_r
+          config
+          ~operator_actor:"operator"
+          ~task_id:"task-001"
+          ~expected_assignee:claude
+          ~expected_version:observed_version
+          ~reason:"owner session is irrecoverable"
+          ()
+      with
+      | Ok recovered -> recovered
+      | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err)
+    in
+    Alcotest.(check string) "recovered task id" "task-001" recovered.task_id;
+    Alcotest.(check string) "recovered exact owner" claude recovered.previous_assignee;
+    Alcotest.(check int)
+      "backlog version advanced exactly once"
+      (observed_version + 1)
+      recovered.backlog_version;
+    let task = task_by_id config "task-001" in
+    Alcotest.(check string)
+      "recovered task is claimable"
+      "todo"
+      (Masc_domain.task_status_to_string task.task_status))
+;;
+
+let test_transition_release_rejects_name_shape_aliases () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    match
-      Workspace.release_task_r config ~agent_name:"claude-happy-shark" ~task_id:"task-001" ()
-    with
-    | Ok msg ->
-      Alcotest.(check bool)
-        "release via generated nickname alias"
-        true
-        (str_contains msg "todo")
-    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
+    List.iter
+      (fun alias ->
+         match
+           Workspace.release_task_r config ~agent_name:alias ~task_id:"task-001" ()
+         with
+         | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+         | Ok _ -> Alcotest.failf "name-shape alias %s gained owner authority" alias
+         | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
+      [ "keeper-claude-agent"; "claude-happy-shark" ];
+    assert_claimed_by config "task-001" "claude")
 ;;
 
 let test_transition_release_todo_noop () =
@@ -1669,6 +1738,69 @@ let test_task_transitions_emit_observability () =
            ]))
 ;;
 
+let test_task_activity_uses_explicit_actor_kind () =
+  with_test_env (fun config ->
+    let previous = Atomic.get Workspace_hooks.activity_emit_fn in
+    let emitted = ref [] in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.activity_emit_fn previous)
+      (fun () ->
+         Atomic.set
+           Workspace_hooks.activity_emit_fn
+           (fun _config ~actor ?subject:_ ~kind ~payload:_ ~tags:_ () ->
+              emitted := (actor.Workspace_hooks.kind, actor.id, kind) :: !emitted);
+         let agent_name = "keeper-spoof-agent" in
+         let bind_result =
+           Workspace.bind_session config ~agent_name ~capabilities:[ "test" ] ()
+         in
+         Alcotest.(check bool) "agent bind succeeds" true (contains_check bind_result);
+         let _ =
+           Workspace.add_task
+             config
+             ~title:"Actor boundary task"
+             ~priority:1
+             ~description:""
+         in
+         (match Workspace.claim_task_r config ~agent_name ~task_id:"task-001" () with
+          | Ok _ -> ()
+          | Error err ->
+            Alcotest.failf "claim_task_r failed: %s" (Masc_domain.show_masc_error err));
+         (match
+            Workspace.link_task_execution_artifacts_r
+              config
+              ~task_id:"task-001"
+              ~session_id:"session-actor-boundary"
+              ()
+          with
+          | Ok _ -> ()
+          | Error err ->
+            Alcotest.failf
+              "link_task_execution_artifacts_r failed: %s"
+              (Masc_domain.show_masc_error err));
+         let has_event ~actor_kind ~actor_id ~event_kind =
+           List.exists
+             (fun (actual_kind, actual_id, actual_event) ->
+                String.equal actual_kind actor_kind
+                && String.equal actual_id actor_id
+                && String.equal actual_event event_kind)
+             !emitted
+         in
+         Alcotest.(check bool)
+           "agent mutation emits agent actor"
+           true
+           (has_event
+              ~actor_kind:"agent"
+              ~actor_id:agent_name
+              ~event_kind:(Event_kind.Task.to_string Event_kind.Task.Claimed));
+         Alcotest.(check bool)
+           "system mutation emits explicit system actor"
+           true
+           (has_event
+              ~actor_kind:"system"
+              ~actor_id:"system"
+              ~event_kind:(Event_kind.Task.to_string Event_kind.Task.Linked))))
+;;
+
 let test_transition_done_from_claimed_emits_observability () =
   with_test_env (fun config ->
     let before_seq = latest_ring_seq () in
@@ -1737,10 +1869,8 @@ let test_claim_next_existing_task_does_not_emit_release_observability () =
      | Workspace.Claim_next_claimed _ -> ()
      | _ -> Alcotest.fail "expected first claim_next_r to succeed");
     (match Workspace.claim_next_r config ~agent_name:claude () with
-     | Workspace.Claim_next_claimed { released_task_id = None; task_id; _ } ->
+     | Workspace.Claim_next_claimed { task_id; _ } ->
        Alcotest.(check string) "keeps task id" "task-001" task_id
-     | Workspace.Claim_next_claimed { released_task_id = Some _; _ } ->
-       Alcotest.fail "second claim_next_r should not auto-release"
      | _ -> Alcotest.fail "expected existing task on second claim_next_r");
     let audit_entries = Audit_log.read_entries ~n:50 config in
     Alcotest.(check bool)
@@ -1887,7 +2017,7 @@ let test_get_active_agents_falls_back_to_state_when_agent_files_missing () =
     match agents with
     | [ agent ] ->
       Alcotest.(check string) "agent name" "keeper-albini-agent" agent.name;
-      Alcotest.(check string) "agent type" "keeper" agent.agent_type;
+      Alcotest.(check string) "agent type" "workspace-state" agent.agent_type;
       Alcotest.(check string)
         "agent status"
         "active"
@@ -2033,7 +2163,7 @@ let test_claim_task_r_success () =
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let result = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     match result with
-    | Ok outcome -> Alcotest.(check bool) "claim success" true (str_contains outcome.message "claimed")
+    | Ok message -> Alcotest.(check bool) "claim success" true (str_contains message "claimed")
     | Error _ -> Alcotest.fail "Expected Ok")
 ;;
 
@@ -2638,9 +2768,9 @@ let () =
             `Quick
             test_claim_next_preserved_task_not_claimable_by_others
         ; Alcotest.test_case
-            "#10421: preserved task result field"
+            "#10421: preserved task result"
             `Quick
-            test_claim_next_r_preserved_task_field
+            test_claim_next_r_preserves_current_task
         ; Alcotest.test_case
             "release hard-stop persists policy, todo stays claimable"
             `Quick
@@ -2658,17 +2788,17 @@ let () =
             `Quick
             test_claim_next_done_block_reclaim_is_terminal
         ; Alcotest.test_case
-            "legacy auto-cycle text is ignored"
+            "non-authoritative auto-cycle text is ignored"
             `Quick
-            test_claim_next_ignores_legacy_auto_cycle_text
+            test_claim_next_ignores_non_authoritative_auto_cycle_text
         ; Alcotest.test_case
             "routing handoff text is ignored"
             `Quick
             test_claim_next_ignores_routing_handoff_text
         ; Alcotest.test_case
-            "legacy text does not alter priority"
+            "narrative text does not alter priority"
             `Quick
-            test_claim_next_does_not_deprioritize_legacy_text
+            test_claim_next_does_not_deprioritize_narrative_text
         ; Alcotest.test_case
             "release cycles do not create auto block"
             `Quick
@@ -2706,13 +2836,17 @@ let () =
         ; Alcotest.test_case "start" `Quick test_transition_start
         ; Alcotest.test_case "release" `Quick test_transition_release
         ; Alcotest.test_case
-            "release accepts keeper transport alias"
+            "release rejects non-owner"
             `Quick
-            test_transition_release_keeper_transport_alias
+            test_transition_release_rejects_non_owner
         ; Alcotest.test_case
-            "release accepts generated nickname alias"
+            "operator recovery requires exact owner and version"
             `Quick
-            test_transition_release_generated_nickname_alias
+            test_operator_task_recovery_requires_exact_owner_and_version
+        ; Alcotest.test_case
+            "release rejects name-shape aliases"
+            `Quick
+            test_transition_release_rejects_name_shape_aliases
         ; Alcotest.test_case "release todo no-op" `Quick test_transition_release_todo_noop
         ; Alcotest.test_case "invalid" `Quick test_transition_invalid
         ; Alcotest.test_case
@@ -2741,6 +2875,10 @@ let () =
             "task transitions fan-out"
             `Quick
             test_task_transitions_emit_observability
+        ; Alcotest.test_case
+            "task activity actor kind is explicit"
+            `Quick
+            test_task_activity_uses_explicit_actor_kind
         ; Alcotest.test_case
             "claimed done fan-out"
             `Quick

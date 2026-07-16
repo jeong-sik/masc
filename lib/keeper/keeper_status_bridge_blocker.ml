@@ -131,7 +131,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
-    | Stale_fleet_batch
     | Sdk_context_window_exceeded
     | Sdk_unrecognized_stop_reason
     | Sdk_guardrail_violation
@@ -201,15 +200,6 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
              investigation is required before restart."
             count
       }
-  | Keeper_registry.Stale_fleet_batch { distinct_count } ->
-    Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:
-           (Printf.sprintf
-              "Stale watchdog terminated %d distinct keeper(s) inside the fleet batch \
-               window; each affected Keeper is recovered independently."
-              distinct_count)
-         Stale_fleet_batch)
   | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
     (match
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record

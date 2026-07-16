@@ -1051,41 +1051,6 @@ let test_xss_in_message_type () =
    (Nickname.is_generated_nickname requires 3+ dash-separated parts) *)
 let admin_keeper_agent = "admin-board-keeper"
 let test_agent_a = "agent-test-alpha"
-let test_orphan_reconciliation_requires_exact_absent_assignee () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Orphan Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* A different actor cannot release someone else's task. *)
-    let normal = Workspace.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~action:Masc_domain.Release () in
-    Alcotest.(check bool) "normal release blocked" true
-      (match normal with Error _ -> true | Ok _ -> false);
-    let live_reconciliation =
-      Workspace.reconcile_orphaned_task_r
-        config
-        ~task_id:"task-001"
-        ~expected_assignee:test_agent_a
-        ~signal:Workspace.Assignee_absent
-        ()
-    in
-    Alcotest.(check bool) "live assignee is not absent" true
-      (match live_reconciliation with Error _ -> true | Ok _ -> false);
-    ignore (Workspace.end_session config ~agent_name:test_agent_a);
-    let reconciled =
-      Workspace.reconcile_orphaned_task_r
-        config
-        ~task_id:"task-001"
-        ~expected_assignee:test_agent_a
-        ~signal:Workspace.Assignee_inactive
-        ()
-    in
-    Alcotest.(check bool) "absent assignee reconciliation" true
-      (match reconciled with Ok _ -> true | Error _ -> false);
-    (* Task should be back to Todo *)
-    let tasks = Workspace.list_tasks config in
-    Alcotest.(check bool) "task is todo" true (str_contains tasks "Todo" || str_contains tasks "todo")
-  )
 
 let find_task config task_id =
   Workspace.get_tasks_raw config
@@ -1157,7 +1122,6 @@ let strict_contract : Masc_domain.task_contract =
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
   ; evidence_claims = []
-  ; stale_claim_timeout_sec = 0
   ; links = { operation_id = None; session_id = None }
   }
 
@@ -1273,6 +1237,53 @@ let test_audit_orphan_ignores_elapsed_last_seen_for_active_agent () =
     Alcotest.(check int) "elapsed last_seen cannot orphan an active task" 0
       (List.length orphans)
   )
+
+let assert_prefixed_identity_does_not_claim_membership ~assignee ~active_name =
+  with_test_env (fun config ->
+    let _ =
+      Workspace.add_task
+        config
+        ~title:"Identity Boundary"
+        ~priority:1
+        ~description:""
+    in
+    let backlog = Workspace.read_backlog config in
+    let tasks =
+      List.map
+        (fun (task : Masc_domain.task) ->
+           if String.equal task.id "task-001"
+           then
+             { task with
+               task_status =
+                 Masc_domain.Claimed { assignee; claimed_at = "test" }
+             }
+           else task)
+        backlog.tasks
+    in
+    Workspace.write_backlog
+      config
+      { backlog with tasks; version = backlog.version + 1 };
+    let state = Workspace.read_state config in
+    Workspace.write_state
+      config
+      { state with active_agents = active_name :: state.active_agents };
+    let orphans = Workspace.audit_orphan_tasks config in
+    Alcotest.(check bool)
+      (Printf.sprintf "%s does not confer identity to %s" active_name assignee)
+      true
+      (List.exists
+         (fun ((task : Masc_domain.task), orphan_assignee) ->
+            String.equal task.id "task-001"
+            && String.equal orphan_assignee assignee)
+         orphans))
+
+let test_audit_orphan_requires_exact_registered_identity () =
+  assert_prefixed_identity_does_not_claim_membership
+    ~assignee:"alice"
+    ~active_name:"alice-worker";
+  assert_prefixed_identity_does_not_claim_membership
+    ~assignee:"alice-worker"
+    ~active_name:"alice"
 
 let keeper_meta_for_self_filter agent_name =
   let json =
@@ -1476,20 +1487,6 @@ let test_rejoin_event_log () =
     ) events in
     Alcotest.(check bool) "rejoin event logged" true has_rejoin
   )
-
-(** BUG-5: Keeper detection uses agent_type/metadata evidence, not just name *)
-let test_keeper_detection_by_agent_type () =
-  (* A non-keeper-named agent with agent_type="keeper" should get keeper threshold *)
-  let is_keeper_by_type = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"keeper" in
-  Alcotest.(check bool) "agent_type=keeper detected" true is_keeper_by_type;
-
-  (* A keeper-shaped name alone is not authoritative. *)
-  let is_keeper_by_name = Workspace_resilience.Zombie.is_keeper ~name:"keeper-test-agent" ~agent_type:"test" in
-  Alcotest.(check bool) "keeper-*-agent name alone rejected" false is_keeper_by_name;
-
-  (* Neither name nor type matches *)
-  let not_keeper = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"claude" in
-  Alcotest.(check bool) "non-keeper correctly rejected" false not_keeper
 
 (** BUG-6: Heartbeat Mutex protects concurrent access *)
 let test_heartbeat_concurrent_start_stop () =
@@ -1743,10 +1740,6 @@ let () =
 
     (* === Board Admin Tests === *)
     "board_admin", [
-      Alcotest.test_case
-        "orphan reconciliation verifies exact absent assignee"
-        `Quick
-        test_orphan_reconciliation_requires_exact_absent_assignee;
       Alcotest.test_case "audit orphan tasks" `Quick test_audit_orphan_tasks;
       Alcotest.test_case
         "audit orphan awaiting verification tasks"
@@ -1754,6 +1747,8 @@ let () =
         test_audit_orphan_awaiting_verification_tasks;
       Alcotest.test_case "audit orphan ignores elapsed last_seen" `Quick
         test_audit_orphan_ignores_elapsed_last_seen_for_active_agent;
+      Alcotest.test_case "audit orphan requires exact identity" `Quick
+        test_audit_orphan_requires_exact_registered_identity;
       Alcotest.test_case "read backlog counts excludes self-owned orphan" `Quick
         test_read_backlog_counts_excludes_self_owned_orphan;
       Alcotest.test_case "read backlog counts falls back to unscoped claimable"
@@ -1766,7 +1761,6 @@ let () =
     (* === Lifecycle Bug Fix Tests (#1655) === *)
     "lifecycle_bugs", [
       Alcotest.test_case "BUG-1: rejoin event log" `Quick test_rejoin_event_log;
-      Alcotest.test_case "BUG-5: keeper detection by agent_type" `Quick test_keeper_detection_by_agent_type;
       Alcotest.test_case "BUG-6: heartbeat concurrent start/stop" `Quick test_heartbeat_concurrent_start_stop;
     ];
 

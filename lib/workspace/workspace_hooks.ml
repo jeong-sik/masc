@@ -31,25 +31,6 @@ type operator_pending_confirm_request =
   }
 
 (* ============================================ *)
-(* Callback refs (migrated from workspace_gc.ml)     *)
-(* ============================================ *)
-
-(** Reconcile an objectively orphaned task — avoids Workspace_gc →
-    Workspace_task circular dependency without minting a privileged actor. *)
-let reconcile_orphaned_task_fn
-  : (Workspace_utils_backend_setup.config ->
-     task_id:string ->
-     expected_assignee:string ->
-     signal:[ `Absent | `Inactive ] ->
-     unit ->
-     string masc_result) Atomic.t
-  = Atomic.make (fun _config ~task_id:_ ~expected_assignee:_ ~signal:_ () ->
-      Error
-        (Masc_domain.Task
-           (Masc_domain.Task_error.InvalidState
-              "Workspace_hooks: reconcile_orphaned_task_fn not connected")))
-
-(* ============================================ *)
 (* New callback refs (Phase 4A)                 *)
 (* ============================================ *)
 
@@ -69,13 +50,6 @@ let activity_emit_fn
 let agent_economy_earn_fn
   : (base_path:string -> agent_name:string -> reason:string -> unit) Atomic.t
   = Atomic.make (fun ~base_path:_ ~agent_name:_ ~reason:_ -> ())
-
-(** Stop keeper keepalive fiber — avoids Workspace_gc → Keeper_keepalive dep.
-    Called during zombie cleanup to terminate keeper fibers that would
-    otherwise continue making tool calls after agent removal. *)
-let stop_keeper_fn
-  : (string -> unit) Atomic.t
-  = Atomic.make (fun _name -> ())
 
 (** Runtime-visible agents supplied by upper layers such as the keeper
     registry.  Workspace code consumes [Masc_domain.agent] rows without
@@ -259,31 +233,6 @@ let tool_assigned_fn
 let task_completion_path_observed_fn
   : (path:string -> contract_state:string -> agent_name:string -> unit) Atomic.t
   = Atomic.make (fun ~path:_ ~contract_state:_ ~agent_name:_ -> ())
-
-(** #10421: task_claim_next implicit auto-release observability.
-
-    When a keeper calls [task_claim_next] while still holding a
-    previous claim, the scheduler implicitly transitions that prior
-    claim back to [Todo] before issuing the new one.  Field log
-    showed 43 [claimed → todo] transitions vs 24 [todo → claimed]
-    in a single day (179% release/claim ratio), with only 1/71
-    transitions reaching [done] — the same task hot-potatoed up to
-    5x as keepers churned through claim_next without finishing.
-
-    The structured event already carries [reason] and
-    [from_status], but a Otel_metric_store counter is the missing surface:
-    operators cannot alert on auto-release rate or split it by
-    keeper from a JSONL tail alone.  The split by [from_status]
-    matters because [Claimed → Todo] (just claimed, no work yet)
-    and [InProgress → Todo] (mid-work, lost progress) are
-    operationally distinct symptoms.
-
-    Cardinality bounded by fleet size (~10 keepers) ×
-    [from_status] (claimed | in_progress) = ~20 series.  Emit at
-    [lib/workspace.ml] to avoid a [masc_workspace → Otel_metric_store] dep cycle. *)
-let task_auto_release_observed_fn
-  : (agent_name:string -> from_status:string -> unit) Atomic.t
-  = Atomic.make (fun ~agent_name:_ ~from_status:_ -> ())
 
 (** Wall-clock latency of [Workspace_broadcast.broadcast] including
     [next_seq] (state.json file lock + read + write), agent.json read

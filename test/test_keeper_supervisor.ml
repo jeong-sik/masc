@@ -1376,70 +1376,6 @@ let test_sweep_and_recover_swallows_failing_tombstone_hook () =
   check bool "dead keeper still unregistered after failing hook"
     false (Reg.is_registered ~base_path:config.base_path name)
 
-(* Legacy stale-fleet observations use the same per-lane restart path as
-   every other crashed lane. They never synthesize pause or Dead. *)
-let test_legacy_stale_fleet_batch_routes_to_restart () =
-  with_restart_launch_noop @@ fun () ->
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  with_config_dir @@ fun config_dir ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let name = "legacy-stale-fleet-batch-keeper" in
-      write_keeper_toml config_dir ~name;
-      let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name meta in
-      resolve_done_for_test reg (`Crashed "legacy stale fleet batch");
-      Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:50 ~last_restart_ts:0.0 ~crash_log:[];
-      Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Stale_fleet_batch { distinct_count = 3 }));
-      let baseline_restart =
-        Masc.Otel_metric_store.metric_total
-          Keeper_metrics.(to_string RestartAttempts)
-      in
-      let ctx : _ Keeper_types_profile.context =
-        {
-          config;
-          agent_name = supervisor_agent_name;
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = Some (Eio.Stdenv.net env);
-          publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config);
-        }
-      in
-      sweep_and_recover_no_materialize ctx;
-      let after_restart =
-        Masc.Otel_metric_store.metric_total
-          Keeper_metrics.(to_string RestartAttempts)
-      in
-      check (float 0.001) "legacy fleet batch restarts after many failures"
-        (baseline_restart +. 1.0) after_restart;
-      (match Reg.get ~base_path:config.base_path name with
-       | Some entry -> check bool "lane never becomes Dead" false (entry.phase = KSM.Dead)
-       | None -> fail "registry entry missing after restart");
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           check bool "meta.paused stays false for legacy fleet batch"
-             false m.paused
-       | Ok None -> fail "meta missing after legacy fleet batch"
-       | Error err -> fail ("read_meta failed: " ^ err));
-      ())
-
 exception Synthetic_cleanup_failure
 
 let test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures () =
@@ -2029,8 +1965,6 @@ let () =
         test_sweep_and_recover_swallows_failing_tombstone_hook;
     ];
     "stale_storm_phase2", [
-      test_case "legacy Stale_fleet_batch follows restart path" `Quick
-        test_legacy_stale_fleet_batch_routes_to_restart;
       test_case "supervisor cleanup suppresses cancellation and classifies failures" `Quick
         test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures;
       test_case "terminal-state launch reject does not announce Running" `Quick

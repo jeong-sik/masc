@@ -25,7 +25,7 @@ type keeper_health =
   | KH_healthy (** Keepalive alive, recent turns, no quiet_reason *)
   | KH_idle (** Keepalive alive but no recent activity *)
   | KH_offline (** Agent not present or status=offline/inactive *)
-  | KH_stale (** Last seen too long ago or zombie flag from agent *)
+  | KH_stale (** Last observed signal is outside the health projection window *)
   | KH_degraded (** graphql_error or model_error quiet_reason *)
   | KH_zombie (** Fiber terminated but registry entry exists *)
   | KH_dead (** Explicit durable Dead tombstone *)

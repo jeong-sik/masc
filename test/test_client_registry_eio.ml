@@ -11,7 +11,7 @@ let test_init () =
   Client_registry_eio.reset_for_testing ();
   check int "total count after reset is 0" 0 (Client_registry_eio.total_count ())
 
-let test_get_or_create_new () =
+let test_sessionless_identity_is_not_registered () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Client_registry_eio.reset_for_testing ();
@@ -20,17 +20,9 @@ let test_get_or_create_new () =
     ("_channel", `String "telegram");
   ] in
   let identity = Client_registry_eio.get_or_create_identity params in
-  check string "agent_name" "test-new-agent" identity.agent_name
-
-let test_get_or_create_existing () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Client_registry_eio.reset_for_testing ();
-  let params = `Assoc [("_agent_name", `String "existing-agent")] in
-  let id1 = Client_registry_eio.get_or_create_identity params in
-  let id2 = Client_registry_eio.get_or_create_identity params in
-  (* Same agent_name should be used *)
-  check string "same agent_name" id1.agent_name id2.agent_name
+  check string "agent_name" "test-new-agent" identity.agent_name;
+  check int "no lifecycle owner means no registry row" 0
+    (Client_registry_eio.total_count ())
 
 let test_mcp_session_persistence () =
   Eio_main.run @@ fun env ->
@@ -47,50 +39,51 @@ let test_mcp_session_persistence () =
   
   check string "same session_key" id1.session_key id2.session_key
 
-let test_get_by_name () =
+let test_total_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Client_registry_eio.reset_for_testing ();
-  let name = Printf.sprintf "lookup-agent-%d" (Random.int 10000) in
-  let params = `Assoc [("_agent_name", `String name)] in
-  let created = Client_registry_eio.get_or_create_identity params in
-  
-  match Client_registry_eio.get_by_name name with
-  | Some found -> check string "same agent" created.agent_name found.agent_name
-  | None -> fail "agent not found by name"
-
-let test_active_count () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Client_registry_eio.reset_for_testing ();
-  let initial = Client_registry_eio.active_count () in
-  
-  (* Create a new agent with unique name *)
-  let name = Printf.sprintf "count-test-agent-%d" (Random.int 10000) in
-  let _ = Client_registry_eio.get_or_create_identity 
+  check int "empty registry" 0 (Client_registry_eio.total_count ());
+  let name = "count-test-agent" in
+  let _ = Client_registry_eio.get_or_create_identity
+    ~mcp_session_id:"count-session"
     (`Assoc [("_agent_name", `String name)]) in
-  
-  let after = Client_registry_eio.active_count () in
-  check bool "count increased" true (after >= initial)
+  check int "one registered identity" 1 (Client_registry_eio.total_count ())
 
-let test_list_active () =
+let test_unregister_mcp_session_removes_identity () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Client_registry_eio.reset_for_testing ();
-  let name = Printf.sprintf "active-list-agent-%d" (Random.int 10000) in
-  let _ = Client_registry_eio.get_or_create_identity 
-    (`Assoc [("_agent_name", `String name)]) in
-  
-  let active = Client_registry_eio.list_active () in
-  check bool "has active agents" true (List.length active > 0)
+  let _ =
+    Client_registry_eio.get_or_create_identity
+      ~mcp_session_id:"closed-session"
+      (`Assoc [ ("_agent_name", `String "closed-agent") ])
+  in
+  Client_registry_eio.unregister_mcp_session "closed-session";
+  check int "closed session removed" 0 (Client_registry_eio.total_count ())
 
-let test_cleanup_stale () =
+let test_unregister_preserves_same_name_sibling () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Client_registry_eio.reset_for_testing ();
-  (* After reset, no sessions exist so cleanup should return 0 *)
-  let cleaned = Client_registry_eio.cleanup_stale_sessions () in
-  check int "cleanup after reset returns 0" 0 cleaned
+  let params = `Assoc [ ("_agent_name", `String "shared-agent") ] in
+  let first =
+    Client_registry_eio.get_or_create_identity ~mcp_session_id:"shared-1" params
+  in
+  let second =
+    Client_registry_eio.get_or_create_identity ~mcp_session_id:"shared-2" params
+  in
+  Client_registry_eio.unregister_mcp_session "shared-2";
+  let remaining =
+    Client_registry_eio.get_or_create_identity
+      ~mcp_session_id:"shared-1"
+      (`Assoc [])
+  in
+  check string "remaining session stays registered" first.session_key
+    remaining.session_key;
+  check int "one registration remains" 1 (Client_registry_eio.total_count ());
+  check bool "removed session is distinct" true
+    (not (String.equal second.session_key remaining.session_key))
 
 let test_reset_clears_cached_session_mappings () =
   Eio_main.run @@ fun env ->
@@ -187,15 +180,22 @@ let () =
   run "Client_registry_eio" [
     "basics", [
       test_case "init" `Quick test_init;
-      test_case "get_or_create_new" `Quick test_get_or_create_new;
-      test_case "get_or_create_existing" `Quick test_get_or_create_existing;
+      test_case
+        "sessionless identity is not registered"
+        `Quick
+        test_sessionless_identity_is_not_registered;
       test_case "mcp_session_persistence" `Quick test_mcp_session_persistence;
-      test_case "get_by_name" `Quick test_get_by_name;
     ];
     "statistics", [
-      test_case "active_count" `Quick test_active_count;
-      test_case "list_active" `Quick test_list_active;
-      test_case "cleanup_stale" `Quick test_cleanup_stale;
+      test_case "total_count" `Quick test_total_count;
+      test_case
+        "unregister_mcp_session removes identity"
+        `Quick
+        test_unregister_mcp_session_removes_identity;
+      test_case
+        "unregister preserves same-name sibling"
+        `Quick
+        test_unregister_preserves_same_name_sibling;
       test_case "reset_clears_cached_session_mappings" `Quick
         test_reset_clears_cached_session_mappings;
     ];

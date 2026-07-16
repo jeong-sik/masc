@@ -800,6 +800,44 @@ let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
     ~finally:Masc.Client_registry_eio.reset_for_testing
     (fun () ->
       Masc.Client_registry_eio.reset_for_testing ();
+      ignore (Workspace.init config ~agent_name:None);
+      let now = Masc_domain.now_iso () in
+      let meta : Masc_domain.agent_meta =
+        { session_id = "dashboard-presence:runtime-busy"
+        ; agent_type = "test"
+        ; pid = None
+        ; hostname = None
+        ; tty = None
+        ; parent_task = None
+        ; keeper_name = Some "busy-keeper"
+        ; keeper_id = None
+        }
+      in
+      let agent : Masc_domain.agent =
+        { id = None
+        ; name = "runtime-busy"
+        ; agent_type = "test"
+        ; status = Masc_domain.Busy
+        ; capabilities = []
+        ; current_task = None
+        ; session_bound_at = now
+        ; last_seen = "2020-01-01T00:00:00Z"
+        ; meta = Some meta
+        }
+      in
+      let agent_path =
+        Filename.concat
+          (Workspace.agents_dir config)
+          (Workspace.safe_filename agent.name ^ ".json")
+      in
+      (match
+         Workspace.write_json_result
+           config
+           agent_path
+           (Masc_domain.agent_to_yojson agent)
+       with
+       | Ok () -> ()
+       | Error message -> failf "write dashboard presence agent failed: %s" message);
       let json = Server_dashboard_http.dashboard_ide_snapshot_json ~config in
       let partition = Ide_paths.Legacy_default in
       let open Yojson.Safe.Util in
@@ -815,12 +853,20 @@ let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
         (json |> member "annotations_count" |> to_int);
       check int "regions count metadata" 0
         (json |> member "regions_count" |> to_int);
-      check int "active keepers count metadata" 0
+      check int "active keepers count metadata" 1
         (json |> member "active_keepers_count" |> to_int);
       check int "events nested count remains" 0
         (json |> member "events" |> member "count" |> to_int);
-      check int "presence nested count remains" 0
-        (json |> member "presence" |> member "count" |> to_int))
+      check int "presence nested count remains" 1
+        (json |> member "presence" |> member "count" |> to_int);
+      check string "presence uses canonical keeper identity" "busy-keeper"
+        (json
+         |> member "presence"
+         |> member "active_keepers"
+         |> to_list
+         |> List.hd
+         |> member "keeper_id"
+         |> to_string))
 
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->

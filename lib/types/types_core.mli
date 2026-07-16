@@ -156,7 +156,6 @@ type task_contract =
            consumer wired (unlike the fan-in-0 required_evidence_typed removed
            2026-06-03); legacy required_evidence strings are NOT auto-parsed
            into claims (that would be a substring classifier). *)
-  ; stale_claim_timeout_sec : int [@default 0]
   ; links : task_execution_links
         [@default { operation_id = None; session_id = None }]
   }
@@ -338,15 +337,12 @@ type claim_next_result =
       { task_id : string
       ; title : string
       ; priority : int
-      ; released_task_id : string option
       ; message : string
       ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
       { excluded_count : int
-      ; blocked_count : int
-      ; verification_blocked_count : int
       ; scope_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int

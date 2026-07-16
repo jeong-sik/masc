@@ -35,6 +35,10 @@ let chat_recovery_tool_name =
   operator_tool_name Operator_name.Operator_chat_recovery_resolve
 ;;
 
+let task_recovery_tool_name =
+  operator_tool_name Operator_name.Operator_task_recovery_resolve
+;;
+
 (* RFC-0189 PR-1b.11 — typed result.
 
    [result_of_json] projects [Operator_control.*_json :
@@ -238,6 +242,43 @@ let chat_recovery_schema =
   }
 ;;
 
+let task_recovery_schema =
+  { name = task_recovery_tool_name
+  ; description =
+      "Recover exactly one claimed or in-progress Task to todo. The observed task_id, persisted assignee, and backlog version must all match; this tool performs no liveness or elapsed-time inference."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; "additionalProperties", `Bool false
+        ; ( "properties"
+          , schema_properties
+              [ ( "schema"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "enum"
+                      , `List
+                          [ `String Operator_task_recovery_command.tool_command_schema ] )
+                    ] )
+              ; "task_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+              ; ( "expected_assignee"
+                , `Assoc [ "type", `String "string"; "minLength", `Int 1 ] )
+              ; ( "expected_version"
+                , `Assoc
+                    [ "type", `String "integer"; "minimum", `Int 0 ] )
+              ; "reason", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+              ] )
+        ; ( "required"
+          , `List
+              [ `String "schema"
+              ; `String "task_id"
+              ; `String "expected_assignee"
+              ; `String "expected_version"
+              ; `String "reason"
+              ] )
+        ]
+  }
+;;
+
 let action_schema ~remote =
   {
     name = "masc_operator_action";
@@ -355,6 +396,90 @@ let chat_recovery_result ~tool_name ~start_time (ctx : _ context) args =
          (Yojson.Safe.to_string data))
 ;;
 
+let task_recovery_failure_class = function
+  | Masc_domain.Task _ | Masc_domain.Agent _ -> Tool_result.Workflow_rejection
+  | Masc_domain.Auth _ -> Tool_result.Policy_rejection
+  | Masc_domain.System (Masc_domain.System_error.LockContention _)
+  | Masc_domain.RateLimitExceeded _ ->
+    Tool_result.Transient_error
+  | Masc_domain.System _ | Masc_domain.CacheError _ -> Tool_result.Runtime_failure
+;;
+
+let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =
+  match Operator_task_recovery_command.parse_tool_command args with
+  | Error error ->
+    let data = Operator_task_recovery_command.input_error_to_json error in
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      ~data
+      (Yojson.Safe.to_string data)
+  | Ok command ->
+    let result =
+      Operator_task_recovery_command.execute
+        ctx.config
+        ~actor:ctx.agent_name
+        command
+    in
+    let audit =
+      Operator_task_recovery_command.audit
+        ctx.config
+        ~actor:ctx.agent_name
+        command
+        ~outcome:
+          (match result with
+           | Ok _ -> Audit_log.Success
+           | Error error ->
+             Audit_log.Failure (Masc_domain.masc_error_to_string error))
+      |> Operator_task_recovery_command.audit_json
+    in
+    (match result with
+     | Ok report ->
+       let observe_cache_invalidation label f =
+         try
+           f ();
+           None
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           let detail = Printf.sprintf "%s: %s" label (Printexc.to_string exn) in
+           Log.Misc.error
+             "operator task recovery cache invalidation failed task=%s detail=%s"
+             report.task_id
+             detail;
+           Some detail
+       in
+       let cache_errors =
+         [ observe_cache_invalidation "operator_snapshot_cache" (fun () ->
+             Operator_control.invalidate_snapshot_cache ())
+         ; observe_cache_invalidation "dashboard_projection_cache" (fun () ->
+             Dashboard_projection_cache.invalidate_snapshot_json ~config:ctx.config)
+         ]
+         |> List.filter_map Fun.id
+       in
+       let report =
+         { report with
+           post_commit_errors = report.post_commit_errors @ cache_errors
+         }
+       in
+       Tool_result.make_ok
+         ~tool_name
+         ~start_time
+         ~data:(Operator_task_recovery_command.success_json ~audit command report)
+         ()
+     | Error error ->
+       let data =
+         Operator_task_recovery_command.mutation_error_json ~audit error
+       in
+       Tool_result.make_err
+         ~tool_name
+         ~class_:(task_recovery_failure_class error)
+         ~start_time
+         ~data
+         (Yojson.Safe.to_string data))
+;;
+
 let judgment_write_schema =
   {
     name = "masc_operator_judgment_write";
@@ -417,6 +542,10 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   in
   match name with
   | "masc_operator_snapshot" ->
+      (* The tool is the observation half of operator CAS commands. Dashboard
+         refreshes may use the cache, but an explicit operator observation must
+         not return a stale assignee/backlog version. *)
+      Operator_control.invalidate_snapshot_cache ();
       let actor = get_string_opt args "actor" in
       let view = get_string_opt args "view" in
       let include_messages = get_bool args "include_messages" true in
@@ -440,6 +569,8 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
            (Operator_control.action_json control_ctx args))
   | tool_name when String.equal tool_name chat_recovery_tool_name ->
       Some (chat_recovery_result ~tool_name ~start_time:start ctx args)
+  | tool_name when String.equal tool_name task_recovery_tool_name ->
+      Some (task_recovery_result ~tool_name ~start_time:start ctx args)
   | "masc_operator_confirm" ->
       Some
         (result_of_json ~tool_name:name ~start_time:start
@@ -458,6 +589,7 @@ let schemas : tool_schema list =
     digest_schema ~remote:false;
     action_schema ~remote:false;
     chat_recovery_schema;
+    task_recovery_schema;
     confirm_schema;
     judgment_write_schema;
   ]
@@ -468,6 +600,7 @@ let remote_schemas : tool_schema list =
     digest_schema ~remote:true;
     action_schema ~remote:true;
     chat_recovery_schema;
+    task_recovery_schema;
     confirm_schema;
   ]
 
@@ -484,7 +617,12 @@ let tool_spec_read_only =
   ]
 
 (* Tools with explicit catalog metadata that must be preserved. *)
-let tool_spec_hidden = [ "masc_operator_judgment_write"; chat_recovery_tool_name ]
+let operator_profile_only_tools =
+  [ chat_recovery_tool_name; task_recovery_tool_name ]
+;;
+
+let tool_spec_hidden =
+  "masc_operator_judgment_write" :: operator_profile_only_tools
 ;;
 
 let tool_spec_hidden_actions = [ operator_tool_name Operator_name.Operator_action ]
@@ -495,7 +633,7 @@ let () =
       let is_hidden = List.mem s.name tool_spec_hidden || List.mem s.name tool_spec_hidden_actions in
       let existing = Tool_catalog.metadata s.name in
       let direct_call_when_hidden =
-        is_hidden && not (String.equal s.name chat_recovery_tool_name)
+        is_hidden && not (List.mem s.name operator_profile_only_tools)
       in
       Tool_spec.register
         (Tool_spec.create

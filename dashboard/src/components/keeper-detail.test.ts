@@ -320,7 +320,6 @@ describe('KeeperDetailPage', () => {
         last_seen: '2026-05-01T00:48:26Z',
         age_s: 1206,
         last_seen_ago_s: 1111,
-        is_zombie: false,
       },
       diagnostic: {
         summary: 'Keeper runtime is reconciling back into live presence.',

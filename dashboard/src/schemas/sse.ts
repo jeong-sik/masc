@@ -385,12 +385,6 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     if (typeof value.agent_name !== 'string' || value.agent_name.trim() === '') {
       return fail('agent_name', 'Expected non-empty agent_name')
     }
-    if (
-      !Array.isArray(value.auto_released_task_ids)
-      || !value.auto_released_task_ids.every(id => typeof id === 'string')
-    ) {
-      return fail('auto_released_task_ids', 'Expected an array of task id strings')
-    }
   }
 
   if (value.type === 'dashboard_yjs_update') {

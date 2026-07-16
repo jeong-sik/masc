@@ -77,17 +77,31 @@ val release_task_r :
   ?expected_version:int ->
   ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
 
-type task_reconciliation_signal =
-  | Assignee_absent
-  | Assignee_inactive
+(** {1 Explicit operator recovery} *)
 
-val reconcile_orphaned_task_r
-  :  config
-  -> task_id:string
-  -> expected_assignee:string
-  -> signal:task_reconciliation_signal
-  -> unit
-  -> string Masc_domain.masc_result
+type operator_task_recovery_result =
+  { task_id : string
+  ; previous_status : Masc_domain.task_status
+  ; previous_assignee : string
+  ; backlog_version : int
+  ; post_commit_errors : string list
+  }
+
+val recover_owned_task_to_todo_r :
+  config ->
+  operator_actor:string ->
+  task_id:string ->
+  expected_assignee:string ->
+  expected_version:int ->
+  reason:string ->
+  unit ->
+  operator_task_recovery_result Masc_domain.masc_result
+(** Explicit compare-and-set recovery for a task whose owner cannot continue.
+    Only [Claimed] and [InProgress] tasks are eligible. The persisted assignee
+    and backlog version must exactly match the operator's observation.
+
+    This function performs no liveness, elapsed-time, name-shape, or status-file
+    inference. Authorization belongs to the operator tool boundary. *)
 
 (** {1 Task cancellation} *)
 
@@ -100,22 +114,19 @@ val link_task_execution_artifacts_r :
   ?session_id:string -> ?operation_id:string ->
   unit -> string Masc_domain.masc_result
 
-(** {1 Re-exported type (backward compatibility)} *)
+(** {1 Re-exported scheduling result} *)
 
 type claim_next_result = Masc_domain.claim_next_result =
   | Claim_next_claimed of {
       task_id : string;
       title : string;
       priority : int;
-      released_task_id : string option;
       message : string;
       scope_widened : bool;
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
       { excluded_count : int
-      ; blocked_count : int
-      ; verification_blocked_count : int
       ; scope_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int

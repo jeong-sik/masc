@@ -102,7 +102,6 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
         (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
   | Keeper_meta_contract.Capacity_backpressure
   | Keeper_meta_contract.Fiber_unresolved
-  | Keeper_meta_contract.Stale_fleet_batch
   | Keeper_meta_contract.Sdk_context_window_exceeded
   | Keeper_meta_contract.Sdk_unrecognized_stop_reason
   | Keeper_meta_contract.Sdk_guardrail_violation

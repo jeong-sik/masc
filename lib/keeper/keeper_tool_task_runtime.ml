@@ -143,8 +143,6 @@ let active_goal_scope_json
       ~(meta : keeper_meta)
       ?matched_goal_id
       ?excluded_count
-      ?blocked_count
-      ?verification_blocked_count
       ?scope_excluded_count
       ?explicit_excluded_count
       ?claim_pool_candidate_count
@@ -189,9 +187,7 @@ let active_goal_scope_json
     | None -> fields
   in
   let int_fields =
-    [ "blocked_count", blocked_count
-    ; "verification_blocked_count", verification_blocked_count
-    ; "scope_excluded_count", scope_excluded_count
+    [ "scope_excluded_count", scope_excluded_count
     ; "explicit_excluded_count", explicit_excluded_count
     ; "claim_pool_candidate_count", claim_pool_candidate_count
     ]
@@ -229,11 +225,12 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
     let scope_hint =
       match claim_goal_scope.Keeper_runtime_contract.mode with
       | Keeper_runtime_contract.Active_goal_ids ->
-        (* Scope only stays in [active_goal_ids] mode when a Todo task IS linked
-           to the goal (otherwise the resolver falls back to all_tasks). So a
-           no-eligible here means those scoped tasks exist but are blocked /
-           awaiting verification — not a scope lock to clear. *)
-        " Scoped tasks exist but are blocked or awaiting verification; resolve those blockers."
+        (* Scope only stays in [active_goal_ids] mode when a claim-pool task is
+           linked to the goal (otherwise the resolver falls back to all_tasks).
+           A no-eligible result therefore means the remaining scoped candidates
+           were excluded by the explicit filter, not that a hidden gate owns
+           their admission. *)
+        " Scoped tasks exist but the explicit task filter excluded them."
       | Keeper_runtime_contract.All_tasks
       | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks -> ""
     in
@@ -243,16 +240,10 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
       scope_hint
 ;;
 
-let no_eligible_blocker_summary
-      ~blocked_count
-      ~verification_blocked_count
-      ~scope_excluded_count
-  =
+let no_eligible_exclusion_summary ~scope_excluded_count =
   Printf.sprintf
-    "Diagnostics: goal_scope_or_filter=%d, verification=%d, blocked=%d."
+    "Diagnostics: goal_scope_or_filter=%d."
     scope_excluded_count
-    verification_blocked_count
-    blocked_count
 ;;
 
 
@@ -554,13 +545,12 @@ let handle_keeper_task_tool_with_outcome
             ~task_id:requested_task_id
             ()
         with
-        | Ok outcome ->
+        | Ok message ->
           Workspace.Claim_next_claimed
             { task_id = requested_task_id
             ; title = task.title
             ; priority = task.priority
-            ; released_task_id = None
-            ; message = outcome.message
+            ; message
             ; scope_widened = false
             }
         | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e)
@@ -637,8 +627,6 @@ let handle_keeper_task_tool_with_outcome
       | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Workspace.Claim_next_no_eligible
           { excluded_count
-          ; blocked_count
-          ; verification_blocked_count
           ; scope_excluded_count
           ; _
           } ->
@@ -649,16 +637,13 @@ let handle_keeper_task_tool_with_outcome
           "No eligible tasks%s. %s %s"
           (claim_scope_context_suffix ~meta claim_goal_scope)
           action
-          (no_eligible_blocker_summary
-             ~blocked_count
-             ~verification_blocked_count
-             ~scope_excluded_count)
+          (no_eligible_exclusion_summary ~scope_excluded_count)
       | Workspace.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claim_scope, claimed_task_fields =
       match result with
       | Workspace.Claim_next_claimed
-          { task_id; title; priority; released_task_id; scope_widened; _ } ->
+          { task_id; title; priority; scope_widened; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
           ( active_goal_scope_json ~meta ?matched_goal_id
               ~effective_mode:claim_goal_scope.mode
@@ -677,14 +662,10 @@ let handle_keeper_task_tool_with_outcome
                     ("priority", `Int priority);
                     ( "goal_id",
                       Json_util.string_opt_to_json matched_goal_id );
-                    ( "released_task_id",
-                      Json_util.string_opt_to_json released_task_id );
                   ] );
             ] )
       | Workspace.Claim_next_no_eligible
           { excluded_count
-          ; blocked_count
-          ; verification_blocked_count
           ; scope_excluded_count
           ; explicit_excluded_count
           ; claim_pool_candidate_count
@@ -692,8 +673,6 @@ let handle_keeper_task_tool_with_outcome
           ( active_goal_scope_json
               ~meta
               ~excluded_count
-              ~blocked_count
-              ~verification_blocked_count
               ~scope_excluded_count
               ~explicit_excluded_count
               ~claim_pool_candidate_count
@@ -711,8 +690,6 @@ let handle_keeper_task_tool_with_outcome
       match result with
       | Workspace.Claim_next_no_eligible
           { scope_excluded_count
-          ; blocked_count
-          ; verification_blocked_count
           ; _
           } ->
         let all_goals_excluded =
@@ -727,8 +704,6 @@ let handle_keeper_task_tool_with_outcome
                  { reason =
                      Keeper_tool_outcome.No_eligible_tasks
                        { scope_excluded_count
-                       ; blocked_count
-                       ; verification_blocked_count
                        ; all_goals_excluded
                        }
                  }) )

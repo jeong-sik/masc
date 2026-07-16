@@ -48,6 +48,8 @@ let runtime_entries =
     entry ~default:"52428800" "MASC_TELEMETRY_MAX_BYTES"
       "Telemetry JSONL byte cap. Positive values override; non-positive \
        disables byte-cap pruning.";
+    entry ~default:"60.0" "MASC_MAINTENANCE_PULSE_INTERVAL_SEC"
+      "Maintenance Pulse interval for orphan observation and channel dedup";
   ]
 
 let rate_limiting_entries =
@@ -596,12 +598,6 @@ let sse_entries =
       "Per-client SSE event stream capacity (clamped 8-1024)";
   ]
 
-let task_entries =
-  [
-    entry ~default:"3600.0" "MASC_CLAIM_TTL_SECONDS"
-      "Maximum time a task stays claimed without heartbeat before auto-release (seconds)";
-  ]
-
 let telemetry_entries =
   [
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
@@ -688,16 +684,6 @@ let worker_runtime_entries =
       "Host MCP base URL for worker runtime; None when unset";
   ]
 
-let zombie_cleanup_entries =
-  [
-    entry ~default:"3600.0" "MASC_KEEPER_ZOMBIE_THRESHOLD_SEC"
-      "Threshold for keeper agents zombie detection (1 hour grace)";
-    entry ~default:"60.0" "MASC_ZOMBIE_CLEANUP_INTERVAL_SEC"
-      "Cleanup loop interval for zombie detection (seconds)";
-    entry ~default:"300.0" "MASC_ZOMBIE_THRESHOLD_SEC"
-      "Threshold for considering a resource as zombie (seconds)";
-  ]
-
 let all_categories () =
   [
     category "server"
@@ -707,7 +693,7 @@ let all_categories () =
     category "transport" transport_entries;
     category "storage" (storage_entries @ cache_entries @ memory_entries @ board_entries);
     category "runtime"
-      (runtime_entries @ task_entries
+      (runtime_entries
        @ message_gc_entries @ internal_timer_entries
        @ timeout_entries @ sse_entries @ telemetry_entries
        @ tool_entries);
@@ -733,9 +719,7 @@ let all_categories () =
       (operator_entries @ orchestrator_entries);
     category "channel" channel_gate_entries;
     category "process"
-      (shutdown_entries
-       @ cancellation_entries @ zombie_cleanup_entries @ lock_entries
-       );
+      (shutdown_entries @ cancellation_entries @ lock_entries);
     category "worker" (worker_entries @ worker_runtime_entries);
     category "web_search" web_search_entries;
     category "session" (session_entries @ tempo_entries);

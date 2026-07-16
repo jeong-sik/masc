@@ -484,6 +484,85 @@ let test_list_posts_with_sort () =
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
 
+let board_observation_meta name =
+  match
+    Keeper_meta_json_parse.meta_of_json
+      (`Assoc
+        [ "name", `String name
+        ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+        ; "trace_id", `String ("trace-" ^ name)
+        ; "sandbox_profile", `String "local"
+        ; "network_mode", `String "inherit"
+        ])
+  with
+  | Ok meta -> meta
+  | Error message -> Alcotest.failf "board observation meta failed: %s" message
+
+let test_first_board_observation_starts_at_current_head () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "cursor-bootstrap" in
+  let meta = board_observation_meta keeper_name in
+  ignore (Keeper_registry.register ~base_path keeper_name meta);
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.unregister ~base_path keeper_name)
+    (fun () ->
+       let old_post =
+         match
+           Board_dispatch.create_post
+             ~author:"external-author"
+             ~content:("@" ^ keeper_name ^ " historical post must not replay")
+             ~post_kind:Board.Human_post
+             ()
+         with
+         | Ok post -> post
+         | Error error -> Alcotest.fail (Board.show_board_error error)
+       in
+       let events, new_count, mention_count =
+         Keeper_world_observation.collect_board_events ~base_path ~meta
+       in
+       Alcotest.(check int)
+         "historical events are not replayed"
+         0
+         (List.length events);
+       Alcotest.(check int) "historical post is not counted as new" 0 new_count;
+       Alcotest.(check int) "historical mention is not counted" 0 mention_count;
+       let cursor_ts, cursor_post_id =
+         Keeper_registry.get_board_cursor ~base_path keeper_name
+       in
+       Alcotest.(check (float 0.0))
+         "cursor starts at exact current Board head"
+         old_post.updated_at
+         cursor_ts;
+       Alcotest.(check (option string))
+         "cursor records current head post id"
+         (Some (Board.Post_id.to_string old_post.id))
+         cursor_post_id;
+       Unix.sleepf 0.01;
+       let new_post =
+         match
+           Board_dispatch.create_post
+             ~author:"external-author"
+             ~content:("@" ^ keeper_name ^ " new post must be observed")
+             ~post_kind:Board.Human_post
+             ()
+         with
+         | Ok post -> post
+         | Error error -> Alcotest.fail (Board.show_board_error error)
+       in
+       let events, new_count, mention_count =
+         Keeper_world_observation.collect_board_events ~base_path ~meta
+       in
+       Alcotest.(check int) "new event is observed once" 1 (List.length events);
+       Alcotest.(check int) "new post count" 1 new_count;
+       Alcotest.(check int) "new mention count" 1 mention_count;
+       match events with
+       | [ event ] ->
+         Alcotest.(check string)
+           "new event id"
+           (Board.Post_id.to_string new_post.id)
+           event.Keeper_world_observation.post_id
+       | _ -> Alcotest.fail "expected exactly one new Board event")
+
 let test_recent_sort_bypasses_hot_cutoff () =
   let create_post_exn ~author ~content =
     match
@@ -570,43 +649,6 @@ let test_list_posts_with_filters () =
   Alcotest.(check int) "exclude both" 1 (List.length human_only);
   Alcotest.(check string) "human remains" "filter-human"
     (human_only |> List.hd |> fun (p : Board.post) -> Board.Agent_id.to_string p.author)
-
-let test_keeper_without_cursor_observes_board_origin () =
-  let base_path = Sys.getenv "MASC_BASE_PATH" in
-  let keeper_name = "bootstrap-keeper" in
-  let created =
-    match
-      Board_dispatch.create_post
-        ~author:"external-author"
-        ~content:("@" ^ keeper_name ^ " inspect the existing Board history")
-        ~post_kind:Board.Human_post
-        ()
-    with
-    | Ok post -> post
-    | Error error -> Alcotest.fail (Board.show_board_error error)
-  in
-  let origin_post = { created with created_at = 1.0; updated_at = 1.0 } in
-  (match Board.append_post origin_post with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Board.show_board_error error));
-  Board.reset_global_for_test ();
-  Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
-  let events, new_count, mention_count =
-    Keeper_world_observation.collect_board_events_without_advancing_cursor
-      ~base_path
-      ~meta:(keeper_meta keeper_name)
-  in
-  Alcotest.(check int) "origin post counted" 1 new_count;
-  Alcotest.(check int) "origin mention counted" 1 mention_count;
-  match events with
-  | [ (event : Keeper_world_observation.pending_board_event) ] ->
-    Alcotest.(check string)
-      "origin post delivered"
-      (Board.Post_id.to_string created.id)
-      event.post_id;
-    Alcotest.(check (float 0.0)) "persisted origin timestamp" 1.0 event.updated_at
-  | _ -> Alcotest.failf "expected one origin event, got %d" (List.length events)
 
 let test_list_posts_matches_comment_author () =
   let matching_post =
@@ -1886,11 +1928,13 @@ let () =
       Alcotest.test_case "negative list limit" `Quick
         (with_eio test_list_posts_negative_limit_returns_empty);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
+      Alcotest.test_case
+        "first observation starts at current head"
+        `Quick
+        (with_eio test_first_board_observation_starts_at_current_head);
       Alcotest.test_case "recent bypasses hot cutoff" `Quick
         (with_eio test_recent_sort_bypasses_hot_cutoff);
       Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
-      Alcotest.test_case "keeper starts at Board origin" `Quick
-        (with_eio test_keeper_without_cursor_observes_board_origin);
       Alcotest.test_case "comment author filter" `Quick
         (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "literal wildcard filter" `Quick

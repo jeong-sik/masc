@@ -515,21 +515,41 @@ let runtime_id_and_branch state =
 let build_presence_snapshot state =
   let base = base_path_of_state state in
   let runtime_id, branch = runtime_id_and_branch state in
+  let config = Mcp_server.workspace_config state in
   let entries =
-    let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
-    List.map
-      (fun (a : Client_identity.t) ->
-         `Assoc
-           [ "keeper_id", `String a.Client_identity.agent_name
-           ; "workspace_label", `String (Filename.basename base)
-           ; "branch", `String branch
-           ; "role", `String "keeper"
-           ; "status", `String "active"
-           ; ( "last_seen_ms"
-             , `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
-             )
-           ])
-      agents
+    Workspace.get_active_agents config
+    |> List.filter_map (fun (agent : Masc_domain.agent) ->
+         let keeper_name =
+           Option.bind agent.meta (fun meta -> meta.Masc_domain.keeper_name)
+         in
+         let presence_status =
+           match agent.status with
+           | Masc_domain.Active | Masc_domain.Busy -> Some "active"
+           | Masc_domain.Listening -> Some "idle"
+           | Masc_domain.Inactive -> None
+         in
+         match keeper_name, presence_status with
+         | None, _ | _, None -> None
+         | Some keeper_id, Some status ->
+           let last_seen_ms =
+             match Masc_domain.parse_iso8601_opt agent.last_seen with
+             | Some seconds -> Int64.of_float (seconds *. 1000.0)
+             | None ->
+               Log.Server.warn
+                 "IDE presence mapped invalid last_seen timestamp to 0 agent=%s value=%S"
+                 agent.name
+                 agent.last_seen;
+               0L
+           in
+           Some
+             (`Assoc
+               [ "keeper_id", `String keeper_id
+               ; "workspace_label", `String (Filename.basename base)
+               ; "branch", `String branch
+               ; "role", `String "keeper"
+               ; "status", `String status
+               ; "last_seen_ms", `Intlit (Int64.to_string last_seen_ms)
+               ]))
   in
   `Assoc
     [ "runtime_id", `String runtime_id
@@ -575,14 +595,15 @@ let add_routes router =
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
-         let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
+         let config = Mcp_server.workspace_config state in
+         let agents = Workspace.get_active_agents config in
          let entries =
            List.map
-             (fun (a : Client_identity.t) ->
+             (fun (agent : Masc_domain.agent) ->
                 `Assoc
-                  [ "name", `String a.Client_identity.agent_name
-                  ; "status", `String "active"
-                  ; "current_task", `Null
+                  [ "name", `String agent.name
+                  ; "status", `String (Masc_domain.agent_status_to_string agent.status)
+                  ; "current_task", Json_util.string_opt_to_json agent.current_task
                   ; "model", `Null
                   ])
              agents

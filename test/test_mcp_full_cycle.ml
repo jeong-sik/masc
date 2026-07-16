@@ -101,29 +101,6 @@ let test_capability_filtering () =
   check bool "has search" true (Client_identity.has_capability id "search");
   check bool "no admin" false (Client_identity.has_capability id "admin")
 
-(** Test: Stale agent cleanup *)
-let test_stale_agent_cleanup () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let reg = Client_identity.Registry.create () in
-  
-  (* Active agent *)
-  let active = Fixtures.identity_for "active-agent" in
-  let _ = Client_identity.Registry.register reg active in
-  
-  (* Stale agent (last_seen in the past) *)
-  let stale = Client_identity.({
-    (Fixtures.identity_for "stale-agent") with
-    last_seen = Unix.gettimeofday () -. 3600.0;  (* 1 hour ago *)
-  }) in
-  let _ = Client_identity.Registry.register reg stale in
-  
-  check int "total count" 2 (Client_identity.Registry.count reg);
-  
-  let active_list = Client_identity.Registry.list_active reg ~within_seconds:60.0 in
-  check int "active count" 1 (List.length active_list);
-  check string "active is correct" "active-agent" (List.hd active_list).agent_name
-
 (** Test: Concurrent registration safety *)
 let test_concurrent_registration () =
   Eio_main.run @@ fun env ->
@@ -171,7 +148,6 @@ let () =
       test_case "capability_filtering" `Quick test_capability_filtering;
     ];
     "lifecycle", [
-      test_case "stale_cleanup" `Quick test_stale_agent_cleanup;
       test_case "concurrent_registration" `Quick test_concurrent_registration;
       test_case "session_key_stability" `Quick test_session_key_stability;
     ];

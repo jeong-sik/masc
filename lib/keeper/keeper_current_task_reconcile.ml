@@ -5,29 +5,6 @@
     Keeper_agent_tool_surface, so lifecycle transitions can update keeper meta
     without creating a keeper tool-surface dependency cycle. *)
 
-let resolved_agent_names_result ~(config : Workspace.config) ~(agent_name : string) =
-  try
-    let actual_name = Workspace.resolve_agent_name config agent_name in
-    Ok ([ agent_name; actual_name ] |> List.sort_uniq String.compare)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printexc.to_string exn)
-;;
-
-let resolved_agent_names ~(config : Workspace.config) ~(agent_name : string) =
-  match resolved_agent_names_result ~config ~agent_name with
-  | Ok names -> names
-  | Error detail ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ReconcileFailures)
-        ~labels:[("keeper", agent_name); ("phase", "resolve_agent")]
-        ();
-      Log.Keeper.warn
-        "resolve_agent_name failed while reconciling current task for %s: %s"
-        agent_name
-        detail;
-      [ agent_name ]
-
 let task_id_of_owned_active_task ~(keeper_name : string) (task : Masc_domain.task) =
   match Keeper_id.Task_id.of_string task.id with
   | Ok task_id -> Some task_id
@@ -52,9 +29,8 @@ type owned_active_tasks_snapshot =
   ; backlog_version : int
   }
 
-let owned_active_tasks_snapshot_for_names ~(config : Workspace.config)
-    ~(meta : Keeper_meta_contract.keeper_meta) names =
-  let matches assignee = List.mem assignee names in
+let owned_active_tasks_snapshot_for_meta ~(config : Workspace.config)
+    ~(meta : Keeper_meta_contract.keeper_meta) =
   try
     match Workspace_backlog.read_backlog_r config with
     | Error message ->
@@ -73,7 +49,7 @@ let owned_active_tasks_snapshot_for_names ~(config : Workspace.config)
           match task.task_status with
           | Masc_domain.Claimed { assignee; _ }
           | Masc_domain.InProgress { assignee; _ }
-            when matches assignee ->
+            when String.equal assignee meta.agent_name ->
             task_id_of_owned_active_task ~keeper_name:meta.name task
             |> Option.map (fun task_id -> { task_id; task })
           | Masc_domain.Claimed _
@@ -97,46 +73,18 @@ let owned_active_tasks_snapshot_for_names ~(config : Workspace.config)
       message;
     Error message
 
-let owned_active_tasks_for_names ~config ~meta names =
-  owned_active_tasks_snapshot_for_names ~config ~meta names
+let owned_active_tasks_for_meta ~config ~meta =
+  owned_active_tasks_snapshot_for_meta ~config ~meta
   |> Result.map (fun snapshot -> snapshot.tasks)
-
-let owned_active_tasks_for_meta ~(config : Workspace.config)
-    ~(meta : Keeper_meta_contract.keeper_meta) =
-  let names = resolved_agent_names ~config ~agent_name:meta.agent_name in
-  owned_active_tasks_for_names ~config ~meta names
-;;
 
 let owned_active_tasks_for_meta_strict ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
-  match resolved_agent_names_result ~config ~agent_name:meta.agent_name with
-  | Error detail ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ReconcileFailures)
-      ~labels:[ "keeper", meta.name; "phase", "shutdown_resolve_agent" ]
-      ();
-    Log.Keeper.warn
-      ~keeper_name:meta.name
-      "shutdown task ownership resolution failed: %s"
-      detail;
-    Error detail
-  | Ok names -> owned_active_tasks_for_names ~config ~meta names
+  owned_active_tasks_for_meta ~config ~meta
 ;;
 
 let owned_active_tasks_snapshot_for_meta_strict ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
-  match resolved_agent_names_result ~config ~agent_name:meta.agent_name with
-  | Error detail ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ReconcileFailures)
-      ~labels:[ "keeper", meta.name; "phase", "shutdown_resolve_agent" ]
-      ();
-    Log.Keeper.warn
-      ~keeper_name:meta.name
-      "shutdown task ownership resolution failed: %s"
-      detail;
-    Error detail
-  | Ok names -> owned_active_tasks_snapshot_for_names ~config ~meta names
+  owned_active_tasks_snapshot_for_meta ~config ~meta
 ;;
 
 let active_status_rank = function
@@ -252,36 +200,12 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
          | None -> "(cleared)");
       updated_meta
 
-let keeper_name_candidates ~(config : Workspace.config) ~(agent_name : string) =
-  resolved_agent_names ~config ~agent_name
-  |> List.filter_map Keeper_identity.canonical_keeper_name
-  |> List.sort_uniq String.compare
-
 let sync_current_task_id_for_agent_name ~(config : Workspace.config) ~agent_name =
-  let candidates = keeper_name_candidates ~config ~agent_name in
-  let entry_from_candidates =
-    candidates
-    |> List.find_map (fun name ->
-         match Keeper_registry.get ~base_path:config.base_path name with
-         | Some entry -> Some entry
-         | None -> None)
-  in
-  let entry =
-    match entry_from_candidates with
-    | Some _ as entry -> entry
-    | None ->
-      Keeper_registry.all ~base_path:config.base_path ()
-      |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
-           String.equal entry.meta.agent_name agent_name)
-  in
-  match entry with
+  match
+    Keeper_registry.all ~base_path:config.base_path ()
+    |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
+         String.equal entry.meta.agent_name agent_name)
+  with
   | Some entry ->
     ignore (sync_current_task_id_from_backlog ~config entry.meta : Keeper_meta_contract.keeper_meta)
-  | None ->
-    candidates
-    |> List.find_map (fun name ->
-         match Keeper_meta_store.read_meta config name with
-         | Ok (Some meta) -> Some meta
-         | Ok None | Error _ -> None)
-    |> Option.iter (fun meta ->
-         ignore (sync_current_task_id_from_backlog ~config meta : Keeper_meta_contract.keeper_meta))
+  | None -> ()

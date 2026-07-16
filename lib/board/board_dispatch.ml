@@ -482,6 +482,10 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
       in
       Board.take limit filtered
 
+let current_post_cursor () =
+  match backend () with
+  | Jsonl store -> Board.current_post_cursor store
+
 let get_comments ~post_id =
   match backend () with
   | Jsonl store -> Board.get_comments store ~post_id

@@ -202,28 +202,6 @@ let record_task_completion_path ~path ~contract_state ~agent_name =
     ()
 ;;
 
-(* #10421: implicit auto-release rate from [task_claim_next]. *)
-let task_auto_release_metric = "masc_task_auto_release_total"
-
-let () =
-  Otel_metric_store.register_counter
-    ~name:task_auto_release_metric
-    ~help:
-      "Total implicit task auto-releases triggered by [task_claim_next] (mid-work churn \
-       or just-claimed churn). Labels: agent_name, from_status (separates [InProgress -> \
-       Todo] from [Claimed -> Todo]). Field log motivation: observed 179% release/claim \
-       ratio with task hot-potatoed up to 5x in one day (#10421). Cardinality bounded at \
-       ~fleet x 2."
-    ()
-;;
-
-let record_task_auto_release ~agent_name ~from_status =
-  Otel_metric_store.inc_counter
-    task_auto_release_metric
-    ~labels:[ "agent_name", agent_name; "from_status", from_status ]
-    ()
-;;
-
 let record_workspace_broadcast ~msg_type ~elapsed_s =
   Otel_metric_store.observe_histogram
     Otel_metric_store.metric_workspace_broadcast_duration
@@ -384,7 +362,6 @@ let install () =
   Atomic.set Workspace_hooks.tool_assigned_fn Tool_assignment_telemetry.emit_assigned;
 
   Atomic.set Workspace_hooks.task_completion_path_observed_fn record_task_completion_path;
-  Atomic.set Workspace_hooks.task_auto_release_observed_fn record_task_auto_release;
   Atomic.set Workspace_hooks.workspace_broadcast_observed_fn record_workspace_broadcast;
   Atomic.set File_lock_eio.on_lock_attempt_fn record_file_lock_attempt;
   Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry;

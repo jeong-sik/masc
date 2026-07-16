@@ -642,16 +642,34 @@ let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   let active_keepers =
     try
-      List.map
-        (fun (a : Client_identity.t) ->
-           `Assoc
-             [ "keeper_id", `String a.Client_identity.agent_name
-             ; "last_seen_ms", `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
-             ])
-        (Client_registry_eio.list_active ~within_seconds:300.0 ())
+      Workspace.get_active_agents config
+      |> List.filter_map (fun (agent : Masc_domain.agent) ->
+           match Option.bind agent.meta (fun meta -> meta.Masc_domain.keeper_name) with
+           | None -> None
+           | Some keeper_name ->
+             let last_seen_ms =
+               match Masc_domain.parse_iso8601_opt agent.last_seen with
+               | Some seconds -> Int64.of_float (seconds *. 1000.0)
+               | None ->
+                 Log.Server.warn
+                   "dashboard IDE presence mapped invalid last_seen timestamp to 0 \
+                    agent=%s value=%S"
+                   agent.name
+                   agent.last_seen;
+                 0L
+             in
+             Some
+               (`Assoc
+                 [ "keeper_id", `String keeper_name
+                 ; "last_seen_ms", `Intlit (Int64.to_string last_seen_ms)
+                 ]))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _exn -> []
+    | exn ->
+      Log.Server.warn
+        "client registry active projection failed: %s"
+        (Printexc.to_string exn);
+      []
   in
   let events_count = List.length events in
   let cursors_count = List.length cursors in

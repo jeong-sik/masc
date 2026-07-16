@@ -416,7 +416,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'heartbeat_failures',
   'turn_failures',
   'exception',
-  'stale_fleet_batch',
   'awaiting_operator',
   'awaiting_sandbox_egress',
   'supervisor_paused',
@@ -1280,7 +1279,6 @@ export interface Keeper {
     last_seen?: string
     last_seen_ago_s?: number
     capabilities?: string[]
-    is_zombie?: boolean
     [key: string]: unknown
   }
   // Metrics time-series (from backend metrics_series)

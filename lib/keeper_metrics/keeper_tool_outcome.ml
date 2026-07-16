@@ -10,16 +10,12 @@ and no_progress_reason =
 
 and claim_scope_exclusions = {
   scope_excluded_count : int;
-  blocked_count : int;
-  verification_blocked_count : int;
   all_goals_excluded : bool;
 }
 
 let claim_scope_exclusions_to_json (e : claim_scope_exclusions) : Yojson.Safe.t =
   `Assoc
     [ "scope_excluded_count", `Int e.scope_excluded_count
-    ; "blocked_count", `Int e.blocked_count
-    ; "verification_blocked_count", `Int e.verification_blocked_count
     ; "all_goals_excluded", `Bool e.all_goals_excluded
     ]
 ;;
@@ -77,8 +73,6 @@ let of_json (json : Yojson.Safe.t) : t option =
                      { reason =
                          No_eligible_tasks
                            { scope_excluded_count = get_int "scope_excluded_count"
-                           ; blocked_count = get_int "blocked_count"
-                           ; verification_blocked_count = get_int "verification_blocked_count"
                            ; all_goals_excluded = get_bool "all_goals_excluded"
                            }
                      })

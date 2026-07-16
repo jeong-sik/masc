@@ -80,8 +80,8 @@ val read_json_result :
     local FS when the backend has no key for this path. *)
 val read_text : config -> string -> string
 
-(** [true] iff the FileSystem backend should mirror writes to
-    local disk (single-process configs only). *)
+(** [true] iff the authoritative backend should also mirror writes to the
+    local filesystem. *)
 val should_dual_write_local : config -> bool
 
 (** Backend-routed JSON write; respects [should_dual_write_local]. *)
@@ -89,6 +89,15 @@ val write_json : config -> string -> Yojson.Safe.t -> unit
 
 (** Result-returning variant that reports backend and local mirror failures. *)
 val write_json_result : config -> string -> Yojson.Safe.t -> (unit, string) result
+
+type write_json_commit = { mirror_error : string option }
+
+(** Commit-aware write result. [Error] means the authoritative backend/local
+    write did not commit. For the Memory backend, a failed filesystem mirror
+    is returned as [Ok { mirror_error = Some _ }] because the backend mutation
+    is already committed. *)
+val write_json_commit_result :
+  config -> string -> Yojson.Safe.t -> (write_json_commit, string) result
 
 val write_text_local : string -> string -> (unit, string) result
 val write_text : config -> string -> string -> unit

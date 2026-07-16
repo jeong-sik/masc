@@ -294,33 +294,19 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
-  it('accepts a masc/task_claimed event with auto-released task ids', () => {
+  it('accepts a masc/task_claimed event', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'masc/task_claimed',
       task_id: 'task-1',
       agent_name: 'claude',
-      auto_released_task_ids: ['task-0'],
-      timestamp: 1_712_000_000,
-    })
-    expect(r.success).toBe(true)
-  })
-
-  it('accepts a masc/task_claimed event with no auto-released task ids', () => {
-    const r = SSEMessageSchema.safeParse({
-      type: 'masc/task_claimed',
-      task_id: 'task-1',
-      agent_name: 'claude',
-      auto_released_task_ids: [],
       timestamp: 1_712_000_000,
     })
     expect(r.success).toBe(true)
   })
 
   it.each([
-    { type: 'masc/task_claimed', agent_name: 'claude', auto_released_task_ids: [] },
-    { type: 'masc/task_claimed', task_id: 'task-1', auto_released_task_ids: [] },
-    { type: 'masc/task_claimed', task_id: 'task-1', agent_name: 'claude', auto_released_task_ids: 'not-an-array' },
-    { type: 'masc/task_claimed', task_id: 'task-1', agent_name: 'claude', auto_released_task_ids: [1, 2] },
+    { type: 'masc/task_claimed', agent_name: 'claude' },
+    { type: 'masc/task_claimed', task_id: 'task-1' },
   ])('rejects a malformed masc/task_claimed event: %o', value => {
     expect(SSEMessageSchema.safeParse(value).success).toBe(false)
   })
@@ -452,7 +438,6 @@ describe('parseSSEMessage', () => {
       type: 'masc/task_claimed',
       task_id: 'task-1',
       agent_name: 'claude',
-      auto_released_task_ids: [],
       timestamp: 1_712_000_000,
     })
     expect(msg).not.toBeNull()

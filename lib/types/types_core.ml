@@ -525,7 +525,6 @@ type task_contract = {
   verify_gate_evidence : string list; [@default []]
   evidence_claims : Evidence_claim.t list; [@default []]
   (* RFC-0199 Phase B: typed deterministic completion criteria (see .mli). *)
-  stale_claim_timeout_sec : int; [@default 0]
   links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
 
@@ -962,7 +961,6 @@ type claim_next_result =
       task_id : string;
       title : string;
       priority : int;
-      released_task_id : string option;  (** Legacy field; claim_next no longer auto-releases active work. *)
       message : string;
       scope_widened : bool;
           (** True when goal-scope was widened to all_tasks because no scoped
@@ -973,8 +971,6 @@ type claim_next_result =
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
       { excluded_count : int
-      ; blocked_count : int
-      ; verification_blocked_count : int
       ; scope_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int

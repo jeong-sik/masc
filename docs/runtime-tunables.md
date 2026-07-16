@@ -114,12 +114,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_DOMAIN_POOL_ENABLED` | feature_flag | n/a | n/a | 12 | Historical keeper Domain_pool pilot flag. The supervisor still reads this for observability, but keepalive fibers rem... |
 | `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 17 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
 
-## Env_config_oas_bridge (1 knobs; typed classification 0/0)
-
-| Env var | Kind | Category | Ops class | Line | Doc |
-|---|---|---|---|---|---|
-| `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 66 |  |
-
 ## Env_config_runtime (82 knobs; typed classification 4/66)
 
 | Env var | Kind | Category | Ops class | Line | Doc |

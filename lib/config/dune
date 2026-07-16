@@ -11,7 +11,6 @@
   env_config_keeper
   env_config_memory
   env_config_keeper_supervisor
-  env_config_oas_bridge
   env_config_runtime
   env_config_sandbox
   env_config_slack

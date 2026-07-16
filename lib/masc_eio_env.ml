@@ -2,9 +2,9 @@
     Set once per OCaml domain via {!init}.
 
     The switch and net handle are needed by OAS provider completions
-    which use cohttp-eio for HTTP transport.  They are stored in
-    [Domain.DLS] only; an uninitialized domain must call {!init} itself
-    or fail closed.  Falling back to another domain's [Eio.Switch.t] or
+    which use cohttp-eio for HTTP transport. They are stored in
+    [Domain.DLS] only; a consumer that needs them must call {!init} in its
+    own domain. Falling back to another domain's [Eio.Switch.t] or
     [Eio.Net.t] would let a worker domain borrow handles whose lifetime is
     tied to the originating domain's switch, which is unsafe.
 

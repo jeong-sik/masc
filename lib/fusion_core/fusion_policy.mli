@@ -34,8 +34,6 @@ type judge_spec =
   ; jmax_output_tokens : int option
       (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초). *)
-  ; jmax_timeout_s : float option
-      (** 적응형 타임아웃 확장 상한. None이면 예산 내에서 factor만큼 확장. *)
   }
 [@@deriving show, eq]
 
@@ -58,8 +56,6 @@ type preset =
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
-  ; adaptive_timeout_factor : float
-      (** 1차 심판 타임아웃 적응형 확장 계수. 1.0=확장 안 함. *)
   ; fallback_judge_model : string option
       (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
   }
@@ -151,22 +147,6 @@ val panel_outer_timeout_of : panel_group list -> float
     단일 그룹이면 [req_web_tools || group.web_tools] (오늘과 byte-identical). *)
 val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
 
-(** [adaptive_timeout_enabled preset] — preset의 [adaptive_timeout_factor]가 확장
-    임계값(1.0)을 넘는가. callers(orchestrator)가 float equality 비교 없이 typed bool로
-    adaptive 재시도 분기를 판정한다. *)
-val adaptive_timeout_enabled : preset -> bool
-
-(** 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-    [factor <= adaptive_extension_threshold](= 1.0)이면 [base_s]를 반환하고,
-    [already_timed_out]이고 [factor > adaptive_extension_threshold]이면 [base_s *.
-    factor]를 [max_s]로만 상한해 확장한다. *)
-val adjust_judge_timeout
-  :  base_s:float
-  -> max_s:float option
-  -> factor:float
-  -> already_timed_out:bool
-  -> float
-
 (** RFC-0280: 검증을 통과한 preset (Parse, don't validate). [t = private preset]이라
     필드는 자유롭게 읽되([preset] 또는 coercion [(vp :> preset)]) 검증 없이 생성할 수
     없다 → invalid preset이 게이트·orchestrator로 흐를 수 없다. 검증 SSOT는
@@ -186,11 +166,9 @@ module Validated_preset : sig
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_adaptive_factor of float
-        (** [adaptive_timeout_factor]가 1.0 미만. *)
 
   (** 검증 순서: non-empty models → prompt → judge → 정체성 중복 → max_output_tokens →
-      1차 심판 prompt/정체성/max_output_tokens → timeout 예산/계수.
+      1차 심판 prompt/정체성/max_output_tokens → meta timeout.
       통과 시 [Ok vp], 첫 위반에서 [Error invalid].
       config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result

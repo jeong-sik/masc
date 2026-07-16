@@ -169,7 +169,6 @@ let run_fallback_judge
       ; jweb_tools = judge_web_tools
       ; jmax_output_tokens = preset.Fusion_policy.judge_max_output_tokens
       ; jtimeout_s = preset.Fusion_policy.judge_timeout_s
-      ; jmax_timeout_s = None
       }
     in
     let id = Fusion_policy.panelist_id ~label:j.jlabel ~model:j.jmodel in
@@ -178,7 +177,6 @@ let run_fallback_judge
         ~sw
         ~net
         ~timeout_s:j.jtimeout_s
-        ?max_tokens:j.jmax_output_tokens
         ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
         ~judge_model:model
         ~question

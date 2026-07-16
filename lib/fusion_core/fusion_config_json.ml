@@ -11,10 +11,6 @@ let opt_int : int option -> Yojson.Safe.t = function
   | None -> `Null
   | Some n -> `Int n
 
-let opt_float : float option -> Yojson.Safe.t = function
-  | None -> `Null
-  | Some f -> `Float f
-
 let opt_string : string option -> Yojson.Safe.t = function
   | None -> `Null
   | Some s -> `String s
@@ -40,7 +36,6 @@ let judge_spec_to_yojson (j : Fusion_policy.judge_spec) : Yojson.Safe.t =
     ; ("web_tools", `Bool j.Fusion_policy.jweb_tools)
     ; ("max_output_tokens", opt_int j.Fusion_policy.jmax_output_tokens)
     ; ("timeout_s", `Float j.Fusion_policy.jtimeout_s)
-    ; ("max_timeout_s", opt_float j.Fusion_policy.jmax_timeout_s)
     ]
 
 let preset_to_yojson (p : Fusion_policy.preset) : Yojson.Safe.t =
@@ -53,8 +48,6 @@ let preset_to_yojson (p : Fusion_policy.preset) : Yojson.Safe.t =
     ; ("judge_max_output_tokens", opt_int p.Fusion_policy.judge_max_output_tokens)
     ; ("meta_timeout_s", `Float p.Fusion_policy.meta_timeout_s)
     ; ("judges", `List (List.map judge_spec_to_yojson p.Fusion_policy.judges))
-    ; ( "adaptive_timeout_factor"
-      , `Float p.Fusion_policy.adaptive_timeout_factor )
     ; ("fallback_judge_model", opt_string p.Fusion_policy.fallback_judge_model)
     ]
 

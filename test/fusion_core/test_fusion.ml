@@ -46,7 +46,6 @@ let base_policy : Fusion_policy.t =
           ; judge_max_output_tokens = None
           ; meta_timeout_s = 300.0
           ; judges = []
-          ; adaptive_timeout_factor = 1.0
           ; fallback_judge_model = None
           }
       ]
@@ -711,7 +710,6 @@ let test_config_two_judges_not_staged_eligible () =
     ; jweb_tools = false
     ; jmax_output_tokens = None
     ; jtimeout_s = 300.0
-    ; jmax_timeout_s = None
     }
   in
   let judges =
@@ -815,7 +813,7 @@ let test_config_disabled_with_preset () =
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
     ?(judges = [])
     ?(meta_timeout_s = 300.0)
-    ?(adaptive_timeout_factor = 1.0) ?(fallback_judge_model = None)
+    ?(fallback_judge_model = None)
     (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
   ; panels
@@ -825,7 +823,6 @@ let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthe
   ; judge_max_output_tokens = None
   ; meta_timeout_s
   ; judges
-  ; adaptive_timeout_factor
   ; fallback_judge_model
   }
 
@@ -878,7 +875,6 @@ let base_judge : Fusion_policy.judge_spec =
   ; jweb_tools = false
   ; jmax_output_tokens = None
   ; jtimeout_s = 300.0
-  ; jmax_timeout_s = None
   }
 
 (* judges=[]면 (simple/refine/conditional preset) 기존과 동일하게 유효 = byte-identity. *)
@@ -1341,76 +1337,7 @@ let test_panels_unavailable_failure () =
   Alcotest.(check bool) "not a timeout (no fallback judge trigger)" false
     (judge_failure_is_timeout failure)
 
-(* --- FUSION adaptive timeout / P0 hardening (RFC-0284-FUSION-P0) --- *)
-
-let adaptive_toml =
-  {|
-[fusion]
-enabled = true
-default_preset = "adaptive"
-[fusion.presets.adaptive]
-judge = "meta"
-judge_system_prompt = "reconcile"
-judge_timeout_s = 120.0
-meta_timeout_s = 90.0
-adaptive_timeout_factor = 2.0
-fallback_judge_model = "fallback-model"
-[[fusion.presets.adaptive.panels]]
-panel = ["p1"]
-panel_system_prompt = "answer"
-[[fusion.presets.adaptive.judges]]
-model = "judge-a"
-system_prompt = "lens A"
-timeout_s = 100.0
-max_timeout_s = 180.0
-[[fusion.presets.adaptive.judges]]
-model = "judge-b"
-system_prompt = "lens B"
-timeout_s = 110.0
-|}
-
-let test_config_adaptive_timeout_parse () =
-  match Fusion_config.of_toml (parse adaptive_toml) with
-  | Ok p ->
-    (match p.Fusion_policy.presets with
-     | [ vp ] ->
-       let preset = raw vp in
-       Alcotest.(check (float 0.001)) "meta_timeout_s" 90.0
-         preset.Fusion_policy.meta_timeout_s;
-       Alcotest.(check (float 0.001)) "adaptive_timeout_factor" 2.0
-         preset.Fusion_policy.adaptive_timeout_factor;
-       Alcotest.(check (option string)) "fallback_judge_model"
-         (Some "fallback-model")
-         preset.Fusion_policy.fallback_judge_model;
-       (match preset.Fusion_policy.judges with
-        | [ ja; _ ] ->
-          Alcotest.(check (float 0.001)) "ja timeout" 100.0 ja.Fusion_policy.jtimeout_s;
-          Alcotest.(check (option (float 0.001))) "ja max_timeout_s"
-            (Some 180.0)
-            ja.Fusion_policy.jmax_timeout_s
-        | _ -> Alcotest.fail "expected two judges")
-     | _ -> Alcotest.fail "expected exactly one preset")
-  | Error es ->
-    Alcotest.failf "expected Ok, got errors: %s"
-      (String.concat ", " (List.map Fusion_config.show_config_error es))
-
-let test_config_adaptive_timeout_defaults () =
-  match Fusion_config.of_toml (parse golden_single_group_toml) with
-  | Ok p ->
-    (match p.Fusion_policy.presets with
-     | [ vp ] ->
-       let preset = raw vp in
-       Alcotest.(check (float 0.001)) "meta_timeout_s defaults to judge_timeout_s"
-         preset.Fusion_policy.judge_timeout_s
-         preset.Fusion_policy.meta_timeout_s;
-       Alcotest.(check (float 0.001)) "adaptive_timeout_factor defaults to 1.0"
-         1.0
-         preset.Fusion_policy.adaptive_timeout_factor;
-       Alcotest.(check (option string)) "fallback_judge_model defaults to None"
-         None
-         preset.Fusion_policy.fallback_judge_model
-     | _ -> Alcotest.fail "expected one preset")
-  | Error _ -> Alcotest.fail "golden must parse Ok"
+(* --- Judge timeout observation and config validation. --- *)
 
 let test_config_invalid_meta_timeout () =
   let s =
@@ -1434,46 +1361,6 @@ meta_timeout_s = 0.0
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_meta_timeout"
 
-let test_config_invalid_adaptive_factor () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p"
-[fusion.presets.p]
-panel = ["a"]
-judge = "j"
-panel_system_prompt = "x"
-judge_system_prompt = "y"
-adaptive_timeout_factor = 0.5
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_adaptive_timeout_factor present" true
-      (List.exists
-         (function Fusion_config.Invalid_adaptive_timeout_factor _ -> true | _ -> false)
-         es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_adaptive_timeout_factor"
-
-let test_adjust_judge_timeout_disabled () =
-  Alcotest.(check (float 0.001)) "factor=1.0 returns base"
-    10.0
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~already_timed_out:false)
-
-let test_adjust_judge_timeout_extend () =
-  Alcotest.(check (float 0.001)) "extend capped by max_s"
-    15.0
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 15.0)
-       ~factor:2.0 ~already_timed_out:true)
-
-let test_adjust_judge_timeout_not_yet_timed_out () =
-  Alcotest.(check (float 0.001)) "not timed out uses base_s"
-    10.0
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 5.0)
-       ~factor:2.0 ~already_timed_out:false)
-
 let test_judge_error_node_timed_out () =
   let timeout_node =
     Fusion_types.Judge_failed
@@ -1496,14 +1383,6 @@ let test_validated_bad_meta_timeout () =
   with
   | Error (Fusion_policy.Validated_preset.Bad_meta_timeout 0.0) -> ()
   | _ -> Alcotest.fail "expected Bad_meta_timeout 0.0"
-
-let test_validated_bad_adaptive_factor () =
-  match
-    Fusion_policy.Validated_preset.of_preset
-      (mk_preset ~adaptive_timeout_factor:0.5 "bad-factor")
-  with
-  | Error (Fusion_policy.Validated_preset.Bad_adaptive_factor 0.5) -> ()
-  | _ -> Alcotest.fail "expected Bad_adaptive_factor 0.5"
 
 let () =
   Alcotest.run "fusion_core"
@@ -1553,13 +1432,7 @@ let () =
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ; Alcotest.test_case "judges_parse" `Quick test_config_judges_parse
         ; Alcotest.test_case "no_judges" `Quick test_config_no_judges
-        ; Alcotest.test_case "adaptive_timeout_parse" `Quick
-            test_config_adaptive_timeout_parse
-        ; Alcotest.test_case "adaptive_timeout_defaults" `Quick
-            test_config_adaptive_timeout_defaults
         ; Alcotest.test_case "invalid_meta_timeout" `Quick test_config_invalid_meta_timeout
-        ; Alcotest.test_case "invalid_adaptive_factor" `Quick
-            test_config_invalid_adaptive_factor
         ] )
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok
@@ -1577,8 +1450,6 @@ let () =
         ; Alcotest.test_case "judge_bad_max_output_tokens" `Quick
             test_validated_judge_bad_max_output_tokens
         ; Alcotest.test_case "bad_meta_timeout" `Quick test_validated_bad_meta_timeout
-        ; Alcotest.test_case "bad_adaptive_factor" `Quick
-            test_validated_bad_adaptive_factor
         ] )
     ; ( "staged_judge_groups"
       , [ Alcotest.test_case "exact_3x3" `Quick test_staged_judge_groups_exact_3x3
@@ -1592,12 +1463,6 @@ let () =
         ; Alcotest.test_case "multi_group" `Quick test_judge_args_multi_group
         ; Alcotest.test_case "outer_timeout_member_count_independent" `Quick
             test_panel_outer_timeout_member_count_independent
-        ] )
-    ; ( "adaptive_timeout"
-      , [ Alcotest.test_case "disabled" `Quick test_adjust_judge_timeout_disabled
-        ; Alcotest.test_case "extend" `Quick test_adjust_judge_timeout_extend
-        ; Alcotest.test_case "not_yet_timed_out" `Quick
-            test_adjust_judge_timeout_not_yet_timed_out
         ] )
     ; ( "judge_parse"
       , [ Alcotest.test_case "valid" `Quick test_judge_valid

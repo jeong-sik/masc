@@ -28,8 +28,6 @@ type judge_spec =
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부 *)
   ; jmax_output_tokens : int option  (** 출력 토큰 예산 override *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초) *)
-  ; jmax_timeout_s : float option
-      (** 적응형 타임아웃 확장 상한. None이면 예산 내에서 factor만큼 확장. *)
   }
 [@@deriving show, eq]
 
@@ -46,8 +44,6 @@ type preset =
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
-  ; adaptive_timeout_factor : float
-      (** 1차 심판 타임아웃 적응형 확장 계수. 1.0=확장 안 함. *)
   ; fallback_judge_model : string option
       (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
   }
@@ -214,32 +210,6 @@ let panel_outer_timeout_of (groups : panel_group list) =
 let judge_web_tools_of ~req_web_tools (groups : panel_group list) =
   req_web_tools || List.exists (fun (g : panel_group) -> g.web_tools) groups
 
-(* [adaptive_extension_threshold]는 adaptive 확장을 끄는
-   factor 값(config default 1.0; 검증이 >= 1.0을 강제). 1.0은 IEEE754에서 정확히
-   표현되지만, 의도를 명시하고 drift를 막기 named 상수로 둔다 — callers 도 float
-   equality 비교 대신 [adaptive_timeout_enabled]를 쓴다 (CLAUDE.md §Magic Number +
-   P2#6 float-equality-as-toggle 회피). *)
-let adaptive_extension_threshold = 1.0
-
-(* [adaptive_timeout_enabled preset] — preset의 factor가 확장 임계값을 넘는가. float
-   equality 대신 typed bool 토글로, callers(orchestrator)가 adaptive 재시도 분기를
-   판정한다. *)
-let adaptive_timeout_enabled (p : preset) =
-  p.adaptive_timeout_factor > adaptive_extension_threshold
-
-(* 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-   - factor <= [adaptive_extension_threshold] (또는 아직 타임아웃 안 됨): base_s 반환.
-   - already_timed_out && factor > [adaptive_extension_threshold]: base_s *. factor를
-     max_s로만 상한해 확장된 타임아웃을 반환. *)
-let adjust_judge_timeout ~base_s ~max_s ~factor ~already_timed_out : float =
-  if factor <= adaptive_extension_threshold || not already_timed_out
-  then base_s
-  else
-    let extended = base_s *. factor in
-    match max_s with
-    | Some m -> Float.min extended m
-    | None -> extended
-
 (* RFC-0280: 검증된 preset을 타입으로 증명한다 (Parse, don't validate).
    [Validated_preset.t = private preset]이라 외부는 필드를 읽되([preset]/coercion)
    검증 없이 생성할 수 없다 → invalid preset이 게이트·orchestrator로 흐를 수 없다.
@@ -260,8 +230,6 @@ module Validated_preset = struct
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_adaptive_factor of float
-        (** [adaptive_timeout_factor]가 1.0 미만. *)
 
   (* 검증 순서는 config 로드 시점과 동일: non-empty models → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
@@ -301,8 +269,6 @@ module Validated_preset = struct
                   if
                     not (p.meta_timeout_s > 0.0 && Float.is_finite p.meta_timeout_s)
                   then Error (Bad_meta_timeout p.meta_timeout_s)
-                  else if p.adaptive_timeout_factor < 1.0
-                  then Error (Bad_adaptive_factor p.adaptive_timeout_factor)
                   else Ok p)))
 
   let preset (t : t) : preset = t

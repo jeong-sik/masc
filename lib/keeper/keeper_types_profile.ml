@@ -147,19 +147,6 @@ let reject_placeholder_persona_profile =
   Keeper_types_profile_persona.reject_placeholder_persona_profile
 ;;
 
-let operator_todo_placeholder_fields =
-  Keeper_types_profile_persona.operator_todo_placeholder_fields
-
-let persona_operator_todo_placeholder_fields
-    (summary : persona_summary)
-    (defaults : keeper_profile_defaults) =
-  operator_todo_placeholder_fields
-    [
-      ("name", Some summary.display_name);
-      ("role", summary.role);
-      ("trait", summary.trait);
-    ]
-
 let keeper_profile_defaults_materializable (defaults : keeper_profile_defaults) =
   let has_runtime_identity =
     Option.is_some defaults.persona_name

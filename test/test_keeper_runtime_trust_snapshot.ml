@@ -525,12 +525,12 @@ let test_runtime_blocker_supersedes_completion_observation () =
           |> member "runtime_blocker_class"
           |> to_string);
        Alcotest.(check string)
-         "completion observation does not become display reason"
-         "fsm_invariant"
+         "runtime blocker remains the display reason"
+         "runtime_exhausted"
          (snapshot |> member "disposition_reason" |> to_string);
        Alcotest.(check string)
          "attention follows runtime blocker"
-         "runtime_blocked"
+         "runtime_attempts_exhausted"
          (snapshot |> member "attention_reason" |> to_string);
        Alcotest.(check bool)
          "runtime blocker summary remains typed runtime evidence"

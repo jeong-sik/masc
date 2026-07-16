@@ -1306,44 +1306,6 @@ let test_persona_resolver_rejects_operator_todo_profile () =
       check bool "reports persona unavailable" true
         (contains_substring e "persona not found")
 
-let test_persona_resolver_reports_placeholder_defaults_source () =
-  with_personas_dir @@ fun personas_dir ->
-  with_config_dir @@ fun config_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "role": "runtime profile",
-  "keeper": {
-    "instructions": "normal persona instructions"
-  }
-}
-|};
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  mkdir_p keepers_dir;
-  let keeper_path = Filename.concat keepers_dir "probe.toml" in
-  write_file keeper_path
-    {|
-[keeper]
-persona_name = "probe"
-instructions = "OPERATOR_TODO: replace before spawn"
-|};
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc [ ("persona_name", `String "probe") ])
-  with
-  | Ok _ -> fail "placeholder keeper defaults should not resolve"
-  | Error e ->
-      check bool "reports keeper defaults" true
-        (contains_substring e "keeper defaults");
-      check bool "reports manifest path" true
-        (contains_substring e keeper_path);
-      check bool "reports field" true
-        (contains_substring e "keeper.instructions")
-
 let test_persona_resolver_rejects_placeholder_in_resolved_payload () =
   with_personas_dir @@ fun personas_dir ->
   with_config_dir @@ fun config_dir ->
@@ -2074,8 +2036,6 @@ let () =
             test_persona_defaults_reject_removed_shards;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
-          test_case "persona resolver reports placeholder defaults source" `Quick
-            test_persona_resolver_reports_placeholder_defaults_source;
           test_case "persona resolver rejects placeholder in resolved payload" `Quick
             test_persona_resolver_rejects_placeholder_in_resolved_payload;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick

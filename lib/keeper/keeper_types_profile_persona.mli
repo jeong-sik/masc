@@ -13,7 +13,6 @@ val json_has_operator_todo_placeholder : Yojson.Safe.t -> bool
 val json_operator_todo_placeholder_paths : Yojson.Safe.t -> string list
 val reject_placeholder_persona_profile :
   label:string -> path:string -> Yojson.Safe.t -> bool
-val operator_todo_placeholder_fields : (string * string option) list -> string list
 val personas_root_opt : unit -> string option
 val persona_profile_path_opt_in_dirs : string list -> string -> string option
 val persona_profile_path_opt : string -> string option

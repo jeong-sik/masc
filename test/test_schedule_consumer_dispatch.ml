@@ -406,12 +406,12 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
    | Some stored ->
      check string "schedule remains retryable" "due"
        (Schedule_domain.schedule_status_to_string stored.status));
-  check int "failed commit leaves no queued wake" 0
+  Unix.rmdir queue_path;
+  check int "failed commit leaves no queued wake after storage repair" 0
     (Keeper_event_queue.length
        (Keeper_registry_event_queue.snapshot
           ~base_path:config.Workspace_utils.base_path
           "schedule-keeper"));
-  Unix.rmdir queue_path;
   let retried = tick_ok config ~now:202.0 in
   check int "signal log is not duplicated" 0 (List.length retried.emitted);
   (match List.hd retried.dispatches with

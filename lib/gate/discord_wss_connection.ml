@@ -270,6 +270,7 @@ module For_testing = struct
   let message_to_event = message_to_event
   let close_to_event = close_to_event
   let close_code_no_status = close_code_no_status
+  let client_tls_config = client_tls_config
 
   (* A connection with a real session switch + spawn/close but no socket: the
      wsd is a bare, never-driven endpoint and the event stream stays empty. For

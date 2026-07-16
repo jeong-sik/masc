@@ -1678,6 +1678,8 @@
 
 (include stanzas/test_discord_gateway_client.inc)
 
+(include stanzas/test_discord_tls_config_cache.inc)
+
 (include stanzas/test_discord_presence_bridge.inc)
 
 (include stanzas/test_discord_observability.inc)

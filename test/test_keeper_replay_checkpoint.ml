@@ -7,8 +7,6 @@ module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Receipt = Masc.Keeper_execution_receipt
 module Replay_prefix = Masc.Keeper_replay_prefix
 
-let observed_max_turns = 10
-
 let message role content =
   Agent_sdk.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
@@ -279,72 +277,6 @@ let test_empty_success_drops_current_turn_replay () =
     (prune_reason_to_string reason)
 ;;
 
-let test_execution_observations_preserve_tool_replay_suffix () =
-  let open Agent_sdk.Types in
-  let history =
-    [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
-  in
-  let current_turn =
-    [ message User [ Text "inspect the source" ]
-    ; message Assistant
-        [ Thinking { signature = Some "sig-1"; content = "inspect repository" }
-        ; ToolUse
-            { id = "tool-1"
-            ; name = "Execute"
-            ; input = `Assoc [ "cmd", `String "git status --short" ]
-            }
-        ]
-    ; message Tool
-        [ ToolResult
-            { tool_use_id = "tool-1"
-            ; content = "clean"
-            ; outcome = Tool_succeeded
-            ; json = None
-            ; content_blocks = None
-            }
-        ]
-    ]
-  in
-  let observations =
-    [ Runtime_agent.TurnLimitObserved { turns_used = 4; limit = 4 }
-    ; Runtime_agent.ExecutionTimeoutObserved
-        { elapsed_sec = 300.0
-        ; timeout_sec = 300.0
-        ; turn_count = 4
-        ; max_turns = observed_max_turns
-        }
-    ; Runtime_agent.ExecutionIdleTimeoutObserved
-        { idle_sec = 120.0
-        ; idle_timeout_sec = 120.0
-        ; turn_count = 4
-        ; max_turns = observed_max_turns
-        }
-    ]
-  in
-  List.iter
-    (fun stop_reason ->
-       let patched, reason =
-         Finalize.checkpoint_for_replay_persistence
-           ~history_messages:history
-           ~pre_turn_working_context:None
-           ~completion_contract_result:Receipt.Completion_tool_execution_observed
-           ~session_id:"new-session"
-           ~response_text:""
-           ~stop_reason
-           (checkpoint (history @ current_turn))
-         |> expect_ok
-       in
-       Alcotest.(check bool)
-         "execution observation retains thinking/tool call/tool result"
-         true
-         (patched.messages = history @ current_turn);
-       Alcotest.(check (option string))
-         "execution observation has no replay prune reason"
-         None
-         (prune_reason_to_string reason))
-    observations
-;;
-
 let test_input_required_preserves_exact_tool_failure_suffix () =
   let open Agent_sdk.Types in
   let history =
@@ -481,10 +413,6 @@ let () =
             "empty success drops current turn"
             `Quick
             test_empty_success_drops_current_turn_replay
-        ; Alcotest.test_case
-            "execution observations preserve tool replay suffix"
-            `Quick
-            test_execution_observations_preserve_tool_replay_suffix
         ; Alcotest.test_case
             "InputRequired preserves exact tool-failure suffix"
             `Quick

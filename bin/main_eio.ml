@@ -28,7 +28,6 @@ module Dashboard_briefing = Dashboard_briefing
 (* module Dashboard_proof removed *)
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
-module Auth_login = Masc.Auth_login
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_tool_call_log = Masc.Keeper_tool_call_log
@@ -603,6 +602,27 @@ let run_cmd host port cli_base_path =
   let _base_path_lease = acquire_base_path_lock ~run_dir canonical_base_path in
   acquire_pid_lock port;
   Log.init_from_env ();
+  (* Report a fresh takeover breadcrumb at boot: after a SIGKILL escalation
+     the victim could not log, so this is the only place the kill becomes
+     visible. Skip the breadcrumb this process wrote itself while reclaiming
+     the lock (the killer already logged its own WARN). *)
+  (match
+     Server_startup_takeover.read_takeover_breadcrumb
+       ~lock_path:(Server_startup_takeover.pid_lock_path port)
+       ()
+   with
+   | Server_startup_takeover.Breadcrumb_found { killer_pid = Some killer; _ }
+     when killer = Unix.getpid () -> ()
+   | Server_startup_takeover.Breadcrumb_found { breadcrumb_path; age_sec; payload; _ }
+     ->
+     Log.Server.warn
+       "[Startup] takeover breadcrumb found (%.0fs old, %s) — previous instance was killed by a takeover: %s"
+       age_sec breadcrumb_path payload
+   | Server_startup_takeover.Breadcrumb_stale _ | Server_startup_takeover.Breadcrumb_absent
+     -> ()
+   | Server_startup_takeover.Breadcrumb_unreadable { breadcrumb_path; reason } ->
+     Log.Server.warn "[Startup] takeover breadcrumb unreadable at %s: %s"
+       breadcrumb_path reason);
   let shutdown_cfg =
     match Masc.Shutdown.config_from_env_result () with
     | Ok config -> config
@@ -647,8 +667,7 @@ let run_cmd host port cli_base_path =
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->
-  (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
-  Mirage_crypto_rng_unix.use_default ();
+  Crypto_rng.ensure_default ();
 
   (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
   Eio_guard.enable ();
@@ -702,6 +721,31 @@ let run_cmd host port cli_base_path =
             Log.Server.info
               "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
               signal_name force_timeout Masc.Shutdown.process_deadline_exit_code;
+            (* Signal-sender attribution for the restart-cycle investigation:
+               a takeover killer writes a breadcrumb next to the pid lock
+               right before signalling; its absence means the sender is
+               external (user, pkill, system). *)
+            (match
+               Server_startup_takeover.read_takeover_breadcrumb
+                 ~lock_path:(Server_startup_takeover.pid_lock_path port)
+                 ()
+             with
+             | Server_startup_takeover.Breadcrumb_found { age_sec; payload; _ } ->
+               Log.Server.info
+                 "[Shutdown] signal attribution: takeover breadcrumb (%.1fs old): %s"
+                 age_sec payload
+             | Server_startup_takeover.Breadcrumb_stale { age_sec; _ } ->
+               Log.Server.info
+                 "[Shutdown] signal attribution: no fresh takeover breadcrumb (stale one is %.0fs old) — sender is external (user/pkill/system)"
+                 age_sec
+             | Server_startup_takeover.Breadcrumb_absent ->
+               Log.Server.info
+                 "[Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)"
+             | Server_startup_takeover.Breadcrumb_unreadable { breadcrumb_path; reason }
+               ->
+               Log.Server.warn
+                 "[Shutdown] signal attribution: breadcrumb unreadable at %s: %s"
+                 breadcrumb_path reason);
             (* Phase 1: Notify SSE clients *)
             let t_phase = Unix.gettimeofday () in
             let shutdown_data =

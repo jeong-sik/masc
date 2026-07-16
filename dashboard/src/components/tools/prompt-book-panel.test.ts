@@ -48,10 +48,10 @@ const PROMPTS: DashboardPromptItem[] = [
     char_count: 80,
   }),
   makePrompt({
-    key: 'keeper.turn_intent.board_activity_guidance',
+    key: 'keeper.immediate_task_move',
     category: 'keeper',
-    description: 'board activity guidance',
-    file_path: 'config/prompts/keeper.turn_intent.board_activity_guidance.md',
+    description: 'claimable work guidance',
+    file_path: 'config/prompts/keeper.immediate_task_move.md',
     char_count: 40,
   }),
   makePrompt({

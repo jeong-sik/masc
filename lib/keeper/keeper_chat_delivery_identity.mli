@@ -14,6 +14,9 @@ module Receipt_id : sig
   type t
 
   val generate : unit -> t
+  val of_request_id : Request_id.t -> t
+  (** Preserve a producer-allocated exact request identity as the queue receipt.
+      No derived hash or second namespace participates in duplicate convergence. *)
   val of_string : string -> (t, string) result
   val to_string : t -> string
   val equal : t -> t -> bool

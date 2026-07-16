@@ -29,12 +29,6 @@ module For_testing : sig
     | Invariant
     | Registered_only
 
-  val set_on_keeper_tool_call
-    : (tool_name:string -> success:bool -> duration_ms:int -> unit) -> unit
-
-  val record_keeper_tool_call
-    : tool_name:string -> success:bool -> duration_ms:int -> unit
-
   val descriptor_route_invariant_payload
     :  tool_name:string
     -> Keeper_tool_descriptor.t
@@ -50,22 +44,9 @@ end
     Must be called once during server initialization. *)
 val inject_masc_schemas : Masc_domain.tool_schema list -> unit
 
-(** Bridge-facing execution outcome. *)
-type execution_outcome =
-  [ `Success
-  | `Failure of Tool_result.tool_failure_class
-  ]
-
-(** Typed keeper tool execution result.
-    [raw_output] preserves opaque producer text. [data] preserves explicitly
-    typed producer JSON. [outcome] is derived only from the producer's typed
-    result and carries the failure class on failure; consumers must never
-    recover either value by inspecting [raw_output]. *)
-type executed_tool_result =
-  { raw_output : string
-  ; data : Yojson.Safe.t option
-  ; outcome : execution_outcome
-  }
+(** The dispatch result is the producer result itself.  No bridge-facing
+    outcome enum is introduced between Keeper execution and {!Tool_result}. *)
+type executed_tool_result = Keeper_tool_execution.t
 
 (** Tag-based dispatch callback for masc_* tools without handler registry entries.
     Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.

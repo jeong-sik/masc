@@ -10,10 +10,6 @@ val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
     [failure_class] for keeper-facing routing and diagnostics. *)
 val tool_result_error_json : Tool_result.result -> string
 
-(** [Tool_result.result] passes [msg] through on success; wraps it
-    in [error_json] on failure. *)
-val tool_result_or_error : Tool_result.result -> string
-
 val file_not_found_prefix : string
 
 (** Render a missing-file JSON envelope with the error, path, and
@@ -101,6 +97,23 @@ val resolve_keeper_path
 (** Resolve a read target using the same deterministic namespace as
     {!resolve_keeper_path}, without existence inference. *)
 val resolve_keeper_read_path
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> raw_path:string
+  -> (string, string) result
+
+(** Resolve a caller-declared [cwd] against the read boundary WITHOUT the
+    logical-path projection: no container-root rewrite and no playground
+    join for relative input, so ambiguous cwd values reach the
+    [path_outside_sandbox] Gate unmodified. *)
+val resolve_keeper_read_cwd
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> raw_path:string
+  -> (string, string) result
+
+(** [resolve_keeper_read_cwd] for the execute/write boundary. *)
+val resolve_keeper_execute_cwd
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string

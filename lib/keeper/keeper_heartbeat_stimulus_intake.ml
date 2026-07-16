@@ -8,8 +8,8 @@
     - per-stimulus consumption ([consume_single_heartbeat_stimulus]) +
       board-batch consumption ([consume_board_stimulus_batch]);
     - the top-level RFC-0020 §3 Rule 4 draining function
-      ([heartbeat_event_intake]) that prefers a debounced board batch and
-      falls back to a single non-board queue dequeue. *)
+      ([heartbeat_event_intake]) that leases the earliest ready stimulus
+      without assigning priority to a payload family. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -286,28 +286,19 @@ let heartbeat_event_intake
       ~meta_after_triage
       ~pending_board_events
   =
-  (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus per
-     turn, where the board unit is the turn digest: every queued board
-     signal is consumed as one batch ({!Keeper_event_queue.drain_board_all},
-     RFC-0334 W2 — arrival-window batching is retired), and the non-board
-     fallback below stays a single stimulus. *)
+  (* RFC-0020 §3 Rule 4 — lease at most one new Event Layer stimulus per
+     turn. The queue chooses the earliest ready stimulus while preserving
+     every skipped unready entry in place. Board, Connector, HITL, Schedule,
+     Fusion, and Goal inputs therefore share one lane order instead of a
+     payload-family priority hierarchy. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
   let claim_new () =
-    match
-      Keeper_registry_event_queue.claim_board_result
-        ~base_path
-        keeper_name
-        ~claimed_at:(Time_compat.now ())
-    with
-    | Error _ as error -> error
-    | Ok (Some _ as lease) -> Ok lease
-    | Ok None ->
-      Keeper_registry_event_queue.claim_when_result
-        ~base_path
-        keeper_name
-        ~claimed_at:(Time_compat.now ())
-        ~ready:stimulus_ready_for_intake
+    Keeper_registry_event_queue.claim_when_result
+      ~base_path
+      keeper_name
+      ~claimed_at:(Time_compat.now ())
+      ~ready:stimulus_ready_for_intake
   in
   let claimed_lease =
     match Keeper_registry_event_queue.active_lease_result ~base_path keeper_name with

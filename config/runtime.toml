@@ -987,12 +987,13 @@ candidates = [
 # keepers fall back to [runtime].default. Per-keeper overrides in the
 # live config (<base>/.masc/config/runtime.toml) take precedence.
 #
-# Seed only nick0cave to the local Gemma 4 canary. Other keepers use the
-# fleet default unless their live config overrides this seed.
+# The public seed ships no keeper assignments: keeper names are
+# deployment-local identities, so per-keeper routing belongs in the live
+# config, not here (enforced by test_runtime_config_validity "public seed
+# has no keeper assignments").
 # Do not assign general keeper lanes to Pro here. Pro is reserved for explicit
 # judge/evaluator lanes ([runtime].cross_verifier and [fusion].judge).
 [runtime.assignments]
-nick0cave = "ollama.gemma4-26b-a4b-qat"
 # example: route a test keeper through the failover lane
 # canary = "default"
 
@@ -1058,8 +1059,6 @@ panel_timeout_s = 300.0
 judge_timeout_s = 300.0
 # 패널/심판에 MASC web_search/web_fetch 도구를 주입할지 여부.
 web_tools = false
-# 패널 모델당 최대 tool 호출 수 (0 = 무제한, OpenRouter Fusion 허용 범위 0..16).
-max_tool_calls_per_panel = 0
 
 # ── JoJ-capable preset (RFC-0283 judge-of-judges) ───────────────────────────
 # masc_fusion topology="judge_of_judges"는 preset에 1차 심판 >= 2명을 요구한다
@@ -1098,7 +1097,6 @@ judge_timeout_s = 300.0
 # meta/stage-meta reducer 구조적 타임아웃. 미지정 시 judge_timeout_s와 동일.
 meta_timeout_s = 300.0
 web_tools = false
-max_tool_calls_per_panel = 0
 
 # 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다 (JoJ requires >= 2; RFC-0283).
 # label이 정체성을 주므로 distinct lens는 distinct identity가 된다 (Duplicate_judge 회피).
@@ -1170,7 +1168,6 @@ panel_timeout_s = 300.0
 judge_timeout_s = 300.0
 meta_timeout_s = 300.0
 web_tools = false
-max_tool_calls_per_panel = 0
 
 [[fusion.presets.council.judges]]
 model = "ollama_cloud.ollama-cloud-devstral-2-123b"

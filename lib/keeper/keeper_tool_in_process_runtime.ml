@@ -18,24 +18,14 @@ let handle_tools_list ~(meta : keeper_meta) ~args:_ =
   Keeper_tool_shared_runtime.keeper_tools_list_json ~meta
 ;;
 
-let external_effect_deferred_json ~approval_id ~reason =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "error", `String "gate_deferred"
-       ; "message"
-       , `String
-           "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper lane will wake after resolution."
-       ; "gate_request_id", `String approval_id
-       ; "gate_status", `String "pending"
-       ; "gate_nonblocking", `Bool true
-       ; "gate_reason", `String (Keeper_gate.deferred_reason_to_string reason)
-       ])
-;;
-
 type external_gate_block =
   { payload : string
   ; failure_class : Tool_result.tool_failure_class
   }
+
+type external_gate_non_allow =
+  | Gate_deferred of Keeper_gate_deferred_payload.t
+  | Gate_unavailable of external_gate_block
 
 let external_gate_decision
       ~config
@@ -63,23 +53,27 @@ let external_gate_decision
   with
   | Keeper_gate.Deferred { approval_id; reason } ->
     Error
-      { payload = external_effect_deferred_json ~approval_id ~reason
-      ; failure_class = Tool_result.Workflow_rejection
-      }
+      (Gate_deferred
+         (Keeper_gate_deferred_payload.create
+            ~operation
+            ~approval_id
+            ~reason
+            ()))
   | Keeper_gate.Unavailable reason ->
     Error
-      { payload =
-          Yojson.Safe.to_string
-            (`Assoc
-               [ "error", `String "gate_unavailable"
-               ; "message"
-               , `String
-                   "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
-               ; "gate_reason"
-               , `String (Keeper_gate.unavailable_reason_to_string reason)
-               ])
-      ; failure_class = Tool_result.Runtime_failure
-      }
+      (Gate_unavailable
+         { payload =
+             Yojson.Safe.to_string
+               (`Assoc
+                  [ "error", `String "gate_unavailable"
+                  ; "message"
+                  , `String
+                      "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
+                  ; "gate_reason"
+                  , `String (Keeper_gate.unavailable_reason_to_string reason)
+                  ])
+         ; failure_class = Tool_result.Runtime_failure
+         })
   | Keeper_gate.Allow authorization ->
     Log.Keeper.info
       ~keeper_name:meta.name
@@ -87,31 +81,6 @@ let external_gate_decision
       operation
       (Keeper_gate.authorization_source_to_string authorization.source);
     Ok ()
-;;
-
-let with_external_gate
-      ~config
-      ~(meta : keeper_meta)
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~operation
-      ~input
-      continue
-  =
-  match
-    external_gate_decision
-      ~config
-      ~meta
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~operation
-      ~input
-      ()
-  with
-  | Ok () -> continue ()
-  | Error blocked -> blocked.payload
 ;;
 
 let with_external_gate_tool_result
@@ -136,7 +105,12 @@ let with_external_gate_tool_result
       ()
   with
   | Ok () -> continue ()
-  | Error blocked ->
+  | Error (Gate_deferred deferred) ->
+    Keeper_gate_deferred_payload.to_tool_result
+      ~tool_name:operation
+      ~start_time:(Time_compat.now ())
+      deferred
+  | Error (Gate_unavailable blocked) ->
     tool_result_error
       ~tool_name:operation
       ~class_:blocked.failure_class
@@ -165,7 +139,13 @@ let with_external_gate_tool_result_option
       ()
   with
   | Ok () -> continue ()
-  | Error blocked ->
+  | Error (Gate_deferred deferred) ->
+    Some
+      (Keeper_gate_deferred_payload.to_tool_result
+         ~tool_name:operation
+         ~start_time:(Time_compat.now ())
+         deferred)
+  | Error (Gate_unavailable blocked) ->
     Some
       (tool_result_error
          ~tool_name:operation
@@ -195,7 +175,9 @@ let with_external_gate_execution
       ()
   with
   | Ok () -> continue ()
-  | Error blocked ->
+  | Error (Gate_deferred deferred) ->
+    Keeper_gate_deferred_payload.to_execution deferred
+  | Error (Gate_unavailable blocked) ->
     Keeper_tool_execution.failure
       ~class_:blocked.failure_class
       blocked.payload
@@ -374,26 +356,6 @@ let connector_post_gate_input ~connector ~channel_id ~content ?blocks () =
      ; "content", `String content
      ]
      @ block_fields)
-;;
-
-let with_connector_post_gate
-      ~config
-      ~(meta : keeper_meta)
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~input
-      continue
-  =
-  with_external_gate
-    ~config
-    ~meta
-    ?continuation_channel
-    ?gate_context
-    ?gate_grant
-    ~operation:"connector_post"
-    ~input
-    continue
 ;;
 
 let with_connector_post_gate_execution

@@ -8,6 +8,7 @@ export {
 export {
   refreshGate,
   respondToKeeperApproval,
+  retryKeeperAutoJudge,
   deleteKeeperApprovalRule,
   setKeeperGateMode,
 } from './gate-actions'

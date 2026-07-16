@@ -152,7 +152,7 @@ export interface DashboardScheduledAutomationActor {
 }
 
 export interface DashboardScheduledAutomationSignal {
-  signal_id: string
+  occurrence_id: string
   kind: string
   event_type?: string
   schedule_id: string

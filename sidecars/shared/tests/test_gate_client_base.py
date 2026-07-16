@@ -2,12 +2,53 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
-from unittest.mock import AsyncMock, patch
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import cast
 
+import httpx
 import pytest
 
-from gate_shared import BreakerSnapshot, GateClientBase, GateResponse
+from gate_shared import GateClientBase
+
+
+@asynccontextmanager
+async def _idle_sse_server() -> AsyncIterator[
+    tuple[str, asyncio.Queue[None], asyncio.Event]
+]:
+    accepted: asyncio.Queue[None] = asyncio.Queue()
+    release = asyncio.Event()
+
+    async def handle(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/event-stream\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            await writer.drain()
+            accepted.put_nowait(None)
+            await release.wait()
+            writer.write(b'data: {"type":"TEXT_MESSAGE_CONTENT","delta":"ready"}\n\n')
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    socket = server.sockets[0]
+    host, port = socket.getsockname()[:2]
+    try:
+        yield f"http://{host}:{port}/stream", accepted, release
+    finally:
+        release.set()
+        server.close()
+        await server.wait_closed()
 
 
 def _make_client(**kwargs: object) -> GateClientBase:
@@ -125,3 +166,86 @@ class TestSendMessage:
         )
         assert not resp.ok
         assert "circuit open" in resp.error
+
+
+class TestKeeperStream:
+    @pytest.mark.asyncio
+    async def test_accepted_idle_stream_has_no_read_deadline(self) -> None:
+        c = _make_client(timeout_sec=0.1)
+        observed_timeouts: list[dict[str, float | None]] = []
+
+        async def observe_timeout(request: httpx.Request) -> None:
+            observed_timeouts.append(
+                cast(dict[str, float | None], request.extensions["timeout"])
+            )
+
+        async with _idle_sse_server() as (url, accepted, release):
+            c._stream_url = url
+            c._client = httpx.AsyncClient(
+                headers=c._headers,
+                event_hooks={"request": [observe_timeout]},
+            )
+
+            async def release_after_idle() -> None:
+                await accepted.get()
+                await asyncio.sleep(0.2)
+                release.set()
+
+            release_task = asyncio.create_task(release_after_idle())
+            try:
+                deltas = [
+                    delta
+                    async for delta in c.stream_keeper(
+                        keeper_name="keeper-a",
+                        message="continue",
+                        context={"channel": "test"},
+                    )
+                ]
+                await release_task
+            finally:
+                await c.aclose()
+
+        assert deltas == ["ready"]
+        assert len(observed_timeouts) == 1
+        assert observed_timeouts[0] == {
+            "connect": 0.1,
+            "read": None,
+            "write": 0.1,
+            "pool": 0.1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_transport_timeout_is_raised_to_caller(self) -> None:
+        c = _make_client(timeout_sec=0.1)
+        async with _idle_sse_server() as (url, accepted, release):
+            c._stream_url = url
+            c._client = httpx.AsyncClient(
+                headers=c._headers,
+                limits=httpx.Limits(max_connections=1),
+            )
+            first_stream = c.stream_keeper(
+                keeper_name="keeper-a",
+                message="first",
+                context={"channel": "test"},
+            )
+
+            async def consume_first_stream() -> list[str]:
+                return [delta async for delta in first_stream]
+
+            first_result = asyncio.create_task(consume_first_stream())
+            await accepted.get()
+
+            second_stream = c.stream_keeper(
+                keeper_name="keeper-b",
+                message="second",
+                context={"channel": "test"},
+            )
+            try:
+                with pytest.raises(httpx.PoolTimeout):
+                    await anext(second_stream)
+                assert c.breaker_snapshot().consecutive_failures == 1
+                release.set()
+                assert await first_result == ["ready"]
+            finally:
+                release.set()
+                await c.aclose()

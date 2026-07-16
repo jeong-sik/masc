@@ -173,7 +173,7 @@ let request_context_attrs () =
 
 let tool_span_attrs (result : Tool_result.result) =
   let status_attrs =
-    if Tool_result.is_success result
+    if not (Tool_result.is_failed result)
     then []
     else
       [ ( Otel_genai.Mcp_attr_key.error_type
@@ -204,7 +204,7 @@ let on_tool_result (result : Tool_result.result) : unit =
   if enabled ()
   then (
     let status =
-      if Tool_result.is_success result
+      if not (Tool_result.is_failed result)
       then None
       else
         Some

@@ -37,11 +37,11 @@ function automation(
 }
 
 function signal(
-  overrides: Partial<DashboardScheduledAutomationSignal> & { signal_id: string; schedule_id: string },
+  overrides: Partial<DashboardScheduledAutomationSignal> & { occurrence_id: string; schedule_id: string },
 ): DashboardScheduledAutomationSignal {
-  const { signal_id, schedule_id, ...rest } = overrides
+  const { occurrence_id, schedule_id, ...rest } = overrides
   return {
-    signal_id,
+    occurrence_id,
     kind: 'schedule.due_candidate',
     schedule_id,
     emitted_at_iso: '2026-06-21T00:00:00Z',
@@ -838,17 +838,17 @@ describe('ScheduledAutomationPanel', () => {
     auto.signal_count = 3
     auto.signals = [
       signal({
-        signal_id: 'sig-supported',
+        occurrence_id: 'sig-supported',
         schedule_id: 'sched-supported',
         payload_kind: 'keeper.smoke',
       }),
       signal({
-        signal_id: 'sig-unsupported',
+        occurrence_id: 'sig-unsupported',
         schedule_id: 'sched-unsupported',
         payload_kind: 'orphan_auto_release',
       }),
       signal({
-        signal_id: 'sig-unknown',
+        occurrence_id: 'sig-unknown',
         schedule_id: 'sched-unknown',
         payload_kind: 'keeper.future',
       }),
@@ -894,17 +894,17 @@ describe('ScheduledAutomationPanel', () => {
     auto.signal_count = 3
     auto.signals = [
       signal({
-        signal_id: 'sig-supported',
+        occurrence_id: 'sig-supported',
         schedule_id: 'sched-supported',
         payload_kind: 'keeper.smoke',
       }),
       signal({
-        signal_id: 'sig-unsupported-missing-row',
+        occurrence_id: 'sig-unsupported-missing-row',
         schedule_id: 'sched-unsupported-missing-row',
         payload_kind: 'orphan_auto_release',
       }),
       signal({
-        signal_id: 'sig-unknown-missing-row',
+        occurrence_id: 'sig-unknown-missing-row',
         schedule_id: 'sched-unknown-missing-row',
       }),
     ]
@@ -946,12 +946,12 @@ describe('ScheduledAutomationPanel', () => {
     auto.signal_count = 2
     auto.signals = [
       signal({
-        signal_id: 'sig-unsupported-only',
+        occurrence_id: 'sig-unsupported-only',
         schedule_id: 'sched-unsupported-only',
         payload_kind: 'orphan_auto_release',
       }),
       signal({
-        signal_id: 'sig-unknown-only',
+        occurrence_id: 'sig-unknown-only',
         schedule_id: 'sched-unknown-only',
       }),
     ]
@@ -1161,7 +1161,7 @@ describe('ScheduledAutomationPanel', () => {
     automation.signal_limit = 20
     automation.signals = [
       {
-        signal_id: 'sig-due-1',
+        occurrence_id: 'sig-due-1',
         kind: 'schedule.due_candidate',
         event_type: 'schedule.due_candidate',
         schedule_id: 'sched-run-smoke',

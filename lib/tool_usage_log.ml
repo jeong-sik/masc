@@ -232,11 +232,11 @@ let init ?cluster_name ~base_path () =
 
 (* -- Record format -- *)
 
-let record_to_json ~tool_name ~success ~caller =
+let record_to_json ~tool_name ~disposition ~caller =
   let fields =
     [ ("tool_name", `String tool_name)
     ; ("ts", `Float (Time_compat.now ()))
-    ; ("success", `Bool success)
+    ; ("disposition", `String (Tool_result.string_of_disposition disposition))
     ]
   in
   let fields = match caller with
@@ -254,12 +254,12 @@ let record_to_json ~tool_name ~success ~caller =
    must not name keeper internals (generalizes RFC-0084's dispatch-path rule to
    the whole surface). Keeper-facing IO-failure handling is supplied at the
    install boundary (lib/server/server_bootstrap_maintenance.ml). *)
-let log_call ~on_io_failure ~tool_name ~success ~caller =
+let log_call ~on_io_failure ~tool_name ~disposition ~caller =
   match !store_ref with
   | None ->
       Log.Misc.debug "tool_usage_log: store not initialized, skipping %s" tool_name
   | Some store ->
-      let json = record_to_json ~tool_name ~success ~caller in
+      let json = record_to_json ~tool_name ~disposition ~caller in
       (try Dated_jsonl.append store json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          on_io_failure ~site:"tool_usage_log.append" exn;
@@ -298,7 +298,7 @@ let install ~on_io_failure =
         log_call
           ~on_io_failure
           ~tool_name
-          ~success:(Tool_result.is_success result)
+          ~disposition:result
           ~caller:(extract_caller result)
     | _ -> ())
 

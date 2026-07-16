@@ -347,7 +347,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
            belongs in the I/O layer per RFC-0203. Prevents thundering
            herd when multiple instances restart simultaneously. *)
         let jitter_factor =
-          let raw = Mirage_crypto_rng.generate 1 in
+          let raw = Crypto_rng.generate 1 in
           let byte = Char.code raw.[0] in
           0.75 +. 0.5 *. (float_of_int byte /. 255.0)
         in

@@ -134,14 +134,15 @@ protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.smoke]
-# Borrow a real repo catalog id for strict capability lookup. The transport
-# harness never reaches the provider endpoint, but Runtime.init_default_strict
-# must still see model capability metadata instead of falling back to provider
-# defaults.
-api-name = "deepseek-v4-flash"
+# Harness-local opaque runtime alias. The adjacent typed capability block is
+# the sole declaration used when no exact OAS catalog row exists.
+api-name = "transport-harness-smoke"
 max-context = 32768
 tools-support = true
 streaming = true
+
+[models.smoke.capabilities]
+supports-tool-choice = true
 
 [deepseek.smoke]
 is-default = true

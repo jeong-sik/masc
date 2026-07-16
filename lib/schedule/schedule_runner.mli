@@ -9,7 +9,7 @@ type signal_kind =
   | Due_candidate
 
 type wake_signal =
-  { signal_id : string
+  { occurrence_id : Schedule_occurrence_id.t
   ; kind : signal_kind
   ; schedule_id : string
   ; emitted_at : float
@@ -32,7 +32,8 @@ and dispatch_status =
   | Dispatch_start_rejected
 
 and dispatch_result =
-  { schedule_id : string
+  { occurrence_id : Schedule_occurrence_id.t
+  ; schedule_id : string
   ; status : dispatch_status
   ; detail : Yojson.Safe.t option
   ; error : string option

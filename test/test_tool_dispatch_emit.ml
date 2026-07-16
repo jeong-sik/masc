@@ -62,8 +62,14 @@ let test_finalize_applies_transformer_before_observer () =
   let transformer (r : Tool_result.result) : Tool_result.result =
     incr called;
     match r with
-    | Ok ok -> Ok { ok with data = `String ((Tool_result.message r) ^ "[capped]") }
-    | Error err -> Error { err with message = err.message ^ "[capped]" }
+    | Tool_result.Completed output ->
+      Tool_result.Completed
+        { output with data = `String ((Tool_result.message r) ^ "[capped]") }
+    | Tool_result.Deferred output ->
+      Tool_result.Deferred
+        { output with data = `String ((Tool_result.message r) ^ "[capped]") }
+    | Tool_result.Failed failure ->
+      Tool_result.Failed { failure with message = failure.message ^ "[capped]" }
   in
   Tool_dispatch.clear_hooks ();
   Tool_dispatch.set_result_transformer transformer;

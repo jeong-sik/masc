@@ -34,9 +34,7 @@ val turn_ref_wire_key : string
     ({!turn_ref_of_reply_payload}) so the wire name cannot drift. *)
 
 val of_stop_reason : Runtime_agent.stop_reason -> t
-(** Stop-reason-only classifier. [Completed] and the observational
-    [TurnLimitObserved] fact may carry model output. Execution-timeout
-    observations never manufacture visible output. Use
+(** Stop-reason-only classifier. [Completed] may carry model output. Use
     {!of_result_surface} at payload production sites where the actual
     [response_text] is available. *)
 

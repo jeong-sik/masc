@@ -83,7 +83,6 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
       (`Assoc
           [ "name", `String name
           ; "trace_id", `String ("trace-" ^ name)
-          ; "goal", `String "test goal"
           ])
   with
   | Ok meta -> meta
@@ -499,7 +498,10 @@ let test_runtime_blocker_supersedes_completion_observation () =
        let meta =
          make_meta keeper_name
          |> Masc.Keeper_meta_contract.map_runtime (fun rt ->
-           { rt with last_blocker = Some blocker })
+           { rt with
+             last_blocker = Some blocker
+           ; usage = { rt.usage with last_turn_ts = 1_800_000_000.0 }
+           })
        in
        let receipt_store =
          Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
@@ -523,12 +525,12 @@ let test_runtime_blocker_supersedes_completion_observation () =
           |> member "runtime_blocker_class"
           |> to_string);
        Alcotest.(check string)
-         "completion observation does not become display reason"
-         "fsm_invariant"
+         "runtime blocker remains the display reason"
+         "runtime_exhausted"
          (snapshot |> member "disposition_reason" |> to_string);
        Alcotest.(check string)
          "attention follows runtime blocker"
-         "runtime_blocked"
+         "runtime_attempts_exhausted"
          (snapshot |> member "attention_reason" |> to_string);
        Alcotest.(check bool)
          "runtime blocker summary remains typed runtime evidence"

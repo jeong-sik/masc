@@ -55,7 +55,7 @@ function sampleAutomation(): DashboardScheduledAutomation {
     signal_count: 1,
     signals: [
       {
-        signal_id: 'sig-1',
+        occurrence_id: 'sig-1',
         kind: 'schedule.due_candidate',
         event_type: 'schedule.due_candidate',
         schedule_id: 'sched-1',

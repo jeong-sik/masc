@@ -1,9 +1,9 @@
 (** Post-turn memory write series for [Keeper_agent_run.run_turn].
 
-    Extracts the four post-turn side-effect stages from Step 8 body
-    (deterministic write, episodic record, compaction, quality-metrics
-    JSONL append) into a single typed boundary so that the orchestrator
-    only sees [run ~config ~meta ...].
+    Extracts deterministic writes, LLM librarian records, and quality metrics
+    from Step 8 behind [run ~config ~meta ...]. It does not rewrite or delete
+    memory-bank rows: semantic consolidation requires an explicit typed LLM
+    Memory operation, never a storage-pressure survival rule.
 
     Each sub-stage is best-effort: non-cancel exceptions are logged and
     counted, never propagated.  [Eio.Cancel.Cancelled] is re-raised. *)

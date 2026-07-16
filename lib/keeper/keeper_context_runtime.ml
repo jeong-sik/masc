@@ -108,6 +108,7 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
 type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
   compaction : compaction_event;
+  evidence : Keeper_compact_policy.compaction_evidence;
   turn_generation : int;
 }
 

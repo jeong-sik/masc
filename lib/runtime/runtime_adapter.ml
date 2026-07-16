@@ -398,6 +398,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ?max_context:spec.max_context
             ?supports_tool_choice_override
             ?model_capabilities_override
+            ?temperature:spec.temperature
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p
@@ -421,6 +422,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ?max_context:spec.max_context
             ?supports_tool_choice_override
             ?model_capabilities_override
+            ?temperature:spec.temperature
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p

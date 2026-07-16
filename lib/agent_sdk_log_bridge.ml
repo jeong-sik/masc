@@ -163,7 +163,7 @@ let field_value_to_human (json : Yojson.Safe.t) : string option =
 let preferred_summary_keys message =
   match message with
   | "turn completed" | "turn started" ->
-      [ "turn"; "max_turns"; "turn_duration_sec"; "elapsed_run_sec"; "model"; "stop" ]
+      [ "turn"; "turn_duration_sec"; "elapsed_run_sec"; "model"; "stop" ]
   | "agent completed" | "agent started" ->
       [ "agent_name"; "agent"; "task_id"; "elapsed_s"; "input_tokens"; "output_tokens" ]
   | "tool completed" | "tool called" ->

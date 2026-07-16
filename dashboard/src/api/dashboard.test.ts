@@ -538,6 +538,17 @@ describe('keeper tool telemetry fetchers', () => {
             compaction_source: 'event_bus',
             status: 'observed',
             links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+            exact_evidence: {
+              before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
+              before_message_count: 8, after_message_count: 3,
+              summarized_message_count: 4, dropped_message_count: 1,
+              before_tool_use_count: 2, after_tool_use_count: 1,
+              before_tool_result_count: 2, after_tool_result_count: 1,
+            },
+            reinjection_observation: {
+              state: 'reinserted', keeper_turn_id: 13,
+              checkpoint_loaded_receipts: 1, context_injected_receipts: 1,
+            },
           },
           {
             id: 'manifest:trace-b:context_compacted:2026-06-26T04:03:00Z',
@@ -557,6 +568,11 @@ describe('keeper tool telemetry fetchers', () => {
             compaction_source: 'pre_dispatch_hygiene',
             status: 'compacted',
             links: {},
+            exact_evidence: null,
+            reinjection_observation: {
+              state: 'not_linked', keeper_turn_id: null,
+              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
+            },
           },
         ],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
@@ -569,6 +585,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.items[0]?.before_tokens).toBe(210000)
     expect(result.items[0]?.saved_tokens).toBe(90000)
     expect(result.items[0]?.display_runtime).toBe('oas-seoul-1')
+    expect(result.items[0]?.reinjection_observation.state).toBe('reinserted')
     expect(result.read_error_count).toBe(1)
     expect(result.read_errors).toEqual([
       { scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' },
@@ -1806,11 +1823,6 @@ describe('fetchKeeperConfig', () => {
         count_total: '2',
         last_reason: 'board quiet',
       },
-      handoff: {
-        auto: 'true',
-        threshold: '0.85',
-        cooldown_sec: '300',
-      },
       hooks: {
         slots: {
           pre_tool_use: {
@@ -2710,7 +2722,7 @@ describe('fetchRuntimeModelMetrics', () => {
             {
               ts_unix: 1,
               outcome: 'success',
-              stop_reason: 'turn_limit_observed:turns=3,limit=3',
+              stop_reason: 'completed',
               turn_lane: 'text_only',
               input_tokens: null,
               output_tokens: null,
@@ -2768,7 +2780,7 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.total_input_tokens).toBeNull()
     expect(metric.total_cost_usd).toBeNull()
     expect(metric.recent_entries?.[0]?.outcome).toBe('success')
-    expect(metric.recent_entries?.[0]?.stop_reason).toBe('turn_limit_observed:turns=3,limit=3')
+    expect(metric.recent_entries?.[0]?.stop_reason).toBe('completed')
     expect(metric.recent_entries?.[0]?.turn_lane).toBe('text_only')
     expect(metric.recent_entries?.[0]?.input_tokens).toBeNull()
     expect(metric.recent_entries?.[0]?.cache_read_tokens).toBeNull()

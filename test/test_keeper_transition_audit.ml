@@ -209,8 +209,8 @@ let test_transition_json_preserves_observation_only () =
   let open Yojson.Safe.Util in
   check string "event type" "operator_pause"
     (json |> member "event_type" |> to_string);
-  check string "previous phase" "Running" (json |> member "prev_phase" |> to_string);
-  check string "new phase" "Paused" (json |> member "new_phase" |> to_string);
+  check string "previous phase" "running" (json |> member "prev_phase" |> to_string);
+  check string "new phase" "paused" (json |> member "new_phase" |> to_string);
   check string "outcome" "applied"
     (json |> member "transition_outcome" |> to_string);
   check int "transition JSON has only observed fields" 8

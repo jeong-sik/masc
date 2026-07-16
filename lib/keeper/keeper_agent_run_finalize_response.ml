@@ -159,9 +159,6 @@ let checkpoint_for_replay_persistence
        Error
          "refusing to save input-required checkpoint: messages do not match \
           pre-turn history prefix")
-  | Runtime_agent.TurnLimitObserved _
-  | Runtime_agent.ExecutionTimeoutObserved _
-  | Runtime_agent.ExecutionIdleTimeoutObserved _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     (* A control-boundary checkpoint retains the current-turn tool result so

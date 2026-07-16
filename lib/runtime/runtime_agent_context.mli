@@ -14,19 +14,6 @@
 (** Why a worker run terminated. *)
 type stop_reason =
   | Completed
-  | TurnLimitObserved of { turns_used : int; limit : int }
-  | ExecutionTimeoutObserved of {
-      elapsed_sec : float;
-      timeout_sec : float;
-      turn_count : int;
-      max_turns : int;
-    }
-  | ExecutionIdleTimeoutObserved of {
-      idle_sec : float;
-      idle_timeout_sec : float;
-      turn_count : int;
-      max_turns : int;
-    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {

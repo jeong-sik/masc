@@ -81,7 +81,6 @@ type t =
   | TransitionAuditFailures
   | ExecutionReceiptFailures
   | OperatorBroadcastSuppressed
-  | LlmBridgeFailures
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures
@@ -110,8 +109,6 @@ type t =
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures
-  | PromptUnknownToolTokens
-  | PromptTokenStripped
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
@@ -144,7 +141,6 @@ type t =
   | MemoryLaneInFlight
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
-  | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures
   | AlertPersistFailures
   | MetricsSseFailures

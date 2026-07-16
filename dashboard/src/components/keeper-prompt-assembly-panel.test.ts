@@ -64,7 +64,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'turn-soft-context',
       'oas-hook',
     ])
-    expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(9)
+    expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(3)
     expect(report.rows.find(row => row.promptKey === '(computed:world_observation)')?.source).toBe('computed')
     expect(report.rows.find(row => row.promptKey === '(computed:scheduled_automation)')?.source).toBe('computed')
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])

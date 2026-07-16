@@ -208,8 +208,9 @@ let build_keeper_system_prompt
      <repositories>\n\
      The filesystem is the source of truth for your repositories: only \
      checkouts that actually exist under repos/ resolve. Before referencing \
-     a repository, list repos/ (for example: Execute ls repos) and use the \
-     directory names you find. Do not assume a repository exists because it \
+     a repository, inspect the repository directory through a visible \
+     filesystem capability and use the directory names you find. Do not \
+     assume a repository exists because it \
      is registered in a catalog — registration does not imply a checkout in \
      your sandbox.\n\
      </repositories>\n"

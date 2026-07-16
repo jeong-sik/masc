@@ -46,8 +46,7 @@ let resolved_keeper_args_to_json
     ~mention_targets
     ~allowed_paths_opt
     ~autoboot_enabled_opt
-    ~proactive_enabled
-    ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
+    ~proactive_enabled =
   let base =
     [
       ("name", `String name);
@@ -55,9 +54,6 @@ let resolved_keeper_args_to_json
       ("instructions", `String instructions);
       ("mention_targets", Json_util.json_string_list mention_targets);
       ("proactive_enabled", `Bool proactive_enabled);
-      ("auto_handoff", `Bool auto_handoff);
-      ("handoff_threshold", `Float handoff_threshold);
-      ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
     ]
   in
   let allowed_paths_field =
@@ -237,15 +233,6 @@ let resolved_keeper_args_from_persona args :
         let defaults_source =
           Option.value defaults.manifest_path ~default:persona.profile_path
         in
-        (match persona_operator_todo_placeholder_fields persona defaults with
-        | _ :: _ as fields ->
-            Error
-              (Printf.sprintf
-                 "keeper defaults at %s contain OPERATOR_TODO placeholder(s): %s; \
-                  replace placeholders before masc_keeper_create_from_persona"
-                 defaults_source
-                 (String.concat ", " fields))
-        | [] ->
         let name =
           get_string_opt args "name" |> Option.value ~default:persona_name
         in
@@ -279,15 +266,6 @@ let resolved_keeper_args_from_persona args :
                    | Some _ as paths -> paths
                    | None -> defaults.allowed_paths
                  in
-                 let auto_handoff = get_bool args "auto_handoff" true in
-                 let handoff_threshold =
-                   Safe_ops.json_float_opt "handoff_threshold" args
-                   |> Option.value ~default:0.85
-                 in
-                 let handoff_cooldown_sec =
-                   Safe_ops.json_int_opt "handoff_cooldown_sec" args
-                   |> Option.value ~default:300
-                 in
                  let resolved =
                    resolved_keeper_args_to_json
                      ~name
@@ -297,8 +275,6 @@ let resolved_keeper_args_from_persona args :
                      ~allowed_paths_opt:allowed_paths
                      ~autoboot_enabled_opt:autoboot_enabled
                      ~proactive_enabled
-                     ~auto_handoff ~handoff_threshold
-                     ~handoff_cooldown_sec
                  in
                  (match json_operator_todo_placeholder_paths resolved with
                   | _ :: _ as fields ->
@@ -309,4 +285,4 @@ let resolved_keeper_args_from_persona args :
                           masc_keeper_create_from_persona"
                          defaults_source
                          (String.concat ", " fields))
-                  | [] -> Ok (persona, resolved)))))
+                  | [] -> Ok (persona, resolved))))

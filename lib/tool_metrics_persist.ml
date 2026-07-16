@@ -35,28 +35,30 @@ let flush_interval_s = Env_config.InternalTimers.metrics_flush_sec
 let record_to_json (r : Tool_result.result) : Yojson.Safe.t =
   `Assoc
     [ ("tool_name", `String (Tool_result.tool_name r))
-    ; ("success", `Bool (Tool_result.is_success r))
+    ; ("disposition", `String (Tool_result.string_of_disposition r))
     ; ("duration_ms", `Float (Tool_result.duration_ms r))
     ; ("ts", `Float (Time_compat.now ()))
     ]
 
 type persisted_record = {
   tool_name : string;
-  success : bool;
+  disposition : (unit, unit, unit) Tool_result.disposition;
   duration_ms : float;
 }
 
 let parse_record (json : Yojson.Safe.t)
   : (persisted_record, string) Result.t =
   let tool_name = Safe_ops.json_string_opt "tool_name" json in
-  let success = Safe_ops.json_bool_opt "success" json in
+  let disposition = Safe_ops.json_string_opt "disposition" json in
   let duration_ms = Safe_ops.json_float_opt "duration_ms" json in
-  match tool_name, success, duration_ms with
-  | Some tn, Some s, Some d -> Ok { tool_name = tn; success = s; duration_ms = d }
+  match tool_name, disposition, duration_ms with
+  | Some tool_name, Some disposition, Some duration_ms ->
+    Tool_result.unit_disposition_of_string disposition
+    |> Result.map (fun disposition -> { tool_name; disposition; duration_ms })
   | _ ->
     let missing =
       [ ("tool_name", Option.is_none tool_name)
-      ; ("success", Option.is_none success)
+      ; ("disposition", Option.is_none disposition)
       ; ("duration_ms", Option.is_none duration_ms)
       ]
       |> List.filter_map (fun (field, is_missing) ->
@@ -209,15 +211,23 @@ let restore ~base_path : int =
        match parse_record json with
        | Ok r ->
          let result : Tool_result.result =
-           if r.success
-           then
-             Ok
+           match r.disposition with
+           | Tool_result.Completed () ->
+             Tool_result.Completed
                { Tool_result.tool_name = r.tool_name
                ; data = `Null
+               ; metadata = None
                ; duration_ms = r.duration_ms
                }
-           else
-             Error
+           | Tool_result.Deferred () ->
+             Tool_result.Deferred
+               { Tool_result.tool_name = r.tool_name
+               ; data = `Null
+               ; metadata = None
+               ; duration_ms = r.duration_ms
+               }
+           | Tool_result.Failed () ->
+             Tool_result.Failed
                { Tool_result.class_ = Tool_result.Runtime_failure
                ; message = ""
                ; data = `Null

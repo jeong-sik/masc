@@ -266,7 +266,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'provider_runtime_error',
         model_used: 'claude-code:auto',
-        stop_reason: 'max_turns',
+        stop_reason: null,
         duration_ms: 87736,
         error: {
           kind: 'config',

@@ -169,7 +169,6 @@ module KeeperMemoryOs = struct
   let librarian_enabled_default = true
   let librarian_cadence_turns_default = 3
   let librarian_max_messages_default = 24
-  let librarian_timeout_sec_default = 600.0
   let librarian_max_tokens_default = 4096
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
@@ -185,7 +184,6 @@ module KeeperMemoryOs = struct
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
   let librarian_cadence_turns_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
   let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-  let librarian_timeout_sec_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
   let librarian_max_tokens_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
   let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
   let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
@@ -195,8 +193,6 @@ module KeeperMemoryOs = struct
 
   let optional_string_default value = Option.value value ~default:""
   ;;
-
-  let float_default_to_display value = Printf.sprintf "%.1f" value ;;
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
@@ -256,16 +252,6 @@ module KeeperMemoryOs = struct
       (get_int_logged
          librarian_max_messages_env_key
          ~default:librarian_max_messages_default)
-  ;;
-
-  (** Provider timeout for librarian extraction. Default: 600 seconds; invalid,
-      non-positive, NaN, or infinite values fall back to the default.
-      @category Timeouts
-      @ops_class operator *)
-  let librarian_timeout_sec () =
-    get_float_positive_logged
-      librarian_timeout_sec_env_key
-      ~default:librarian_timeout_sec_default
   ;;
 
   (** Output token cap for librarian extraction, applied as min with the

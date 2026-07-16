@@ -196,7 +196,7 @@ let get_all_agents config =
 let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
-    (* Read agent files from the same path that cleanup_zombies and session binding use *)
+    (* Read agent files from the canonical session-binding path. *)
     let agents_path = agents_dir config in
     let active_names =
       load_agents_from_dir config agents_path ~include_inactive:false

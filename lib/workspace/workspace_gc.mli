@@ -5,8 +5,9 @@
     [.mli] coverage push.
 
     Side effects:
-    - Both functions touch [agents_dir config] and the locks
-      under it.  Callers must hold no other workspace lock when invoking.
+    - [heartbeat] touches [agents_dir config].
+    - [gc] touches the explicit retention surfaces documented below.
+      Callers must hold no other workspace lock when invoking either function.
     - Board artifact cleanup is wired via [Workspace_hooks] callbacks at
       startup; this module does not depend on the board layer
       directly. *)

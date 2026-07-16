@@ -22,17 +22,22 @@ type summarizer = messages:Agent_sdk.Types.message list -> planning_outcome opti
     {!Llm_provider.Complete.complete}; overridable in tests. *)
 type complete_fn = Keeper_provider_subcall.complete_fn
 
-(** [make ~runtime_id ~keeper_name ()] resolves [runtime_id] as a Runtime or
-    Runtime Lane. A Runtime contributes its exact provider config; a Lane tries
-    its configured Runtime candidates in declared order until one returns a
-    valid plan. Missing, ineligible, and failed candidates are logged with
-    their Runtime id. No default Runtime is substituted. [complete] overrides
-    the Provider boundary in tests.
+(** [make ~sw ~net ?clock ~runtime_id ~keeper_name ()] resolves [runtime_id]
+    as a Runtime or Runtime Lane. The caller owns every Eio resource used by
+    the resulting summarizer; no ambient process context is consulted. A
+    Runtime contributes its exact provider config; a Lane tries its configured
+    Runtime candidates in declared order until one returns a valid plan.
+    Missing, ineligible, and failed candidates are logged with their Runtime
+    id. No default Runtime is substituted. [complete] overrides the Provider
+    boundary in tests.
 
     The compaction owner imposes no wall-clock deadline. Cancellation belongs
     to the owning Keeper lane or to the Provider transport boundary. *)
 val make
   :  ?complete:complete_fn
+  -> sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> runtime_id:string
   -> keeper_name:string
   -> unit
@@ -49,11 +54,6 @@ val apply : compaction_plan -> Agent_sdk.Types.message list
 val observation : compaction_plan -> observation
 
 module For_testing : sig
-  val with_make_override
-    :  (runtime_id:string -> keeper_name:string -> unit -> summarizer option)
-    -> (unit -> 'a)
-    -> 'a
-
   (** Apply the compaction request policy while preserving the input provider
       config's exact temperature, including omission. *)
   val provider_for_plan

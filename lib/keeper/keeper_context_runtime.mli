@@ -187,7 +187,8 @@ val dispatch_post_turn_lifecycle_events
   -> unit
 
 val recover_latest_checkpoint_for_overflow_retry
-  :  base_dir:string
+  :  summarizer:Keeper_compaction_llm_summarizer.summarizer option
+  -> base_dir:string
   -> meta:keeper_meta
   -> trigger:Compaction_trigger.t
   -> primary_model_max_tokens:int

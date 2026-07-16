@@ -1,7 +1,7 @@
 (** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
-    See keeper_compaction_llm_summarizer.mli. Structure mirrors
-    Keeper_memory_llm_summary: opt-in gate + fiber-local Eio capture +
-    schema-capable provider filter + fail-closed [None]. *)
+    See keeper_compaction_llm_summarizer.mli. The caller supplies the exact
+    Eio resources owned by its Keeper lane; this module performs no ambient
+    process-context lookup. *)
 
 module Schema = Keeper_structured_output_schema
 module Unit = Keeper_compaction_unit
@@ -187,10 +187,14 @@ let candidates_for_assignment ~keeper_name assignment_id =
   | `Lane lane ->
     resolve_lane [] (Runtime_lane.ordered_candidates lane)
 
-type make_fn = runtime_id:string -> keeper_name:string -> unit -> summarizer option
-let make_override : make_fn option Atomic.t = Atomic.make None
-
-let make_resolved ?complete ~(runtime_id : string) ~(keeper_name : string) ()
+let make
+    ?complete
+    ~sw
+    ~net
+    ?clock
+    ~(runtime_id : string)
+    ~(keeper_name : string)
+    ()
   : summarizer option
   =
   match candidates_for_assignment ~keeper_name runtime_id with
@@ -201,59 +205,38 @@ let make_resolved ?complete ~(runtime_id : string) ~(keeper_name : string) ()
       runtime_id;
     None
   | Some candidates ->
-    (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-     | Some sw, Some net ->
-       let clock = Eio_context.get_clock_opt () in
-       Some
-         (fun ~messages ->
-           match Unit.partition messages with
-           | Error error ->
-             Log.Keeper.warn ~keeper_name
-               "compaction LLM source rejected assignment=%s: %s"
-               runtime_id (Unit.show_structural_error error);
-             None
-           | Ok source ->
-             let rec attempt = function
-               | [] ->
-                 Log.Keeper.warn ~keeper_name
-                   "compaction LLM candidate chain exhausted assignment=%s"
-                   runtime_id;
-                 None
-               | candidate :: rest ->
-                 (match
-                    run_plan ?complete ?clock ~keeper_name
-                      ~runtime_id:candidate.runtime_id ~sw ~net
-                      ~provider_cfg:candidate.provider_cfg ~source ()
-                  with
-                  | Some (Planned plan) ->
-                    Log.Keeper.info ~keeper_name
-                      "compaction LLM candidate succeeded assignment=%s runtime=%s"
-                      runtime_id candidate.runtime_id;
-                    Some (Planned plan)
-                  | Some No_compaction -> Some No_compaction
-                  | None -> attempt rest)
-             in
-             attempt candidates)
-     | _ ->
-       List.iter
-         (fun candidate ->
-           Log.Keeper.warn ~keeper_name
-             "compaction LLM candidate skipped runtime=%s assignment=%s: Eio \
-              context unavailable"
-             candidate.runtime_id runtime_id)
-       candidates;
-       None)
-
-let make ?complete ~runtime_id ~keeper_name () =
-  match Atomic.get make_override with
-  | Some override -> override ~runtime_id ~keeper_name ()
-  | None -> make_resolved ?complete ~runtime_id ~keeper_name ()
+    Some
+      (fun ~messages ->
+        match Unit.partition messages with
+        | Error error ->
+          Log.Keeper.warn ~keeper_name
+            "compaction LLM source rejected assignment=%s: %s"
+            runtime_id (Unit.show_structural_error error);
+          None
+        | Ok source ->
+          let rec attempt = function
+            | [] ->
+              Log.Keeper.warn ~keeper_name
+                "compaction LLM candidate chain exhausted assignment=%s"
+                runtime_id;
+              None
+            | candidate :: rest ->
+              (match
+                 run_plan ?complete ?clock ~keeper_name
+                   ~runtime_id:candidate.runtime_id ~sw ~net
+                   ~provider_cfg:candidate.provider_cfg ~source ()
+               with
+               | Some (Planned plan) ->
+                 Log.Keeper.info ~keeper_name
+                   "compaction LLM candidate succeeded assignment=%s runtime=%s"
+                   runtime_id candidate.runtime_id;
+                 Some (Planned plan)
+               | Some No_compaction -> Some No_compaction
+               | None -> attempt rest)
+          in
+          attempt candidates)
 
 module For_testing = struct
-  let with_make_override override f =
-    let previous = Atomic.exchange make_override (Some override) in
-    Fun.protect ~finally:(fun () -> Atomic.set make_override previous) f
-
   let provider_for_plan = provider_for_plan
 
   let candidate_runtime_ids_for_assignment ~keeper_name ~runtime_id =

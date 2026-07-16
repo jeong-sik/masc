@@ -4,7 +4,6 @@
     compaction on their own. *)
 
 type compaction_rejection =
-  | Runtime_identity_unavailable
   | Summarizer_unavailable
   | Plan_unavailable_or_invalid
   | Structurally_unchanged
@@ -54,12 +53,15 @@ type compaction_preparation =
     {!compact_for_request_typed}. *)
 val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * int * int
 
-(** Apply a caller-owned request. Only a valid configured-LLM plan that
+(** Apply a caller-owned request with the caller-resolved semantic
+    [summarizer]. [None] is an explicit unavailable dependency, never a signal
+    to consult ambient process state. Only a valid configured-LLM plan that
     strictly reduces the exact serialized checkpoint byte length is prepared.
     Every refusal preserves the original context and returns a typed reason.
     The caller owns the durable save and promotion from [Prepared] to [Applied]. *)
 val compact_for_request_typed
-  :  meta:Keeper_meta_contract.keeper_meta
+  :  summarizer:Keeper_compaction_llm_summarizer.summarizer option
+  -> meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
   -> Keeper_context_core.working_context
   -> compaction_preparation

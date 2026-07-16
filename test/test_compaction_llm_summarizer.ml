@@ -91,6 +91,70 @@ let test_lane_candidates_keep_declared_order () =
     (Some [ "local.kimi_like"; "fallback.kimi_like" ])
     actual
 
+let test_make_uses_caller_owned_eio_resources () =
+  with_temperature_runtime @@ fun _ ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let called_with_exact_resources = ref false in
+  let complete
+        ~sw:received_sw
+        ~net:received_net
+        ?clock:received_clock
+        ~config:_
+        ~messages:_
+        ()
+    =
+    called_with_exact_resources :=
+      received_sw == sw
+      && received_net == net
+      && Option.fold
+           ~none:false
+           ~some:(fun received_clock -> received_clock == clock)
+           received_clock;
+    Ok
+      { Agent_sdk.Types.id = "compaction-explicit-resources"
+      ; model = "test-model"
+      ; stop_reason = Agent_sdk.Types.EndTurn
+      ; content =
+          [ Agent_sdk.Types.Text
+              {|{"kept_indices":[0],"dropped_indices":[],"summarized_units":[]}|}
+          ]
+      ; usage = None
+      ; telemetry = None
+      }
+  in
+  let summarizer =
+    match
+      C.make
+        ~complete
+        ~sw
+        ~net
+        ~clock
+        ~runtime_id:temperature_runtime_id
+        ~keeper_name:"keeper-test"
+        ()
+    with
+    | Some summarizer -> summarizer
+    | None -> Alcotest.fail "explicit-resource summarizer should resolve"
+  in
+  let outcome =
+    summarizer
+      ~messages:
+        [ Agent_sdk.Types.text_message Agent_sdk.Types.User "keep this exact unit" ]
+  in
+  Alcotest.(check bool)
+    "provider received the caller-owned switch, net, and clock"
+    true
+    !called_with_exact_resources;
+  Alcotest.(check bool)
+    "valid terminal no-compaction judgment is preserved"
+    true
+    (match outcome with
+     | Some C.No_compaction -> true
+     | Some (C.Planned _) | None -> false)
+
 let () =
   Alcotest.run "compaction_llm_summarizer"
     [ ( "provider"
@@ -100,5 +164,7 @@ let () =
             test_provider_for_plan_preserves_temperature_omission
         ; Alcotest.test_case "lane candidates keep declared order" `Quick
             test_lane_candidates_keep_declared_order
+        ; Alcotest.test_case "make uses caller-owned Eio resources" `Quick
+            test_make_uses_caller_owned_eio_resources
         ] )
     ]

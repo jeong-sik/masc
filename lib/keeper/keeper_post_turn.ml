@@ -502,6 +502,7 @@ let checkpoint_of_save_outcome = function
 ;;
 
 let recover_latest_checkpoint_for_overflow_retry
+    ~(summarizer : Keeper_compaction_llm_summarizer.summarizer option)
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
@@ -545,6 +546,7 @@ let recover_latest_checkpoint_for_overflow_retry
     in
     let preparation =
       Keeper_compact_policy.compact_for_request_typed
+        ~summarizer
         ~meta:retry_meta
         ~trigger
         ctx

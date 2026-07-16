@@ -113,6 +113,7 @@ val apply_post_turn_lifecycle_with_resilience_handles :
     structurally changed [Prepared] candidate; every other outcome is a typed
     [Error]. *)
 val recover_latest_checkpoint_for_overflow_retry :
+  summarizer:Keeper_compaction_llm_summarizer.summarizer option ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->

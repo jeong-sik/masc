@@ -168,6 +168,8 @@ type turn_success =
 val run_keeper_cycle
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> resolve_compaction_summarizer:
+       (unit -> Keeper_compaction_llm_summarizer.summarizer option)
   -> publication_recovery_provider:
        Keeper_publication_recovery_availability.provider
   -> observation:Keeper_world_observation.world_observation

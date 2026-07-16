@@ -66,14 +66,12 @@ let register_record_pre_compact
 ;;
 
 type compaction_rejection =
-  | Runtime_identity_unavailable
   | Summarizer_unavailable
   | Plan_unavailable_or_invalid
   | Structurally_unchanged
   | Checkpoint_not_reduced
 
 let compaction_rejection_to_string = function
-  | Runtime_identity_unavailable -> "runtime_identity_unavailable"
   | Summarizer_unavailable -> "summarizer_unavailable"
   | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
   | Structurally_unchanged -> "structurally_unchanged"
@@ -207,39 +205,25 @@ type requested_compaction =
   ; dropped_message_count : int
   }
 
-let requested_messages (meta : keeper_meta) messages =
-  let runtime_id =
-    try
-      let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
-      if String.trim runtime_id = ""
-      then Error Runtime_identity_unavailable
-      else Ok runtime_id
-    with
-    | Failure _ -> Error Runtime_identity_unavailable
-  in
-  match runtime_id with
-  | Error _ as error -> error
-  | Ok runtime_id ->
-    (match
-       Keeper_compaction_llm_summarizer.make
-         ~runtime_id
-         ~keeper_name:meta.name
-         ()
-     with
-     | None -> Error Summarizer_unavailable
-     | Some summarize ->
-       (match summarize ~messages with
-        | None -> Error Plan_unavailable_or_invalid
-        | Some Keeper_compaction_llm_summarizer.No_compaction ->
-          Error Structurally_unchanged
-        | Some (Keeper_compaction_llm_summarizer.Planned plan) ->
-          let observed = Keeper_compaction_llm_summarizer.observation plan in
-          Ok
-            { messages = Keeper_compaction_llm_summarizer.apply plan
-            ; selected_runtime_id = observed.selected_runtime_id
-            ; summarized_message_count = observed.summarized_message_count
-            ; dropped_message_count = observed.dropped_message_count
-            }))
+let requested_messages
+      ~(summarizer : Keeper_compaction_llm_summarizer.summarizer option)
+      messages
+  =
+  match summarizer with
+  | None -> Error Summarizer_unavailable
+  | Some summarize ->
+    (match summarize ~messages with
+     | None -> Error Plan_unavailable_or_invalid
+     | Some Keeper_compaction_llm_summarizer.No_compaction ->
+       Error Structurally_unchanged
+     | Some (Keeper_compaction_llm_summarizer.Planned plan) ->
+       let observed = Keeper_compaction_llm_summarizer.observation plan in
+       Ok
+         { messages = Keeper_compaction_llm_summarizer.apply plan
+         ; selected_runtime_id = observed.selected_runtime_id
+         ; summarized_message_count = observed.summarized_message_count
+         ; dropped_message_count = observed.dropped_message_count
+         })
 ;;
 
 let tool_block_counts messages =
@@ -289,6 +273,7 @@ let log_rejection ~meta ~trigger ~reason ~checkpoint_bytes ~message_count =
 ;;
 
 let compact_for_request_typed
+      ~(summarizer : Keeper_compaction_llm_summarizer.summarizer option)
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
       (ctx : working_context)
@@ -302,7 +287,7 @@ let compact_for_request_typed
     ~message_count:before_messages
     ~strategies:strategy_names
     ~trigger;
-  match requested_messages meta (messages_of_context ctx) with
+  match requested_messages ~summarizer (messages_of_context ctx) with
   | Error reason ->
     log_rejection
       ~meta

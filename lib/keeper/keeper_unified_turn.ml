@@ -139,6 +139,7 @@ let recover_provider_context_overflow_in_lane
       ~(config : Workspace.config)
       ~base_dir
       ~(meta : keeper_meta)
+      ~(summarizer : Keeper_compaction_llm_summarizer.summarizer option)
       ~primary_model_max_tokens
       error
   =
@@ -196,6 +197,7 @@ let recover_provider_context_overflow_in_lane
           (try
              match
                recover_latest_checkpoint_for_overflow_retry
+                 ~summarizer
                  ~base_dir
                  ~meta
                  ~trigger
@@ -331,6 +333,8 @@ let append_provider_overflow_manifest
 let run_keeper_cycle
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(resolve_compaction_summarizer :
+          unit -> Keeper_compaction_llm_summarizer.summarizer option)
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
       ~(observation : Keeper_world_observation.world_observation)
@@ -1075,6 +1079,7 @@ dominant source of the observed CAS race exhaustion after
                       ~config
                       ~base_dir
                       ~meta
+                      ~summarizer:(resolve_compaction_summarizer ())
                       ~primary_model_max_tokens:final_execution.max_context
                       err
                   in

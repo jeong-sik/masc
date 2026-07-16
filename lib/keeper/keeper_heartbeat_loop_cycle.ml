@@ -210,15 +210,42 @@ let run_keeper_cycle_admitted
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
       ?failure_judgment
+      ?compaction_summarizer
       ?(manual_compaction_requested = false)
       ()
   =
+  let resolve_compaction_summarizer () =
+    match compaction_summarizer, ctx.net with
+    | Some summarizer, _ -> Some summarizer
+    | None, None -> None
+    | None, Some net ->
+      (try
+         Keeper_compaction_llm_summarizer.make
+           ~sw:ctx.sw
+           ~net
+           ~clock:(ctx.clock :> float Eio.Time.clock_ty Eio.Resource.t)
+           ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta_after_triage)
+           ~keeper_name:meta_after_triage.name
+           ()
+       with
+       | Failure detail ->
+         Log.Keeper.warn
+           ~keeper_name:meta_after_triage.name
+           "compaction summarizer resolution failed: %s"
+           detail;
+         None)
+  in
   let admitted_execution =
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       let prepared =
         if manual_compaction_requested
         then
-          (match Keeper_manual_compaction.run ~config:ctx.config ~meta:meta_after_triage with
+          (match
+             Keeper_manual_compaction.run
+               ~summarizer:(resolve_compaction_summarizer ())
+               ~config:ctx.config
+               ~meta:meta_after_triage
+           with
            | Error failure -> `Compaction_failed failure
            | Ok success ->
              Keeper_manual_compaction.observe_manifest
@@ -247,6 +274,7 @@ let run_keeper_cycle_admitted
           ( Keeper_unified_turn.run_keeper_cycle
               ~config:ctx.config
               ~meta:meta_after_triage
+              ~resolve_compaction_summarizer
               ~publication_recovery_provider:ctx.publication_recovery_provider
               ~observation
               ~generation:meta_after_triage.runtime.generation
@@ -345,6 +373,7 @@ let run_keeper_cycle
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
       ?failure_judgment
+      ?compaction_summarizer
       ?manual_compaction_requested
       ()
   =
@@ -361,6 +390,7 @@ let run_keeper_cycle
          ~shared_context
          ~wake
          ?failure_judgment
+         ?compaction_summarizer
          ?manual_compaction_requested
          ?event_bus
          ?hitl_resolution

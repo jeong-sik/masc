@@ -255,7 +255,7 @@ let test_manual_compaction_serializes_owner_lane () =
         ; since_last_scheduled_autonomous = None
         }
       in
-      let run_cycle () =
+      let run_cycle ?compaction_summarizer () =
         Cycle.run_keeper_cycle
           ~ctx
           ~meta_after_triage:meta
@@ -264,6 +264,7 @@ let test_manual_compaction_serializes_owner_lane () =
           ~turn_decision:decision
           ~shared_context:(Agent_sdk.Context.create_sync ())
           ~wake:(Masc.Keeper_registry.Woken [ Manual_compaction_requested ])
+          ?compaction_summarizer
           ~manual_compaction_requested:true
           ()
       in
@@ -301,14 +302,12 @@ let test_manual_compaction_serializes_owner_lane () =
       in
       Atomic.set owner_entry.fiber_stop true;
       let outcome =
-        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-          (fun ~runtime_id:_ ~keeper_name:_ () ->
-             Some
-               (fun ~messages ->
-                  Some
-                    (Masc.Keeper_compaction_llm_summarizer.Planned
-                       (plan messages))))
-          run_cycle
+        run_cycle
+          ~compaction_summarizer:(fun ~messages ->
+            Some
+              (Masc.Keeper_compaction_llm_summarizer.Planned
+                 (plan messages)))
+          ()
       in
       (match outcome with
        | Cycle.Manual_compaction_applied _ -> ()

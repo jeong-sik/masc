@@ -58,7 +58,11 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
       ()
     |> Keeper_runtime_manifest.append config
 ;;
-let run ~(config : Workspace.config) ~(meta : keeper_meta) =
+let run
+      ~(summarizer : Keeper_compaction_llm_summarizer.summarizer option)
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+  =
   let dispatch stage event =
     Keeper_context_runtime.dispatch_keeper_phase_event_result
       ~config
@@ -86,6 +90,7 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
        let base_dir = Keeper_types_profile.session_base_dir config in
        (match
           Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
+            ~summarizer
             ~base_dir
             ~meta
             ~trigger:Compaction_trigger.Manual

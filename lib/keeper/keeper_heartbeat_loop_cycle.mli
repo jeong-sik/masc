@@ -54,6 +54,7 @@ val run_keeper_cycle
   -> shared_context:Agent_sdk.Context.t
   -> wake:Keeper_registry.wake_reason
   -> ?failure_judgment:Keeper_event_queue.failure_judgment
+  -> ?compaction_summarizer:Keeper_compaction_llm_summarizer.summarizer
   -> ?manual_compaction_requested:bool
   -> unit
   -> cycle_outcome

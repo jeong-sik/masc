@@ -8,7 +8,8 @@ type failure =
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
 val run
-  :  config:Workspace.config
+  :  summarizer:Keeper_compaction_llm_summarizer.summarizer option
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> (success, failure) result
 val failure_to_string : failure -> string

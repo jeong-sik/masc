@@ -1487,6 +1487,7 @@ let reasoning_replay_override_wire
   | Force_no_replay -> "force-no-replay"
   | Force_drop_without_tool_preserve_with_tool -> "drop-without-tool-preserve-with-tool"
   | Force_preserve_always -> "preserve-always"
+  | Force_latest_user_turn_tool_calls -> "latest-user-turn-tool-calls"
 ;;
 
 let task_json : Llm_provider.Capabilities.task option -> Yojson.Safe.t = function

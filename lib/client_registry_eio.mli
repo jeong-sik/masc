@@ -65,15 +65,8 @@ val list_registered : unit -> Client_identity.t list
 (** {1 Cleanup} *)
 
 val clear_session_caches : unit -> unit
-val cleanup_stale_sessions : unit -> int
+val cleanup_unregistered_session_caches : unit -> int
+(** Removes cache entries whose explicitly registered identity no longer
+    exists. No elapsed-time classification is performed. *)
+
 val unregister : string -> unit
-
-(** {1 Background Maintenance} *)
-
-(** Start a periodic cleanup fiber.  Call once at server startup within an
-    active Eio switch.  [interval] defaults to 300 seconds. *)
-val start_cleanup_loop :
-  sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
-  ?interval:float ->
-  unit -> unit

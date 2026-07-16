@@ -30,7 +30,6 @@ module Random = Stdlib.Random
     - Call [init ()] once during server startup (within Eio context)
     - Use [get_or_create_identity] in tool handlers
     - Identity persists across tool calls via MCP session ID
-    - Optionally call [start_cleanup_loop ~sw ~clock] to enable background eviction
 
     @since 0.5.0
 *)
@@ -200,12 +199,13 @@ let list_registered () =
 
 (** {1 Cleanup} *)
 
-(** Clean up stale session mappings and resolved-name cache entries.
+(** Remove session mappings and resolved-name cache entries whose explicitly
+    registered identity no longer exists.
 
     Runs under [state_mu] so that a concurrent [get_or_create_identity]
-    cannot install a fresh entry between the stale-detection scan and the
+    cannot install a fresh entry between the registry scan and the
     removal step. *)
-let cleanup_stale_sessions () =
+let cleanup_unregistered_session_caches () =
   with_state_rw (fun s ->
     let reg = get_registry_locked !s in
     let to_remove =
@@ -242,26 +242,4 @@ let unregister session_key =
       session_map = remove_from (!s).session_map to_remove;
       resolved_map = remove_from (!s).resolved_map to_remove;
     }
-  )
-
-(** {1 Background Maintenance} *)
-
-(** Start a periodic cleanup fiber that removes stale sessions and evicts
-    caches when they grow too large.  Call once at server startup. *)
-let start_cleanup_loop ~sw ~clock ?(interval = 300.0) () =
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock interval;
-      (try
-         let removed = cleanup_stale_sessions () in
-         if removed > 0 then
-           Log.Identity.info "[AgentRegistry] cleanup: removed %d stale sessions" removed
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Identity.warn "[AgentRegistry] cleanup error: %s"
-             (Stdlib.Printexc.to_string exn));
-      loop ()
-    in
-    loop ()
   )

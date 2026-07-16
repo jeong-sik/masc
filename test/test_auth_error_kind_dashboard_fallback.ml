@@ -14,7 +14,7 @@
     [auth_error_kind.mli §Dashboard actor fallback typed surface]. *)
 
 open Alcotest
-module Aek = Masc.Auth_error_kind
+module Aek = Auth_error_kind
 module Sda = Masc.Silent_dashboard_actor_outcome
 
 let with_eio_runtime f =

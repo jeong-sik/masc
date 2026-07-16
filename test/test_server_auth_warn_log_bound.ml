@@ -10,7 +10,7 @@ let test_warn_log_table_bounded () =
   let inserted = cap + 500 in
   for i = 1 to inserted do
     Server_auth.record_dashboard_actor_fallback
-      { Masc.Auth_error_kind.outcome = Masc.Auth_error_kind.Outcome_none
+      { Auth_error_kind.outcome = Auth_error_kind.Outcome_none
       ; token_hash_prefix = Printf.sprintf "prefix-%d" i
       }
   done;

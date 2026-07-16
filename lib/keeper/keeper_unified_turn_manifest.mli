@@ -23,6 +23,8 @@ val append_manifest
   -> ?decision:Yojson.Safe.t
   -> ?runtime_id:string
   -> ?clock_refs:Yojson.Safe.t
+  -> ?compaction_source:string
+  -> ?checkpoint_path:string
   -> site:string
   -> Keeper_runtime_manifest.event_kind
   -> Keeper_unified_turn_types.turn_state

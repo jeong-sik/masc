@@ -121,6 +121,36 @@ let test_is_complete_turn () =
   Alcotest.(check bool) "finished+receipt+checkpoint is complete" true
     (M.is_complete_turn complete)
 
+let test_compaction_evidence_public_projection () =
+  let decision =
+    M.with_payload_role
+      ~payload_role:M.Checkpoint
+      (`Assoc
+        [ ( "exact_evidence"
+          , `Assoc
+              [ "before_checkpoint_bytes", `Int 4096
+              ; "after_checkpoint_bytes", `Int 1024
+              ] )
+        ])
+  in
+  let json =
+    manifest ~event:M.Context_compacted ~decision ~links:(links ())
+    |> M.public_to_json
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "checkpoint role retained"
+    "checkpoint"
+    (json |> member "decision" |> member "payload_role" |> to_string);
+  Alcotest.(check int)
+    "exact before bytes retained"
+    4096
+    (json
+     |> member "decision"
+     |> member "exact_evidence"
+     |> member "before_checkpoint_bytes"
+     |> to_int)
+
 let () =
   Alcotest.run "keeper_runtime_manifest_completeness"
     [ ( "completeness"
@@ -133,5 +163,7 @@ let () =
         ; Alcotest.test_case "is_finished_turn" `Quick test_is_finished_turn
         ; Alcotest.test_case "is_complete_turn" `Quick
             test_is_complete_turn
+        ; Alcotest.test_case "compaction evidence public projection" `Quick
+            test_compaction_evidence_public_projection
         ] )
     ]

@@ -18,6 +18,8 @@ let append_manifest
       ?decision
       ?runtime_id
       ?clock_refs
+      ?compaction_source
+      ?checkpoint_path
       ~site
       event
   =
@@ -46,6 +48,7 @@ let append_manifest
           ~event
           ?elapsed_ms
           ~logical_seq:manifest_seq
+          ?compaction_source
           ()
       in
       Some (Keeper_runtime_manifest.with_clock_refs ~clock_refs decision), manifest_seq
@@ -56,6 +59,7 @@ let append_manifest
     ?runtime_id
     ?status
     ?decision
+    ?checkpoint_path
     ()
   |> Keeper_runtime_manifest.append_best_effort ~site config;
   { turn_state with manifest_seq }

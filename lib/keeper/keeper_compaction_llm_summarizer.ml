@@ -1,7 +1,7 @@
 (** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
     See keeper_compaction_llm_summarizer.mli. Structure mirrors
     Keeper_memory_llm_summary: opt-in gate + fiber-local Eio capture +
-    schema-capable provider filter + timeout + fail-closed [None]. *)
+    schema-capable provider filter + fail-closed [None]. *)
 
 module Schema = Keeper_structured_output_schema
 module Int_set = Set.Make (Int)
@@ -11,6 +11,7 @@ type compaction_plan =
   ; kept : int list
   ; summarized : int list
   ; dropped : int list
+  ; selected_runtime_id : string option
   }
 
 type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
@@ -166,7 +167,7 @@ let plan_of_json ~message_count json =
     then Error "plan keeps every message without summarizing or dropping any"
     else Ok ()
   in
-  Ok { summary; kept; summarized; dropped }
+  Ok { summary; kept; summarized; dropped; selected_runtime_id = None }
 
 (* Marker prefix so the folded summary is recognizable in the transcript and
    by downstream tooling, matching the memory-bank [MEMORY_SUMMARY] convention. *)
@@ -200,33 +201,9 @@ let plan_of_response ~message_count response =
   | Ok json -> plan_of_json ~message_count json
   | Error detail -> Error ("invalid structured response: " ^ detail)
 
-type 'a timeout_result =
-  | Completed of 'a
-  | Timed_out
-  | Clock_unavailable
-
-let with_timeout ?clock ~timeout_sec:_ f =
-  match clock with
-  | None -> Clock_unavailable
-  | Some _clock ->
-    (* No wall-clock budget kill (fail-open; RFC-0156 withdrew the MASC turn-budget
-       timeout policy). [timeout_sec] is NOT used to force-kill the compaction LLM call: a
-       budget that fired while a slow-but-healthy provider was still streaming
-       turned every compaction turn into kill -> None -> retry churn that never
-       produced a plan, so the completion call now runs to natural completion.
-       A genuine inner transport timeout (the provider call's own connect/idle
-       deadline raising [Eio.Time.Timeout]) is still surfaced as [Timed_out];
-       [Eio.Cancel.Cancelled] from server shutdown / parent-fiber cancel is not
-       caught here and propagates so the caller exits immediately without
-       retrying. The no-clock [Clock_unavailable] fail-closed guard (the [None]
-       arm above) is intentionally left in place. *)
-    (try Completed (f ()) with
-     | Eio.Time.Timeout -> Timed_out)
-
 let run_plan
     ?(complete : complete_fn = default_complete)
     ?clock
-    ?(timeout_sec = Env_config_runtime_services.Inference.timeout_seconds)
     ~(keeper_name : string)
     ~(runtime_id : string)
     ~sw
@@ -237,29 +214,15 @@ let run_plan
   let message_count = List.length messages in
   let provider_cfg = provider_for_plan provider_cfg in
   let request = messages_for_plan ~messages in
-  match
-    with_timeout ?clock ~timeout_sec (fun () ->
-      complete ~sw ~net ?clock ~config:provider_cfg ~messages:request ())
-  with
-  | Timed_out ->
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM plan timed out runtime=%s timeout_sec=%.1f"
-      runtime_id timeout_sec;
-    None
-  | Clock_unavailable ->
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM plan clock unavailable runtime=%s — refusing provider \
-       call without enforcing timeout"
-      runtime_id;
-    None
-  | Completed (Error err) ->
+  match complete ~sw ~net ?clock ~config:provider_cfg ~messages:request () with
+  | Error err ->
     Log.Keeper.warn ~keeper_name
       "compaction LLM plan failed runtime=%s: %s"
       runtime_id (Provider_http_error.to_message err);
     None
-  | Completed (Ok response) ->
+  | Ok response ->
     (match plan_of_response ~message_count response with
-     | Ok plan -> Some plan
+     | Ok plan -> Some { plan with selected_runtime_id = Some runtime_id }
      | Error detail ->
        Log.Keeper.warn ~keeper_name
          "compaction LLM plan rejected runtime=%s: %s"
@@ -322,7 +285,7 @@ let candidates_for_assignment ~keeper_name assignment_id =
 type make_fn = runtime_id:string -> keeper_name:string -> unit -> summarizer option
 let make_override : make_fn option Atomic.t = Atomic.make None
 
-let make_resolved ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
+let make_resolved ?complete ~(runtime_id : string) ~(keeper_name : string) ()
   : summarizer option
   =
   match candidates_for_assignment ~keeper_name runtime_id with
@@ -346,7 +309,7 @@ let make_resolved ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : 
                None
              | candidate :: rest ->
                (match
-                  run_plan ?complete ?clock ?timeout_sec ~keeper_name
+                  run_plan ?complete ?clock ~keeper_name
                     ~runtime_id:candidate.runtime_id ~sw ~net
                     ~provider_cfg:candidate.provider_cfg ~messages ()
                 with
@@ -368,10 +331,10 @@ let make_resolved ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : 
        candidates;
        None)
 
-let make ?complete ?timeout_sec ~runtime_id ~keeper_name () =
+let make ?complete ~runtime_id ~keeper_name () =
   match Atomic.get make_override with
   | Some override -> override ~runtime_id ~keeper_name ()
-  | None -> make_resolved ?complete ?timeout_sec ~runtime_id ~keeper_name ()
+  | None -> make_resolved ?complete ~runtime_id ~keeper_name ()
 
 module For_testing = struct
   let with_make_override override f =

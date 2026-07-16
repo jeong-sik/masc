@@ -1,5 +1,5 @@
 module Operation = Keeper_compaction_operation
-module Decode_support = Keeper_compaction_operation_codec_support
+module Codec = Keeper_compaction_operation_codec
 module Operation_json = Keeper_compaction_operation_json
 module Reducer = Keeper_compaction_operation_reducer
 
@@ -310,41 +310,123 @@ let test_canonical_json_projection () =
      |> Yojson.Safe.Util.to_string)
 ;;
 
-let test_nested_decode_support () =
-  let projected = Operation_json.to_json (candidate_event ()) in
-  let payload = Yojson.Safe.Util.member "payload" projected in
-  let checkpoint_json = Yojson.Safe.Util.member "source_checkpoint" payload in
-  let evidence_json = Yojson.Safe.Util.member "evidence" payload in
-  let decoded_checkpoint =
-    Decode_support.checkpoint ~path:"payload.source_checkpoint" checkpoint_json
-    |> Result.get_ok
+let test_codec_roundtrip_all_events () =
+  let turn = Ids.Turn_ref.make ~trace_id:"trace-a" ~absolute_turn:8 in
+  let failed failure =
+    Operation.attempt_failed ~operation_id ~attempt_id ~failure
   in
-  let decoded_evidence =
-    Decode_support.evidence ~path:"payload.evidence" evidence_json
-    |> Result.get_ok
+  let reconcile reason =
+    Operation.commit_reconciliation_required
+      ~operation_id
+      ~attempt_id
+      ~source_checkpoint:source
+      ~candidate_checkpoint:candidate
+      ~evidence
+      ~reason
   in
-  Alcotest.(check bool)
-    "checkpoint identity"
-    true
-    (Keeper_checkpoint_ref.equal source decoded_checkpoint);
-  Alcotest.(check string)
-    "runtime identity"
-    "compact-runtime"
-    (Option.get decoded_evidence.selected_runtime_id)
+  let events =
+    [ request_event ()
+    ; Operation.requested
+        ~operation_id
+        ~keeper_name
+        ~source_checkpoint:source
+        ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+        ~cause
+        ~producer_invocation:None
+    ; attempt_event ()
+    ; candidate_event ()
+    ; failed (Operation.Pre_commit_failure cause)
+    ; failed
+        (Operation.Candidate_not_installed
+           { cause; observed_checkpoint = source })
+    ; reconcile Operation.Commit_durability_unknown
+    ; reconcile Operation.Transaction_outcome_unknown
+    ; Operation.compacted
+        ~operation_id
+        ~attempt_id
+        ~source_checkpoint:source
+        ~committed_checkpoint:candidate
+        ~evidence
+    ; Operation.reinjected
+        ~operation_id
+        ~adopted_checkpoint:candidate
+        ~adopting_turn:turn
+    ]
+  in
+  List.iter
+    (fun event ->
+       let json = Codec.to_json event in
+       match Codec.of_json json with
+       | Ok decoded ->
+         Alcotest.(check (testable Yojson.Safe.pp Yojson.Safe.equal))
+           "canonical roundtrip"
+           json
+           (Codec.to_json decoded)
+       | Error _ -> Alcotest.fail "canonical event was rejected")
+    events
 ;;
 
-let test_nested_decode_support_rejects_unknown_field () =
-  match
-    Decode_support.trigger
-      ~path:"payload.trigger"
-      (`Assoc [ "kind", `String "manual"; "unexpected", `Null ])
-  with
-  | Error
-      (Decode_support.Invalid_field
-         (Decode_support.Unknown_field
-            { path = "payload.trigger"; field = "unexpected" })) ->
-    ()
-  | Ok _ | Error _ -> Alcotest.fail "manual trigger accepted an unknown field"
+let replace_field name value = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (field, current) ->
+            if String.equal field name then field, value else field, current)
+         fields)
+  | json -> json
+;;
+
+let expect_field_error message expected json =
+  match Codec.of_json json with
+  | Error (Codec.Invalid_field actual) when actual = expected -> ()
+  | Ok _ | Error _ -> Alcotest.fail message
+;;
+
+let test_codec_rejects_nested_unknown_field () =
+  let json = Codec.to_json (request_event ()) in
+  let payload = Yojson.Safe.Util.member "payload" json in
+  let prepend name value = function
+    | `Assoc fields -> `Assoc ((name, value) :: fields)
+    | current -> current
+  in
+  let remove name = function
+    | `Assoc fields -> `Assoc (List.remove_assoc name fields)
+    | current -> current
+  in
+  let with_unknown name =
+    prepend name `Null
+  in
+  expect_field_error
+    "event accepted an unknown top field"
+    (Codec.Unknown_field { path = "$"; field = "unexpected_top" })
+    (with_unknown "unexpected_top" json);
+  expect_field_error
+    "event accepted a duplicate top field"
+    (Codec.Duplicate_field { path = "$"; field = "kind" })
+    (prepend "kind" (`String "requested") json);
+  expect_field_error
+    "event accepted a missing top field"
+    (Codec.Missing_field { path = "$"; field = "payload" })
+    (remove "payload" json);
+  expect_field_error
+    "event accepted a wrong-type top field"
+    (Codec.Wrong_type { path = "$"; field = "operation_id"; expected = "string" })
+    (replace_field "operation_id" (`Int 1) json);
+  let payload_unknown =
+    replace_field "payload" (with_unknown "unexpected_payload" payload) json
+  in
+  expect_field_error
+    "event accepted an unknown payload field"
+    (Codec.Unknown_field { path = "payload"; field = "unexpected_payload" })
+    payload_unknown;
+  let trigger =
+    `Assoc [ "kind", `String "manual"; "unexpected", `Null ]
+  in
+  let malformed = replace_field "payload" (replace_field "trigger" trigger payload) json in
+  expect_field_error
+    "event accepted an unknown trigger field"
+    (Codec.Unknown_field { path = "payload.trigger"; field = "unexpected" })
+    malformed
 ;;
 
 let () =
@@ -375,12 +457,12 @@ let () =
             `Quick
             test_canonical_json_projection
         ; Alcotest.test_case
-            "nested decode support"
+            "codec roundtrip all events"
             `Quick
-            test_nested_decode_support
+            test_codec_roundtrip_all_events
         ; Alcotest.test_case
-            "nested decode support rejects unknown field"
+            "codec rejects nested unknown field"
             `Quick
-            test_nested_decode_support_rejects_unknown_field
+            test_codec_rejects_nested_unknown_field
         ] )
     ]

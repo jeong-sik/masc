@@ -63,14 +63,14 @@ let test_active_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Client_registry_eio.reset_for_testing ();
-  let initial = Client_registry_eio.active_count () in
+  let initial = Client_registry_eio.active_count ~within_seconds:300.0 () in
   
   (* Create a new agent with unique name *)
   let name = Printf.sprintf "count-test-agent-%d" (Random.int 10000) in
   let _ = Client_registry_eio.get_or_create_identity 
     (`Assoc [("_agent_name", `String name)]) in
   
-  let after = Client_registry_eio.active_count () in
+  let after = Client_registry_eio.active_count ~within_seconds:300.0 () in
   check bool "count increased" true (after >= initial)
 
 let test_list_active () =
@@ -81,7 +81,7 @@ let test_list_active () =
   let _ = Client_registry_eio.get_or_create_identity 
     (`Assoc [("_agent_name", `String name)]) in
   
-  let active = Client_registry_eio.list_active () in
+  let active = Client_registry_eio.list_active ~within_seconds:300.0 () in
   check bool "has active agents" true (List.length active > 0)
 
 let test_cleanup_stale () =

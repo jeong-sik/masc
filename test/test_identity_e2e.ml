@@ -67,7 +67,8 @@ let test_multi_agent_isolation () =
   check int "all unique" 3 (List.length unique_keys);
   
   (* Verify agent count *)
-  check int "3 active agents" 3 (Client_registry_eio.active_count ())
+  check int "3 active agents" 3
+    (Client_registry_eio.active_count ~within_seconds:300.0 ())
 
 (** Test identity display string *)
 let test_display_string () =

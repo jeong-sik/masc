@@ -31,9 +31,6 @@ val pause_info :
   Workspace_utils_backend_setup.config ->
   (string option * string option * string option) option
 
-val heartbeat_timeout_seconds : float
 val parse_iso_time_opt : string -> float option
 val parse_iso_time : string -> float
-val is_zombie_agent :
-  ?agent_type:string -> ?agent_meta:Masc_domain.agent_meta -> agent_name:string -> string -> bool
 val take : int -> 'a list -> 'a list

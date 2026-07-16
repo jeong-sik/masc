@@ -123,11 +123,6 @@ val heartbeat : t -> agent_id:string -> unit
 val increment_turn : t -> agent_id:string -> unit
 (** Bumps [turn_count] and [last_activity]. *)
 
-val cleanup_zombies : t -> ?timeout:float -> unit -> int
-(** Removes sessions whose [last_activity] is older than [timeout]
-    (default {!Workspace_resilience.default_zombie_threshold}). Returns the
-    number of evicted sessions. *)
-
 (** {1 Persistence} *)
 
 val persist : t -> unit

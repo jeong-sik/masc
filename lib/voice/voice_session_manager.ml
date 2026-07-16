@@ -36,7 +36,7 @@ type t = {
   sessions_mu: Eio.Mutex.t;
   (** Serialises every read/write on [sessions] and every mutation of
       the [mutable] fields of a [session] value.  Keeper fibers call
-      start_session / heartbeat / end_session / cleanup_zombies from
+      start_session / heartbeat / end_session from
       different turns concurrently, and without the lock the Hashtbl
       races on TOCTOU ([find_opt] + [add]) and the session record's
       mutable [turn_count]/[last_activity]/[status] are non-atomic.
@@ -386,23 +386,6 @@ let increment_turn t ~agent_id =
       session.last_activity <- Time_compat.now ();
       save_session t session
     | None -> ())
-
-(** {1 Zombie Cleanup} *)
-
-let cleanup_zombies t ?(timeout = Workspace_resilience.default_zombie_threshold) () =
-  with_lock t (fun () ->
-    let now = Time_compat.now () in
-    let to_remove = Hashtbl.fold (fun agent_id session acc ->
-      if now -. session.last_activity > timeout then
-        agent_id :: acc
-      else
-        acc
-    ) t.sessions [] in
-    List.iter (fun agent_id ->
-      Hashtbl.remove t.sessions agent_id;
-      delete_session_file t agent_id
-    ) to_remove;
-    List.length to_remove)
 
 (** {1 Persistence} *)
 

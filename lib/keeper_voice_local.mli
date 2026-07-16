@@ -28,7 +28,4 @@ val get_session_manager : unit -> Voice_session_manager.t
 
     Thread-safety: safe under a single Eio domain — all fibers
     share one OS thread, so the underlying [ref] read/write
-    cannot race.  No [Eio.Mutex] needed.  Zombie session cleanup
-    happens lazily inside {!Voice_session_manager} at
-    session-start time, so callers do not need to schedule a
-    reaper. *)
+    cannot race.  No [Eio.Mutex] needed. *)

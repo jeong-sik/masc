@@ -50,6 +50,15 @@ module RateLimit = struct
     get_float ~default:3600.0 "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"
 end
 
+(** {1 Client Registry Observation} *)
+
+module ClientRegistry = struct
+  (** Active-presence observation window used by HTTP projections. *)
+  let active_window_seconds =
+    Float.max 1.0
+      (get_float ~default:300.0 "MASC_CLIENT_REGISTRY_ACTIVE_WINDOW_SEC")
+end
+
 (** {1 Agent Autonomy Configuration}
     Primary env vars: MASC_AUTONOMY_*. *)
 

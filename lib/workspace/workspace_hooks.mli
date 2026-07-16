@@ -28,14 +28,6 @@ type agent_lifecycle_event =
   | Session_rebound
   | Session_ended
 
-val reconcile_orphaned_task_fn
-  :  (Workspace_utils_backend_setup.config
-      -> task_id:string
-      -> expected_assignee:string
-      -> signal:[ `Absent | `Inactive ]
-      -> unit
-      -> string Masc_domain.masc_result)
-       Atomic.t
 val activity_emit_fn : (Workspace_utils_backend_setup.config ->
             actor:activity_entity ->
             ?subject:activity_entity ->
@@ -44,7 +36,6 @@ val activity_emit_fn : (Workspace_utils_backend_setup.config ->
            Atomic.t
 val agent_economy_earn_fn : (base_path:string -> agent_name:string -> reason:string -> unit)
            Atomic.t
-val stop_keeper_fn : (string -> unit) Atomic.t
 val runtime_agents_fn :
   (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t
 val relation_on_leave_fn : (leaving_agent:string -> active_agents:string list -> unit)

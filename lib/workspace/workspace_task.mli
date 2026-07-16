@@ -77,18 +77,6 @@ val release_task_r :
   ?expected_version:int ->
   ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
 
-type task_reconciliation_signal =
-  | Assignee_absent
-  | Assignee_inactive
-
-val reconcile_orphaned_task_r
-  :  config
-  -> task_id:string
-  -> expected_assignee:string
-  -> signal:task_reconciliation_signal
-  -> unit
-  -> string Masc_domain.masc_result
-
 (** {1 Task cancellation} *)
 
 val cancel_task_r :

@@ -7,11 +7,7 @@ type threshold_params = {
   compaction_message_gate : int;
   compaction_token_gate : int;
   compaction_cooldown_sec : int;
-  handoff_threshold : float;
-  handoff_cooldown_sec : int;
-  auto_handoff_enabled : bool;
   model_ratio_multiplier : float;
-  model_handoff_multiplier : float;
 }
 
 type context_measurement = {
@@ -25,7 +21,6 @@ type timing_measurement = {
   now_ts : float;
   idle_seconds : int;
   since_last_compaction_sec : float;
-  since_last_handoff_sec : float;
   proactive_warmup_elapsed : bool;
 }
 
@@ -51,11 +46,7 @@ let threshold_params_to_json (t : threshold_params) : Yojson.Safe.t =
     "compaction_message_gate", `Int t.compaction_message_gate;
     "compaction_token_gate", `Int t.compaction_token_gate;
     "compaction_cooldown_sec", `Int t.compaction_cooldown_sec;
-    "handoff_threshold", `Float t.handoff_threshold;
-    "handoff_cooldown_sec", `Int t.handoff_cooldown_sec;
-    "auto_handoff_enabled", `Bool t.auto_handoff_enabled;
     "model_ratio_multiplier", `Float t.model_ratio_multiplier;
-    "model_handoff_multiplier", `Float t.model_handoff_multiplier;
   ]
 
 let capture
@@ -71,7 +62,6 @@ let capture
       ~now_ts
       ~idle_seconds
       ~since_last_compaction_sec
-      ~since_last_handoff_sec
       ~proactive_warmup_elapsed
       ~consecutive_hb_failures
       ~consecutive_turn_failures
@@ -93,7 +83,6 @@ let capture
       { now_ts
       ; idle_seconds
       ; since_last_compaction_sec
-      ; since_last_handoff_sec
       ; proactive_warmup_elapsed
       }
   ; failures =
@@ -119,7 +108,6 @@ let measurement_snapshot_to_json (s : measurement_snapshot) : Yojson.Safe.t =
       "now_ts", `Float s.timing.now_ts;
       "idle_seconds", `Int s.timing.idle_seconds;
       "since_last_compaction_sec", `Float s.timing.since_last_compaction_sec;
-      "since_last_handoff_sec", `Float s.timing.since_last_handoff_sec;
       "proactive_warmup_elapsed", `Bool s.timing.proactive_warmup_elapsed;
     ];
     "failures", `Assoc [

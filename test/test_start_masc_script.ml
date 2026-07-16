@@ -13,6 +13,9 @@ let script_path () =
 let loopback_script_path () =
   source_file "scripts/start-loopback.sh"
 
+let supervised_script_path () =
+  source_file "scripts/start-masc-supervised.sh"
+
 let quote = Filename.quote
 
 let read_file path =
@@ -1199,6 +1202,54 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
       check bool "loopback honors explicit keeper autoboot opt-in" true
         (contains_substring captured_override "MASC_KEEPER_BOOTSTRAP_ENABLED=true"))
 
+let test_supervisor_preserves_child_exit_status_across_restart_policy () =
+  with_temp_dir "start-masc-supervised-script" (fun repo_root ->
+      let scripts_dir = Filename.concat repo_root "scripts" in
+      let supervisor_script =
+        Filename.concat scripts_dir "start-masc-supervised.sh"
+      in
+      let child_script = Filename.concat repo_root "start-masc.sh" in
+      let invocation_count = Filename.concat repo_root "invocation-count" in
+      let log_file = Filename.concat repo_root "supervisor.log" in
+      mkdir_p scripts_dir;
+      copy_script (supervised_script_path ()) supervisor_script;
+      write_executable child_script
+        (Printf.sprintf
+           {|#!/bin/sh
+set -eu
+count=0
+if [ -f %s ]; then
+  count="$(cat %s)"
+fi
+count=$((count + 1))
+printf '%%s\n' "$count" > %s
+exit 23
+|}
+           (quote invocation_count) (quote invocation_count)
+           (quote invocation_count));
+      let code, stdout, stderr =
+        run_script ~cwd:repo_root supervisor_script
+          ~env:
+            [
+              ("MASC_SUPERVISOR_LOG", log_file);
+              ("MASC_RESTART_WINDOW_SEC", "300");
+              ("MASC_MAX_RESTARTS_IN_WINDOW", "2");
+              ("MASC_RESTART_COOLDOWN_SEC", "0");
+            ]
+          []
+      in
+      check int "crash-loop breaker exit status" 1 code;
+      check string "child restarted until configured exit limit" "2\n"
+        (read_file invocation_count);
+      let log = read_file log_file in
+      check bool "real child exit status is recorded" true
+        (contains_substring log "masc exited code=23");
+      check bool "child failure is not rewritten as success" false
+        (contains_substring log "masc exited code=0");
+      check string "supervisor writes no stdout" "" stdout;
+      check bool "abort remains explicit" true
+        (contains_substring stderr "ABORT: 2 exits in 300s window"))
+
 let () =
   run "start_masc_script"
     [
@@ -1269,5 +1320,9 @@ let () =
             "loopback disables keeper autoboot by default and requires opt-in"
             `Quick
             test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in;
+          test_case
+            "supervisor preserves child exit status across restart policy"
+            `Quick
+            test_supervisor_preserves_child_exit_status_across_restart_policy;
         ] );
     ]

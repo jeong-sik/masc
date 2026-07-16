@@ -260,7 +260,7 @@ function formatRelativeTime(date: Date): string {
   return date.toLocaleString('ko-KR')
 }
 
-// Runtime config draft for sandbox/proactive/compaction/handoff inline editing
+// Runtime config draft for sandbox/proactive/compaction inline editing
 export function normalizeMaxContextOverrideDraft(value: number, maxTokens?: number | null): number {
   if (!Number.isFinite(value)) return 0
   const normalized = Math.max(0, Math.trunc(value))
@@ -285,9 +285,6 @@ export type RuntimeDraft = {
   compaction_message_gate: number
   compaction_token_gate: number
   compaction_cooldown_sec: number
-  auto_handoff: boolean
-  handoff_threshold: number
-  handoff_cooldown_sec: number
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
@@ -364,9 +361,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     compaction_message_gate: c.compaction.message_gate,
     compaction_token_gate: c.compaction.token_gate,
     compaction_cooldown_sec: c.compaction.cooldown_sec,
-    auto_handoff: c.handoff.auto,
-    handoff_threshold: c.handoff.threshold,
-    handoff_cooldown_sec: c.handoff.cooldown_sec,
   }
 }
 
@@ -611,8 +605,8 @@ export function keeperConfigControlInventory(
           c,
           tab,
           'kcf-policy-continuity',
-          'Compaction, proactive, handoff',
-          `${configApiSource} compaction.* + proactive.* + handoff.* + autoboot_enabled`,
+          'Compaction and proactive',
+          `${configApiSource} compaction.* + proactive.* + autoboot_enabled`,
           'PATCH /api/v1/keepers/:name/config continuity/autoboot fields',
           'continuity/autoboot fields',
           [
@@ -623,9 +617,6 @@ export function keeperConfigControlInventory(
             'compaction.token_gate',
             'compaction.cooldown_sec',
             'proactive.enabled',
-            'handoff.auto',
-            'handoff.threshold',
-            'handoff.cooldown_sec',
           ],
         ),
       ]
@@ -819,9 +810,6 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
   if (draft.compaction_token_gate !== orig.compaction.token_gate) payload.compaction_token_gate = draft.compaction_token_gate
   if (draft.compaction_cooldown_sec !== orig.compaction.cooldown_sec) payload.compaction_cooldown_sec = draft.compaction_cooldown_sec
-  if (draft.auto_handoff !== orig.handoff.auto) payload.auto_handoff = draft.auto_handoff
-  if (draft.handoff_threshold !== orig.handoff.threshold) payload.handoff_threshold = draft.handoff_threshold
-  if (draft.handoff_cooldown_sec !== orig.handoff.cooldown_sec) payload.handoff_cooldown_sec = draft.handoff_cooldown_sec
   return payload
 }
 
@@ -864,9 +852,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     compaction_message_gate: 'compaction_message_gate' in payload,
     compaction_token_gate: 'compaction_token_gate' in payload,
     compaction_cooldown_sec: 'compaction_cooldown_sec' in payload,
-    auto_handoff: 'auto_handoff' in payload,
-    handoff_threshold: 'handoff_threshold' in payload,
-    handoff_cooldown_sec: 'handoff_cooldown_sec' in payload,
   }
 }
 
@@ -1952,7 +1937,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     </${KcfSec}>
   `
 
-  // policy ⚖ — verify gate + compaction + proactive + handoff + tool policy
+  // policy ⚖ — verify gate + compaction + proactive + tool policy
   const policyTab = html`
     ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="검증" />
@@ -2005,27 +1990,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ` : html`
       <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
       <${BoolRow} label="활성" value=${c.proactive.enabled} />
-    `}
-
-    <${SectionHeader} title="핸드오프" />
-    ${rd && runtimeCanEdit ? html`
-      <${SetRow} label="자동" hint="컨텍스트 임계 도달 시 자동 인계" dirty=${dirtyFlags.auto_handoff}>
-        <${SetToggle} ariaLabel="자동 핸드오프" on=${rd.auto_handoff}
-          onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)} />
-      </${SetRow}>
-      <${SetRow} label="임계값" hint="컨텍스트 %" dirty=${dirtyFlags.handoff_threshold}>
-        <${SetSeg} ariaLabel="핸드오프 임계값" value=${Math.round(rd.handoff_threshold * 100)}
-          options=${[80, 85, 90, 95]}
-          onChange=${(v: number) => updateRuntimeDraft('handoff_threshold', v / 100)} />
-      </${SetRow}>
-      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.handoff_cooldown_sec}
-        onChange=${(v: number) => updateRuntimeDraft('handoff_cooldown_sec', v)}
-        min=${0} max=${3600} step=${30} suffix="s"
-        dirty=${dirtyFlags.handoff_cooldown_sec} />
-    ` : html`
-      <${BoolRow} label="자동" value=${c.handoff.auto} />
-      <${ConfigRow} label="임계값" value=${formatPct(c.handoff.threshold)} />
-      <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
     `}
 
   `

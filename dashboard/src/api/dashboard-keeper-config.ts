@@ -155,7 +155,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const compaction = isRecord(data.compaction) ? data.compaction : {}
   const proactive = isRecord(data.proactive) ? data.proactive : {}
   const drift = isRecord(data.drift) ? data.drift : {}
-  const handoff = isRecord(data.handoff) ? data.handoff : {}
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
@@ -220,11 +219,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       min_turn_gap: asInt(drift.min_turn_gap) ?? null,
       count_total: asInt(drift.count_total) ?? null,
       last_reason: asNullableString(drift.last_reason),
-    },
-    handoff: {
-      auto: asLooseBoolean(handoff.auto),
-      threshold: asLooseNumber(handoff.threshold) ?? 0.85,
-      cooldown_sec: asInt(handoff.cooldown_sec) ?? 0,
     },
     hooks: hooks
       ? {
@@ -315,10 +309,6 @@ export type KeeperConfigUpdatePayload = {
   compaction_message_gate?: number
   compaction_token_gate?: number
   compaction_cooldown_sec?: number
-  // Handoff
-  auto_handoff?: boolean
-  handoff_threshold?: number
-  handoff_cooldown_sec?: number
 }
 
 export async function patchKeeperConfig(

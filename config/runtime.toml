@@ -987,12 +987,13 @@ candidates = [
 # keepers fall back to [runtime].default. Per-keeper overrides in the
 # live config (<base>/.masc/config/runtime.toml) take precedence.
 #
-# Seed only nick0cave to the local Gemma 4 canary. Other keepers use the
-# fleet default unless their live config overrides this seed.
+# The public seed ships no keeper assignments: keeper names are
+# deployment-local identities, so per-keeper routing belongs in the live
+# config, not here (enforced by test_runtime_config_validity "public seed
+# has no keeper assignments").
 # Do not assign general keeper lanes to Pro here. Pro is reserved for explicit
 # judge/evaluator lanes ([runtime].cross_verifier and [fusion].judge).
 [runtime.assignments]
-nick0cave = "ollama.gemma4-26b-a4b-qat"
 # example: route a test keeper through the failover lane
 # canary = "default"
 

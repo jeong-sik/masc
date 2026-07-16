@@ -41,7 +41,7 @@ let test_labels () =
           { Fusion_types.failed_role = Meta
           ; failure = Fusion_types.Provider_error "boom"
           ; usage = sample_usage
-          ; elapsed_s = 0.0
+          ; elapsed_s = None
           }))
 
 let test_record_judge_execution_emits () =

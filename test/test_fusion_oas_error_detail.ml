@@ -213,7 +213,7 @@ let test_panel_failure_yojson_round_trips_current_shapes () =
 
 let test_timeout_budget_sets_transport_timeouts () =
   let config =
-    Fusion_oas.For_testing.apply_timeout_budget
+    Fusion_oas.For_testing.apply_provider_timeout
       ~timeout_s:300.0
       (runtime_config ())
   in

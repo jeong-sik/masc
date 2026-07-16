@@ -1,49 +1,7 @@
 module Va = Multimodal.Vision_analyze
 module Store = Multimodal.Vision_artifact_store
 
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
-
-(* Mirrors Keeper_librarian_runtime.default_complete (neither is exposed).
-   Replicated rather than shared: two tiny consumers do not yet justify a shared
-   keeper_provider_subcall module (repetition over premature abstraction);
-   extract one if a third sub-call appears. The provider-attempt wrapper below
-   deliberately diverges from the librarian's: the vision sub-call runs to
-   completion (no wall-clock kill), see [attempt_catching_transport_timeout]. *)
-let default_complete : complete_fn =
- fun ~sw ~net ?clock ~config ~messages () ->
-  Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
-
-(* RFC-0156 (withdraw MASC turn-budget timeout policy) / fail-open directive: a
-   single provider attempt runs to completion — no wall-clock budget kills it.
-   A wall-budget kill only turned a slow-but-progressing call into
-   kill -> error -> retry churn, discarding work already in flight. The
-   cumulative per-request deadline is retained, but only as a scheduling gate on
-   whether the *next* candidate runtime is started (see [remaining_timeout_sec]
-   in [run_candidates] / [run_candidates_outcome]); it never interrupts an
-   attempt that is already running.
-
-   [Eio.Time.Timeout] is still caught and mapped to [None] so a genuine
-   inner-transport timeout — the HTTP client's own connect/idle deadline, on the
-   defensive path where it escapes [complete] as an exception rather than an
-   [Error] result — fails the candidate over to the next runtime. [Eio.Cancel.Cancelled]
-   and every other exception propagate so caller/supervisor cancellation is not
-   swallowed by this handler. *)
-let attempt_catching_transport_timeout f =
-  try Some (f ()) with
-  | Eio.Time.Timeout -> None
-
-let valid_timeout_sec timeout_sec =
-  Float.is_finite timeout_sec && timeout_sec > 0.0
-
-(* One-shot vision read: shorter than a full keeper turn. *)
-let default_timeout_sec = 120.0
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 (* Thinking is forced off (below), so the budget only needs room for the answer;
    keep it well above the 64-token point where the 2026-06-25 gemma4 reply
@@ -310,22 +268,6 @@ let vision_text_of_response (response : Agent_sdk.Types.api_response) =
   | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)
 ;;
 
-let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
-  match vision_text_of_response response with
-  | Error detail ->
-    err_json
-      ~failure_class:Tool_result.Runtime_failure
-      ~detail
-      "invalid_structured_response"
-  | Ok text ->
-    let truncated = truncated_of_stop_reason response.stop_reason in
-    (match Va.classify ~truncated ~content:text with
-     | Ok t -> ok_json t
-     | Error Va.Empty_extraction ->
-       err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
-     | Error Va.Truncated_extraction ->
-       err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction")
-
 let outcome_of_response (response : Agent_sdk.Types.api_response) =
   match vision_text_of_response response with
   | Error detail -> Vo_invalid_structured_response detail
@@ -335,10 +277,6 @@ let outcome_of_response (response : Agent_sdk.Types.api_response) =
      | Ok t -> Vo_ok t
      | Error Va.Empty_extraction -> Vo_empty
      | Error Va.Truncated_extraction -> Vo_truncated)
-
-let remaining_timeout_sec ~clock ~deadline =
-  let remaining = deadline -. Eio.Time.now clock in
-  if remaining <= 0.0 then None else Some remaining
 
 let bounded_exponential_backoff ~base ~max_backoff ~attempt_index =
   let rec loop remaining delay =
@@ -359,115 +297,13 @@ let candidate_backoff_sec ~attempt_index =
   else bounded_exponential_backoff ~base ~max_backoff ~attempt_index
 ;;
 
-let sleep_before_next_candidate ~clock ~deadline ~attempt_index =
+let sleep_before_next_candidate ~clock ~attempt_index =
   let delay = candidate_backoff_sec ~attempt_index in
-  match remaining_timeout_sec ~clock ~deadline with
-  | Some remaining when delay > 0.0 ->
-    Eio.Time.sleep clock (Float.min delay remaining)
-  | Some _ | None -> ()
+  if delay > 0.0 then Eio.Time.sleep clock delay
 ;;
 
-let run_candidates
-    ~complete
-    ~deadline
-    ~sw
-    ~clock
-    ~net
-    ~messages
-    ~last_error
-    ~attempt_index
-    candidates
-  =
-  let rec loop ~last_error ~attempt_index = function
-    | [] ->
-      (match last_error with
-       | None ->
-         err_json
-           ~failure_class:Tool_result.Runtime_failure
-           ~detail:"no schema-capable image runtime configured"
-           "no_capable_runtime"
-       | Some (`Timeout runtime_id) ->
-         err_json
-           ~failure_class:Tool_result.Transient_error
-           ~detail:(Printf.sprintf "runtime %S timed out" runtime_id)
-           "timeout"
-       | Some (`Provider_error err) ->
-         err_json
-           ~failure_class:(failure_class_of_http_error err)
-           ~detail:(Provider_http_error.to_message err)
-           "provider_error")
-    | (runtime_id, rt) :: rest ->
-      let continue_with last_error =
-        (if not (List.is_empty rest)
-         then sleep_before_next_candidate ~clock ~deadline ~attempt_index);
-        loop
-          ~last_error:(Some last_error)
-          ~attempt_index:(attempt_index + 1)
-          rest
-      in
-      (match remaining_timeout_sec ~clock ~deadline with
-       | None ->
-         let last_error =
-           match last_error with
-           | Some _ as existing -> existing
-           | None -> Some (`Timeout runtime_id)
-         in
-         loop ~last_error ~attempt_index []
-       | Some _remaining ->
-         (* [_remaining] (budget left before the failover deadline) is no longer
-            used to bound the attempt: it runs to completion. The deadline is
-            consumed only by the [None] arm above, which stops starting further
-            candidates once it is exhausted. *)
-         let config = provider_for_vision rt.Runtime.provider_config in
-         (match
-            attempt_catching_transport_timeout (fun () ->
-              complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
-          with
-          | None ->
-            record_vision_candidate_attempt
-              ~runtime_id
-              ~result:"error"
-              ~reason:"timeout";
-            continue_with (`Timeout runtime_id)
-          | Some (Error err) ->
-            if terminal_policy_http_error err
-            then (
-              record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"terminal_provider_error";
-              err_json
-                ~failure_class:(failure_class_of_http_error err)
-                ~detail:(Provider_http_error.to_message err)
-                "provider_error")
-            else if Runtime_attempt_fsm.should_try_next err
-            then (
-              record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"transient_provider_error";
-              continue_with (`Provider_error err))
-            else (
-              record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"runtime_provider_error";
-              err_json
-                ~failure_class:(failure_class_of_http_error err)
-                ~detail:(Provider_http_error.to_message err)
-                "provider_error")
-          | Some (Ok response) ->
-            record_vision_candidate_attempt
-              ~runtime_id
-              ~result:"ok"
-              ~reason:"provider_response";
-            ok_or_classified_json response))
-  in
-  loop ~last_error ~attempt_index candidates
-
 let run_candidates_outcome
-    ~complete
-    ~deadline
+    ?complete
     ~sw
     ~clock
     ~net
@@ -489,37 +325,24 @@ let run_candidates_outcome
     | (runtime_id, rt) :: rest ->
       let continue_with last_error =
         (if not (List.is_empty rest)
-         then sleep_before_next_candidate ~clock ~deadline ~attempt_index);
+         then sleep_before_next_candidate ~clock ~attempt_index);
         loop
           ~last_error:(Some last_error)
           ~attempt_index:(attempt_index + 1)
           rest
       in
-      (match remaining_timeout_sec ~clock ~deadline with
-       | None ->
-         let last_error =
-           match last_error with
-           | Some _ as existing -> existing
-           | None -> Some (`Timeout runtime_id)
-         in
-         loop ~last_error ~attempt_index []
-       | Some _remaining ->
-         (* [_remaining] (budget left before the failover deadline) is no longer
-            used to bound the attempt: it runs to completion. The deadline is
-            consumed only by the [None] arm above, which stops starting further
-            candidates once it is exhausted. *)
-         let config = provider_for_vision rt.Runtime.provider_config in
-         (match
-            attempt_catching_transport_timeout (fun () ->
-              complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
-          with
-          | None ->
+      let config = provider_for_vision rt.Runtime.provider_config in
+      (match
+         Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
+           ~config ~messages ()
+       with
+       | Error (Llm_provider.Http_client.TimeoutError _) ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"error"
               ~reason:"timeout";
             continue_with (`Timeout runtime_id)
-          | Some (Error err) ->
+       | Error err ->
             if terminal_policy_http_error err
             then (
               record_vision_candidate_attempt
@@ -546,18 +369,17 @@ let run_candidates_outcome
                 { failure_class = failure_class_of_http_error err
                 ; detail = Provider_http_error.to_message err
                 })
-          | Some (Ok response) ->
+       | Ok response ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"ok"
               ~reason:"provider_response";
-            outcome_of_response response))
+            outcome_of_response response)
   in
   loop ~last_error ~attempt_index candidates
 
 let run_vision
-    ?(complete = default_complete)
-    ?(timeout_sec = default_timeout_sec)
+    ?complete
     ~sw
     ~clock
     ~net
@@ -566,14 +388,7 @@ let run_vision
     ~bytes
     () =
   try
-    if not (valid_timeout_sec timeout_sec)
-    then
-      Vo_provider
-        { failure_class = Tool_result.Runtime_failure
-        ; detail = "timeout_sec must be finite and > 0"
-        }
-    else (
-      match validate_image_size bytes with
+    match validate_image_size bytes with
       | Error msg -> Vo_invalid_request msg
       | Ok () ->
         (match validate_media_type media_type with
@@ -586,15 +401,14 @@ let run_vision
             | Error msg -> Vo_invalid_request msg
             | Ok req ->
               run_candidates_outcome
-                ~complete
-                ~deadline:(Eio.Time.now clock +. timeout_sec)
+                ?complete
                 ~sw
                 ~clock
                 ~net
                 ~messages:[ message_of_request req ]
                 ~last_error:None
                 ~attempt_index:0
-                (vision_runtime_candidates ()))))
+                (vision_runtime_candidates ())))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _exn ->
@@ -645,8 +459,7 @@ let execution_of_vision_outcome = function
 ;;
 
 let handle_with_outcome
-    ?(complete = default_complete)
-    ?(timeout_sec = default_timeout_sec)
+    ?complete
     ?sw
     ?clock
     ?net
@@ -670,16 +483,7 @@ let handle_with_outcome
             ~failure_class:Tool_result.Runtime_failure
             "eio_context_unavailable")
      | Some sw, Some net, Some clock ->
-       if not (valid_timeout_sec timeout_sec)
-       then
-         Keeper_tool_execution.failure
-           ~class_:Tool_result.Runtime_failure
-           (err_json
-              ~failure_class:Tool_result.Runtime_failure
-              ~detail:"timeout_sec must be finite and > 0"
-              "invalid_timeout")
-       else
-         let dir = vision_store_dir ~keeper_name:meta.name in
+       let dir = vision_store_dir ~keeper_name:meta.name in
          (match load_artifact ~dir (Store.of_string handle_str) with
         | Error msg ->
           Keeper_tool_execution.failure
@@ -708,8 +512,7 @@ let handle_with_outcome
                      "invalid_media_type")
               | Ok media_type ->
                 run_vision
-                  ~complete
-                  ~timeout_sec
+                  ?complete
                   ~sw
                   ~clock
                   ~net
@@ -719,10 +522,9 @@ let handle_with_outcome
                   ()
                 |> execution_of_vision_outcome))))
 
-let handle ?complete ?timeout_sec ?sw ?clock ?net ~meta ~args () =
+let handle ?complete ?sw ?clock ?net ~meta ~args () =
   (handle_with_outcome
      ?complete
-     ?timeout_sec
      ?sw
      ?clock
      ?net

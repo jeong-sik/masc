@@ -82,6 +82,7 @@
   masc.keeper_metrics
   masc.keeper_types
   masc.keeper_runtime
+  masc.keeper_chat_delivery_identity
   masc.keeper_failure_taxonomy
   masc.keeper_toml
   masc.runtime_provider_labels

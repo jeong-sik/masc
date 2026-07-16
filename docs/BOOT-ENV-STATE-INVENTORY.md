@@ -569,7 +569,41 @@ OLLAMA_SERVER_URL
 ZAI_BASE_URL
 ```
 
-### A.3 `env_config_keeper`
+### A.3 `env_config_runtime_services`
+
+Used for runtime-service observation windows, rate-limit cleanup, inference
+cache policy, autonomy scoring, and operator projection cadence.
+
+```text
+MASC_AUTONOMY_MAX_STARVATION_TICKS
+MASC_AUTONOMY_QUIET_END
+MASC_AUTONOMY_QUIET_START
+MASC_AUTONOMY_STARVATION_BONUS_COEF
+MASC_AUTONOMY_THOMPSON_WEIGHT
+MASC_AUTONOMY_VOTE_DECAY_FACTOR
+MASC_DASHBOARD_FIXTURE
+MASC_DASHBOARD_FIXTURES_ENABLED
+MASC_DEFAULT_RUNTIME
+MASC_INFERENCE_CACHE_ENABLED
+MASC_INFERENCE_CACHE_L1_MAX_ENTRIES
+MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS
+MASC_INFERENCE_CACHE_MAX_TEMP
+MASC_INFERENCE_CACHE_TTL_SEC
+MASC_INFERENCE_TIMEOUT_SEC
+MASC_MAINTENANCE_PULSE_INTERVAL_SEC
+MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE
+MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR
+MASC_OPERATOR_CACHE_TTL
+MASC_OPERATOR_JUDGE_ENABLED
+MASC_OPERATOR_JUDGE_INTERVAL_SEC
+MASC_OPERATOR_JUDGE_SESSION_TTL_SEC
+MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC
+MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC
+MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC
+MASC_SPAWN_CACHE_POLICY
+```
+
+### A.4 `env_config_keeper`
 
 Used for explicit Keeper runtime configuration and observation cadence. The
 generated [runtime tunables catalog](./runtime-tunables.md) is the field-level
@@ -591,7 +625,7 @@ Important operator-facing families still outside the centralized inventory:
 To regenerate the inventories:
 
 ```bash
-rg -oN '"MASC_[A-Z0-9_]+"' lib/config/env_config_core.ml lib/config/env_config_runtime.ml lib/config/env_config_keeper.ml | tr -d '"' | sort -u
+rg -oN '"MASC_[A-Z0-9_]+"' lib/config/env_config_core.ml lib/config/env_config_runtime.ml lib/config/env_config_runtime_services.ml lib/config/env_config_keeper.ml | tr -d '"' | sort -u
 rg -oN '"MASC_[A-Z0-9_]+"' lib bin | tr -d '"' | sort -u
 rg -oN '"(LLAMA_[A-Z0-9_]+|OLLAMA_[A-Z0-9_]+|HOME|DUNE_SOURCEROOT)"' lib bin | tr -d '"' | sort -u
 ```

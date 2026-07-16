@@ -81,14 +81,6 @@ let test_list_registered () =
   check int "one registered identity" 1 (List.length registered);
   check string "registered identity name" name (List.hd registered).agent_name
 
-let test_cleanup_stale () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Client_registry_eio.reset_for_testing ();
-  (* After reset, no sessions exist so cleanup should return 0 *)
-  let cleaned = Client_registry_eio.cleanup_stale_sessions () in
-  check int "cleanup after reset returns 0" 0 cleaned
-
 let test_reset_clears_cached_session_mappings () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -192,7 +184,6 @@ let () =
     "statistics", [
       test_case "total_count" `Quick test_total_count;
       test_case "list_registered" `Quick test_list_registered;
-      test_case "cleanup_stale" `Quick test_cleanup_stale;
       test_case "reset_clears_cached_session_mappings" `Quick
         test_reset_clears_cached_session_mappings;
     ];

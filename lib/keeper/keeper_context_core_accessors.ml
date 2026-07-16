@@ -15,14 +15,6 @@ open Keeper_types_profile
 module Message_json = Keeper_context_core_message_json
 module Canonical_tool = Agent_sdk.Canonical_tool
 
-(** Hard caps for checkpoint payload hygiene.
-    Message-count capping alone is insufficient when a single message
-    accumulates hundreds of text blocks or multi-MB synthetic context. *)
-let default_max_checkpoint_text_blocks_per_message = 32
-let default_max_checkpoint_text_chars_per_message = 16 * 1024
-let default_max_checkpoint_content_chars_total = 512 * 1024
-let checkpoint_text_cap_marker = "\n[capped]"
-
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
 (* ================================================================ *)
@@ -533,30 +525,3 @@ let log_keeper_exn ~label exn =
   Log.Keeper.info "%s%s: %s" tag label (Printexc.to_string exn)
 
 let checkpoint_generation_key = "keeper_generation"
-
-type checkpoint_sanitize_stats = {
-  dropped_messages : int;
-  dropped_blocks : int;
-  dropped_chars : int;
-  truncated_blocks : int;
-  truncated_chars : int;
-  tool_pair_repair : tool_pair_repair_stats;
-}
-
-let empty_checkpoint_sanitize_stats =
-  {
-    dropped_messages = 0;
-    dropped_blocks = 0;
-    dropped_chars = 0;
-    truncated_blocks = 0;
-    truncated_chars = 0;
-    tool_pair_repair = empty_tool_pair_repair_stats;
-  }
-
-let checkpoint_sanitize_changed (stats : checkpoint_sanitize_stats) : bool =
-  stats.dropped_messages > 0
-  || stats.dropped_blocks > 0
-  || stats.dropped_chars > 0
-  || stats.truncated_blocks > 0
-  || stats.truncated_chars > 0
-  || tool_pair_repair_stats_changed stats.tool_pair_repair

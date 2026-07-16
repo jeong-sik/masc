@@ -43,6 +43,9 @@ let test_unknown_kind_is_error () =
 let test_missing_field_is_error () =
   (* dashboard requires thread_id *)
   expect_error "missing thread_id" (`Assoc [ ("kind", `String "dashboard") ]);
+  expect_error
+    "blank thread_id"
+    (`Assoc [ "kind", `String "dashboard"; "thread_id", `String "  " ]);
   (* discord requires user_id *)
   expect_error "missing discord user_id"
     (`Assoc [ ("kind", `String "discord"); ("channel_id", `String "C") ])
@@ -56,6 +59,13 @@ let test_optional_route_coordinates_are_strict () =
           ; "channel_id", `String "C"
           ; "user_id", `String "U"
           ; "guild_id", `Int 1
+          ] )
+    ; ( "discord guild_id blank"
+      , `Assoc
+          [ "kind", `String "discord"
+          ; "channel_id", `String "C"
+          ; "user_id", `String "U"
+          ; "guild_id", `String ""
           ] )
     ; ( "discord parent_channel_id wrong type"
       , `Assoc
@@ -84,6 +94,13 @@ let test_optional_route_coordinates_are_strict () =
           ; "channel_id", `String "C"
           ; "user_id", `String "U"
           ; "thread_ts", `Float 1.0
+          ] )
+    ; ( "slack thread_ts blank"
+      , `Assoc
+          [ "kind", `String "slack"
+          ; "channel_id", `String "C"
+          ; "user_id", `String "U"
+          ; "thread_ts", `String " "
           ] )
     ]
 

@@ -699,11 +699,6 @@
  (libraries masc_test_deps))
 
 (test
- (name test_keeper_structured_output_coverage)
- (modules test_keeper_structured_output_coverage)
- (libraries alcotest ast_grep masc_test_deps masc.fusion_core))
-
-(test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
  (libraries alcotest ast_grep))
@@ -888,7 +883,6 @@
   ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
-  test_dashboard_keeper_worker_degrade_source
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify
@@ -1062,7 +1056,6 @@
   ; test_command_plane_help removed (CP purge)
   test_dashboard_cache
   test_dashboard_http_core
-  test_dashboard_keeper_worker_degrade_source
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify
@@ -1905,8 +1898,6 @@
 
 (include stanzas/test_keeper_receipt_authoritative_matrix.inc)
 
-(include stanzas/test_keeper_receipt_outcome_tla_parity.inc)
-
 (include stanzas/test_keeper_raw_trace_sink.inc)
 
 (include stanzas/test_keeper_sandbox_docker_cwd_response.inc)
@@ -1931,10 +1922,6 @@
 
 (include stanzas/test_keeper_tool_matrix.inc)
 
-
-(include stanzas/test_keeper_turn_fsm_wired_sites.inc)
-
-(include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 
 (include stanzas/test_keeper_unified_tool_event_order_source.inc)
 

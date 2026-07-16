@@ -1398,7 +1398,9 @@ let compare_active_inventory_entry left right =
   else String.compare left.request_id right.request_id
 ;;
 
-let compare_active_inventory_record_error left right =
+let compare_active_inventory_record_error
+    (left : active_inventory_record_error)
+    (right : active_inventory_record_error) =
   let by_path = String.compare left.path right.path in
   if by_path <> 0
   then by_path

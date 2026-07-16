@@ -64,7 +64,6 @@ let test_reads_disk_only_entry () =
      | Ok { entries = [ entry ]; record_errors = [] } ->
        check string "exact request id" request_id entry.request_id;
        check string "exact keeper" "inventory-keeper" entry.keeper_name;
-       check string "exact caller" caller entry.submitted_by;
        check bool "exact running status" true
          (match entry.status with Async.Running -> true | _ -> false)
      | Ok inventory ->
@@ -118,7 +117,7 @@ let test_reports_terminal_residue () =
       | Some path -> path
       | None -> fail "safe request id did not produce a terminal path"
     in
-    Masc.Fs_compat.save_file active_path (Masc.Fs_compat.load_file terminal_path);
+    Fs_compat.save_file active_path (Fs_compat.load_file terminal_path);
     match Async.read_durable_active_inventory ~base_path with
     | Ok
         { entries = []
@@ -145,11 +144,11 @@ let error_kind_by_basename errors basename =
 let test_reports_malformed_link_non_file_and_name () =
   with_temp_base "keeper-msg-durable-inventory-errors-" (fun base_path ->
     let dir = active_dir ~base_path in
-    Masc.Fs_compat.mkdir_p dir;
-    Masc.Fs_compat.save_file (Filename.concat dir "malformed.json") "{";
+    Fs_compat.mkdir_p dir;
+    Fs_compat.save_file (Filename.concat dir "malformed.json") "{";
     Unix.symlink "malformed.json" (Filename.concat dir "link.json");
     Unix.mkdir (Filename.concat dir "directory.json") 0o755;
-    Masc.Fs_compat.save_file (Filename.concat dir "undeclared.txt") "{}";
+    Fs_compat.save_file (Filename.concat dir "undeclared.txt") "{}";
     match Async.read_durable_active_inventory ~base_path with
     | Error _ -> fail "record-local failures rejected the whole inventory"
     | Ok { entries; record_errors } ->

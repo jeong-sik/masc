@@ -1,4 +1,5 @@
 module U = Masc.Keeper_compaction_unit
+module P = Masc.Keeper_compaction_unit_plan
 module T = Agent_sdk.Types
 
 let message role content : T.message =
@@ -146,6 +147,104 @@ let test_mixed_request_result_error () =
       ()
   | _ -> Alcotest.fail "expected typed mixed request/result"
 
+let plan_json ~kept ~dropped ~summarized =
+  let ints values = `List (List.map (fun value -> `Int value) values) in
+  let summary (unit_index, value) =
+    `Assoc [ "unit_index", `Int unit_index; "summary", `String value ]
+  in
+  `Assoc
+    [ "kept_indices", ints kept
+    ; "dropped_indices", ints dropped
+    ; "summarized_units", `List (List.map summary summarized)
+    ]
+
+let test_unit_plan_contract () =
+  let ordinary = text T.User "ordinary" in
+  let request = message T.Assistant [ use "closed" ] in
+  let result = message T.Tool [ result "closed" ] in
+  let open_request = message T.Assistant [ use "open" ] in
+  let progress = text T.Assistant "in-flight" in
+  let source = U.partition [ ordinary; request; result; open_request; progress ] |> require_ok in
+  let input = P.input_json source in
+  let units = Yojson.Safe.Util.(member "units" input |> to_list) in
+  Alcotest.(check int) "protected suffix excluded" 2 (List.length units);
+  check_exact "no must_keep heuristic" `Null
+    Yojson.Safe.Util.(member "must_keep" (List.nth units 1));
+  let decode ~kept ~dropped ~summarized =
+    P.decode ~source (plan_json ~kept ~dropped ~summarized)
+  in
+  let summarized_cycle =
+    decode ~kept:[ 0 ] ~dropped:[] ~summarized:[ 1, "cycle summary" ]
+    |> Result.get_ok
+  in
+  check_exact "closed pair summarized atomically"
+    [ ordinary; text T.Assistant "cycle summary"; open_request; progress ]
+    (P.apply summarized_cycle);
+  let observed = P.observation summarized_cycle in
+  Alcotest.(check int) "two source messages summarized" 2
+    observed.summarized_source_messages;
+  Alcotest.(check int) "one summary emitted" 1 observed.emitted_summary_messages;
+  let dropped_cycle =
+    decode ~kept:[ 0 ] ~dropped:[ 1 ] ~summarized:[] |> Result.get_ok
+  in
+  check_exact "closed pair dropped atomically"
+    [ ordinary; open_request; progress ]
+    (P.apply dropped_cycle);
+  let kept_cycle =
+    decode ~kept:[ 1 ] ~dropped:[] ~summarized:[ 0, "  exact summary  " ]
+    |> Result.get_ok
+  in
+  check_exact "summary bytes and kept cycle stay exact"
+    [ text T.Assistant "  exact summary  "; request; result; open_request; progress ]
+    (P.apply kept_cycle);
+  let disjoint_messages =
+    [ text T.User "zero"; request; result; text T.User "two" ]
+  in
+  let disjoint_source = U.partition disjoint_messages |> require_ok in
+  let disjoint =
+    P.decode ~source:disjoint_source
+      (plan_json ~kept:[ 1 ] ~dropped:[]
+         ~summarized:[ 0, "summary zero"; 2, "summary two" ])
+    |> Result.get_ok
+  in
+  check_exact "disjoint summaries retain chronology"
+    [ text T.Assistant "summary zero"; request; result; text T.Assistant "summary two" ]
+    (P.apply disjoint);
+  let is_error expected json =
+    match P.decode ~source json with
+    | Error actual -> expected actual
+    | Ok _ -> false
+  in
+  Alcotest.(check bool) "blank summary rejected" true
+    (is_error
+       (function P.Blank_summary 1 -> true | _ -> false)
+       (plan_json ~kept:[ 0 ] ~dropped:[] ~summarized:[ 1, " " ]));
+  Alcotest.(check bool) "duplicate decision rejected" true
+    (is_error
+       (function P.Duplicate_decision 0 -> true | _ -> false)
+       (plan_json ~kept:[ 0 ] ~dropped:[ 0 ] ~summarized:[ 1, "x" ]));
+  Alcotest.(check bool) "missing decision rejected" true
+    (is_error
+       (function P.Missing_decision 1 -> true | _ -> false)
+       (plan_json ~kept:[ 0 ] ~dropped:[] ~summarized:[]));
+  Alcotest.(check bool) "out-of-range rejected" true
+    (is_error
+       (function P.Index_out_of_range { index = 2; unit_count = 2 } -> true | _ -> false)
+       (plan_json ~kept:[ 0; 2 ] ~dropped:[ 1 ] ~summarized:[]));
+  Alcotest.(check bool) "all-kept no-op rejected" true
+    (is_error
+       (function P.No_compaction -> true | _ -> false)
+       (plan_json ~kept:[ 0; 1 ] ~dropped:[] ~summarized:[]));
+  Alcotest.(check bool) "unknown field rejected" true
+    (is_error
+       (function P.Unknown_field "repair" -> true | _ -> false)
+       (`Assoc
+          [ "kept_indices", `List [ `Int 0 ]
+          ; "dropped_indices", `List [ `Int 1 ]
+          ; "summarized_units", `List []
+          ; "repair", `Bool true
+          ]))
+
 let () =
   Alcotest.run "keeper_compaction_unit"
     [ ( "partition"
@@ -170,5 +269,6 @@ let () =
         ; Alcotest.test_case "duplicate use" `Quick test_duplicate_tool_use_error
         ; Alcotest.test_case "mixed request/result" `Quick
             test_mixed_request_result_error
+        ; Alcotest.test_case "typed unit plan" `Quick test_unit_plan_contract
         ] )
     ]

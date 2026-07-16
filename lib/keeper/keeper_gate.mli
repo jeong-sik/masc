@@ -104,8 +104,9 @@ type operator_recovery_report =
   }
 
 (** Reopen failed request-local judgments after an explicit operator selection
-    of Auto Judge, then start a concurrency-bounded drain of every unresolved
-    judgment for the workspace. *)
+    of Auto Judge, then submit every unresolved judgment for the workspace.
+    The Gate owns exact-id duplicate suppression only; it does not impose a
+    numeric execution budget or a fleet-wide admission policy. *)
 val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 

@@ -286,6 +286,7 @@
   test_keeper_artifact_hydrator
   test_artifacts_endpoint
   test_tool_output_washing_e2e
+  test_keeper_compaction_unit
   test_keeper_context_core_dedup
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
@@ -607,6 +608,7 @@
   test_keeper_artifact_hydrator
   test_artifacts_endpoint
   test_tool_output_washing_e2e
+  test_keeper_compaction_unit
   test_keeper_context_core_dedup
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics

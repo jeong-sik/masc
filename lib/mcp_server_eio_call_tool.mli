@@ -34,6 +34,8 @@ val record_mcp_server_operation_duration_sample :
     {!Otel_dispatch_hook.with_request_context}. *)
 
 module For_testing : sig
+  val arguments_of_params : Yojson.Safe.t -> Yojson.Safe.t
+
   val activity_tool_called_payload :
     tool_name:string ->
     success:bool ->

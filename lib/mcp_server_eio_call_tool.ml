@@ -143,8 +143,21 @@ let record_mcp_server_operation_duration result ~duration_ms =
     ~duration_seconds:(float_of_int duration_ms /. 1000.0)
 ;;
 
+(** MCP tools/call [arguments] is optional (spec: "arguments?: object").
+    Absence therefore means an empty object. An explicitly supplied [`Null]
+    is not absence and must remain [`Null] so OAS strict validation rejects it
+    instead of silently repairing an invalid wire value. *)
+let arguments_of_params = function
+  | `Assoc fields ->
+    (match List.assoc_opt "arguments" fields with
+     | None -> `Assoc []
+     | Some value -> value)
+  | _ -> `Null
+;;
+
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
+  let arguments_of_params = arguments_of_params
   let record_mcp_server_operation_duration = record_mcp_server_operation_duration
   let record_mcp_server_operation_duration_sample =
     record_mcp_server_operation_duration_sample
@@ -438,16 +451,6 @@ let record_runtime_mcp_keeper_tool_trace
        ~success
        ~arguments
        ~message)
-
-(** MCP tools/call [arguments] is optional (spec: "arguments?: object").
-    [Yojson.Safe.Util.member] yields [`Null] for an absent field; OAS 0.212
-    validates strictly ("expected object, got null"), so an omitted
-    arguments field must normalize to an empty object at this protocol
-    boundary — absence of arguments means "no arguments", not null. *)
-let arguments_of_params params =
-  match Yojson.Safe.Util.member "arguments" params with
-  | `Null -> `Assoc []
-  | value -> value
 
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =

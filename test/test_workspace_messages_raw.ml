@@ -116,8 +116,13 @@ let test_repeated_mention_delivers_each_canonical_event () =
     let published_sequences =
       !publications
       |> List.map (fun envelope ->
-        let open Yojson.Safe.Util in
-        Yojson.Safe.from_string envelope |> member "seq" |> to_int)
+        match
+          Yojson.Safe.from_string envelope
+          |> Masc_domain.message_of_yojson
+        with
+        | Ok (message : Masc_domain.message) -> message.seq
+        | Error error ->
+          Alcotest.failf "published message failed typed decode: %s" error)
       |> List.sort Int.compare
     in
     Alcotest.(check (list int))
@@ -126,10 +131,14 @@ let test_repeated_mention_delivers_each_canonical_event () =
       published_sequences;
     Alcotest.(check (list (pair string (option string))))
       "each broadcast emits exact activity kinds and mention subject"
-      [ "message.broadcast", None
-      ; "message.mentioned", Some "gemini"
-      ; "message.broadcast", None
-      ; "message.mentioned", Some "gemini"
+      [ ( Event_kind.Message.to_string Event_kind.Message.Broadcast
+        , None )
+      ; ( Event_kind.Message.to_string Event_kind.Message.Mentioned
+        , Some "gemini" )
+      ; ( Event_kind.Message.to_string Event_kind.Message.Broadcast
+        , None )
+      ; ( Event_kind.Message.to_string Event_kind.Message.Mentioned
+        , Some "gemini" )
       ]
       (List.rev !activities);
     Alcotest.(check (list (option string))) "mention wake hooks"

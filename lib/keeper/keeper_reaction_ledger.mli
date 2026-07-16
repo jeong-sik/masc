@@ -21,6 +21,7 @@ type stimulus_kind =
   | Hitl_resolved  (** HITL resolution delivered as an ordinary Keeper wake. *)
   | Failure_judgment
       (** RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
+  | Manual_compaction
   | Goal_assigned
       (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
 

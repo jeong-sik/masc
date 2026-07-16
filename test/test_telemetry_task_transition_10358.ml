@@ -2,6 +2,32 @@
 
 open Masc
 
+(* The [done] transition runs the configured-LLM completion review (#24332),
+   which renders the [verification.anti_rationalization] registry prompt. This
+   executable exercises the real tool-dispatch path, so it pins prompt
+   resolution to the repo's own prompt files — the same idiom
+   test_tool_task_coverage uses so the prompt resolves whether run under dune
+   (DUNE_SOURCEROOT) or as a bare executable. *)
+let has_prompt_root path =
+  Sys.file_exists
+    (Filename.concat path "config/prompts/verification.anti_rationalization.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+    let rec ascend path =
+      if has_prompt_root path then path
+      else
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent
+    in
+    ascend (Sys.getcwd ())
+
+let () =
+  Prompt_registry.set_markdown_dir
+    (Filename.concat (repo_root ()) "config/prompts")
+
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -82,6 +108,15 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
   let previous_observe_task_transition =
     Atomic.get Workspace_hooks.observe_task_transition_fn
   in
+  let previous_reviewer =
+    Atomic.get Task.Anti_rationalization.run_llm_reviewer_fn
+  in
+  (* The completion verdict comes from the configured LLM reviewer; stub it to a
+     structured APPROVE so the [done] transition reaches its terminal state and
+     emits the lifecycle telemetry under test. *)
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
+    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+      Ok (Some Task.Anti_rationalization.Approve));
   Atomic.set Workspace_hooks.get_default_runtime_id_fn
     (fun () -> "test-evaluator-runtime");
   Atomic.set Workspace_hooks.observe_task_transition_fn
@@ -100,7 +135,8 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
     ~finally:(fun () ->
       Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_default_runtime;
       Atomic.set Workspace_hooks.observe_task_transition_fn
-        previous_observe_task_transition)
+        previous_observe_task_transition;
+      Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer)
     (fun () ->
   with_isolated_runtime_env (fun () ->
     let base_path =

@@ -28,6 +28,7 @@ DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/imessage/status.json"
 DEFAULT_CURSOR_PATH: Final[str] = ".gate/runtime/imessage/cursor.json"
 CHAT_DB_PATH: Final[str] = os.path.expanduser("~/Library/Messages/chat.db")
 
+
 def _runtime_toml_path() -> Path:
     raw = os.getenv("MASC_BASE_PATH", "").strip()
     root = Path(raw).expanduser() if raw else Path.cwd()
@@ -68,7 +69,13 @@ class BotConfig(BaseSettings):
         toml_source = TomlConfigSettingsSource(
             settings_cls, toml_file=_runtime_toml_path()
         )
-        return (init_settings, env_settings, dotenv_settings, toml_source, file_secret_settings)
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            toml_source,
+            file_secret_settings,
+        )
 
     # Gate connection
     gate_base_url: str = Field(
@@ -99,8 +106,6 @@ class BotConfig(BaseSettings):
 
     # Gate HTTP
     gate_timeout_sec: float = Field(default=30.0)
-    gate_breaker_failure_threshold: int = Field(default=5)
-    gate_breaker_reset_sec: int = Field(default=60)
 
     # Cache
     status_cache_ttl_sec: int = Field(default=10)

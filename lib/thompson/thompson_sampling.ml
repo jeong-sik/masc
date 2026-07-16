@@ -165,20 +165,6 @@ let trigger_priority = function
   | Starved -> 1
   | Scheduled | Thompson -> 0
 
-let trigger_bypasses_health = function
-  | Mentioned _ -> true
-  | ContentAlert _ | Scheduled | Starved | Thompson -> false
-
-(* [is_healthy] is injected by the caller of [select_with_feedback]
-   (dependency inversion). Previously this called [Health.is_healthy]
-   directly, coupling this module to the masc mega-library root. The
-   caller now supplies the health predicate so this module stays a clean
-   leaf. Required (not optional) — a permissive default would silently make
-   every agent eligible if a caller forgot to wire health (CLAUDE.md
-   "Unknown -> Permissive Default" anti-pattern). *)
-let is_trigger_eligible ~is_healthy ~agent_name trigger =
-  trigger_bypasses_health trigger || is_healthy ~agent_name
-
 let normalized_subscore value =
   Float.max 0.0 (Float.min 0.999 value)
 
@@ -537,7 +523,6 @@ let record_quality_signal ~agent_name ~(verdict : quality_verdict) =
    non-instrumented callers stay simple; an instrumented caller supplies the
    real Otel_metric_store increment. *)
 let select_with_feedback
-    ~is_healthy
     ?(on_priority_selected = fun ~agent_name:_ ~trigger_label:_ -> ())
     ~agents ~max_n ~pending_triggers ~tick_interval_s () =
   (* Drain any pending votes so Beta posteriors reflect recorded feedback
@@ -576,8 +561,7 @@ let select_with_feedback
     match trigger with
     | Mentioned _ | ContentAlert _
       when List.length !selected < max_n
-           && not (is_selected name)
-           && is_trigger_eligible ~is_healthy ~agent_name:name trigger ->
+           && not (is_selected name) ->
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
         let signal = starvation_bonus ~ticks in
@@ -612,7 +596,6 @@ let select_with_feedback
   let max_starvation = Env_config.AgentSelection.max_starvation_ticks in
   let starved = List.filter_map (fun name ->
     if is_selected name then None
-    else if not (is_trigger_eligible ~is_healthy ~agent_name:name Starved) then None
     else begin
       let s = get_stats name in
       let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
@@ -645,11 +628,6 @@ let select_with_feedback
 
     let candidates = List.filter_map (fun name ->
       if is_selected name then None
-      else if not (is_trigger_eligible ~is_healthy ~agent_name:name Thompson) then begin
-        (* Unhealthy agents excluded from Thompson selection *)
-        Log.Metrics.info "thompson sampling skipping %s (unhealthy)" name;
-        None
-      end
       else begin
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in

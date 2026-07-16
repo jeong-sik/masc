@@ -117,18 +117,6 @@ class BotConfig(BaseSettings):
         default=120.0,
         validation_alias=AliasChoices("GATE_TIMEOUT_SEC", "gate_timeout_sec"),
     )
-    gate_breaker_failure_threshold: int = Field(
-        default=3,
-        validation_alias=AliasChoices(
-            "GATE_BREAKER_FAILURE_THRESHOLD", "gate_breaker_failure_threshold"
-        ),
-    )
-    gate_breaker_reset_sec: int = Field(
-        default=30,
-        validation_alias=AliasChoices(
-            "GATE_BREAKER_RESET_SEC", "gate_breaker_reset_sec"
-        ),
-    )
     status_cache_ttl_sec: int = Field(
         default=15,
         validation_alias=AliasChoices("STATUS_CACHE_TTL_SEC", "status_cache_ttl_sec"),

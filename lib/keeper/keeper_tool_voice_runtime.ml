@@ -42,6 +42,12 @@ let command_to_string = function
 let command_of_string (s : string) : voice_command option =
   List.find_opt (fun c -> String.equal (command_to_string c) s) all_commands
 
+type external_effect_authorizer =
+  operation:string ->
+  input:Yojson.Safe.t ->
+  continue:(unit -> Keeper_tool_execution.t) ->
+  Keeper_tool_execution.t
+
 type voice_memory_status =
   { recorded : bool
   ; rows_written : int
@@ -91,6 +97,7 @@ let attach_memory_status json status =
 let handle_speak_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(authorize_external_effect : external_effect_authorizer)
       ~(args : Yojson.Safe.t)
   =
   let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
@@ -126,19 +133,23 @@ let handle_speak_with_outcome
          status="queued" immediately, so the model never saw playback
          complete and re-spoke the same content every sub-turn
          (2026-06-10 sangsu voice repeat incident). *)
-      (match
-         Voice_bridge.agent_speak
-           ~sw
-           ~clock
-           ~net
-           ~agent_id:meta.name
-           ~message
-           ?provider
-           ~priority
-           ?audio_device
-           ()
-       with
-       | Ok json ->
+      authorize_external_effect
+        ~operation:(command_to_string Speak)
+        ~input:args
+        ~continue:(fun () ->
+          match
+            Voice_bridge.agent_speak
+              ~sw
+              ~clock
+              ~net
+              ~agent_id:meta.name
+              ~message
+              ?provider
+              ~priority
+              ?audio_device
+              ()
+          with
+          | Ok json ->
          let spoken =
            match Json_util.get_string json "status" with
            | Some "spoken" -> true
@@ -210,13 +221,13 @@ let handle_speak_with_outcome
            Keeper_tool_execution.success
              (Yojson.Safe.to_string (attach_memory_status json memory_status)))
          else Keeper_tool_execution.success (Yojson.Safe.to_string json)
-       | Error err ->
-         Keeper_tool_execution.failure
-           ~class_:Tool_result.Runtime_failure
-           (Tool_args.error_response_with
-              [ "agent_id", `String meta.name
-              ; "message", `String err
-              ]))
+          | Error err ->
+            Keeper_tool_execution.failure
+              ~class_:Tool_result.Runtime_failure
+              (Tool_args.error_response_with
+                 [ "agent_id", `String meta.name
+                 ; "message", `String err
+                 ]))
     | _ ->
       let memory_status =
         record_voice_output
@@ -233,24 +244,33 @@ let handle_speak_with_outcome
               (keeper_text_fallback_json ~agent_id:meta.name ~message)
               memory_status)))
 
-let handle_listen_with_outcome ~(meta : keeper_meta) ~(args : Yojson.Safe.t) () =
+let handle_listen_with_outcome
+      ~(meta : keeper_meta)
+      ~(authorize_external_effect : external_effect_authorizer)
+      ~(args : Yojson.Safe.t)
+      ()
+  =
   let timeout_sec = Safe_ops.json_float ~default:60.0 "timeout_seconds" args in
   let language_code = Safe_ops.json_string_opt "language_code" args in
-  match
-    Voice_bridge.record_and_transcribe
-      ~agent_id:meta.name
-      ~timeout_sec
-      ?language_code
-      ()
-  with
-  | Ok json -> Keeper_tool_execution.success (Yojson.Safe.to_string json)
-  | Error err ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      (Tool_args.error_response_with
-         [ "error", `String err
-         ; "agent_id", `String meta.name
-         ])
+  authorize_external_effect
+    ~operation:(command_to_string Listen)
+    ~input:args
+    ~continue:(fun () ->
+      match
+        Voice_bridge.record_and_transcribe
+          ~agent_id:meta.name
+          ~timeout_sec
+          ?language_code
+          ()
+      with
+      | Ok json -> Keeper_tool_execution.success (Yojson.Safe.to_string json)
+      | Error err ->
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Runtime_failure
+          (Tool_args.error_response_with
+             [ "error", `String err
+             ; "agent_id", `String meta.name
+             ]))
 
 let append_assoc_fields json fields =
   match json with
@@ -393,13 +413,15 @@ let handle_session_end_with_outcome ~(meta : keeper_meta) =
 let handle_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(authorize_external_effect : external_effect_authorizer)
       ~(command : voice_command)
       ~(args : Yojson.Safe.t)
       ()
   =
   match command with
-  | Speak -> handle_speak_with_outcome ~config ~meta ~args
-  | Listen -> handle_listen_with_outcome ~meta ~args ()
+  | Speak ->
+    handle_speak_with_outcome ~config ~meta ~authorize_external_effect ~args
+  | Listen -> handle_listen_with_outcome ~meta ~authorize_external_effect ~args ()
   | Agent -> handle_agent_with_outcome ~meta
   | Sessions -> handle_sessions_with_outcome ()
   | Session_start -> handle_session_start_with_outcome ~meta ~args
@@ -408,16 +430,25 @@ let handle_with_outcome
 let handle_voice_tool_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(authorize_external_effect : external_effect_authorizer)
       ~(name : string)
       ~(args : Yojson.Safe.t)
       ()
   =
   match command_of_string name with
-  | Some command -> handle_with_outcome ~config ~meta ~command ~args ()
+  | Some command ->
+    handle_with_outcome ~config ~meta ~authorize_external_effect ~command ~args ()
   | None ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure
       (error_json ~fields:[ "tool", `String name ] "unknown_voice_tool")
 
-let handle_voice_tool ~config ~meta ~name ~args () =
-  (handle_voice_tool_with_outcome ~config ~meta ~name ~args ()).raw_output
+let handle_voice_tool ~config ~meta ~authorize_external_effect ~name ~args () =
+  (handle_voice_tool_with_outcome
+     ~config
+     ~meta
+     ~authorize_external_effect
+     ~name
+     ~args
+     ())
+    .raw_output

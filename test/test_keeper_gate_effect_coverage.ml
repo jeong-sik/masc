@@ -375,6 +375,57 @@ let test_ollama_probe_leaf_requests_exact_authorization () =
   | calls -> failf "expected one authorization request, got %d" (List.length calls)
 ;;
 
+let test_voice_effect_defers_without_gating_local_reads () =
+  with_clean_gate_runtime @@ fun () ->
+  let base_path = temp_dir "voice-gate-effect" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  (match Keeper_gate_mode.set config ~actor:"test" Keeper_gate_mode.Manual with
+   | Ok _ -> ()
+   | Error error -> fail ("failed to select manual Gate mode: " ^ error));
+  let meta = make_meta "voice-gate-keeper" in
+  let listen_input =
+    `Assoc
+      [ "timeout_seconds", `Float 3.0
+      ; "language_code", `String "ko-KR"
+      ]
+  in
+  let listen =
+    Keeper_tool_in_process_runtime.handle_voice_with_outcome
+      ~config
+      ~meta
+      ~name:"keeper_voice_listen"
+      ~args:listen_input
+      ()
+  in
+  check string
+    "microphone/STT effect defers before execution"
+    "gate_deferred"
+    (json_error listen.raw_output);
+  check int "one exact voice effect is pending" 1 (Keeper_approval_queue.pending_count ());
+  (match Keeper_approval_queue.list_pending_entries () with
+   | [ pending ] ->
+     check string "request belongs to the calling Keeper" meta.name pending.keeper_name;
+     check string "opaque operation is preserved" "keeper_voice_listen" pending.tool_name;
+     check yojson "complete input is preserved" listen_input pending.input
+   | pending -> failf "expected one pending voice effect, got %d" (List.length pending));
+  let capability_read =
+    Keeper_tool_in_process_runtime.handle_voice_with_outcome
+      ~config
+      ~meta
+      ~name:"keeper_voice_agent"
+      ~args:(`Assoc [])
+      ()
+  in
+  (match capability_read.outcome with
+   | Keeper_tool_execution.Succeeded -> ()
+   | Keeper_tool_execution.Failed _ -> fail "local voice capability read was gated");
+  check int
+    "local read creates no second Gate request"
+    1
+    (Keeper_approval_queue.pending_count ())
+;;
+
 let () =
   run
     "keeper_gate_effect_coverage"
@@ -411,6 +462,12 @@ let () =
             "effect leaf requests exact authorization"
             `Quick
             test_ollama_probe_leaf_requests_exact_authorization
+        ] )
+    ; ( "voice"
+      , [ test_case
+            "external effect defers without gating local reads"
+            `Quick
+            test_voice_effect_defers_without_gating_local_reads
         ] )
     ]
 ;;

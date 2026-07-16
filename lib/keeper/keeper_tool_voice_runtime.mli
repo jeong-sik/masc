@@ -20,9 +20,19 @@ val command_to_string : voice_command -> string
 
 val command_of_string : string -> voice_command option
 
+(** Caller-owned authorization boundary around one concrete voice effect. The
+    voice runtime invokes it only at the TTS/playback or microphone/STT leaf;
+    local capability and session reads do not become Gate requests. *)
+type external_effect_authorizer =
+  operation:string ->
+  input:Yojson.Safe.t ->
+  continue:(unit -> Keeper_tool_execution.t) ->
+  Keeper_tool_execution.t
+
 val handle_voice_tool :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  authorize_external_effect:external_effect_authorizer ->
   name:string ->
   args:Yojson.Safe.t ->
   unit ->
@@ -31,6 +41,7 @@ val handle_voice_tool :
 val handle_voice_tool_with_outcome :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  authorize_external_effect:external_effect_authorizer ->
   name:string ->
   args:Yojson.Safe.t ->
   unit ->

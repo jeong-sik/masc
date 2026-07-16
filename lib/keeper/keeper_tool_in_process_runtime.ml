@@ -551,10 +551,31 @@ let handle_ide_annotate_with_outcome ~config ~(meta : keeper_meta) ~args =
   Keeper_tool_ide_runtime.handle_ide_annotate_with_outcome ~config ~meta ~args
 ;;
 
-let handle_voice_with_outcome ~config ~(meta : keeper_meta) ~name ~args () =
+let handle_voice_with_outcome
+      ~config
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~name
+      ~args
+      ()
+  =
+  let authorize_external_effect ~operation ~input ~continue =
+    with_external_gate_execution
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~operation
+      ~input
+      continue
+  in
   Keeper_tool_voice_runtime.handle_voice_tool_with_outcome
     ~config
     ~meta
+    ~authorize_external_effect
     ~name
     ~args
     ()

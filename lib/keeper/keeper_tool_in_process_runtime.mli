@@ -104,6 +104,9 @@ val handle_ide_annotate_with_outcome
 val handle_voice_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
   -> name:string
   -> args:Yojson.Safe.t
   -> unit

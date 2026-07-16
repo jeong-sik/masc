@@ -241,6 +241,9 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_voice_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
          ~name
          ~args
          ())

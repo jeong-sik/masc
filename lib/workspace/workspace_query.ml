@@ -179,11 +179,10 @@ let get_all_agents config =
     let agents_path = agents_dir config in
     load_agents_from_dir config agents_path ~include_inactive:true
 
-(** Audit [Claimed], [InProgress], and [AwaitingVerification] tasks whose
-    assignees are absent from explicit active workspace/session membership.
-    Matches assignees by exact name or agent-type prefix (e.g. ["<prefix>"]
-    matches ["<prefix>-xxx"]). [last_seen] is retained as observation and never
-    changes task ownership. *)
+(** Audit owned tasks ([Claimed], [InProgress], [AwaitingVerification]) whose
+    exact assignee identity is absent from explicit active workspace/session
+    membership. [last_seen] is retained as observation and never changes task
+    ownership. *)
 let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
@@ -191,16 +190,7 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
       get_active_agents config
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     in
-    let is_active_agent assignee =
-      List.mem assignee active_names
-      ||
-      let prefix = assignee ^ "-" in
-      List.exists
-        (fun name ->
-           String.length name > String.length prefix
-           && String.starts_with name ~prefix)
-        active_names
-    in
+    let is_active_agent assignee = List.mem assignee active_names in
     let backlog = read_backlog config in
     List.filter_map (fun (task : Masc_domain.task) ->
       match task.task_status with

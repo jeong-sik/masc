@@ -75,7 +75,7 @@ code_refs:
 |---------|---------|--------|----------|
 | State Machines | Task FSM (Pending→Claimed→InProgress→Done) | IMPL | workspace_task.ml + telemetry |
 | Heartbeat | Exact configured cadence + directed interruptible wake | IMPL | keeper_heartbeat_loop.ml + keeper_keepalive_signal.ml |
-| Zombie Detection | 300s general, 3600s keeper threshold | IMPL | resilience.ml + GC 증거 |
+| Elapsed-time lifecycle classification | Removed; `last_seen` is observation only | REMOVED | workspace_query.ml + orchestrator.ml |
 | GC Pipeline | Explicit retention cleanup; no Agent lifecycle mutation | IMPL | workspace_gc.ml |
 | WALPH | Retired — loop, state, tools all removed | REMOVED | — |
 | Mention Routing | @mention parsing, stateless/stateful/broadcast | IMPL | mention.ml |

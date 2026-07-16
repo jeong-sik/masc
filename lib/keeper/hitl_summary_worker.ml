@@ -70,7 +70,9 @@ let () =
        Labels: [outcome] (ok_summary | parse_error | provider_error | timeout | \
        no_provider_config | no_net | prompt_error | crashed | \
        degraded_plain_json | restart_worker_recovered | \
-       restart_judgment_recovered | operator_retry_started). \
+       restart_judgment_recovered | operator_retry_started | \
+       terminal_wake_idle | terminal_wake_started | terminal_wake_failed | \
+       terminal_wake_crashed | terminal_wake_mode_unavailable). \
        [degraded_plain_json] is emitted alongside the terminal outcome when \
        the judge endpoint could not serve native structured output and the \
        strict plain-JSON capability path was used. The restart outcomes record which exact persisted work \

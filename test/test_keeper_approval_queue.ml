@@ -927,6 +927,48 @@ let test_inflight_auto_judge_preserves_durable_restart_marker () =
         | None -> Alcotest.fail "cleanup resolution was not durable"))
 ;;
 
+let test_terminal_wake_selects_replay_across_workspaces () =
+  let finished_base_path = temp_dir () in
+  let replay_base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir finished_base_path;
+      cleanup_dir replay_base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let finished_id =
+         submit
+           ~base_path:finished_base_path
+           ~keeper_name:"queue-terminal-finished"
+           ~input:(`String "finished")
+       in
+       let replay_id =
+         submit
+           ~base_path:replay_base_path
+           ~keeper_name:"queue-terminal-replay"
+           ~input:(`String "replay")
+       in
+       check_update
+         "replay candidate is durable"
+         true
+         (AQ.mark_summary_pending ~id:replay_id);
+       (match
+          Gate.For_testing.next_auto_judge_wake_candidate ~finished_id
+        with
+        | Some (actual_id, Gate.For_testing.Restart_replay) ->
+          Alcotest.(check string)
+            "another workspace replay is selected"
+            replay_id
+            actual_id
+        | Some (_, Gate.For_testing.Awaiting_start) ->
+          Alcotest.fail "durable replay was classified as a fresh start"
+        | None ->
+          Alcotest.fail "another workspace's durable replay was not selected");
+       reject_and_cleanup finished_id;
+       reject_and_cleanup replay_id)
+;;
+
 let test_malformed_snapshot_fails_install_and_is_observed () =
   let base_path = temp_dir () in
   Fun.protect
@@ -1370,6 +1412,10 @@ let () =
             "interrupted judge keeps restart marker"
             `Quick
             test_inflight_auto_judge_preserves_durable_restart_marker
+        ; Alcotest.test_case
+            "terminal wake crosses workspace boundary"
+            `Quick
+            test_terminal_wake_selects_replay_across_workspaces
         ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick

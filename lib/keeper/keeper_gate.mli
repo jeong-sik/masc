@@ -113,3 +113,12 @@ val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
+
+module For_testing : sig
+  type auto_judge_ready_source =
+    | Awaiting_start
+    | Restart_replay
+
+  val next_auto_judge_wake_candidate :
+    finished_id:string -> (string * auto_judge_ready_source) option
+end

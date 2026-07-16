@@ -1,0 +1,9 @@
+(test
+ (name test_keeper_compaction_operation_record)
+ (libraries
+ alcotest
+  masc.compaction_trigger
+  masc.keeper_checkpoint_ref
+  masc.keeper_compaction_operation
+  masc.keeper_registry
+  yojson))

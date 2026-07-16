@@ -500,7 +500,7 @@ let test_runtime_blocker_supersedes_completion_observation () =
          |> Masc.Keeper_meta_contract.map_runtime (fun rt ->
            { rt with
              last_blocker = Some blocker
-           ; usage = { rt.usage with last_turn_ts = 1_800_000_000.0 }
+           ; usage = { rt.usage with last_turn_ts = Time_compat.now () }
            })
        in
        let receipt_store =

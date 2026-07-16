@@ -193,6 +193,17 @@ let status_json_with ?(agent_name = "test-agent") ?name config =
     Alcotest.failf "status failed: %s" (Profile.tool_result_body result);
   Yojson.Safe.from_string (Profile.tool_result_body result)
 
+let status_json_with_args config args =
+  let result =
+    Status_detail.handle_keeper_status_config
+      ~config
+      ~agent_name:"test-agent"
+      args
+  in
+  if not (Profile.tool_result_success result) then
+    Alcotest.failf "status failed: %s" (Profile.tool_result_body result);
+  Yojson.Safe.from_string (Profile.tool_result_body result)
+
 let resolved_keeper_name config name =
   match
     Keeper_tool_surface_ops.resolve_keeper_name_config
@@ -590,6 +601,75 @@ let test_status_cache_tracks_toml_overlay_changes () =
     "second cache instructions after toml edit"
     (status_instructions config name)
 
+let test_status_cache_distinguishes_normalized_options () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-options-cache" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"normalized status options";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  Status_detail.invalidate_status_cache_all ();
+  let common_fields =
+    [ "name", `String name
+    ; "fast", `Bool false
+    ; "include_metrics_overview", `Bool false
+    ; "include_memory_bank", `Bool false
+    ; "include_history_tail", `Bool false
+    ; "include_compaction_history", `Bool false
+    ]
+  in
+  let context_enabled = status_json_with_args config (`Assoc common_fields) in
+  Alcotest.(check (option bool))
+    "derived include_context default is true"
+    (Some true)
+    (json_assoc_field "status_options" context_enabled
+     |> json_bool_field "include_context");
+  let context_disabled =
+    status_json_with_args config
+      (`Assoc (("include_context", `Bool false) :: common_fields))
+  in
+  Alcotest.(check (option bool))
+    "explicit include_context false is not served from the prior cache entry"
+    (Some false)
+    (json_assoc_field "status_options" context_disabled
+     |> json_bool_field "include_context");
+  Alcotest.(check (option bool))
+    "disabled context is observable"
+    (Some true)
+    (json_assoc_field "context" context_disabled |> json_bool_field "skipped");
+  let first_window =
+    status_json_with_args config
+      (`Assoc
+        [ "name", `String name
+        ; "fast", `Bool true
+        ; "tail_compactions", `Int 1
+        ; "tail_bytes", `Int 1
+        ])
+  in
+  let first_options = json_assoc_field "status_options" first_window in
+  Alcotest.(check (option int))
+    "tail bytes clamp is observable"
+    (Some 1_000)
+    (json_int_field "tail_bytes" first_options);
+  let second_window =
+    status_json_with_args config
+      (`Assoc
+        [ "name", `String name
+        ; "fast", `Bool true
+        ; "tail_compactions", `Int 7
+        ; "tail_bytes", `Int 8_000
+        ])
+  in
+  let second_options = json_assoc_field "status_options" second_window in
+  Alcotest.(check (option int))
+    "tail compaction window participates in cache identity"
+    (Some 7)
+    (json_int_field "tail_compactions" second_options);
+  Alcotest.(check (option int))
+    "tail byte window participates in cache identity"
+    (Some 8_000)
+    (json_int_field "tail_bytes" second_options)
+
 let test_status_surfaces_chat_queue_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "chatqueue-status" in
@@ -807,6 +887,8 @@ let () =
             `Quick test_missing_profile_source_fails_loud;
           Alcotest.test_case "status cache tracks TOML overlay edits" `Quick
             test_status_cache_tracks_toml_overlay_changes;
+          Alcotest.test_case "status cache distinguishes normalized options"
+            `Quick test_status_cache_distinguishes_normalized_options;
           Alcotest.test_case "status surfaces chat queue runtime" `Quick
             test_status_surfaces_chat_queue_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"

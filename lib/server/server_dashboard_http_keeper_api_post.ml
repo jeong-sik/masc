@@ -933,6 +933,22 @@ let should_persist_directive_paused_state directive (meta : Keeper_meta_contract
   | Keeper_directive.Pause | Keeper_directive.Wakeup
   | Keeper_directive.Assign_task _ -> not (Bool.equal meta.paused paused)
 
+type resume_registration =
+  | Already_registered
+  | Booted_missing_registry
+
+type paused_state_persist_plan =
+  | Persist_paused_state of bool
+  | Skip_paused_state_persist
+
+let paused_state_persist_plan directive registration =
+  match directive, registration with
+  | Keeper_directive.Pause, _ -> Persist_paused_state true
+  | Keeper_directive.Resume, Already_registered -> Persist_paused_state false
+  | Keeper_directive.Resume, Booted_missing_registry -> Skip_paused_state_persist
+  | Keeper_directive.Wakeup, _
+  | Keeper_directive.Assign_task _, _ -> Skip_paused_state_persist
+
 let persist_directive_paused_state ~config ~name ~action_str directive meta paused =
   let updated_meta = meta_with_directive_paused_state meta paused in
     (* Pause/resume toggle via CAS merge: do not rewind a concurrent
@@ -963,14 +979,14 @@ let persist_directive_paused_state ~config ~name ~action_str directive meta paus
 let ensure_registered_for_resume ~sw ~clock state agent_name name =
   let config = Mcp_server.workspace_config state in
   match Keeper_registry.get ~base_path:config.base_path name with
-  | Some _ -> Ok `Already_registered
+  | Some _ -> Ok Already_registered
   | None ->
       let keeper_ctx = keeper_ctx_of_dashboard_state ~sw ~clock state agent_name in
       let args = `Assoc [ ("name", `String name) ] in
       (match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_up" ~args with
        | Some result when Tool_result.is_success result ->
            (match Keeper_registry.get ~base_path:config.base_path name with
-            | Some _ -> Ok `Booted_missing_registry
+            | Some _ -> Ok Booted_missing_registry
             | None ->
                 Error
                   (Printf.sprintf
@@ -1059,13 +1075,9 @@ let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
                 reqd
           | Ok registration_state ->
               let persist_result =
-                match directive, registration_state with
-                | Keeper_directive.Pause, _ -> persist_paused_state true
-                | Keeper_directive.Resume, `Already_registered ->
-                  persist_paused_state false
-                | Keeper_directive.Resume, `Booted_missing_registry -> Ok ()
-                | Keeper_directive.Wakeup, _
-                | Keeper_directive.Assign_task _, _ -> Ok ()
+                match paused_state_persist_plan directive registration_state with
+                | Persist_paused_state paused -> persist_paused_state paused
+                | Skip_paused_state_persist -> Ok ()
               in
               (match persist_result with
               | Error err ->
@@ -1259,26 +1271,31 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
                | Keeper_directive.Resume ->
                  ensure_registered_for_resume ~sw ~clock state agent_name name
                | Keeper_directive.Pause | Keeper_directive.Wakeup
-               | Keeper_directive.Assign_task _ -> Ok `Already_registered
+               | Keeper_directive.Assign_task _ -> Ok Already_registered
              with
              | Error err ->
                  `Assoc
                    [ ("name", `String name); ("ok", `Bool false); ("error", `String err) ]
              | Ok registration_state ->
                  let persist_result =
-                   match directive, registration_state, target_paused, meta_opt with
-                   | Keeper_directive.Resume, `Booted_missing_registry, _, _ -> Ok ()
-                   | _, _, Some target, Some meta
-                     when should_persist_directive_paused_state directive meta target
-                     ->
-                       persist_directive_paused_state
-                         ~config
-                         ~name
-                         ~action_str
-                         directive
-                         meta
-                         target
-                   | _ -> Ok ()
+                   match paused_state_persist_plan directive registration_state with
+                   | Persist_paused_state target ->
+                     (match target_paused, meta_opt with
+                      | Some target_paused, Some meta
+                        when Bool.equal target target_paused
+                             && should_persist_directive_paused_state
+                                  directive
+                                  meta
+                                  target ->
+                        persist_directive_paused_state
+                          ~config
+                          ~name
+                          ~action_str
+                          directive
+                          meta
+                          target
+                      | _ -> Ok ())
+                   | Skip_paused_state_persist -> Ok ()
                  in
                  (match persist_result with
                   | Error err ->

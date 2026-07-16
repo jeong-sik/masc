@@ -224,7 +224,7 @@ CI 테스트 실행기. 다음 기능을 제공한다:
 | Heartbeat logging | `CI_TEST_HEARTBEAT_SEC` (기본 30초) 간격으로 진행 상태 출력. "silent hang" 방지. |
 | Diagnostics dump | 실패 시 프로세스 스냅샷, 로그 파일 경로, 빌드 디렉토리 정보 출력. |
 | Disk observation | 사용 가능 공간이 임계값 아래로 내려가면 상태와 진단을 기록하되 실행을 중단하지 않는다. |
-| Single attempt | 명령을 정확히 한 번 실행하고 원래 종료 코드를 보존한다. 실행 경계는 CI job이 소유한다. |
+| Single attempt | 명령을 정확히 한 번 실행하고 원래 종료 코드를 보존한다. 실행 경계는 호출 수명주기(CI에서는 job, 로컬에서는 foreground parent)가 소유한다. |
 
 ### 6.2 실행 흐름
 

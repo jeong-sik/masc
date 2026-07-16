@@ -1,7 +1,7 @@
 (** Keeper_status_detail — single-keeper detailed status handler.
     Split from keeper_status.ml.
 
-    Server-side response cache: keyed on (base_path, name, updated_at, args_hash).
+    Server-side response cache: keyed on (base_path, name, updated_at, cache input).
     Avoids expensive JSONL parsing and checkpoint loading when keeper
     state has not changed between consecutive status polls. *)
 
@@ -29,9 +29,33 @@ let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
 
 (* ── Response cache ──────────────────────────────────── *)
 
+type tail_order =
+  | Oldest_first
+  | Newest_first
+
+type status_options =
+  { tail_turns : int
+  ; tail_messages : int
+  ; tail_compactions : int
+  ; tail_bytes : int
+  ; tail_order : tail_order
+  ; fast : bool
+  ; include_context : bool
+  ; include_metrics_overview : bool
+  ; include_memory_bank : bool
+  ; include_history_tail : bool
+  ; include_compaction_history : bool
+  }
+
+type status_cache_input =
+  { options : status_options
+  ; effective_meta_overlay_hash : string
+  ; chat_queue_fingerprint : string
+  }
+
 type cache_entry = {
   updated_at : string;
-  args_hash : string;
+  cache_input : status_cache_input;
   response : Yojson.Safe.t;
 }
 
@@ -133,10 +157,6 @@ let effective_status_name_config ~(agent_name : string) args =
 let effective_status_name (ctx : _ context) args =
   effective_status_name_config ~agent_name:ctx.agent_name args
 
-type tail_order =
-  | Oldest_first
-  | Newest_first
-
 let tail_order_of_args args =
   match String.lowercase_ascii (String.trim (get_string args "tail_order" "")) with
   | "newest_first" | "newest" | "latest_first" | "desc" ->
@@ -156,6 +176,23 @@ let tail_order_to_string = function
 let all_tail_orders = [ Oldest_first; Newest_first ]
 let valid_tail_order_strings =
   List.map tail_order_to_string all_tail_orders
+
+let status_options_of_args args =
+  let fast = get_bool args "fast" (keeper_status_fast_default ()) in
+  { tail_turns = max 0 (get_int args "tail_turns" 3)
+  ; tail_messages = max 0 (get_int args "tail_messages" 5)
+  ; tail_compactions = max 0 (get_int args "tail_compactions" 10)
+  ; tail_bytes = max 1_000 (get_int args "tail_bytes" 60_000)
+  ; tail_order = tail_order_of_args args
+  ; fast
+  ; include_context = get_bool args "include_context" (not fast)
+  ; include_metrics_overview =
+      get_bool args "include_metrics_overview" (not fast)
+  ; include_memory_bank = get_bool args "include_memory_bank" (not fast)
+  ; include_history_tail = get_bool args "include_history_tail" (not fast)
+  ; include_compaction_history =
+      get_bool args "include_compaction_history" (not fast)
+  }
 
 let apply_tail_order order items =
   match order with
@@ -315,25 +352,6 @@ let chat_queue_status_to_json observation =
       ; "durable_replay_enabled", `Bool durable_replay_enabled
       ]
 
-let hash_status_args _config resolved_name (meta : keeper_meta)
-    ~chat_queue_fingerprint args =
-  let parts = [
-    resolved_name;
-    effective_meta_overlay_hash meta;
-    chat_queue_fingerprint;
-    (* Keeper_manual_reconcile.cache_key removed with reconcile system. *)
-    string_of_bool (get_bool args "fast" false);
-    string_of_bool (get_bool args "include_context" false);
-    string_of_bool (get_bool args "include_metrics_overview" false);
-    string_of_bool (get_bool args "include_memory_bank" false);
-    string_of_bool (get_bool args "include_history_tail" false);
-    string_of_bool (get_bool args "include_compaction_history" false);
-    string_of_int (get_int args "tail_turns" 3);
-    string_of_int (get_int args "tail_messages" 5);
-    tail_order_to_string (tail_order_of_args args);
-  ] in
-  Digest.string (String.concat "|" parts) |> Digest.to_hex
-
 let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
 let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
@@ -348,13 +366,15 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
   | Ok (name, m) ->
       let cache_key = status_cache_key ~base_path:config.base_path ~name in
       let chat_queue_observation = observe_chat_queue ~keeper_name:m.name in
-      let args_hash =
-        hash_status_args config name m
-          ~chat_queue_fingerprint:
-            (chat_queue_observation_fingerprint chat_queue_observation)
-          args
+      let options = status_options_of_args args in
+      let cache_input =
+        { options
+        ; effective_meta_overlay_hash = effective_meta_overlay_hash m
+        ; chat_queue_fingerprint =
+            chat_queue_observation_fingerprint chat_queue_observation
+        }
       in
-      (* Cache hit: same updated_at + same args/effective-meta hash → return cached response.
+      (* Cache hit: same updated_at + same typed args/effective-meta input → return cached response.
          The read is taken under [cache_mu] so it cannot interleave with
          an eviction from [invalidate_status_cache_{for,all}]. *)
       (match
@@ -363,23 +383,23 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
        with
        | Some entry
          when entry.updated_at = m.updated_at
-           && entry.args_hash = args_hash ->
+           && entry.cache_input = cache_input ->
          tool_result_ok_data entry.response
        | _ ->
-      let tail_turns = max 0 (get_int args "tail_turns" 3) in
-      let tail_messages = max 0 (get_int args "tail_messages" 5) in
-      let tail_compactions = max 0 (get_int args "tail_compactions" 10) in
-      let tail_bytes = max 1_000 (get_int args "tail_bytes" 60_000) in
-      let fast = get_bool args "fast" (keeper_status_fast_default ()) in
-      let tail_order = tail_order_of_args args in
-      let include_context = get_bool args "include_context" (not fast) in
-      let include_metrics_overview =
-        get_bool args "include_metrics_overview" (not fast)
-      in
-      let include_memory_bank = get_bool args "include_memory_bank" (not fast) in
-      let include_history_tail = get_bool args "include_history_tail" (not fast) in
-      let include_compaction_history =
-        get_bool args "include_compaction_history" (not fast)
+      let
+        { tail_turns
+        ; tail_messages
+        ; tail_compactions
+        ; tail_bytes
+        ; tail_order
+        ; fast
+        ; include_context
+        ; include_metrics_overview
+        ; include_memory_bank
+        ; include_history_tail
+        ; include_compaction_history
+        }
+        = options
       in
       let max_context_resolution =
         Keeper_context_runtime.resolve_max_context_resolution_of_meta m
@@ -915,6 +935,10 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("token_gate_enabled", `Bool (compact_token_gate > 0));
            ]);
            ("status_options", `Assoc [
+             ("tail_turns", `Int tail_turns);
+             ("tail_messages", `Int tail_messages);
+             ("tail_compactions", `Int tail_compactions);
+             ("tail_bytes", `Int tail_bytes);
              ("fast", `Bool fast);
              ("include_context", `Bool include_context);
              ("include_metrics_overview", `Bool include_metrics_overview);
@@ -1013,7 +1037,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          ]) in
          Eio_guard.with_mutex cache_mu (fun () ->
            Hashtbl.replace _cache cache_key
-             { updated_at = m.updated_at; args_hash; response = json });
+             { updated_at = m.updated_at; cache_input; response = json });
          tool_result_ok_data json)
 (* TEL-OK: 1-line delegate to ctx-free body. *)
 let handle_keeper_status (ctx : _ context) args = handle_keeper_status_config ~config:ctx.config ~agent_name:ctx.agent_name args

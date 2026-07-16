@@ -139,6 +139,10 @@ and recovery_record_error_kind =
 
 type submit_error =
   | Submit_rejected of access_rejection
+  | Request_store_inspection_failed of
+      { path : string
+      ; reason : string
+      }
   | Submit_invalid_keeper_name of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
@@ -349,6 +353,7 @@ module For_testing : sig
     :  ?before_durable_write:(Keeper_fs.durable_write_stage -> unit)
     -> ?before_durable_remove:(Keeper_fs.durable_remove_stage -> unit)
     -> ?generate_request_id:(unit -> string)
+    -> ?before_request_store_inspection:(unit -> unit)
     -> ?before_integrity_projection:(unit -> unit)
     -> ?signal_cancel:(Eio.Switch.t -> exn -> unit)
     -> unit

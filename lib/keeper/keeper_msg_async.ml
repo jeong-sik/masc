@@ -119,6 +119,10 @@ and recovery_record_error_kind =
 
 type submit_error =
   | Submit_rejected of access_rejection
+  | Request_store_inspection_failed of
+      { path : string
+      ; reason : string
+      }
   | Submit_invalid_keeper_name of { reason : string }
   | Initial_persistence_failed of { reason : string }
   | Acceptance_persistence_failed of
@@ -276,6 +280,7 @@ type request_ops =
       -> string
       -> (unit, Keeper_fs.durable_remove_error) result
   ; generate_request_id : unit -> string
+  ; before_request_store_inspection : unit -> unit
   ; before_integrity_projection : unit -> unit
   ; signal_cancel : Eio.Switch.t -> exn -> unit
   }
@@ -293,6 +298,7 @@ let production_request_ops =
          Keeper_fs.remove_file_durable ~ownership_root path)
   ; generate_request_id =
       (fun () -> Random_id.prefixed ~prefix:"kmsg-" ~bytes:16)
+  ; before_request_store_inspection = (fun () -> ())
   ; before_integrity_projection = (fun () -> ())
   ; signal_cancel = Eio.Switch.fail
   }
@@ -658,6 +664,12 @@ let durable_terminal_entry proof = proof.terminal_entry
 
 let submit_error_to_json = function
   | Submit_rejected rejection -> access_rejection_to_json rejection
+  | Request_store_inspection_failed { path; reason } ->
+    `Assoc
+      [ "error", `String "request_store_inspection_failed"
+      ; "path", `String path
+      ; "message", `String reason
+      ]
   | Submit_invalid_keeper_name { reason } ->
     `Assoc
       [ "error", `String "invalid_keeper_name"
@@ -1723,17 +1735,32 @@ let recover_lost_disk_records ~base_path () =
 
 let with_lock f = Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
 
-let validate_request_store_root ~base_path =
-  match
-    Fs_compat.inspect_owned_directory_chain
-      ~ownership_root:base_path
-      (request_dir ~base_path)
+let validate_request_store_root ~ops ~base_path =
+  let path = request_dir ~base_path in
+  try
+    ops.before_request_store_inspection ();
+    match
+      Fs_compat.inspect_owned_directory_chain
+        ~ownership_root:base_path
+        path
+    with
+    | Ok (Fs_compat.Owned_directory_missing | Fs_compat.Owned_directory _) ->
+      Ok ()
+    | Error rejection ->
+      Error
+        (Submit_rejected
+           (Invalid_base_path
+              { reason =
+                  Fs_compat.owned_directory_chain_rejection_to_string rejection
+              }))
   with
-  | Ok (Fs_compat.Owned_directory_missing | Fs_compat.Owned_directory _) -> Ok ()
-  | Error rejection ->
+  | Eio.Cancel.Cancelled _ as exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exn bt
+  | exn ->
     Error
-      (Invalid_base_path
-         { reason = Fs_compat.owned_directory_chain_rejection_to_string rejection })
+      (Request_store_inspection_failed
+         { path; reason = Printexc.to_string exn })
 ;;
 
 let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
@@ -1774,16 +1801,16 @@ let reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name =
                 `Reserved (request_id, entry, key, transition_lock))
           | Located _ -> `Collision
           | Located_unreadable _ ->
-            (match validate_request_store_root ~base_path with
+            (match validate_request_store_root ~ops ~base_path with
              | Ok () -> `Collision
-             | Error rejection -> `Rejected rejection)
-          | Located_rejected rejection -> `Rejected rejection)
+             | Error error -> `Rejected error)
+          | Located_rejected rejection -> `Rejected (Submit_rejected rejection))
       with
       | `Reserved reserved -> Ok reserved
       | `Collision -> reserve ()
       | `Rejected rejection -> Error rejection
   in
-  match validate_request_store_root ~base_path with
+  match validate_request_store_root ~ops ~base_path with
   | Ok () -> reserve ()
   | Error _ as error -> error
 ;;
@@ -2016,7 +2043,7 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
     let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
     with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
     match reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name with
-    | Error rejection -> Error (Submit_rejected rejection)
+    | Error error -> Error error
     | Ok (request_id, entry, key, transition_lock) ->
     let reconciliation_outcome reason =
       Ok
@@ -2620,6 +2647,8 @@ module For_testing = struct
 
   let make_request_ops ?before_durable_write ?before_durable_remove
       ?(generate_request_id = production_request_ops.generate_request_id)
+      ?(before_request_store_inspection =
+        production_request_ops.before_request_store_inspection)
       ?(before_integrity_projection =
         production_request_ops.before_integrity_projection)
       ?(signal_cancel = production_request_ops.signal_cancel) () =
@@ -2648,6 +2677,7 @@ module For_testing = struct
     { save_json_durable
     ; remove_file_durable
     ; generate_request_id
+    ; before_request_store_inspection
     ; before_integrity_projection
     ; signal_cancel
     }

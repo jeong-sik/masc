@@ -420,6 +420,64 @@ let test_keeper_msg_async_does_not_accept_failed_initial_persistence () =
            (Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string))
 ;;
 
+let test_keeper_msg_async_reports_request_store_inspection_failure () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun background_sw ->
+  let base_path = temp_dir "keeper-msg-inspection-failure-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_msg_async.For_testing.clear ();
+      rm_rf base_path)
+    (fun () ->
+       let generated = Atomic.make 0 in
+       let worker_ran = Atomic.make false in
+       let request_ops =
+         Keeper_msg_async.For_testing.make_request_ops
+           ~before_request_store_inspection:(fun () ->
+             raise (Unix.Unix_error (Unix.EIO, "lstat", "request-store")))
+           ~generate_request_id:(fun () ->
+             Atomic.incr generated;
+             "kmsg-inspection-must-not-reserve")
+           ()
+       in
+       match
+         Keeper_msg_async.For_testing.submit
+           request_ops
+           ~background_sw
+           ~base_path
+           ~caller
+           ~keeper_name:"inspection-failure"
+           ~f:(fun _request_sw ->
+             Atomic.set worker_ran true;
+             tr_ok "{}")
+           ()
+       with
+       | Error
+           (Keeper_msg_async.Request_store_inspection_failed { path; reason = _ }) ->
+         Alcotest.(check string)
+           "error identifies the request store"
+           (Filename.concat
+              (Common.masc_dir_from_base_path ~base_path)
+              "keeper_msg_requests")
+           path;
+         Alcotest.(check int) "request id was not generated" 0
+           (Atomic.get generated);
+         Alcotest.(check bool) "worker was not started" false
+           (Atomic.get worker_ran);
+         Alcotest.(check int) "no request id was reserved" 0
+           (Keeper_msg_async.For_testing.reserved_request_id_count ())
+       | Error error ->
+         Alcotest.failf
+           "expected request store inspection failure, got %s"
+           (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+       | Ok outcome ->
+         Alcotest.failf
+           "request store inspection failure was accepted: %s"
+           (Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string))
+;;
+
 let fail_once_on_write_stage expected =
   let armed = Atomic.make true in
   fun actual ->
@@ -2563,6 +2621,10 @@ let () =
             "initial persistence failure is not accepted"
             `Quick
             test_keeper_msg_async_does_not_accept_failed_initial_persistence
+        ; test_case
+            "request store inspection failure is typed"
+            `Quick
+            test_keeper_msg_async_reports_request_store_inspection_failure
         ; test_case
             "request id collision uses reservation index"
             `Quick

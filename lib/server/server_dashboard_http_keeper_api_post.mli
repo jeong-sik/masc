@@ -69,6 +69,17 @@ val refresh_keeper_execution_surfaces :
 val invalidate_keeper_execution_surfaces :
   config:Workspace_utils.config -> unit -> unit
 
+type resume_registration =
+  | Already_registered
+  | Booted_missing_registry
+
+type paused_state_persist_plan =
+  | Persist_paused_state of bool
+  | Skip_paused_state_persist
+
+val paused_state_persist_plan :
+  Keeper_directive.t -> resume_registration -> paused_state_persist_plan
+
 val handle_keeper_config_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->

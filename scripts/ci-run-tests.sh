@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# CI test observer. The workflow job owns the outer execution boundary.
+# Test observer. The invoking lifecycle owns the outer execution boundary
+# (the workflow job in CI, or the foreground parent for local invocations).
 # This script reports progress and diagnostics, but never terminates or retries
-# the command it observes.
+# the command it observes except when its own lifecycle is cancelled.
 
 mktemp_ci_log() {
   local tmp_dir="${TMPDIR:-/tmp}"
@@ -187,8 +188,7 @@ effective_test_cmd() {
   fi
 }
 
-kill_active_cmd_tree() {
-  local signal="${1:-TERM}"
+terminate_active_cmd_tree() {
   local tree_pids=()
   local pid=""
   while IFS= read -r pid; do
@@ -196,22 +196,46 @@ kill_active_cmd_tree() {
   done < <(active_cmd_tree_pids)
   local idx=0
   for (( idx=${#tree_pids[@]}-1; idx>=0; idx-- )); do
-    kill "-${signal}" "${tree_pids[idx]}" >/dev/null 2>&1 || true
+    kill -TERM "${tree_pids[idx]}" >/dev/null 2>&1 || true
   done
+  # Cancellation must converge even when a child ignores TERM. Reuse the
+  # captured tree so descendants that become reparented after TERM are still
+  # terminated; no wall-clock grace-period heuristic is introduced here.
+  for (( idx=${#tree_pids[@]}-1; idx>=0; idx-- )); do
+    kill -KILL "${tree_pids[idx]}" >/dev/null 2>&1 || true
+  done
+  if [[ -n "${ACTIVE_CMD_PID}" ]]; then
+    wait "${ACTIVE_CMD_PID}" >/dev/null 2>&1 || true
+  fi
+  ACTIVE_CMD_PID=""
+  ACTIVE_CMD_PGID=""
 }
 
 hb_pid=""
-cleanup() {
-  if [[ -n "${ACTIVE_CMD_PID}" ]] && kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; then
-    kill_active_cmd_tree TERM
-    wait "${ACTIVE_CMD_PID}" >/dev/null 2>&1 || true
-  fi
+stop_observation_helpers() {
   [[ -z "${hb_pid}" ]] || kill "${hb_pid}" >/dev/null 2>&1 || true
   [[ -z "${ACTIVE_LOG_TAIL_PID}" ]] || kill "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
+  hb_pid=""
+  ACTIVE_LOG_TAIL_PID=""
+}
+
+cleanup() {
+  terminate_active_cmd_tree
+  stop_observation_helpers
+}
+
+handle_signal() {
+  local signal_name="$1"
+  local exit_code="$2"
+  diag_dump "signal_${signal_name}"
+  terminate_active_cmd_tree
+  stop_observation_helpers
+  trap - EXIT INT TERM
+  exit "${exit_code}"
 }
 trap cleanup EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
+trap 'handle_signal INT 130' INT
+trap 'handle_signal TERM 143' TERM
 
 run_observed() {
   local cmd="$1"

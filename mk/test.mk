@@ -39,7 +39,7 @@ clean-tlc-artifacts:
 coverage:
 	rm -rf _coverage
 	mkdir -p _coverage
-	CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 scripts/ci-run-tests.sh "BISECT_FILE=$(CURDIR)/_coverage/bisect scripts/dune-local.sh test --instrument-with bisect_ppx --force"
+	CI_TEST_HEARTBEAT_SEC=30 scripts/ci-run-tests.sh "BISECT_FILE=$(CURDIR)/_coverage/bisect scripts/dune-local.sh test --instrument-with bisect_ppx --force"
 
 # Print coverage summary to stdout
 coverage-summary: coverage

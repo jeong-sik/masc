@@ -95,6 +95,61 @@ let run_ci ?(env = []) ~cwd command =
   let script = script_path () in
   run_process ~cwd ~env script [| script; command |]
 
+let run_ci_then_signal ~cwd ~env ~ready_file command =
+  let script = script_path () in
+  let out = Filename.temp_file "ci-run-tests-signal-out" ".txt" in
+  let err = Filename.temp_file "ci-run-tests-signal-err" ".txt" in
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process_env script [| script; command |] (env_array env)
+          Unix.stdin out_fd err_fd)
+  in
+  let rec await_ready remaining =
+    if Sys.file_exists ready_file then ()
+    else if remaining = 0 then fail "observed command did not become ready"
+    else (
+      Unix.sleepf 0.01;
+      await_ready (remaining - 1))
+  in
+  let waitpid_nointr () =
+    let rec wait () =
+      try Unix.waitpid [] pid
+      with Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+    in
+    wait ()
+  in
+  let _, status =
+    Fun.protect
+      ~finally:(fun () ->
+        try
+          Unix.kill pid Sys.sigkill;
+          ignore (Unix.waitpid [] pid)
+        with Unix.Unix_error (Unix.ESRCH | Unix.ECHILD, _, _) -> ())
+      (fun () ->
+        await_ready 500;
+        Unix.kill pid Sys.sigterm;
+        waitpid_nointr ())
+  in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
+  let stdout = read_file out in
+  let stderr = read_file err in
+  Sys.remove out;
+  Sys.remove err;
+  code, stdout, stderr
+
 let base_env log_file =
   [
     ("CI_TEST_HEARTBEAT_SEC", "1");
@@ -184,6 +239,23 @@ let test_contract_harness_runs_once () =
       check bool "contract success reported" true
         (contains_substring observed "contract harness completed successfully"))
 
+let test_signal_dumps_diagnostics_and_converges () =
+  with_temp_dir "ci-run-tests-signal" (fun dir ->
+      let ci_log = Filename.concat dir "ci.log" in
+      let ready_file = Filename.concat dir "ready" in
+      let command =
+        Printf.sprintf
+          "printf ready > %s; trap '' TERM INT; while :; do sleep 1; done"
+          (Filename.quote ready_file)
+      in
+      let code, stdout, stderr =
+        run_ci_then_signal ~cwd:dir ~env:(base_env ci_log) ~ready_file command
+      in
+      check int "TERM exit code" 143 code;
+      let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
+      check bool "signal diagnostics emitted" true
+        (contains_substring observed "[ci-diag] reason=signal_TERM"))
+
 let test_control_layers_are_absent () =
   let script = read_file (script_path ()) in
   List.iter
@@ -211,6 +283,8 @@ let () =
             test_legacy_deadline_knob_does_not_terminate_command;
           test_case "contract harness runs once" `Quick
             test_contract_harness_runs_once;
+          test_case "signal diagnostics converge" `Quick
+            test_signal_dumps_diagnostics_and_converges;
           test_case "control layers are absent" `Quick
             test_control_layers_are_absent;
         ] );

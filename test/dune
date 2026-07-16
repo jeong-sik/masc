@@ -115,6 +115,7 @@
   test_server_keeper_background
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
+  test_keeper_directive_persist_plan
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state
@@ -435,6 +436,7 @@
   test_server_keeper_background
   test_server_dashboard_http_legacy_keeper_inventory
   test_server_dashboard_http_keeper_api_trace
+  test_keeper_directive_persist_plan
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state

@@ -80,14 +80,6 @@ let reject_placeholder_persona_profile ~label ~path json =
   else false
 ;;
 
-let operator_todo_placeholder_fields fields =
-  fields
-  |> List.filter_map (fun (field, value) ->
-    match value with
-    | Some raw when string_has_operator_todo_placeholder raw -> Some field
-    | _ -> None)
-;;
-
 let personas_root_opt () =
   try
     Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();

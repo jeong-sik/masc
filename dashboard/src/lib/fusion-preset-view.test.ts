@@ -21,7 +21,6 @@ You are an expert panelist. Answer directly.
 """
 panel_timeout_s = 300.0
 judge_timeout_s = 250.0
-max_tool_calls_per_panel = 0
 
 [fusion.presets.quorum]
 panel = ["lens_a", "lens_b"]
@@ -38,7 +37,7 @@ describe('readFusionPresetView', () => {
     expect(readFusionPresetView(MULTILINE, 'nonexistent')).toBeNull()
   })
 
-  it('parses a multi-line panel array plus scalar judge/timeouts/max_tool_calls', () => {
+  it('parses a multi-line panel array plus scalar judge/timeouts', () => {
     const view = readFusionPresetView(MULTILINE, 'trio')
     expect(view).not.toBeNull()
     expect(view!.preset).toBe('trio')
@@ -51,7 +50,6 @@ describe('readFusionPresetView', () => {
     // Scalars are found even though a multi-line prompt string precedes them.
     expect(view!.panelTimeoutS).toBe(300)
     expect(view!.judgeTimeoutS).toBe(250)
-    expect(view!.maxToolCallsPerPanel).toBe(0)
   })
 
   it('scopes to the requested preset and does not inherit a sibling preset', () => {
@@ -61,7 +59,6 @@ describe('readFusionPresetView', () => {
     // quorum declares no timeouts → null, not the trio values.
     expect(view!.panelTimeoutS).toBeNull()
     expect(view!.judgeTimeoutS).toBeNull()
-    expect(view!.maxToolCallsPerPanel).toBeNull()
   })
 
   it('handles a single-line panel array', () => {
@@ -78,7 +75,6 @@ describe('readFusionPresetView', () => {
     expect(view!.panel).toEqual([])
     expect(view!.judge).toBeNull()
     expect(view!.panelTimeoutS).toBeNull()
-    expect(view!.maxToolCallsPerPanel).toBeNull()
   })
 
   it('flags a flat preset as not grouped', () => {
@@ -102,12 +98,10 @@ judge_system_prompt = "synthesize"
 panel = ["fast1", "fast2"]
 panel_system_prompt = "quick"
 web_tools = false
-max_tool_calls_per_panel = 0
 [[fusion.presets.mixed.panels]]
 panel = ["careful1"]
 panel_system_prompt = "deliberate"
 web_tools = true
-max_tool_calls_per_panel = 4
 panel_timeout_s = 180.0
 `
 

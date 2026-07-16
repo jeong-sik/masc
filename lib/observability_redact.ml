@@ -9,6 +9,7 @@ let default_max_len = 200
 let sensitive_keys =
   [ "access_token"
   ; "api_key"
+  ; "api_token"
   ; "apikey"
   ; "authorization"
   ; "client_secret"

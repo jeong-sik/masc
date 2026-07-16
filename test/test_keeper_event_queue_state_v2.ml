@@ -97,6 +97,63 @@ let test_claim_codec_ack_idempotency () =
    | Ok _ -> Alcotest.fail "conflicting second settlement was accepted")
 ;;
 
+let test_claim_leases_earliest_ready_without_reordering_skipped_work () =
+  let blocked =
+    { (stimulus "blocked" 1.0) with urgency = Queue.Immediate }
+  in
+  let first_ready =
+    { (stimulus "first-ready" 2.0) with urgency = Queue.Low }
+  in
+  let second_ready =
+    { (stimulus "second-ready" 3.0) with urgency = Queue.Immediate }
+  in
+  let ready (candidate : Queue.stimulus) =
+    not (String.equal candidate.post_id blocked.post_id)
+  in
+  let state =
+    State.with_pending (queue [ blocked; first_ready; second_ready ]) State.empty
+  in
+  let state, first_lease =
+    State.claim_when ~claimed_at:4.0 ~ready state
+    |> require_ok "claim earliest ready"
+  in
+  let first_lease = require_some "first ready lease" first_lease in
+  Alcotest.(check (list string))
+    "arrival order wins across urgency labels"
+    [ first_ready.post_id ]
+    (post_ids (queue first_lease.stimuli));
+  Alcotest.(check (list string))
+    "skipped input keeps its position"
+    [ blocked.post_id; second_ready.post_id ]
+    (post_ids (State.pending state));
+  let state, settlement =
+    State.settle ~settled_at:5.0 ~lease:first_lease ~settlement:State.Ack state
+    |> require_ok "settle first ready"
+  in
+  let receipt =
+    match settlement with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "first ready lease was already settled"
+  in
+  let state =
+    State.mark_transition_projected ~transition_id:receipt.transition_id state
+    |> require_ok "project first ready settlement"
+  in
+  let state, second_lease =
+    State.claim_when ~claimed_at:6.0 ~ready state
+    |> require_ok "claim second ready"
+  in
+  let second_lease = require_some "second ready lease" second_lease in
+  Alcotest.(check (list string))
+    "next ready input follows"
+    [ second_ready.post_id ]
+    (post_ids (queue second_lease.stimuli));
+  Alcotest.(check (list string))
+    "blocked input remains durable"
+    [ blocked.post_id ]
+    (post_ids (State.pending state))
+;;
+
 let test_requeue_and_escalation_are_total () =
   let retry = stimulus "retry" 1.0 in
   let state = State.with_pending (queue [ retry ]) State.empty in
@@ -928,6 +985,10 @@ let () =
     "keeper event queue v2"
     [ ( "state"
       , [ Alcotest.test_case "claim codec ack idempotency" `Quick test_claim_codec_ack_idempotency
+        ; Alcotest.test_case
+            "claim earliest ready without reordering"
+            `Quick
+            test_claim_leases_earliest_ready_without_reordering_skipped_work
         ; Alcotest.test_case "requeue and escalation" `Quick test_requeue_and_escalation_are_total
         ; Alcotest.test_case
             "judgment terminal evidence"

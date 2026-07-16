@@ -55,9 +55,6 @@ let canonical_app_codes : (string * D.t) list =
 let runtime_wire_codes : (string * D.t) list =
   [ "api_error_overloaded", D.Provider_error (Code.Sdk_error "api_error_overloaded")
   ; "api_error_server:502", D.Provider_error (Code.Sdk_error "api_error_server:502")
-  ; ( "agent_error_max_turns_exceeded:turns=10,limit=10"
-    , D.Provider_error (Code.Sdk_error "agent_error_max_turns_exceeded:turns=10,limit=10")
-    )
   ]
 ;;
 
@@ -219,8 +216,8 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Exception_unhandled "x"
     , D.Provider_error (Code.Exception_unhandled "x") )
   ; ( "Sdk"
-    , Code.Sdk_error "agent_error_max_turns_exceeded:turns=1,limit=1"
-    , D.Provider_error (Code.Sdk_error "agent_error_max_turns_exceeded:turns=1,limit=1") )
+    , Code.Sdk_error "api_error_server:502"
+    , D.Provider_error (Code.Sdk_error "api_error_server:502") )
   ]
 ;;
 

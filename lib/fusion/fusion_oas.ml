@@ -154,7 +154,6 @@ let build_agent
     ~net
     ~system_prompt
     ?(tools = [])
-    ?(max_tool_calls = 0)
     ?timeout_s
     ?max_tokens
     ?name
@@ -162,7 +161,6 @@ let build_agent
     (model : string)
   : (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
   =
-  let _ = max_tool_calls in
   (* 카드명(Async_agent.all이 결과 키로 반환)은 패널 정체성([name], 예 "skeptic (claude)").
      provider 라우팅·에러 귀속은 원 [model]로 따로 한다 — 정체성과 routable model을 한
      문자열에 압축하지 않는다 (RFC-0278). [name] 미지정(judge·label 없는 panel)이면 카드명=model.

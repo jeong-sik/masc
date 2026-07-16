@@ -19,13 +19,18 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     |> List.filter (fun key -> List.mem_assoc key doc)
   in
   let result =
-    match removed_present with
-    | [] -> Ok ()
-    | fields ->
-        Error
-          (Printf.sprintf
-             "removed keeper TOML keys: %s"
-             (String.concat ", " fields))
+    if has "goal" then
+      Error
+        "keeper.goal is removed. Link Goal entities through active_goal_ids; \
+         keeper instructions remain under keeper.instructions."
+    else
+      match removed_present with
+      | [] -> Ok ()
+      | fields ->
+          Error
+            (Printf.sprintf
+               "removed keeper TOML keys: %s"
+               (String.concat ", " fields))
   in
   let result =
     Result.bind result (fun () ->
@@ -98,18 +103,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
          runtime in runtime.toml [[runtime.assignments]] (keyed by keeper name)."
     | false, false -> Ok ()
   in
-  let legacy_goal_result =
-    if has "goal" then
-      Error
-        "keeper.goal is removed. Link Goal entities through active_goal_ids; \
-         keeper instructions remain under keeper.instructions."
-    else Ok ()
-  in
-  let result =
-    Result.bind
-      (Result.bind result (fun () -> runtime_assignment_result))
-      (fun () -> legacy_goal_result)
-  in
+  let result = Result.bind result (fun () -> runtime_assignment_result) in
   Result.map
     (fun () ->
       {

@@ -148,7 +148,11 @@ let known_unrelated_untyped_compaction_snapshot_events =
 ;;
 
 let classify_compaction_snapshot_typed_event = function
-  | Event_bus_correlated | Context_compacted -> Compaction_snapshot_relevant
+  | Event_bus_correlated
+  | Context_compacted
+  | Context_injected
+  | Checkpoint_loaded ->
+    Compaction_snapshot_relevant
   | Turn_started
   | Phase_gate_decided
   | Runtime_routed
@@ -159,8 +163,6 @@ let classify_compaction_snapshot_typed_event = function
   | Provider_lane_resolved
   | Provider_attempt_started
   | Provider_attempt_finished
-  | Context_injected
-  | Checkpoint_loaded
   | Checkpoint_saved
   | Receipt_appended
   | Turn_finished ->

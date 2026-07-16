@@ -159,5 +159,6 @@ bearer-token auth module layout.
 - #22178 (token hash collision): its net branch tree no longer carries the `lib/`
   token copy, so it does not re-introduce the dual-copy; it is unblocked by this RFC,
   not gated by it.
-- The remaining `lib/auth.ml` / `lib/auth_credential_base.ml` drift is the live debt
-  this RFC closes.
+- `lib/auth.ml` is now a thin facade over the `lib/auth/` leaf, and the retired
+  root `lib/auth_credential_base.ml` implementation has been removed. The leaf
+  is the sole authentication implementation.

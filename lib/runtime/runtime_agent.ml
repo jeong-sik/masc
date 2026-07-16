@@ -62,19 +62,6 @@ let transport_error_kind_of_exception = function
 type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed
-  | TurnLimitObserved of { turns_used : int; limit : int }
-  | ExecutionTimeoutObserved of {
-      elapsed_sec : float;
-      timeout_sec : float;
-      turn_count : int;
-      max_turns : int;
-    }
-  | ExecutionIdleTimeoutObserved of {
-      idle_sec : float;
-      idle_timeout_sec : float;
-      turn_count : int;
-      max_turns : int;
-    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
@@ -904,9 +891,6 @@ let run_duration_ms_since started_at =
 
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_oas_bridge.Success
-  | TurnLimitObserved _
-  | ExecutionTimeoutObserved _
-  | ExecutionIdleTimeoutObserved _ -> Dashboard_oas_bridge.Success
   | Yielded_to_chat_waiting _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->

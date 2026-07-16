@@ -119,8 +119,6 @@ type t =
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures
-  | PromptUnknownToolTokens
-  | PromptTokenStripped
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
@@ -343,10 +341,6 @@ let to_string = function
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotReadFailures -> "masc_keeper_snapshot_read_failures_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
-  | PromptUnknownToolTokens ->
-    "masc_keeper_prompt_unknown_tool_tokens_total"
-  | PromptTokenStripped ->
-    "masc_keeper_prompt_token_stripped_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
   | TurnMetricsSnapshotFailures -> "masc_keeper_turn_metrics_snapshot_failures_total"

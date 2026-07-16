@@ -143,7 +143,6 @@ let create_keeper env sw state name =
         (`Assoc
           [
             ("name", `String name);
-            ("goal", `String "Dashboard keeper fixture");
             ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
           ])

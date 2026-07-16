@@ -17,6 +17,7 @@
   common
   validation
   circuit_breaker
+  cross_context_mutex
   eio_guard
   executor_pool_ref
   domain_pool

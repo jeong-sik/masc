@@ -34,7 +34,6 @@ val run_first_judges
   -> question:string
   -> clock:clock
   -> judge_web_tools:bool
-  -> judge_max_tool_calls:int
   -> Fusion_policy.judge_spec list
   -> judge_run list
 
@@ -76,6 +75,5 @@ val run_fallback_judge
   -> question:string
   -> clock:clock
   -> judge_web_tools:bool
-  -> judge_max_tool_calls:int
   -> unit
   -> judge_run option

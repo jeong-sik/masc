@@ -8,6 +8,7 @@
 open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
+module KTE = Masc.Keeper_tool_execution
 module Workspace = Masc.Workspace
 module AR = Masc.Task.Anti_rationalization
 module Publication_availability =
@@ -111,8 +112,9 @@ let with_ws name fn =
                  ~ctx_work:(make_ctx ()))))
 
 let outcome_label = function
-  | `Success -> "success"
-  | `Failure _ -> "failure"
+  | Tool_result.Completed () -> "success"
+  | Tool_result.Deferred () -> "deferred"
+  | Tool_result.Failed _ -> "failure"
 
 let parse_json raw =
   try Yojson.Safe.from_string raw with
@@ -226,8 +228,9 @@ let test_completion_denied_for_non_owner () =
         ~result:"I finished another agent's task on their behalf"
         ()
     in
-    check string "non-owner completion outcome" "failure" (outcome_label result.KET.outcome);
-    let json = parse_json result.KET.raw_output in
+    check string "non-owner completion outcome" "failure"
+      (outcome_label result.KTE.disposition);
+    let json = parse_json result.KTE.raw_output in
     check bool "rejection is ok=false" false Yojson.Safe.Util.(member "ok" json |> to_bool);
     check string "ownership reject is a deterministic workflow rejection" "workflow_rejection"
       Yojson.Safe.Util.(member "failure_class" json |> to_string);
@@ -255,8 +258,9 @@ let test_completion_denied_when_unclaimed () =
         ~result:"pretending an unclaimed backlog item is finished"
         ()
     in
-    check string "unclaimed completion outcome" "failure" (outcome_label result.KET.outcome);
-    let json = parse_json result.KET.raw_output in
+    check string "unclaimed completion outcome" "failure"
+      (outcome_label result.KTE.disposition);
+    let json = parse_json result.KTE.raw_output in
     check string "unclaimed reject is a workflow rejection" "workflow_rejection"
       Yojson.Safe.Util.(member "failure_class" json |> to_string);
     check string "unclaimed reject rule_id" "task_done_requires_claimed_or_started"
@@ -283,7 +287,8 @@ let test_short_notes_without_evidence_follow_llm_approval () =
       claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
         ~task_id:"task-001"
     in
-    check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
+    check string "self-claim succeeds" "success"
+      (outcome_label claim.KTE.disposition);
     let result =
       attempt_done
         ~config
@@ -296,7 +301,7 @@ let test_short_notes_without_evidence_follow_llm_approval () =
         ()
     in
     check string "LLM approval controls outcome" "success"
-      (outcome_label result.KET.outcome);
+      (outcome_label result.KTE.disposition);
     match
       List.find_opt
         (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
@@ -322,7 +327,8 @@ let test_completion_with_evidence_refs_succeeds () =
       claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
         ~task_id:"task-001"
     in
-    check string "self-claim precondition succeeds" "success" (outcome_label claim.KET.outcome);
+    check string "self-claim precondition succeeds" "success"
+      (outcome_label claim.KTE.disposition);
     seed_trace_evidence ~config "completion-trust-harness";
     let result =
       attempt_done
@@ -335,7 +341,8 @@ let test_completion_with_evidence_refs_succeeds () =
         ~evidence_refs:[ "trace:completion-trust-harness" ]
         ()
     in
-    check string "completion outcome" "success" (outcome_label result.KET.outcome);
+    check string "completion outcome" "success"
+      (outcome_label result.KTE.disposition);
     match
       List.find_opt
         (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
@@ -367,7 +374,8 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
       claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
         ~task_id:"task-001"
     in
-    check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
+    check string "self-claim succeeds" "success"
+      (outcome_label claim.KTE.disposition);
     reviewer_response := Reviewer_verdict (AR.Reject "deliverable is not complete");
     let rejected =
       attempt_done
@@ -381,9 +389,9 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
         ()
     in
     check string "LLM reject controls outcome" "failure"
-      (outcome_label rejected.KET.outcome);
+      (outcome_label rejected.KTE.disposition);
     check bool "LLM reason is returned" true
-      (contains_substring rejected.KET.raw_output "deliverable is not complete");
+      (contains_substring rejected.KTE.raw_output "deliverable is not complete");
     (match assignee_of config "task-001" with
      | Some assignee ->
        check string "task remains active for the same keeper"
@@ -402,7 +410,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
         ()
     in
     check string "later LLM approval completes" "success"
-      (outcome_label approved.KET.outcome);
+      (outcome_label approved.KTE.disposition);
     match
       List.find_opt
         (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
@@ -426,7 +434,8 @@ let test_unavailable_evaluator_keeps_task_active () =
       claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
         ~task_id:"task-001"
     in
-    check string "self-claim succeeds" "success" (outcome_label claim.KET.outcome);
+    check string "self-claim succeeds" "success"
+      (outcome_label claim.KTE.disposition);
     reviewer_response := Reviewer_unavailable;
     let result =
       attempt_done
@@ -440,9 +449,9 @@ let test_unavailable_evaluator_keeps_task_active () =
         ()
     in
     check string "unavailable evaluator rejects" "failure"
-      (outcome_label result.KET.outcome);
+      (outcome_label result.KTE.disposition);
     check bool "typed evaluator failure is visible" true
-      (contains_substring result.KET.raw_output "evaluator unavailable");
+      (contains_substring result.KTE.raw_output "evaluator unavailable");
     match assignee_of config "task-001" with
     | Some assignee ->
       check string "only task remains active" meta.agent_name assignee
@@ -462,7 +471,8 @@ let test_legitimate_claim_succeeds () =
       claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
         ~task_id:"task-001"
     in
-    check string "legitimate claim outcome" "success" (outcome_label result.KET.outcome);
+    check string "legitimate claim outcome" "success"
+      (outcome_label result.KTE.disposition);
     match assignee_of config "task-001" with
     | Some assignee -> check string "claimed task is owned by the caller" meta.agent_name assignee
     | None -> fail "task-001 must be Claimed/InProgress after a legitimate claim")

@@ -83,8 +83,8 @@ let format_current_task (task : Masc_domain.task) : string =
    | Some _ | None -> ());
   Buffer.add_string buf
     "- Continue this task this turn. If you cannot progress it, state the \
-     blocker and release it with a handoff summary (masc_transition release) \
-     so another keeper can take over.\n\n";
+     blocker and use the visible task-lifecycle capability to release it with \
+     a handoff summary so another keeper can take over.\n\n";
   Buffer.contents buf
 
 (** Format one connected-surface presence line (RFC-0223 P2).
@@ -176,12 +176,12 @@ let board_event_note = function
     board_reaction_note reaction
   | Keeper_world_observation.External_attention ->
     (* RFC-0320 W3(a): steer a woken keeper to answer back into the connector
-       conversation this attention came from (via keeper_surface_post), instead
+       conversation this attention came from, instead
        of only proceeding on its own state. The routing target is deterministic
        — it is the conversation surface already on this observation; the LLM
        decides only what to say. *)
-    " [continuation: someone is waiting in this conversation — reply to them \
-     with keeper_surface_post, do not only proceed on your own state]"
+    " [continuation: someone is waiting in this conversation — reply through \
+     the visible connected-surface capability, do not only proceed on your own state]"
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
@@ -288,7 +288,8 @@ let format_scheduled_automation_summary
            Buffer.add_char ubuf '\n')
         summary.items;
       Buffer.add_string ubuf
-        "- Use masc_schedule_get for details; a due Schedule wakes the Keeper lane and grants no effect authority.\n");
+        "- Use the visible schedule inspection capability for details; a due \
+         Schedule wakes the Keeper lane and grants no effect authority.\n");
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
 ;;
@@ -304,8 +305,8 @@ let render_board_observations
   "Rows below are Board context. author, post_kind, and mention fields are \
    source/routing metadata, not a local authority ranking. Judge relevance and \
    response from the content and current Keeper/Goal/Task context; external \
-   effects cross the Gate. Use post_id with keeper_board_post_get when the \
-   preview is insufficient.\n"
+   effects cross the Gate. Use the listed post_id with the visible board-detail \
+   capability when the preview is insufficient.\n"
   ^ (events |> List.map format_board_event_text |> String.concat "\n")
 ;;
 
@@ -313,8 +314,7 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
-(* In-binary mirror of config/prompts/keeper.turn_intent.md (minus the
-   {{...}} substitution slots that cannot be filled during a fallback).
+(* In-binary mirror of config/prompts/keeper.turn_intent.md.
    Used only when [resolve_turn_intent_block] fails or the registry
    template renders empty.  The previous minimal stub silently weakened
    keeper behavior exactly when prompt config was degraded — multi-tool
@@ -362,7 +362,7 @@ let fallback_turn_intent_block reason =
   observe_turn_intent_render_failure reason;
   turn_intent_fallback_block
 
-let resolve_turn_intent_block substitutions =
+let resolve_turn_intent_block () =
   let observe_outcome label =
     Otel_metric_store.inc_counter
       (Keeper_metrics.to_string PromptTemplateRenderOutcome)
@@ -371,7 +371,7 @@ let resolve_turn_intent_block substitutions =
   in
   match
     Prompt_registry.render_prompt_template Keeper_prompt_names.turn_intent
-      substitutions
+      []
   with
   | Ok value ->
       let rendered = String.trim value in
@@ -481,8 +481,8 @@ let autonomous_trigger_lines
         if has_hitl_resolution then
           [ "- Continuation: an approval you were waiting on was just resolved. \
              If you requested it inside a conversation (dashboard / Discord / \
-             Slack), reply back into that conversation with keeper_surface_post \
-             instead of only proceeding on your own state." ]
+             Slack), reply back into that conversation through the visible \
+             connected-surface capability instead of only proceeding on your own state." ]
         else []
       in
       ("- Scheduler: reactive turn (external stimulus)."
@@ -575,8 +575,10 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
         (if not has_valid_primary_goal then
            "\n\
             You have no active goal. Pick ONE action this turn to self-assign a purpose:\n\
-            - Scan the backlog with keeper_tasks_list and claim a matching task.\n\
-            - Read the board with keeper_board_list and join an active discussion.\n\
+            - Inspect the typed backlog and claim a matching task when a task \
+              capability is visible.\n\
+            - Inspect workspace discussion and join an active thread when that \
+              capability is visible.\n\
             - Post your intended focus to the board so other keepers can align.\n\
             Do not ask the operator what repo, goal, or task to create unless \
             the operator explicitly requested new repo, goal, or task creation.\n\
@@ -587,8 +589,8 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
            "\n\
             On a turn with no new external signal, advance one of your active \
             goals:\n\
-            - Break the goal into one concrete claimable task \
-            (keeper_task_create), or claim a matching backlog task.\n\
+            - Break the goal into one concrete claimable task, or claim a \
+              matching backlog task, through the visible task capability.\n\
             - Post a short progress or plan update to the board so the fleet \
             can align.\n\
             - If the goal is blocked, state the blocker and what would unblock \
@@ -609,78 +611,12 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     | Ok value -> value
     | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.unified_system
   in
-  let allowed_tool_names = Keeper_tool_policy.keeper_model_tool_names () in
-  let tool_allowed name = List.mem name allowed_tool_names in
-  let claim_tool_available = tool_allowed "keeper_task_claim" in
   let show_claim_guidance =
     observation.claimable_task_count > 0
-    && claim_tool_available
     && not meta.paused
     && Option.is_none meta.current_task_id
   in
-  let show_task_create_guidance =
-    observation.active_goals <> []
-    && observation.claimable_task_count = 0
-    && tool_allowed "keeper_task_create"
-    && not meta.paused
-    && Option.is_none meta.current_task_id
-  in
-  (* Turn intent body and each conditional guidance bullet live as markdown
-     under config/prompts/. The OCaml side only computes the boolean toggle
-     for each bullet and loads the prose via Prompt_registry; the prose
-     itself (and any future edits) stay in the markdown files alongside the
-     other keeper prompts. See lib/keeper_prompt_names/keeper_prompt_names.ml for
-     the key set. *)
-  let board_activity_guidance =
-    load_externalized_bullet
-      ~enabled:(tool_allowed "keeper_board_post_get"
-                && tool_allowed "keeper_board_comment")
-      Keeper_prompt_names.turn_intent_board_activity_guidance
-  in
-  let board_post_guidance =
-    load_externalized_bullet
-      ~enabled:(tool_allowed "keeper_board_post")
-      Keeper_prompt_names.turn_intent_board_post_guidance
-  in
-  let board_curation_guidance =
-    load_externalized_bullet
-      ~enabled:(tool_allowed "keeper_board_curation_submit")
-      Keeper_prompt_names.turn_intent_board_curation_guidance
-  in
-  let broadcast_guidance =
-    load_externalized_bullet
-      ~enabled:(tool_allowed "keeper_broadcast")
-      Keeper_prompt_names.turn_intent_broadcast_guidance
-  in
-  let task_create_guidance =
-    load_externalized_bullet
-      ~enabled:show_task_create_guidance
-      Keeper_prompt_names.turn_intent_task_create_guidance
-  in
-  let claim_guidance_a =
-    load_externalized_bullet
-      ~enabled:show_claim_guidance
-      Keeper_prompt_names.turn_intent_claim_guidance_a
-  in
-  let claim_guidance_b =
-    load_externalized_bullet
-      ~enabled:show_claim_guidance
-      Keeper_prompt_names.turn_intent_claim_guidance_b
-  in
-  let turn_intent_substitutions =
-    [
-      ("board_activity_guidance", board_activity_guidance);
-      ("claim_guidance_a", claim_guidance_a);
-      ("claim_guidance_b", claim_guidance_b);
-      ("task_create_guidance", task_create_guidance);
-      ("board_post_guidance", board_post_guidance);
-      ("board_curation_guidance", board_curation_guidance);
-      ("broadcast_guidance", broadcast_guidance);
-    ]
-  in
-  let turn_intent_block =
-    resolve_turn_intent_block turn_intent_substitutions
-  in
+  let turn_intent_block = resolve_turn_intent_block () in
   let system_prompt =
     Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block
   in
@@ -866,28 +802,10 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let user_message =
     "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
-  (* The registry is the sole tool-token SSOT for instruction-owned prompt
-     surfaces. The deleted hardcoded sanitizer removed valid prose such as
-     "Grep"/"Bash". The structured world-state user message is different: its
-     board/task/connector values are observations, not tool instructions, so a
-     [keeper_*]/[masc_*] substring there must remain byte-for-byte intact. *)
-  (* P0-3: rendered prompt token integrity ratchet. Scan the prompt surfaces
-     *before* the registry-driven strip so stale tokens that are about to be
-     replaced still increment [PromptUnknownToolTokens] and are logged. The
-     strip pass additionally emits [PromptTokenStripped] per removed token, but
-     running the ratchet first preserves the producer-side alarm signal that
-     would otherwise be silently dropped after removal. *)
-  let (_ : string list) =
-    Keeper_prompt_token_integrity.scan_instruction_surfaces
-      ~keeper_name:meta.name
-      ~system_prompt
-  in
-  let sanitized_system =
-    system_prompt
-    |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
-         ~keeper_name:meta.name
-  in
-  let sanitized_user = user_message in
+  (* Tool names and availability come exclusively from the typed schemas sent
+     with this turn. Prompt markdown describes behaviour rather than attempting
+     to mirror that catalog. World-state observations remain byte-for-byte
+     intact; unknown calls are rejected explicitly by typed dispatch. *)
   (* set_gauge only: a stray inc_counter here used to create this
      (name, labels) cell as Counter first, so the system_prompt series
      kept Counter kind, carried a non-monotonic byte length, and exported
@@ -897,17 +815,17 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   Otel_metric_store.set_gauge
     (Keeper_metrics.to_string PromptSegmentBytes)
     ~labels:[("keeper", meta.name); ("segment", "system_prompt")]
-    (Float.of_int (String.length sanitized_system));
+    (Float.of_int (String.length system_prompt));
   Otel_metric_store.set_gauge
     (Keeper_metrics.to_string PromptSegmentBytes)
     ~labels:[("keeper", meta.name); ("segment", "user_message")]
-    (Float.of_int (String.length sanitized_user));
+    (Float.of_int (String.length user_message));
   (* Instruction hash: emit a stable numeric fingerprint of the full prompt
      composition (system + user) so Grafana can detect when the instruction
      changes between turns without storing the prompt content itself.
      Uses first 8 hex chars of SHA-256 as an integer (32-bit). *)
   let prompt_hash =
-    let combined = sanitized_system ^ sanitized_user in
+    let combined = system_prompt ^ user_message in
     let hex =
       Digestif.SHA256.(to_hex (digest_string combined))
     in
@@ -917,4 +835,4 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (Keeper_metrics.to_string KeeperTurnInstructionHash)
     ~labels:[("keeper", meta.name)]
     prompt_hash;
-  ( sanitized_system, sanitized_user )
+  system_prompt, user_message

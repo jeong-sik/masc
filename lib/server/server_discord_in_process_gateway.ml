@@ -717,6 +717,17 @@ let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
       ~message_id ~author_id ~author_name ~content ()
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
+let submit_ingress ingress ~lane ~event_id run =
+  match Connector_ingress_lane.submit ingress ~lane ~event_id run with
+  | Ok () -> ()
+  | Error error ->
+    Log.Server.error
+      "Discord ingress submission rejected lane=%s event=%s: %s"
+      (Connector_ingress_lane.lane_to_string lane)
+      (Connector_ingress_lane.event_id_to_string event_id)
+      (Connector_ingress_lane.submit_error_to_string error)
+;;
+
 let submit_triggered_event ingress ~dispatch ~clock ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
@@ -727,7 +738,7 @@ let submit_triggered_event ingress ~dispatch ~clock ~base_dir
      with
      | None -> on_event ~dispatch ~clock ~base_dir ev
      | Some ((resolution, _) as resolved_binding) ->
-       Connector_ingress_lane.submit
+       submit_ingress
          ingress
          ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
          ~event_id:{ source = "discord_triggered"; opaque_id = message_id }
@@ -752,7 +763,7 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
     (match State.keeper_for_channel ~channel_id with
      | None -> on_ambient ~base_dir ev
      | Some keeper_name ->
-       Connector_ingress_lane.submit
+       submit_ingress
          ingress
          ~lane:(Connector_ingress_lane.Keeper_lane keeper_name)
          ~event_id:{ source = "discord_ambient"; opaque_id = message_id }
@@ -785,7 +796,7 @@ let start ~sw ~env ~clock ~state =
             "Discord ingress callback failed lane=%s event=%s: %s"
             (Connector_ingress_lane.lane_to_string failure.lane)
             (Connector_ingress_lane.event_id_to_string failure.event_id)
-            failure.reason)
+            (Connector_ingress_lane.failure_reason_to_string failure.reason))
         ()
     in
     let dispatch_for_config config =

@@ -28,6 +28,16 @@ let ensure_json_response body =
   else Ok body
 ;;
 
+let response_of_curl_process_result = function
+  | Unix.WEXITED 0, output -> ensure_json_response output
+  | Unix.WEXITED code, output ->
+    Error (Printf.sprintf "curl exited %d: %s" code output)
+  | Unix.WSIGNALED code, output ->
+    Error (Printf.sprintf "curl signaled %d: %s" code output)
+  | Unix.WSTOPPED code, output ->
+    Error (Printf.sprintf "curl stopped %d: %s" code output)
+;;
+
 (** Write auth header to temp file (keeps token out of argv).  *)
 let with_auth_header_file key f =
   if key = ""
@@ -83,34 +93,30 @@ let request_curl ~timeout_sec body =
         if Process_eio.is_initialized ()
         then (
           try
-            let output =
-              Masc_exec.Exec_gate.run_argv
-                ~actor:(Masc_exec.Agent_id.of_string "system/graphql_client_eio")
-                ~raw_source:(String.concat " " (List.map Filename.quote argv))
-                ~summary:"graphql curl fallback"
-                ~timeout_sec
-                argv
-            in
-            ensure_json_response output
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
-        else (
-          (* Unix fallback when Eio loop not started *)
-          try
-            match
+            let process_result =
               Masc_exec.Exec_gate.run_argv_with_status
                 ~actor:(Masc_exec.Agent_id.of_string "system/graphql_client_eio")
                 ~raw_source:(String.concat " " (List.map Filename.quote argv))
                 ~summary:"graphql curl fallback"
                 ~timeout_sec
                 argv
-            with
-            | Unix.WEXITED 0, output -> ensure_json_response output
-            | Unix.WEXITED code, output ->
-              Error (Printf.sprintf "curl exited %d: %s" code output)
-            | Unix.WSIGNALED code, _ -> Error (Printf.sprintf "curl signaled: %d" code)
-            | Unix.WSTOPPED code, _ -> Error (Printf.sprintf "curl stopped: %d" code)
+            in
+            response_of_curl_process_result process_result
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
+        else (
+          (* Unix fallback when Eio loop not started *)
+          try
+            let process_result =
+              Masc_exec.Exec_gate.run_argv_with_status
+                ~actor:(Masc_exec.Agent_id.of_string "system/graphql_client_eio")
+                ~raw_source:(String.concat " " (List.map Filename.quote argv))
+                ~summary:"graphql curl fallback"
+                ~timeout_sec
+                argv
+            in
+            response_of_curl_process_result process_result
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn -> Error (Printexc.to_string exn))))
@@ -195,6 +201,7 @@ let request ?(timeout_sec = 10.0) ?(fallback = true) body : (string, string) res
 
 module For_testing = struct
   let is_transport_error = is_transport_error
+  let response_of_curl_process_result = response_of_curl_process_result
 end
 
 (** {1 GraphQL Response Parsing} *)

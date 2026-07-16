@@ -112,8 +112,9 @@ let execute_tool_eio
   let with_non_public_tool_audit ~agent_name (result : Tool_result.result) =
     if is_non_public_tool
     then (
+      let success = not (Tool_result.is_failed result) in
       let error_msg =
-        if Tool_result.is_success result then None else Some (preview (Tool_result.message result))
+        if success then None else Some (preview (Tool_result.message result))
       in
       let details =
         `Assoc
@@ -128,7 +129,7 @@ let execute_tool_eio
         config
         ~agent_id:agent_name
         ~tool_name:name
-        ~success:(Tool_result.is_success result)
+        ~success
         ~error_msg
         ~details
         ?trace_id:(Otel_spans.current_trace_id ())

@@ -16,10 +16,6 @@ let check_no_binding ~file ~name =
 
 let test_masc_delegates_canonical_oas_projections () =
   check_calls
-    ~file:"lib/context_compact_oas.ml"
-    ~callee:"Agent_sdk.Types.role_to_string"
-    ~expected:1;
-  check_calls
     ~file:"lib/keeper/keeper_context_core_message_json.ml"
     ~callee:"Agent_sdk.Types.role_to_string"
     ~expected:1;

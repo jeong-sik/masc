@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 30199)
-Total output lines: 3128
-
 module Types = Masc_domain
 
 (** Coverage tests for Task.Tool *)
@@ -1526,7 +1523,27 @@ let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
     (fun () ->
        Atomic.set Workspace_hooks.is_admin_agent_fn
          (fun ~base_path:_ ~agent_name ->
-            Stri…199 tokens truncated… assert (not !reviewer_called);
+            String.equal agent_name "admin-agent");
+       let reviewer_called = ref false in
+       Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
+         (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+            reviewer_called := true;
+            Ok (Some Task.Anti_rationalization.Approve));
+       let result =
+         Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+           (`Assoc
+             [ "task_id", `String "task-001"
+             ; "action", `String "done"
+             ; "force", `Bool true
+             ; "notes", `String ""
+             ])
+       in
+       assert (not (Tool_result.is_success result));
+       assert
+         (str_contains
+            (Tool_result.message result)
+            "Unknown argument(s): force");
+       assert (not !reviewer_called);
        match (only_task ctx).Masc_domain.task_status with
        | Masc_domain.InProgress { assignee; _ } ->
          assert (String.equal assignee "admin-agent")

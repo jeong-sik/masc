@@ -1891,7 +1891,14 @@
 
 (include stanzas/test_keeper_personality_round_trip.inc)
 
-(include stanzas/test_keeper_post_turn_wirein_order.inc)
+; WORKAROUND(unbreak-main): test_keeper_post_turn_wirein_order is stale against
+; restructured Keeper APIs already on main — Keeper_event_queue/Keeper_id moved out
+; of the `masc` wrapper library, and Tool_result.result was replaced by disposition.
+; The test no longer compiles, breaking `dune build .`. Excluded here to restore a
+; buildable main. Root fix / removal target: #24607 (isolate manual compaction
+; transaction) owns the full rewrite of this test to the new shape; re-enable this
+; include when #24607 lands.
+; (include stanzas/test_keeper_post_turn_wirein_order.inc)
 
 (include stanzas/test_keeper_receipt_authoritative.inc)
 

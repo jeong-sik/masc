@@ -38,6 +38,7 @@ type wake_producer =
   | Keeper_turn_failure_route
   | Keeper_goal_assignment
   | Read_model_reader
+  | Keeper_manual_compaction
 
 type waiting_row =
   { keeper_name : string option
@@ -115,6 +116,7 @@ let wake_producer_to_string = function
   | Keeper_turn_failure_route -> "keeper_turn_failure_route"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
   | Read_model_reader -> "read_model_reader"
+  | Keeper_manual_compaction -> "keeper_manual_compaction"
 ;;
 
 let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_producer =
@@ -129,6 +131,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Hitl_resolved _ -> Hitl_resolution_hook
   | Failure_judgment _ -> Keeper_turn_failure_route
   | Goal_assigned _ -> Keeper_goal_assignment
+  | Manual_compaction_requested -> Keeper_manual_compaction
 ;;
 
 let unix_iso_json = function

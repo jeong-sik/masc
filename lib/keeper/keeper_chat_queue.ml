@@ -1270,8 +1270,11 @@ let sqlite_finalize db stmt =
      use-after-free, observed as SIGSEGV `checkMutexEnter <-
      sqlite3_finalize <- stmt_wrap_finalize_gc` in the 2026-07-15 23:32
      and 2026-07-17 01:31 crash reports. Keeping [stmt] reachable past
-     the call closes the window; the true fix (null the pointer before
-     releasing the runtime) belongs upstream in the binding. *)
+     the call closes the window — [Sys.opaque_identity] is documented to
+     "prevent the argument from being garbage collected until the
+     location where the call would have occurred" (sys.mli). The true
+     fix (null the pointer before releasing the runtime) belongs
+     upstream in the binding. *)
   ignore (Sys.opaque_identity stmt) (* See GC-liveness pin note above. *);
   result
 

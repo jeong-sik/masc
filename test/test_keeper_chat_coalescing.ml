@@ -880,15 +880,19 @@ let test_finalize_statement_total () =
 let test_finalize_statement_gc_pressure () =
   Printf.printf
     "Test: finalize keeps the statement wrap pinned across its blocking window\n%!";
-  (* Regression smoke for the stmt_wrap_finalize_gc use-after-free
-     (SIGSEGV `checkMutexEnter <- sqlite3_finalize <- stmt_wrap_finalize_gc`,
-     2026-07-15 / 2026-07-17 crash reports): finalize each statement as its
-     last use while forcing allocation churn and minor collections, so the
-     finalize blocking window overlaps GC activity. Without the
-     Sys.opaque_identity pin in [sqlite_finalize] the wrap can be collected
-     mid-window and double-finalized by the GC finalizer; a regression
-     surfaces as a crash of this executable rather than a check failure
-     (GC timing races admit no deterministic assertion). *)
+  (* Exercises the pinned [sqlite_finalize] path under allocation churn:
+     2,000 prepare/finalize cycles stay functionally correct while the
+     minor heap turns over. Honest scope note: this loop is single-threaded
+     and [Gc.minor] runs only after each finalize returns, so it does NOT
+     construct the cross-thread race the pin closes (the
+     stmt_wrap_finalize_gc use-after-free needs another thread to drive a
+     collection during the finalize blocking window — SIGSEGV
+     `checkMutexEnter <- sqlite3_finalize <- stmt_wrap_finalize_gc`,
+     2026-07-15 / 2026-07-17 crash reports). The pin's guarantee rests on
+     the documented [Sys.opaque_identity] semantics ("prevent the argument
+     from being garbage collected until the location where the call would
+     have occurred", sys.mli), which no in-process test can deterministically
+     falsify; this test guards the code path's functional behavior only. *)
   let db = Sqlite3.db_open ":memory:" in
   let churn = ref [] in
   for i = 1 to 2_000 do

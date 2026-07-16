@@ -880,29 +880,30 @@ type scheduled_work =
   ; candidate : candidate
   }
 
-let max_scheduled_workspace_queue = 1
-let scheduled_work = Eio.Stream.create max_scheduled_workspace_queue
+let max_scheduled_keeper_queue = 1
+let scheduled_work = Eio.Stream.create max_scheduled_keeper_queue
 let worker_running = Atomic.make false
-let active_workspaces = Atomic.make Active_set.empty
+let active_keepers = Atomic.make Active_set.empty
 
-let active_key ~base_path = base_path
+let active_key ~base_path ~keeper_name =
+  Keeper_registry_types.registry_key ~base_path keeper_name
 ;;
 
 let rec claim_active key =
-  let current = Atomic.get active_workspaces in
+  let current = Atomic.get active_keepers in
   if Active_set.mem key current
   then false
-  else if Atomic.compare_and_set active_workspaces current (Active_set.add key current)
+  else if Atomic.compare_and_set active_keepers current (Active_set.add key current)
   then true
   else claim_active key
 ;;
 
 let rec release_active key =
-  let current = Atomic.get active_workspaces in
+  let current = Atomic.get active_keepers in
   if not (Active_set.mem key current)
   then ()
   else if
-    Atomic.compare_and_set active_workspaces current (Active_set.remove key current)
+    Atomic.compare_and_set active_keepers current (Active_set.remove key current)
   then ()
   else release_active key
 ;;
@@ -928,25 +929,36 @@ let observe_worker_failure ~base_path candidate kind detail =
       storage_detail
 ;;
 
+let run_in_keeper_lane ~base_path ~keeper_name f =
+  match Keeper_turn_admission.run_if_free ~base_path ~keeper_name f with
+  | `Ran value -> `Ran value
+  | `Busy _ -> `Busy
+;;
+
 let process_scheduled_work ~sw ~net { base_path; candidate } =
-  let key = active_key ~base_path in
+  let key = active_key ~base_path ~keeper_name:candidate.keeper_name in
   Fun.protect
     ~finally:(fun () -> release_active key)
     (fun () ->
        try
-         match
+         match run_in_keeper_lane ~base_path ~keeper_name:candidate.keeper_name (fun () ->
            process_with_judge
              ~base_path
              ~judge:(run_judge ~sw ~net ~base_path)
-             candidate
+             candidate)
          with
-         | Ok _ -> ()
-         | Error detail ->
+         | `Ran (Ok _) -> ()
+         | `Ran (Error detail) ->
            observe_worker_failure
              ~base_path
              candidate
              Worker_unavailable
              detail
+         | `Busy ->
+           Log.Keeper.debug
+             "Board attention judgment deferred to busy Keeper lane keeper=%s candidate=%s"
+             candidate.keeper_name
+             candidate.candidate_id
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
@@ -961,12 +973,29 @@ let run_worker ~sw ~net () =
   if not (Atomic.compare_and_set worker_running false true)
   then Log.Keeper.warn "Board attention worker already running"
   else (
-    Log.Keeper.info "Board attention worker started (global concurrency=1)";
+    Log.Keeper.info "Board attention dispatcher started (lane per Keeper)";
     Fun.protect
       ~finally:(fun () -> Atomic.set worker_running false)
       (fun () ->
          while true do
-           Eio.Stream.take scheduled_work |> process_scheduled_work ~sw ~net
+           let work = Eio.Stream.take scheduled_work in
+           (try Eio.Fiber.fork ~sw (fun () -> process_scheduled_work ~sw ~net work) with
+            | Eio.Cancel.Cancelled _ as exn ->
+              release_active
+                (active_key
+                   ~base_path:work.base_path
+                   ~keeper_name:work.candidate.keeper_name);
+              raise exn
+            | exn ->
+              release_active
+                (active_key
+                   ~base_path:work.base_path
+                   ~keeper_name:work.candidate.keeper_name);
+              observe_worker_failure
+                ~base_path:work.base_path
+                work.candidate
+                Worker_unavailable
+                (Printexc.to_string exn))
          done))
 ;;
 
@@ -974,7 +1003,7 @@ let schedule ~base_path candidate =
   match candidate.status with
   | Consumed _ -> false
   | Pending _ | Judged _ ->
-    let key = active_key ~base_path in
+    let key = active_key ~base_path ~keeper_name:candidate.keeper_name in
     if not (Atomic.get worker_running)
     then (
       observe_worker_failure
@@ -1024,3 +1053,7 @@ let resume_pending ~base_path ~keeper_name =
   in
   Ok started
 ;;
+
+module For_testing = struct
+  let run_in_keeper_lane = run_in_keeper_lane
+end

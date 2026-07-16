@@ -113,9 +113,10 @@ val process_with_judge :
     judge through {!record_and_start} and {!resume_pending}. *)
 
 val run_worker : sw:Eio.Switch.t -> net:Eio_context.eio_net -> unit -> unit
-(** Run the process-lifetime Board-attention judgment consumer. The caller must
-    pass the Eio capabilities owned by the server domain. Work submission is
-    cross-domain safe and globally serialized. *)
+(** Run the process-lifetime Board-attention dispatcher. The caller must pass
+    the Eio capabilities owned by the server domain. Cross-domain submissions
+    are transferred to server-owned fibers, while judgment execution remains
+    isolated by the candidate's Keeper turn lane. *)
 
 val record_and_start :
   base_path:string -> candidate -> (candidate, string) result
@@ -126,3 +127,11 @@ val resume_pending :
   base_path:string -> keeper_name:string -> (int, string) result
 (** Asynchronously retries every non-consumed candidate in this Keeper lane.
     The returned count is observability only and never limits retries. *)
+
+module For_testing : sig
+  val run_in_keeper_lane :
+    base_path:string ->
+    keeper_name:string ->
+    (unit -> 'a) ->
+    [ `Ran of 'a | `Busy ]
+end

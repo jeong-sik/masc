@@ -1,4 +1,5 @@
 module A = Masc.Keeper_board_attention_candidate
+module Admission = Masc.Keeper_turn_admission
 module J = Masc.Keeper_board_attention_judgment
 
 let rec remove_tree path =
@@ -196,6 +197,47 @@ let test_record_and_start_retains_pending_when_worker_is_unavailable () =
     Alcotest.fail "worker startup failure did not remain durably Pending"
 ;;
 
+let test_judgment_execution_is_isolated_per_keeper_lane () =
+  with_temp_base "keeper-board-attention-lanes" @@ fun base_path ->
+  Admission.For_testing.reset ();
+  Fun.protect
+    ~finally:(fun () -> Admission.For_testing.reset ())
+    (fun () ->
+       Eio_main.run @@ fun _env ->
+       Eio.Switch.run @@ fun sw ->
+       let entered, signal_entered = Eio.Promise.create () in
+       let release, signal_release = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         match
+           A.For_testing.run_in_keeper_lane
+             ~base_path
+             ~keeper_name:"sangsu"
+             (fun () ->
+                Eio.Promise.resolve signal_entered ();
+                Eio.Promise.await release)
+         with
+         | `Ran () -> ()
+         | `Busy -> Alcotest.fail "first Keeper lane was unexpectedly busy");
+       Eio.Promise.await entered;
+       (match
+          A.For_testing.run_in_keeper_lane
+            ~base_path
+            ~keeper_name:"sangsu"
+            (fun () -> ())
+        with
+        | `Busy -> ()
+        | `Ran () -> Alcotest.fail "same Keeper admitted concurrent judgment");
+       (match
+          A.For_testing.run_in_keeper_lane
+            ~base_path
+            ~keeper_name:"rondo"
+            (fun () -> ())
+        with
+        | `Ran () -> ()
+        | `Busy -> Alcotest.fail "independent Keeper lane was globally blocked");
+       Eio.Promise.resolve signal_release ())
+;;
+
 let test_retryable_judge_failure_remains_pending () =
   with_temp_base "keeper-board-attention-retry" @@ fun base_path ->
   let pending = record_or_fail ~base_path (candidate ()) in
@@ -378,6 +420,10 @@ let () =
             "record_and_start retains Pending without worker"
             `Quick
             test_record_and_start_retains_pending_when_worker_is_unavailable
+        ; Alcotest.test_case
+            "judgment execution is isolated per Keeper lane"
+            `Quick
+            test_judgment_execution_is_isolated_per_keeper_lane
         ; Alcotest.test_case
             "retryable judge failure remains Pending"
             `Quick

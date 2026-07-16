@@ -288,19 +288,19 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tail_turns", `Assoc [
           ("type", `String "integer");
-          ("description", `String "How many recent turns to include from keeper metrics (default: 3).");
+          ("description", `String (Printf.sprintf "How many recent turns to include from keeper metrics (default: %d)." Keeper_status_options_defaults.tail_turns));
         ]);
         ("tail_messages", `Assoc [
           ("type", `String "integer");
-          ("description", `String "How many recent history messages to include (default: 5).");
+          ("description", `String (Printf.sprintf "How many recent history messages to include (default: %d)." Keeper_status_options_defaults.tail_messages));
         ]);
         ("tail_compactions", `Assoc [
           ("type", `String "integer");
-          ("description", `String "How many recent compaction events to include (default: 10).");
+          ("description", `String (Printf.sprintf "How many recent compaction events to include (default: %d)." Keeper_status_options_defaults.tail_compactions));
         ]);
         ("tail_bytes", `Assoc [
           ("type", `String "integer");
-          ("description", `String "How many bytes from the end of files to scan for tails (default: 60000).");
+          ("description", `String (Printf.sprintf "How many bytes from the end of files to scan for tails (default: %d; minimum: %d)." Keeper_status_options_defaults.tail_bytes Keeper_status_options_defaults.min_tail_bytes));
         ]);
         ("tail_order", `Assoc [
           ("type", `String "string");

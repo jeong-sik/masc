@@ -204,6 +204,12 @@ let status_json_with_args config args =
     Alcotest.failf "status failed: %s" (Profile.tool_result_body result);
   Yojson.Safe.from_string (Profile.tool_result_body result)
 
+let status_result_with_args config args =
+  Status_detail.handle_keeper_status_config
+    ~config
+    ~agent_name:"test-agent"
+    args
+
 let resolved_keeper_name config name =
   match
     Keeper_tool_surface_ops.resolve_keeper_name_config
@@ -619,6 +625,23 @@ let test_status_cache_distinguishes_normalized_options () =
     ]
   in
   let context_enabled = status_json_with_args config (`Assoc common_fields) in
+  let default_options = json_assoc_field "status_options" context_enabled in
+  Alcotest.(check (option int))
+    "tail turns runtime default"
+    (Some Masc.Keeper_status_options_defaults.tail_turns)
+    (json_int_field "tail_turns" default_options);
+  Alcotest.(check (option int))
+    "tail messages runtime default"
+    (Some Masc.Keeper_status_options_defaults.tail_messages)
+    (json_int_field "tail_messages" default_options);
+  Alcotest.(check (option int))
+    "tail compactions runtime default"
+    (Some Masc.Keeper_status_options_defaults.tail_compactions)
+    (json_int_field "tail_compactions" default_options);
+  Alcotest.(check (option int))
+    "tail bytes runtime default"
+    (Some Masc.Keeper_status_options_defaults.tail_bytes)
+    (json_int_field "tail_bytes" default_options);
   Alcotest.(check (option bool))
     "derived include_context default is true"
     (Some true)
@@ -669,6 +692,55 @@ let test_status_cache_distinguishes_normalized_options () =
     "tail byte window participates in cache identity"
     (Some 8_000)
     (json_int_field "tail_bytes" second_options)
+
+let test_status_rejects_tail_order_outside_schema () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-tail-order" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"strict tail order";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let result =
+    status_result_with_args config
+      (`Assoc
+        [ "name", `String name
+        ; "fast", `Bool true
+        ; "tail_order", `String "desc"
+        ])
+  in
+  Alcotest.(check bool)
+    "unadvertised alias is rejected"
+    false
+    (Profile.tool_result_success result);
+  Alcotest.(check bool)
+    "error names exact allowed values"
+    true
+    (contains_substring
+       ~needle:"allowed: oldest_first, newest_first"
+       (Profile.tool_result_body result))
+
+let test_status_cache_tracks_persisted_meta_without_updated_at () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-persisted-meta-cache" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"persisted meta cache";
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Status_detail.invalidate_status_cache_all ();
+  let initial = status_json_with ~name config in
+  Alcotest.(check (option bool))
+    "initial status is active"
+    (Some false)
+    (json_assoc_field "meta" initial |> json_bool_field "paused");
+  let paused = { meta with paused = true } in
+  write_file
+    (Profile.keeper_meta_path config name)
+    (Masc.Keeper_meta_json.meta_to_json paused |> Yojson.Safe.to_string);
+  let refreshed = status_json_with ~name config in
+  Alcotest.(check (option bool))
+    "persisted paused change invalidates cache without updated_at change"
+    (Some true)
+    (json_assoc_field "meta" refreshed |> json_bool_field "paused")
 
 let test_status_surfaces_chat_queue_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -889,6 +961,11 @@ let () =
             test_status_cache_tracks_toml_overlay_changes;
           Alcotest.test_case "status cache distinguishes normalized options"
             `Quick test_status_cache_distinguishes_normalized_options;
+          Alcotest.test_case "status rejects tail order outside schema" `Quick
+            test_status_rejects_tail_order_outside_schema;
+          Alcotest.test_case
+            "status cache tracks persisted meta without updated_at" `Quick
+            test_status_cache_tracks_persisted_meta_without_updated_at;
           Alcotest.test_case "status surfaces chat queue runtime" `Quick
             test_status_surfaces_chat_queue_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"

@@ -17,8 +17,9 @@ type tail_order =
   | Newest_first
 
 (** Parse the [tail_order] argument from a tool-call JSON.
-    Defaults to [Oldest_first] for unknown / missing values. *)
-val tail_order_of_args : Yojson.Safe.t -> tail_order
+    Defaults to [Oldest_first] when missing and rejects values outside the
+    public schema enum. *)
+val tail_order_of_args : Yojson.Safe.t -> (tail_order, string) result
 
 val tail_order_to_string : tail_order -> string
 

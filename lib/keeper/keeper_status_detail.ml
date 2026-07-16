@@ -158,11 +158,14 @@ let effective_status_name (ctx : _ context) args =
   effective_status_name_config ~agent_name:ctx.agent_name args
 
 let tail_order_of_args args =
-  match String.lowercase_ascii (String.trim (get_string args "tail_order" "")) with
-  | "newest_first" | "newest" | "latest_first" | "desc" ->
-      Newest_first
-  | _ ->
-      Oldest_first
+  match String.trim (get_string args "tail_order" "") with
+  | "" | "oldest_first" -> Ok Oldest_first
+  | "newest_first" -> Ok Newest_first
+  | value ->
+      Error
+        (Printf.sprintf
+           "invalid tail_order %S (allowed: oldest_first, newest_first)"
+           value)
 
 let tail_order_to_string = function
   | Oldest_first -> "oldest_first"
@@ -179,20 +182,48 @@ let valid_tail_order_strings =
 
 let status_options_of_args args =
   let fast = get_bool args "fast" (keeper_status_fast_default ()) in
-  { tail_turns = max 0 (get_int args "tail_turns" 3)
-  ; tail_messages = max 0 (get_int args "tail_messages" 5)
-  ; tail_compactions = max 0 (get_int args "tail_compactions" 10)
-  ; tail_bytes = max 1_000 (get_int args "tail_bytes" 60_000)
-  ; tail_order = tail_order_of_args args
-  ; fast
-  ; include_context = get_bool args "include_context" (not fast)
-  ; include_metrics_overview =
-      get_bool args "include_metrics_overview" (not fast)
-  ; include_memory_bank = get_bool args "include_memory_bank" (not fast)
-  ; include_history_tail = get_bool args "include_history_tail" (not fast)
-  ; include_compaction_history =
-      get_bool args "include_compaction_history" (not fast)
-  }
+  match tail_order_of_args args with
+  | Error _ as error -> error
+  | Ok tail_order ->
+      Ok
+        { tail_turns =
+            max
+              0
+              (get_int
+                 args
+                 "tail_turns"
+                 Keeper_status_options_defaults.tail_turns)
+        ; tail_messages =
+            max
+              0
+              (get_int
+                 args
+                 "tail_messages"
+                 Keeper_status_options_defaults.tail_messages)
+        ; tail_compactions =
+            max
+              0
+              (get_int
+                 args
+                 "tail_compactions"
+                 Keeper_status_options_defaults.tail_compactions)
+        ; tail_bytes =
+            max
+              Keeper_status_options_defaults.min_tail_bytes
+              (get_int
+                 args
+                 "tail_bytes"
+                 Keeper_status_options_defaults.tail_bytes)
+        ; tail_order
+        ; fast
+        ; include_context = get_bool args "include_context" (not fast)
+        ; include_metrics_overview =
+            get_bool args "include_metrics_overview" (not fast)
+        ; include_memory_bank = get_bool args "include_memory_bank" (not fast)
+        ; include_history_tail = get_bool args "include_history_tail" (not fast)
+        ; include_compaction_history =
+            get_bool args "include_compaction_history" (not fast)
+        }
 
 let apply_tail_order order items =
   match order with
@@ -250,6 +281,8 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
   let opt_int = Option.fold ~none:"" ~some:string_of_int in
   let fields =
     [
+      ( "persisted_meta"
+      , Keeper_meta_json.meta_to_json meta |> Yojson.Safe.to_string );
       ("persona", opt_string meta.persona);
       ("instructions", meta.instructions);
       ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
@@ -259,6 +292,12 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
       ("mention_targets", cache_fingerprint_list meta.mention_targets);
       ( "multimodal_policy",
         multimodal_policy_to_string meta.multimodal_policy );
+      ("compaction_profile", meta.compaction.profile);
+      ("compaction_ratio_gate", string_of_float meta.compaction.ratio_gate);
+      ("compaction_message_gate", string_of_int meta.compaction.message_gate);
+      ("compaction_token_gate", string_of_int meta.compaction.token_gate);
+      ("compaction_cooldown_sec", string_of_int meta.compaction.cooldown_sec);
+      ("max_context_override", opt_int meta.max_context_override);
       ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
       ("proactive_enabled", string_of_bool meta.proactive.enabled);
       ("autoboot_enabled", string_of_bool meta.autoboot_enabled);
@@ -364,9 +403,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
   match resolve_status_target_config ~config ~agent_name args with
   | Error err -> tool_result_error err
   | Ok (name, m) ->
+      (match status_options_of_args args with
+       | Error err -> tool_result_error err
+       | Ok options ->
       let cache_key = status_cache_key ~base_path:config.base_path ~name in
       let chat_queue_observation = observe_chat_queue ~keeper_name:m.name in
-      let options = status_options_of_args args in
       let cache_input =
         { options
         ; effective_meta_overlay_hash = effective_meta_overlay_hash m
@@ -1019,6 +1060,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          Eio_guard.with_mutex cache_mu (fun () ->
            Hashtbl.replace _cache cache_key
              { updated_at = m.updated_at; cache_input; response = json });
-         tool_result_ok_data json)
+         tool_result_ok_data json))
 (* TEL-OK: 1-line delegate to ctx-free body. *)
 let handle_keeper_status (ctx : _ context) args = handle_keeper_status_config ~config:ctx.config ~agent_name:ctx.agent_name args

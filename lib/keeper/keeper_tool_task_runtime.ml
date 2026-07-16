@@ -324,22 +324,20 @@ let task_op_of_name name =
   | None -> None
 ;;
 
+(* Entry VALIDITY is an objective parse fact and stays rejected here; a
+   count floor is not. RFC-0337 (Withdrawn) removed the mandatory
+   evidence floor: "local evidence shape can reject work before the
+   configured judge evaluates the actual Task" is the hierarchy it
+   withdrew. Completion is decided by the configured LLM verdict, so a
+   missing or empty evidence_refs list proceeds to that judgment. *)
 let parse_keeper_task_done_evidence_refs args =
   match args with
   | `Assoc fields ->
     (match List.assoc_opt "evidence_refs" fields with
-     | None ->
-       Error
-         "evidence_refs is required. Include at least one locally validated \
-          base-path artifact, local git commit, or .masc trace/turn/receipt \
-          reference."
+     | None -> Ok []
      | Some (`List refs) ->
        let rec collect acc = function
-         | [] ->
-           let refs = List.rev acc in
-           if refs = []
-           then Error "evidence_refs must contain at least one non-empty string."
-           else Ok refs
+         | [] -> Ok (List.rev acc)
          | `String ref_ :: rest ->
            if Task.Completion_review.blank_evidence_ref ref_
            then Error "evidence_refs must contain only non-empty strings."

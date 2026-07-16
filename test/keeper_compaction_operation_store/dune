@@ -2,6 +2,7 @@
  (name test_keeper_compaction_operation_store)
  (libraries
   alcotest
+  masc_test_deps
   masc.compaction_trigger
   masc.fs_compat
   masc.keeper_checkpoint_ref

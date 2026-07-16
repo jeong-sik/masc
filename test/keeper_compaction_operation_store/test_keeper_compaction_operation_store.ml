@@ -138,6 +138,159 @@ let test_malformed_history_fails_loud () =
     Alcotest.(check string) "malformed bytes unchanged" "not-json\n" (Fs_compat.load_file path)
   | _ -> Alcotest.fail "append accepted malformed history"
 ;;
+let write_meta config name =
+  let meta =
+    ok
+      (Masc_test_deps.meta_of_json_fixture
+         (`Assoc
+           [ "name", `String name
+           ; "agent_name", `String (name ^ "-agent")
+           ; "trace_id", `String (name ^ "-trace")
+           ; "allowed_paths", `List [ `String "*" ]
+           ]))
+  in
+  ok (Masc.Keeper_meta_store.write_meta config meta);
+  meta
+;;
+let save_checkpoint config meta =
+  let session_id =
+    Keeper_id.Trace_id.to_string
+      meta.Masc.Keeper_meta_contract.runtime.trace_id
+  in
+  let session =
+    Masc.Keeper_context_runtime.create_session
+      ~session_id
+      ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+  in
+  let working =
+    Masc.Keeper_context_core.create
+      ~eio:false
+      ~system_prompt:"test"
+      ~max_tokens:1
+  in
+  let context = Masc.Keeper_context_core.oas_context_of_context working in
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "keeper_generation" (`Int meta.runtime.generation);
+  let checkpoint =
+    Masc.Keeper_context_core.checkpoint_of_context working
+    |> fun checkpoint ->
+    { checkpoint with
+      session_id
+    ; agent_name = meta.agent_name
+    ; model = "test"
+    ; turn_count = 1
+    }
+  in
+  ignore
+    (ok
+       (Masc.Keeper_checkpoint_store.save_oas_classified
+          ~session_dir:session.session_dir
+          checkpoint));
+  let snapshot =
+    ok
+      (Masc.Keeper_checkpoint_store.load_oas_exact_snapshot
+         ~session_dir:session.session_dir
+         ~session_id)
+  in
+  session.session_dir, session_id, snapshot
+;;
+let test_manual_request_persists_source_before_journal () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_base @@ fun base ->
+  let config = Masc.Workspace.default_config base in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+  let meta = write_meta config "manual-request" in
+  let keeper = ok (Keeper_id.Keeper_name.of_string meta.name) in
+  let session_dir, session_id, source = save_checkpoint config meta in
+  let source_ref =
+    Masc.Keeper_checkpoint_store.exact_snapshot_reference source
+  in
+  let producer = producer () in
+  let created =
+    ok
+      (Masc.Keeper_compaction_manual_request.request
+         ~config
+         ~keeper_name:keeper
+         ~cause
+         ~producer:(Some producer))
+  in
+  Alcotest.(check bool) "created" true
+    (created.status = Masc.Keeper_compaction_manual_request.Created);
+  Alcotest.(check bool) "exact source" true
+    (Keeper_checkpoint_ref.equal source_ref created.source_checkpoint);
+  let journal =
+    Store.journal_path ~base_path:config.base_path ~keeper_name:keeper
+  in
+  let before_retry = Fs_compat.load_file journal in
+  Unix.unlink
+    (Masc.Keeper_checkpoint_store.oas_checkpoint_path
+       ~session_dir
+       ~session_id);
+  let existing =
+    ok
+      (Masc.Keeper_compaction_manual_request.request
+         ~config
+         ~keeper_name:keeper
+         ~cause
+         ~producer:(Some producer))
+  in
+  Alcotest.(check bool) "existing" true
+    (existing.status = Masc.Keeper_compaction_manual_request.Existing);
+  Alcotest.(check bool) "same operation" true
+    (Operation.Operation_id.equal created.operation_id existing.operation_id);
+  Alcotest.(check string) "retry wrote no bytes" before_retry
+    (Fs_compat.load_file journal)
+;;
+let test_source_failures () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_base @@ fun base ->
+  let config = Masc.Workspace.default_config base in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+  let missing = write_meta config "manual-missing" in
+  let missing_keeper = ok (Keeper_id.Keeper_name.of_string missing.name) in
+  (match
+     Masc.Keeper_compaction_manual_request.request
+       ~config
+       ~keeper_name:missing_keeper
+       ~cause
+       ~producer:None
+   with
+   | Error (Masc.Keeper_compaction_manual_request.Source_checkpoint_unavailable _) -> ()
+   | _ -> Alcotest.fail "missing checkpoint did not fail explicitly");
+  Alcotest.(check bool) "missing checkpoint wrote no journal" false
+    (Sys.file_exists
+       (Store.journal_path
+          ~base_path:config.base_path
+          ~keeper_name:missing_keeper));
+  let meta = write_meta config "manual-object-failure" in
+  let keeper = ok (Keeper_id.Keeper_name.of_string meta.name) in
+  let _, _, source = save_checkpoint config meta in
+  let reference =
+    Masc.Keeper_checkpoint_store.exact_snapshot_reference source
+  in
+  let object_path =
+    Masc.Keeper_compaction_object_store.object_path
+      ~base_path:config.base_path
+      ~keeper_name:keeper
+      ~reference
+  in
+  Fs_compat.mkdir_p (Filename.dirname object_path);
+  Fs_compat.save_file object_path "corrupt\n";
+  (match
+     Masc.Keeper_compaction_manual_request.request
+       ~config
+       ~keeper_name:keeper
+       ~cause
+       ~producer:None
+   with
+   | Error (Masc.Keeper_compaction_manual_request.Source_object_persist_failed _) -> ()
+   | _ -> Alcotest.fail "invalid source object did not fail explicitly");
+  Alcotest.(check bool) "object failure wrote no journal" false
+    (Sys.file_exists
+       (Store.journal_path ~base_path:config.base_path ~keeper_name:keeper))
+;;
 let () =
   Alcotest.run "keeper compaction operation store"
     [ "journal",
@@ -148,5 +301,8 @@ let () =
           `Quick
           test_provider_binding_includes_exact_source
       ; Alcotest.test_case "malformed history" `Quick test_malformed_history_fails_loud
+      ; Alcotest.test_case "manual source durability" `Quick
+          test_manual_request_persists_source_before_journal
+      ; Alcotest.test_case "source failures" `Quick test_source_failures
       ] ]
 ;;

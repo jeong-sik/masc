@@ -578,7 +578,6 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
     # (branch push to main/develop, workflow_dispatch) always run Build and Test
@@ -592,18 +591,13 @@ jobs:
     # not synthesize default build inputs even though `always()` keeps this
     # condition evaluable.
     if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
-    # Flake-handling policy (hard-required tests):
+    # Test execution policy (hard-required tests):
     #   - `continue-on-error` is intentionally absent: compile failures and
     #     every test suite are merge-blocking.
-    #   - Dune-based test commands (quick suite, operator-control, SSE e2e) are
-    #     run through scripts/ci-run-tests.sh, which performs one isolated-
-    #     build-dir retry for CI-only flakes (RPC lock, interface mismatch,
-    #     resource exhaustion) when CI_TEST_ALLOW_FLAKY_RETRY=1.
-    #   - Non-dune harness suites (transport, contract) get a workflow-level
-    #     shell retry wrapper below so they are not left without mitigation.
-    #   - Disk-exhaustion failures are non-retryable; the script emits explicit
-    #     repair guidance instead of masking the error.
-    # See: https://github.com/jeong-sik/masc/issues/2957
+    #   - Each suite runs exactly once. scripts/ci-run-tests.sh only reports
+    #     heartbeat, disk pressure, process state, and failure diagnostics.
+    #   - GitHub Actions owns the outer workflow lifecycle; this job does not
+    #     impose a second deadline on individual commands or the suite.
     steps:
       - name: Free disk space
         # ubuntu-latest starts with roughly 14 GB free but preinstalls the
@@ -778,27 +772,13 @@ jobs:
           chmod +x dashboard/scripts/gen-sse-types.sh
           opam exec -- dashboard/scripts/gen-sse-types.sh --check
 
-      - name: Install eio-trace
-        continue-on-error: true
-        run: |
-          # Diagnostic-only. Avoid opam depexts here: GTK/cairo system
-          # packages can consume the step before the quick suite runs.
-          timeout 45s opam install -y --no-depexts eio-trace \
-            || echo "::warning::eio-trace install skipped"
-
       - name: Run tests (quick suite)
         id: quick_suite
-        # scripts/ci-run-tests.sh has its own 2100s timeout and diagnostics,
-        # but this step-level bound keeps a stuck timeout/diagnostic path from
-        # holding the shared runner for the full Build and Test job budget.
-        timeout-minutes: 40
         env:
           ME_ROOT: /tmp/me
           ALCOTEST_QUICK_TESTS: "1"
           MASC_INCLUDE_OPERATOR_CONTROL: "false"
-          CI_TEST_TIMEOUT_SEC: 2100
           CI_TEST_HEARTBEAT_SEC: 30
-          CI_TEST_ALLOW_FLAKY_RETRY: "1"
           MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
           MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
           MASC_E2E_TESTS: "true"
@@ -821,16 +801,6 @@ jobs:
             /tmp/ci-run-tests.*.log
           retention-days: 7
 
-      - name: Upload eio-trace on failure
-        if: ${{ failure() && steps.quick_suite.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: eio-trace-quick-suite-${{ github.run_id }}
-          path: |
-            _build/default/**/*.trace
-            /tmp/eio-trace-*
-          retention-days: 7
-
       - name: Run operator control suite
         id: operator_control_suite
         # Run regardless of earlier test failures, but only after a successful
@@ -840,9 +810,7 @@ jobs:
         env:
           ME_ROOT: /tmp/me
           ALCOTEST_QUICK_TESTS: "1"
-          CI_TEST_TIMEOUT_SEC: 600
           CI_TEST_HEARTBEAT_SEC: 15
-          CI_TEST_ALLOW_FLAKY_RETRY: "1"
           MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
           MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
           MASC_E2E_TESTS: "true"
@@ -858,9 +826,7 @@ jobs:
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
           ME_ROOT: /tmp/me
-          CI_TEST_TIMEOUT_SEC: 900
           CI_TEST_HEARTBEAT_SEC: 15
-          CI_TEST_ALLOW_FLAKY_RETRY: "1"
           DUNE_JOBS: 1
           MASC_E2E_TESTS: "true"
         run: |
@@ -873,9 +839,7 @@ jobs:
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
           ME_ROOT: /tmp/me
-          CI_TEST_TIMEOUT_SEC: 900
           CI_TEST_HEARTBEAT_SEC: 15
-          CI_TEST_ALLOW_FLAKY_RETRY: "1"
           DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
@@ -887,37 +851,21 @@ jobs:
           chmod +x scripts/harness/transport/verify_ws.sh
           chmod +x scripts/harness/transport/verify_webrtc_signaling.sh
           chmod +x scripts/harness/lib/server_bootstrap.sh
-          run_suite() {
-            scripts/ci-run-tests.sh "bash scripts/harness/transport/run_all.sh"
-          }
-          if run_suite; then
-            exit 0
-          fi
-          echo "::warning::transport harness suite failed; retrying once"
-          run_suite
+          scripts/ci-run-tests.sh "bash scripts/harness/transport/run_all.sh"
 
       - name: Run contract harness suite
         id: contract_harness_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
           ME_ROOT: /tmp/me
-          CI_TEST_TIMEOUT_SEC: 900
           CI_TEST_HEARTBEAT_SEC: 15
-          CI_TEST_ALLOW_FLAKY_RETRY: "1"
           DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           chmod +x scripts/harness/contract/run_all.sh
           chmod +x scripts/harness/lib/server_bootstrap.sh
-          run_suite() {
-            scripts/ci-run-tests.sh "scripts/harness/contract/run_all.sh"
-          }
-          if run_suite; then
-            exit 0
-          fi
-          echo "::warning::contract harness suite failed; retrying once"
-          run_suite
+          scripts/ci-run-tests.sh "scripts/harness/contract/run_all.sh"
 
       - name: Generate main release evidence bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

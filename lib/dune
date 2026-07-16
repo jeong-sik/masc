@@ -102,6 +102,7 @@
   masc.keeper_types_profile_sandbox
   masc.keeper_usage_trust
   masc.keeper_event_bus
+  masc.keeper_compaction_evidence
   ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
   ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
   masc.runtime_provider_labels

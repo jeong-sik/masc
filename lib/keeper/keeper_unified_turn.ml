@@ -276,7 +276,7 @@ let append_provider_overflow_manifest
                ; "source_requeued", `Bool true
                ; "error", error
                ; ( "exact_evidence"
-                 , Keeper_compact_policy.compaction_evidence_to_json evidence )
+                 , Keeper_compaction_evidence.to_json evidence )
                ]))
         Keeper_runtime_manifest.Context_compacted
     in

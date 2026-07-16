@@ -173,6 +173,15 @@ type submit_error =
       ; reason : string
       }
 
+type recovery_resume_error =
+  | Recovery_candidate_absent
+  | Recovery_candidate_unreadable of string
+  | Recovery_candidate_rejected of access_rejection
+  | Recovery_candidate_changed of request_status
+  | Recovery_candidate_terminal of request_status
+  | Recovery_candidate_already_owned
+  | Recovery_candidate_start_failed of submit_error
+
 type submission_acceptance =
   | Durably_accepted
   | Reconciliation_required of { reason : string }
@@ -334,6 +343,20 @@ val mark_completion_delivered :
 val recover_request_records :
   base_path:string -> unit -> recovery_report
 
+val resume_recovery_candidate
+  :  ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
+  -> ?on_worker_settled:(request_id:string -> worker_settlement -> unit)
+  -> background_sw:Eio.Switch.t
+  -> f:(Eio.Switch.t -> Keeper_types_profile.tool_result)
+  -> recovery_candidate
+  -> (submit_outcome, recovery_resume_error) result
+(** Atomically claims the exact durable restart candidate under its original
+    request identity and starts one worker. The accepted record is not written
+    again and producer acceptance callbacks are not replayed. A repeated claim
+    is explicit and cannot fork a duplicate worker. *)
+
+val recovery_resume_error_to_string : recovery_resume_error -> string
+
 (** [cancel ~base_path ~caller request_id] validates exact request ownership,
     durably commits a non-terminal [Cancelling] intent, publishes it, and only
     then fails the per-request worker switch. The worker's abort callback owns
@@ -411,6 +434,14 @@ module For_testing : sig
   val load_record : base_path:string -> request_id:string -> load_result
   val recover_request_records :
     base_path:string -> unit -> recovery_report
+  val resume_recovery_candidate :
+    request_ops ->
+    ?on_worker_aborted:(worker_abort_reason -> (unit, string) result) ->
+    ?on_worker_settled:(request_id:string -> worker_settlement -> unit) ->
+    background_sw:Eio.Switch.t ->
+    f:(Eio.Switch.t -> Keeper_types_profile.tool_result) ->
+    recovery_candidate ->
+    (submit_outcome, recovery_resume_error) result
   val reserved_request_id_count : unit -> int
   val active_switch_count : unit -> int
   val persistence_lane_observation : unit -> int * int * int

@@ -150,6 +150,15 @@ type submit_error =
       ; reason : string
       }
 
+type recovery_resume_error =
+  | Recovery_candidate_absent
+  | Recovery_candidate_unreadable of string
+  | Recovery_candidate_rejected of access_rejection
+  | Recovery_candidate_changed of request_status
+  | Recovery_candidate_terminal of request_status
+  | Recovery_candidate_already_owned
+  | Recovery_candidate_start_failed of submit_error
+
 type submission_acceptance =
   | Durably_accepted
   | Reconciliation_required of { reason : string }
@@ -1845,6 +1854,44 @@ let recover_request_records ~base_path () =
 
 let with_lock f = Eio.Mutex.use_rw ~protect:true mu (fun () -> f ())
 
+let reserve_recovery_candidate (candidate : recovery_candidate) =
+  let expected = candidate.entry in
+  let base_path = expected.base_path in
+  let request_id = expected.request_id in
+  let key = request_key ~base_path ~submitted_by:expected.submitted_by ~request_id in
+  with_store_transition_lock ~base_path ~request_id (fun () ->
+    match Eio.Mutex.use_ro mu (fun () -> Request_table.find_opt pending key) with
+    | Some _ -> Error Recovery_candidate_already_owned
+    | None ->
+      (match load_record_canonical_located ~base_path ~request_id with
+       | Located_absent -> Error Recovery_candidate_absent
+       | Located_unreadable reason -> Error (Recovery_candidate_unreadable reason)
+       | Located_rejected rejection -> Error (Recovery_candidate_rejected rejection)
+       | Located (current, Terminal_location) ->
+         Error (Recovery_candidate_terminal current.status)
+       | Located (current, Active_location) when is_terminal_status current.status ->
+         Error (Recovery_candidate_terminal current.status)
+       | Located (current, Active_location) when current <> expected ->
+         Error (Recovery_candidate_changed current.status)
+       | Located (current, Active_location)
+         when Option.map
+                (fun observed -> observed.provenance)
+                (recovery_candidate_of_entry current)
+              <> Some candidate.provenance ->
+         Error (Recovery_candidate_changed current.status)
+       | Located (current, Active_location) ->
+         Eio.Mutex.use_rw ~protect:true mu (fun () ->
+           let reservation_key : Store_transition_key.t = { base_path; request_id } in
+           if Store_transition_table.mem reserved_request_ids reservation_key
+           then Error Recovery_candidate_already_owned
+           else
+             let transition_lock = Eio.Mutex.create () in
+             Store_transition_table.add reserved_request_ids reservation_key ();
+             Request_table.add pending key current;
+             Request_table.add transition_locks key transition_lock;
+             Ok (request_id, current, key, transition_lock))))
+;;
+
 let reserve_new_request ~ops ~base_path ~submitted_by ~request =
   let rec reserve () =
     let request_id = ops.generate_request_id () in
@@ -2113,8 +2160,9 @@ let runtime_cancelled_status () =
     "keeper_msg worker was cancelled by runtime before terminal result"
 ;;
 
-let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
-    ~base_path ~caller ~(f : Eio.Switch.t -> tool_result) ~request () :
+let submit_with_ops ops ?reserved_request ?(already_accepted = false) ?on_accepted
+    ?on_worker_aborted ?on_worker_settled ~background_sw ~base_path ~caller
+    ~(f : Eio.Switch.t -> tool_result) ~request () :
     (submit_outcome, submit_error) result =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Submit_rejected rejection)
@@ -2125,7 +2173,9 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
     in
     with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
     let request_id, entry, key, transition_lock =
-      reserve_new_request ~ops ~base_path ~submitted_by ~request
+      match reserved_request with
+      | Some reserved -> reserved
+      | None -> reserve_new_request ~ops ~base_path ~submitted_by ~request
     in
     let reconciliation_outcome reason =
       Ok
@@ -2134,6 +2184,9 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
         }
     in
     let initial_persistence =
+      if already_accepted
+      then `Persisted
+      else
       with_keeper_persistence_lock
         ~base_path
         ~keeper_name:keeper_name_id
@@ -2186,7 +2239,7 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
      | `Settled result -> result
      | `Persisted ->
        let acceptance_result =
-         match on_accepted with
+         if already_accepted then Ok () else match on_accepted with
          | None -> Ok ()
          | Some callback ->
            Eio.Cancel.protect (fun () ->
@@ -2412,7 +2465,60 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
           background_start_failed (Printexc.to_string exn)))))
 ;;
 
-let submit = submit_with_ops production_request_ops
+let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
+    ~base_path ~caller ~f ~request () =
+  submit_with_ops
+    production_request_ops
+    ?on_accepted
+    ?on_worker_aborted
+    ?on_worker_settled
+    ~background_sw
+    ~base_path
+    ~caller
+    ~f
+    ~request
+    ()
+;;
+
+let resume_recovery_candidate_with_ops ops ?on_worker_aborted ?on_worker_settled
+    ~background_sw ~f candidate =
+  match reserve_recovery_candidate candidate with
+  | Error _ as error -> error
+  | Ok reserved_request ->
+    let entry = candidate.entry in
+    submit_with_ops
+      ops
+      ~reserved_request
+      ~already_accepted:true
+      ?on_worker_aborted
+      ?on_worker_settled
+      ~background_sw
+      ~base_path:entry.base_path
+      ~caller:entry.submitted_by
+      ~f
+      ~request:entry.request
+      ()
+    |> Result.map_error (fun error -> Recovery_candidate_start_failed error)
+;;
+
+let resume_recovery_candidate =
+  resume_recovery_candidate_with_ops production_request_ops
+;;
+
+let recovery_resume_error_to_string = function
+  | Recovery_candidate_absent -> "restart candidate is absent"
+  | Recovery_candidate_unreadable reason -> "restart candidate is unreadable: " ^ reason
+  | Recovery_candidate_rejected rejection ->
+    "restart candidate access rejected: "
+    ^ (access_rejection_to_json rejection |> Yojson.Safe.to_string)
+  | Recovery_candidate_changed status ->
+    "restart candidate changed to " ^ status_to_string status
+  | Recovery_candidate_terminal status ->
+    "restart candidate is already terminal: " ^ status_to_string status
+  | Recovery_candidate_already_owned -> "restart candidate already has a live worker"
+  | Recovery_candidate_start_failed error ->
+    submit_error_to_json error |> Yojson.Safe.to_string
+;;
 
 (** Exact owner check for both the process-global table and persisted rows. *)
 let owner_rejection ~caller (entry : entry) =
@@ -2856,7 +2962,21 @@ module For_testing = struct
   let atomic_staging_dir = atomic_staging_dir
   let load_record = load_record
   let recover_request_records = recover_request_records
-  let submit = submit_with_ops
+  let resume_recovery_candidate = resume_recovery_candidate_with_ops
+  let submit ops ?on_accepted ?on_worker_aborted ?on_worker_settled
+      ~background_sw ~base_path ~caller ~f ~request () =
+    submit_with_ops
+      ops
+      ?on_accepted
+      ?on_worker_aborted
+      ?on_worker_settled
+      ~background_sw
+      ~base_path
+      ~caller
+      ~f
+      ~request
+      ()
+  ;;
   let cancel = cancel_with_ops
   let reserved_request_id_count () =
     Eio.Mutex.use_ro mu (fun () -> Store_transition_table.length reserved_request_ids)

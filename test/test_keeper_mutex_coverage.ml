@@ -1336,6 +1336,99 @@ let write_request_record ?location ?keeper_name ?submitted_at ~base_path
   |> write_disk_record ?location ~base_path ~request_id
 ;;
 
+let test_keeper_msg_async_resumes_exact_queued_candidate_once () =
+  with_eio_env
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = temp_dir "keeper-msg-resume-queued-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_msg_async.For_testing.clear ();
+      rm_rf base_path)
+    (fun () ->
+       let request_id = "kmsg_resume_queued_0_0" in
+       write_request_record
+         ~base_path
+         ~request_id
+         ~status:"queued"
+         ~status_fields:[]
+         ();
+       let candidate =
+         match
+           (Keeper_msg_async.For_testing.recover_request_records ~base_path ())
+             .candidates
+         with
+         | [ candidate ] -> candidate
+         | candidates ->
+           failf "expected one restart candidate, got %d" (List.length candidates)
+       in
+       let entered, resolve_entered = Eio.Promise.create () in
+       let release, resolve_release = Eio.Promise.create () in
+       let calls = Atomic.make 0 in
+       let run _request_sw =
+         ignore (Atomic.fetch_and_add calls 1 : int);
+         Eio.Promise.resolve resolve_entered ();
+         Eio.Promise.await release;
+         tr_ok "resumed"
+       in
+       (match
+          Keeper_msg_async.resume_recovery_candidate
+            ~background_sw:sw
+            ~f:run
+            { candidate with provenance = Running_before_restart }
+        with
+        | Error (Keeper_msg_async.Recovery_candidate_changed Queued) -> ()
+        | Error error ->
+          failf
+            "forged provenance returned %s"
+            (Keeper_msg_async.recovery_resume_error_to_string error)
+        | Ok _ -> fail "forged recovery provenance claimed the queued request");
+       (match
+          Keeper_msg_async.resume_recovery_candidate
+            ~background_sw:sw
+            ~f:run
+            candidate
+        with
+        | Ok outcome ->
+          check string "original request identity" request_id outcome.request_id
+        | Error error ->
+          fail (Keeper_msg_async.recovery_resume_error_to_string error));
+       Eio.Promise.await entered;
+       (match
+          Keeper_msg_async.resume_recovery_candidate
+            ~background_sw:sw
+            ~f:run
+            candidate
+        with
+        | Error Keeper_msg_async.Recovery_candidate_already_owned -> ()
+        | Error error ->
+          failf
+            "second claim returned %s"
+            (Keeper_msg_async.recovery_resume_error_to_string error)
+        | Ok _ -> fail "second claim forked a duplicate worker");
+       Eio.Promise.resolve resolve_release ();
+       ignore
+         (wait_for_done_with_clock
+            (Eio.Stdenv.clock env)
+            ~base_path
+            request_id
+          : Keeper_msg_async.entry);
+       check int "worker executed once" 1 (Atomic.get calls);
+       match
+         Keeper_msg_async.resume_recovery_candidate
+           ~background_sw:sw
+           ~f:run
+           candidate
+       with
+       | Error (Keeper_msg_async.Recovery_candidate_terminal (Done _)) -> ()
+       | Error error ->
+         failf
+           "stale claim returned %s"
+           (Keeper_msg_async.recovery_resume_error_to_string error)
+       | Ok _ -> fail "terminal candidate was restarted")
+;;
+
 let require_record_path ~location ~base_path ~request_id =
   match disk_record_path ~location ~base_path ~request_id with
   | Some path -> path
@@ -2686,6 +2779,10 @@ let () =
             "active running inventory is non-mutating"
             `Quick
             test_keeper_msg_async_inventories_active_running_without_mutation
+        ; test_case
+            "queued restart candidate is claimed exactly once"
+            `Quick
+            test_keeper_msg_async_resumes_exact_queued_candidate_once
         ; test_case
             "terminal precedence cleans stale active"
             `Quick

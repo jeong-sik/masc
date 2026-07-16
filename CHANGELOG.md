@@ -19,6 +19,9 @@
 - Keeper lifecycle reservations now use cooperative cross-context locking, so
   TOML reconciliation can suspend during durable persistence without a second
   Eio fiber re-locking the same OS-thread mutex.
+- Long-lived Keeper turn event-bus polling now uses a real tail-recursive loop;
+  polling no longer retains one exception-handler frame per cycle until CPU and
+  memory are consumed by stack scanning and GC.
 - Auto Judge requests now persist the exact outer-turn causal context without interpreting it, and durable retryable judgments resume on an accepted provider attempt rather than waiting for a server restart.
 - Keeper Gate state now has a BasePath-derived `.masc/gate/` owner. A corrupt optional Always Allowed rule store degrades only exact-rule lookup, while Chat persistence/read failures remain local to Chat and no longer close unrelated Keeper lanes.
 - Prompt overrides now persist in a schema-versioned envelope bound to the SHA256 revision of each prompt body and template-variable contract. Legacy or malformed files and contract-drifted entries fail closed with observable fallback, writes use atomic replacement, and dashboard set/clear mutations commit to memory only after persistence succeeds.

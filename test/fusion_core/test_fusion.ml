@@ -46,7 +46,6 @@ let base_policy : Fusion_policy.t =
           ; judge_max_output_tokens = None
           ; meta_timeout_s = 300.0
           ; judges = []
-          ; min_answered = Fusion_policy.default_min_answered
           ; judge_wave_budget_s = Float.max_float
           ; adaptive_timeout_factor = 1.0
           ; fallback_judge_model = None
@@ -462,51 +461,49 @@ let test_config_empty_presets () =
       (List.mem Fusion_config.Empty_presets es)
   | Ok _ -> Alcotest.fail "expected Error Empty_presets"
 
-let test_config_invalid_size () =
+let test_config_wide_panel () =
   let s =
     {|
 [fusion]
 enabled = true
-[fusion.presets.toomany]
+default_preset = "wide"
+[fusion.presets.wide]
 panel = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
-judge = "a"
+panel_system_prompt = "compare independently"
+judge = "j"
+judge_system_prompt = "synthesize"
 |}
   in
   match Fusion_config.of_toml (parse s) with
   | Error es ->
-    Alcotest.(check bool) "Invalid_panel_size present" true
-      (List.exists
-         (function Fusion_config.Invalid_panel_size _ -> true | _ -> false)
-         es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_panel_size"
+    Alcotest.failf "expected wide panel to load, got: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+  | Ok policy ->
+    (match Fusion_policy.find_preset policy "wide" with
+     | None -> Alcotest.fail "expected wide preset"
+     | Some vp ->
+       Alcotest.(check int) "all supplied models retained" 9
+         (List.length
+            (Fusion_policy.preset_models (Fusion_policy.Validated_preset.preset vp))))
 
-let test_config_invalid_min_answered () =
-  let check_invalid value =
-    let s =
-      Printf.sprintf
-        {|
+let test_config_empty_panel_models () =
+  let s =
+    {|
 [fusion]
 enabled = true
-default_preset = "p"
-[fusion.presets.p]
-panel = ["a", "b"]
-panel_system_prompt = "y"
+default_preset = "empty"
+[fusion.presets.empty]
+panel = []
+panel_system_prompt = "compare independently"
 judge = "j"
-judge_system_prompt = "x"
-min_answered = %d
+judge_system_prompt = "synthesize"
 |}
-        value
-    in
-    match Fusion_config.of_toml (parse s) with
-    | Error es ->
-      Alcotest.(check bool) "Invalid_min_answered present" true
-        (List.mem (Fusion_config.Invalid_min_answered ("p", value)) es)
-    | Ok _ -> Alcotest.fail "expected Error Invalid_min_answered"
   in
-  check_invalid 0;
-  check_invalid (-1);
-  (* 2 panels -> max allowed is 2, so 3 is out of range *)
-  check_invalid 3
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Empty_panel_models present" true
+      (List.mem (Fusion_config.Empty_panel_models "empty") es)
+  | Ok _ -> Alcotest.fail "expected Error Empty_panel_models"
 
 let test_config_missing_default () =
   let s =
@@ -817,7 +814,7 @@ let test_config_disabled_with_preset () =
    목표 결함 하나만 두고 나머지는 유효하게 해, 검증 순서(size→prompt→judge→dup→mtc)에서
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
-    ?(judges = []) ?(min_answered = Fusion_policy.default_min_answered)
+    ?(judges = [])
     ?(meta_timeout_s = 300.0) ?(judge_wave_budget_s = Float.max_float)
     ?(adaptive_timeout_factor = 1.0) ?(fallback_judge_model = None)
     (name : string) : Fusion_policy.preset =
@@ -829,7 +826,6 @@ let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthe
   ; judge_max_output_tokens = None
   ; meta_timeout_s
   ; judges
-  ; min_answered
   ; judge_wave_budget_s
   ; adaptive_timeout_factor
   ; fallback_judge_model
@@ -842,13 +838,13 @@ let test_validated_ok () =
       (List.length (raw vp).Fusion_policy.panels)
   | Error _ -> Alcotest.fail "expected Ok for a valid preset"
 
-let test_validated_bad_size () =
+let test_validated_empty_panel_models () =
   let empty_group = { base_group with Fusion_policy.models = [] } in
   match
     Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ empty_group ] "empty")
   with
-  | Error (Fusion_policy.Validated_preset.Bad_size 0) -> ()
-  | _ -> Alcotest.fail "expected Bad_size 0 for zero models"
+  | Error Fusion_policy.Validated_preset.Empty_panel_models -> ()
+  | _ -> Alcotest.fail "expected Empty_panel_models"
 
 let test_validated_missing_prompt () =
   let no_prompt = { base_group with Fusion_policy.system_prompt = "" } in
@@ -1347,32 +1343,6 @@ let test_panels_unavailable_failure () =
   Alcotest.(check bool) "not timeout-or-budget (no fallback judge trigger)" false
     (judge_failure_is_timeout_or_budget failure)
 
-(* min_answered must be in the policy range 1..total panels (inclusive).
-   base_group has 3 models, so 0 and 4 are rejected; full-panel quorum (3) is allowed. *)
-let test_validated_bad_min_answered () =
-  let check_bad mn label =
-    match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:mn label) with
-    | Error (Fusion_policy.Validated_preset.Min_answered_below_min got)
-    | Error (Fusion_policy.Validated_preset.Min_answered_above_max got) ->
-      Alcotest.(check int) (label ^ " reports value") mn got
-    | _ -> Alcotest.failf "%s: expected min_answered error" label
-  in
-  check_bad 0 "min_answered=0";
-  check_bad 4 "min_answered>panels";
-  (* full-panel quorum is now allowed (3 answered required for 3 panels). *)
-  (match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:3 "ok3") with
-   | Ok _ -> ()
-   | Error _ -> Alcotest.fail "min_answered=3 with 3 panels should be Ok");
-  (* in-range stays Ok (3 models, require 2) *)
-  match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:2 "ok2") with
-  | Ok _ -> ()
-  | Error _ -> Alcotest.fail "min_answered=2 with 3 panels should be Ok"
-
-let test_min_answered_constants () =
-  Alcotest.(check int) "default_min_answered" 1 Fusion_policy.default_min_answered;
-  Alcotest.(check int) "min_answered_floor" 1 Fusion_policy.min_answered_floor
-
-
 (* --- FUSION adaptive timeout / P0 hardening (RFC-0284-FUSION-P0) --- *)
 
 let adaptive_toml =
@@ -1641,9 +1611,8 @@ let () =
         ; Alcotest.test_case "panelist_id_collision_fail_closed" `Quick
             test_config_panelist_id_collision_fail_closed
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
-        ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
-        ; Alcotest.test_case "invalid_min_answered" `Quick
-            test_config_invalid_min_answered
+        ; Alcotest.test_case "wide_panel" `Quick test_config_wide_panel
+        ; Alcotest.test_case "empty_panel_models" `Quick test_config_empty_panel_models
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
         ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model
@@ -1673,7 +1642,8 @@ let () =
         ] )
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok
-        ; Alcotest.test_case "bad_size" `Quick test_validated_bad_size
+        ; Alcotest.test_case "empty_panel_models" `Quick
+            test_validated_empty_panel_models
         ; Alcotest.test_case "missing_prompt" `Quick test_validated_missing_prompt
         ; Alcotest.test_case "missing_judge" `Quick test_validated_missing_judge
         ; Alcotest.test_case "duplicate_panelist" `Quick test_validated_duplicate_panelist
@@ -1739,9 +1709,7 @@ let () =
             test_judge_error_node_timed_out
         ] )
     ; ( "panel_guard"
-      , [ Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered
-        ; Alcotest.test_case "min_answered_constants" `Quick test_min_answered_constants
-        ; Alcotest.test_case "panels_unavailable_failure" `Quick
+      , [ Alcotest.test_case "panels_unavailable_failure" `Quick
             test_panels_unavailable_failure
         ] )
     ]

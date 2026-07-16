@@ -46,7 +46,7 @@ type judge_spec =
     desugar한다 — 그 경우 오늘과 byte-identical 동작. *)
 type preset =
   { name : string
-  ; panels : panel_group list  (** 1개 이상 그룹; 모델 총합 {!min_panel}..{!max_panel} *)
+  ; panels : panel_group list  (** 1개 이상 그룹; 전체 모델 집합은 비어 있지 않음 *)
   ; judge : string
   ; judge_system_prompt : string
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
@@ -58,12 +58,6 @@ type preset =
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
-  ; min_answered : int
-      (** 심판을 돌리기 위해 응답해야 하는 패널 최소 수 (런타임 quorum). 기본 1.
-          [answered_of] 수가 이 값 미만이면 orchestrator는 심판을 건너뛰고
-          [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
-          허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
-          명시적으로 설정할 수 있다. *)
   ; judge_wave_budget_s : float
       (** 1차 심판 wave 전체 wall-clock 예산 (초). 0=비활성(legacy). *)
   ; adaptive_timeout_factor : float
@@ -72,16 +66,6 @@ type preset =
       (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
   }
 [@@deriving show, eq]
-
-(** 패널 크기(모델 총합) 하한/상한 (OpenRouter Fusion: 1..8 모델). *)
-val min_panel : int
-
-val max_panel : int
-
-(** [min_answered] 하한과 기본값. 기본 1 = "응답 패널이 1개도 없을 때만 judge skip". *)
-val min_answered_floor : int
-
-val default_min_answered : int
 
 (** Default staged JOJ group size. A staged judge-of-judges run groups first
     judges into fixed-size cohorts before a final meta reduction; default 3
@@ -100,11 +84,6 @@ val default_timeout_s : float
 
 (** 모든 그룹의 모델을 평탄화 (그룹순 × 그룹내 모델순 보존). *)
 val preset_models : preset -> string list
-
-(** 패널 모델 총합이 [min_panel]..[max_panel] 범위이고 [panels]가 비어있지 않은가.
-    {!Validated_preset.of_preset}의 검증 술어 (RFC-0280: 게이트는 더 이상 재검증하지
-    않고 [Validated_preset.t]로 타입 증명한다). *)
-val preset_size_ok : preset -> bool
 
 (** 패널 정체성 (RFC-0278). [label]이 비면 [model] 그대로(legacy byte-identical),
     있으면 ["label (model)"]. agent 카드명·심판 패널 태그·[panel_answer.model]에
@@ -208,7 +187,7 @@ module Validated_preset : sig
 
   (** 검증 실패 사유 — 닫힌 합. config 계층이 자기 [config_error]로 매핑한다. *)
   type invalid =
-    | Bad_size of int  (** 모델 총합(panels=[] 포함)이 [min_panel]..[max_panel] 밖 *)
+    | Empty_panel_models  (** 패널 그룹 전체에 실행할 모델이 없음 *)
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성({!panelist_id}) *)
@@ -216,10 +195,6 @@ module Validated_preset : sig
         (** 그룹/심판 max_output_tokens override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
-    | Min_answered_below_min of int
-        (** [min_answered]가 하한 [min_answered_floor] 미만. *)
-    | Min_answered_above_max of int
-        (** [min_answered]가 패널 모델 총합을 초과. *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
     | Bad_judge_wave_budget of float
@@ -228,8 +203,8 @@ module Validated_preset : sig
     | Bad_adaptive_factor of float
         (** [adaptive_timeout_factor]가 1.0 미만. *)
 
-  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_output_tokens →
-      1차 심판 prompt/정체성/max_output_tokens → min_answered → timeout 예산/계수.
+  (** 검증 순서: non-empty models → prompt → judge → 정체성 중복 → max_output_tokens →
+      1차 심판 prompt/정체성/max_output_tokens → timeout 예산/계수.
       통과 시 [Ok vp], 첫 위반에서 [Error invalid].
       config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result
@@ -264,7 +239,7 @@ val find_preset : t -> string -> Validated_preset.t option
     + [depth = Nested] → [Deny Depth_exceeded]
     + 그 외 → [Allow request]
 
-    size는 [Validated_preset.t]로 타입 증명되므로 게이트가 재검증하지 않는다
+    모델 집합 non-empty는 [Validated_preset.t]로 타입 증명되므로 게이트가 재검증하지 않는다
     (RFC-0280). "이 턴이 심의할 가치가 있나"는 게이트가 score/문자열로 판정하지
     않는다 — 그 판단은 키퍼(이미 LLM)가 masc_fusion을 호출하는 것으로 표현되고,
     trigger는 발동 이유 라벨일 뿐이다. *)

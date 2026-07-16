@@ -2,38 +2,29 @@ import { describe, it, expect } from 'vitest'
 import {
   readFusionSettings,
   readFusionSettingsResult,
-  readFusionPresetMinAnswered,
   applyFusionSettings,
   applyFusionPresetComposition,
   FUSION_SETTINGS_DEFAULTS,
 } from './fusion-settings'
 
-// SAMPLE still carries a [fusion.gate] per_hour_budget line: RFC-0277 removed the
-// key from the backend, so the editor must IGNORE it (never read/write it) while
-// leaving it untouched in the file. The preservation test below pins that.
 const SAMPLE = `# live runtime config
 [fusion]
 enabled = true
 default_preset = "trio"
 
-[fusion.gate]
-per_hour_budget = 20
-
 [fusion.presets.trio]
 panel = ["a", "b", "c"]
 judge = "j"
-min_answered = 2
 
 [runtime]
 default = "x.y"
 `
 
 describe('readFusionSettings', () => {
-  it('reads [fusion] + the default preset min_answered (per_hour_budget not surfaced)', () => {
+  it('reads the writable [fusion] scalars', () => {
     expect(readFusionSettings(SAMPLE)).toEqual({
       enabled: true,
       defaultPreset: 'trio',
-      minAnswered: 2,
     })
   })
 
@@ -71,17 +62,13 @@ default_preset = "rocket\\U0001F680"
     }
   })
 
-  it('parses single-quoted default_preset and rejects unknown preset sections only when enabled', () => {
+  it('parses single-quoted and opaque default_preset values', () => {
     const singleQuoted = SAMPLE.replace('default_preset = "trio"', "default_preset = 'trio'")
     expect(readFusionSettings(singleQuoted).defaultPreset).toBe('trio')
     expect(readFusionSettings('[fusion]\nenabled = false\ndefault_preset = \'tri#o\'\n').defaultPreset).toBe('tri#o')
 
     const unknownPreset = SAMPLE.replace('default_preset = "trio"', 'default_preset = "missing"')
-    const result = readFusionSettingsResult(unknownPreset)
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.issues[0]?.key).toBe('fusion.presets.missing.min_answered')
-    }
+    expect(readFusionSettings(unknownPreset).defaultPreset).toBe('missing')
 
     const disabledUnknownPreset = `[fusion]
 enabled = false
@@ -90,20 +77,7 @@ default_preset = "old"
     expect(readFusionSettings(disabledUnknownPreset)).toEqual({
       enabled: false,
       defaultPreset: 'old',
-      minAnswered: 1,
     })
-  })
-
-  it('reads min_answered for a specific preset without changing default_preset', () => {
-    const withDuo = `${SAMPLE}
-[fusion.presets.duo]
-panel = ["a", "b"]
-judge = "j"
-min_answered = 1
-`
-    expect(readFusionSettings(withDuo).defaultPreset).toBe('trio')
-    expect(readFusionPresetMinAnswered(withDuo, 'duo')).toBe(1)
-    expect(readFusionPresetMinAnswered(withDuo, 'missing')).toBe(1)
   })
 })
 
@@ -112,49 +86,11 @@ describe('applyFusionSettings', () => {
     const next = applyFusionSettings(SAMPLE, {
       enabled: false,
       defaultPreset: 'trio',
-      minAnswered: 3,
     })
     expect(readFusionSettings(next)).toEqual({
       enabled: false,
       defaultPreset: 'trio',
-      minAnswered: 3,
     })
-  })
-
-  it('writes min_answered into the default preset table, not [fusion]', () => {
-    const next = applyFusionSettings(SAMPLE, { ...readFusionSettings(SAMPLE), minAnswered: 3 })
-    expect(next).toContain('[fusion.presets.trio]')
-    expect(next.split('[fusion.presets.trio]')[1]).toContain('min_answered = 3')
-    expect(next.split('[fusion]')[1]?.split('[fusion.gate]')[0]).not.toContain('min_answered')
-  })
-
-  it('never touches the removed per_hour_budget key (RFC-0277)', () => {
-    const next = applyFusionSettings(SAMPLE, readFusionSettings(SAMPLE))
-    // unchanged verbatim — the editor neither reads nor writes it
-    expect(next).toContain('per_hour_budget = 20')
-  })
-
-  it('removes stale min_answered from the previous default preset on preset switch or clear', () => {
-    const withDuo = `${SAMPLE}
-[fusion.presets.duo]
-panel = ["a", "b"]
-judge = "j"
-min_answered = 1
-`
-    const switched = applyFusionSettings(withDuo, {
-      enabled: true,
-      defaultPreset: 'duo',
-      minAnswered: 1,
-    })
-    expect(switched.split('[fusion.presets.trio]')[1]?.split('[runtime]')[0]).not.toContain('min_answered')
-    expect(switched.split('[fusion.presets.duo]')[1]).toContain('min_answered = 1')
-
-    const cleared = applyFusionSettings(SAMPLE, {
-      enabled: true,
-      defaultPreset: '',
-      minAnswered: 1,
-    })
-    expect(cleared.split('[fusion.presets.trio]')[1]?.split('[runtime]')[0]).not.toContain('min_answered')
   })
 
   it('preserves comments and untouched sections/keys', () => {
@@ -175,7 +111,6 @@ min_answered = 1
     const trio = next.split('[fusion.presets.trio]')[1]?.split('[runtime]')[0] ?? ''
     expect(trio).toContain('panel = ["a", "b", "d"]')
     expect(trio).toContain('judge = "meta.judge"')
-    expect(trio).toContain('min_answered = 2')
   })
 
   it('refuses to flatten grouped panel presets', () => {

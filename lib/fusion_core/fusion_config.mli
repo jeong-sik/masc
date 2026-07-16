@@ -9,10 +9,10 @@
 (** config 파싱/검증 에러 — 닫힌 합. *)
 type config_error =
   | Empty_presets  (** enabled=true인데 preset 0개 *)
-  | Invalid_panel_size of string * int
-      (** (preset 이름, 모델 총합) — 그룹 모델 총합 1..8 위반 (빈 panel=[] 포함). *)
+  | Empty_panel_models of string
+      (** preset의 패널 그룹 전체에 실행할 모델이 없음 (빈 panel=[] 포함). *)
   | Empty_panels of string
-      (** preset의 [panels]가 빈 배열 (그룹 0개). "모델 0개"(Invalid_panel_size)와 구분. *)
+      (** preset의 [panels]가 빈 배열 (그룹 0개). "모델 0개"와 구분. *)
   | Conflicting_panel_grammar of string
       (** 같은 preset에 [[...panels]]와 flat [panel] 둘 다 존재 (silent 선택 금지). *)
   | Duplicate_panelist of string * string
@@ -35,9 +35,6 @@ type config_error =
       (** preset 이름 — JOJ 1차 심판 system prompt 누락 (RFC-0283). *)
   | Duplicate_judge of string * string
       (** (preset 이름, 중복 judge 정체성) — 두 JOJ 1차 심판이 같은 정체성 (RFC-0283). *)
-  | Invalid_min_answered of string * int
-      (** (preset 이름, min_answered) — [min_answered]가 policy 허용 범위(1..패널
-          모델 총합) 밖. full-panel quorum([총합])도 명시적으로 설정할 수 있다. *)
   | Invalid_meta_timeout of string * float
       (** (preset 이름, meta_timeout_s) — 양수 유한수가 아님. *)
   | Invalid_judge_wave_budget of string * float
@@ -55,7 +52,7 @@ val disabled : Fusion_policy.t
 
     - [fusion] 부재 → [Ok disabled].
     - enabled=true인데 preset 부재 → [Error [Empty_presets]].
-    - 패널 모델 총합 1..8 위반 → [Error [Invalid_panel_size _]].
+    - 패널 모델 집합이 비어 있음 → [Error [Empty_panel_models _]].
     - [panels] 빈 배열(그룹 0개) → [Error [Empty_panels _]].
     - [[...panels]]와 flat [panel] 동시 → [Error [Conflicting_panel_grammar _]].
     - 패널 정체성(panelist_id) 중복 → [Error [Duplicate_panelist _]]. 라벨이 다르면
@@ -64,7 +61,6 @@ val disabled : Fusion_policy.t
     - judge 모델 id 누락 → [Error [Missing_judge_model _]].
     - staged_judge_group_size < 2 → [Error [Invalid_staged_judge_group_size _]].
     - max_output_tokens override가 0 이하 → [Error [Invalid_max_output_tokens _]].
-    - min_answered가 1..패널 모델 총합 범위 밖 → [Error [Invalid_min_answered _]].
     - default_preset가 presets에 없음 → [Error [Missing_default_preset _]].
     - 필드 타입 불일치 → [Error [Toml_type_error _]].
     여러 에러는 누적되어 한 번에 반환된다. *)

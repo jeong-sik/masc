@@ -198,7 +198,6 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; judge_max_output_tokens = None
     ; meta_timeout_s = Fusion_policy.default_timeout_s
     ; judges = []
-    ; min_answered = Fusion_policy.default_min_answered
     ; judge_wave_budget_s = Float.max_float
     ; adaptive_timeout_factor = 1.0
     ; fallback_judge_model = None

@@ -11,14 +11,14 @@
 
 ## §1 동기 (Motivation)
 
-fusion preset의 invariant(모델 총합 1..8, 패널 정체성 유일, 프롬프트/심판 모델 비어있지 않음)는 **런타임 predicate를 호출처가 직접 부르는** 방식으로 강제된다. 이 "validate at use"는 두 결함을 만든다.
+fusion preset의 invariant(모델 집합 non-empty, 패널 정체성 유일, 프롬프트/심판 모델 비어있지 않음)는 **런타임 predicate를 호출처가 직접 부르는** 방식으로 강제된다. 이 "validate at use"는 두 결함을 만든다.
 
 ### 1.1 게이트가 검증을 재실행한다 (validate-at-use)
 
-config 로드(`finish_preset`, `lib/fusion_core/fusion_config.ml:62`)가 `preset_size_ok`로 size를 검증하는데, 발동 게이트(`decide`, `lib/fusion_core/fusion_policy.ml`)가 **같은 검증을 또** 한다:
+초기 구현은 config 로드와 발동 게이트가 같은 모델 집합 검증을 다시 실행했다:
 
 ```ocaml
-| Some preset when not (preset_size_ok preset) ->
+| Some preset when panel_models_are_empty preset ->
   Fusion_types.Deny (Fusion_types.Preset_unknown req.preset)
 ```
 
@@ -32,7 +32,7 @@ config 로드(`finish_preset`, `lib/fusion_core/fusion_config.ml:62`)가 `preset
 
 Alexis King의 "Parse, don't validate": 검증된 preset을 **존재 자체가 invariant 증명인 타입**(`Validated_preset.t = private preset`)으로 만든다. 검증을 smart constructor `of_preset` 한 곳에 모으고, 게이트·orchestrator는 검증된 타입만 받는다 → §1.1 재검증 제거, §1.2 우회 차단(검증 없이 `Validated_preset.t` 생성 불가).
 
-비목표: 새 거부 규칙 추가, per-group `NonEmpty` 모델 타입(현 size 검증이 이미 빈 그룹·총합 0을 거부; 구조적 NonEmpty는 deriving/yojson 리플만 키움), `run`의 시그니처 변경(harness arm이 임의 그룹을 구성하므로 raw groups primitive 유지).
+비목표: 새 거부 규칙 추가, per-group `NonEmpty` 모델 타입(전체 집합 non-empty 검증으로 충분), `run`의 시그니처 변경(harness arm이 임의 그룹을 구성하므로 raw groups primitive 유지).
 
 ---
 
@@ -46,7 +46,7 @@ Alexis King의 "Parse, don't validate": 검증된 preset을 **존재 자체가 i
 module Validated_preset : sig
   type t = private preset
   type invalid =
-    | Bad_size of int           (* 모델 총합이 min..max 밖 (panels=[] 포함) *)
+    | Empty_panel_models
     | Missing_prompt
     | Missing_judge_model
     | Duplicate_panelist of string
@@ -59,15 +59,15 @@ module Validated_preset : sig
 end
 ```
 
-`of_preset`는 기존 검증 순서(size → prompt → judge → dup panelist → max_tool_calls)를 그대로 수행한다. `pp`/`equal`/`show`는 underlying `preset`에 위임(private 타입 deriving 의존 회피 — `Fusion_policy.t`가 derive할 때 `Validated_preset.pp`/`equal`을 참조).
+`of_preset`는 non-empty models → prompt → judge → dup panelist 순서의 구조 검증을 수행한다. `pp`/`equal`/`show`는 underlying `preset`에 위임(private 타입 deriving 의존 회피 — `Fusion_policy.t`가 derive할 때 `Validated_preset.pp`/`equal`을 참조).
 
 ### 2.2 정책이 검증된 preset만 담는다
 
-`type t = { ...; presets : Validated_preset.t list }`. `find_preset : t -> string -> Validated_preset.t option`. 게이트 `decide`는 `preset_size_ok` 재검사를 **제거** — 타입이 size를 증명한다. depth/enabled 구조 판정만 남는다.
+`type t = { ...; presets : Validated_preset.t list }`. `find_preset : t -> string -> Validated_preset.t option`. 게이트 `decide`는 모델 집합 재검사를 **제거** — 타입이 non-empty를 증명한다. depth/enabled 구조 판정만 남는다.
 
 ### 2.3 config가 smart constructor를 통과시킨다
 
-`finish_preset`(`fusion_config.ml`)은 raw `preset`을 만든 뒤 `Validated_preset.of_preset`을 호출하고 `invalid → config_error`를 매핑한다(`Bad_size→Invalid_panel_size`, `Missing_prompt→Missing_prompt`, `Missing_judge_model→Missing_judge_model`, `Duplicate_panelist→Duplicate_panelist`, `Bad_max_tool_calls→Invalid_max_tool_calls`). 출력 config_error는 오늘과 동일.
+`finish_preset`(`fusion_config.ml`)은 raw `preset`을 만든 뒤 `Validated_preset.of_preset`을 호출하고 `invalid → config_error`를 매핑한다(`Empty_panel_models→Empty_panel_models`, `Missing_prompt→Missing_prompt`, `Missing_judge_model→Missing_judge_model`, `Duplicate_panelist→Duplicate_panelist`).
 
 ### 2.4 소비처는 검증된 타입을 coerce해 읽는다
 
@@ -77,8 +77,8 @@ end
 
 ## §3 byte-identity / 동작 보존
 
-- config_error 출력 동일: `of_preset`가 같은 순서·같은 조건으로 검증하고 `invalid`를 기존 variant로 매핑한다.
-- 게이트 동작 동일: 제거한 `preset_size_ok` 재검사는 항상 통과하던 dead code(of_toml이 size-invalid preset을 이미 `policy.presets`에서 배제). validated presets는 정의상 size-ok.
+- config는 빈 모델 집합을 typed `Empty_panel_models`로 명시한다.
+- 게이트는 validated preset을 받아 non-empty 검증을 재실행하지 않는다.
 - 패널/심판 실행 동일: orchestrator·harness가 같은 `.panels`를 읽는다(coerce는 read-only).
 
 ---

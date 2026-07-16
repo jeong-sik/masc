@@ -62,7 +62,7 @@ type preset =
 [@@deriving show, eq]
 ```
 
-`preset_size_ok`는 그룹별이 아니라 **평탄화 모델 총합** 1..8을 검증한다 (`preset_models = List.concat_map (fun g -> g.models) panels`). `panels=[]`는 명시적 실패.
+`Validated_preset.of_preset`은 **평탄화 모델 집합이 비어 있지 않음**을 검증한다 (`preset_models = List.concat_map (fun g -> g.models) panels`). 모델 수 상한은 없고 `panels=[]`는 명시적 실패다.
 
 ### 2.2 config 문법 + desugar
 
@@ -91,7 +91,7 @@ legacy flat `panel=[...]`는 같은 `parse_group` 함수를 preset 테이블 자
 
 `config_error`에 닫힌 합 variant 3종 추가: `Empty_panels`(그룹 0개), `Conflicting_panel_grammar`(`[[panels]]`+flat `panel` 동시), `Duplicate_panel_model`(평탄화 모델 리스트 중복). **중복 모델 거부**는 `Async_agent.all`이 카드명(=model)으로 결과를 키잉하므로 중복이 답변 충돌(silent 손실)을 부르기 때문이다 — cross-group뿐 아니라 한 그룹 내 중복(`["a","a"]`)도 같은 이유로 거부한다.
 
-`panel=[]`(모델 0개)는 길이-1 빈 그룹으로 desugar되어 `Invalid_panel_size(_,0)`으로 잡힌다. "그룹 0개"(Empty_panels)와 "모델 0개"(Invalid_panel_size)는 다른 조건이므로 다른 variant로 구분한다.
+`panel=[]`(모델 0개)는 길이-1 빈 그룹으로 desugar되어 `Empty_panel_models`로 잡힌다. "그룹 0개"(`Empty_panels`)와 "모델 0개"(`Empty_panel_models`)는 다른 조건이므로 다른 variant로 구분한다.
 
 ---
 

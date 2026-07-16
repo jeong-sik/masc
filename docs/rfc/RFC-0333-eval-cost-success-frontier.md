@@ -2,7 +2,7 @@
 
 - Status: Draft
 - Decision driver: Ilya-30-papers adversarial transfer census (2026-07-08), axis A2's surviving core after the scaling-law refutation: "`total_cost_usd` ↔ `pass_at_k` paired frontier join — 오늘 없는 join, stochasticity 추가 0." The Kaplan curve-fit proposal was refuted on power grounds (6-value quantized Bernoulli at n=5, SE≈0.22, <1 OOM of resource range — curve shape unidentifiable); what survives is a deterministic join over data the harness already records.
-- Area: `lib/eval_harness.ml:105,113-124` (`eval_run.total_cost_usd`, `eval_result` carrying both `pass_at_k` and `total_cost_usd` per scenario, `:321-337` aggregation), `:629-633` (summary print — pass/score/consistency only), `lib/fusion_policy.ml:86` (`max_panel = 8` — an OpenRouter API cap, not a measured optimum).
+- Area: `lib/eval_harness.ml:105,113-124` (`eval_run.total_cost_usd`, `eval_result` carrying both `pass_at_k` and `total_cost_usd` per scenario, `:321-337` aggregation), `:629-633` (summary print — pass/score/consistency only).
 - Refinement over the census (fresh-read 2026-07-09): the census said "success↔cost가 join 안 됨"; in fact both metrics already coexist **per scenario** in `eval_result`. The missing join is **across configurations** — nothing pairs the same scenario under different resource configs (model, panel size, retry budget) and computes dominance, and the human-facing summary does not surface cost at all.
 
 ## Problem (audited)
@@ -11,7 +11,7 @@ Resource choices (which model, what panel width, how many retries) are made with
 
 - Per run: `total_cost_usd : float option` (`eval_harness.ml:105`), missing costs propagate as `None` (`sum_costs`, `:309-311`) — the honest-unknown path already exists.
 - Per scenario: `pass_at_k` (`:334`) and summed `total_cost_usd` (`:337`) sit in the same record; the PASS/FAIL summary (`:629-633`) prints pass\@k, mean score, and consistency but not cost.
-- `fusion_policy.ml:86` pins `max_panel = 8` with a comment that it is the OpenRouter API cap — panel width has never been chosen by measurement.
+- Fusion accepts the supplied non-empty panel set without a product-owned width cap. Panel width remains useful as an explicit eval dimension, not an execution gate.
 
 The refuted alternative (fit `success = f(N, R, B)` curves) would have burned ~900 real API calls to produce "no recommendation" at the harness's statistical power. The frontier join asks a weaker, answerable question: **among the configs we actually ran, which are dominated** (worse-or-equal success at higher-or-equal cost)?
 
@@ -28,7 +28,7 @@ The refuted alternative (fit `success = f(N, R, B)` curves) would have burned ~9
 |---|---|---|
 | W1 | `frontier_row` / `dominance = On_frontier \| Dominated \| Insufficient_runs \| Unknown_cost` types + pure join fn + unit pins | dominance is a total function over any two results; None cost never ranks |
 | W2 | Summary surface: frontier table in the suite report (`:629` region) and JSON output | cost visible where pass/fail already prints |
-| W3 | Panel-width sweep harness config (2/4/8) so `max_panel` gets its first measured data point — still no auto-tuning; the number stays in code and a human moves it | one recorded comparison exists; `fusion_policy.ml:86` comment gains a data citation or stays honest about the cap |
+| W3 | Panel-width sweep harness configs (for example 2/4/8) as explicit experiment inputs | one recorded comparison exists; no runtime cap or auto-tuning is introduced |
 
 ## Verification
 
@@ -39,11 +39,11 @@ The refuted alternative (fit `success = f(N, R, B)` curves) would have burned ~9
 ## Boundaries (untouched)
 
 - `compute_pass_at_k` and CI math — unchanged.
-- `max_panel = 8` — not auto-tuned; W3 only produces the first measured comparison for a human decision.
+- Panel cardinality is not a runtime governance knob; W3 observes explicit experiment inputs only.
 - No new eval executions are triggered by the join itself; it consumes existing results.
 
 ## Evidence record
 
-- Evidence: `lib/eval_harness.ml:105,113-124,309-337,629-633`, `lib/fusion_policy.ml:86`, census artifact e1d4ba86 (axis A2, WEAKENED→surviving core), fresh-read re-verified 2026-07-09 at `63b5a69975` including the per-scenario-join refinement.
+- Evidence: `lib/eval_harness.ml:105,113-124,309-337,629-633`, census artifact e1d4ba86 (axis A2, WEAKENED→surviving core), fresh-read re-verified 2026-07-09 at `63b5a69975` including the per-scenario-join refinement.
 - Confidence: High (all cited lines re-read; the census claim was tightened, not weakened, by the re-read).
 - Delta: replaces the refuted Kaplan-style curve fit with a dominance partition over already-persisted data; the expensive A/B remains deferred.

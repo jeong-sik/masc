@@ -53,7 +53,6 @@ let preset_to_yojson (p : Fusion_policy.preset) : Yojson.Safe.t =
     ; ("judge_max_output_tokens", opt_int p.Fusion_policy.judge_max_output_tokens)
     ; ("meta_timeout_s", `Float p.Fusion_policy.meta_timeout_s)
     ; ("judges", `List (List.map judge_spec_to_yojson p.Fusion_policy.judges))
-    ; ("min_answered", `Int p.Fusion_policy.min_answered)
     ; ("judge_wave_budget_s", `Float p.Fusion_policy.judge_wave_budget_s)
     ; ( "adaptive_timeout_factor"
       , `Float p.Fusion_policy.adaptive_timeout_factor )

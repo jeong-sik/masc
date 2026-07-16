@@ -93,13 +93,15 @@ let test_context_max_fallback_uses_pure_runtime_budget () =
     src
     "Keeper_context_runtime.resolve_max_context_resolution_of_meta m";
   check_contains
-    "metrics zero context max falls back to runtime budget"
+    "context max is the typed runtime resolution budget"
     src
-    "if raw_context_max > 0 then raw_context_max else primary_max_context";
-  check_contains
-    "missing metrics ratio is recomputed from tokens and runtime budget"
-    src
-    "float_of_int context_tokens /. float_of_int context_max";
+    "let primary_max_context = max_context_resolution.effective_budget";
+  (* #24468 removed the raw-metrics fallback and ratio recompute outright:
+     the no-heuristic boundary means metrics never supply a context max. *)
+  check bool "raw metrics context max heuristic stays deleted" false
+    (contains ~needle:"raw_context_max" src);
+  check bool "metrics ratio recompute heuristic stays deleted" false
+    (contains ~needle:"float_of_int context_tokens /. float_of_int context_max" src);
   check bool "summary fallback does not hardcode zero context max" false
     (contains ~needle:"let primary_max_context = 0 in" src)
   ; check bool "dashboard read path avoids turn resolver side effects" false

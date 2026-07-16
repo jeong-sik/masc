@@ -97,14 +97,18 @@ let test_success_completion_transitions_owned_once () =
   Alcotest.(check int)
     "success completion transitions not emitted by caller" 0
     (count_substring unified "Keeper_turn_fsm.Completing");
+  (* #24332 deleted the completion-contract branch (Completing -> Failed)
+     along with the governance mechanism, so the success handler owns two
+     completion-state references (enter Completing, Completing -> Done)
+     and no Failed transition. *)
   Alcotest.(check int)
-    "success handler owns three completion-state references" 3
+    "success handler owns two completion-state references" 2
     (count_substring success "Keeper_turn_fsm.Completing");
   Alcotest.(check int)
     "success handler owns one done transition" 1
     (count_substring success "Keeper_turn_fsm.Done");
   Alcotest.(check int)
-    "success handler owns one typed failed transition" 1
+    "success handler owns no typed failed transition" 0
     (count_substring success "Keeper_turn_fsm.Failed")
 
 let () =

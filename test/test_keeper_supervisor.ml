@@ -582,13 +582,17 @@ let test_declarative_boot_allows_empty_goal_links () =
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
-  (match KR.load_or_materialize_boot_meta ctx name with
-   | Error err -> fail err
-   | Ok resolution ->
-     check bool "empty-goal keeper materialized" true resolution.materialized;
-     check (list string) "no active goal links" [] resolution.meta.active_goal_ids);
-  check bool "no boot failure recorded" true
-    (Option.is_none (KR.boot_meta_failure_for ~base_path:config.base_path ~name))
+  Fun.protect
+    ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
+    (fun () ->
+      (match KR.load_or_materialize_boot_meta ctx name with
+       | Error err -> fail err
+       | Ok resolution ->
+         check bool "empty-goal keeper materialized" true resolution.materialized;
+         check (list string) "no active goal links" [] resolution.meta.active_goal_ids);
+      check bool "no boot failure recorded" true
+        (Option.is_none
+           (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
 
 let test_declarative_boot_records_typed_invalid_config_failure () =
   with_config_dir @@ fun config_dir ->

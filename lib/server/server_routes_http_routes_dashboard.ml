@@ -379,6 +379,42 @@ let respond_runtime_config_reload state agent_name ~operation request reqd =
       ~status:(runtime_config_path_error_status msg)
       ~request reqd msg
 
+type gate_mode_recovery =
+  | Recovery_completed of Keeper_gate.operator_recovery_report
+  | Recovery_failed of string
+  | Recovery_not_requested
+
+let gate_mode_change_json change recovery =
+  let recovery_status, recovery_error, reopened, started, queued =
+    match recovery with
+    | Recovery_completed report ->
+      ( "completed"
+      , `Null
+      , List.length report.reopened_ids
+      , List.length report.started_ids
+      , report.queued )
+    | Recovery_failed detail -> "failed", `String detail, 0, 0, 0
+    | Recovery_not_requested -> "not_requested", `Null, 0, 0, 0
+  in
+  let `Assoc fields = Keeper_gate_mode.change_json change in
+  `Assoc
+    (("recovery_status", `String recovery_status)
+     :: ("recovery_error", recovery_error)
+     :: ("reopened", `Int reopened)
+     :: ("started", `Int started)
+     :: ("queued", `Int queued)
+     :: fields)
+;;
+
+module For_testing = struct
+  type nonrec gate_mode_recovery = gate_mode_recovery =
+    | Recovery_completed of Keeper_gate.operator_recovery_report
+    | Recovery_failed of string
+    | Recovery_not_requested
+
+  let gate_mode_change_json = gate_mode_change_json
+end
+
 let handle_gate_mode_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
@@ -442,35 +478,32 @@ let handle_gate_mode_body state operator_name request reqd body_str =
             let recovery =
               match mode with
               | Keeper_gate_mode.Auto_judge ->
-                Keeper_gate.request_operator_auto_judge_recovery
-                  ~base_path:config.base_path
+                (match
+                   Keeper_gate.request_operator_auto_judge_recovery
+                     ~base_path:config.base_path
+                 with
+                 | Ok report -> Recovery_completed report
+                 | Error detail ->
+                   Log.Dashboard.emit
+                     Log.Warn
+                     ~details:
+                       (`Assoc
+                          [ "event", `String "gate_mode_recovery_failed"
+                          ; "base_path", `String config.base_path
+                          ; "actor", `String operator_name
+                          ; "mode", `String (Keeper_gate_mode.to_string mode)
+                          ; "changed_at", `String change.changed_at
+                          ; "error", `String detail
+                          ])
+                     "Gate mode was saved, but Auto Judge recovery failed";
+                   Recovery_failed detail)
               | Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow ->
-                Ok
-                  { Keeper_gate.reopened_ids = []
-                  ; started_ids = []
-                  ; queued = 0
-                  }
+                Recovery_not_requested
             in
-            (match recovery with
-             | Error detail ->
-               respond_json_value_with_cors
-                 ~status:`Service_unavailable
-                 request
-                 reqd
-                 (operator_error_json
-                    ("Gate mode saved, but Auto Judge recovery failed: " ^ detail))
-             | Ok recovery ->
             respond_json_value_with_cors
               request
               reqd
-              (match Keeper_gate_mode.change_json change with
-               | `Assoc fields ->
-                 `Assoc
-                   (("reopened", `Int (List.length recovery.reopened_ids))
-                    :: ("started", `Int (List.length recovery.started_ids))
-                    :: ("queued", `Int recovery.queued)
-                    :: fields)
-               | other -> other)))))
+              (gate_mode_change_json change recovery))))
   with
   | Eio.Cancel.Cancelled _ as error -> raise error
   | Yojson.Json_error message ->

@@ -790,6 +790,62 @@ let test_dashboard_proof_route_registered_in_http_routers () =
   check bool "HTTP/2 dashboard proof route registered" true
     (contains_substring h2 "\"/api/v1/dashboard/proof\"")
 
+let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
+  let open Yojson.Safe.Util in
+  let change : Masc.Keeper_gate_mode.change =
+    { previous = Some Masc.Keeper_gate_mode.Manual
+    ; current = Masc.Keeper_gate_mode.Auto_judge
+    ; actor = "operator"
+    ; changed_at = "2026-07-16T00:00:00Z"
+    ; replaced_read_error = None
+    }
+  in
+  let json recovery =
+    Server_routes_http_routes_dashboard.For_testing.gate_mode_change_json
+      change
+      recovery
+  in
+  let completed =
+    json
+      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+         { Masc.Keeper_gate.reopened_ids = [ "approval-1"; "approval-2" ]
+         ; started_ids = [ "approval-1" ]
+         ; queued = 1
+         })
+  in
+  check string "completed status" "completed"
+    (completed |> member "recovery_status" |> to_string);
+  check bool "completed error is null" true
+    (completed |> member "recovery_error" = `Null);
+  check int "completed reopened" 2 (completed |> member "reopened" |> to_int);
+  check int "completed started" 1 (completed |> member "started" |> to_int);
+  check int "completed queued" 1 (completed |> member "queued" |> to_int);
+  let failed =
+    json
+      (Server_routes_http_routes_dashboard.For_testing.Recovery_failed
+         "judge worker unavailable")
+  in
+  check string "failed status" "failed"
+    (failed |> member "recovery_status" |> to_string);
+  check string "failed detail" "judge worker unavailable"
+    (failed |> member "recovery_error" |> to_string);
+  check int "failed reopened" 0 (failed |> member "reopened" |> to_int);
+  check int "failed started" 0 (failed |> member "started" |> to_int);
+  check int "failed queued" 0 (failed |> member "queued" |> to_int);
+  let not_requested =
+    json Server_routes_http_routes_dashboard.For_testing.Recovery_not_requested
+  in
+  check string "not requested status" "not_requested"
+    (not_requested |> member "recovery_status" |> to_string);
+  check bool "not requested error is null" true
+    (not_requested |> member "recovery_error" = `Null);
+  check int "not requested reopened" 0
+    (not_requested |> member "reopened" |> to_int);
+  check int "not requested started" 0
+    (not_requested |> member "started" |> to_int);
+  check int "not requested queued" 0
+    (not_requested |> member "queued" |> to_int)
+
 let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Fun.protect
@@ -1918,6 +1974,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_verification_index;
           test_case "proof route registered in HTTP routers" `Quick
             test_dashboard_proof_route_registered_in_http_routers;
+          test_case "Gate mode save reports recovery independently" `Quick
+            test_gate_mode_change_json_separates_saved_mode_from_recovery;
           test_case "IDE snapshot exposes legacy partition metadata" `Quick
             test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata;
           test_case "bootstrap omits eager goal tree" `Quick

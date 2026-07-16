@@ -669,6 +669,7 @@
 
 (test
  (name test_crypto_rng)
+ (modules test_crypto_rng)
  (libraries alcotest masc.crypto_rng))
 
 ; Request-authority admission uses Eio fiber-local bindings and therefore owns

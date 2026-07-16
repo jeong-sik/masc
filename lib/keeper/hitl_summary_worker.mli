@@ -4,10 +4,10 @@ type summary_provider = private
   ; provider_config : Llm_provider.Provider_config.t
   }
 
-val provider_config_for_summary : keeper_name:string -> summary_provider option
+val provider_config_for_summary : unit -> summary_provider option
 
-(** Verify that the registry-owned Gate judgment prompt is renderable. This is
-    the readiness floor for selecting the workspace Auto Judge mode. *)
+(** Verify that the registry-owned Gate judgment prompt is renderable and that
+    the exact [runtime].hitl_summary runtime is configured and loaded. *)
 val readiness : unit -> (unit, string) result
 
 (** Spawn an asynchronous HITL context-summary worker for [runtime_id].

@@ -2028,9 +2028,7 @@ let test_hitl_summary_runtime_routing () =
         (option string)
         "saved hitl_summary runtime id"
         (Some "local.summary")
-        (Runtime.hitl_summary_runtime_id ());
-      check string "resolved HITL summary runtime" "local.summary"
-        (Runtime.runtime_id_for_hitl_summary ()));
+        (Runtime.hitl_summary_runtime_id ()));
   with_temp_runtime_toml base (fun path ->
     match
       Runtime.set_runtime_hitl_summary

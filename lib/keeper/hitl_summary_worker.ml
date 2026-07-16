@@ -9,36 +9,34 @@ let system_prompt () =
   Prompt_registry.render_prompt_template Keeper_prompt_names.gate_judgment []
 ;;
 
-let readiness () = Result.map (fun (_ : string) -> ()) (system_prompt ())
-
 type summary_provider =
   { runtime_id : string
   ; provider_config : Llm_provider.Provider_config.t
   }
 
-let provider_config_for_summary ~keeper_name =
-  let resolve runtime_id =
-    Option.map
-      (fun runtime ->
-         { runtime_id; provider_config = runtime.Runtime.provider_config })
-      (Runtime.get_runtime_by_id runtime_id)
-  in
-  let keeper_runtime_id () =
-    match Runtime.runtime_id_for_keeper keeper_name with
-    | Some id when String.trim id <> "" -> id
-    | Some _ | None -> Keeper_config.default_runtime_id ()
-  in
-  let summary_runtime_id = Runtime.runtime_id_for_hitl_summary () in
-  match resolve summary_runtime_id with
-  | Some _ as config -> config
+let provider_config_for_summary () =
+  match Runtime.hitl_summary_runtime_id () with
+  | None -> None
+  | Some runtime_id ->
+    Runtime.get_runtime_by_id runtime_id
+    |> Option.map (fun runtime ->
+      { runtime_id; provider_config = runtime.Runtime.provider_config })
+;;
+
+let readiness () =
+  let ( let* ) = Result.bind in
+  let* (_ : string) = system_prompt () in
+  match Runtime.hitl_summary_runtime_id () with
   | None ->
-    let fallback_runtime_id = keeper_runtime_id () in
-    Log.Keeper.warn
-      ~keeper_name
-      "HITL judgment runtime=%s is unavailable; falling back to keeper runtime=%s"
-      summary_runtime_id
-      fallback_runtime_id;
-    resolve fallback_runtime_id
+    Error "Auto Judge requires an explicit [runtime].hitl_summary runtime"
+  | Some runtime_id ->
+    (match Runtime.get_runtime_by_id runtime_id with
+     | Some _ -> Ok ()
+     | None ->
+       Error
+         (Printf.sprintf
+            "Auto Judge [runtime].hitl_summary=%s is not loaded"
+            runtime_id))
 ;;
 
 (* ── Metrics ────────────────────────────────────── *)

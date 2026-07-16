@@ -405,6 +405,19 @@ let handle_gate_mode_body state operator_name request reqd body_str =
            (operator_error_json message)
        | Ok mode ->
          let config = Mcp_server.workspace_config state in
+         let readiness =
+           match mode with
+           | Keeper_gate_mode.Auto_judge -> Hitl_summary_worker.readiness ()
+           | Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow -> Ok ()
+         in
+         (match readiness with
+          | Error detail ->
+            respond_json_value_with_cors
+              ~status:`Service_unavailable
+              request
+              reqd
+              (operator_error_json ("Auto Judge unavailable: " ^ detail))
+          | Ok () ->
          (match Keeper_gate_mode.set config ~actor:operator_name mode with
           | Error message ->
             respond_json_value_with_cors
@@ -426,10 +439,38 @@ let handle_gate_mode_body state operator_name request reqd body_str =
                  ; "actor", `String operator_name
                  ; "changed_at", `String change.changed_at
                  ]);
+            let recovery =
+              match mode with
+              | Keeper_gate_mode.Auto_judge ->
+                Keeper_gate.request_operator_auto_judge_recovery
+                  ~base_path:config.base_path
+              | Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow ->
+                Ok
+                  { Keeper_gate.reopened_ids = []
+                  ; started_ids = []
+                  ; queued = 0
+                  }
+            in
+            (match recovery with
+             | Error detail ->
+               respond_json_value_with_cors
+                 ~status:`Service_unavailable
+                 request
+                 reqd
+                 (operator_error_json
+                    ("Gate mode saved, but Auto Judge recovery failed: " ^ detail))
+             | Ok recovery ->
             respond_json_value_with_cors
               request
               reqd
-              (Keeper_gate_mode.change_json change)))
+              (match Keeper_gate_mode.change_json change with
+               | `Assoc fields ->
+                 `Assoc
+                   (("reopened", `Int (List.length recovery.reopened_ids))
+                    :: ("started", `Int (List.length recovery.started_ids))
+                    :: ("queued", `Int recovery.queued)
+                    :: fields)
+               | other -> other)))))
   with
   | Eio.Cancel.Cancelled _ as error -> raise error
   | Yojson.Json_error message ->

@@ -466,8 +466,8 @@ function ApAside({
           <div class="wka-auto-note">
             Human은 사람이 판단하고, Auto Judge는 LLM이 판단하며, Always Allow는 workspace의 명시적 선택입니다.
           </div>
-          ${gateMode?.state === 'invalid' || gateMode?.read_error
-            ? html`<div class="ap-env-warn mono">Gate mode invalid: ${gateMode.read_error ?? '상태 파싱 실패'}</div>`
+          ${gateMode?.state === 'invalid' || gateMode?.state === 'unavailable' || gateMode?.read_error
+            ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state ?? 'invalid'}: ${gateMode.read_error ?? '상태 확인 실패'}</div>`
             : null}
         </div>
       </section>

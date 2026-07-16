@@ -9,6 +9,8 @@ let system_prompt () =
   Prompt_registry.render_prompt_template Keeper_prompt_names.gate_judgment []
 ;;
 
+let readiness () = Result.map (fun (_ : string) -> ()) (system_prompt ())
+
 type summary_provider =
   { runtime_id : string
   ; provider_config : Llm_provider.Provider_config.t
@@ -37,6 +39,25 @@ let provider_config_for_summary ~keeper_name =
       summary_runtime_id
       fallback_runtime_id;
     resolve fallback_runtime_id
+;;
+
+let effective_max_concurrency ~configured ~runtime_limit =
+  match runtime_limit with
+  | Some limit -> Int.min configured limit
+  | None -> configured
+;;
+
+let max_concurrency () =
+  let configured = Keeper_config.hitl_summary_max_concurrency () in
+  let runtime_limit =
+    match Runtime.hitl_summary_runtime_id () with
+    | Some runtime_id ->
+      (match Runtime.get_runtime_by_id runtime_id with
+       | Some runtime -> runtime.Runtime.binding.max_concurrent
+       | None -> None)
+    | None -> None
+  in
+  effective_max_concurrency ~configured ~runtime_limit
 ;;
 
 (* ── Metrics ────────────────────────────────────── *)
@@ -225,7 +246,7 @@ let build_context_bundle ~(entry : pending_approval) : Yojson.Safe.t =
     ; "input", entry.input
     ; ( "request_context"
       , match entry.request_context with
-        | Some context -> context
+        | Some context -> Keeper_gate_request_context.project context
         | None -> `Null )
     ; "task", task_json
     ; "goals", goals_json
@@ -271,6 +292,16 @@ let summary_llm_error_outcomes ~mode error =
     | _ -> "provider_error"
   in
   plain_mode_degradation_outcomes mode @ [ terminal ]
+;;
+
+let summary_llm_error_retryable error =
+  error
+  |> Agent_sdk.Error_domain.of_sdk_error
+  |> Agent_sdk.Error_domain.is_retryable
+;;
+
+let sdk_error_of_http_error error =
+  Agent_sdk.Provider_failure_attribution.sdk_error_of_http_error error
 ;;
 
 (** Appended on the [Plain_json_text] path so a model without native structured
@@ -334,8 +365,7 @@ let call_summary_llm ~sw ~net ~runtime_id ~provider_config ~context_bundle () =
   | Ok messages ->
     (match
        Keeper_provider_subcall.complete ~sw ~net ~config ~messages ()
-       |> Result.map_error (fun http_err ->
-            Agent_sdk.Error.Internal (Provider_http_error.to_message http_err))
+       |> Result.map_error sdk_error_of_http_error
      with
      | Ok response -> Ok (response, mode)
      | Error error -> Error (Llm_call_error { mode; error }))
@@ -455,7 +485,9 @@ let spawn
                List.iter
                  record_outcome
                  (summary_llm_error_outcomes ~mode error);
-               on_failure ~reason:(Agent_sdk.Error.to_string error) ~retryable:true)
+               on_failure
+                 ~reason:(Agent_sdk.Error.to_string error)
+                 ~retryable:(summary_llm_error_retryable error))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -478,6 +510,9 @@ module For_testing = struct
   let provider_config_for_summary = prepare_provider_config
   let extract_json_object = extract_json_object
   let summary_llm_error_outcomes = summary_llm_error_outcomes
+  let summary_llm_error_retryable = summary_llm_error_retryable
+  let sdk_error_of_http_error = sdk_error_of_http_error
+  let effective_max_concurrency = effective_max_concurrency
   let system_prompt = system_prompt
   let summary_version = summary_version
 end

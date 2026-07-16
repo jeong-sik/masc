@@ -1,12 +1,11 @@
 ---
 status: reference
-last_verified: 2026-05-14
+last_verified: 2026-07-17
 code_refs:
-  - lib/masc_oas_bridge.ml
   - lib/worker_oas.ml
-  - lib/verifier_oas.ml
-  - lib/keeper/keeper_context_core.ml
-  - lib/keeper/keeper_memory_policy.ml
+  - lib/keeper/keeper_compact_policy.ml
+  - lib/keeper/keeper_manual_compaction.ml
+  - lib/keeper/keeper_context_runtime.ml
 ---
 
 # OAS-MASC Boundary Contract
@@ -21,7 +20,8 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 
 ## 문서 역할 (SSOT)
 
-- 이 문서는 **boundary contract SSOT**다.
+- Keeper 실행의 규범 계약은
+  `docs/KEEPER-FULL-FEATURE-GOAL.md`다. 이 문서는 경계 요약이다.
 - `docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
 - `docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
 - `docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
@@ -34,8 +34,8 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 | 단일 에이전트 실행 | `Agent.run`, `Builder`, `Hooks`, `Guardrails`, `Checkpoint` | 언제/왜/어떤 agent를 돌릴지 결정 |
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | workspace, board, workflow, policies, operator surfaces |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, tool dispatch, auth/join/policy semantics |
-| 컨텍스트 축약 | `Context_reducer` | 어떤 전략을 언제 적용할지 결정 |
-| ContextOverflow retry | overflow detection, structured error, standalone/keeper compact retry | 최종 overflow 결과를 keeper state, receipt, operator surfaces에 attribution |
+| 컨텍스트 축약 | reducer/automatic truncation 없음; typed capacity/overflow 보고 | durable Keeper compaction, source CAS, reinjection |
+| ContextOverflow | provider capacity와 typed overflow 결과 | owner lane에 compaction/reconciliation 작업을 기록하고 continuation 결정 |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
 | 장기 메모리 | 없음 | keeper memory bank, institution episodes, procedural memory, workspace/task/social semantics |
 | 조율 상태 | 없음 | workspace, tasks, board, Gate/HITL, social runtime |
@@ -77,8 +77,8 @@ OAS  ──does not know──→ MASC
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Context compaction | Partial complete | `context_compact_oas.ml`는 OAS `Context_reducer`를 사용한다. MASC 전체 context system이 OAS `Context.t`로 통합된 것은 아니다. |
-| ContextOverflow retry ownership | Complete for keeper hot path | Keeper dispatch keeps `auto_context_overflow_retry=true`, so OAS owns transcript mutation, emergency compaction, and retry. If OAS still returns structured `ContextOverflow`, MASC records the typed blocker and terminal receipt without compacting checkpoints or re-dispatching the agent turn. |
+| Context compaction | MASC-owned, durable cut incomplete | Current MASC has explicit Manual/provider-overflow compaction paths; durable owner-operation, exact source CAS, and reinjection proof remain completion gates. |
+| ContextOverflow ownership | Boundary aligned | OAS reports typed capacity/overflow. MASC owns checkpoint mutation, compaction, retry/requeue choice, and Keeper continuation. |
 | Event bus bridge | Complete for current native/custom flow | `oas_event_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
@@ -92,7 +92,7 @@ OAS  ──does not know──→ MASC
 | Module / Surface | Classification | Why |
 |------------------|----------------|-----|
 | `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
-| `lib/context_compact_oas.ml` | Adapter | Runtime compaction delegates to OAS. MASC-owned typed anchors may influence retention, but raw assistant text is not a domain-state channel. |
+| `lib/keeper/keeper_compact_policy.ml`, `keeper_manual_compaction.ml` | MASC product owner | Configured LLM planning and checkpoint mutation stay in MASC; OAS supplies only generic model/runtime execution. |
 | `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Correct boundary | Keeper recovery reads canonical OAS checkpoints. MASC does not parse assistant replies into continuity state; owner-specific typed adapter metadata remains separate from the transcript. |
 
 ## Open Structural Gaps

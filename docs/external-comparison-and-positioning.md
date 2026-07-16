@@ -49,7 +49,7 @@
 
 ## References
 
-- `docs/keeper-turn-lifecycle.md` — turn-level execution model
+- `docs/spec/04-turn-lifecycle.md` — current turn-level execution contract
 - `lib/keeper/keeper_turn_fsm.mli` — typed FSM states
 - `lib/keeper/keeper_runtime_engine.mli` — runtime routing boundary
 - OAS analysis 2026-05-21 §8 — external comparison checklist origin

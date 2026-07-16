@@ -1,10 +1,12 @@
 ---
 status: reference
-last_verified: 2026-05-15
+last_verified: 2026-07-17
 code_refs:
+  - lib/worker_oas.ml
   - lib/verifier_oas.ml
   - lib/keeper/keeper_agent_error.ml
-  - lib/worker_oas.ml
+  - lib/keeper/keeper_compact_policy.ml
+  - lib/keeper/keeper_manual_compaction.ml
 ---
 
 # OAS Integration
@@ -13,7 +15,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | OAS Bridge |
-| Maps to | `lib/oas_*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml`, `lib/runtime_inference.ml`, `lib/context_compact_oas.ml` |
+| Maps to | `lib/oas_*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml`, `lib/runtime_inference.ml`, `lib/keeper/keeper_compact_policy.ml` |
 | Dependencies | 02-types-and-invariants |
 | OAS Version | `agent_sdk` library (OCaml, in-tree dependency) |
 
@@ -330,7 +332,9 @@ val usage_or_zero : api_response -> Agent_sdk.Types.api_usage
 
 ### 7.3 Type Compatibility
 
-MASC와 OAS는 `Agent_sdk.Types.message` 타입을 공유한다. 4개 역할(System, User, Assistant, Tool)과 ToolUse/ToolResult content block이 동일하므로, message 변환이 불필요하다. `context_compact_oas.ml` 주석에서 명시하듯 별도 role conversion이나 extra tagging은 필요하지 않다.
+MASC와 OAS는 `Agent_sdk.Types.message` 타입을 공유한다. 4개 역할(System,
+User, Assistant, Tool)과 ToolUse/ToolResult content block이 동일하므로,
+provider-specific role conversion이나 extra tagging은 필요하지 않다.
 
 ---
 
@@ -448,7 +452,7 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | 영역 | 상태 | 설명 |
 |------|------|------|
 | Agent 실행 | Complete | `oas_worker.ml`이 모든 MODEL 호출을 Agent.run으로 라우팅 |
-| Context compaction | Complete | Keeper compaction is MASC-owned; OAS receives exact messages without an implicit reducer |
+| Context compaction | Partial | Keeper compaction is MASC-owned and OAS receives exact messages without an implicit reducer; durable owner operation, source CAS, and reinjection proof remain |
 | Event_bus bridge | Complete | OAS native/custom events are relayed to SSE and persisted under `.masc/oas-events/` |
 | Dashboard OAS runtime health | Complete | dashboard health uses `durable replay + live tail`, not live-only counters |
 | Dashboard runtime counts | Complete | dashboard `counts` carries active runtimes and `configured_keepers` carries inventory |
@@ -482,7 +486,7 @@ Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
 |------|-------|-----------------|-----------------|
 | A | truth surface cleanup | `keeper_checkpoint_store`, `keeper_agent_run`, `keeper_post_turn` | native OAS checkpoint is documented and treated as runtime truth |
 | B | replay semantics + checkpoint boundary | `keeper_agent_run`, `keeper_post_turn`, `agent_tool_command_runtime`, `retired_file_write_tool` | typed replay target facts and checkpoint rules |
-| C | wrapper reduction | `keeper_context_runtime`, `keeper_agent_run`, `keeper_post_turn`, `context_compact_oas` | `working_context` dependency inventory and marker-leakage backlog |
+| C | wrapper reduction | `keeper_context_runtime`, `keeper_agent_run`, `keeper_post_turn`, `keeper_compact_policy` | `working_context` dependency inventory and exact checkpoint/reinjection backlog |
 | D | optional delta path | `keeper_checkpoint_store`, `delta-checkpoint-read-path` | delta restore remains subordinate to full checkpoint truth |
 
 ### 12.1.2 Active Tasks
@@ -502,8 +506,8 @@ Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 | Surface | Classification | Notes |
 |---------|----------------|-------|
 | `oas_worker` / `worker_oas` / `verifier_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about workspace/task semantics |
-| `context_compact_oas` | Acceptable but lossy | OAS reducer is authoritative, but MASC marker heuristics still influence scoring |
-| keeper context/checkpoint continuity path | Boundary violation | duplicate runtime ownership + raw text continuity markers remain |
+| `keeper_compact_policy` / `keeper_manual_compaction` | Correct owner, incomplete durability | MASC owns configured-LLM planning and checkpoint mutation; durable owner operation, source CAS, and reinjection proof remain |
+| keeper context/checkpoint continuity path | Open | exact checkpoint identity, durable operation references, and restart reconciliation remain incomplete |
 
 ### 12.3 Priority Order
 
@@ -516,7 +520,9 @@ Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 ## 13. Invariants
 
 1. **의존 방향은 단방향이다**: MASC -> OAS. OAS 코드에 MASC import가 존재하면 설계 위반이다.
-2. **MASC는 OAS Agent.run을 사용한다**: 에이전트 생명주기를 자체 재구현하지 않는다. `Runtime.call` 직접 사용은 금지.
+2. **MASC는 finite OAS Agent.run을 조합한다**: OAS run lifecycle을
+   복제하지 않는다. Keeper lifecycle과 durable product continuation은
+   MASC가 소유한다.
 3. **Message 타입은 공유한다**: `Agent_sdk.Types.message`가 MASC와 OAS 모두의 메시지 타입이다. 변환 레이어 없음.
 4. **Runtime name이 model을 추상화한다**: MASC policy code에 구체적 provider/model 이름이 하드코딩되지 않는다. runtime_id -> runtime.toml runtime config -> Provider_registry 체인.
 5. **Event_bus prefix는 `masc:`이다**: MASC 이벤트는 반드시 이 prefix를 사용한다. SSE bridge가 이 prefix로 필터링한다.

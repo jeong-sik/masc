@@ -20,7 +20,7 @@ opam install . --deps-only
 scripts/dune-local.sh build @default
 
 # 5. Run a focused test while developing
-scripts/dune-local.sh exec test/test_config_runtime_split.exe
+scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
 
 # 6. Start server (HTTP mode)
 ./start-masc.sh --http
@@ -80,7 +80,7 @@ test/                         # Alcotest suites + fixtures
 
 ```bash
 # Run a focused test through the repo wrapper
-scripts/dune-local.sh exec test/test_config_runtime_split.exe
+scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
 
 # Run specific test
 scripts/dune-local.sh exec test/<test-name>.exe

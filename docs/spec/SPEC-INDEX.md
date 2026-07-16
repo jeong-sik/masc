@@ -141,4 +141,3 @@ graph TB
 | `docs/SPEC.md` | Historical snapshot. 이 suite로 대체. |
 | `docs/MERGED-ARCHITECTURE-SSOT.md` | Layer map과 canonical paths는 `01-system-overview.md`로 이관. |
 | `docs/GLOSSARY.md` | `00-glossary.md`로 통합. |
-| `docs/keeper-turn-lifecycle.md` | `04-turn-lifecycle.md`로 이관. 기존 문서는 historical diagram/tooling notes로 유지. |

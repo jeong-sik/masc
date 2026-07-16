@@ -44,8 +44,7 @@ type failure_reason =
       backtrace : string option;
     }
 
-(** Turn FSM states.  Mirrors the lanes in
-    [docs/keeper-turn-lifecycle.md]. *)
+(** Turn FSM states.  See [docs/spec/04-turn-lifecycle.md]. *)
 type _ turn_state =
   | Idle : [`Idle] turn_state [@tla.idle]
   | Phase_gating : [`Phase_gating] turn_state [@tla.active]

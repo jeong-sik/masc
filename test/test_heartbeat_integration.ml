@@ -3206,7 +3206,7 @@ let test_crashed_cycle_records_health_failure () =
       (Failure (Printf.sprintf "boom-%d" i))
   done;
   let summary = Health.get_summary ~agent_name:keeper_name in
-  check int "crashed cycles are observed" 3 summary.recent_failures
+  check int "crashed cycles are observed" 3 summary.failure_count
 
 (* ── Test runner ──────────────────────────────────────────── *)
 

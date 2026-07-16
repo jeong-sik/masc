@@ -1,4 +1,6 @@
 module Operation = Keeper_compaction_operation
+module Projection = Keeper_compaction_operation_projection
+module Record = Keeper_operation_record
 module Store = Keeper_compaction_operation_store
 let ok = function Ok value -> value | Error _ -> Alcotest.fail "fixture failed"
 let keeper_name = ok (Keeper_id.Keeper_name.of_string "store-keeper")
@@ -42,6 +44,38 @@ let append base time event =
   match Store.append ~base_path:base ~keeper_name ~recorded_at:time event with
   | Ok row -> row
   | Error _ -> Alcotest.fail "valid append failed"
+;;
+let cursor value = ok (Record.Cursor.of_int value)
+let row start_cursor end_cursor recorded_at event : Record.row =
+  { recorded_at
+  ; start_cursor = cursor start_cursor
+  ; end_cursor = cursor end_cursor
+  ; event = Keeper_operation_event.Compaction event
+  }
+;;
+let test_incremental_projection_matches_replay () =
+  let rows =
+    [ row 0 10 1.0 (request op2)
+    ; row 10 20 2.0 (request op1)
+    ; row 20 30 3.0 (Operation.attempt_started ~operation_id:op2 ~attempt_id:attempt)
+    ]
+  in
+  let replayed = ok (Projection.replay ~keeper_name rows) in
+  let incremented =
+    List.fold_left
+      (fun state entry -> ok (Projection.apply state entry))
+      (Projection.empty ~keeper_name)
+      rows
+  in
+  Alcotest.(check bool) "same ordered entries" true
+    (Projection.operations replayed = Projection.operations incremented);
+  Alcotest.(check int) "same end cursor" 30
+    (Record.Cursor.to_int (Projection.end_cursor incremented));
+  match Projection.apply incremented (List.hd rows) with
+  | Error (Projection.Cursor_mismatch { expected; actual }) ->
+    Alcotest.(check int) "expected current end" 30 (Record.Cursor.to_int expected);
+    Alcotest.(check int) "stale row start" 0 (Record.Cursor.to_int actual)
+  | _ -> Alcotest.fail "stale row was not rejected explicitly"
 ;;
 let test_append_replay_and_slice () =
   with_base @@ fun base ->
@@ -152,7 +186,11 @@ let test_malformed_history_fails_loud () =
 let () =
   Alcotest.run "keeper compaction operation store"
     [ "journal",
-      [ Alcotest.test_case "append replay slice" `Quick test_append_replay_and_slice
+      [ Alcotest.test_case
+          "pure incremental replay"
+          `Quick
+          test_incremental_projection_matches_replay
+      ; Alcotest.test_case "append replay slice" `Quick test_append_replay_and_slice
       ; Alcotest.test_case "rejections no write" `Quick test_rejections_do_not_write
       ; Alcotest.test_case
           "provider binding includes exact source"

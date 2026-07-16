@@ -1,0 +1,11 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_compaction_operation_projection)
+ (public_name masc.keeper_compaction_operation_projection)
+ (wrapped false)
+ (modules keeper_compaction_operation_projection)
+ (libraries
+  masc.keeper_compaction_operation
+  masc.keeper_operation
+  masc.keeper_registry))

@@ -13,6 +13,7 @@
   masc.keeper_checkpoint_ref
   masc.keeper_compaction_evidence
   masc.keeper_compaction_operation
+  masc.keeper_compaction_operation_projection
   masc.keeper_operation
   masc.keeper_registry
   masc.masc_core))

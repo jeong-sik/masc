@@ -3884,6 +3884,7 @@ module For_testing = struct
     Atomic.set inventory_classified_observer_for_testing observer
 
   let failure_kind_of_string = failure_kind_of_string
+  let finalize_statement = sqlite_finalize
   let snapshot_path = snapshot_path
 
   let receipt_json ~base_path ~keeper_name ~receipt_id =

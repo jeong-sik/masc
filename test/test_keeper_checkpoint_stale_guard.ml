@@ -81,6 +81,12 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     working_context = None;
   }
 
+let with_generation generation (checkpoint : Agent_sdk.Checkpoint.t) =
+  let context = Agent_sdk.Context.copy ~eio:false checkpoint.context in
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "keeper_generation" (`Int generation);
+  { checkpoint with context }
+
 let save_ok ~session_dir ckpt label =
   match Keeper_checkpoint_store.save_oas_classified ~session_dir ckpt with
   | Ok _ -> ()
@@ -446,6 +452,69 @@ let test_ready_runtime_raw_domain_save () =
   | Error _ -> fail "raw-domain checkpoint did not round-trip"
   | Ok checkpoint -> check int "raw-domain turn persisted" 11 checkpoint.turn_count
 
+let test_exact_source_cas_allows_one_equal_turn_writer () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "sess-exact-cas" in
+    save_ok ~session_dir
+      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source"
+       |> with_generation 3)
+      "CAS seed save";
+    let source_ref =
+      match
+        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+      with
+      | Ok (_, reference) -> reference
+      | Error _ -> fail "CAS source load failed"
+    in
+    let writer marker =
+      Keeper_checkpoint_store.save_oas_if_source
+        ~session_dir
+        ~expected_source_ref:source_ref
+        (make_checkpoint ~session_id ~turn_count:8 ~marker
+         |> with_generation 3)
+    in
+    let left = Domain.spawn (fun () -> "left", writer "left") in
+    let right = Domain.spawn (fun () -> "right", writer "right") in
+    let committed, changed =
+      [ Domain.join left; Domain.join right ]
+      |> List.fold_left
+           (fun (committed, changed) (marker, outcome) ->
+             match outcome with
+             | Ok reference -> (marker, reference) :: committed, changed
+             | Error (Keeper_checkpoint_store.Source_changed _) ->
+               committed, changed + 1
+             | Error _ -> fail "CAS writer returned an unexpected error")
+           ([], 0)
+    in
+    check int "exactly one writer commits" 1 (List.length committed);
+    check int "the competing source is rejected" 1 changed;
+    match committed,
+      Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+    with
+    | [ (winner, committed_ref) ], Ok (checkpoint, disk_ref) ->
+      check bool "committed ref identifies installed canonical bytes" true
+        (Keeper_checkpoint_ref.equal committed_ref disk_ref);
+      check bool "installed payload belongs to the winning writer" true
+        (List.exists
+           (fun (message : Agent_sdk.Types.message) ->
+             String.equal (Agent_sdk.Types.text_of_message message) winner)
+           checkpoint.messages)
+    | _ -> fail "CAS winner did not round-trip")
+
+let test_checkpoint_ref_requires_generation () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "sess-ref-generation" in
+    save_ok ~session_dir
+      (make_checkpoint ~session_id ~turn_count:1 ~marker:"legacy")
+      "generation-less seed";
+    match Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id with
+    | Error
+        (Keeper_checkpoint_store.Ref_identity_invalid
+           Keeper_checkpoint_store.Generation_missing) -> ()
+    | _ -> fail "generation-less checkpoint acquired an exact ref")
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -471,5 +540,9 @@ let () =
             test_fingerprint_mismatch_recovers_externally_written_canonical;
           test_case "canonical checkpoint is written compact and round-trips" `Quick
             test_canonical_checkpoint_is_written_compact;
+          test_case "exact source CAS permits one equal-turn writer" `Quick
+            test_exact_source_cas_allows_one_equal_turn_writer;
+          test_case "checkpoint refs require keeper generation" `Quick
+            test_checkpoint_ref_requires_generation;
         ] );
     ]

@@ -127,6 +127,75 @@ val load_oas :
   session_id:string ->
   (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
 
+type checkpoint_identity_error =
+  | Session_id_invalid of string
+  | Generation_missing
+  | Generation_not_integer
+  | Ref_create_failed of Keeper_checkpoint_ref.create_error
+
+type checkpoint_ref_load_error =
+  | Ref_not_found
+  | Ref_read_failed of checkpoint_load_error
+  | Ref_identity_invalid of checkpoint_identity_error
+  | Ref_session_mismatch of
+      { expected : Keeper_id.Trace_id.t
+      ; actual : Keeper_id.Trace_id.t
+      }
+  | Ref_lock_failed of string
+
+(** Load one canonical checkpoint and its exact source identity from the same
+    locked byte snapshot. No size, mtime, timestamp, or process cache
+    participates in the identity. *)
+val load_oas_with_ref :
+  session_dir:string ->
+  session_id:string ->
+  ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_ref.t
+  , checkpoint_ref_load_error )
+  result
+
+type checkpoint_cas_error =
+  | Source_unavailable of checkpoint_ref_load_error
+  | Source_changed of Keeper_checkpoint_ref.t
+  | Candidate_identity_invalid of checkpoint_identity_error
+  | Candidate_session_mismatch of
+      { expected : Keeper_id.Trace_id.t
+      ; candidate : Keeper_id.Trace_id.t
+      }
+  | Candidate_generation_mismatch of
+      { expected : int
+      ; candidate : int
+      }
+  | Candidate_turn_regressed of
+      { source_turn : int
+      ; candidate_turn : int
+      }
+  | Commit_not_installed of Keeper_fs.durable_write_error
+  | Commit_durability_unknown of
+      { installed_ref : Keeper_checkpoint_ref.t
+      ; error : Keeper_fs.durable_write_error
+      }
+  | Transaction_outcome_unknown of
+      { possible_installed_ref : Keeper_checkpoint_ref.t
+      ; error : File_lock_eio.durable_lock_error
+      }
+
+(** Conditionally publish [candidate] only when the canonical bytes still
+    have exactly [expected_source_ref]. The stable session lock is reacquired,
+    current bytes are re-read and hashed, and an equal-turn checkpoint with
+    different content is rejected as [Source_changed]. On success the returned
+    ref is derived from the exact compact bytes passed to the durable atomic
+    JSON writer. A writer error after atomic rename is
+    [Commit_durability_unknown], never a retryable not-installed failure. This
+    same rule applies when releasing the stable lock fails after the body:
+    [Transaction_outcome_unknown] requires reconciliation rather than retry. The
+    payload-store commit is not an operation terminal fact; the Keeper operation
+    journal owns that authority. *)
+val save_oas_if_source :
+  session_dir:string ->
+  expected_source_ref:Keeper_checkpoint_ref.t ->
+  Agent_sdk.Checkpoint.t ->
+  (Keeper_checkpoint_ref.t, checkpoint_cas_error) result
+
 module For_testing : sig
   (** Number of times the checkpoint watermark resolution has fallen back to
       a full canonical-file parse (sidecar absent, corrupt, or fingerprint

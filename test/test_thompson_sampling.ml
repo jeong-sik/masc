@@ -3,12 +3,6 @@
 open Alcotest
 open Masc
 
-(* Production health predicate, injected into [select_with_feedback] after the
-   masc_thompson leaf carve inverted the direct [Health.is_healthy] edge.
-   Wiring the *real* predicate here keeps the health-gate tests below exercising
-   identical behavior — the inversion changed plumbing, not the algorithm. *)
-let is_healthy = Health.is_healthy
-
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -151,7 +145,6 @@ let test_vote_updates_alpha_beta () =
 
 let test_select_empty_agents () =
   let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
     ~agents:[]
     ~max_n:3
     ~pending_triggers:[]
@@ -164,7 +157,6 @@ let test_select_respects_max_n () =
   let agents = ["agent-a"; "agent-b"; "agent-c"; "agent-d"; "agent-e"] in
   List.iter Thompson_sampling.init_agent agents;
   let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
     ~agents
     ~max_n:2
     ~pending_triggers:[]
@@ -180,7 +172,6 @@ let test_select_mentioned_priority () =
     ("agent-y", Thompson_sampling.Mentioned "test mention")
   ] in
   let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
     ~agents
     ~max_n:2
     ~pending_triggers:triggers
@@ -200,7 +191,6 @@ let test_select_content_alert_priority () =
     ("agent-r", Thompson_sampling.ContentAlert "urgent content")
   ] in
   let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
     ~agents
     ~max_n:2
     ~pending_triggers:triggers
@@ -218,7 +208,6 @@ let test_stronger_trigger_replaces_weaker_duplicate () =
     ("agent-dupe", Thompson_sampling.Mentioned "mention");
   ] in
   let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
     ~agents
     ~max_n:1
     ~pending_triggers:triggers
@@ -241,7 +230,6 @@ let test_stronger_trigger_uses_winner_order () =
     ("agent-a", Thompson_sampling.Mentioned "mention-a");
   ] in
   let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
     ~agents
     ~max_n:2
     ~pending_triggers:triggers
@@ -254,8 +242,6 @@ let test_stronger_trigger_uses_winner_order () =
 (** {1 Quality Signal Tests (Phase 3)} *)
 
 module Pv = Thompson_sampling
-module Ah = Masc.Health
-
 let float_eq ?(eps = 0.001) a b = Float.abs (a -. b) < eps
 
 (* Reset agent stats for test isolation *)
@@ -316,60 +302,6 @@ let test_quality_cumulative () =
   Thompson_sampling.record_quality_signal ~agent_name:"qs-cumul" ~verdict:Pv.Pass;
   check bool "3x Pass → alpha ~1.9" true (float_eq s.alpha 1.9);
   check bool "beta unchanged" true (float_eq s.beta 1.0)
-
-(** {1 Health Gate Tests (Phase 3)} *)
-
-let test_unhealthy_excluded_from_thompson () =
-  let _ = fresh_agent "hg-healthy" in
-  let _ = fresh_agent "hg-sick" in
-  for _ = 1 to 10 do
-    Ah.record_failure ~agent_name:"hg-sick" ~reason:"test_fail"
-  done;
-  let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
-    ~agents:["hg-healthy"; "hg-sick"]
-    ~max_n:2
-    ~pending_triggers:[]
-    ~tick_interval_s:60.0
-    ()
-  in
-  let has_sick = List.exists (fun r ->
-    r.Thompson_sampling.agent_name = "hg-sick") results in
-  check bool "unhealthy excluded" false has_sick
-
-let test_mentioned_bypasses_health () =
-  let _ = fresh_agent "hg-mentioned" in
-  for _ = 1 to 10 do
-    Ah.record_failure ~agent_name:"hg-mentioned" ~reason:"test_fail"
-  done;
-  let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
-    ~agents:["hg-mentioned"]
-    ~max_n:1
-    ~pending_triggers:[("hg-mentioned", Thompson_sampling.Mentioned "by-test")]
-    ~tick_interval_s:60.0
-    ()
-  in
-  let selected = List.exists (fun r ->
-    r.Thompson_sampling.agent_name = "hg-mentioned") results in
-  check bool "mentioned bypasses health gate" true selected
-
-let test_content_alert_respects_health () =
-  let _ = fresh_agent "hg-alert" in
-  for _ = 1 to 10 do
-    Ah.record_failure ~agent_name:"hg-alert" ~reason:"test_fail"
-  done;
-  let results = Thompson_sampling.select_with_feedback
-    ~is_healthy
-    ~agents:["hg-alert"]
-    ~max_n:1
-    ~pending_triggers:[("hg-alert", Thompson_sampling.ContentAlert "needs-attention")]
-    ~tick_interval_s:60.0
-    ()
-  in
-  let selected = List.exists (fun r ->
-    r.Thompson_sampling.agent_name = "hg-alert") results in
-  check bool "content alert respects health gate" false selected
 
 (** {1 Selection Entropy Tests} *)
 
@@ -586,11 +518,6 @@ let () =
       test_case "fail penalizes beta" `Quick test_quality_fail_penalizes_beta;
       test_case "signal floor" `Quick test_quality_signal_floor;
       test_case "cumulative signals" `Quick test_quality_cumulative;
-    ];
-    "health_gate", [
-      test_case "unhealthy excluded" `Quick test_unhealthy_excluded_from_thompson;
-      test_case "mentioned bypasses health" `Quick test_mentioned_bypasses_health;
-      test_case "content alert respects health" `Quick test_content_alert_respects_health;
     ];
     "monitoring", [
       test_case "selection entropy" `Quick test_selection_entropy_empty;

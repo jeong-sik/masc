@@ -16,15 +16,13 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 module Random = Stdlib.Random
 
-(** Agent Health — Autonomy-specific health gate over Circuit Breaker.
+(** Agent Health — Keeper failure observation over Circuit Breaker.
 
     Wraps {!Circuit_breaker} with agent-name semantics for Keeper
-    Heartbeat. Agents with open breakers are skipped during tick
-    selection, preventing cascading failures from repeatedly invoking
-    failing agents.
+    Heartbeat. Failure history is diagnostic data and never controls
+    Keeper participation.
 
     Integration points:
-    - Pre-action: {!is_healthy} before [decide_agent_action]
     - Post-action: {!record_success} / {!record_failure} after
       [execute_agent_action]
     - Statistics: {!get_summary} for dashboard/monitoring
@@ -50,31 +48,11 @@ type agent_health_summary = {
   cooldown_remaining_sec : int;
 }
 
-(** {1 Core API} *)
-
-(** [Healthy] / [Unhealthy reason] / [Recovering]. This function
-    currently never returns [Unknown] — that case is reserved for
-    {!get_summary} when [Circuit_breaker] exposes an unrecognised
-    [state_name]. *)
-val check_health : agent_name:string -> health_status
-
-(** Convenience predicate. Fail-closed: [Unhealthy] and [Unknown] map
-    to [false]; [Healthy] and [Recovering] map to [true]. *)
-val is_healthy : agent_name:string -> bool
-
 (** Record a successful action — clears half-open state. *)
 val record_success : agent_name:string -> unit
 
 (** Record a failed action — may open the breaker. *)
 val record_failure : agent_name:string -> reason:string -> unit
-
-(** {1 Batch Filtering} *)
-
-(** [filter_healthy agents] splits into [(healthy, skipped_with_reasons)].
-    [Unknown raw] is reported as ["unknown breaker state <raw>"]. *)
-val filter_healthy :
-  (string * 'a) list ->
-  (string * 'a) list * (string * string) list
 
 (** {1 Statistics} *)
 

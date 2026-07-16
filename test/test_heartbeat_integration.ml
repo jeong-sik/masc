@@ -3202,18 +3202,14 @@ let test_crashed_cycle_records_health_failure () =
   let base_path = temp_dir "health-feed" in
   let keeper_name = "health-feed-keeper" in
   Health.record_success ~agent_name:keeper_name;
-  check bool "keeper starts healthy" true (Health.is_healthy ~agent_name:keeper_name);
   for i = 1 to 3 do
     KHL.record_crashed_cycle_failure
       ~base_path
       ~keeper_name
       (Failure (Printf.sprintf "boom-%d" i))
   done;
-  check
-    bool
-    "crashed cycles feed Health breaker"
-    false
-    (Health.is_healthy ~agent_name:keeper_name)
+  let summary = Health.get_summary ~agent_name:keeper_name in
+  check int "crashed cycles are observed" 3 summary.recent_failures
 
 (* ── Test runner ──────────────────────────────────────────── *)
 

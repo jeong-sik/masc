@@ -1,4 +1,4 @@
-(** Tests for Health module — Autonomy-specific health gate over Circuit Breaker.
+(** Tests for Health module — Keeper failure observation over Circuit Breaker.
 
     All tests that touch Circuit_breaker must run inside Eio_main.run
     because Circuit_breaker uses Eio.Mutex internally. *)
@@ -6,76 +6,6 @@
 module Health = Masc.Health
 
 open Alcotest
-
-(* Test: fresh agent is healthy *)
-let test_fresh_agent_healthy () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let name = "test-health-fresh-" ^ string_of_int (Random.int 100000) in
-  let status = Health.check_health ~agent_name:name in
-  match status with
-  | Health.Healthy -> ()
-  | Health.Recovering -> fail "expected Healthy, got Recovering"
-  | Health.Unhealthy r -> fail (Printf.sprintf "expected Healthy, got Unhealthy(%s)" r)
-  | Health.Unknown raw -> fail (Printf.sprintf "expected Healthy, got Unknown(%S)" raw)
-
-(* Test: is_healthy returns true for fresh agent *)
-let test_is_healthy_fresh () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let name = "test-healthy-" ^ string_of_int (Random.int 100000) in
-  check bool "fresh agent is healthy" true (Health.is_healthy ~agent_name:name)
-
-(* Test: recording success keeps agent healthy *)
-let test_record_success_stays_healthy () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let name = "test-success-" ^ string_of_int (Random.int 100000) in
-  Health.record_success ~agent_name:name;
-  check bool "still healthy after success" true (Health.is_healthy ~agent_name:name)
-
-(* Test: repeated failures make agent unhealthy *)
-let test_failures_make_unhealthy () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let name = "test-fail-" ^ string_of_int (Random.int 100000) in
-  (* Default threshold is 3 failures in 60s *)
-  Health.record_failure ~agent_name:name ~reason:"test-error-1";
-  Health.record_failure ~agent_name:name ~reason:"test-error-2";
-  Health.record_failure ~agent_name:name ~reason:"test-error-3";
-  let healthy = Health.is_healthy ~agent_name:name in
-  check bool "unhealthy after 3 failures" false healthy
-
-(* Test: check_health returns Unhealthy with reason after breaker opens *)
-let test_unhealthy_has_reason () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let name = "test-reason-" ^ string_of_int (Random.int 100000) in
-  Health.record_failure ~agent_name:name ~reason:"boom-1";
-  Health.record_failure ~agent_name:name ~reason:"boom-2";
-  Health.record_failure ~agent_name:name ~reason:"boom-3";
-  match Health.check_health ~agent_name:name with
-  | Health.Unhealthy _ -> ()  (* reason present *)
-  | Health.Healthy -> fail "expected Unhealthy, got Healthy"
-  | Health.Recovering -> fail "expected Unhealthy, got Recovering"
-  | Health.Unknown raw -> fail (Printf.sprintf "expected Unhealthy, got Unknown(%S)" raw)
-
-(* Test: filter_healthy separates healthy from unhealthy *)
-let test_filter_healthy () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let healthy_name = "test-filter-ok-" ^ string_of_int (Random.int 100000) in
-  let sick_name = "test-filter-sick-" ^ string_of_int (Random.int 100000) in
-  (* Make one agent unhealthy *)
-  Health.record_failure ~agent_name:sick_name ~reason:"err1";
-  Health.record_failure ~agent_name:sick_name ~reason:"err2";
-  Health.record_failure ~agent_name:sick_name ~reason:"err3";
-  let agents = [(healthy_name, 1); (sick_name, 2)] in
-  let (healthy, skipped) = Health.filter_healthy agents in
-  check int "one healthy" 1 (List.length healthy);
-  check int "one skipped" 1 (List.length skipped);
-  check string "healthy name" healthy_name (fst (List.hd healthy));
-  check string "skipped name" sick_name (fst (List.hd skipped))
 
 (* Test: get_summary returns correct structure *)
 let test_get_summary () =
@@ -123,30 +53,8 @@ let test_summary_to_json () =
     (try ignore (Yojson.Safe.Util.member "status" json); true
      with _ -> false)
 
-(* Test: success after failures resets health (if not yet opened) *)
-let test_success_resets_partial_failures () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let name = "test-reset-" ^ string_of_int (Random.int 100000) in
-  Health.record_failure ~agent_name:name ~reason:"err1";
-  Health.record_failure ~agent_name:name ~reason:"err2";
-  (* 2 failures, not enough to open breaker (threshold=3) *)
-  Health.record_success ~agent_name:name;
-  check bool "still healthy after reset" true (Health.is_healthy ~agent_name:name)
-
 let () =
   run "Health" [
-    "check_health", [
-      test_case "fresh agent is healthy" `Quick test_fresh_agent_healthy;
-      test_case "is_healthy returns true for fresh" `Quick test_is_healthy_fresh;
-      test_case "success keeps healthy" `Quick test_record_success_stays_healthy;
-      test_case "3 failures make unhealthy" `Quick test_failures_make_unhealthy;
-      test_case "unhealthy has reason" `Quick test_unhealthy_has_reason;
-      test_case "success resets partial failures" `Quick test_success_resets_partial_failures;
-    ];
-    "filter_healthy", [
-      test_case "separates healthy from sick" `Quick test_filter_healthy;
-    ];
     "summary", [
       test_case "get_summary structure" `Quick test_get_summary;
       test_case "get_summary with failures" `Quick test_get_summary_with_failures;

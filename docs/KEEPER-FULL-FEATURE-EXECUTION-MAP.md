@@ -2,8 +2,8 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-16 20:30 KST
-> MASC `origin/main`: `a7aaef8400`
+> Checked: 2026-07-16 20:51 KST
+> MASC `origin/main`: `dbf140cbdc`
 > OAS `origin/main`: `3a6c92c715`
 > Latest published OAS: `v0.213.0` at `e43baf8fe`
 
@@ -13,7 +13,7 @@ belongs. Refresh every live fact before acting.
 
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
-`git merge-base --is-ancestor`; checked 2026-07-16 20:30 KST; confidence High.
+`git merge-base --is-ancestor`; checked 2026-07-16 20:51 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -231,6 +231,10 @@ Verified main-reachable changes include:
 - #24821: delete Connector transport breaker authority;
 - #24850: remove heartbeat cadence ceiling;
 - #24851: remove the silent `[3, 300]` timeout clamp;
+- #24828/#24837: delete dead inference and handover timeout trigger surfaces;
+- #24788: hard-cut duplicate mention authority;
+- #24840: restore manual compaction lane proof without reintroducing automatic
+  semantic compaction;
 - #24727: remove the public heuristic compaction facade;
 - #24810: recover Auto Judge backlog without globally blocking Keepers;
 - #24856: remove fixed checkpoint ToolResult count/byte caps;

@@ -29,9 +29,6 @@ val compaction_plan_output_schema : Yojson.Safe.t
 val vision_analyze_output_schema : Yojson.Safe.t
 (** JSON object the one-shot vision analyzer provider must return. *)
 
-val operator_judge_output_schema : Yojson.Safe.t
-(** JSON object the dashboard operator judge provider must return. *)
-
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 

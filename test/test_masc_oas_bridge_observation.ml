@@ -19,7 +19,7 @@ let test_clockless_execution () =
 let test_inner_timeout_observation () =
   require_clockless ();
   match
-    Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Operator_judge (fun () ->
+    Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_judge (fun () ->
       raise Eio.Time.Timeout)
   with
   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _)) -> ()
@@ -31,7 +31,7 @@ let test_structured_cancellation_reraise () =
   require_clockless ();
   match
     try
-      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Operator_judge (fun () ->
+      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_judge (fun () ->
         raise (Eio.Cancel.Cancelled (Failure "bridge-cancel")))
       |> ignore;
       None
@@ -46,13 +46,13 @@ let test_structured_cancellation_reraise () =
 let test_exception_isolation () =
   require_clockless ();
   match
-    Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Operator_judge (fun () ->
+    Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_judge (fun () ->
       raise Exit)
   with
   | Error error ->
     (match Keeper_internal_error.classify_masc_internal_error error with
      | Some (Keeper_internal_error.Internal_bridge_exception { caller; _ }) ->
-       Alcotest.(check string) "typed caller" "operator_judge" caller
+       Alcotest.(check string) "typed caller" "fusion_judge" caller
      | Some other ->
        Alcotest.fail (Keeper_internal_error.kind_of_masc_internal_error other)
      | None -> Alcotest.fail (Agent_sdk.Error.to_string error))

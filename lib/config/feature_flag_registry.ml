@@ -126,11 +126,6 @@ let all_flags : flag list = [
     default = false; category = "dashboard";
     lifecycle = Active; since = "2.140.0" };
 
-  { env_name = "MASC_OPERATOR_JUDGE_ENABLED";
-    description = "Operator background judgment loop";
-    default = true; category = "dashboard";
-    lifecycle = Active; since = "2.140.0" };
-
   { env_name = "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE";
     description = "Serve stale operator snapshots while recomputing in the background";
     default = true; category = "dashboard";

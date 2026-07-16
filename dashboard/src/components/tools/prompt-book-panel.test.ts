@@ -69,10 +69,10 @@ const PROMPTS: DashboardPromptItem[] = [
     char_count: 50,
   }),
   makePrompt({
-    key: 'dashboard.operator_judge',
+    key: 'dashboard.gate_judge',
     category: 'dashboard',
-    description: 'operator judge',
-    file_path: 'config/prompts/dashboard.operator_judge.md',
+    description: 'gate judge',
+    file_path: 'config/prompts/dashboard.gate_judge.md',
     char_count: 70,
   }),
   makePrompt({

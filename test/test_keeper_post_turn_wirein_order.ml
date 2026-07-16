@@ -6,7 +6,7 @@ module Compact_policy = Masc.Keeper_compact_policy
 module Post_turn = Masc.Keeper_post_turn
 module Admission = Masc.Keeper_turn_admission
 module Cycle = Masc.Keeper_heartbeat_loop_cycle
-module Queue = Masc.Keeper_event_queue
+module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue
 module WO = Masc.Keeper_world_observation
 
@@ -112,8 +112,8 @@ let test_regular_post_turn_does_not_auto_compact () =
     check bool "checkpoint messages retained exactly" true
       (retained.messages = checkpoint.messages)
 
-let only_compaction_manifest config meta =
-  let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
     config
     ~keeper_name:meta.name

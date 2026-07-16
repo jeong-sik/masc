@@ -171,12 +171,6 @@ val settlement_of_cycle_outcome :
 (** Pure lease settlement boundary. Completed work acknowledges; typed
     cancellation and non-executable-phase skips requeue. *)
 
-val project_transition_outbox :
-  base_path:string -> keeper_name:string -> (unit, string) result
-(** Idempotently materialize the lane's single durable transition into the
-    reaction ledger, then retire the outbox entry. New claims remain blocked
-    while this projection is incomplete. *)
-
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
     [0] maps to [Turn_succeeded]. *)
@@ -196,6 +190,7 @@ val run_keepalive_unified_turn :
   proactive_warmup_elapsed:bool ->
   turn_origin:turn_origin ->
   shared_context:Agent_sdk.Context.t ->
+  notify_transition_projection:(unit -> unit) ->
   keepalive_turn_outcome
 
 val refresh_work_as_heartbeat :

@@ -485,7 +485,10 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
        | Ok (Keeper_registry_event_queue.Settled _)
        | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
        | Error detail -> fail detail);
-      (match Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name with
+      (match
+         Keeper_transition_projector.project_pending ~base_path ~keeper_name
+         |> Result.map ignore
+       with
        | Ok () -> ()
        | Error detail -> fail detail);
       (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with

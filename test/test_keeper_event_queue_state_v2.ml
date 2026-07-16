@@ -4,6 +4,7 @@ module Persistence = Keeper_event_queue_persistence
 module Heartbeat = Masc.Keeper_heartbeat_loop
 module Intake = Masc.Keeper_heartbeat_stimulus_intake
 module Registry = Masc.Keeper_registry
+module Projector = Masc.Keeper_transition_projector
 
 let require_ok label = function
   | Ok value -> value
@@ -981,7 +982,8 @@ let test_transition_outbox_projects_with_stable_identity () =
       |> require_ok "load ordered transition outbox"
     in
     Alcotest.(check int) "two settlements await projection" 2 (List.length queued_outbox);
-    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
+    Projector.project_pending ~base_path ~keeper_name
+    |> Result.map ignore
     |> require_ok "project transition outbox";
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
@@ -1009,8 +1011,114 @@ let test_transition_outbox_projects_with_stable_identity () =
       "stable event id deduplicates crash replay"
       2
       (summary |> member "event_queue_ack_count" |> to_int);
-    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
+    Projector.project_pending ~base_path ~keeper_name
+    |> Result.map ignore
     |> require_ok "empty outbox projection is idempotent")
+;;
+
+let test_slow_failed_projection_preserves_lane_claim_and_provenance () =
+  with_temp_dir "keeper-transition-projector-isolation" (fun base_path ->
+    let keeper_name = "projection_isolation_keeper" in
+    let source = stimulus "projection-source" 1.0 in
+    let unrelated = stimulus "projection-unrelated" 2.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue (Queue.enqueue pending source) unrelated)
+    |> require_ok "seed projection isolation queue";
+    let source_lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:3.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim projection source"
+      |> require_some "projection source lease"
+    in
+    ignore
+      (Persistence.settle_result
+         ~base_path
+         ~keeper_name
+         ~settled_at:4.0
+         ~lease:source_lease
+         ~settlement:State.Ack
+         ()
+       |> require_ok "settle projection source");
+    let started, resolve_started = Eio.Promise.create () in
+    let release, resolve_release = Eio.Promise.create () in
+    let finished, resolve_finished = Eio.Promise.create () in
+    let projector =
+      Projector.For_testing.create_with_project
+        ~base_path
+        ~keeper_name
+        ~project:(fun () ->
+          Eio.Promise.resolve resolve_started ();
+          Eio.Promise.await release;
+          let result = Projector.project_pending ~base_path ~keeper_name in
+          Eio.Promise.resolve resolve_finished result;
+          result)
+    in
+    Dated_jsonl.set_append_guard (fun _ -> raise Exit);
+    let projection_result =
+      Fun.protect
+        ~finally:Dated_jsonl.For_testing.reset_append_guard
+        (fun () ->
+           Eio_main.run
+           @@ fun _env ->
+           Eio.Switch.run
+           @@ fun sw ->
+           Eio.Fiber.fork ~sw (fun () -> Projector.run projector);
+           Eio.Promise.await started;
+           Projector.notify projector;
+           let state =
+             Persistence.load_state_result ~base_path ~keeper_name
+             |> require_ok "load queue during slow projection"
+           in
+           let origin =
+             Heartbeat.next_turn_origin
+               ~ready_queue_followup_count:
+                 (Intake.ready_stimulus_count
+                    ~excluding:None
+                    (State.pending state))
+               ~sleep:(fun () -> Alcotest.fail "internal drain entered wakeup CAS")
+             |> require_some "internal lane drain origin"
+           in
+           (match Heartbeat.wake_reason_of_turn_origin origin [ unrelated ] with
+            | Registry.Ready_queue_followup [ Queue.Bootstrap ] -> ()
+            | Registry.Ready_queue_followup _
+            | Registry.Proactive_tick
+            | Registry.Woken _ ->
+              Alcotest.fail "slow projection fabricated external wake provenance");
+           let unrelated_lease =
+             Persistence.claim_when_result
+               ~base_path
+               ~keeper_name
+               ~claimed_at:5.0
+               ~ready:(fun _ -> true)
+               ()
+             |> require_ok "claim during slow projection"
+             |> require_some "unrelated lease during slow projection"
+           in
+           Alcotest.(check string)
+             "slow projection does not prevent unrelated actual lease"
+             unrelated.post_id
+             (Persistence.lease_stimulus unrelated_lease).post_id;
+           Projector.stop projector;
+           Eio.Promise.resolve resolve_release ();
+           Eio.Promise.await finished)
+    in
+    (match projection_result with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "injected projection failure was not explicit");
+    let retained =
+      Persistence.transition_outbox_result ~base_path ~keeper_name
+      |> require_ok "load retained projection outbox"
+    in
+    Alcotest.(check int) "failure retains exact outbox entry" 1 (List.length retained);
+    Alcotest.(check int)
+      "later retry retires retained entry"
+      1
+      (Projector.project_pending ~base_path ~keeper_name
+       |> require_ok "retry retained projection"))
 ;;
 
 let test_registration_preparation_is_atomic_and_fail_closed () =
@@ -1175,6 +1283,10 @@ let () =
             "transition outbox projection"
             `Quick
             test_transition_outbox_projects_with_stable_identity
+        ; Alcotest.test_case
+            "slow failed projection preserves lane claim and provenance"
+            `Quick
+            test_slow_failed_projection_preserves_lane_claim_and_provenance
         ; Alcotest.test_case
             "registration preparation"
             `Quick

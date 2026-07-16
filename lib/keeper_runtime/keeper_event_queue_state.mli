@@ -113,8 +113,9 @@ val active_lease : t -> lease option
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
 (** Atomically retire the oldest durable outbox entry after an external projector has
     materialized its stable [event_id]. Other ordered entries remain durable;
-    the retired receipt is retained for an immediate idempotent retry. Unknown
-    transition ids fail closed. *)
+    the retired receipt is retained for an immediate idempotent retry. Claims
+    are independent of this read-model cursor. Unknown transition ids fail
+    closed. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t

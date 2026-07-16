@@ -392,44 +392,6 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
     )
 ;;
 
-let reaction_kind_of_settlement = function
-  | Keeper_registry_event_queue.Ack -> Keeper_reaction_ledger.Event_queue_ack
-  | Keeper_registry_event_queue.Requeue _ ->
-    Keeper_reaction_ledger.Event_queue_requeued
-  | Keeper_registry_event_queue.Escalate _ ->
-    Keeper_reaction_ledger.Event_queue_escalated
-;;
-
-let project_transition_outbox ~base_path ~keeper_name =
-  let rec project_entries = function
-    | [] -> Ok ()
-    | (entry : Keeper_registry_event_queue.outbox_entry) :: rest ->
-      let receipt = entry.receipt in
-      let reaction_kind = reaction_kind_of_settlement receipt.settlement in
-      (match
-         Keeper_reaction_ledger.record_event_queue_transition_reaction_result
-           ~base_path
-           ~keeper_name
-           ~reaction_kind
-           ~receipt
-           entry.stimulus
-       with
-       | Error _ as error -> error
-       | Ok () ->
-         (match
-            Keeper_registry_event_queue.mark_transition_projected_result
-              ~base_path
-              keeper_name
-              ~transition_id:receipt.transition_id
-          with
-          | Error _ as error -> error
-          | Ok () -> project_entries rest))
-  in
-  match Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name with
-  | Error _ as error -> error
-  | Ok entries -> project_entries entries
-;;
-
 let settle_claimed_lease
       ~base_path
       ~keeper_name
@@ -513,6 +475,7 @@ let run_keepalive_unified_turn
       ~(proactive_warmup_elapsed : bool)
       ~(turn_origin : turn_origin)
       ~(shared_context : Agent_sdk.Context.t)
+      ~notify_transition_projection
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
@@ -573,17 +536,6 @@ let run_keepalive_unified_turn
              message)
     in
     try
-      (match
-         project_transition_outbox
-           ~base_path:ctx.config.base_path
-           ~keeper_name:meta_after_triage.name
-       with
-       | Ok () -> ()
-       | Error message ->
-         Log.Keeper.error
-           "registry: deferred transition projection keeper=%s: %s"
-           meta_after_triage.name
-           message);
       let event_intake =
         heartbeat_event_intake
           ~ctx
@@ -894,17 +846,7 @@ let run_keepalive_unified_turn
             lease_settled := true;
             ready_queue_followup :=
               ready_queue_followup_of_settlement ~lease settlement;
-            (match
-               project_transition_outbox
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:meta_after_triage.name
-             with
-             | Error message ->
-               Log.Keeper.error
-                 "registry: deferred transition projection keeper=%s: %s"
-                 meta_after_triage.name
-                 message
-             | Ok () -> ());
+            notify_transition_projection ();
             if settlement_is_ack settlement
             then
               mark_connector_attention_ignored_after_turn
@@ -1027,6 +969,16 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_sdk.Context.create () in
+  let transition_projector =
+    Keeper_transition_projector.create
+      ~base_path:ctx.config.base_path
+      ~keeper_name:m.name
+  in
+  (* Read-model projection is lane-owned but not lane-authoritative.  A blocked
+     projector therefore cannot keep the heartbeat body alive during teardown. *)
+  Eio.Fiber.fork_daemon ~sw:ctx.sw (fun () ->
+    Keeper_transition_projector.run transition_projector;
+    `Stop_daemon);
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
@@ -1212,6 +1164,8 @@ let run_heartbeat_loop
                 ~proactive_warmup_elapsed
                 ~turn_origin:!last_turn_origin
                 ~shared_context
+                ~notify_transition_projection:(fun () ->
+                  Keeper_transition_projector.notify transition_projector)
             in
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
             turn_running := false;
@@ -1314,5 +1268,7 @@ let run_heartbeat_loop
            last_turn_origin := origin);
       if Atomic.get stop then () else loop ())
   in
-  loop ()
+  Eio_guard.protect
+    ~finally:(fun () -> Keeper_transition_projector.stop transition_projector)
+    loop
 ;;

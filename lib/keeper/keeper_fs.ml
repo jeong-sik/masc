@@ -195,7 +195,7 @@ let note_pressure_observer ~observer ~site note exn =
 ;;
 
 let note_durable_write_pressure exn =
-  let site = "filesystem_runtime.save_json_durable_atomic" in
+  let site = "filesystem_runtime.save_durable_atomic" in
   note_pressure_observer
     ~observer:"fd"
     ~site
@@ -273,6 +273,175 @@ let ensure_dir_durable
          })
 ;;
 
+let protect_durable_write f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Durable_write_failed error -> Error error
+  | exn ->
+    note_durable_write_pressure exn;
+    Error
+      { renamed = false
+      ; stage = Directory_prepare
+      ; failure = Operation_failed (Printexc.to_string exn)
+      }
+;;
+
+let save_bytes_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  =
+  let dir = Filename.dirname path in
+  (* DET-OK: an omitted staging directory means the destination directory;
+     both paths are derived from the same explicit destination [path]. *)
+  let temp_dir = Option.value temp_dir ~default:dir in
+  let directory_lease =
+    ensure_dir_durable
+      ~renamed:false
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      dir
+  in
+  let temp_directory_lease =
+    if String.equal temp_dir dir
+    then directory_lease
+    else
+      ensure_dir_durable
+        ~renamed:false
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        temp_dir
+  in
+  let result =
+    run_in_systhread_cancel_checked (fun () ->
+    let temp_path = ref None in
+    let channel = ref None in
+    let renamed = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        Option.iter close_out_noerr !channel;
+        match !temp_path with
+        | Some temp when not !renamed && Sys.file_exists temp ->
+          (try Sys.remove temp with
+           | exn ->
+             Log.Keeper.error
+               "filesystem_runtime: strict atomic temp cleanup failed path=%s error=%s"
+               temp
+               (Printexc.to_string exn))
+        | Some _ | None -> ())
+      (fun () ->
+         let temp, oc =
+           run_durable_write_stage
+             ~renamed:false
+             ~before_stage
+             Temp_file_create
+             (fun () -> Fs_compat.open_atomic_temp_file ~temp_dir ())
+         in
+         temp_path := Some temp;
+         channel := Some oc;
+         run_durable_write_stage
+           ~renamed:false
+           ~before_stage
+           Payload_write
+           (fun () -> output_string oc bytes; flush oc);
+         run_durable_write_stage
+           ~renamed:false
+           ~before_stage
+           Payload_fsync
+           (fun () -> Unix.fsync (Unix.descr_of_out_channel oc));
+         run_durable_write_stage
+           ~renamed:false
+           ~before_stage
+           Temp_file_close
+           (fun () -> close_out oc; channel := None);
+         run_durable_write_stage
+           ~renamed:false
+           ~before_stage
+           Atomic_rename
+           (fun () -> Unix.rename temp path; renamed := true);
+         run_durable_write_stage
+           ~renamed:true
+           ~before_stage
+           Parent_directory_fsync_after_rename
+           (fun () -> Keeper_fs_durable_directory.fsync_directory dir);
+         if not (String.equal temp_dir dir)
+         then
+           run_durable_write_stage
+             ~renamed:true
+             ~before_stage
+             Temp_directory_fsync_after_rename
+             (fun () -> Keeper_fs_durable_directory.fsync_directory temp_dir);
+         Ok ()))
+  in
+  let rec confirm_directory_lease lease =
+    if Keeper_fs_durable_directory.lease_is_current lease
+    then result
+    else (
+      let lease =
+        ensure_dir_durable
+          ~renamed:true
+          ~before_stage
+          ?before_directory_fsync
+          ?ownership_root
+          dir
+      in
+      run_in_systhread_cancel_checked (fun () ->
+        run_durable_write_stage
+          ~renamed:true
+          ~before_stage
+          Parent_directory_fsync_after_rename
+          (fun () ->
+             let (_ : Unix.stats) = Unix.lstat path in
+             Keeper_fs_durable_directory.fsync_directory dir));
+      confirm_directory_lease lease)
+  in
+  let result = confirm_directory_lease directory_lease in
+  let rec confirm_temp_directory_lease lease =
+    if String.equal temp_dir dir || Keeper_fs_durable_directory.lease_is_current lease
+    then result
+    else (
+      let lease =
+        ensure_dir_durable
+          ~renamed:true
+          ~before_stage
+          ?before_directory_fsync
+          ?ownership_root
+          temp_dir
+      in
+      run_in_systhread_cancel_checked (fun () ->
+        run_durable_write_stage
+          ~renamed:true
+          ~before_stage
+          Temp_directory_fsync_after_rename
+          (fun () -> Keeper_fs_durable_directory.fsync_directory temp_dir));
+      confirm_temp_directory_lease lease)
+  in
+  confirm_temp_directory_lease temp_directory_lease
+;;
+
+let save_bytes_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  =
+  protect_durable_write (fun () ->
+    save_bytes_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes)
+;;
+
 let save_json_durable_atomic_from_with
       ~before_stage
       ?before_directory_fsync
@@ -282,15 +451,11 @@ let save_json_durable_atomic_from_with
       path
       json_source
   =
-  let dir = Filename.dirname path in
-  (* DET-OK: an omitted staging directory means the destination directory;
-     both paths are derived from the same explicit destination [path]. *)
-  let temp_dir = Option.value temp_dir ~default:dir in
   let encode json =
     if pretty then Yojson.Safe.pretty_to_string json else Yojson.Safe.to_string json
   in
-  try
-    let content =
+  protect_durable_write (fun () ->
+    let bytes =
       run_durable_write_stage
         ~renamed:false
         ~before_stage
@@ -298,140 +463,13 @@ let save_json_durable_atomic_from_with
         (fun () ->
            Executor_pool_ref.submit_or_inline (fun () -> encode (json_source ())))
     in
-    let directory_lease =
-      ensure_dir_durable
-        ~renamed:false
-        ~before_stage
-        ?before_directory_fsync
-        ?ownership_root
-        dir
-    in
-    let temp_directory_lease =
-      if String.equal temp_dir dir
-      then directory_lease
-      else
-        ensure_dir_durable
-          ~renamed:false
-          ~before_stage
-          ?before_directory_fsync
-          ?ownership_root
-          temp_dir
-    in
-    let result =
-      run_in_systhread_cancel_checked (fun () ->
-      let temp_path = ref None in
-      let channel = ref None in
-      let renamed = ref false in
-      Fun.protect
-        ~finally:(fun () ->
-          Option.iter close_out_noerr !channel;
-          match !temp_path with
-          | Some temp when not !renamed && Sys.file_exists temp ->
-            (try Sys.remove temp with
-             | exn ->
-               Log.Keeper.error
-                 "filesystem_runtime: strict atomic temp cleanup failed path=%s error=%s"
-                 temp
-                 (Printexc.to_string exn))
-          | Some _ | None -> ())
-        (fun () ->
-           let temp, oc =
-             run_durable_write_stage
-               ~renamed:false
-               ~before_stage
-               Temp_file_create
-               (fun () -> Fs_compat.open_atomic_temp_file ~temp_dir ())
-           in
-           temp_path := Some temp;
-           channel := Some oc;
-           run_durable_write_stage
-             ~renamed:false
-             ~before_stage
-             Payload_write
-             (fun () -> output_string oc content; flush oc);
-           run_durable_write_stage
-             ~renamed:false
-             ~before_stage
-             Payload_fsync
-             (fun () -> Unix.fsync (Unix.descr_of_out_channel oc));
-           run_durable_write_stage
-             ~renamed:false
-             ~before_stage
-             Temp_file_close
-             (fun () -> close_out oc; channel := None);
-           run_durable_write_stage
-             ~renamed:false
-             ~before_stage
-             Atomic_rename
-             (fun () -> Unix.rename temp path; renamed := true);
-           run_durable_write_stage
-             ~renamed:true
-             ~before_stage
-             Parent_directory_fsync_after_rename
-             (fun () -> Keeper_fs_durable_directory.fsync_directory dir);
-           if not (String.equal temp_dir dir)
-           then
-             run_durable_write_stage
-               ~renamed:true
-               ~before_stage
-               Temp_directory_fsync_after_rename
-               (fun () -> Keeper_fs_durable_directory.fsync_directory temp_dir);
-           Ok ()))
-    in
-    let rec confirm_directory_lease lease =
-      if Keeper_fs_durable_directory.lease_is_current lease
-      then result
-      else (
-        let lease =
-          ensure_dir_durable
-            ~renamed:true
-            ~before_stage
-            ?before_directory_fsync
-            ?ownership_root
-            dir
-        in
-        run_in_systhread_cancel_checked (fun () ->
-          run_durable_write_stage
-            ~renamed:true
-            ~before_stage
-            Parent_directory_fsync_after_rename
-            (fun () ->
-               let (_ : Unix.stats) = Unix.lstat path in
-               Keeper_fs_durable_directory.fsync_directory dir));
-        confirm_directory_lease lease)
-    in
-    let result = confirm_directory_lease directory_lease in
-    let rec confirm_temp_directory_lease lease =
-      if String.equal temp_dir dir || Keeper_fs_durable_directory.lease_is_current lease
-      then result
-      else (
-        let lease =
-          ensure_dir_durable
-            ~renamed:true
-            ~before_stage
-            ?before_directory_fsync
-            ?ownership_root
-            temp_dir
-        in
-        run_in_systhread_cancel_checked (fun () ->
-          run_durable_write_stage
-            ~renamed:true
-            ~before_stage
-            Temp_directory_fsync_after_rename
-            (fun () -> Keeper_fs_durable_directory.fsync_directory temp_dir));
-        confirm_temp_directory_lease lease)
-    in
-    confirm_temp_directory_lease temp_directory_lease
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Durable_write_failed error -> Error error
-  | exn ->
-    note_durable_write_pressure exn;
-    Error
-      { renamed = false
-      ; stage = Directory_prepare
-      ; failure = Operation_failed (Printexc.to_string exn)
-    }
+    save_bytes_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes)
 ;;
 
 let save_json_durable_atomic_with
@@ -451,6 +489,15 @@ let save_json_durable_atomic_with
     ?pretty
     path
     (fun () -> json)
+;;
+
+let save_bytes_durable_atomic ?ownership_root ?temp_dir path bytes =
+  save_bytes_durable_atomic_with
+    ~before_stage:(fun _ -> ())
+    ?ownership_root
+    ?temp_dir
+    path
+    bytes
 ;;
 
 let save_json_durable_atomic ?ownership_root ?temp_dir ?pretty path json =
@@ -550,6 +597,23 @@ let remove_file_durable ?ownership_root path =
 ;;
 
 module For_testing = struct
+  let save_bytes_durable_atomic
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        path
+        bytes
+    =
+    save_bytes_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  ;;
+
   let save_json_durable_atomic
         ~before_stage
         ?before_directory_fsync

@@ -11,6 +11,7 @@
    default rather than producing a half-formed policy. *)
 
 open Alcotest
+open Masc
 module G = Server_discord_in_process_gateway
 module State = Channel_gate_discord_state
 

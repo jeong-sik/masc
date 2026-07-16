@@ -9,6 +9,7 @@
    falls back to the default rather than producing a half-formed policy. *)
 
 open Alcotest
+open Masc
 module G = Server_slack_in_process_gateway
 module State = Channel_gate_slack_state
 

@@ -1,44 +1,31 @@
-(** Compaction_trigger — closed sum type for context compaction reason.
-
-    Replaces the prior [string] / [string option] representation in
-    [compaction_event.trigger] and [pre_compact_event.trigger] so the
-    Otel_metric_store [trigger] label has bounded cardinality (5 values) while
-    structured numerical detail (ratio, counts, thresholds) is preserved
-    in the JSON receipt via [to_detail_json]. *)
+(** Compaction_trigger — explicit context compaction request origin. *)
 
 type t =
-  | Ratio_threshold of
-      { ratio : float
-      ; threshold : float
-      }
-  | Message_count of
-      { count : int
-      ; threshold : int
-      }
-  | Token_count of
-      { count : int
-      ; threshold : int
-      }
   | Provider_overflow of { limit_tokens : int option }
       (** Typed provider context-window overflow. [limit_tokens] is the
           provider-declared limit when present, never an estimated count. *)
   | Manual
 
-(** Closed label set (5 values) for Otel_metric_store / SSE [trigger] label.
+(** Closed label set for Otel_metric_store / SSE [trigger] label.
     Use this anywhere cardinality matters. *)
 val to_label : t -> string
 
-(** Human-readable rendering with embedded numerical detail.  Use for
-    [Log.*] string interpolation only — NOT for Otel_metric_store labels. *)
+(** Human-readable rendering. Use for [Log.*] string interpolation only. *)
 val to_human : t -> string
 
-(** Structured JSON detail with all numerical fields preserved.  Use
-    inside SSE broadcasts and JSON receipts so dashboards can plot
-    actual ratios/counts rather than parse strings. *)
+(** Structured JSON detail for durable observation. *)
 val to_detail_json : t -> Yojson.Safe.t
 
-(** Inverse of {!to_detail_json}.  Returns [None] if the JSON cannot be
-    parsed as a known trigger kind.  Used by persistence-recovery code
-    paths (e.g. dashboard log replay) where the typed variant must be
-    reconstructed from a stored JSON record. *)
-val of_detail_json : Yojson.Safe.t -> t option
+type decode_error =
+  | Expected_object
+  | Missing_kind
+  | Invalid_kind
+  | Unknown_kind of string
+  | Missing_provider_limit
+  | Invalid_provider_limit
+
+val decode_error_to_string : decode_error -> string
+
+val of_detail_json : Yojson.Safe.t -> (t, decode_error) result
+(** Exact inverse of {!to_detail_json}. Retired heuristic trigger kinds and
+    malformed rows are rejected explicitly. *)

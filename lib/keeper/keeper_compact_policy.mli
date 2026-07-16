@@ -4,7 +4,6 @@
     compaction on their own. *)
 
 type compaction_rejection =
-  | Retired_deterministic_mode
   | Runtime_identity_unavailable
   | Summarizer_unavailable
   | Plan_unavailable_or_invalid

@@ -66,7 +66,6 @@ let register_record_pre_compact
 ;;
 
 type compaction_rejection =
-  | Retired_deterministic_mode
   | Runtime_identity_unavailable
   | Summarizer_unavailable
   | Plan_unavailable_or_invalid
@@ -74,7 +73,6 @@ type compaction_rejection =
   | Checkpoint_not_reduced
 
 let compaction_rejection_to_string = function
-  | Retired_deterministic_mode -> "retired_deterministic_mode"
   | Runtime_identity_unavailable -> "runtime_identity_unavailable"
   | Summarizer_unavailable -> "summarizer_unavailable"
   | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
@@ -150,11 +148,7 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
 
-let strategy_names (meta : keeper_meta) =
-  match meta.compaction.mode with
-  | Keeper_config.Llm -> [ "ConfiguredLlm" ]
-  | Keeper_config.Deterministic -> [ "NoLocalReducer" ]
-;;
+let strategy_names = [ "ConfiguredLlm" ]
 
 let record_pre_compact
       ~(meta : keeper_meta)
@@ -214,41 +208,38 @@ type requested_compaction =
   }
 
 let requested_messages (meta : keeper_meta) messages =
-  match meta.compaction.mode with
-  | Keeper_config.Deterministic -> Error Retired_deterministic_mode
-  | Keeper_config.Llm ->
-    let runtime_id =
-      try
-        let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
-        if String.trim runtime_id = ""
-        then Error Runtime_identity_unavailable
-        else Ok runtime_id
-      with
-      | Failure _ -> Error Runtime_identity_unavailable
-    in
-    (match runtime_id with
-     | Error _ as error -> error
-     | Ok runtime_id ->
-       (match
-          Keeper_compaction_llm_summarizer.make
-            ~runtime_id
-            ~keeper_name:meta.name
-            ()
-        with
-        | None -> Error Summarizer_unavailable
-        | Some summarize ->
-          (match summarize ~messages with
-           | None -> Error Plan_unavailable_or_invalid
-           | Some plan ->
-             if plan.summarized = [] && plan.dropped = []
-             then Error Structurally_unchanged
-             else
-               Ok
-                 { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
-                 ; selected_runtime_id = plan.selected_runtime_id
-                 ; summarized_message_count = List.length plan.summarized
-                 ; dropped_message_count = List.length plan.dropped
-                 })))
+  let runtime_id =
+    try
+      let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+      if String.trim runtime_id = ""
+      then Error Runtime_identity_unavailable
+      else Ok runtime_id
+    with
+    | Failure _ -> Error Runtime_identity_unavailable
+  in
+  match runtime_id with
+  | Error _ as error -> error
+  | Ok runtime_id ->
+    (match
+       Keeper_compaction_llm_summarizer.make
+         ~runtime_id
+         ~keeper_name:meta.name
+         ()
+     with
+     | None -> Error Summarizer_unavailable
+     | Some summarize ->
+       (match summarize ~messages with
+        | None -> Error Plan_unavailable_or_invalid
+        | Some plan ->
+          if plan.summarized = [] && plan.dropped = []
+          then Error Structurally_unchanged
+          else
+            Ok
+              { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
+              ; selected_runtime_id = plan.selected_runtime_id
+              ; summarized_message_count = List.length plan.summarized
+              ; dropped_message_count = List.length plan.dropped
+              }))
 ;;
 
 let tool_block_counts messages =
@@ -309,7 +300,7 @@ let compact_for_request_typed
     ~meta
     ~checkpoint_bytes:before_bytes
     ~message_count:before_messages
-    ~strategies:(strategy_names meta)
+    ~strategies:strategy_names
     ~trigger;
   match requested_messages meta (messages_of_context ctx) with
   | Error reason ->

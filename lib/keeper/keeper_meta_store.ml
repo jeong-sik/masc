@@ -399,11 +399,10 @@ let is_version_conflict_error msg =
 
 (* Keys deliberately deleted from persisted keeper meta. Dropping is
    destructive, so membership is EXPLICIT — a key is listed only after
-   BOTH codec sides stopped knowing it. Deriving this set instead
-   (canonical/config complement) was refuted twice: [compaction_mode]
-   (keeper_meta_json_parse.ml, fail-closed persisted override) and
-   [keeper_name] (keeper_identity.ml, wins over [name]) are
-   parser-consumed yet in neither derived list, and a derived drop
+   BOTH codec sides stopped knowing it. Deriving this set instead was
+   refuted by [keeper_name] (keeper_identity.ml, wins over [name]),
+   which is parser-consumed yet absent from the canonical serializer;
+   a derived drop
    would silently destroy them. Forgetting to extend THIS list is
    fail-safe: the file merely keeps triggering the unknown-keys
    warning until the key is added here. *)

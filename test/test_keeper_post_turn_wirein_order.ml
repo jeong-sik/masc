@@ -43,7 +43,6 @@ let make_meta
       (`Assoc
         [ "name", `String name
         ; "trace_id", `String trace_id
-        ; "compaction_mode", `String "llm"
         ])
   with
   | Ok meta -> meta

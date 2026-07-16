@@ -396,7 +396,7 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
   | **oas_env**(per-keeper OAS env) | keeper.toml`[keeper.oas_env]`(권위) → keeper.json에 **derived snapshot으로 emit**(`keeper_meta_json.ml`), read 시 TOML로 overlay(`keeper_runtime.ml:402`) | **YES(TOML)** — json은 render/status projection | 낮음 — TOML 권위, json 값은 read 시 덮임. 잔여: `keeper_meta_json_parse.ml:532`가 아직 json oas_env를 입력으로 read(legacy 경로, 제거 대상) |
   | **active_goal_ids**(goal 바인딩) | keeper.toml(권위) → keeper.json emit되나 reconcile이 TOML 소유 시 `[]` 강제 persist(`keeper_runtime.ml:459`). Goal **엔티티**는 `goal_store.ml` SSOT | **YES(TOML)** — json은 TOML-미선언 시만 값 보유 | 낮음 — TOML 권위 |
   | **always_allow**(per-keeper tool auto-approve) | keeper.toml(권위, `keeper_types_profile_defaults.ml:18`); keeper.json에 **write 안 됨**(`keeper_meta_json.ml` emit 0) | **YES(TOML)** — write는 TOML-only | 낮음 — 잔여: `keeper_meta_json_parse.ml:178`이 아직 json에서 read(legacy 입력, 제거 대상). tool allowlist/denylist tier는 3곳 fail-closed reject(제거 확정) |
-  | max_context_override / compaction_mode | meta/json 단일(`keeper_meta_json_parse.ml:42`; toml에 없음 grep 0); compaction_mode=env default→json override(1 home) | **YES**(clean) | 낮음 — same-knob dual-home 없음(negative result) |
+  | max_context_override | meta/json 단일(`keeper_meta_json_parse.ml`; toml에 없음 grep 0) | **YES**(clean) | 낮음 — same-knob dual-home 없음(negative result) |
 
 - **경계 계약:** repo config·identity·runtime·sandbox·playground·lifecycle 각 축은 **정확히 하나의 파일/키가 권위**이고, 나머지 on-disk/in-mem 사본은 source `meta_version`으로 stamp된 projection이며 단일 read path만 노출한다. keeper 개별 파일(profile.json/keeper.toml/keeper.json)에 각자 역할이 있고 **같은 필드를 2곳 이상에서 정의하지 않는다**.
 - **결정론↔LLM:** 전부 결정론(config 로드/병합/경로 구성에 의미 판단 없음). merge 우선순위는 단일 모듈에 문서화+테스트.

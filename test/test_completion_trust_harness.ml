@@ -156,6 +156,7 @@ let attempt_done
       ()
   =
   KET.execute_keeper_tool_call_with_outcome
+    ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
     ~config
     ~meta
     ~publication_recovery
@@ -190,6 +191,7 @@ let claim_via_dispatch
       ~task_id
   =
   KET.execute_keeper_tool_call_with_outcome
+    ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
     ~config
     ~meta
     ~publication_recovery

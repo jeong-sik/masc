@@ -242,6 +242,8 @@ let execute_tool_eio
                 ~net:state.Mcp_server.net
                 ~publication_recovery_provider:
                   (Mcp_server.publication_recovery_availability_provider state)
+                ~compaction_wake_registry:
+                  (Mcp_server.keeper_compaction_wake_registry state)
             in
             (* Dispatch a single module by tag — creates only that module's context.
      Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
@@ -272,7 +274,9 @@ let execute_tool_eio
                               ~net:state.Mcp_server.net
                               ~publication_recovery_provider:
                                 (Mcp_server.publication_recovery_availability_provider
-                                   state))
+                                   state)
+                              ~compaction_wake_registry:
+                                (Mcp_server.keeper_compaction_wake_registry state))
                      ; mcp_session_id
                      }
                    in

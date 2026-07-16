@@ -367,6 +367,7 @@ let test_stream_surface_preserves_typed_shutdown_rejection () =
     ; clock
     ; proc_mgr = None
     ; net = None
+    ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
     ; publication_recovery_provider =
         Masc_test_deps.non_runtime_publication_recovery_provider
     }
@@ -416,6 +417,7 @@ let test_delegate_surface_uses_serialized_shutdown_fence () =
     ; clock
     ; proc_mgr = None
     ; net = None
+    ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
     ; publication_recovery_provider =
         Masc_test_deps.non_runtime_publication_recovery_provider
     }
@@ -454,6 +456,7 @@ let test_delegate_resource_error_uses_typed_tool_name () =
     ; clock
     ; proc_mgr = None
     ; net = None
+    ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
     ; publication_recovery_provider =
         Masc_test_deps.non_runtime_publication_recovery_provider
     }

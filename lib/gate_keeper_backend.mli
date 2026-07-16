@@ -76,6 +76,7 @@ val dispatch :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
   publication_recovery_provider:
     Keeper_publication_recovery_availability.provider ->
+  compaction_wake_registry:Keeper_compaction_wake_registry.t ->
   config:Workspace.config ->
   channel:string ->
   channel_user_id:string ->
@@ -115,6 +116,7 @@ val dispatch_with_text_snapshot :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
   publication_recovery_provider:
     Keeper_publication_recovery_availability.provider ->
+  compaction_wake_registry:Keeper_compaction_wake_registry.t ->
   config:Workspace.config ->
   channel:string ->
   channel_user_id:string ->

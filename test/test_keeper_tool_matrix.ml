@@ -389,6 +389,7 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
       in
       let tools =
         Masc.Keeper_tools_oas_bundle.make_tools
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       let names =

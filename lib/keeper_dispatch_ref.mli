@@ -40,6 +40,7 @@ val dispatch
      -> agent_name:string
      -> publication_recovery_provider:
           Keeper_publication_recovery_availability.provider
+     -> compaction_wake_registry:Keeper_compaction_wake_registry.t
      -> ?sw:Eio.Switch.t
      -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
      -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t

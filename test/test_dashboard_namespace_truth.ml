@@ -133,6 +133,7 @@ let create_keeper env sw state name =
       sw;
       clock = Eio.Stdenv.clock env;
       proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
+      compaction_wake_registry = Keeper_compaction_wake_registry.create ();
       publication_recovery_provider =
         Lib.Mcp_server.publication_recovery_availability_provider state;
     }

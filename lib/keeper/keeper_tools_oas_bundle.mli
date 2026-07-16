@@ -9,6 +9,7 @@ val make_tool_bundle
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
+  -> compaction_wake_registry:Keeper_compaction_wake_registry.t
   -> ctx_snapshot:Keeper_types.working_context
   -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -24,6 +25,7 @@ val make_tools
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
+  -> compaction_wake_registry:Keeper_compaction_wake_registry.t
   -> ctx_snapshot:Keeper_types.working_context
   -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

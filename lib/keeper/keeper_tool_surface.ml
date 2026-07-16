@@ -865,7 +865,9 @@ let eio_context_missing tool_name =
 
 let () =
   Keeper_dispatch_ref.dispatch
-  := fun ~config ~agent_name ~publication_recovery_provider ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ?authorize_external_effect ~name ~args () ->
+  := fun ~config ~agent_name ~publication_recovery_provider
+       ~compaction_wake_registry ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_
+       ?authorize_external_effect ~name ~args () ->
     let run_external_effect continue =
       match authorize_external_effect with
       | None -> continue ()
@@ -926,6 +928,7 @@ let () =
            ; proc_mgr
            ; net
            ; publication_recovery_provider
+           ; compaction_wake_registry
            }
          in
          Some
@@ -956,6 +959,7 @@ let () =
            ; proc_mgr
            ; net
            ; publication_recovery_provider
+           ; compaction_wake_registry
            }
          in
          run_external_effect (fun () ->
@@ -974,7 +978,15 @@ let () =
       (match sw, clock with
        | Some sw, Some clock ->
          let ctx : _ Keeper_types_profile.context =
-           { config; agent_name; sw; clock; proc_mgr; net; publication_recovery_provider }
+           { config
+           ; agent_name
+           ; sw
+           ; clock
+           ; proc_mgr
+           ; net
+           ; publication_recovery_provider
+           ; compaction_wake_registry
+           }
          in
          Some (Keeper_tool_surface_ops.handle_keeper_delegate ~submitted_by:agent_name ctx args)
        | _ -> eio_context_missing "masc_keeper_delegate")
@@ -988,6 +1000,7 @@ let () =
               ~sw
               ~clock
               ~publication_recovery_provider
+              ~compaction_wake_registry
               ?proc_mgr
               ?net
               args)

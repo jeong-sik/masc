@@ -436,6 +436,7 @@ sandbox_profile = "docker"
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
+      compaction_wake_registry = Keeper_compaction_wake_registry.create ();
       publication_recovery_provider =
         Masc_test_deps.non_runtime_publication_recovery_provider;
     }
@@ -516,6 +517,7 @@ instructions = "missing sandbox profile"
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
+      compaction_wake_registry = Keeper_compaction_wake_registry.create ();
       publication_recovery_provider =
         Masc_test_deps.non_runtime_publication_recovery_provider;
     }
@@ -545,6 +547,7 @@ let test_keeper_up_rejects_missing_profile_source () =
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
+      compaction_wake_registry = Keeper_compaction_wake_registry.create ();
       publication_recovery_provider =
         Masc_test_deps.non_runtime_publication_recovery_provider;
     }
@@ -732,6 +735,7 @@ instructions = "missing sandbox profile"
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               publication_recovery_registry;

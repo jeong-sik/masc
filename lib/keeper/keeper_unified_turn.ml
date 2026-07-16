@@ -333,6 +333,7 @@ let run_keeper_cycle
       ~(meta : keeper_meta)
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
       ~(wake : Keeper_registry.wake_reason)
@@ -802,6 +803,7 @@ let run_keeper_cycle
                            ; observation
                            ; profile_defaults
                            ; publication_recovery
+                           ; compaction_wake_registry
                            ; shared_context
                            ; trajectory_acc
                            ; turn_id = keeper_turn_id

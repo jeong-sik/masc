@@ -701,6 +701,8 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                           net = state.Mcp_server.net;
                           publication_recovery_provider =
                             Mcp_server.publication_recovery_availability_provider state;
+                          compaction_wake_registry =
+                            Mcp_server.keeper_compaction_wake_registry state;
                         }
                       in
                       (match
@@ -893,6 +895,8 @@ let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
     net = state.Mcp_server.net;
     publication_recovery_provider =
       Mcp_server.publication_recovery_availability_provider state;
+    compaction_wake_registry =
+      Mcp_server.keeper_compaction_wake_registry state;
   }
 
 let meta_with_directive_paused_state

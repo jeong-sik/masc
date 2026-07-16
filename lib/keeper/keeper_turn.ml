@@ -826,6 +826,8 @@ let run_keeper_invocation_turn_admitted
 			                                ~config:ctx.config
 			                                ~meta
 			                                ~publication_recovery
+			                                ~compaction_wake_registry:
+			                                  ctx.compaction_wake_registry
 			                                ~profile_defaults
 			                                ~turn_ctx_cell
 		                                ~base_dir

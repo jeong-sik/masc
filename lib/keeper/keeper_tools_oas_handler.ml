@@ -15,6 +15,7 @@ let make_keeper_tool_handler
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -120,6 +121,7 @@ let make_keeper_tool_handler
               ~config
               ~meta
               ~publication_recovery
+              ~compaction_wake_registry
               ~ctx_snapshot
               ?turn_sandbox_factory
               ~exec_cache

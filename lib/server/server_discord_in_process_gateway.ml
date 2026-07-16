@@ -813,6 +813,8 @@ let start ~sw ~env ~clock ~state =
         ~net:state.Mcp_server.net
         ~publication_recovery_provider:
           (Mcp_server.publication_recovery_availability_provider state)
+        ~compaction_wake_registry:
+          (Mcp_server.keeper_compaction_wake_registry state)
         ~config
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in

@@ -612,6 +612,7 @@ let test_fresh_presence_preserves_turn_failures () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.non_runtime_publication_recovery_provider;
         }
@@ -715,6 +716,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -1553,6 +1555,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = None
         ; net = None
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
@@ -3132,6 +3135,7 @@ let test_start_keepalive_denies_dead_tombstone_before_registration () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = None
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
@@ -3175,6 +3179,7 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -3224,6 +3229,7 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);

@@ -61,6 +61,7 @@ let test_missing_checkpoint_still_queues_owner_lane_stimulus () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = None
         ; net = None
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }

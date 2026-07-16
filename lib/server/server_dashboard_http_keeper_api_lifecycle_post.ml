@@ -235,6 +235,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         net = state.Mcp_server.net;
         publication_recovery_provider =
           Mcp_server.publication_recovery_availability_provider state;
+        compaction_wake_registry =
+          Mcp_server.keeper_compaction_wake_registry state;
       }
     in
     let args_result =

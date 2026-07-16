@@ -84,6 +84,7 @@
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)
   (re_export masc.keeper_contract)
+  (re_export masc.keeper_compaction_wake_registry)
   ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
   (re_export masc.compaction_trigger)
   ;; RFC-0056 Phase 1L — Attribution leaf sub-library.

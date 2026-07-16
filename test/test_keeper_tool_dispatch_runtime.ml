@@ -211,6 +211,7 @@ let test_public_read_rejects_unsupported_range_fields () =
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config
           ~meta
           ~publication_recovery
@@ -256,6 +257,7 @@ let test_public_read_rejects_offset_without_enrichment () =
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config
           ~meta
           ~publication_recovery
@@ -552,6 +554,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
       mkdir_p (Filename.concat repo_dir ".git");
       let result =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
           ~name:"Read"
           ~input:(`Assoc [ ("file_path", `String "config/runtime.toml") ])
@@ -690,6 +693,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
        write_file existing_path untouched;
        let execute ~name ~input =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -830,6 +834,7 @@ let test_manual_gate_defers_publication_writes_before_recovery () =
        write_file path original;
        let execute ~name ~input =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -902,6 +907,7 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
        in
        let handler =
          Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~name:"Write"
            ~input_schema
            ~config
@@ -967,6 +973,7 @@ let test_publication_initialization_crash_is_redacted () =
        let path = Filename.concat config.base_path "crash-must-not-write.txt" in
        let result =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -1098,6 +1105,7 @@ let test_publication_reconciliation_evidence_is_redacted () =
        let target = Filename.concat config.base_path "must-not-write.txt" in
        let result =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -1161,6 +1169,7 @@ let test_publication_registry_evidence_is_redacted () =
        let target = Filename.concat config.base_path "registry-must-not-write.txt" in
        let result =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -1211,6 +1220,7 @@ let test_publication_write_rereads_live_provider_after_initialization () =
        let path = Filename.concat config.base_path "after-initialization.txt" in
        let execute () =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -1238,6 +1248,7 @@ let test_publication_write_rereads_live_provider_after_initialization () =
          (Atomic.get provider_reads);
        let edit =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -1418,6 +1429,7 @@ let test_real_publication_release_failure_preserves_effect_truth () =
        let target = Filename.concat config.base_path "release-effect.txt" in
        let execute_at target content =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -1686,6 +1698,7 @@ let test_real_directory_release_failure_preserves_effect_truth () =
        in
        let execute target content =
          KET.execute_keeper_tool_call_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery
@@ -1827,6 +1840,7 @@ let test_tool_search_without_session_searcher_is_unavailable () =
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
           ~name:"keeper_tool_search"
           ~input:(`Assoc [])
@@ -1856,6 +1870,7 @@ let test_tool_search_uses_exact_injected_searcher () =
       in
       let result =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None ~search_fn
           ~name:"keeper_tool_search"
           ~input:(`Assoc [])
@@ -1879,6 +1894,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
       let file_path = Filename.concat playground visible_file_path in
       let run name input =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config
           ~meta
           ~publication_recovery
@@ -1958,6 +1974,7 @@ let test_keeper_task_claim_accepts_specific_task_id () =
            ~description:"must be claimed by explicit task_id");
       let result =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config
           ~meta
           ~publication_recovery
@@ -1996,6 +2013,7 @@ let test_unknown_tool_returns_exact_error () =
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config
           ~meta
           ~publication_recovery
@@ -2034,6 +2052,7 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
         (fun () ->
           let result =
             KET.execute_keeper_tool_call_with_outcome
+              ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
               ~config
               ~meta
               ~publication_recovery
@@ -2103,6 +2122,7 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
         (fun () ->
           let result =
             KET.execute_keeper_tool_call_with_outcome
+              ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
               ~config
               ~meta
               ~publication_recovery
@@ -2157,6 +2177,7 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
         (fun () ->
           let result =
             KET.execute_keeper_tool_call_with_outcome
+              ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
               ~config
               ~meta
               ~publication_recovery
@@ -2195,6 +2216,7 @@ let test_manual_gate_defers_web_tools_before_network () =
             (fun () ->
               let search =
                 KET.execute_keeper_tool_call_with_outcome
+                  ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
                   ~config
                   ~meta
                   ~publication_recovery
@@ -2206,6 +2228,7 @@ let test_manual_gate_defers_web_tools_before_network () =
               in
               let fetch =
                 KET.execute_keeper_tool_call_with_outcome
+                  ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
                   ~config
                   ~meta
                   ~publication_recovery
@@ -2260,6 +2283,7 @@ let test_manual_gate_defers_tool_execute_before_process () =
       let marker = Filename.concat config.base_path "must-not-execute" in
       let result =
         KET.execute_keeper_tool_call_with_outcome
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config
           ~meta
           ~publication_recovery
@@ -2296,6 +2320,7 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       in
       let run () =
         KET.execute_keeper_tool_call
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
           ~name:"tool_execute" ~input ()
       in
@@ -2358,6 +2383,10 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
       let saw_turn_sw = Atomic.make false in
       let saw_clock = Atomic.make false in
       let saw_provider = Atomic.make false in
+      let compaction_wake_registry =
+        Keeper_compaction_wake_registry.create ()
+      in
+      let saw_compaction_wake_registry = Atomic.make false in
       let delegated_data =
         `Assoc [ "run_ref", `Assoc [ "run_id", `String "test-run" ] ]
       in
@@ -2369,6 +2398,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
           Masc.Keeper_dispatch_ref.dispatch :=
             (fun ~config:_ ~agent_name:_
                  ~publication_recovery_provider:observed_provider
+                 ~compaction_wake_registry:observed_compaction_wake_registry
                  ?sw ?clock ?proc_mgr:_ ?net:_ ?mcp_session_id:_
                  ?authorize_external_effect:_
                  ~name ~args:_ () ->
@@ -2378,6 +2408,8 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
               Atomic.set saw_clock (Option.is_some clock);
               Atomic.set saw_provider
                 (observed_provider == publication_recovery.provider);
+              Atomic.set saw_compaction_wake_registry
+                (observed_compaction_wake_registry == compaction_wake_registry);
               Some
                 (Tool_result.make_ok
                    ~tool_name:name
@@ -2386,6 +2418,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
                    ()));
           let handler =
             Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+              ~compaction_wake_registry
               ~name:"masc_keeper_delegate"
               ~input_schema:(keeper_delegate_input_schema ())
               ~config
@@ -2416,7 +2449,9 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
           check bool "turn switch reaches keeper dispatch" true (Atomic.get saw_turn_sw);
           check bool "clock reaches keeper dispatch" true (Atomic.get saw_clock);
           check bool "live provider reaches keeper dispatch" true
-            (Atomic.get saw_provider))))
+            (Atomic.get saw_provider);
+          check bool "compaction wake registry identity reaches keeper dispatch" true
+            (Atomic.get saw_compaction_wake_registry))))
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
@@ -2474,6 +2509,7 @@ let execute_registered_probe ~fixture ~name ~make_result =
   with_exec_fixture fixture
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
     KET.execute_keeper_tool_call_with_outcome
+      ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
       ~config
       ~meta
       ~publication_recovery
@@ -2678,6 +2714,7 @@ let test_model_visible_tools_do_not_infer_oas_descriptors () =
     (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
        let tools =
          Masc.Keeper_tools_oas_bundle.make_tools
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~meta
            ~publication_recovery

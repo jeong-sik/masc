@@ -709,7 +709,8 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
    to [None] ([dispatch]). Without the unit the optional leaks into [dispatch]'s
    inferred type and breaks the .mli signature. Do not drop the [()]. *)
 let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owner
-    ~sw ~clock ~proc_mgr ~net ~publication_recovery_provider ~config
+    ~sw ~clock ~proc_mgr ~net ~publication_recovery_provider
+    ~compaction_wake_registry ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~idempotency_key ~metadata ~content () =
   let keeper_name = String.trim keeper_name in
@@ -814,6 +815,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
     proc_mgr;
     net;
     publication_recovery_provider;
+    compaction_wake_registry;
   } in
   let start_mtime = Mtime_clock.now () in
   let on_text_delta =
@@ -1015,7 +1017,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
    its kind also makes a missing wiring a compile error rather than a silent
    [Generic] default. *)
 let dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
-    ~publication_recovery_provider ~config
+    ~publication_recovery_provider ~compaction_wake_registry ~config
     ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content =
@@ -1030,14 +1032,16 @@ let dispatch ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
       ~idempotency_key ~metadata ~content
   | Generic ->
     dispatch_core ~connector_kind ~submission_owner ~sw ~clock ~proc_mgr ~net
-      ~publication_recovery_provider ~config ~channel ~channel_user_id
+      ~publication_recovery_provider ~compaction_wake_registry ~config
+      ~channel ~channel_user_id
       ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
       ~metadata ~content ()
 
 let dispatch_with_text_snapshot ~connector_kind ~submission_owner
     ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~publication_recovery_provider
-    ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~idempotency_key ~metadata ~content =
+    ~compaction_wake_registry ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+    ~metadata ~content =
   match connector_kind with
   | Discord ->
     accept_connector ~connector:Discord_connector ~clock ~config ~channel
@@ -1049,6 +1053,7 @@ let dispatch_with_text_snapshot ~connector_kind ~submission_owner
       ~idempotency_key ~metadata ~content
   | Generic ->
     dispatch_core ~connector_kind ~submission_owner ~on_text_snapshot ~sw
-      ~clock ~proc_mgr ~net ~publication_recovery_provider ~config ~channel
-      ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-      ~idempotency_key ~metadata ~content ()
+      ~clock ~proc_mgr ~net ~publication_recovery_provider
+      ~compaction_wake_registry ~config ~channel ~channel_user_id
+      ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
+      ~metadata ~content ()

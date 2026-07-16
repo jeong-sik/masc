@@ -184,6 +184,7 @@ let test_manual_compaction_serializes_owner_lane () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = None
         ; net = None
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }

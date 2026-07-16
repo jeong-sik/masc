@@ -79,6 +79,7 @@ type ctx =
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; publication_recovery :
       Keeper_publication_recovery_availability.turn_context
+  ; compaction_wake_registry : Keeper_compaction_wake_registry.t
   ; shared_context : Agent_sdk.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
@@ -111,6 +112,7 @@ let run (ctx : ctx)
       ; trajectory_acc
       ; profile_defaults
       ; publication_recovery
+      ; compaction_wake_registry
       ; cleanup
       ; drain_turn_event_bus
       ; event_bus
@@ -177,6 +179,7 @@ let run (ctx : ctx)
                  ~config
                  ~meta:run_meta
                  ~publication_recovery
+                 ~compaction_wake_registry
                  ~profile_defaults
                  ?continuation_delivery_channel
                  ?hitl_resolution

@@ -95,6 +95,7 @@ let with_keeper_dispatch_probe f =
         ~config:_
         ~agent_name:_
         ~publication_recovery_provider:_
+        ~compaction_wake_registry:_
         ?sw:_
         ?clock:_
         ?proc_mgr:_
@@ -190,6 +191,7 @@ let test_keeper_effects_defer_without_dispatch () =
        let args = `Assoc [ "opaque", `String name ] in
          let result =
            Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta
@@ -217,6 +219,7 @@ let test_keeper_effects_unavailable_without_dispatch () =
     (fun name ->
          let result =
            Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta
@@ -248,6 +251,7 @@ let test_keeper_effects_allow_exact_dispatch () =
        let args = `Assoc [ "opaque", `String name ] in
          let result =
            Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta

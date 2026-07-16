@@ -9,6 +9,7 @@ type 'a context = {
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
   publication_recovery_provider :
     Keeper_publication_recovery_availability.provider;
+  compaction_wake_registry : Keeper_compaction_wake_registry.t;
 }
 
 let create
@@ -19,6 +20,7 @@ let create
       ~proc_mgr
       ~net
       ~publication_recovery_provider
+      ~compaction_wake_registry
   =
   { config
   ; agent_name
@@ -27,6 +29,7 @@ let create
   ; proc_mgr
   ; net
   ; publication_recovery_provider
+  ; compaction_wake_registry
   }
 
 let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
@@ -38,6 +41,7 @@ let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
     proc_mgr = ctx.proc_mgr;
     net = ctx.net;
     publication_recovery_provider = ctx.publication_recovery_provider;
+    compaction_wake_registry = ctx.compaction_wake_registry;
   }
 
 let dispatch ctx ~name ~args =
@@ -52,6 +56,7 @@ let delegated_dispatch
       ~proc_mgr
       ~net
       ~publication_recovery_provider
+      ~compaction_wake_registry
   =
   let ctx =
     create
@@ -62,6 +67,7 @@ let delegated_dispatch
       ~proc_mgr
       ~net
       ~publication_recovery_provider
+      ~compaction_wake_registry
   in
   fun ~name ~args -> dispatch ctx ~name ~args
 ;;

@@ -26,6 +26,7 @@ type 'a context = 'a Keeper_types_profile.context = {
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
   publication_recovery_provider :
     Keeper_publication_recovery_availability.provider;
+  compaction_wake_registry : Keeper_compaction_wake_registry.t;
 }
 type tool_result = Keeper_types_profile.tool_result
 let schemas = Keeper_types_profile.schemas
@@ -478,6 +479,7 @@ let keeper_up_body
       ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ?proc_mgr
       ?net
       args : tool_result =
@@ -489,6 +491,7 @@ let keeper_up_body
     ; proc_mgr
     ; net
     ; publication_recovery_provider
+    ; compaction_wake_registry
     }
   in
   with_keeper_startup_gate (fun () -> execute_keeper_up keeper_ctx args)

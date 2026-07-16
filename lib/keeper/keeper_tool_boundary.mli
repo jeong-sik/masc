@@ -12,6 +12,7 @@ type 'a context = {
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
   publication_recovery_provider :
     Keeper_publication_recovery_availability.provider;
+  compaction_wake_registry : Keeper_compaction_wake_registry.t;
 }
 
 val create :
@@ -23,6 +24,7 @@ val create :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
   publication_recovery_provider:
     Keeper_publication_recovery_availability.provider ->
+  compaction_wake_registry:Keeper_compaction_wake_registry.t ->
   'a context
 
 val dispatch :
@@ -37,6 +39,7 @@ val delegated_dispatch :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
   publication_recovery_provider:
     Keeper_publication_recovery_availability.provider ->
+  compaction_wake_registry:Keeper_compaction_wake_registry.t ->
   name:string ->
   args:Yojson.Safe.t ->
   Keeper_types_profile.tool_result option

@@ -71,6 +71,7 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
     delegated_dispatch =
       Some
         (Masc.Keeper_tool_boundary.delegated_dispatch
+           ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
            ~config
            ~agent_name
            ~sw

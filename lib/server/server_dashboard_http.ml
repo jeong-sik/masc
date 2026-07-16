@@ -751,7 +751,9 @@ let operator_control_context ~state ~sw ~clock ~config ~agent_name
            ~proc_mgr:state.Mcp_server.proc_mgr
            ~net:state.Mcp_server.net
            ~publication_recovery_provider:
-             (Mcp_server.publication_recovery_availability_provider state))
+             (Mcp_server.publication_recovery_availability_provider state)
+           ~compaction_wake_registry:
+             (Mcp_server.keeper_compaction_wake_registry state))
   ; mcp_session_id = None
   }
 ;;

@@ -62,6 +62,7 @@ val execute_keeper_tool_call_with_outcome
   -> meta:keeper_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
+  -> compaction_wake_registry:Keeper_compaction_wake_registry.t
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
@@ -89,6 +90,7 @@ val execute_keeper_tool_call
   -> meta:keeper_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
+  -> compaction_wake_registry:Keeper_compaction_wake_registry.t
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option

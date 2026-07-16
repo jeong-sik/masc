@@ -32,6 +32,7 @@ let make_tool_bundle
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?clock
@@ -90,6 +91,7 @@ let make_tool_bundle
                  ~config
                  ~meta
                  ~publication_recovery
+                 ~compaction_wake_registry
                  ~ctx_snapshot
                    ?turn_sandbox_factory
                  ~exec_cache
@@ -142,6 +144,7 @@ let make_tools
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?clock
@@ -152,6 +155,7 @@ let make_tools
      ~config
      ~meta
      ~publication_recovery
+     ~compaction_wake_registry
      ~ctx_snapshot
      ?search_fn
      ?clock

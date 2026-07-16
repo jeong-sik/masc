@@ -1460,6 +1460,8 @@ let start_keeper_loops_owned
         ; net = state.net
         ; publication_recovery_provider =
             Mcp_server.publication_recovery_availability_provider state
+        ; compaction_wake_registry =
+            Mcp_server.keeper_compaction_wake_registry state
         }
       in
       Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
@@ -1519,6 +1521,8 @@ let start_keeper_loops_owned
                 ; net = state.net
                 ; publication_recovery_provider =
                     Mcp_server.publication_recovery_availability_provider state
+                ; compaction_wake_registry =
+                    Mcp_server.keeper_compaction_wake_registry state
                 }
               in
               let launch_outcome =

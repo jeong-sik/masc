@@ -114,6 +114,7 @@ let execute_keeper_tool_call_with_outcome
       ~(meta : keeper_meta)
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -144,6 +145,7 @@ let execute_keeper_tool_call_with_outcome
                        { config
                        ; meta
                        ; publication_recovery
+                       ; compaction_wake_registry
                        ; ctx_work
                        ; turn_sandbox_factory
                        ; exec_cache
@@ -217,6 +219,7 @@ let execute_keeper_tool_call
       ~(meta : keeper_meta)
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -231,6 +234,7 @@ let execute_keeper_tool_call
       ~config
       ~meta
       ~publication_recovery
+      ~compaction_wake_registry
       ~ctx_work
                   ?turn_sandbox_factory
                   ~exec_cache

@@ -185,6 +185,7 @@ let make_fixture
   ignore (Masc.Keeper_registry.register ~base_path "tool-matrix" meta);
   let tools =
     KTO.make_tools
+      ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
       ~config
       ~meta
       ~publication_recovery

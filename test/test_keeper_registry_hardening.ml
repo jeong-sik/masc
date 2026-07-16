@@ -369,6 +369,7 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
              | None -> fail "replacement entry not found");
             let result =
               KET.execute_keeper_tool_call_with_outcome
+                ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
                 ~config
                 ~meta:exact_resources.entry.meta
                 ~publication_recovery:exact_resources.publication_recovery

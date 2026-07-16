@@ -98,6 +98,7 @@ let test_busy_discord_enqueues () =
         let reply =
           with_busy_slot ~base ~sw (fun () ->
             Gate_keeper_backend.dispatch
+              ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
               ~connector_kind:Gate_keeper_backend.Discord
               ~submission_owner:Gate_keeper_backend.Channel_actor
               ~sw ~clock ~proc_mgr:None ~net:None
@@ -216,6 +217,7 @@ let test_unpublished_busy_slot_queues_without_resolved_meta () =
             check "raw lock has no published in-flight metadata"
               (Keeper_turn_admission.in_flight ~base_path:base ~keeper_name = None);
             Gate_keeper_backend.dispatch
+              ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
               ~connector_kind:Gate_keeper_backend.Discord
               ~submission_owner:Gate_keeper_backend.Channel_actor
               ~sw ~clock ~proc_mgr:None ~net:None
@@ -266,6 +268,7 @@ let test_busy_discord_persist_failure_is_explicit () =
             Keeper_chat_queue.For_testing.fail_transaction_at_stages
               [ Mutation_applied ];
             Gate_keeper_backend.dispatch
+              ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
               ~connector_kind:Gate_keeper_backend.Discord
               ~submission_owner:Gate_keeper_backend.Channel_actor
               ~sw ~clock ~proc_mgr:None ~net:None
@@ -322,6 +325,7 @@ let test_pending_receipt_prevents_direct_overtake () =
       Eio.Switch.run @@ fun sw ->
       let reply =
         Gate_keeper_backend.dispatch
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~connector_kind:Gate_keeper_backend.Discord
           ~submission_owner:Gate_keeper_backend.Channel_actor
           ~sw ~clock ~proc_mgr:None ~net:None
@@ -365,6 +369,7 @@ let test_busy_slack_preserves_thread_context () =
       let reply =
         with_busy_slot ~base ~sw (fun () ->
           Gate_keeper_backend.dispatch
+            ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
             ~connector_kind:Gate_keeper_backend.Slack
             ~submission_owner:Gate_keeper_backend.Channel_actor
             ~sw ~clock ~proc_mgr:None ~net:None
@@ -506,6 +511,7 @@ let test_shutdown_fenced_connector_ack
         Eio.Switch.on_release sw Keeper_chat_queue.For_testing.reset;
         let reply =
           Gate_keeper_backend.dispatch
+            ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
             ~connector_kind
             ~submission_owner:Gate_keeper_backend.Channel_actor
             ~sw ~clock ~proc_mgr:None ~net:None

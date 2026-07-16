@@ -528,6 +528,7 @@ let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
   ; clock = Eio.Stdenv.clock env
   ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
   ; net = Some (Eio.Stdenv.net env)
+  ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
   ; publication_recovery_provider =
       Masc_test_deps.publication_recovery_provider
         (publication_recovery_registry env sw config)
@@ -989,6 +990,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -1122,6 +1124,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -1184,6 +1187,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -1260,6 +1264,7 @@ let test_restart_denies_persisted_dead_tombstone () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config)
@@ -1330,6 +1335,7 @@ let with_reap_ready_dead_keeper name f =
           ; clock = Eio.Stdenv.clock env
           ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
           ; net = Some (Eio.Stdenv.net env)
+          ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
           ; publication_recovery_provider =
               Masc_test_deps.publication_recovery_provider
                 (publication_recovery_registry env sw config)
@@ -1429,6 +1435,7 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -1496,6 +1503,7 @@ let test_launch_fork_rejection_does_not_announce_running () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -1547,6 +1555,7 @@ let test_fork_rejection_preserves_replacement_lane () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config)
@@ -1600,6 +1609,7 @@ let test_fork_rejection_unregisters_non_terminalizable_owner () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config)
@@ -1642,6 +1652,7 @@ let test_sweep_waits_for_lane_join_before_unregister () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config)
@@ -1719,6 +1730,7 @@ let test_idle_duration_never_stops_keeper () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -1779,6 +1791,7 @@ let test_non_storm_crashed_restarts_normally () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = Some (Eio.Stdenv.net env);
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config);
@@ -1845,6 +1858,7 @@ let test_persisted_blocker_survives_unregister () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = Some (Eio.Stdenv.net env)
+        ; compaction_wake_registry = Keeper_compaction_wake_registry.create ()
         ; publication_recovery_provider =
             Masc_test_deps.publication_recovery_provider
               (publication_recovery_registry env sw config)

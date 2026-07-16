@@ -1334,6 +1334,8 @@ let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
                ~config
                ~agent_name
                ~publication_recovery_provider:publication_recovery.provider
+               ~compaction_wake_registry:
+                 (Keeper_compaction_wake_registry.create ())
                ~name
                ~args:(`Assoc [])
                ()

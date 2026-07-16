@@ -565,6 +565,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          compaction_wake_registry = Keeper_compaction_wake_registry.create ();
           publication_recovery_provider =
             Publication_availability.constant
               Publication_availability.Non_runtime;

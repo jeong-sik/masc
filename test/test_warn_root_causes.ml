@@ -97,6 +97,7 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
       in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -149,6 +150,7 @@ let test_fusion_default_descriptor_is_bundle_visible () =
       in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -186,6 +188,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
       in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -245,6 +248,7 @@ let test_missing_current_task_reconciled_before_transition_hint () =
       in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -292,6 +296,7 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
       in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle
+          ~compaction_wake_registry:(Keeper_compaction_wake_registry.create ())
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect

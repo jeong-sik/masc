@@ -903,6 +903,7 @@ let handle_masc_local_runtime
 let handle_masc_keeper_with_outcome
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ?sw
       ?clock
       ?proc_mgr
@@ -932,6 +933,7 @@ let handle_masc_keeper_with_outcome
       ~config
       ~agent_name:meta.agent_name
       ~publication_recovery_provider
+      ~compaction_wake_registry
       ?sw
       ?clock
       ?proc_mgr
@@ -947,6 +949,7 @@ let handle_masc_keeper_with_outcome
 let handle_masc_keeper
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
+      ~(compaction_wake_registry : Keeper_compaction_wake_registry.t)
       ?sw
       ?clock
       ?proc_mgr
@@ -963,6 +966,7 @@ let handle_masc_keeper
   =
   (handle_masc_keeper_with_outcome
      ~publication_recovery_provider
+     ~compaction_wake_registry
      ?sw
      ?clock
      ?proc_mgr

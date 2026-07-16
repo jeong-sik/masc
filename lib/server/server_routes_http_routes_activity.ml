@@ -364,6 +364,8 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
       net = state.Mcp_server.net;
       publication_recovery_provider =
         Mcp_server.publication_recovery_availability_provider state;
+      compaction_wake_registry =
+        Mcp_server.keeper_compaction_wake_registry state;
     }
   in
   let post_id = Board.Post_id.to_string post.id in

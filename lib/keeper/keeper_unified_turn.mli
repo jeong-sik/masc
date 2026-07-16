@@ -170,6 +170,7 @@ val run_keeper_cycle
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery_provider:
        Keeper_publication_recovery_availability.provider
+  -> compaction_wake_registry:Keeper_compaction_wake_registry.t
   -> observation:Keeper_world_observation.world_observation
   -> generation:int
   -> wake:Keeper_registry.wake_reason

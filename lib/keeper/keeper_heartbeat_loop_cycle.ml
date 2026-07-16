@@ -248,6 +248,7 @@ let run_keeper_cycle_admitted
               ~config:ctx.config
               ~meta:meta_after_triage
               ~publication_recovery_provider:ctx.publication_recovery_provider
+              ~compaction_wake_registry:ctx.compaction_wake_registry
               ~observation
               ~generation:meta_after_triage.runtime.generation
               ~wake

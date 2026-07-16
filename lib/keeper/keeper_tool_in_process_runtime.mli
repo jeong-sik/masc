@@ -271,6 +271,7 @@ val handle_analyze_image_with_outcome
 val handle_masc_keeper
   :  publication_recovery_provider:
        Keeper_publication_recovery_availability.provider
+  -> compaction_wake_registry:Keeper_compaction_wake_registry.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -289,6 +290,7 @@ val handle_masc_keeper
 val handle_masc_keeper_with_outcome
   :  publication_recovery_provider:
        Keeper_publication_recovery_availability.provider
+  -> compaction_wake_registry:Keeper_compaction_wake_registry.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t

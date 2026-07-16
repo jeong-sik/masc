@@ -38,8 +38,6 @@ class GateClient(GateClientBase):
             gate_api_token=cfg.gate_api_token,
             gate_origin=cfg.gate_origin(),
             timeout_sec=cfg.gate_timeout_sec,
-            breaker_failure_threshold=cfg.gate_breaker_failure_threshold,
-            breaker_reset_sec=cfg.gate_breaker_reset_sec,
             status_cache_ttl_sec=cfg.status_cache_ttl_sec,
             keeper_cache_ttl_sec=cfg.keeper_cache_ttl_sec,
         )

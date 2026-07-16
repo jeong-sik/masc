@@ -1,4 +1,4 @@
-"""Tests for GateClientBase circuit breaker and HTTP transport."""
+"""Tests for GateClientBase HTTP transport."""
 
 from __future__ import annotations
 
@@ -58,8 +58,6 @@ def _make_client(**kwargs: object) -> GateClientBase:
         "gate_api_token": "",
         "gate_origin": "http://localhost:8935",
         "timeout_sec": 5.0,
-        "breaker_failure_threshold": 3,
-        "breaker_reset_sec": 10,
     }
     defaults.update(kwargs)
     return GateClientBase(**defaults)  # type: ignore[arg-type]
@@ -93,50 +91,6 @@ class TestHeaders:
         assert c._headers["X-Gate-Agent"] == "my-bot"
 
 
-class TestCircuitBreaker:
-    def test_starts_closed(self) -> None:
-        c = _make_client()
-        assert not c._breaker_is_open()
-
-    def test_opens_after_threshold_failures(self) -> None:
-        c = _make_client(breaker_failure_threshold=2)
-        c._note_transport_failure("fail 1")
-        assert not c._breaker_is_open()
-        c._note_transport_failure("fail 2")
-        assert c._breaker_is_open()
-
-    def test_resets_on_success(self) -> None:
-        c = _make_client(breaker_failure_threshold=2)
-        c._note_transport_failure("fail 1")
-        c._note_transport_failure("fail 2")
-        assert c._breaker_is_open()
-        c._note_success()
-        assert not c._breaker_is_open()
-        assert c._consecutive_failures == 0
-
-    def test_snapshot(self) -> None:
-        c = _make_client(breaker_failure_threshold=2)
-        snap = c.breaker_snapshot()
-        assert snap.open is False
-        assert snap.consecutive_failures == 0
-        assert snap.last_failure == ""
-
-        c._note_transport_failure("timeout")
-        c._note_transport_failure("timeout again")
-        snap = c.breaker_snapshot()
-        assert snap.open is True
-        assert snap.consecutive_failures == 2
-        assert snap.last_failure == "timeout again"
-
-    def test_disabled_breaker(self) -> None:
-        c = _make_client(breaker_failure_threshold=0)
-        assert not c._breaker_enabled()
-        c._note_transport_failure("fail")
-        c._note_transport_failure("fail")
-        c._note_transport_failure("fail")
-        assert not c._breaker_is_open()
-
-
 class TestCacheFreshness:
     def test_fresh_cache(self) -> None:
         c = _make_client()
@@ -155,17 +109,45 @@ class TestCacheFreshness:
 
 class TestSendMessage:
     @pytest.mark.asyncio
-    async def test_returns_error_when_breaker_open(self) -> None:
-        c = _make_client(breaker_failure_threshold=1)
-        c._note_transport_failure("forced open")
-        resp = await c.send_message(
-            keeper_name="test",
-            content="hello",
-            context={"channel": "test"},
-            idempotency_key="key-1",
+    async def test_transport_failure_does_not_refuse_next_request(self) -> None:
+        responses = iter(
+            [
+                httpx.Response(503),
+                httpx.Response(200, json={"ok": True, "reply": "ready"}),
+            ]
         )
-        assert not resp.ok
-        assert "circuit open" in resp.error
+        request_count = 0
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            return next(responses)
+
+        c = _make_client()
+        c._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            headers=c._headers,
+        )
+        try:
+            first = await c.send_message(
+                keeper_name="keeper-a",
+                content="first",
+                context={"channel": "test"},
+                idempotency_key="key-1",
+            )
+            second = await c.send_message(
+                keeper_name="keeper-b",
+                content="second",
+                context={"channel": "test"},
+                idempotency_key="key-2",
+            )
+        finally:
+            await c.aclose()
+
+        assert not first.ok
+        assert second.ok
+        assert second.reply == "ready"
+        assert request_count == 2
 
 
 class TestKeeperStream:
@@ -243,7 +225,6 @@ class TestKeeperStream:
             try:
                 with pytest.raises(httpx.PoolTimeout):
                     await anext(second_stream)
-                assert c.breaker_snapshot().consecutive_failures == 1
                 release.set()
                 assert await first_result == ["ready"]
             finally:

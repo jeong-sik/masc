@@ -24,8 +24,6 @@ env  >  runtime TOML  >  field defaults
 | `gate_base_url` | `GATE_BASE_URL` (Discord/Slack/Telegram), `MASC_GATE_URL` (iMessage) | `http://localhost:8935` | MASC server. Loopback host relaxes auth. |
 | `gate_api_token` | `GATE_API_TOKEN`, `MASC_GATE_API_TOKEN` (iMessage) | `""` | Required unless `gate_base_url` is loopback. |
 | `gate_timeout_sec` | `GATE_TIMEOUT_SEC` | 120 (30 for iMessage) | int/float seconds, must be positive. |
-| `gate_breaker_failure_threshold` | `GATE_BREAKER_FAILURE_THRESHOLD` | 3 (5 for iMessage) | consecutive 5xx/timeout before circuit opens. |
-| `gate_breaker_reset_sec` | `GATE_BREAKER_RESET_SEC` | 30 (60 for iMessage) | half-open wait. |
 | `status_cache_ttl_sec` | `STATUS_CACHE_TTL_SEC` | 15 (10 for iMessage) | gate status cache. |
 | `keeper_cache_ttl_sec` | `KEEPER_CACHE_TTL_SEC` | 30 | keeper discovery cache. |
 | `binding_store_path` | `<NAME>_BINDING_STORE_PATH` | `.gate/runtime/<name>/bindings.json` | runtime-bind file. |

@@ -24,6 +24,7 @@ DEFAULT_STATE_DIR: Final[str] = ".gate/runtime/telegram"
 DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/telegram/bindings.json"
 DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/telegram/status.json"
 
+
 def _runtime_toml_path() -> Path:
     raw = os.getenv("MASC_BASE_PATH", "").strip()
     root = Path(raw).expanduser() if raw else Path.cwd()
@@ -64,7 +65,13 @@ class BotConfig(BaseSettings):
         toml_source = TomlConfigSettingsSource(
             settings_cls, toml_file=_runtime_toml_path()
         )
-        return (init_settings, env_settings, dotenv_settings, toml_source, file_secret_settings)
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            toml_source,
+            file_secret_settings,
+        )
 
     # Required: Telegram Bot API token from @BotFather
     telegram_bot_token: str = Field(
@@ -99,16 +106,6 @@ class BotConfig(BaseSettings):
         default=120.0,
         validation_alias=AliasChoices("GATE_TIMEOUT_SEC", "gate_timeout_sec"),
     )
-    gate_breaker_failure_threshold: int = Field(
-        default=3,
-        validation_alias=AliasChoices(
-            "GATE_BREAKER_FAILURE_THRESHOLD", "gate_breaker_failure_threshold"
-        ),
-    )
-    gate_breaker_reset_sec: int = Field(
-        default=30,
-        validation_alias=AliasChoices("GATE_BREAKER_RESET_SEC", "gate_breaker_reset_sec"),
-    )
     status_cache_ttl_sec: int = Field(
         default=15,
         validation_alias=AliasChoices("STATUS_CACHE_TTL_SEC", "status_cache_ttl_sec"),
@@ -137,6 +134,7 @@ class BotConfig(BaseSettings):
             "status_path",
         ),
     )
+
     @field_validator("telegram_bot_token")
     @classmethod
     def token_not_empty(cls, v: str) -> str:

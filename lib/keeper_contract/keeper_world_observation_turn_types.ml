@@ -44,6 +44,7 @@ type event_queue_trigger =
       (** Durable recovery control for a deterministic failed turn. This opens
           the independent judge even when the failed Keeper is unhealthy or
           its ordinary reactive lane is disabled. *)
+  | Manual_compaction_stimulus
 
 type turn_reason =
   | Mention_pending
@@ -53,6 +54,7 @@ type turn_reason =
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
+  | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -81,6 +83,7 @@ let turn_reason_to_string = function
   | Connector_attention_pending -> "connector_attention_pending"
   | Hitl_resolved_pending -> "hitl_resolved_pending"
   | Failure_judgment_pending -> "failure_judgment_pending"
+  | Manual_compaction_pending -> "manual_compaction_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
   | Task_backlog _ -> "task_backlog"
@@ -93,6 +96,7 @@ let turn_reason_of_event_queue_trigger = function
   | Connector_attention_stimulus -> Connector_attention_pending
   | Hitl_resolved_stimulus -> Hitl_resolved_pending
   | Failure_judgment_stimulus -> Failure_judgment_pending
+  | Manual_compaction_stimulus -> Manual_compaction_pending
 ;;
 
 let skip_reason_to_string = function

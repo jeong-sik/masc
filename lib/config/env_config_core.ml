@@ -8,7 +8,6 @@
     {!Config_error} on missing/invalid environment variables.
 
     Usage:
-      let threshold = Env_config.Zombie.threshold_seconds
       let lock_timeout = Env_config.Lock.timeout_seconds
 *)
 

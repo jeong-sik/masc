@@ -152,7 +152,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_HTTP_AUTH_STRICT` | feature_flag | n/a | n/a | 284 |  |
 | `MASC_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 624 | Bootstrap janitor tick interval (seconds). Drives the SSE/session/ rate-limit/webrtc reaper loop in [server_bootstrap... |
 | `MASC_KEEPER_BOOTSTRAP_WINDOW_SEC` | typed:float | unclassified | unclassified | 608 | Keeper world observation bootstrap window (seconds). Default: 300 (5 min). |
-| `MASC_KEEPER_ZOMBIE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 10 | Threshold for keeper agents (longer grace period, default 1 hour) |
 | `MASC_LABEL_QUIET_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 596 | Dashboard label "quiet" threshold (seconds). Default: 300 (5 min). |
 | `MASC_LABEL_STUCK_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 600 | Dashboard label "stuck" threshold (seconds). Default: 900 (15 min). |
 | `MASC_LIST_PAGE_SIZE` | typed:int | unclassified | unclassified | 360 | Tool list page size, clamped to [10, 1024]. Default: 512. Re-readable within the process; not a guarantee of shell-le... |
@@ -196,8 +195,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | Timeouts | operator | 715 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse]... |
 | `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 265 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
 | `MASC_WS_PORT` | string_literal | n/a | n/a | 261 | WebSocket server port. Default: 8937. |
-| `MASC_ZOMBIE_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 14 | Cleanup loop interval (seconds) |
-| `MASC_ZOMBIE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 6 | Threshold for considering a resource as zombie (seconds) |
 
 ## Env_config_runtime_services (27 knobs; typed classification 3/21)
 

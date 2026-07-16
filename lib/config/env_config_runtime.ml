@@ -1,19 +1,5 @@
 open Env_config_core
 
-module Zombie = struct
-  (** Threshold for considering a resource as zombie (seconds) *)
-  let threshold_seconds =
-    get_float ~default:300.0 "MASC_ZOMBIE_THRESHOLD_SEC"
-
-  (** Threshold for keeper agents (longer grace period, default 1 hour) *)
-  let keeper_threshold_seconds =
-    get_float ~default:3600.0 "MASC_KEEPER_ZOMBIE_THRESHOLD_SEC"
-
-  (** Cleanup loop interval (seconds) *)
-  let cleanup_interval_seconds =
-    get_float ~default:60.0 "MASC_ZOMBIE_CLEANUP_INTERVAL_SEC"
-end
-
 (** {1 Lock Configuration} *)
 
 module Lock = struct

@@ -129,18 +129,6 @@ let test_config_of_json_invalid () =
   check bool "pause allowed on admin/catalog surface" true
     (Config.is_tool_allowed "masc_pause")
 
-(* ============================================================
-   Env_config Tests
-   ============================================================ *)
-
-let test_env_zombie_threshold () =
-  let threshold = Env_config.Zombie.threshold_seconds in
-  check bool "positive threshold" true (threshold > 0.0)
-
-let test_env_zombie_cleanup_interval () =
-  let interval = Env_config.Zombie.cleanup_interval_seconds in
-  check bool "positive interval" true (interval > 0.0)
-
 let test_env_lock_timeout () =
   let timeout = Env_config.Lock.timeout_seconds in
   check bool "positive timeout" true (timeout > 0.0)
@@ -228,10 +216,6 @@ let () =
       test_case "of_json" `Quick test_config_of_json;
       test_case "of_json custom" `Quick test_config_of_json_custom;
       test_case "of_json invalid" `Quick test_config_of_json_invalid;
-    ];
-    "env_config.zombie", [
-      test_case "threshold" `Quick test_env_zombie_threshold;
-      test_case "cleanup_interval" `Quick test_env_zombie_cleanup_interval;
     ];
     "env_config.lock", [
       test_case "timeout" `Quick test_env_lock_timeout;

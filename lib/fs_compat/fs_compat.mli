@@ -771,6 +771,11 @@ type private_jsonl_append_error =
     is proportional to [suffix], not to historical file size. When the Eio
     filesystem is active, the entire blocking lock/write/fsync transaction runs
     in a system thread so one contended file cannot stop unrelated fibers. *)
+val append_private_jsonl_durable_locked_with_end_offset_result :
+  string -> string -> (int, private_jsonl_append_error) result
+
+(** As {!append_private_jsonl_durable_locked_with_end_offset_result}, discarding
+    the committed newline-end byte offset. *)
 val append_private_jsonl_durable_locked_result :
   string -> string -> (unit, private_jsonl_append_error) result
 

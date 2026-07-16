@@ -41,9 +41,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let substantive_tool_call_count = List.length tool_names in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
-  (* Visible-output preview follows the typed result surface. In particular,
-     [TurnLimitObserved] is only an observed OAS fact: MASC neither fabricates
-     continuation text nor promotes it to a lifecycle checkpoint. *)
+  (* Visible-output preview follows the typed result surface. *)
   let is_visible_reply =
     Keeper_turn_outcome.equal
       (Keeper_turn_outcome.of_result_surface

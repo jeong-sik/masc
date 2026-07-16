@@ -373,9 +373,6 @@ type keeper_meta =
   ; proactive : proactive_policy
   ; compaction : compaction_policy
   ; multimodal_policy : Keeper_types_profile.multimodal_policy
-  ; auto_handoff : bool
-  ; handoff_threshold : float
-  ; handoff_cooldown_sec : int
   ; (* -- Lifecycle -- *)
     created_at : string
   ; updated_at : string

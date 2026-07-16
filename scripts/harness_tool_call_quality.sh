@@ -655,7 +655,6 @@ run_live_case() {
       persona_name: $persona_name,
       autoboot_enabled: false,
       proactive_enabled: false,
-      auto_handoff: false,
       allowed_paths: $allowed_paths
     }')"
 

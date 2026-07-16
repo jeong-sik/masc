@@ -99,19 +99,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                        p.profile_defaults.proactive_enabled)
                   p.proactive_enabled_opt
             in
-              let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
-              let handoff_threshold =
-                match p.handoff_threshold_opt with
-                | Some threshold -> threshold
-                | None ->
-                    Runtime_params.get Runtime_settings.keeper_handoff_threshold
-              in
-              let handoff_cooldown_sec =
-                match p.handoff_cooldown_sec_opt with
-                | Some cooldown_sec -> cooldown_sec
-                | None ->
-                    Runtime_params.get Runtime_settings.keeper_handoff_cooldown_sec
-              in
               let instructions = Option.value ~default:"" p.instructions_opt in
               let (env_ratio_gate, env_message_gate, env_token_gate) =
                 keeper_compaction_policy_from_env ()
@@ -265,9 +252,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           token_gate = compaction_token_gate;
           cooldown_sec = compaction_cooldown_sec;
         };
-        auto_handoff;
-        handoff_threshold;
-        handoff_cooldown_sec;
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
@@ -414,8 +398,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("compaction_message_gate", `Int meta.compaction.message_gate);
           ("compaction_token_gate", `Int meta.compaction.token_gate);
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
-          ("auto_handoff", `Bool meta.auto_handoff);
-          ("handoff_threshold", `Float meta.handoff_threshold);
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
         tool_result_ok_data json

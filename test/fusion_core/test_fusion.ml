@@ -18,7 +18,6 @@ let base_group : Fusion_policy.panel_group =
   ; label = ""
   ; system_prompt = "panel"
   ; web_tools = false
-  ; max_tool_calls = 0
   ; max_output_tokens = None
   ; timeout_s = 300.0
   }
@@ -112,7 +111,6 @@ max_concurrent_judges = 4
 staged_judge_group_size = 3
 [fusion.presets.trio]
 web_tools = false
-max_tool_calls_per_panel = 0
 panel = ["a", "b", "c"]
 judge = "j"
 panel_system_prompt = "answer independently"
@@ -137,7 +135,6 @@ let test_config_valid () =
        (match preset.Fusion_policy.panels with
         | [ g ] ->
           Alcotest.(check bool) "web_tools" false g.Fusion_policy.web_tools;
-          Alcotest.(check int) "max_tool_calls" 0 g.Fusion_policy.max_tool_calls;
           Alcotest.(check (option int)) "max_output_tokens default" None
             g.Fusion_policy.max_output_tokens
         | _ -> Alcotest.fail "expected one group")
@@ -208,7 +205,6 @@ enabled = true
 default_preset = "p"
 [fusion.presets.p]
 web_tools = true
-max_tool_calls_per_panel = 4
 max_output_tokens_per_panel = 2048
 panel_timeout_s = 123.0
 panel = ["a", "b", "c"]
@@ -233,7 +229,6 @@ judge_max_output_tokens = 1024
 panel = ["a", "b", "c"]
 panel_system_prompt = "answer independently"
 web_tools = true
-max_tool_calls_per_panel = 4
 max_output_tokens_per_panel = 2048
 panel_timeout_s = 123.0
 |}
@@ -268,12 +263,10 @@ judge_system_prompt = "synthesize"
 panel = ["fast1", "fast2"]
 panel_system_prompt = "quick"
 web_tools = false
-max_tool_calls_per_panel = 0
 [[fusion.presets.mixed.panels]]
 panel = ["careful1"]
 panel_system_prompt = "deliberate"
 web_tools = true
-max_tool_calls_per_panel = 4
 panel_timeout_s = 180.0
 |}
 
@@ -290,7 +283,6 @@ let test_config_heterogeneous () =
         | [ g1; g2 ] ->
           Alcotest.(check bool) "g1 no web" false g1.Fusion_policy.web_tools;
           Alcotest.(check bool) "g2 web" true g2.Fusion_policy.web_tools;
-          Alcotest.(check int) "g2 tool budget" 4 g2.Fusion_policy.max_tool_calls;
           Alcotest.(check (option int)) "g1 default max output" None
             g1.Fusion_policy.max_output_tokens;
           Alcotest.(check (float 0.001)) "g2 timeout" 180.0 g2.Fusion_policy.timeout_s;
@@ -766,7 +758,6 @@ let test_config_two_judges_not_staged_eligible () =
     ; jlabel = label
     ; jsystem_prompt = label ^ " lens"
     ; jweb_tools = false
-    ; jmax_tool_calls = 0
     ; jmax_output_tokens = None
     ; jtimeout_s = 300.0
     ; jmax_timeout_s = None
@@ -781,29 +772,6 @@ let test_config_two_judges_not_staged_eligible () =
     Alcotest.failf "expected Staged_too_few_judges, got: %s"
       (Fusion_policy.staged_judge_group_error_message e)
   | Ok _ -> Alcotest.fail "two judges must not be staged-eligible"
-
-let test_config_invalid_max_tool_calls () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p1"
-[fusion.presets.p1]
-panel = ["a", "b"]
-judge = "a"
-panel_system_prompt = "p"
-judge_system_prompt = "j"
-web_tools = true
-max_tool_calls_per_panel = 17
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_max_tool_calls present" true
-      (List.exists
-         (function Fusion_config.Invalid_max_tool_calls _ -> true | _ -> false)
-         es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_max_tool_calls"
 
 let test_config_invalid_max_output_tokens () =
   let s =
@@ -862,7 +830,6 @@ max_concurrent_judges = 3
 staged_judge_group_size = 3
 [fusion.presets.trio]
 web_tools = false
-max_tool_calls_per_panel = 0
 panel = [
   "deepseek.deepseek-v4-pro",
   "glm-coding.glm-5-turbo",
@@ -951,15 +918,6 @@ let test_validated_duplicate_panelist () =
   | Error (Fusion_policy.Validated_preset.Duplicate_panelist "x") -> ()
   | _ -> Alcotest.fail "expected Duplicate_panelist x for same model no label"
 
-let test_validated_bad_max_tool_calls () =
-  let over =
-    { base_group with Fusion_policy.max_tool_calls = Fusion_policy.max_tool_calls_ceiling + 1 }
-  in
-  match Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ over ] "mtc") with
-  | Error (Fusion_policy.Validated_preset.Bad_max_tool_calls v) ->
-    Alcotest.(check int) "over-ceiling value reported" 17 v
-  | _ -> Alcotest.fail "expected Bad_max_tool_calls over ceiling"
-
 let test_validated_bad_max_output_tokens () =
   let bad = { base_group with Fusion_policy.max_output_tokens = Some 0 } in
   match Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ bad ] "mot") with
@@ -973,7 +931,6 @@ let base_judge : Fusion_policy.judge_spec =
   ; jlabel = ""
   ; jsystem_prompt = "lens"
   ; jweb_tools = false
-  ; jmax_tool_calls = 0
   ; jmax_output_tokens = None
   ; jtimeout_s = 300.0
   ; jmax_timeout_s = None
@@ -1007,20 +964,6 @@ let test_validated_duplicate_judge () =
   with
   | Error (Fusion_policy.Validated_preset.Duplicate_judge "x") -> ()
   | _ -> Alcotest.fail "expected Duplicate_judge x for same judge identity"
-
-let test_validated_judge_bad_max_tool_calls () =
-  let over =
-    { base_judge with
-      Fusion_policy.jmax_tool_calls = Fusion_policy.max_tool_calls_ceiling + 1
-    }
-  in
-  (* 단일 over-ceiling judge — panel-side test_validated_bad_max_tool_calls(~panels:[ over ])와
-     대칭. base_judge를 더하면 jmodel="jm" 정체성이 겹쳐 Duplicate_judge가 먼저 발동하므로,
-     max_tool_calls 검사에 도달하려면 정체성 충돌이 없어야 한다. judges는 of_preset 레벨에서
-     최소 개수 요구가 없다(JOJ <2 에러는 orchestrator 런타임 책임). *)
-  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ over ] "jmtc") with
-  | Error (Fusion_policy.Validated_preset.Bad_max_tool_calls 17) -> ()
-  | _ -> Alcotest.fail "expected Bad_max_tool_calls 17 for over-ceiling judge"
 
 let test_validated_judge_bad_max_output_tokens () =
   let bad = { base_judge with Fusion_policy.jmax_output_tokens = Some (-1) } in
@@ -1067,7 +1010,7 @@ let test_staged_judge_groups_bad_size () =
 (* --- JOJ 1차 심판 TOML 파싱 (RFC-0283). parse_judge_spec + finish_preset의
        [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
        검증 테스트는 OCaml record를 직접 구성해 config 레이어를 우회하므로, TOML 키
-       이름(model/label/system_prompt/web_tools/max_tool_calls/timeout_s)과 getter
+       이름(model/label/system_prompt/web_tools/timeout_s)과 getter
        매핑은 이 테스트만 커버한다 — 잘못된 키/getter는 여기서만 잡힌다. panel
        sub-table에는 동형 golden(test_config_panels_golden 등)이 있으나 judge에는
        없었다. --- *)
@@ -1087,7 +1030,6 @@ model = "judge-a"
 label = "strict"
 system_prompt = "lens A"
 web_tools = true
-max_tool_calls = 3
 max_output_tokens = 1536
 timeout_s = 222.0
 [[fusion.presets.joj.judges]]
@@ -1108,15 +1050,13 @@ let test_config_judges_parse () =
           Alcotest.(check string) "ja label" "strict" ja.Fusion_policy.jlabel;
           Alcotest.(check string) "ja prompt" "lens A" ja.Fusion_policy.jsystem_prompt;
           Alcotest.(check bool) "ja web" true ja.Fusion_policy.jweb_tools;
-          Alcotest.(check int) "ja tool budget" 3 ja.Fusion_policy.jmax_tool_calls;
           Alcotest.(check (option int)) "ja max output" (Some 1536)
             ja.Fusion_policy.jmax_output_tokens;
           Alcotest.(check (float 0.001)) "ja timeout" 222.0 ja.Fusion_policy.jtimeout_s;
-          (* judge-b: 누락 키는 find_or default 경로 (web=false / budget=0 / timeout=default). *)
+          (* judge-b: 누락 키는 find_or default 경로 (web=false / timeout=default). *)
           Alcotest.(check string) "jb model" "judge-b" jb.Fusion_policy.jmodel;
           Alcotest.(check string) "jb prompt" "lens B" jb.Fusion_policy.jsystem_prompt;
           Alcotest.(check bool) "jb web default" false jb.Fusion_policy.jweb_tools;
-          Alcotest.(check int) "jb budget default" 0 jb.Fusion_policy.jmax_tool_calls;
           Alcotest.(check (option int)) "jb max output default" None
             jb.Fusion_policy.jmax_output_tokens;
           Alcotest.(check (float 0.001)) "jb timeout default"
@@ -1149,7 +1089,6 @@ let g_web4 : Fusion_policy.panel_group =
   ; label = ""
   ; system_prompt = "p"
   ; web_tools = true
-  ; max_tool_calls = 4
   ; max_output_tokens = None
   ; timeout_s = 123.0
   }
@@ -1165,20 +1104,12 @@ let test_judge_args_single_group_identity () =
        [ { g_web4 with Fusion_policy.web_tools = false } ]);
   Alcotest.(check bool) "judge web = req||group, req=true overrides" true
     (Fusion_policy.judge_web_tools_of ~req_web_tools:true
-       [ { g_web4 with Fusion_policy.web_tools = false } ]);
-  Alcotest.(check int) "judge tool budget = sole group" 4
-    (Fusion_policy.judge_tool_budget_of groups)
+       [ { g_web4 with Fusion_policy.web_tools = false } ])
 
 let test_judge_args_multi_group () =
-  let g_unlimited = { g_web4 with Fusion_policy.models = [ "x" ]; max_tool_calls = 0 } in
   let g_slow = { g_web4 with Fusion_policy.models = [ "y" ]; timeout_s = 200.0 } in
   Alcotest.(check (float 0.001)) "outer timeout = max over groups (single wave)" 200.0
-    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2 [ g_web4; g_slow ]);
-  Alcotest.(check int) "judge tool budget: 0 (unlimited) absorbs" 0
-    (Fusion_policy.judge_tool_budget_of [ g_web4; g_unlimited ]);
-  Alcotest.(check int) "judge tool budget: max when none unlimited" 4
-    (Fusion_policy.judge_tool_budget_of
-       [ { g_web4 with Fusion_policy.models = [ "z" ]; max_tool_calls = 2 }; g_web4 ])
+    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2 [ g_web4; g_slow ])
 
 (* --- outer timeout wave math: ceil(총원/max_fibers) 웨이브 × max timeout.
        2026-07-01 사고 회귀 가드: 라이브 config(3패널, max_concurrent_panels=2,
@@ -1785,8 +1716,6 @@ let () =
             test_shipped_runtime_council_is_staged_eligible
         ; Alcotest.test_case "two_judges_not_staged_eligible" `Quick
             test_config_two_judges_not_staged_eligible
-        ; Alcotest.test_case "invalid_max_tool_calls" `Quick
-            test_config_invalid_max_tool_calls
         ; Alcotest.test_case "invalid_max_output_tokens" `Quick
             test_config_invalid_max_output_tokens
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
@@ -1809,15 +1738,12 @@ let () =
         ; Alcotest.test_case "missing_prompt" `Quick test_validated_missing_prompt
         ; Alcotest.test_case "missing_judge" `Quick test_validated_missing_judge
         ; Alcotest.test_case "duplicate_panelist" `Quick test_validated_duplicate_panelist
-        ; Alcotest.test_case "bad_max_tool_calls" `Quick test_validated_bad_max_tool_calls
         ; Alcotest.test_case "bad_max_output_tokens" `Quick
             test_validated_bad_max_output_tokens
         ; Alcotest.test_case "judges_empty_ok" `Quick test_validated_judges_empty_ok
         ; Alcotest.test_case "judges_ok" `Quick test_validated_judges_ok
         ; Alcotest.test_case "judge_prompt_missing" `Quick test_validated_judge_prompt_missing
         ; Alcotest.test_case "duplicate_judge" `Quick test_validated_duplicate_judge
-        ; Alcotest.test_case "judge_bad_max_tool_calls" `Quick
-            test_validated_judge_bad_max_tool_calls
         ; Alcotest.test_case "judge_bad_max_output_tokens" `Quick
             test_validated_judge_bad_max_output_tokens
         ; Alcotest.test_case "bad_meta_timeout" `Quick test_validated_bad_meta_timeout

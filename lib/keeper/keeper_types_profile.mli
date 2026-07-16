@@ -62,8 +62,6 @@ val string_has_operator_todo_placeholder : string -> bool
 val json_has_operator_todo_placeholder : Yojson.Safe.t -> bool
 val json_operator_todo_placeholder_paths : Yojson.Safe.t -> string list
 val reject_placeholder_persona_profile : label:string -> path:string -> Yojson.Safe.t -> bool
-val operator_todo_placeholder_fields : (string * string option) list -> string list
-val persona_operator_todo_placeholder_fields : persona_summary -> keeper_profile_defaults -> string list
 val keeper_profile_defaults_materializable : keeper_profile_defaults -> bool
 val keeper_profile_defaults_materializable_for_name :
   ?base_path:string -> string -> bool

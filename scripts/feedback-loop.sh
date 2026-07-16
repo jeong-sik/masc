@@ -41,7 +41,7 @@ for i in $(seq 1 $ITERATIONS); do
   if [ "$RUN_FULL_TESTS" = "1" ]; then
     echo "🧪 Testing full suite..."
     TEST_OUTPUT=$(
-      CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+      CI_TEST_HEARTBEAT_SEC=30 \
         "$REPO_DIR/scripts/ci-run-tests.sh" \
         "$REPO_DIR/scripts/dune-local.sh test" 2>&1 || true
     )

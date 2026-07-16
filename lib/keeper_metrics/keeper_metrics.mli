@@ -110,8 +110,6 @@ type t =
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures
-  | PromptUnknownToolTokens
-  | PromptTokenStripped
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures

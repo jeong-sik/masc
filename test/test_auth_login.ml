@@ -53,6 +53,8 @@ let test_login_with_expiry_uses_caller_env_var () =
       check string "agent" "test-agent" report.agent_name;
       check string "role" "worker"
         (Masc_domain.agent_role_to_string report.role);
+      check (option string) "worker login creates no bootstrap admin" None
+        (Auth.read_initial_admin base_path);
       check string "client env passthrough" "MASC_TOKEN"
         report.mcp_token_env_var;
       check bool "raw token file exists" true

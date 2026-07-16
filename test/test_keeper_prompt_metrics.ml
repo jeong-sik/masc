@@ -34,13 +34,21 @@ let repo_root () =
       ascend (Sys.getcwd ())
 
 let () =
-  let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
+  let root = repo_root () in
+  let prompts_dir = Filename.concat root "config/prompts" in
+  Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
+  Config_dir_resolver.reset ();
+  Masc.Keeper_prompt_external.reset_cache ();
   Prompt_registry.set_markdown_dir prompts_dir;
   Masc.Prompt_defaults.init ()
 
 let restore_prompt_registry () =
+  let root = repo_root () in
   Prompt_registry.clear ();
-  Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
+  Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
+  Config_dir_resolver.reset ();
+  Masc.Keeper_prompt_external.reset_cache ();
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Masc.Prompt_defaults.init ()
 
 (* ── Fixture: realistic keeper prompt components ──────── *)
@@ -191,7 +199,7 @@ let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
       ()
   in
   check bool "mentions server-managed heartbeat" true
-    (has_in prompt "Heartbeat is server-managed");
+    (has_in prompt "Heartbeats are server-managed");
   check bool "does not mention masc_heartbeat" false
     (has_in prompt "masc_heartbeat")
 
@@ -226,8 +234,8 @@ let test_no_catalog_repository_injection () =
     (has_in prompt "<repositories>");
   check bool "names the filesystem as the source of truth" true
     (has_in prompt "filesystem is the source of truth");
-  check bool "instructs listing repos/ before referencing" true
-    (has_in prompt "list repos/");
+  check bool "requires visible filesystem inspection before referencing" true
+    (has_in prompt "inspect the repository directory through a visible filesystem capability");
   check bool "warns registration does not imply a checkout" true
     (has_in prompt "registration does not imply a checkout")
 

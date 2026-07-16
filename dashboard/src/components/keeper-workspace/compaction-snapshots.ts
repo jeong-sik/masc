@@ -8,11 +8,15 @@
 
 import { signal, type Signal } from '@preact/signals'
 import type { KeeperCompactionSnapshot as BackendCompactionSnapshot } from '../../api/dashboard'
+import type { KeeperCompactionReinjectionObservation } from '../../api/dashboard-turn-records'
 
 export interface CompactionSnapshotNumbers {
   readonly tok: number | null
   readonly msgs?: number | null
   readonly traces?: number | null
+  readonly bytes?: number | null
+  readonly toolUses?: number | null
+  readonly toolResults?: number | null
 }
 
 export interface CompactionSnapshot {
@@ -28,6 +32,9 @@ export interface CompactionSnapshot {
   readonly keeperTurnId?: number | null
   readonly status?: string | null
   readonly detailSource?: string | null
+  readonly summarizedCount?: number | null
+  readonly droppedCount?: number | null
+  readonly reinjection?: KeeperCompactionReinjectionObservation
   readonly kept: readonly string[]
   readonly summarized: readonly string[]
   readonly dropped: readonly string[]
@@ -83,19 +90,35 @@ function labelFromIso(iso: string): string {
 }
 
 function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): CompactionSnapshot {
+  const evidence = snapshot.exact_evidence
   return {
     id: snapshot.id,
     at: labelFromIso(snapshot.ts_iso),
     atIso: snapshot.ts_iso,
     trigger: snapshot.trigger,
     runtime: snapshot.display_runtime,
-    before: { tok: finiteNumberOrNull(snapshot.before_tokens) },
-    after: { tok: finiteNumberOrNull(snapshot.after_tokens) },
+    before: {
+      tok: finiteNumberOrNull(snapshot.before_tokens),
+      msgs: evidence?.before_message_count ?? null,
+      bytes: evidence?.before_checkpoint_bytes ?? null,
+      toolUses: evidence?.before_tool_use_count ?? null,
+      toolResults: evidence?.before_tool_result_count ?? null,
+    },
+    after: {
+      tok: finiteNumberOrNull(snapshot.after_tokens),
+      msgs: evidence?.after_message_count ?? null,
+      bytes: evidence?.after_checkpoint_bytes ?? null,
+      toolUses: evidence?.after_tool_use_count ?? null,
+      toolResults: evidence?.after_tool_result_count ?? null,
+    },
     savedTokens: finiteNumberOrNull(snapshot.saved_tokens),
     traceId: snapshot.trace_id,
     keeperTurnId: snapshot.keeper_turn_id,
     status: snapshot.status,
     detailSource: snapshot.source,
+    summarizedCount: evidence?.summarized_message_count ?? null,
+    droppedCount: evidence?.dropped_message_count ?? null,
+    reinjection: snapshot.reinjection_observation,
     kept: [],
     summarized: [],
     dropped: [],

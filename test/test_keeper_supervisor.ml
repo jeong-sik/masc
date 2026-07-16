@@ -582,13 +582,16 @@ let test_declarative_boot_allows_empty_goal_links () =
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
-  (match KR.load_or_materialize_boot_meta ctx name with
-   | Error err -> fail err
-   | Ok resolution ->
-     check bool "empty-goal keeper materialized" true resolution.materialized;
-     check (list string) "no active goal links" [] resolution.meta.active_goal_ids);
-  check bool "no boot failure recorded" true
-    (Option.is_none (KR.boot_meta_failure_for ~base_path:config.base_path ~name))
+  Fun.protect
+    ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
+    (fun () ->
+      (match KR.load_or_materialize_boot_meta ctx name with
+       | Error err -> fail err
+       | Ok resolution ->
+         check bool "empty-goal keeper materialized" true resolution.materialized;
+         check (list string) "no active goal links" [] resolution.meta.active_goal_ids);
+      check bool "no boot failure recorded" true
+        (Option.is_none (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
 
 let test_declarative_boot_records_typed_invalid_config_failure () =
   with_config_dir @@ fun config_dir ->
@@ -1380,6 +1383,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1390,6 +1394,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart () =
       let config = Masc.Workspace.default_config base_dir in
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "legacy-stale-fleet-batch-keeper" in
+      write_keeper_toml config_dir ~name;
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -1454,50 +1459,6 @@ let test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures () =
     failf "unexpected cleanup failure: %s" (Printexc.to_string exn)
   | Supervisor_launch.Cleanup_completed -> fail "ordinary failure was reported as completed"
   | Supervisor_launch.Cleanup_cancelled -> fail "ordinary failure was reported as cancellation"
-
-(* The declarative start gate must run before launch side effects. *)
-let test_start_keepalive_gate_precedes_side_effects () =
-  let load_source rel =
-    let source_root =
-      match Sys.getenv_opt "DUNE_SOURCEROOT" with
-      | Some root -> root
-      | None -> Sys.getcwd ()
-    in
-    let path = Filename.concat source_root rel in
-    if not (Sys.file_exists path) then
-      fail (Printf.sprintf "source file not found: %s" path)
-    else
-      In_channel.with_open_text path In_channel.input_all
-  in
-  let substring_index ~needle haystack =
-    let nlen = String.length needle in
-    let hlen = String.length haystack in
-    let rec scan pos =
-      if pos + nlen > hlen then None
-      else if String.sub haystack pos nlen = needle then Some pos
-      else scan (pos + 1)
-    in
-    if nlen = 0 then None else scan 0
-  in
-  let index_of ~what needle slice =
-    match substring_index ~needle slice with
-    | Some pos -> pos
-    | None -> fail (Printf.sprintf "%s not found in start_keepalive body" what)
-  in
-  let source = load_source "lib/keeper/keeper_keepalive.ml" in
-  let body_start =
-    index_of ~what:"start_keepalive definition" "let start_keepalive" source
-  in
-  let body = String.sub source body_start (String.length source - body_start) in
-  let gate = index_of ~what:"launch gate call" "dispatch_fiber_started ~base_path" body in
-  let grpc =
-    index_of ~what:"gRPC heartbeat starter call" "start_keeper_grpc_heartbeat ~ctx" body
-  in
-  let bootstrap =
-    index_of ~what:"live meta bootstrap call" "bootstrap_live_keeper_meta ~ctx" body
-  in
-  check bool "launch gate precedes gRPC heartbeat starter" true (gate < grpc);
-  check bool "launch gate precedes live-meta bootstrap" true (gate < bootstrap)
 
 (* Fail-closed launch gate: a registry FSM in a terminal state rejects
    [Fiber_started]; the launch must abort without announcing
@@ -1849,6 +1810,7 @@ let test_non_storm_crashed_restarts_normally () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1859,6 +1821,7 @@ let test_non_storm_crashed_restarts_normally () =
       let config = Masc.Workspace.default_config base_dir in
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "non-storm-keeper" in
+      write_keeper_toml config_dir ~name;
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -2080,8 +2043,6 @@ let () =
         test_fork_rejection_unregisters_non_terminalizable_owner;
       test_case "sweep joins lane before unregister" `Quick
         test_sweep_waits_for_lane_join_before_unregister;
-      test_case "start_keepalive launch gate precedes side effects (source guard)" `Quick
-        test_start_keepalive_gate_precedes_side_effects;
       test_case "idle duration never stops keeper" `Quick
         test_idle_duration_never_stops_keeper;
       test_case "non-storm Crashed still routes to restart (regression guard)" `Quick

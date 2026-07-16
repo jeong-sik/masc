@@ -102,6 +102,23 @@ val resolve_keeper_read_path
   -> raw_path:string
   -> (string, string) result
 
+(** Resolve a caller-declared [cwd] against the read boundary WITHOUT the
+    logical-path projection: no container-root rewrite and no playground
+    join for relative input, so ambiguous cwd values reach the
+    [path_outside_sandbox] Gate unmodified. *)
+val resolve_keeper_read_cwd
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> raw_path:string
+  -> (string, string) result
+
+(** [resolve_keeper_read_cwd] for the execute/write boundary. *)
+val resolve_keeper_execute_cwd
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> raw_path:string
+  -> (string, string) result
+
 (** Resolve an already projected host path that came from a
     Keeper-visible [cwd] + relative [file_path] composition. [raw_for_error]
     is the model-facing path to keep diagnostics in the visible namespace. *)

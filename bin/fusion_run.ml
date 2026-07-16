@@ -123,7 +123,6 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
     ~web_tools:
       (Fusion_policy.judge_web_tools_of ~req_web_tools:false
          preset.Fusion_policy.panels)
-    ~max_tool_calls:(Fusion_policy.judge_tool_budget_of preset.Fusion_policy.panels)
     ()
   |> Result.map_error (fun (failure, _usage) ->
     Fusion_types.judge_failure_text failure)
@@ -158,7 +157,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
   let n = List.length models_all in
   let max_fibers = max 1 n in
   (* 하네스는 동질 arm 비교 도구다(RFC-0252 §11). 이종 preset이면 첫 그룹의 plumbing
-     (system_prompt/web_tools/max_tool_calls/timeout)을 대표로 써 모든 arm을 같은
+     (system_prompt/web_tools/timeout)을 대표로 써 모든 arm을 같은
      설정으로 돌린다 — arm 차이는 모델 집합·judge이지 plumbing이 아니다(legacy 단일
      그룹이면 그 그룹 값 = 오늘과 동일). *)
   let g0 = List.hd preset.Fusion_policy.panels in
@@ -381,7 +380,7 @@ let () =
          exit 2)
   in
   Eio_main.run @@ fun env ->
-  Mirage_crypto_rng_unix.use_default ();
+  Crypto_rng.ensure_default ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
   (* Register the ambient Eio clock the agent runtime resolves via
      [Process_eio.get_clock]. Without this, any runtime config that sets

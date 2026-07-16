@@ -7,5 +7,6 @@ type t =
   | Oas_save (** OAS checkpoint primary save failed. *)
   | Oas_delete (** OAS checkpoint delete failed. *)
   | Oas_archive (** OAS checkpoint history archive failed. *)
+  | Oas_watermark_sidecar (** OAS checkpoint watermark sidecar write failed (best-effort; canonical write already succeeded). *)
 
 val to_label : t -> string

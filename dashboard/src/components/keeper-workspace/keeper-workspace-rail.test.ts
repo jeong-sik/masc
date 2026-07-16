@@ -108,6 +108,17 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
           compaction_source: 'event_bus',
           status: 'observed',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+          exact_evidence: {
+            before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
+            before_message_count: 8, after_message_count: 3,
+            summarized_message_count: 4, dropped_message_count: 1,
+            before_tool_use_count: 2, after_tool_use_count: 1,
+            before_tool_result_count: 2, after_tool_result_count: 1,
+          },
+          reinjection_observation: {
+            state: 'reinserted', keeper_turn_id: 13,
+            checkpoint_loaded_receipts: 1, context_injected_receipts: 1,
+          },
         },
       ],
     }),
@@ -841,6 +852,9 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('proactive(85%)')
     expect(container.textContent).toContain('runtime_manifest · observed')
     expect(container.textContent).toContain('trace-cmp#12')
+    expect(container.textContent).toContain('reinserted · load=1 · inject=1')
+    expect(container.textContent).toContain('checkpoint bytes')
+    expect(container.textContent).toContain('summarized=4 · dropped=1')
     const promptContext = await findByTestId('compaction-prompt-context')
     expect(fetchKeeperTurnRecords).toHaveBeenCalledWith('masc-improver', 12, expect.any(Object))
     expect(promptContext.textContent).toContain('snapshot-linked turn-record')
@@ -882,6 +896,11 @@ describe('KeeperWorkspaceRail', () => {
           compaction_source: 'pre_dispatch_hygiene',
           status: 'compacted',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+          exact_evidence: null,
+          reinjection_observation: {
+            state: 'not_linked', keeper_turn_id: null,
+            checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
+          },
         },
       ],
     })
@@ -993,6 +1012,11 @@ describe('KeeperWorkspaceRail', () => {
         compaction_source: 'event_bus',
         status: 'observed',
         links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+        exact_evidence: null,
+        reinjection_observation: {
+          state: 'not_linked', keeper_turn_id: null,
+          checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
+        },
       },
     ])
 

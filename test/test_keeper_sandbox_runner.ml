@@ -33,7 +33,6 @@ let make_meta ~sandbox : Keeper_meta_contract.keeper_meta =
       [ "name", `String "runner-test"
       ; "agent_name", `String "runner-test-agent"
       ; "trace_id", `String "runner-test-trace"
-      ; "goal", `String "sandbox runner boundary"
       ; "allowed_paths", `List [ `String "*" ]
       ; ( "sandbox_profile",
           `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) )

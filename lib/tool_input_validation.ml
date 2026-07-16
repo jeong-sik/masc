@@ -17,8 +17,10 @@ module Float = Stdlib.Float
 
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 
-    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for type
-    coercion and structured error feedback.
+    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for strict
+    schema checking and structured error feedback. OAS 0.212 removed implicit
+    type coercion: a mistyped scalar (e.g. string for integer) is a
+    deterministic Reject carrying the field name, not a silent repair.
 
     @since 2.220.0 — OAS delegation
     @since 2.221.0 — use Tool_middleware.make_validation_hook *)

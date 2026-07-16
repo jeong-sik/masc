@@ -375,9 +375,16 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
                 ~ctx_work
                 ~exec_cache:None
                 ~name:"Read"
-                ~input:(`Assoc [ ("file_path", `String "exact-meta.txt") ])
+                ~input:(`Assoc [ ("file_path", `String evidence_path) ])
                 ()
             in
+            (match result.outcome with
+             | `Success -> ()
+             | `Failure failure_class ->
+               failf
+                 "exact admitted meta dispatch failed (%s): %s"
+                 (Tool_result.tool_failure_class_to_string failure_class)
+                 result.raw_output);
             let content =
               Yojson.Safe.from_string result.raw_output
               |> Yojson.Safe.Util.member "content"

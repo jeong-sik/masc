@@ -15,7 +15,7 @@ let resolve_tool_read_cwd
   let resolved =
     if raw_cwd = ""
     then Ok (Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta)
-    else resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd
+    else resolve_keeper_read_cwd ~config ~meta ~raw_path:raw_cwd
   in
   match resolved with
   | Error _ as err -> err
@@ -34,7 +34,7 @@ let resolve_tool_execute_cwd ~config ~meta ~write_enabled ~args =
         (if write_enabled
          then keeper_default_write_root ~config ~meta
          else Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta)
-    else resolve_keeper_path ~config ~meta ~raw_path:raw_cwd
+    else resolve_keeper_execute_cwd ~config ~meta ~raw_path:raw_cwd
   in
   match resolved with
   | Error _ as err -> err

@@ -71,12 +71,14 @@ type post_turn_lifecycle = {
 type overflow_retry_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
   compaction : compaction_event;
+  evidence : Keeper_compact_policy.compaction_evidence;
   turn_generation : int;
 } [@@warning "-69"]
 
 type compaction_recovery_error =
   | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
+  | Compaction_evidence_missing
   | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
   | Checkpoint_superseded of {
       incoming_turn_count : int;
@@ -90,6 +92,7 @@ let compaction_recovery_error_to_tag = function
   | Checkpoint_load_failed _ -> "checkpoint_load_failed"
   | Compaction_rejected reason ->
     Keeper_compact_policy.compaction_rejection_to_string reason
+  | Compaction_evidence_missing -> "compaction_evidence_missing"
   | Unexpected_compaction_decision _ -> "unexpected_compaction_decision"
   | Checkpoint_superseded _ -> "checkpoint_superseded"
   | Checkpoint_save_failed _ -> "checkpoint_save_failed"
@@ -106,6 +109,8 @@ let compaction_recovery_error_to_string = function
   | Compaction_rejected reason ->
     "compaction rejected: "
     ^ Keeper_compact_policy.compaction_rejection_to_string reason
+  | Compaction_evidence_missing ->
+    "prepared compaction did not carry structural evidence"
   | Unexpected_compaction_decision decision ->
     "unexpected compaction decision: "
     ^ Keeper_compact_policy.compaction_decision_to_string decision
@@ -618,14 +623,16 @@ let recover_latest_checkpoint_for_overflow_retry
       if turn_generation = meta.runtime.generation then meta
       else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
     in
-    let compacted_ctx, base_decision =
+    let preparation =
       Keeper_compact_policy.compact_for_request_typed
         ~meta:retry_meta
         ~trigger
         ctx
     in
-    (match base_decision with
-     | Keeper_compact_policy.Prepared prepared_trigger ->
+    (match preparation.decision, preparation.evidence with
+     | Keeper_compact_policy.Prepared _, None ->
+       Error Compaction_evidence_missing
+     | Keeper_compact_policy.Prepared prepared_trigger, Some evidence ->
        (try
           match
             commit_prepared_after_save
@@ -636,7 +643,7 @@ let recover_latest_checkpoint_for_overflow_retry
                   ~keeper_name:meta.name
                   ~session
                   ~agent_name:retry_meta.agent_name
-                  ~ctx:compacted_ctx
+                  ~ctx:preparation.context
                   ~generation:turn_generation
                 |> checkpoint_of_save_outcome)
           with
@@ -655,6 +662,7 @@ let recover_latest_checkpoint_for_overflow_retry
                   ; trigger = Some prepared_trigger
                   ; decision
                   }
+              ; evidence
               ; turn_generation
               }
           | Error
@@ -686,11 +694,11 @@ let recover_latest_checkpoint_for_overflow_retry
             ~label:"overflow retry checkpoint save exception"
             exn;
           Error (Checkpoint_save_failed detail))
-     | Keeper_compact_policy.Rejected (_, reason) ->
+     | Keeper_compact_policy.Rejected (_, reason), _ ->
        Error (Compaction_rejected reason)
      | (Keeper_compact_policy.Applied _
        | Keeper_compact_policy.Not_requested
-       | Keeper_compact_policy.Skipped_no_checkpoint) as decision ->
+       | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _ ->
        Error (Unexpected_compaction_decision decision))
 
 module For_testing = struct

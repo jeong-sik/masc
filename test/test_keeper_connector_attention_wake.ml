@@ -278,8 +278,8 @@ let test_external_attention_prompt_steers_continuation () =
   let item = external_attention_item () in
   let ev = WO.pending_board_event_of_external_attention ~meta item in
   let line = Masc.Keeper_unified_prompt.format_board_event_text ev in
-  check bool "prompt line steers a keeper_surface_post reply" true
-    (contains ~needle:"keeper_surface_post" line);
+  check bool "prompt line steers a connected-surface reply" true
+    (contains ~needle:"visible connected-surface capability" line);
   check bool "prompt line marks a waiting continuation" true
     (contains ~needle:"continuation" line)
 

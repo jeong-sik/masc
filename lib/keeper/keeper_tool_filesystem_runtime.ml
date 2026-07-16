@@ -61,6 +61,11 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
   match cwd with
   | None -> Ok (keeper_default_read_root ~config ~meta)
   | Some raw_cwd ->
+    (* File tools keep the logical projection for cwd: a keeper-visible
+       relative cwd ("repos/<repo>") composed with a relative file_path is
+       established Read vocabulary (test_keeper_visible_path_projection).
+       Execute/search cwd goes through the strict no-projection resolvers
+       instead (keeper_tool_execute_path). *)
     let* cwd = resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd in
     if safe_is_dir cwd
     then Ok cwd

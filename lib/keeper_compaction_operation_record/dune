@@ -1,0 +1,11 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_compaction_operation_record)
+ (public_name masc.keeper_compaction_operation_record)
+ (wrapped false)
+ (modules keeper_compaction_operation_record)
+ (libraries
+  masc.keeper_compaction_operation
+  masc.keeper_compaction_operation_codec
+  yojson))

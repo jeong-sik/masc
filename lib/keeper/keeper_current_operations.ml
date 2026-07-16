@@ -25,6 +25,19 @@ type source_name =
 type read_error =
   | Durable_read_failed of string
   | Access_rejected of Keeper_msg_async.access_rejection
+  | Async_keeper_mismatch of
+      { request_id : string
+      ; expected_keeper : string
+      ; actual_keeper : string
+      }
+  | Async_terminal_entry of
+      { request_id : string
+      ; status : Keeper_msg_async.request_status
+      }
+  | Async_active_entry_has_completion_time of
+      { request_id : string
+      ; completed_at : float
+      }
 
 type unavailable =
   { source : source_name

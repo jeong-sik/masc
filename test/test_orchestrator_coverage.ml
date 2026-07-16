@@ -217,6 +217,16 @@ let test_should_orchestrate_with_task_and_agent () =
   let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration with active agent" false result
 
+let test_should_orchestrate_ignores_elapsed_last_seen () =
+  with_initialized_workspace @@ fun config ->
+  let _ = Workspace.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
+  let agent = "observed-active-agent" in
+  let _ = Workspace.bind_session config ~agent_name:agent ~capabilities:[] () in
+  Workspace.update_local_agent_state config ~agent_name:agent (fun record ->
+    { record with last_seen = "2020-01-01T00:00:00Z" });
+  let result = Orchestrator.should_orchestrate ~min_priority:2 config in
+  check bool "last_seen is observation, not orchestration authority" false result
+
 let test_should_orchestrate_paused_workspace () =
   with_initialized_workspace @@ fun config ->
   (* Add task *)
@@ -278,6 +288,8 @@ let () =
       test_case "empty workspace" `Quick test_should_orchestrate_empty_workspace;
       test_case "task no agent" `Quick test_should_orchestrate_with_task_no_agent;
       test_case "task and agent" `Quick test_should_orchestrate_with_task_and_agent;
+      test_case "elapsed last_seen is observational" `Quick
+        test_should_orchestrate_ignores_elapsed_last_seen;
       test_case "paused workspace" `Quick test_should_orchestrate_paused_workspace;
       test_case "low priority task" `Quick test_should_orchestrate_low_priority_task;
     ];

@@ -179,34 +179,15 @@ let get_all_agents config =
     let agents_path = agents_dir config in
     load_agents_from_dir config agents_path ~include_inactive:true
 
-(** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
-    Matches assignees by exact name or agent-type prefix (e.g. "<prefix>" matches "<prefix>-xxx").
-    Agents with Inactive status are excluded from the active set.
-
-    Staleness uses a keeper-aware threshold: actual keeper agents get the
-    longer keeper grace ([MASC_KEEPER_ZOMBIE_THRESHOLD_SEC], default 3600s) and
-    ordinary agents the default ([MASC_ZOMBIE_THRESHOLD_SEC], default 300s).
-    Keeper status is decided by the shared {!Workspace_resilience.Zombie}
-    file-backed predicate ([agent_type = "keeper"] or keeper-owned [meta])
-    rather than by the keeper-shaped name pattern, so a keeper-shaped
-    non-keeper worker does not inherit the longer grace. A live keeper that has
-    gone quiet between heartbeats (but within its grace) is therefore not
-    classified as inactive, so its own claimed/in-progress task is not
-    mis-reported as an orphan at the source. *)
+(** Audit tasks: find claimed/in_progress tasks whose assignees are absent from
+    the explicit active workspace/session membership. Matches assignees by
+    exact name or agent-type prefix (e.g. "<prefix>" matches "<prefix>-xxx").
+    [last_seen] is retained as observation and never changes task ownership. *)
 let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
-    (* Read agent files from the same path that cleanup_zombies and session binding use *)
-    let agents_path = agents_dir config in
     let active_names =
-      load_agents_from_dir config agents_path ~include_inactive:false
-      |> List.filter (fun (agent : Masc_domain.agent) ->
-          not
-            (Workspace_resilience.Zombie.is_zombie_for_agent
-               ~agent_type:agent.agent_type
-               ?agent_meta:agent.meta
-               ~agent_name:agent.name
-               agent.last_seen))
+      get_active_agents config
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     in
     let is_active_agent assignee =

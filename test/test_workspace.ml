@@ -811,26 +811,6 @@ let test_heartbeat_nonexistent_agent () =
 (* test_get_agents_status removed (2026-06-09): get_agents_status deleted with
    the dead agent-status surface. *)
 
-(** Return ISO8601 timestamp offset by seconds from now *)
-let iso_ago seconds =
-  let t = Unix.gettimeofday () -. seconds in
-  let tm = Unix.gmtime t in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
-(* Age a bound agent's last_seen while keeping status:active to exercise the
-   staleness classification still used by the orphan observation path. *)
-let age_active_agent ?(agent_type = "test") config ~name ~age_seconds =
-  let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-  let path = Filename.concat agents_path (Workspace.safe_filename name ^ ".json") in
-  let stale_ts = iso_ago age_seconds in
-  let agent_json = Printf.sprintf
-    {|{"name":"%s","agent_type":"%s","status":"active","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
-    name agent_type stale_ts stale_ts
-  in
-  Workspace.write_json config path (Yojson.Safe.from_string agent_json)
-
 let test_fd_pressure_exn_classification () =
   Alcotest.(check bool)
     "EMFILE is resource pressure, not malformed JSON"
@@ -1281,105 +1261,16 @@ let test_audit_orphan_awaiting_verification_tasks () =
             Alcotest.(check string) "verification orphan task id" "task-001"
               task.id))
 
-(* Regression for #21418: a live keeper that has gone quiet between heartbeats
-   (last_seen past the 300s default, but within the 3600s keeper grace) must NOT
-   have its own claimed task classified as an orphan. With the pre-fix
-   [Time.is_stale] (300s flat) predicate this returned 1 orphan, which drove the
-   keeper self-wake loop that #21418 papered over by filtering self from the
-   count. The root fix routes typed/meta-confirmed keepers through
-   [Zombie.is_zombie_for_agent]. *)
-let test_audit_orphan_spares_live_keeper_within_grace () =
+let test_audit_orphan_ignores_elapsed_last_seen_for_active_agent () =
   with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Keeper Task" ~priority:1 ~description:"" in
-    let keeper = "keeper-grace-agent" in
-    let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"keeper" ~name:keeper ~age_seconds:600.0;
-    let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int) "live keeper within grace is not an orphan" 0
-      (List.length orphans)
-  )
-
-(* A keeper quiet beyond the 3600s keeper grace IS still an orphan, so its task
-   remains reclaimable — the fix extends the grace window, it does not exempt
-   keepers permanently. *)
-let test_audit_orphan_detects_dead_keeper_beyond_grace () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Keeper Task" ~priority:1 ~description:"" in
-    let keeper = "keeper-dead-agent" in
-    let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"keeper" ~name:keeper ~age_seconds:4000.0;
-    let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int) "dead keeper beyond grace is an orphan" 1
-      (List.length orphans);
-    let (_, assignee) = List.hd orphans in
-    Alcotest.(check string) "orphan assignee is the dead keeper" keeper assignee
-  )
-
-(* Non-keeper agents keep the 300s default threshold — 10 minutes quiet orphans
-   the task, confirming the keeper grace is scoped to keepers only. *)
-let test_audit_orphan_nonkeeper_uses_default_threshold () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Regular Task" ~priority:1 ~description:"" in
-    let agent = "claude-worker-agent" in
+    let _ = Workspace.add_task config ~title:"Observed Task" ~priority:1 ~description:"" in
+    let agent = "observed-active-agent" in
     let _ = Workspace.bind_session config ~agent_name:agent ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:agent ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"claude" ~name:agent ~age_seconds:600.0;
+    Workspace.update_local_agent_state config ~agent_name:agent (fun record ->
+      { record with last_seen = "2020-01-01T00:00:00Z" });
     let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int) "non-keeper past default threshold is an orphan" 1
-      (List.length orphans)
-  )
-
-(* A keeper-shaped non-keeper (name matches the pattern, but agent_type is not
-   "keeper" and the record is not keeper-owned) must use the ordinary 300s
-   threshold, not the 3600s keeper grace. Regression for review follow-up. *)
-let test_audit_orphan_detects_keeper_shaped_non_keeper () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Spoof task" ~priority:1 ~description:"" in
-    let spoof = "keeper-spoof-agent" in
-    let _ = Workspace.bind_session config ~agent_name:spoof ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:spoof ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"spoof" ~name:spoof ~age_seconds:600.0;
-    let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int)
-      "keeper-shaped non-keeper past default threshold is an orphan"
-      1
-      (List.length orphans);
-    let (_, assignee) = List.hd orphans in
-    Alcotest.(check string) "orphan assignee is the spoof worker" spoof assignee
-  )
-
-(* An agent whose record is stamped as keeper-owned (via meta.keeper_name)
-   gets the keeper threshold even when its agent_type is not "keeper". *)
-let test_audit_orphan_spares_keeper_owned_meta_within_grace () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Keeper-owned task" ~priority:1 ~description:"" in
-    let worker = "claude-runtime-agent" in
-    let _ = Workspace.bind_session config ~agent_name:worker ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:worker ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"claude" ~name:worker ~age_seconds:600.0;
-    Workspace.update_local_agent_state config ~agent_name:worker (fun agent ->
-      let open Masc_domain in
-      let meta =
-        match agent.meta with
-        | Some m -> { m with keeper_name = Some "keeper-sangsu" }
-        | None ->
-          { session_id = ""
-          ; agent_type = agent.agent_type
-          ; pid = None
-          ; hostname = None
-          ; tty = None
-          ; parent_task = None
-          ; keeper_name = Some "keeper-sangsu"
-          ; keeper_id = None
-          }
-      in
-      { agent with meta = Some meta });
-    let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int)
-      "keeper-owned worker within grace is not an orphan"
-      0
+    Alcotest.(check int) "elapsed last_seen cannot orphan an active task" 0
       (List.length orphans)
   )
 
@@ -1861,16 +1752,8 @@ let () =
         "audit orphan awaiting verification tasks"
         `Quick
         test_audit_orphan_awaiting_verification_tasks;
-      Alcotest.test_case "audit orphan spares live keeper within grace" `Quick
-        test_audit_orphan_spares_live_keeper_within_grace;
-      Alcotest.test_case "audit orphan detects dead keeper beyond grace" `Quick
-        test_audit_orphan_detects_dead_keeper_beyond_grace;
-      Alcotest.test_case "audit orphan non-keeper uses default threshold" `Quick
-        test_audit_orphan_nonkeeper_uses_default_threshold;
-      Alcotest.test_case "audit orphan detects keeper-shaped non-keeper" `Quick
-        test_audit_orphan_detects_keeper_shaped_non_keeper;
-      Alcotest.test_case "audit orphan spares keeper-owned meta within grace" `Quick
-        test_audit_orphan_spares_keeper_owned_meta_within_grace;
+      Alcotest.test_case "audit orphan ignores elapsed last_seen" `Quick
+        test_audit_orphan_ignores_elapsed_last_seen_for_active_agent;
       Alcotest.test_case "read backlog counts excludes self-owned orphan" `Quick
         test_read_backlog_counts_excludes_self_owned_orphan;
       Alcotest.test_case "read backlog counts falls back to unscoped claimable"

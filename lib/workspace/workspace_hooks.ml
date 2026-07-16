@@ -31,25 +31,6 @@ type operator_pending_confirm_request =
   }
 
 (* ============================================ *)
-(* Callback refs (migrated from workspace_gc.ml)     *)
-(* ============================================ *)
-
-(** Reconcile an objectively orphaned task — avoids Workspace_gc →
-    Workspace_task circular dependency without minting a privileged actor. *)
-let reconcile_orphaned_task_fn
-  : (Workspace_utils_backend_setup.config ->
-     task_id:string ->
-     expected_assignee:string ->
-     signal:[ `Absent | `Inactive ] ->
-     unit ->
-     string masc_result) Atomic.t
-  = Atomic.make (fun _config ~task_id:_ ~expected_assignee:_ ~signal:_ () ->
-      Error
-        (Masc_domain.Task
-           (Masc_domain.Task_error.InvalidState
-              "Workspace_hooks: reconcile_orphaned_task_fn not connected")))
-
-(* ============================================ *)
 (* New callback refs (Phase 4A)                 *)
 (* ============================================ *)
 
@@ -69,13 +50,6 @@ let activity_emit_fn
 let agent_economy_earn_fn
   : (base_path:string -> agent_name:string -> reason:string -> unit) Atomic.t
   = Atomic.make (fun ~base_path:_ ~agent_name:_ ~reason:_ -> ())
-
-(** Stop keeper keepalive fiber — avoids Workspace_gc → Keeper_keepalive dep.
-    Called during zombie cleanup to terminate keeper fibers that would
-    otherwise continue making tool calls after agent removal. *)
-let stop_keeper_fn
-  : (string -> unit) Atomic.t
-  = Atomic.make (fun _name -> ())
 
 (** Runtime-visible agents supplied by upper layers such as the keeper
     registry.  Workspace code consumes [Masc_domain.agent] rows without

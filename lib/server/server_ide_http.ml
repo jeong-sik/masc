@@ -516,7 +516,12 @@ let build_presence_snapshot state =
   let base = base_path_of_state state in
   let runtime_id, branch = runtime_id_and_branch state in
   let entries =
-    let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
+    let agents =
+      Client_registry_eio.list_active
+        ~within_seconds:
+          Env_config_runtime_services.ClientRegistry.active_window_seconds
+        ()
+    in
     List.map
       (fun (a : Client_identity.t) ->
          `Assoc
@@ -575,7 +580,12 @@ let add_routes router =
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
-         let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
+         let agents =
+           Client_registry_eio.list_active
+             ~within_seconds:
+               Env_config_runtime_services.ClientRegistry.active_window_seconds
+             ()
+         in
          let entries =
            List.map
              (fun (a : Client_identity.t) ->

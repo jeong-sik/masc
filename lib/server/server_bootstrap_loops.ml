@@ -935,8 +935,6 @@ let start_keeper_loops_owned
       (state : Mcp_server.server_state)
   =
   Progress.set_sse_callback Sse.broadcast;
-  (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
-  Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
   (* Bus creation carries no queue policy. Each subscriber owns its bounded,
      non-blocking queue contract. *)

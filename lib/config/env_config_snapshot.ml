@@ -48,6 +48,10 @@ let runtime_entries =
     entry ~default:"52428800" "MASC_TELEMETRY_MAX_BYTES"
       "Telemetry JSONL byte cap. Positive values override; non-positive \
        disables byte-cap pruning.";
+    entry ~default:"300.0" "MASC_CLIENT_REGISTRY_ACTIVE_WINDOW_SEC"
+      "Client registry active-presence observation window (seconds)";
+    entry ~default:"60.0" "MASC_MAINTENANCE_PULSE_INTERVAL_SEC"
+      "Maintenance Pulse interval for orphan observation and channel dedup";
   ]
 
 let rate_limiting_entries =

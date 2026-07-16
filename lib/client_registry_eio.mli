@@ -58,8 +58,11 @@ val set_resolved_name : string -> string -> is_ephemeral:bool -> unit
 (** {1 Statistics} *)
 
 val active_count : within_seconds:float -> unit -> int
+(** Count identities observed within the caller-selected window. *)
+
 val total_count : unit -> int
 val list_active : within_seconds:float -> unit -> Client_identity.t list
+(** List identities observed within the caller-selected window. *)
 
 (** {1 Cleanup} *)
 

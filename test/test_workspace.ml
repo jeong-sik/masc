@@ -1051,41 +1051,6 @@ let test_xss_in_message_type () =
    (Nickname.is_generated_nickname requires 3+ dash-separated parts) *)
 let admin_keeper_agent = "admin-board-keeper"
 let test_agent_a = "agent-test-alpha"
-let test_orphan_reconciliation_requires_exact_absent_assignee () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Orphan Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* A different actor cannot release someone else's task. *)
-    let normal = Workspace.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~action:Masc_domain.Release () in
-    Alcotest.(check bool) "normal release blocked" true
-      (match normal with Error _ -> true | Ok _ -> false);
-    let live_reconciliation =
-      Workspace.reconcile_orphaned_task_r
-        config
-        ~task_id:"task-001"
-        ~expected_assignee:test_agent_a
-        ~signal:Workspace.Assignee_absent
-        ()
-    in
-    Alcotest.(check bool) "live assignee is not absent" true
-      (match live_reconciliation with Error _ -> true | Ok _ -> false);
-    ignore (Workspace.end_session config ~agent_name:test_agent_a);
-    let reconciled =
-      Workspace.reconcile_orphaned_task_r
-        config
-        ~task_id:"task-001"
-        ~expected_assignee:test_agent_a
-        ~signal:Workspace.Assignee_inactive
-        ()
-    in
-    Alcotest.(check bool) "absent assignee reconciliation" true
-      (match reconciled with Ok _ -> true | Error _ -> false);
-    (* Task should be back to Todo *)
-    let tasks = Workspace.list_tasks config in
-    Alcotest.(check bool) "task is todo" true (str_contains tasks "Todo" || str_contains tasks "todo")
-  )
 
 let find_task config task_id =
   Workspace.get_tasks_raw config
@@ -1743,10 +1708,6 @@ let () =
 
     (* === Board Admin Tests === *)
     "board_admin", [
-      Alcotest.test_case
-        "orphan reconciliation verifies exact absent assignee"
-        `Quick
-        test_orphan_reconciliation_requires_exact_absent_assignee;
       Alcotest.test_case "audit orphan tasks" `Quick test_audit_orphan_tasks;
       Alcotest.test_case
         "audit orphan awaiting verification tasks"

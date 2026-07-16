@@ -216,9 +216,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_chat_recovery_resolve", "Resolve Chat Recovery");
   ("masc_operator_confirm", "Operator Confirm");
   (* SDK projections *)
-  (* Misc *)
-  ("masc_cleanup_zombies", "Clean Up Zombie Agents");
-
 ]
 
 let custom_title_table : string StringMap.t =

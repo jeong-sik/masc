@@ -106,19 +106,3 @@ export async function runGarbageCollection(): Promise<void> {
     showToast(`GC failed: ${errorToString(err)}`, 'error')
   } finally { maintenanceLoading.value = false }
 }
-
-export async function cleanupZombies(): Promise<void> {
-  const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  if (!access.allowed) {
-    showToast(access.reason ?? 'Missing permission to clean up zombie agents.', 'error', 6000)
-    return
-  }
-  maintenanceLoading.value = true
-  try {
-    const raw = await callMcpTool('masc_cleanup_zombies', {})
-    maintenanceResult.value = raw
-    showToast('Zombie cleanup complete.', 'success')
-  } catch (err) {
-    showToast(`Zombie cleanup failed: ${errorToString(err)}`, 'error')
-  } finally { maintenanceLoading.value = false }
-}

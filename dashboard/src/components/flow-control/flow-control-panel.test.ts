@@ -14,7 +14,6 @@ const {
   pauseWorkspace,
   resumeWorkspace,
   runGarbageCollection,
-  cleanupZombies,
   flowState,
   flowLoading,
   maintenanceResult,
@@ -26,7 +25,6 @@ const {
   pauseWorkspace: vi.fn().mockResolvedValue(undefined),
   resumeWorkspace: vi.fn().mockResolvedValue(undefined),
   runGarbageCollection: vi.fn().mockResolvedValue(undefined),
-  cleanupZombies: vi.fn().mockResolvedValue(undefined),
   flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
   flowLoading: { value: false },
   maintenanceResult: { value: null as string | null },
@@ -36,7 +34,6 @@ const {
 }))
 
 vi.mock('./flow-control-state', () => ({
-  cleanupZombies,
   fetchPauseStatus,
   flowLoading,
   flowState,

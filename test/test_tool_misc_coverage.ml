@@ -216,17 +216,6 @@ let () = test "dispatch_gc_requires_days" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test dispatch cleanup_zombies *)
-let () = test "dispatch_cleanup_zombies" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [] in
-  match Tool_misc.dispatch ctx ~name:"masc_cleanup_zombies" ~args with
-  | Some result ->
-      assert (Tool_result.is_success result);
-      assert (String.length (Tool_result.message result) > 0)
-  | None -> failwith "dispatch returned None"
-)
-
 let () = test "dispatch_web_search_requires_query" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in

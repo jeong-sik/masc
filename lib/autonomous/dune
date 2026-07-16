@@ -6,6 +6,6 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries shared_types multimodal yojson)
+ (libraries shared_types yojson)
  (preprocess
   (pps ppx_tla)))

@@ -43,7 +43,6 @@ lib/auth.ml:387
 lib/auth.ml:559
 lib/auth.ml:602
 lib/autonomous/autonomous_bridge.ml:101
-lib/autonomous/autonomous_executor.ml:25
 lib/autonomous/stimulus.ml:38
 lib/backend/backend.ml:639
 lib/backend/backend.ml:643

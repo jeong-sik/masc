@@ -713,6 +713,33 @@ val fold_appended_lines
   -> f:('acc -> string -> 'acc)
   -> 'acc * int
 
+module Private_jsonl_slice : sig
+  type t =
+    { bytes : string
+    ; end_offset : int
+    }
+
+  type error =
+    | Negative_offset of int
+    | Missing_file_after_offset of int
+    | Offset_beyond_end of
+        { offset : int
+        ; end_offset : int
+        }
+    | Offset_not_at_row_boundary of int
+    | Incomplete_tail of int
+    | Io_failed of exn
+
+  val error_to_string : error -> string
+end
+
+(** Read the exact complete JSONL bytes in [[from, end_offset)] while holding
+    the same per-path in-process mutex and a cross-process read lock used by
+    durable private JSONL writers. A missing file at offset zero is the empty
+    stream; every other cursor mismatch is explicit. *)
+val read_private_jsonl_slice_locked_result :
+  string -> from:int -> (Private_jsonl_slice.t, Private_jsonl_slice.error) result
+
 type durable_append_operation =
   | Write
   | Append_fsync

@@ -256,6 +256,59 @@ let test_private_jsonl_append_returns_committed_end_offset () =
    | Error error -> fail (Fs_compat.private_jsonl_append_error_to_string error))
 ;;
 
+let test_private_jsonl_slice_reads_exact_cursor_suffix () =
+  let row1 = "{\"row\":1}\n" in
+  let row2 = "{\"row\":2}\n" in
+  let row3 = "{\"row\":3}\n" in
+  with_temp_jsonl (row1 ^ row2 ^ row3) @@ fun path ->
+  match
+    Fs_compat.read_private_jsonl_slice_locked_result
+      path
+      ~from:(String.length row1)
+  with
+  | Ok slice ->
+    check string "exact suffix" (row2 ^ row3) slice.bytes;
+    check int
+      "locked end offset"
+      (String.length row1 + String.length row2 + String.length row3)
+      slice.end_offset
+  | Error _ -> fail "complete cursor slice was rejected"
+;;
+
+let test_private_jsonl_slice_rejects_invalid_cursors () =
+  with_temp_jsonl "{\"row\":1}\n" @@ fun path ->
+  (match Fs_compat.read_private_jsonl_slice_locked_result path ~from:(-1) with
+   | Error (Fs_compat.Private_jsonl_slice.Negative_offset (-1)) -> ()
+   | _ -> fail "negative cursor was not rejected");
+  (match Fs_compat.read_private_jsonl_slice_locked_result path ~from:1 with
+   | Error (Fs_compat.Private_jsonl_slice.Offset_not_at_row_boundary 1) -> ()
+   | _ -> fail "mid-row cursor was not rejected");
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:1024 with
+  | Error
+      (Fs_compat.Private_jsonl_slice.Offset_beyond_end
+        { offset = 1024; end_offset = 10 }) ->
+    ()
+  | _ -> fail "cursor beyond EOF was not rejected"
+;;
+
+let test_private_jsonl_slice_missing_store_contract () =
+  let path = Filename.temp_file "masc_private_jsonl_missing_" ".jsonl" in
+  Sys.remove path;
+  (match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+   | Ok { bytes = ""; end_offset = 0 } -> ()
+   | _ -> fail "missing origin was not treated as an empty stream");
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:1 with
+  | Error (Fs_compat.Private_jsonl_slice.Missing_file_after_offset 1) -> ()
+  | _ -> fail "missing non-origin cursor was not rejected"
+;;
+
+let test_private_jsonl_slice_rejects_incomplete_tail () =
+  with_temp_jsonl "{\"row\":1}" @@ fun path ->
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+  | Error (Fs_compat.Private_jsonl_slice.Incomplete_tail 9) -> ()
+  | _ -> fail "incomplete JSONL tail was not rejected"
+;;
+
 let test_private_jsonl_append_rejects_incomplete_tail () =
   with_temp_jsonl "{\"row\":1}" @@ fun path ->
   (match
@@ -308,6 +361,22 @@ let () =
             "private JSONL append returns committed end offset"
             `Quick
             test_private_jsonl_append_returns_committed_end_offset
+        ; test_case
+            "private JSONL cursor read returns exact suffix"
+            `Quick
+            test_private_jsonl_slice_reads_exact_cursor_suffix
+        ; test_case
+            "private JSONL cursor read rejects invalid cursors"
+            `Quick
+            test_private_jsonl_slice_rejects_invalid_cursors
+        ; test_case
+            "private JSONL cursor read handles missing stores"
+            `Quick
+            test_private_jsonl_slice_missing_store_contract
+        ; test_case
+            "private JSONL cursor read rejects incomplete tail"
+            `Quick
+            test_private_jsonl_slice_rejects_incomplete_tail
         ; test_case
             "private JSONL append rejects incomplete tail"
             `Quick

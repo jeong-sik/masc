@@ -107,6 +107,73 @@ let test_lane_candidates_keep_declared_order () =
     (Some [ "local.kimi_like"; "fallback.kimi_like" ])
     actual
 
+(* -- structured-judge fallback (#24838): a chat assignment with no
+      schema-capable candidate must not lose compaction entirely -- *)
+
+let judge_fallback_runtime_toml =
+  "[providers.local]\n\
+   display-name = \"Local\"\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://localhost:11434\"\n\
+   \n\
+   [models.chat_like]\n\
+   api-name = \"chat-like\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.judge_like]\n\
+   api-name = \"judge-like\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.judge_like.capabilities]\n\
+   supports-structured-output = true\n\
+   \n\
+   [local.chat_like]\n\
+   \n\
+   [local.judge_like]\n\
+   \n\
+   [runtime]\n\
+   default = \"local.chat_like\"\n\
+   structured_judge = \"local.judge_like\"\n"
+
+let with_judge_fallback_runtime f =
+  let path = Filename.temp_file "compaction_judge_fallback_runtime" ".toml" in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+      match
+        Runtime.save_config_text ~runtime_config_path:path judge_fallback_runtime_toml
+      with
+      | Error detail -> Alcotest.failf "runtime config should load: %s" detail
+      | Ok () -> f ())
+
+let test_schemaless_assignment_falls_back_to_structured_judge () =
+  with_judge_fallback_runtime @@ fun () ->
+  let actual =
+    C.For_testing.candidate_runtime_ids_for_assignment
+      ~keeper_name:"keeper-test"
+      ~runtime_id:"local.chat_like"
+  in
+  Alcotest.(check (option (list string)))
+    "schema-capable structured-judge lane replaces the empty chat candidates"
+    (Some [ "local.judge_like" ])
+    actual
+
+let test_schema_capable_assignment_keeps_own_lane () =
+  with_judge_fallback_runtime @@ fun () ->
+  let actual =
+    C.For_testing.candidate_runtime_ids_for_assignment
+      ~keeper_name:"keeper-test"
+      ~runtime_id:"local.judge_like"
+  in
+  Alcotest.(check (option (list string)))
+    "an already schema-capable assignment does not detour"
+    (Some [ "local.judge_like" ])
+    actual
+
 (* -- plan_of_json: valid partition accepted -- *)
 
 let test_valid_partition_accepted () =
@@ -237,6 +304,10 @@ let () =
             test_provider_for_plan_preserves_temperature_omission
         ; Alcotest.test_case "lane candidates keep declared order" `Quick
             test_lane_candidates_keep_declared_order
+        ; Alcotest.test_case "schemaless assignment falls back to structured judge" `Quick
+            test_schemaless_assignment_falls_back_to_structured_judge
+        ; Alcotest.test_case "schema-capable assignment keeps its own lane" `Quick
+            test_schema_capable_assignment_keeps_own_lane
         ] )
     ; ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted

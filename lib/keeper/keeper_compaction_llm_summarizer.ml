@@ -246,7 +246,7 @@ let eligible_candidate ~keeper_name (runtime : Runtime.t) =
     None)
   else Some { runtime_id; provider_cfg }
 
-let candidates_for_assignment ~keeper_name assignment_id =
+let resolve_assignment_candidates ~keeper_name assignment_id =
   let rec resolve_lane acc = function
     | [] -> Some (List.rev acc)
     | runtime_id :: rest ->
@@ -274,6 +274,31 @@ let candidates_for_assignment ~keeper_name assignment_id =
     Some (Option.to_list (eligible_candidate ~keeper_name runtime))
   | `Lane lane ->
     resolve_lane [] (Runtime_lane.ordered_candidates lane)
+
+let candidates_for_assignment ~keeper_name assignment_id =
+  match resolve_assignment_candidates ~keeper_name assignment_id with
+  | Some (_ :: _) as eligible -> eligible
+  | (Some [] | None) as primary ->
+    (* The compaction plan is a structured-output subcall. A keeper whose chat
+       assignment offers no schema-capable candidate must not lose compaction
+       entirely (an over-budget keeper then wedges: every turn replays the
+       oversized prompt and fails, and the keeper can never shrink it — #24838).
+       Route the plan through the designated structured-judge lane instead,
+       the same chat/schema lane separation the completion verifier applies. *)
+    (match
+       try Some (Runtime.runtime_id_for_structured_judge ()) with
+       | Failure _ -> None
+     with
+     | Some judge_id when not (String.equal judge_id assignment_id) ->
+       (match resolve_assignment_candidates ~keeper_name judge_id with
+        | Some (_ :: _ as candidates) ->
+          Log.Keeper.info ~keeper_name
+            "compaction LLM summarizer falling back to structured-judge lane \
+             runtime=%s (assignment %s has no schema-capable candidate)"
+            judge_id assignment_id;
+          Some candidates
+        | Some [] | None -> primary)
+     | Some _ | None -> primary)
 
 type make_fn = runtime_id:string -> keeper_name:string -> unit -> summarizer option
 let make_override : make_fn option Atomic.t = Atomic.make None

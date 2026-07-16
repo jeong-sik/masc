@@ -3,6 +3,7 @@ open Alcotest
 module Q = Masc.Keeper_approval_queue
 module Worker = Masc.Hitl_summary_worker
 module Schema = Masc.Keeper_structured_output_schema
+module Runtime_resolved = Masc.Keeper_runtime_resolved
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
@@ -244,6 +245,48 @@ let test_readiness_fails_when_gate_prompt_is_missing () =
             (status |> member "read_error" |> to_string |> String.trim <> ""))
 ;;
 
+let with_body_timeout_env value f =
+  let name = "MASC_KEEPER_BODY_TIMEOUT_SEC" in
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Runtime_resolved.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous with
+       | Some previous -> Unix.putenv name previous
+       | None -> Unix.unsetenv name);
+      Runtime_resolved.reset_for_tests ())
+    f
+;;
+
+let with_root_eio_context f =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () -> f clock)
+;;
+
+let test_unset_body_timeout_does_not_forward_root_clock () =
+  with_root_eio_context @@ fun _root_clock ->
+  with_body_timeout_env "" @@ fun () ->
+  check
+    bool
+    "unset body timeout keeps provider clock absent"
+    true
+    (Option.is_none (Worker.For_testing.body_timeout_clock ()))
+;;
+
+let test_explicit_body_timeout_forwards_root_clock () =
+  with_root_eio_context @@ fun root_clock ->
+  with_body_timeout_env "30" @@ fun () ->
+  match Worker.For_testing.body_timeout_clock () with
+  | Some actual ->
+    check bool "explicit body timeout uses the exact root clock" true (actual == root_clock)
+  | None -> fail "explicit body timeout dropped the root clock"
+;;
+
 let () =
   run
     "Hitl_summary_worker"
@@ -290,6 +333,14 @@ let () =
             "Gate judgment readiness fails when missing"
             `Quick
             test_readiness_fails_when_gate_prompt_is_missing
+        ; test_case
+            "unset body timeout does not forward root clock"
+            `Quick
+            test_unset_body_timeout_does_not_forward_root_clock
+        ; test_case
+            "explicit body timeout forwards root clock"
+            `Quick
+            test_explicit_body_timeout_forwards_root_clock
         ] )
     ]
 ;;

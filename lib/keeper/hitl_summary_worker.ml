@@ -304,6 +304,18 @@ let sdk_error_of_http_error error =
   Agent_sdk.Provider_failure_attribution.sdk_error_of_http_error error
 ;;
 
+let root_clock_for_body_timeout ~body_timeout_s ~root_clock =
+  match body_timeout_s with
+  | None -> None
+  | Some _ -> root_clock
+;;
+
+let body_timeout_clock () =
+  root_clock_for_body_timeout
+    ~body_timeout_s:(Keeper_runtime_resolved.body_timeout_override_sec ())
+    ~root_clock:(Eio_context.get_clock_opt ())
+;;
+
 (** Appended on the [Plain_json_text] path so a model without native structured
     output still returns a parseable object. The schema is the SSOT for both
     paths (native applies it as [response_format]; here it is inlined). *)
@@ -363,8 +375,9 @@ let call_summary_llm ~sw ~net ~runtime_id ~provider_config ~context_bundle () =
   match messages with
   | Error detail -> Error (Prompt_unavailable detail)
   | Ok messages ->
+    let clock = body_timeout_clock () in
     (match
-       Keeper_provider_subcall.complete ~sw ~net ~config ~messages ()
+       Keeper_provider_subcall.complete ~sw ~net ?clock ~config ~messages ()
        |> Result.map_error sdk_error_of_http_error
      with
      | Ok response -> Ok (response, mode)
@@ -513,6 +526,7 @@ module For_testing = struct
   let summary_llm_error_retryable = summary_llm_error_retryable
   let sdk_error_of_http_error = sdk_error_of_http_error
   let effective_max_concurrency = effective_max_concurrency
+  let body_timeout_clock = body_timeout_clock
   let system_prompt = system_prompt
   let summary_version = summary_version
 end

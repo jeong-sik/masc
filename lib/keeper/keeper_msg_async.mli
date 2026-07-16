@@ -67,6 +67,33 @@ type load_result =
   | Unreadable of string
   | Rejected of access_rejection
 
+type active_inventory_store_error =
+  | Inventory_access_rejected of access_rejection
+  | Inventory_directory_rejected of Fs_compat.owned_directory_chain_rejection
+  | Inventory_directory_read_failed of
+      { path : string
+      ; reason : string
+      }
+
+type active_inventory_record_error_kind =
+  | Invalid_record_name
+  | Record_missing
+  | Record_not_regular of Unix.file_kind
+  | Record_unreadable of string
+  | Record_inspection_failed of { reason : string }
+  | Record_terminal_status of request_status
+
+type active_inventory_record_error =
+  { path : string
+  ; request_id : string option
+  ; kind : active_inventory_record_error_kind
+  }
+
+type durable_active_inventory =
+  { entries : entry list
+  ; record_errors : active_inventory_record_error list
+  }
+
 (** Opaque evidence that the exact request's canonical terminal-partition
     record is durably authoritative.  A proof is never constructed from
     {!poll}: process memory may contain a visible but unconfirmed terminal
@@ -280,6 +307,19 @@ val submit
     different process does not own its worker. Only the exclusive startup
     recovery boundary may transition such records to [Lost]. *)
 val poll : base_path:string -> caller:string -> string -> load_result
+
+(** Read the canonical durable active partition without consulting process
+    memory. Every regular [*.json] record uses the strict
+    request-record decoder used by exact polling. The read performs no cleanup,
+    status rewrite, worker-ownership inference, or secondary-index lookup.
+
+    A missing active directory is an empty inventory. Directory-boundary
+    failures reject the whole read. Malformed, missing, symbolic-link, and
+    non-regular children and terminal-status residue remain explicit in
+    [record_errors] alongside exact non-terminal entries. *)
+val read_durable_active_inventory
+  :  base_path:string
+  -> (durable_active_inventory, active_inventory_store_error) result
 
 (** Exact O(1) canonical-disk lookup for a durably committed terminal request.
     It checks only the request's terminal/active/legacy filenames; it never

@@ -40,7 +40,7 @@ type snapshot =
   ; source_checkpoint : Keeper_checkpoint_ref.t
   ; trigger : Compaction_trigger.t
   ; cause : Operation.Cause.t
-  ; producer_invocation : Tool_invocation_ref.t option
+  ; producer : Operation.producer_ref option
   ; phase : phase
   ; attempt_id : Operation.Attempt_id.t option
   ; candidate_checkpoint : Keeper_checkpoint_ref.t option
@@ -55,6 +55,9 @@ type snapshot =
 
 type transition_error =
   | Invalid_transition of phase option
+  | Provider_overflow_producer_required
+  | Producer_trigger_mismatch
+  | Producer_source_mismatch
   | Operation_mismatch
   | Attempt_mismatch
   | Source_mismatch
@@ -119,7 +122,7 @@ let snapshot state =
   ; source_checkpoint = state.request.source_checkpoint
   ; trigger = state.request.trigger
   ; cause = state.request.cause
-  ; producer_invocation = state.request.producer_invocation
+  ; producer = state.request.producer
   ; phase = phase state
   ; attempt_id
   ; candidate_checkpoint
@@ -190,6 +193,29 @@ let validate_supersession
 let apply current event =
   let invalid state = Error (Invalid_transition (Option.map phase state)) in
   match current, Operation.view event with
+  | None,
+    Operation.Requested
+      { trigger = Compaction_trigger.Provider_overflow _
+      ; producer = (None | Some (Operation.Tool_invocation _))
+      ; _
+      } ->
+    Error Provider_overflow_producer_required
+  | None,
+    Operation.Requested
+      { trigger = Compaction_trigger.Manual
+      ; producer = Some (Operation.Provider_overflow _)
+      ; _
+      } ->
+    Error Producer_trigger_mismatch
+  | None,
+    Operation.Requested
+      { source_checkpoint
+      ; producer =
+          Some (Operation.Provider_overflow { source_checkpoint = bound; _ })
+      ; _
+      }
+    when not (Keeper_checkpoint_ref.equal source_checkpoint bound) ->
+    Error Producer_source_mismatch
   | None, Operation.Requested request ->
     Ok
       { operation_id = Operation.operation_id event

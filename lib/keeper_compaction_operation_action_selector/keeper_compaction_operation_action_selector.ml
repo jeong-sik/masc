@@ -64,7 +64,7 @@ let operation_context (entry : Store.operation_entry) =
       ; source_checkpoint = snapshot.source_checkpoint
       ; trigger = snapshot.trigger
       ; cause = snapshot.cause
-      ; producer_invocation = snapshot.producer_invocation
+      ; producer = snapshot.producer
       }
   }
 

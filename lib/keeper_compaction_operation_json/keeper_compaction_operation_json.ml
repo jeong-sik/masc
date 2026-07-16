@@ -28,6 +28,19 @@ let candidate ~checkpoint_field (candidate : Operation.candidate) =
   ]
 ;;
 
+let producer = function
+  | Operation.Tool_invocation invocation ->
+    `Assoc
+      [ "kind", `String "tool_invocation"
+      ; "invocation", Tool_invocation_ref.to_yojson invocation
+      ]
+  | Operation.Provider_overflow { source_delivery_sha256; _ } ->
+    `Assoc
+      [ "kind", `String "provider_overflow"
+      ; "source_delivery_sha256", `String source_delivery_sha256
+      ]
+;;
+
 let envelope event kind payload =
   `Assoc
     [ "kind", `String kind
@@ -46,9 +59,9 @@ let to_json event =
       ; "source_checkpoint", checkpoint request.source_checkpoint
       ; "trigger", Compaction_trigger.to_detail_json request.trigger
       ; "cause", `String (Operation.Cause.to_string request.cause)
-      ; ( "producer_invocation"
-        , match request.producer_invocation with
-          | Some producer -> Tool_invocation_ref.to_yojson producer
+      ; ( "producer"
+        , match request.producer with
+          | Some value -> producer value
           | None -> `Null )
       ]
   | Attempt_started attempt_id ->

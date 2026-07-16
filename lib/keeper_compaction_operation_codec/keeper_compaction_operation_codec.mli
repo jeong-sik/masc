@@ -32,7 +32,9 @@ type decode_error = Keeper_compaction_operation_codec_support.decode_error =
   | Invalid_cause of Keeper_compaction_operation_identity.Cause.error
   | Invalid_checkpoint of Keeper_checkpoint_ref.create_error
   | Invalid_trigger of Compaction_trigger.decode_error
-  | Invalid_producer of Tool_invocation_ref.decode_error
+  | Unknown_producer_kind of string
+  | Invalid_tool_producer of Tool_invocation_ref.decode_error
+  | Invalid_provider_producer of Keeper_compaction_operation.producer_ref_error
   | Invalid_evidence of Keeper_compaction_evidence.decode_error
   | Invalid_turn_ref of string
 

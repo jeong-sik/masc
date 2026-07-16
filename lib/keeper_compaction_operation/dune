@@ -12,4 +12,5 @@
   masc.keeper_compaction_operation_identity
   masc.keeper_registry
   masc.masc_types
-  masc.tool_invocation_ref))
+  masc.tool_invocation_ref
+  digestif))

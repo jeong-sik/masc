@@ -19,7 +19,7 @@ type snapshot =
   ; source_checkpoint : Keeper_checkpoint_ref.t
   ; trigger : Compaction_trigger.t
   ; cause : Operation.Cause.t
-  ; producer_invocation : Tool_invocation_ref.t option
+  ; producer : Operation.producer_ref option
   ; phase : phase
   ; attempt_id : Operation.Attempt_id.t option
   ; candidate_checkpoint : Keeper_checkpoint_ref.t option
@@ -34,6 +34,9 @@ type snapshot =
 
 type transition_error =
   | Invalid_transition of phase option
+  | Provider_overflow_producer_required
+  | Producer_trigger_mismatch
+  | Producer_source_mismatch
   | Operation_mismatch
   | Attempt_mismatch
   | Source_mismatch

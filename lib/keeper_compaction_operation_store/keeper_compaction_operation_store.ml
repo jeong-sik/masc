@@ -17,7 +17,7 @@ type event_rejection =
       ; actual : Keeper_id.Keeper_name.t
       }
   | Producer_already_bound of
-      { producer : Tool_invocation_ref.t
+      { producer : Operation.producer_ref
       ; existing_operation_id : Operation.Operation_id.t
       }
 type history_error =
@@ -51,7 +51,7 @@ type operation_state =
   }
 type fold_state =
   { operations : operation_state Operation_map.t
-  ; producers : (Tool_invocation_ref.t * Operation.Operation_id.t) list
+  ; producers : (Operation.producer_ref * Operation.Operation_id.t) list
   }
 let empty_state = { operations = Operation_map.empty; producers = [] }
 let ( let* ) = Result.bind
@@ -69,12 +69,14 @@ let journal_path ~base_path ~keeper_name =
 ;;
 let producer_of_event event =
   match Operation.view event with
-  | Operation.Requested { producer_invocation; _ } -> producer_invocation
+  | Operation.Requested { producer; _ } -> producer
   | _ -> None
 ;;
 let find_producer producer =
   List.find_map (fun (candidate, operation_id) ->
-    if Tool_invocation_ref.equal producer candidate then Some operation_id else None)
+    if Operation.producer_ref_equal producer candidate
+    then Some operation_id
+    else None)
 ;;
 let apply_row ~keeper_name state row =
   let event = row.Record.event in

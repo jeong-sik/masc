@@ -37,6 +37,12 @@ let cause = ok (Operation.Cause.of_string "operator request")
 let producer =
   let request_id = ok (Mcp_transport_protocol.request_id_of_yojson (`String "req-1")) in
   ok (Tool_invocation_ref.external_mcp ~request_id ~session_id:"session-1")
+  |> Operation.tool_invocation_producer_ref
+;;
+let overflow_producer =
+  Operation.provider_overflow_producer_ref
+    ~source_checkpoint:source
+    ~source_delivery_identity:"canonical-provider-delivery"
 ;;
 
 let request_event () =
@@ -46,7 +52,7 @@ let request_event () =
     ~source_checkpoint:source
     ~trigger:Compaction_trigger.Manual
     ~cause
-    ~producer_invocation:(Some producer)
+    ~producer:(Some producer)
 ;;
 
 let attempt_event () = Operation.attempt_started ~operation_id ~attempt_id
@@ -68,7 +74,7 @@ let test_requested_view () =
       ~source_checkpoint:source
       ~trigger:Compaction_trigger.Manual
       ~cause
-      ~producer_invocation:(Some producer)
+      ~producer:(Some producer)
   in
   Alcotest.(check bool)
     "operation identity"
@@ -87,7 +93,7 @@ let test_requested_view () =
     Alcotest.(check bool)
       "producer identity"
       true
-      (Option.exists (Tool_invocation_ref.equal producer) request.producer_invocation)
+      (Option.exists (Operation.producer_ref_equal producer) request.producer)
   | _ -> Alcotest.fail "requested event changed shape"
 ;;
 
@@ -407,6 +413,52 @@ let test_reducer_invalid_transition () =
   | Ok _ | Error _ -> Alcotest.fail "candidate without attempt was accepted"
 ;;
 
+let test_reducer_rejects_provider_source_mismatch () =
+  let mismatched =
+    Operation.requested
+      ~operation_id
+      ~keeper_name
+      ~source_checkpoint:advanced
+      ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+      ~cause
+      ~producer:(Some overflow_producer)
+  in
+  match Reducer.apply None mismatched with
+  | Error Reducer.Producer_source_mismatch -> ()
+  | Ok _ | Error _ ->
+    Alcotest.fail "provider producer was detached from its exact source"
+;;
+
+let test_reducer_requires_typed_provider_producer () =
+  let request ~trigger ~producer =
+    Operation.requested
+      ~operation_id
+      ~keeper_name
+      ~source_checkpoint:source
+      ~trigger
+      ~cause
+      ~producer
+  in
+  (match
+     Reducer.apply
+       None
+       (request
+          ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+          ~producer:None)
+   with
+   | Error Reducer.Provider_overflow_producer_required -> ()
+   | Ok _ | Error _ ->
+     Alcotest.fail "provider overflow without exact producer was accepted");
+  match
+    Reducer.apply
+      None
+      (request ~trigger:Compaction_trigger.Manual ~producer:(Some overflow_producer))
+  with
+  | Error Reducer.Producer_trigger_mismatch -> ()
+  | Ok _ | Error _ ->
+    Alcotest.fail "provider producer was attached to a manual trigger"
+;;
+
 let test_canonical_json_projection () =
   let turn = Ids.Turn_ref.make ~trace_id:"trace-a" ~absolute_turn:8 in
   let events =
@@ -473,7 +525,8 @@ let test_canonical_json_projection () =
     "req-1"
     (requested
      |> Yojson.Safe.Util.member "payload"
-     |> Yojson.Safe.Util.member "producer_invocation"
+     |> Yojson.Safe.Util.member "producer"
+     |> Yojson.Safe.Util.member "invocation"
      |> Yojson.Safe.Util.member "request_id"
      |> Yojson.Safe.Util.to_string)
 ;;
@@ -500,7 +553,7 @@ let test_codec_roundtrip_all_events () =
         ~source_checkpoint:source
         ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
         ~cause
-        ~producer_invocation:None
+        ~producer:(Some overflow_producer)
     ; attempt_event ()
     ; candidate_event ()
     ; failed (Operation.Pre_commit_failure cause)
@@ -601,6 +654,35 @@ let test_codec_rejects_nested_unknown_field () =
     malformed
 ;;
 
+let test_codec_rejects_invalid_provider_digest () =
+  let event =
+    Operation.requested
+      ~operation_id
+      ~keeper_name
+      ~source_checkpoint:source
+      ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+      ~cause
+      ~producer:(Some overflow_producer)
+  in
+  let json = Codec.to_json event in
+  let payload = Yojson.Safe.Util.member "payload" json in
+  let producer = Yojson.Safe.Util.member "producer" payload in
+  let malformed_producer =
+    replace_field "source_delivery_sha256" (`String "bad") producer
+  in
+  let malformed =
+    replace_field
+      "payload"
+      (replace_field "producer" malformed_producer payload)
+      json
+  in
+  match Codec.of_json malformed with
+  | Error
+      (Codec.Invalid_provider_producer
+         (Operation.Invalid_source_delivery_sha256_length 3)) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "invalid provider digest was accepted"
+;;
+
 let () =
   Alcotest.run
     "keeper compaction operation events"
@@ -633,6 +715,14 @@ let () =
             `Quick
             test_reducer_invalid_transition
         ; Alcotest.test_case
+            "provider producer source invariant"
+            `Quick
+            test_reducer_rejects_provider_source_mismatch
+        ; Alcotest.test_case
+            "provider trigger requires typed producer"
+            `Quick
+            test_reducer_requires_typed_provider_producer
+        ; Alcotest.test_case
             "canonical JSON projection"
             `Quick
             test_canonical_json_projection
@@ -644,5 +734,9 @@ let () =
             "codec rejects nested unknown field"
             `Quick
             test_codec_rejects_nested_unknown_field
+        ; Alcotest.test_case
+            "codec rejects invalid provider digest"
+            `Quick
+            test_codec_rejects_invalid_provider_digest
         ] )
     ]

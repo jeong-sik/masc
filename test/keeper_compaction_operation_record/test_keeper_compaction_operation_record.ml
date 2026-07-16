@@ -37,7 +37,7 @@ let event =
     ~source_checkpoint:source
     ~trigger:Compaction_trigger.Manual
     ~cause:(ok (Operation.Cause.of_string "manual compaction"))
-    ~producer_invocation:None
+    ~producer:None
 ;;
 
 let test_roundtrip_and_cursor () =

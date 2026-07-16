@@ -16,7 +16,7 @@ type event_rejection =
       ; actual : Keeper_id.Keeper_name.t
       }
   | Producer_already_bound of
-      { producer : Tool_invocation_ref.t
+      { producer : Keeper_compaction_operation.producer_ref
       ; existing_operation_id : Keeper_compaction_operation.Operation_id.t
       }
 type history_error =

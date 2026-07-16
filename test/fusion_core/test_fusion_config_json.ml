@@ -6,7 +6,7 @@
 let parse s = Otoml.Parser.from_string s
 
 (* Mirrors config/runtime.toml [fusion.presets.quorum] structure with placeholder
-   model ids; judges >= 2 so the JoJ array-of-tables projection is exercised. *)
+   model ids so the JoJ array-of-tables projection is exercised. *)
 let joj_preset_toml =
   {|
 [fusion]

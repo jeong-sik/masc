@@ -209,7 +209,6 @@ let fusion_tool_policy () : Fusion_policy.t =
   in
   { enabled = true
   ; default_preset = preset.name
-  ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets = [ validated_preset preset ]
   }
 ;;

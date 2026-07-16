@@ -95,7 +95,6 @@ let run ~sw ~net ~outer_timeout_s ~groups ~prompt ()
   in
   let built = List.rev built in
   let build_failures = List.rev build_failures in
-  let max_fibers = max 1 (List.length built) in
   (* 2. 모든 그룹을 하나의 Async_agent.all에 union으로 던진다 — 이종 설정은 이미 각
         agent에 baked되어 있으므로 단일 fan-out으로 충분. 외곽 run_safe는 그룹 timeout
         중 max로 전체 멈춤을 막는 상한.
@@ -107,7 +106,7 @@ let run ~sw ~net ~outer_timeout_s ~groups ~prompt ()
     match
       Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s:outer_timeout_s (fun () ->
         Ok
-          (Agent_sdk.Async_agent.all ~sw ~max_fibers
+          (Agent_sdk.Async_agent.all ~sw
              (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))
     with
     | Ok run_results ->

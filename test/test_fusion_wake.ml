@@ -574,6 +574,15 @@ let register_route_exn ~operation_id ~owner channel =
   | Error error -> fail (Fusion_wake_route.error_to_string error)
 ;;
 
+let queue_completion_exn ~operation_id ~ok ~content =
+  match
+    Fusion_wake_route.queue_completion ~operation_id ~ok ~content ~evidence_ref:None
+  with
+  | Ok Fusion_completion_outbox.Queued -> ()
+  | Ok _ -> fail "test completion should be newly queued"
+  | Error error -> fail (Fusion_wake_route.error_to_string error)
+;;
+
 let install_recovery_required_exn ~base_dir operation =
   let path = Filename.concat base_dir "fusion-runs.jsonl" in
   let registry = Fusion_run_registry.create ~path () in
@@ -605,12 +614,11 @@ let test_recovery_resumes_exact_operation_and_owner_lane () =
   with_isolated_eio_base_path "fusion-boot-recovery" (fun env sw base_dir ->
     let keeper = "fusion-recovery-owner" in
     let run_id = "fus-boot-recovery" in
-    let operation =
-      { (fusion_operation ~run_id ~keeper ~preset:"unit") with
-        request =
-          { (fusion_operation ~run_id ~keeper ~preset:"unit").request with
-            prompt = "recover this exact persisted prompt"
-          ; web_tools = true
+    let base_operation = fusion_operation ~run_id ~keeper ~preset:"unit" in
+    let operation : Fusion_types.fusion_operation =
+      { request =
+          { base_operation.request with
+            prompt = "recover this exact persisted prompt"; web_tools = true
           }
       ; topology = Fusion_types.Judge_of_judges
       }
@@ -685,13 +693,8 @@ let test_recovery_requires_exact_registered_owner () =
     register_route_exn ~operation_id:"fus-wrong-recovery-owner"
       ~owner:"wrong-owner" discord_channel;
     let registry = install_recovery_required_exn ~base_dir operation in
-    (match
-       Fusion_wake_route.queue_completion ~operation_id:"fus-wrong-recovery-owner"
-         ~ok:true ~content:"must not reach wrong owner" ~evidence_ref:None
-     with
-     | Ok Fusion_completion_outbox.Queued -> ()
-     | Ok _ -> fail "test completion should be newly queued"
-     | Error error -> fail (Fusion_wake_route.error_to_string error));
+    queue_completion_exn ~operation_id:"fus-wrong-recovery-owner" ~ok:true
+      ~content:"must not reach wrong owner";
     let drain = Fusion_wake_route.drain_all ~base_dir in
     check int "wrong owner delivers no pending completion" 0 drain.delivered;
     check int "wrong owner is an explicit drain failure" 1
@@ -722,6 +725,110 @@ let test_recovery_requires_exact_registered_owner () =
     | Some { Fusion_run_registry.status = Recovery_required _; _ } -> ()
     | Some _ -> fail "unroutable recovery must remain recovery_required"
     | None -> fail "unroutable recovery inventory must remain observable")
+;;
+
+let test_pending_terminal_reconciles_before_recovery () =
+  with_isolated_eio_base_path "fusion-recovery-reconcile" (fun env sw base_dir ->
+    let keeper = "fusion-reconciled-owner" in
+    let run_id = "fus-reconciled-terminal" in
+    let operation = fusion_operation ~run_id ~keeper ~preset:"unit" in
+    let registry = install_recovery_required_exn ~base_dir operation in
+    register_route_exn ~operation_id:run_id ~owner:keeper discord_channel;
+    queue_completion_exn ~operation_id:run_id ~ok:true
+      ~content:"RECONCILED-ANSWER";
+    let drain = Fusion_wake_route.drain_all ~base_dir in
+    check int "pending terminal delivered once" 1 drain.delivered;
+    check int "reconcile has no drain failure" 0 (List.length drain.failures);
+    (match get_run registry ~run_id with
+     | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
+     | Some _ -> fail "outbox terminal must durably reconcile the registry"
+     | None -> fail "reconciled operation must remain observable");
+    let called = ref false in
+    let run_orchestrator ~sw:_ ~net:_ ~base_dir:_ ~policy:_ ~topology:_ ~request:_ () =
+      called := true;
+      failwith "a reconciled terminal must not restart a worker"
+    in
+    let report =
+      Fusion_tool.For_test.recover_required_with_runner ~run_orchestrator ~sw
+        ~net:(Eio.Stdenv.net env) ~base_dir ~policy:(fusion_tool_policy ())
+    in
+    check int "reconciled terminal starts no worker" 0 report.started;
+    check bool "reconciled terminal runner is not called" false !called;
+    match
+      Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+      |> Keeper_event_queue.dequeue
+    with
+    | Some ({ payload = Keeper_event_queue.Fusion_completed completion; _ }, _) ->
+      check string "reconciled answer reaches exact owner" "RECONCILED-ANSWER"
+        completion.resolved_answer
+    | Some _ -> fail "reconciled owner lane received the wrong stimulus"
+    | None -> fail "reconciled completion must reach its owner lane")
+;;
+
+let test_conflicting_terminal_stays_pending_without_restart () =
+  with_isolated_eio_base_path "fusion-recovery-conflict" (fun env sw base_dir ->
+    let keeper = "fusion-conflict-owner" in
+    let run_id = "fus-conflicting-terminal" in
+    register_running_exn (Fusion_run_registry.global ()) ~run_id ~keeper
+      ~preset:"unit" ~started_at:1.0;
+    register_route_exn ~operation_id:run_id ~owner:keeper discord_channel;
+    (match
+       Fusion_run_registry.mark_completed (Fusion_run_registry.global ())
+         ~operation_id:run_id ~failure:"registry failed" ~ok:false ()
+     with
+     | Ok () -> ()
+     | Error error -> fail (Fusion_run_registry.completion_error_to_string error));
+    queue_completion_exn ~operation_id:run_id ~ok:true
+      ~content:"conflicting success";
+    let drain = Fusion_wake_route.drain_all ~base_dir in
+    check int "conflicting terminal is not delivered" 0 drain.delivered;
+    check int "conflict is explicit" 1 (List.length drain.failures);
+    check int "conflicting terminal remains pending" 1
+      (List.length
+         (Fusion_completion_outbox.pending (Fusion_completion_outbox.global ())));
+    let called = ref false in
+    let run_orchestrator ~sw:_ ~net:_ ~base_dir:_ ~policy:_ ~topology:_ ~request:_ () =
+      called := true;
+      failwith "a terminal conflict must not start a worker"
+    in
+    let report =
+      Fusion_tool.For_test.recover_required_with_runner ~run_orchestrator ~sw
+        ~net:(Eio.Stdenv.net env) ~base_dir ~policy:(fusion_tool_policy ())
+    in
+    check int "conflicting terminal starts no worker" 0 report.started;
+    check bool "conflicting terminal runner is not called" false !called;
+    check int "conflicting owner lane remains empty" 0
+      (Keeper_event_queue.length
+         (Keeper_event_queue_persistence.load ~base_path:base_dir
+            ~keeper_name:keeper)))
+;;
+
+let test_pruned_registry_uses_validated_durable_address () =
+  with_isolated_base_path "fusion-delivery-pruned-registry" (fun base_dir ->
+    let keeper = "fusion-pruned-owner" in
+    let run_id = "fus-pruned-registry" in
+    register_running_exn (Fusion_run_registry.global ()) ~run_id ~keeper
+      ~preset:"unit" ~started_at:1.0;
+    register_route_exn ~operation_id:run_id ~owner:keeper discord_channel;
+    queue_completion_exn ~operation_id:run_id ~ok:true
+      ~content:"PRUNED-REGISTRY-ANSWER";
+    Fusion_run_registry.set_global (Fusion_run_registry.create ());
+    let drain = Fusion_wake_route.drain_all ~base_dir in
+    check int "validated address survives registry pruning" 1 drain.delivered;
+    check int "pruned registry delivery has no failure" 0
+      (List.length drain.failures);
+    check int "pruned registry delivery is acknowledged" 0
+      (List.length
+         (Fusion_completion_outbox.pending (Fusion_completion_outbox.global ())));
+    match
+      Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+      |> Keeper_event_queue.dequeue
+    with
+    | Some ({ payload = Keeper_event_queue.Fusion_completed completion; _ }, _) ->
+      check string "validated exact owner receives completion"
+        "PRUNED-REGISTRY-ANSWER" completion.resolved_answer
+    | Some _ -> fail "validated owner received the wrong stimulus"
+    | None -> fail "validated durable address must remain deliverable")
 ;;
 
 let test_wake_durable_commit_carries_channel_and_acks_outbox () =
@@ -1062,6 +1169,18 @@ let () =
             "boot recovery requires its exact registered owner"
             `Quick
             test_recovery_requires_exact_registered_owner
+        ; test_case
+            "pending terminal reconciles before recovery starts"
+            `Quick
+            test_pending_terminal_reconciles_before_recovery
+        ; test_case
+            "conflicting terminal stays pending without worker restart"
+            `Quick
+            test_conflicting_terminal_stays_pending_without_restart
+        ; test_case
+            "validated address survives registry pruning"
+            `Quick
+            test_pruned_registry_uses_validated_durable_address
         ; test_case
             "tool handle does not start without durable register"
             `Quick

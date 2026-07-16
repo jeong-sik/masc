@@ -32,6 +32,7 @@ let escalation_reason_requests_external_input = function
 type settlement =
   | Ack
   | Requeue of requeue_reason
+  | Park_for_compaction of Keeper_compaction_operation_identity.Operation_id.t
   | Escalate of
       { reason : escalation_reason
       ; successor : Keeper_event_queue.stimulus option
@@ -59,6 +60,20 @@ type outbox_entry =
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
+type parked_phase =
+  | Parked
+  | Resumed
+
+type parked_entry =
+  { operation_id : Keeper_compaction_operation_identity.Operation_id.t
+  ; source_lease : lease
+  ; settled_at : float
+  ; phase : parked_phase
+  }
+
+module Operation_map =
+  Map.Make (Keeper_compaction_operation_identity.Operation_id)
+
 type t =
   { revision : int64
   ; next_lease_sequence : int64
@@ -66,13 +81,27 @@ type t =
   ; leases : lease list
   ; last_settlement : transition_receipt option
   ; transition_outbox : outbox_entry list
+  ; parked_compactions : parked_entry Operation_map.t
   }
 
 type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
-let schema = "keeper.event_queue.state.v2"
+type parking_error =
+  | Operation_id_mismatch of
+      Keeper_compaction_operation_identity.Operation_id.t
+      * Keeper_compaction_operation_identity.Operation_id.t
+  | Operation_lease_mismatch of
+      string * string
+  | Parking_settlement_failed of string
+  | Operation_not_parked of Keeper_compaction_operation_identity.Operation_id.t
+
+type resume_result =
+  | Resumed of Keeper_event_queue.stimulus list
+  | Already_resumed
+
+let schema = "keeper.event_queue.state.v3"
 
 let empty =
   { revision = 0L
@@ -81,6 +110,7 @@ let empty =
   ; leases = []
   ; last_settlement = None
   ; transition_outbox = []
+  ; parked_compactions = Operation_map.empty
   }
 ;;
 
@@ -90,6 +120,7 @@ let pending state = state.pending
 let leases state = state.leases
 let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
+let parked_entries state = Operation_map.bindings state.parked_compactions |> List.map snd
 let lease_kind (lease : lease) = lease.kind
 let active_lease state =
   match state.leases with
@@ -354,6 +385,7 @@ let escalation_reason_of_wire ~label ~detail_json =
 let settlement_kind_label = function
   | Ack -> "ack"
   | Requeue _ -> "requeue"
+  | Park_for_compaction _ -> "park_for_compaction"
   | Escalate _ -> "escalate"
 ;;
 
@@ -377,18 +409,21 @@ let settlement_equal left right =
   match left, right with
   | Ack, Ack -> true
   | Requeue left, Requeue right -> left = right
+  | Park_for_compaction left, Park_for_compaction right ->
+    Keeper_compaction_operation_identity.Operation_id.equal left right
   | ( Escalate { reason = left_reason; successor = left_successor }
     , Escalate { reason = right_reason; successor = right_successor } ) ->
     left_reason = right_reason
     && successor_equal left_successor right_successor
-  | Ack, (Requeue _ | Escalate _)
-  | Requeue _, (Ack | Escalate _)
-  | Escalate _, (Ack | Requeue _) ->
+  | Ack, (Requeue _ | Park_for_compaction _ | Escalate _)
+  | Requeue _, (Ack | Park_for_compaction _ | Escalate _)
+  | Park_for_compaction _, (Ack | Requeue _ | Escalate _)
+  | Escalate _, (Ack | Requeue _ | Park_for_compaction _) ->
     false
 ;;
 
 let validate_settlement = function
-  | Ack | Requeue _ -> Ok ()
+  | Ack | Requeue _ | Park_for_compaction _ -> Ok ()
   | Escalate
       { reason = Failure_judgment_requested
       ; successor =
@@ -475,7 +510,112 @@ let lease_equal (left : lease) (right : lease) =
   && List.for_all2 Keeper_event_queue.stimulus_identity_equal left.stimuli right.stimuli
 ;;
 
-let settle ~settled_at ~lease ~settlement state =
+let parking_error_to_string = function
+  | Operation_id_mismatch (parked_operation_id, requested_operation_id) ->
+    Printf.sprintf
+      "event queue lease is parked for compaction %s, not %s"
+      (Keeper_compaction_operation_identity.Operation_id.to_string
+         parked_operation_id)
+      (Keeper_compaction_operation_identity.Operation_id.to_string
+         requested_operation_id)
+  | Operation_lease_mismatch (parked_lease_id, requested_lease_id) ->
+    Printf.sprintf
+      "compaction operation owns lease %s, not %s"
+      parked_lease_id
+      requested_lease_id
+  | Parking_settlement_failed detail -> detail
+  | Operation_not_parked operation_id ->
+    Printf.sprintf
+      "compaction operation is not parked: %s"
+      (Keeper_compaction_operation_identity.Operation_id.to_string operation_id)
+;;
+
+let parked_entry_for_lease lease_id state =
+  Operation_map.fold
+    (fun _ entry found ->
+       match found with
+       | Some _ -> found
+       | None when String.equal entry.source_lease.lease_id lease_id -> Some entry
+       | None -> None)
+    state.parked_compactions
+    None
+;;
+
+let park_for_compaction ~settled_at ~(lease : lease) ~operation_id state =
+  match parked_entry_for_lease lease.lease_id state with
+  | Some entry
+    when not
+           (Keeper_compaction_operation_identity.Operation_id.equal
+              entry.operation_id
+              operation_id) ->
+    Error (Operation_id_mismatch (entry.operation_id, operation_id))
+  | Some entry when not (lease_equal entry.source_lease lease) ->
+    Error
+      (Parking_settlement_failed
+         (Printf.sprintf
+            "event queue parked lease payload conflict: %s"
+            lease.lease_id))
+  | Some entry ->
+    let settlement = Park_for_compaction operation_id in
+    Ok
+      ( state
+      , Already_settled
+          (receipt_for_lease
+             ~settled_at:entry.settled_at
+             ~settlement
+             entry.source_lease) )
+  | None ->
+    (match Operation_map.find_opt operation_id state.parked_compactions with
+     | Some entry ->
+       Error
+         (Operation_lease_mismatch
+            (entry.source_lease.lease_id, lease.lease_id))
+     | None ->
+       (match committed_lease lease state with
+        | None ->
+          Error
+            (Parking_settlement_failed
+               (Printf.sprintf
+                  "event queue lease not found: %s"
+                  lease.lease_id))
+        | Some committed when not (lease_equal committed lease) ->
+          Error
+            (Parking_settlement_failed
+               (Printf.sprintf
+                  "event queue lease payload conflict: %s"
+                  lease.lease_id))
+        | Some committed ->
+          let settlement = Park_for_compaction operation_id in
+          let receipt = receipt_for_lease ~settled_at ~settlement committed in
+          let entry = { operation_id; source_lease = committed; settled_at; phase = Parked } in
+          Ok
+            ( { state with
+                leases = remove_lease committed.lease_id state.leases
+              ; transition_outbox = [ { receipt; stimuli = committed.stimuli } ]
+              ; parked_compactions =
+                  Operation_map.add operation_id entry state.parked_compactions
+              }
+            , Settled receipt )))
+;;
+
+let resume_parked ~operation_id state =
+  match Operation_map.find_opt operation_id state.parked_compactions with
+  | None -> Error (Operation_not_parked operation_id)
+  | Some { phase = Resumed; _ } -> Ok (state, Already_resumed)
+  | Some entry ->
+    let stimuli = entry.source_lease.stimuli in
+    let pending = append_missing stimuli state.pending in
+    let resumed = { entry with phase = Resumed } in
+    Ok
+      ( { state with
+          pending
+        ; parked_compactions =
+            Operation_map.add operation_id resumed state.parked_compactions
+        }
+      , Resumed stimuli )
+;;
+
+let settle_nonparking ~settled_at ~lease ~settlement state =
   let* () = validate_settlement settlement in
   match committed_lease lease state with
   | None ->
@@ -493,22 +633,21 @@ let settle ~settled_at ~lease ~settlement state =
   | Some committed when not (lease_equal committed lease) ->
     Error (Printf.sprintf "event queue lease payload conflict: %s" lease.lease_id)
   | Some committed ->
-    let pending =
+    let* pending =
       match settlement with
-      | Ack -> state.pending
+      | Ack -> Ok state.pending
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
           | Approval_grant_unconsumed
           | Approval_grant_state_unavailable ) ->
-        (* Retryable provider work, a completed context-compaction handoff,
-           and a durable one-shot grant retain the exact leased stimuli
-           without monopolizing the FIFO front. *)
-        append_missing committed.stimuli state.pending
-      | Requeue _ -> prepend_missing committed.stimuli state.pending
-      | Escalate { successor = None; _ } -> state.pending
+        Ok (append_missing committed.stimuli state.pending)
+      | Requeue _ -> Ok (prepend_missing committed.stimuli state.pending)
+      | Escalate { successor = None; _ } -> Ok state.pending
       | Escalate { successor = Some successor; _ } ->
-        enqueue_if_missing state.pending successor
+        Ok (enqueue_if_missing state.pending successor)
+      | Park_for_compaction _ ->
+        Error "compaction settlement escaped its dedicated parking transition"
     in
     let receipt = receipt_for_lease ~settled_at ~settlement committed in
     let outbox_entry =
@@ -523,6 +662,15 @@ let settle ~settled_at ~lease ~settlement state =
         ; transition_outbox = [ outbox_entry ]
         }
       , Settled receipt )
+;;
+
+let settle ~settled_at ~lease ~settlement state =
+  match settlement with
+  | Park_for_compaction operation_id ->
+    park_for_compaction ~settled_at ~lease ~operation_id state
+    |> Result.map_error parking_error_to_string
+  | Ack | Requeue _ | Escalate _ ->
+    settle_nonparking ~settled_at ~lease ~settlement state
 ;;
 
 let recover_leases ~settled_at state =
@@ -694,6 +842,14 @@ let settlement_to_yojson = function
       [ "kind", `String "requeue"
       ; "reason", `String (requeue_reason_label reason)
       ]
+  | Park_for_compaction operation_id ->
+    `Assoc
+      [ "kind", `String "park_for_compaction"
+      ; ( "operation_id"
+        , `String
+            (Keeper_compaction_operation_identity.Operation_id.to_string
+               operation_id) )
+      ]
   | Escalate { reason; successor } ->
     `Assoc
       [ "kind", `String "escalate"
@@ -716,6 +872,15 @@ let settlement_of_yojson json =
     let* reason = string_field ~context "reason" fields in
     let* reason = requeue_reason_of_label reason in
     Ok (Requeue reason)
+  | "park_for_compaction" ->
+    let* () = exact_reason_fields ~context [ "kind"; "operation_id" ] fields in
+    let* operation_id = string_field ~context "operation_id" fields in
+    (match
+       Keeper_compaction_operation_identity.Operation_id.of_string operation_id
+     with
+     | Ok operation_id -> Ok (Park_for_compaction operation_id)
+     | Error Keeper_compaction_operation_identity.Invalid_canonical_uuid ->
+       Error "event queue compaction operation_id must be a canonical UUID")
   | "escalate" ->
     let* reason_label = string_field ~context "reason" fields in
     let reason_detail =
@@ -798,6 +963,56 @@ let outbox_entry_of_yojson json =
   Ok { receipt; stimuli }
 ;;
 
+let parked_phase_to_string = function
+  | Parked -> "parked"
+  | Resumed -> "resumed"
+;;
+
+let parked_entry_to_yojson entry =
+  `Assoc
+    [ ( "operation_id"
+      , `String
+          (Keeper_compaction_operation_identity.Operation_id.to_string
+             entry.operation_id) )
+    ; "source_lease", lease_to_yojson entry.source_lease
+    ; "settled_at_unix", `Float entry.settled_at
+    ; "phase", `String (parked_phase_to_string entry.phase)
+    ]
+;;
+
+let parked_entry_of_yojson json =
+  let context = "event queue parked compaction" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_reason_fields
+      ~context
+      [ "operation_id"; "source_lease"; "settled_at_unix"; "phase" ]
+      fields
+  in
+  let* operation_id_text = string_field ~context "operation_id" fields in
+  let* operation_id =
+    match
+      Keeper_compaction_operation_identity.Operation_id.of_string
+        operation_id_text
+    with
+    | Ok operation_id -> Ok operation_id
+    | Error Keeper_compaction_operation_identity.Invalid_canonical_uuid ->
+      Error "event queue parked compaction operation_id must be a canonical UUID"
+  in
+  let* source_lease_json = required_field ~context "source_lease" fields in
+  let* source_lease = lease_of_yojson source_lease_json in
+  let* settled_at = float_field ~context "settled_at_unix" fields in
+  let* phase =
+    match string_field ~context "phase" fields with
+    | Ok "parked" -> Ok Parked
+    | Ok "resumed" -> Ok Resumed
+    | Ok value ->
+      Error (Printf.sprintf "unknown event queue parked phase: %s" value)
+    | Error _ as error -> error
+  in
+  Ok { operation_id; source_lease; settled_at; phase }
+;;
+
 let to_yojson state =
   `Assoc
     [ "schema", `String schema
@@ -811,6 +1026,8 @@ let to_yojson state =
         | Some receipt -> transition_receipt_to_yojson receipt )
     ; ( "transition_outbox"
       , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
+    ; ( "parked_compactions"
+      , `List (List.map parked_entry_to_yojson (parked_entries state)) )
     ]
 ;;
 
@@ -827,6 +1044,7 @@ let duplicate_by key values =
 ;;
 
 let validate_state state =
+  let parked_entries = parked_entries state in
   if Int64.compare state.revision 0L < 0
   then Error "event queue revision must not be negative"
   else if Int64.compare state.next_lease_sequence 1L < 0
@@ -838,6 +1056,14 @@ let validate_state state =
   else if state.leases <> [] && state.transition_outbox <> []
   then Error "event queue state cannot contain both an active lease and an outbox transition"
   else if
+    List.exists
+      (fun (lease : lease) ->
+         List.exists
+           (fun entry -> String.equal lease.lease_id entry.source_lease.lease_id)
+           parked_entries)
+      state.leases
+  then Error "event queue state cannot actively lease an already parked source"
+  else if
     match state.last_settlement, state.transition_outbox with
     | Some receipt, [ entry ] ->
       String.equal receipt.transition_id entry.receipt.transition_id
@@ -847,11 +1073,15 @@ let validate_state state =
     match duplicate_by (fun (lease : lease) -> lease.lease_id) state.leases with
     | Some lease_id -> Error (Printf.sprintf "duplicate event queue lease id: %s" lease_id)
     | None ->
-      (match
-         duplicate_by
-           (fun entry -> entry.receipt.transition_id)
-           state.transition_outbox
-       with
+      (match duplicate_by (fun entry -> entry.source_lease.lease_id) parked_entries with
+       | Some lease_id ->
+         Error (Printf.sprintf "duplicate parked event queue lease id: %s" lease_id)
+       | None ->
+       match
+           duplicate_by
+             (fun entry -> entry.receipt.transition_id)
+             state.transition_outbox
+         with
        | Some transition_id ->
          Error (Printf.sprintf "duplicate event queue transition id: %s" transition_id)
        | None ->
@@ -868,6 +1098,12 @@ let validate_state state =
              state.transition_outbox
          in
          let max_sequence =
+           List.fold_left
+             (fun acc entry -> Int64.max acc entry.source_lease.sequence)
+             max_sequence
+             parked_entries
+         in
+         let max_sequence =
            match state.last_settlement with
            | None -> max_sequence
            | Some receipt -> Int64.max max_sequence receipt.lease_sequence
@@ -882,6 +1118,20 @@ let validate_state state =
 let of_yojson json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
+  let* () =
+    exact_reason_fields
+      ~context
+      [ "schema"
+      ; "revision"
+      ; "next_lease_sequence"
+      ; "pending"
+      ; "leases"
+      ; "last_settlement"
+      ; "transition_outbox"
+      ; "parked_compactions"
+      ]
+      fields
+  in
   let* schema_value = string_field ~context "schema" fields in
   if not (String.equal schema_value schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
@@ -900,6 +1150,29 @@ let of_yojson json =
     let* transition_outbox =
       list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     in
+    let* parked_entries =
+      list_field ~context "parked_compactions" parked_entry_of_yojson fields
+    in
+    let* parked_compactions =
+      List.fold_left
+        (fun result entry ->
+           let* parked_compactions = result in
+           if Operation_map.mem entry.operation_id parked_compactions
+           then
+             Error
+               (Printf.sprintf
+                  "duplicate parked compaction operation_id: %s"
+                  (Keeper_compaction_operation_identity.Operation_id.to_string
+                     entry.operation_id))
+           else
+             Ok
+               (Operation_map.add
+                  entry.operation_id
+                  entry
+                  parked_compactions))
+        (Ok Operation_map.empty)
+        parked_entries
+    in
     validate_state
       { revision
       ; next_lease_sequence
@@ -907,5 +1180,6 @@ let of_yojson json =
       ; leases
       ; last_settlement
       ; transition_outbox
+      ; parked_compactions
       }
 ;;

@@ -31,6 +31,7 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
   | Requeue of requeue_reason
+  | Park_for_compaction of Keeper_compaction_operation_identity.Operation_id.t
   | Escalate of
       { reason : escalation_reason
       ; successor : Keeper_event_queue.stimulus option

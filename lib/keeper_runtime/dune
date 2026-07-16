@@ -36,6 +36,7 @@
   masc.config_dir_resolver
   masc.fs_compat
   masc.bounded_event_dedupe
+  masc.keeper_compaction_operation_identity
   masc.json_field
   masc.masc_core
   masc.types_boundary

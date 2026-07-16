@@ -941,7 +941,8 @@ let summarize_rows ~keeper_name ~limit rows =
           | Ok
               { settlement =
                   ( Keeper_event_queue_state.Ack
-                  | Keeper_event_queue_state.Requeue _ )
+                  | Keeper_event_queue_state.Requeue _
+                  | Keeper_event_queue_state.Park_for_compaction _ )
               ; _
               } ->
             incr event_queue_transition_parse_error_count

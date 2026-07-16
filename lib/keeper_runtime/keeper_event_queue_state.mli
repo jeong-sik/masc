@@ -38,6 +38,7 @@ val escalation_reason_requests_external_input : escalation_reason -> bool
 type settlement =
   | Ack
   | Requeue of requeue_reason
+  | Park_for_compaction of Keeper_compaction_operation_identity.Operation_id.t
   | Escalate of
       { reason : escalation_reason
       ; successor : Keeper_event_queue.stimulus option
@@ -71,6 +72,20 @@ type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
+type parking_error =
+  | Operation_id_mismatch of
+      Keeper_compaction_operation_identity.Operation_id.t
+      * Keeper_compaction_operation_identity.Operation_id.t
+  | Operation_lease_mismatch of
+      string * string
+  | Parking_settlement_failed of string
+  | Operation_not_parked of Keeper_compaction_operation_identity.Operation_id.t
+
+type resume_result =
+  | Resumed of Keeper_event_queue.stimulus list
+  | Already_resumed
+
+val parking_error_to_string : parking_error -> string
 val empty : t
 val revision : t -> int64
 val next_lease_sequence : t -> int64
@@ -115,6 +130,18 @@ val settle :
     leased stimuli at the pending FIFO tail so unrelated work in the same lane
     can proceed before another provider attempt. *)
 
+val park_for_compaction :
+  settled_at:float ->
+  lease:lease ->
+  operation_id:Keeper_compaction_operation_identity.Operation_id.t ->
+  t ->
+  (t * settle_result, parking_error) result
+
+val resume_parked :
+  operation_id:Keeper_compaction_operation_identity.Operation_id.t ->
+  t ->
+  (t * resume_result, parking_error) result
+
 val recover_leases : settled_at:float -> t -> (t, string) result
 (** Requeue every active lease with [Registration_recovery], preserving claim
     and stimulus order and emitting stable transition receipts. *)
@@ -145,4 +172,3 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v2"]. *)

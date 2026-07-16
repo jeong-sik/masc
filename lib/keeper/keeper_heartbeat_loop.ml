@@ -386,6 +386,8 @@ let reaction_kind_of_settlement = function
   | Keeper_registry_event_queue.Ack -> Keeper_reaction_ledger.Event_queue_ack
   | Keeper_registry_event_queue.Requeue _ ->
     Keeper_reaction_ledger.Event_queue_requeued
+  | Keeper_registry_event_queue.Park_for_compaction _ ->
+    Keeper_reaction_ledger.Event_queue_requeued
   | Keeper_registry_event_queue.Escalate _ ->
     Keeper_reaction_ledger.Event_queue_escalated
 ;;
@@ -440,6 +442,7 @@ let settle_claimed_lease
 let settlement_is_ack = function
   | Keeper_registry_event_queue.Ack -> true
   | Keeper_registry_event_queue.Requeue _
+  | Keeper_registry_event_queue.Park_for_compaction _
   | Keeper_registry_event_queue.Escalate _ ->
     false
 ;;

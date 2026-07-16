@@ -613,6 +613,47 @@ let test_unconsumed_approval_requeues_behind_other_work () =
     ]
 ;;
 
+let test_compaction_parking_is_exact_and_idempotent () =
+  let source = stimulus "overflow-source" 1.0 in
+  let unrelated = stimulus "unrelated" 2.0 in
+  let state = State.with_pending (queue [ source; unrelated ]) State.empty in
+  let state, lease = claim_head state in
+  let lease = require_some "source lease" lease in
+  let operation_id = Keeper_compaction_operation_identity.Operation_id.generate () in
+  let state, receipt =
+    match State.park_for_compaction ~settled_at:11.0 ~lease ~operation_id state with
+    | Ok (state, State.Settled receipt) -> state, receipt
+    | Ok (_, State.Already_settled _) | Error _ ->
+      Alcotest.fail "first compaction park did not commit"
+  in
+  let state =
+    State.to_yojson state |> State.of_yojson |> require_ok "parked codec roundtrip"
+    |> State.mark_transition_projected ~transition_id:receipt.transition_id
+    |> require_ok "project park transition"
+  in
+  let state, next = claim_head state in
+  let next = require_some "unrelated lease" next in
+  Alcotest.(check string) "parked source does not block claims" unrelated.post_id
+    (List.hd next.stimuli).post_id;
+  let resume state =
+    State.resume_parked ~operation_id state
+    |> Result.map_error State.parking_error_to_string
+    |> require_ok "resume"
+  in
+  let state, _ = resume state in
+  let state, repeated = resume state in
+  Alcotest.(check bool) "resume replay is idempotent" true
+    (repeated = State.Already_resumed
+     && post_ids (State.pending state) = [ source.post_id ]);
+  match
+    State.park_for_compaction ~settled_at:12.0 ~lease
+      ~operation_id:(Keeper_compaction_operation_identity.Operation_id.generate ())
+      state
+  with
+  | Error (State.Operation_id_mismatch _) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "operation mismatch was not typed"
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path
   then if Sys.is_directory path
@@ -1044,6 +1085,7 @@ let () =
             "unconsumed approval yields FIFO"
             `Quick
             test_unconsumed_approval_requeues_behind_other_work
+        ; Alcotest.test_case "compaction parking" `Quick test_compaction_parking_is_exact_and_idempotent
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case

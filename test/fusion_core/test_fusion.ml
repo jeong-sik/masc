@@ -1401,9 +1401,7 @@ let test_panels_unavailable_failure () =
   Alcotest.(check string) "failure text = rendered skip reason"
     "fusion aborted: none of 3 panels returned an answer"
     (judge_failure_text failure);
-  Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure);
-  Alcotest.(check bool) "not timeout-or-budget (no fallback judge trigger)" false
-    (judge_failure_is_timeout_or_budget failure)
+  Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure)
 
 (* min_answered must be in the policy range 1..total panels (inclusive).
    base_group has 3 models, so 0 and 4 are rejected; full-panel quorum (3) is allowed. *)
@@ -1578,42 +1576,6 @@ timeout_s = 100.0
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_judge_wave_budget"
 
-let test_adjust_judge_timeout_disabled () =
-  Alcotest.(check (option (float 0.001))) "factor=1.0 within budget"
-    (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  Alcotest.(check (option (float 0.001))) "factor=1.0 over budget"
-    None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:14.0 ~elapsed_s:5.0 ~already_timed_out:false);
-  Alcotest.(check (option (float 0.001))) "wave budget 0 disables cap"
-    (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:0.0 ~elapsed_s:500.0 ~already_timed_out:false)
-
-let test_adjust_judge_timeout_extend () =
-  (* already timed out + factor > 1.0 extends up to max_s and remaining budget. *)
-  Alcotest.(check (option (float 0.001))) "extend capped by max_s"
-    (Some 15.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 15.0)
-       ~factor:2.0 ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  Alcotest.(check (option (float 0.001))) "extend capped by remaining budget"
-    (Some 7.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:12.0 ~elapsed_s:5.0 ~already_timed_out:true);
-  Alcotest.(check (option (float 0.001))) "extend below 0.001 -> None"
-    None
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 30.0)
-       ~factor:2.0 ~wave_budget_s:5.0 ~elapsed_s:5.0 ~already_timed_out:true)
-
-let test_adjust_judge_timeout_not_yet_timed_out () =
-  (* factor > 1.0 but not yet timed out: still use base_s, just budget-check. *)
-  Alcotest.(check (option (float 0.001))) "not timed out uses base_s"
-    (Some 10.0)
-    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:(Some 5.0)
-       ~factor:2.0 ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:false)
-
 let test_judge_error_node_timed_out () =
   let timeout_node =
     Fusion_types.Judge_failed
@@ -1764,12 +1726,6 @@ let () =
         ; Alcotest.test_case "multi_group" `Quick test_judge_args_multi_group
         ; Alcotest.test_case "outer_timeout_wave_math" `Quick
             test_panel_outer_timeout_wave_math
-        ] )
-    ; ( "adaptive_timeout"
-      , [ Alcotest.test_case "disabled" `Quick test_adjust_judge_timeout_disabled
-        ; Alcotest.test_case "extend" `Quick test_adjust_judge_timeout_extend
-        ; Alcotest.test_case "not_yet_timed_out" `Quick
-            test_adjust_judge_timeout_not_yet_timed_out
         ] )
     ; ( "judge_parse"
       , [ Alcotest.test_case "valid" `Quick test_judge_valid

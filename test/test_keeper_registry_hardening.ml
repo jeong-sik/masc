@@ -325,6 +325,81 @@ let cleanup_dir path =
   try rm path with _ -> ()
 ;;
 
+let test_reactive_wakeup_signals_offline_lane_after_queue_commit () =
+  let dir = temp_dir "registry_reactive_offline_wakeup" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.clear ();
+       let meta = make_meta "reactive-offline" in
+       let entry = KR.register_offline ~base_path:dir meta.name meta in
+       let stimulus : Keeper_event_queue.stimulus =
+         { post_id = "reactive-offline-stimulus"
+         ; urgency = Keeper_event_queue.Normal
+         ; arrived_at = 1.0
+         ; payload = Keeper_event_queue.Bootstrap
+         }
+       in
+       Atomic.set entry.fiber_wakeup false;
+       Masc.Keeper_keepalive_signal.wakeup_keeper
+         ~base_path:dir
+         ~stimulus
+         meta.name;
+       check bool "offline reactive wake flag is set" true
+         (Atomic.get entry.fiber_wakeup);
+       match
+         Masc.Keeper_registry_event_queue.snapshot ~base_path:dir meta.name
+         |> Keeper_event_queue.to_list
+       with
+       | [ { post_id; payload = Keeper_event_queue.Bootstrap; _ } ] ->
+         check string "reactive stimulus remains queued" stimulus.post_id post_id
+       | _ -> fail "reactive stimulus was not retained in the offline lane")
+;;
+
+let test_goal_assignment_signals_offline_lane_after_queue_commit () =
+  let dir = temp_dir "registry_goal_offline_wakeup" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.clear ();
+       let config = Masc.Workspace.default_config dir in
+       let meta = make_meta "goal-offline" in
+       let entry =
+         KR.register_offline ~base_path:config.base_path meta.name meta
+       in
+       Atomic.set entry.fiber_wakeup false;
+       let added =
+         Masc.Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
+           ~config
+           ~keeper_name:meta.name
+           ~assigned_by:"test"
+           ~old_ids:[]
+           ~new_ids:[ "goal-offline-1" ]
+           ()
+       in
+       check (list string) "new goal is reported" [ "goal-offline-1" ] added;
+       check bool "offline goal wake flag is set" true
+         (Atomic.get entry.fiber_wakeup);
+       match
+         Masc.Keeper_registry_event_queue.snapshot
+           ~base_path:config.base_path
+           meta.name
+         |> Keeper_event_queue.to_list
+       with
+       | [ { payload = Keeper_event_queue.Goal_assigned assignment; _ } ] ->
+         check string "queued goal id" "goal-offline-1" assignment.ga_goal_id;
+         check string "queued assignment actor" "test" assignment.ga_assigned_by
+       | _ -> fail "goal assignment was not retained in the offline lane")
+;;
+
 let contains_substring text needle =
   let text_len = String.length text in
   let needle_len = String.length needle in
@@ -492,6 +567,16 @@ let () =
             "paused and dead keepers never receive runnable signal"
             `Quick
             test_wakeup_denies_paused_and_dead_without_signaling
+        ] )
+    ; ( "wakeup_callers"
+      , [ test_case
+            "reactive stimulus wakes lifecycle-admitted offline lane"
+            `Quick
+            test_reactive_wakeup_signals_offline_lane_after_queue_commit
+        ; test_case
+            "goal assignment wakes lifecycle-admitted offline lane"
+            `Quick
+            test_goal_assignment_signals_offline_lane_after_queue_commit
         ] )
     ; ( "tool_dispatch_exact_resources"
       , [ test_case "preserves exact meta after healthy entry replacement" `Quick

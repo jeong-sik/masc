@@ -1,8 +1,8 @@
 (** Keeper_goal_assignment_wake — RFC-0315 P3 W0 producer.
 
     Enqueues a [Keeper_event_queue.Goal_assigned] stimulus for each goal that
-    newly entered a keeper's [active_goal_ids], and wakes the keeper fiber
-    when it is running.
+    newly entered a keeper's [active_goal_ids], then signals every registered
+    lifecycle-admitted keeper.
 
     Edge semantics: callers pass the pre-change and post-change id lists;
     only ids present in [new_ids] and absent from [old_ids] enqueue.
@@ -22,6 +22,7 @@ val enqueue_goal_assigned_wakes :
   string list
 (** Enqueue one [Goal_assigned] stimulus per added goal (title resolved from
     Goal_store at enqueue time; a goal deleted between validation and
-    enqueue falls back to its id as the label). Wakes the keeper fiber only
-    when its registry phase is [Running]; otherwise the durable queue entry
-    delivers on the next cycle. Returns the added goal ids. *)
+    enqueue falls back to its id as the label). The durable queue append
+    precedes the lifecycle-admitted wake hint; paused and dead-tombstone lanes
+    retain the queued entry without receiving the hint. Returns the added goal
+    ids. *)

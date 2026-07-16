@@ -2868,12 +2868,20 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             (* RFC-0301: emit the reader-facing media URL so the dashboard can
                fetch + render the payload (GET /api/v1/media/<token>), replacing
                the pre-RFC byte count. *)
+            let media_kind =
+              match Keeper_chat_media_store.category_of_media_type media_type with
+              | Keeper_chat_media_store.Image -> "image"
+              | Keeper_chat_media_store.Audio -> "audio"
+              | Keeper_chat_media_store.Document -> "document"
+              | Keeper_chat_media_store.Other -> "other"
+            in
             if
               send_custom "KEEPER_MEDIA_DELTA"
                 (`Assoc
                   [
                     ("index", `Int index);
                     ("media_type", `String media_type);
+                    ("media_kind", `String media_kind);
                     ( "source_type",
                       `String
                         (Agent_sdk.Types.media_source_kind_to_string source_type)

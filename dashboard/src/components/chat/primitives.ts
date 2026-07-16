@@ -117,6 +117,13 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
       tone: 'stream',
     }
   }
+  if (step.kind === 'media') {
+    return {
+      label: 'media_delta',
+      title: `source: KEEPER_MEDIA_DELTA, content block ${step.oasBlockIndex}`,
+      tone: 'stream',
+    }
+  }
   const callId = step.toolCallId?.trim()
   if (callId) {
     return {
@@ -1726,6 +1733,43 @@ function ChatTraceStep({
                 className="chat-block-reason-detail markdown-body whitespace-pre-wrap break-words"
               />`
             : null}
+        </div>
+      </div>
+    `
+  }
+
+  if (step.kind === 'media') {
+    const media = step.mediaKind === 'image'
+      ? html`<${ChatImageBlock} src=${step.mediaRef} cap=${step.mediaType} />`
+      : step.mediaKind === 'audio'
+        ? html`<${ChatVoiceBlock} src=${step.mediaRef} via=${step.mediaType} />`
+        : html`<${ChatLinkBlock}
+            url=${step.mediaRef}
+            title="Generated media"
+            meta=${step.mediaType}
+            kind=${step.mediaKind}
+          />`
+    return html`
+      <div
+        class="chat-block-tstep media"
+        data-chat-trace-step="media"
+        data-chat-turn-order-index=${orderIndex ?? undefined}
+        data-chat-turn-order-kind="trace"
+        data-chat-trace-provenance=${sourceBadge.label}
+        data-chat-trace-oas-block-index=${step.oasBlockIndex}
+        data-chat-trace-media-kind=${step.mediaKind}
+        data-chat-trace-media-type=${step.mediaType}
+        data-chat-trace-media-ref=${step.mediaRef}
+        data-chat-trace-ts=${step.ts ?? undefined}
+      >
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <div class="chat-block-tstep-row">
+            <span class="chat-block-tstep-kind">Media</span>
+            <${TraceSourceBadge} info=${sourceBadge} />
+            <span class="chat-block-tstep-name">${step.mediaType}</span>
+          </div>
+          <div class="mt-2">${media}</div>
         </div>
       </div>
     `
@@ -3358,6 +3402,7 @@ function ToolTraceCard({
   const orderedToolSteps = ordered.filter(isToolOrderItem)
   const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
   const progressN = traceSteps.filter((step) => step.kind === 'progress').length
+  const mediaN = traceSteps.filter((step) => step.kind === 'media').length
   const failN = orderedToolSteps.filter(
     (s) =>
       (s.output !== null && s.output.success === false)
@@ -3421,6 +3466,7 @@ function ToolTraceCard({
         <span class="chat-block-trace-meta">
           ${thinkN > 0 ? html`<span>Think ${thinkN}</span>` : null}
           ${progressN > 0 ? html`<span>Progress ${progressN}</span>` : null}
+          ${mediaN > 0 ? html`<span>Media ${mediaN}</span>` : null}
           ${orderedToolSteps.length > 0 ? html`<span>도구 ${orderedToolSteps.length}</span>` : null}
           ${chatN > 0 ? html`<span>Chat ${chatN}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
@@ -3738,6 +3784,7 @@ function traceStepsSignature(entry: KeeperConversationEntry): string {
     if (step.kind === 'think') return `think:${step.text.length}:${step.ts ?? ''}`
     if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}:${step.ts ?? ''}`
     if (step.kind === 'progress') return `progress:${step.text.length}:${step.ts ?? ''}`
+    if (step.kind === 'media') return `media:${step.mediaKind}:${step.mediaType}:${step.mediaRef}:${step.ts ?? ''}`
     return `tool:${step.name}:${step.status ?? ''}:${step.dur ?? ''}:${step.result?.length ?? 0}`
   }).join(',')
 }

@@ -23,7 +23,8 @@ describe('interleaveTraceAndTools', () => {
       if (i.kind === 'tool') return `tool:${i.entry?.id ?? i.step?.toolCallId ?? i.step?.name}`
       if (i.kind === 'tool-entry') return `tool:${i.entry.id}`
       if (i.kind === 'chat') return `chat:${i.entry.id}`
-      return `think:${i.step.text}`
+      if (i.step.kind === 'media') return `media:${i.step.mediaRef}`
+      return `${i.step.kind}:${i.step.text}`
     })
 
   it('preserves structural trace order for think -> tool -> think -> tool', () => {
@@ -40,6 +41,28 @@ describe('interleaveTraceAndTools', () => {
       ],
     )
     expect(labels(out)).toEqual(['think:A', 'tool:tool-X', 'think:B', 'tool:tool-Y'])
+  })
+
+  it('preserves media completion between thinking and tool steps', () => {
+    const out = interleaveTraceAndTools(
+      [
+        think('A'),
+        {
+          kind: 'media',
+          mediaKind: 'image',
+          mediaType: 'image/png',
+          mediaRef: '/api/v1/media/abc123',
+          oasBlockIndex: 3,
+        },
+        traceTool('status', 'X'),
+      ],
+      [tool('X')],
+    )
+    expect(labels(out)).toEqual([
+      'think:A',
+      'media:/api/v1/media/abc123',
+      'tool:tool-X',
+    ])
   })
 
   it('keeps the legacy two-section order when trace carries no tool steps', () => {

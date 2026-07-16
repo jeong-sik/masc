@@ -910,6 +910,64 @@ describe('applyKeeperStreamEvent tool calls', () => {
     ])
   })
 
+  it('keeps a persisted media completion in exact stream order', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'inspect image' },
+    })
+    const mediaEvent = {
+      type: 'CUSTOM' as const,
+      name: 'KEEPER_MEDIA_DELTA',
+      value: {
+        index: 3,
+        media_kind: 'image',
+        media_type: 'image/png',
+        media_ref: '/api/v1/media/abc123',
+      },
+    }
+    applyKeeperStreamEvent('sangsu', 'reply-1', mediaEvent)
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-after-media',
+      toolCallName: 'keeper_board_list',
+    })
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      { kind: 'think', text: 'inspect image', ts: expect.any(String) },
+      {
+        kind: 'media',
+        mediaKind: 'image',
+        mediaType: 'image/png',
+        mediaRef: '/api/v1/media/abc123',
+        oasBlockIndex: 3,
+        ts: expect.any(String),
+      },
+      {
+        kind: 'tool',
+        name: 'keeper_board_list',
+        toolCallId: 'tc-after-media',
+        status: 'pending',
+        ts: expect.any(String),
+      },
+    ])
+  })
+
+  it('surfaces malformed media completion metadata', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_MEDIA_DELTA',
+      value: { index: 1, media_type: 'image/png' },
+    })
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.error).toBe('KEEPER_MEDIA_DELTA has invalid typed media completion metadata')
+    expect(reply?.traceSteps).toBeUndefined()
+  })
+
   it('promotes text followed by a tool call and keeps only terminal text as Chat', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {

@@ -54,6 +54,13 @@ describe('keeper chat pending request storage', () => {
         traceSteps: [
           { kind: 'think', text: '상태 확인 중' },
           {
+            kind: 'media',
+            mediaKind: 'audio',
+            mediaType: 'audio/mpeg',
+            mediaRef: '/api/v1/media/voice123',
+            oasBlockIndex: 2,
+          },
+          {
             kind: 'tool',
             name: 'keeper_board_list',
             toolCallId: 'tc-1',
@@ -74,6 +81,13 @@ describe('keeper chat pending request storage', () => {
           streamState: 'thinking',
           traceSteps: [
             { kind: 'think', text: '상태 확인 중' },
+            {
+              kind: 'media',
+              mediaKind: 'audio',
+              mediaType: 'audio/mpeg',
+              mediaRef: '/api/v1/media/voice123',
+              oasBlockIndex: 2,
+            },
             {
               kind: 'tool',
               name: 'keeper_board_list',

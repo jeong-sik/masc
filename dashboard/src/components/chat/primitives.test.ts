@@ -2510,12 +2510,19 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
             traceSteps: [
               { kind: 'think', text: 'checking context', oasBlockIndex: 3 },
               {
+                kind: 'media',
+                mediaKind: 'image',
+                mediaType: 'image/png',
+                mediaRef: '/api/v1/media/abc123',
+                oasBlockIndex: 4,
+              },
+              {
                 kind: 'tool',
                 name: 'keeper_board_list',
                 toolCallId: 'tc-prov',
                 status: 'ok',
                 args: '{"limit":1}',
-                oasBlockIndex: 4,
+                oasBlockIndex: 5,
               },
             ],
           }),
@@ -2530,6 +2537,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     const badges = [...container.querySelectorAll('[data-chat-trace-provenance]')]
       .map(node => node.getAttribute('data-chat-trace-provenance'))
     expect(badges).toContain('thinking_delta')
+    expect(badges).toContain('media_delta')
     expect(badges).toContain('tool_call_id')
     expect(badges).toContain('reply')
 
@@ -2542,12 +2550,18 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(think.querySelector('.chat-block-source-badge')?.getAttribute('title'))
       .toBe('source: KEEPER_THINKING_DELTA, content block 3')
 
+    const media = container.querySelector('[data-chat-trace-step="media"]') as HTMLElement
+    expect(media.getAttribute('data-chat-trace-provenance')).toBe('media_delta')
+    expect(media.getAttribute('data-chat-trace-oas-block-index')).toBe('4')
+    expect(media.getAttribute('data-chat-trace-media-kind')).toBe('image')
+    expect(media.querySelector('img')?.getAttribute('src')).toBe('/api/v1/media/abc123')
+
     const tool = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
     expect(tool.getAttribute('data-chat-trace-provenance')).toBe('tool_call_id')
     expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-prov')
-    expect(tool.getAttribute('data-chat-trace-oas-block-index')).toBe('4')
+    expect(tool.getAttribute('data-chat-trace-oas-block-index')).toBe('5')
     expect(tool.querySelector('.chat-block-source-badge')?.getAttribute('title'))
-      .toBe('source: TOOL_CALL_*, tool_call_id=tc-prov, content block 4')
+      .toBe('source: TOOL_CALL_*, tool_call_id=tc-prov, content block 5')
     expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
     expect(tool.getAttribute('data-chat-trace-output-state')).toBe('ok')
     expect(tool.getAttribute('data-chat-trace-entry-id')).toBeNull()

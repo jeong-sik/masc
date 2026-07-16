@@ -26,6 +26,7 @@ import type {
   ChatShellLine,
   ChatTableCellValue,
   ChatTraceStep,
+  ChatTraceMediaKind,
 } from './types'
 
 // --- Signals ---
@@ -444,6 +445,30 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
           oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
         })
       : null
+  }
+  if (kind === 'media') {
+    const mediaKind = asString(raw.mediaKind) ?? asString(raw.media_kind)
+    const mediaType = asString(raw.mediaType) ?? asString(raw.media_type)
+    const mediaRef = asString(raw.mediaRef) ?? asString(raw.media_ref)
+    const oasBlockIndex = asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index)
+    if (
+      (mediaKind !== 'image' && mediaKind !== 'audio' && mediaKind !== 'document' && mediaKind !== 'other')
+      || mediaType === undefined
+      || mediaType.trim() === ''
+      || mediaRef === undefined
+      || mediaRef.trim() === ''
+      || oasBlockIndex === undefined
+      || !Number.isSafeInteger(oasBlockIndex)
+      || oasBlockIndex < 0
+    ) return null
+    return withoutUndefined({
+      kind: 'media',
+      mediaKind,
+      mediaType,
+      mediaRef,
+      ts: asString(raw.ts),
+      oasBlockIndex,
+    })
   }
   if (kind === 'tool') {
     const name = asString(raw.name)
@@ -1131,6 +1156,34 @@ export function appendAssistantThinkingDelta(
   meta: { oasBlockIndex?: number } = {},
 ): void {
   writeAssistantThinkingText(name, entryId, delta, meta, 'append')
+}
+
+export function appendAssistantMediaTraceStep(
+  name: string,
+  entryId: string,
+  media: {
+    mediaKind: ChatTraceMediaKind
+    mediaType: string
+    mediaRef: string
+    oasBlockIndex: number
+  },
+): void {
+  updateThreadEntry(name, entryId, entry => {
+    const existing = entry.traceSteps ?? []
+    return {
+      ...entry,
+      traceSteps: [
+        ...existing,
+        {
+          kind: 'media',
+          ...media,
+          ts: new Date().toISOString(),
+        },
+      ],
+      streamState: 'streaming',
+      delivery: 'streaming',
+    }
+  })
 }
 
 export function setAssistantThinkingSnapshot(

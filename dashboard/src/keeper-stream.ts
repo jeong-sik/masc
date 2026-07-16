@@ -12,6 +12,7 @@ import {
   appendAssistantToolTraceArgsDelta,
   setAssistantToolTraceArgsSnapshot,
   appendAssistantToolTraceStep,
+  appendAssistantMediaTraceStep,
   setAssistantThinkingSnapshot,
   setAssistantStreamState,
   updateThreadEntry,
@@ -651,13 +652,43 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_MEDIA_DELTA') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'streaming',
-          'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_MEDIA_DELTA' }),
-        )
+        const value = isRecord(event.value) ? event.value : null
+        const oasBlockIndex = asNumber(value?.index)
+        const mediaKind = asString(value?.media_kind)
+        const mediaType = asString(value?.media_type)
+        const mediaRef = asString(value?.media_ref)
+        if (
+          oasBlockIndex === undefined
+          || !Number.isSafeInteger(oasBlockIndex)
+          || oasBlockIndex < 0
+          || (mediaKind !== 'image' && mediaKind !== 'audio' && mediaKind !== 'document' && mediaKind !== 'other')
+          || mediaType === undefined
+          || mediaType.trim() === ''
+          || mediaRef === undefined
+          || mediaRef.trim() === ''
+        ) {
+          recordStreamProtocolError(
+            keeperName,
+            assistantEntryId,
+            'KEEPER_MEDIA_DELTA has invalid typed media completion metadata',
+          )
+          return null
+        }
+        appendAssistantMediaTraceStep(keeperName, assistantEntryId, {
+          mediaKind,
+          mediaType,
+          mediaRef,
+          oasBlockIndex,
+        })
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          streamContract: keeperClientObservedSseStreamContract(
+            'sse_event',
+            'backend_stream_event',
+            { eventName: 'KEEPER_MEDIA_DELTA' },
+          ),
+        }))
+        persistActiveAssistantDraft(keeperName, assistantEntryId)
         return null
       }
       if (event.name === 'KEEPER_QUEUE_REQUEST') {

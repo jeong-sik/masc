@@ -827,6 +827,15 @@ export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string 
 export type ChatTraceThinkStep = { kind: 'think'; text: string; ts?: string; oasBlockIndex?: number }
 export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string; ts?: string }
 export type ChatTraceProgressStep = { kind: 'progress'; text: string; ts?: string; oasBlockIndex?: number }
+export type ChatTraceMediaKind = 'image' | 'audio' | 'document' | 'other'
+export type ChatTraceMediaStep = {
+  kind: 'media'
+  mediaKind: ChatTraceMediaKind
+  mediaType: string
+  mediaRef: string
+  ts?: string
+  oasBlockIndex: number
+}
 export type ChatTraceToolStep = {
   kind: 'tool'
   name: string
@@ -838,7 +847,7 @@ export type ChatTraceToolStep = {
   ts?: string
   oasBlockIndex?: number
 }
-export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceProgressStep | ChatTraceToolStep
+export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceProgressStep | ChatTraceMediaStep | ChatTraceToolStep
 export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[] }
 export type ChatThinkingBlock = { t: 'thinking'; content: string; redacted: boolean }
 

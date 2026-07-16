@@ -119,6 +119,32 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     if (oasBlockIndex !== undefined) step.oasBlockIndex = oasBlockIndex
     return step
   }
+  if (kind === 'media') {
+    const mediaKind = parseMember(['image', 'audio', 'document', 'other'] as const, raw.mediaKind)
+    const mediaType = stringValue(raw.mediaType)
+    const mediaRef = stringValue(raw.mediaRef)
+    const oasBlockIndex = numberValue(raw.oasBlockIndex)
+    if (
+      mediaKind === undefined
+      || mediaType === undefined
+      || mediaType.trim() === ''
+      || mediaRef === undefined
+      || mediaRef.trim() === ''
+      || oasBlockIndex === undefined
+      || !Number.isSafeInteger(oasBlockIndex)
+      || oasBlockIndex < 0
+    ) return null
+    const step: ChatTraceStep = {
+      kind: 'media',
+      mediaKind,
+      mediaType,
+      mediaRef,
+      oasBlockIndex,
+    }
+    const ts = stringValue(raw.ts)
+    if (ts !== undefined) step.ts = ts
+    return step
+  }
   if (kind === 'tool') {
     const name = stringValue(raw.name)
     if (name === undefined) return null

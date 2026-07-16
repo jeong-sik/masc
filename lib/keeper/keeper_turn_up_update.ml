@@ -183,9 +183,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
           p.compaction_cooldown_sec_opt
         |> normalize_compaction_cooldown_sec;
     };
-    auto_handoff = Option.value ~default:old.auto_handoff p.auto_handoff_opt;
-    handoff_threshold = Option.value ~default:old.handoff_threshold p.handoff_threshold_opt;
-    handoff_cooldown_sec = Option.value ~default:old.handoff_cooldown_sec p.handoff_cooldown_sec_opt;
     max_context_override =
       (if p.max_context_override_present then p.max_context_override_opt
        else old.max_context_override);

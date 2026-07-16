@@ -121,7 +121,7 @@ let validate_create_args args =
    failed to materialize the requested keeper defaults. These helpers write
    the shape the loaders actually read. Fields that no reader consumes
    (previously [persona_name],
-   [display_name] as a separate key, [created_at], [auto_handoff]) are not
+   [display_name] as a separate key, [created_at]) are not
    persisted. *)
 
 let keeper_defaults_fields args : (string * Yojson.Safe.t) list =

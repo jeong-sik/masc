@@ -3512,7 +3512,6 @@ let test_lazy_startup_plan_groups_independent_tasks () =
           [
             "restore_sessions";
             "reconcile_active_agents";
-            "prompt_bootstrap";
             "keeper_history_migration";
           ];
       check_lazy_group tool_state ~name:"tool_state" ~execution:"serial"
@@ -3524,7 +3523,6 @@ let test_lazy_startup_plan_groups_independent_tasks () =
         [
           "restore_sessions";
           "reconcile_active_agents";
-          "prompt_bootstrap";
           "keeper_history_migration";
           "tool_metrics_restore";
           "jsonl_prune";

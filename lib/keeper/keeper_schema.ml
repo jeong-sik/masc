@@ -176,9 +176,6 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "If false, persist the keeper but skip auto-start on future server boots.");
         ]);
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
-        ("auto_handoff", `Assoc [("type", `String "boolean")]);
-        ("handoff_threshold", `Assoc [("type", `String "number")]);
-        ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -272,18 +269,6 @@ let keeper_schemas : tool_schema list = [
         ("compaction_cooldown_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between completed compactions. 0 disables the cooldown.");
-        ]);
-        ("auto_handoff", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, automatically rotate trace_id when context gets large (default: true).");
-        ]);
-        ("handoff_threshold", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Context ratio threshold for auto-handoff (default: 0.85).");
-        ]);
-        ("handoff_cooldown_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum seconds between handoffs (default: 300).");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");

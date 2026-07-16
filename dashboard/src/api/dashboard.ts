@@ -126,6 +126,7 @@ export type {
 export {
   fetchDashboardGate,
   resolveGateApproval,
+  retryGateAutoJudge,
   deleteGateApprovalRule,
   setGateMode,
 } from './dashboard-gate'

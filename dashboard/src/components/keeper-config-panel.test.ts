@@ -79,11 +79,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       count_total: 2,
       last_reason: 'board quiet',
     },
-    handoff: {
-      auto: true,
-      threshold: 0.85,
-      cooldown_sec: 300,
-    },
     hooks: {
       slots: {},
       deny_list: [],
@@ -470,11 +465,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       enabled: false,
     } as KeeperConfig['proactive'],
     drift: {} as KeeperConfig['drift'],
-    handoff: {
-      auto: false,
-      threshold: 0.9,
-      cooldown_sec: 0,
-    } as KeeperConfig['handoff'],
     runtime: {} as KeeperConfig['runtime'],
     workspace: {
       mention_targets: [],

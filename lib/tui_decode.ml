@@ -33,7 +33,6 @@ type keeper = {
   k_compaction_ratio_gate : float;
   k_trigger_mode : string;
   k_context_budget : int;
-  k_handoff_threshold : float;
   k_drift_enabled : bool;
   k_verify : bool;
   k_created_at : string;
@@ -225,7 +224,6 @@ let decode_keeper ~filename json =
   let* k_compaction_ratio_gate = require_float_field json "compaction_ratio_gate" in
   let* k_trigger_mode = require_string_field json "trigger_mode" in
   let* k_context_budget = require_int_field json "context_budget" in
-  let* k_handoff_threshold = require_float_field json "handoff_threshold" in
   let* k_drift_enabled = require_bool_field json "drift_enabled" in
   let* k_verify = require_bool_field json "verify" in
   let* k_created_at = require_string_field json "created_at" in
@@ -254,7 +252,6 @@ let decode_keeper ~filename json =
       k_compaction_ratio_gate;
       k_trigger_mode;
       k_context_budget;
-      k_handoff_threshold;
       k_drift_enabled;
       k_verify;
       k_created_at;

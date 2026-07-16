@@ -47,6 +47,19 @@ export type SSEEventType =
   | 'runtime_param_changed'
   | 'approval:pending'
   | 'approval:resolved'
+  | 'approval:summary_updated'
+  // RFC-0284 §3.2: goal-loop OODA status live delta (see hydrateDashboardSlice
+  // in sse-store.ts). Emitted by server_dashboard_http_goal_loop_broadcast.ml.
+  | 'goal_loop_status'
+  // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
+  // Emitted by server_routes_http_routes_dashboard.ml.
+  | 'gate_mode_changed'
+  // Task claim notifications (#18839: surfaces auto-released task ids to
+  // subscribers). Emitted by lib/task/tool_task_handlers.ml.
+  | 'masc/task_claimed'
+  // Yjs WebSocket projection layer for live telemetry. Emitted by
+  // lib/dashboard/dashboard_yjs.ml.
+  | 'dashboard_yjs_update'
   // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
   | 'oas:masc:autonomy:agent_selected'
   | 'oas:masc:autonomy:agent_decision'
@@ -214,8 +227,26 @@ export interface SSEEvent {
   cost_usd?: number
   tool_calls_made?: number
   total_turns?: number
-  // OAS bridge payload (generic container for Event_bus events)
-  payload?: Record<string, unknown>
+  // OAS bridge payload (generic container for Event_bus events). Also carries
+  // the JSON-stringified Yjs update body on `dashboard_yjs_update` (a string,
+  // not a record — see `frame_base64` below for the actual CRDT frame).
+  payload?: Record<string, unknown> | string
+  // masc/task_claimed (#18839): task ids auto-released by the claim, and the
+  // wall-clock time of the claim.
+  auto_released_task_ids?: string[]
+  timestamp?: number
+  // gate_mode_changed: nonhierarchical Gate mode transition fields.
+  mode?: string
+  previous_mode?: string | null
+  actor?: string
+  changed_at?: string
+  // dashboard_yjs_update: Yjs projection envelope. `payload` (above) carries
+  // the JSON-stringified inner event; `frame_base64` carries the actual
+  // binary Yjs update frame, base64-encoded.
+  kind?: string
+  payload_len?: number
+  frame_base64?: string
+  encoding?: string
   // OAS envelope — attached to every oas:* event by oas_sse_bridge since 2.260.0.
   // Used to join events into causal chains in the dashboard journal.
   correlation_id?: string

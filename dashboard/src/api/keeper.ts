@@ -29,6 +29,16 @@ import {
 } from './core'
 import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
 import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
+import {
+  isTerminalKeeperRunResult,
+  keeperRunRefToWire,
+  parseKeeperRunRef,
+  parseKeeperRunResultContract,
+} from '../lib/keeper-run-ref'
+import type {
+  KeeperRunRef,
+  KeeperRunResultContract,
+} from '../lib/keeper-run-ref'
 import type {
   KeeperCompositeSnapshot,
   FleetCompositeSnapshot,
@@ -128,69 +138,26 @@ export interface KeeperToolReply {
   details: KeeperConversationDetails | null
 }
 
-export type QueuedKeeperMessageStatus =
-  | 'queued'
-  | 'running'
-  | 'cancelling'
-  | 'done'
-  | 'error'
-  | 'lost'
-  | 'cancelled'
-  | 'persistence_failed'
-
 export interface QueuedKeeperMessageSubmission {
-  requestId: string
-  keeperName: string
-  status: QueuedKeeperMessageStatus
+  runRef: KeeperRunRef
+  resultContract: 'awaiting_execution' | 'publication_uncertain'
   message?: string
+  reason?: string
 }
 
 export interface QueuedKeeperMessageResult {
-  requestId: string
-  keeperName: string
-  status: QueuedKeeperMessageStatus
+  runRef: KeeperRunRef
+  resultContract: KeeperRunResultContract
   submittedAt?: number
   completedAt?: number
-  elapsedSec?: number
-  ok?: boolean
   result?: unknown
 }
 
 export interface QueuedKeeperMessageCancelResult {
-  requestId: string
-  status: 'cancelling' | 'cancelled'
-  message?: string
-}
-
-const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatus>([
-  'done',
-  'error',
-  'lost',
-  'cancelled',
-  'persistence_failed',
-])
-
-function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
-  switch (asString(value, '').trim()) {
-    case 'queued':
-      return 'queued'
-    case 'running':
-      return 'running'
-    case 'cancelling':
-      return 'cancelling'
-    case 'done':
-      return 'done'
-    case 'error':
-      return 'error'
-    case 'lost':
-      return 'lost'
-    case 'cancelled':
-      return 'cancelled'
-    case 'persistence_failed':
-      return 'persistence_failed'
-    default:
-      throw new Error(`unsupported keeper message status: ${JSON.stringify(value)}`)
-  }
+  runRef: KeeperRunRef
+  resultContract: 'cancellation_requested'
+  durability?: 'durable' | 'publication_uncertain'
+  warning?: string
 }
 
 function optionalNumberField(record: Record<string, unknown>, key: string): number | undefined {
@@ -200,50 +167,44 @@ function optionalNumberField(record: Record<string, unknown>, key: string): numb
 
 function parseQueuedKeeperMessageSubmission(data: unknown): QueuedKeeperMessageSubmission {
   const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
-  if (!requestId) {
-    throw new Error('keeper message queue response missing request_id')
+  const resultContract = parseKeeperRunResultContract(record?.result_contract)
+  if (resultContract !== 'awaiting_execution' && resultContract !== 'publication_uncertain') {
+    throw new Error(`keeper run submission has invalid result contract: ${resultContract}`)
   }
   return {
-    requestId,
-    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
-    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    runRef: parseKeeperRunRef(record?.run_ref),
+    resultContract,
     message: asString(record?.message),
+    reason: asString(record?.reason),
   }
 }
 
 function parseQueuedKeeperMessageResult(data: unknown): QueuedKeeperMessageResult {
   const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
-  if (!requestId) {
-    throw new Error('keeper message result response missing request_id')
-  }
   return {
-    requestId,
-    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
-    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    runRef: parseKeeperRunRef(record?.run_ref),
+    resultContract: parseKeeperRunResultContract(record?.result_contract),
     submittedAt: record ? optionalNumberField(record, 'submitted_at') : undefined,
     completedAt: record ? optionalNumberField(record, 'completed_at') : undefined,
-    elapsedSec: record ? optionalNumberField(record, 'elapsed_sec') : undefined,
-    ok: typeof record?.ok === 'boolean' ? record.ok : undefined,
     result: record?.result,
   }
 }
 
 function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessageCancelResult {
   const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
-  if (!requestId) {
-    throw new Error('keeper message cancel response missing request_id')
+  const resultContract = parseKeeperRunResultContract(record?.result_contract)
+  if (resultContract !== 'cancellation_requested') {
+    throw new Error(`keeper run cancellation has invalid result contract: ${resultContract}`)
   }
-  const status = normalizeQueuedKeeperMessageStatus(record?.status)
-  if (status !== 'cancelling' && status !== 'cancelled') {
-    throw new Error(`keeper message cancel response has non-cancellation status: ${status}`)
+  const durability = record?.durability
+  if (durability !== undefined && durability !== 'durable' && durability !== 'publication_uncertain') {
+    throw new Error(`keeper run cancellation has invalid durability: ${JSON.stringify(durability)}`)
   }
   return {
-    requestId,
-    status,
-    message: asString(record?.message),
+    runRef: parseKeeperRunRef(record?.run_ref),
+    resultContract,
+    durability,
+    warning: asString(record?.warning),
   }
 }
 
@@ -279,7 +240,7 @@ export async function interruptKeeperTurn(
 }
 
 export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult): boolean {
-  return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status)
+  return isTerminalKeeperRunResult(result.resultContract)
 }
 
 // Server no longer enforces an external timeout for keeper_msg.
@@ -364,32 +325,37 @@ export async function submitQueuedKeeperMessage(
 }
 
 export async function fetchQueuedKeeperMessageResult(
-  requestId: string,
+  runRef: KeeperRunRef,
   opts: { signal?: AbortSignal } = {},
 ): Promise<QueuedKeeperMessageResult> {
-  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}`
+  const path = '/api/v1/gate/message/status'
   const resp = await fetchWithTimeout(
     path,
-    { headers: jsonHeaders(), signal: opts.signal },
+    {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ run_ref: keeperRunRefToWire(runRef) }),
+      signal: opts.signal,
+    },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) {
-    throw await apiRequestErrorFromResponse('GET', path, resp)
+    throw await apiRequestErrorFromResponse('POST', path, resp)
   }
   return parseQueuedKeeperMessageResult(await resp.json())
 }
 
 export async function cancelQueuedKeeperMessage(
-  requestId: string,
+  runRef: KeeperRunRef,
   opts: { signal?: AbortSignal } = {},
 ): Promise<QueuedKeeperMessageCancelResult> {
-  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}/cancel`
+  const path = '/api/v1/gate/message/cancel'
   const resp = await fetchControlPlane(
     path,
     {
       method: 'POST',
       headers: jsonHeaders(),
-      body: '{}',
+      body: JSON.stringify({ run_ref: keeperRunRefToWire(runRef) }),
       signal: opts.signal,
     },
   )
@@ -400,15 +366,16 @@ export async function cancelQueuedKeeperMessage(
 }
 
 export function queuedKeeperMessageError(result: QueuedKeeperMessageResult): string {
-  if (result.status === 'cancelled') return '요청이 취소되었습니다.'
+  if (result.resultContract === 'cancelled') return '요청이 취소되었습니다.'
   const payload = isRecord(result.result) ? result.result : null
   const message = asString(payload?.message) ?? asString(payload?.reason)
   const error = asString(payload?.error)
-  return message ?? error ?? `Keeper message request ${result.requestId} ended with ${result.status}`
+  return message ?? error
+    ?? `Keeper run ${result.runRef.runId} ended with ${result.resultContract}`
 }
 
 export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): KeeperToolReply {
-  if (result.status === 'cancelled') {
+  if (result.resultContract === 'cancelled') {
     return {
       text: '요청이 취소되었습니다.',
       details: null,
@@ -417,7 +384,7 @@ export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): K
   const payload = isRecord(result.result) ? result.result : null
   const rawReply = asString(payload?.reply, '').trim()
   const details = normalizeKeeperConversationDetails(payload ?? result.result)
-  if (result.status === 'done' && keeperTurnOutcomeSuppressesReply(details?.turnOutcome)) {
+  if (keeperTurnOutcomeSuppressesReply(details?.turnOutcome)) {
     return {
       text: '',
       details,

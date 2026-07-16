@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type * as CoreApi from './core'
 
 const { runOperatorAction, currentDashboardActor } = vi.hoisted(() => ({
   runOperatorAction: vi.fn(),
@@ -6,7 +7,7 @@ const { runOperatorAction, currentDashboardActor } = vi.hoisted(() => ({
 }))
 
 vi.mock('./core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./core')>()
+  const actual = await importOriginal<typeof CoreApi>()
   return {
     ...actual,
     currentDashboardActor,
@@ -58,6 +59,19 @@ import {
 } from './keeper-runtime-trace'
 import { resetDevTokenBootstrap } from './dev-token'
 import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
+import { keeperRunRefToWire, parseKeeperRunRef } from '../lib/keeper-run-ref'
+
+function keeperRunRef(runId: string) {
+  return parseKeeperRunRef({
+    run_id: runId,
+    target: { kind: 'keeper', name: 'sangsu' },
+    capability: 'invoke_turn',
+  })
+}
+
+function keeperRunWire(runId: string) {
+  return keeperRunRefToWire(keeperRunRef(runId))
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -349,9 +363,8 @@ describe('submitQueuedKeeperMessage', () => {
       result: {
         tool_name: 'masc_keeper_msg',
         result: {
-          request_id: 'kmsg_sangsu_1',
-          keeper_name: 'sangsu',
-          status: 'queued',
+          run_ref: keeperRunWire('kmsg_sangsu_1'),
+          result_contract: 'awaiting_execution',
         },
       },
     })
@@ -369,10 +382,10 @@ describe('submitQueuedKeeperMessage', () => {
       },
     })
     expect(submitted).toEqual({
-      requestId: 'kmsg_sangsu_1',
-      keeperName: 'sangsu',
-      status: 'queued',
+      runRef: keeperRunRef('kmsg_sangsu_1'),
+      resultContract: 'awaiting_execution',
       message: undefined,
+      reason: undefined,
     })
   })
 })
@@ -381,10 +394,8 @@ describe('fetchQueuedKeeperMessageResult', () => {
   it('polls the keeper chat request HTTP wrapper instead of MCP session state', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_1',
-        keeper_name: 'sangsu',
-        status: 'done',
-        ok: true,
+        run_ref: keeperRunWire('kmsg_sangsu_1'),
+        result_contract: 'completed',
         result: { reply: 'pong' },
       }), {
         status: 200,
@@ -393,23 +404,25 @@ describe('fetchQueuedKeeperMessageResult', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_1')
+    const result = await fetchQueuedKeeperMessageResult(keeperRunRef('kmsg_sangsu_1'))
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/api/v1/gate/message/requests/kmsg_sangsu_1')
+    expect(url).toBe('/api/v1/gate/message/status')
+    expect(init.method).toBe('POST')
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
-    expect(result.status).toBe('done')
+    expect(JSON.parse(String(init.body))).toEqual({
+      run_ref: keeperRunWire('kmsg_sangsu_1'),
+    })
+    expect(result.resultContract).toBe('completed')
     expect(result.result).toEqual({ reply: 'pong' })
   })
 
   it('normalizes cancelled queued results as cancellation text', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_2',
-        keeper_name: 'sangsu',
-        status: 'cancelled',
-        ok: false,
+        run_ref: keeperRunWire('kmsg_sangsu_2'),
+        result_contract: 'cancelled',
         result: {
           cancelled: true,
           reason: 'keeper_msg request was cancelled by operator',
@@ -422,9 +435,9 @@ describe('fetchQueuedKeeperMessageResult', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_2')
+    const result = await fetchQueuedKeeperMessageResult(keeperRunRef('kmsg_sangsu_2'))
 
-    expect(result.status).toBe('cancelled')
+    expect(result.resultContract).toBe('cancelled')
     expect(queuedKeeperMessageError(result)).toBe('요청이 취소되었습니다.')
     expect(queuedKeeperMessageToReply(result).text).toBe('요청이 취소되었습니다.')
   })
@@ -432,9 +445,8 @@ describe('fetchQueuedKeeperMessageResult', () => {
   it('keeps cancelling as a typed non-terminal lifecycle state', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_cancelling',
-        keeper_name: 'sangsu',
-        status: 'cancelling',
+        run_ref: keeperRunWire('kmsg_sangsu_cancelling'),
+        result_contract: 'cancellation_requested',
         result: {
           cancellation_requested: true,
           cancelled_by: 'operator',
@@ -445,35 +457,34 @@ describe('fetchQueuedKeeperMessageResult', () => {
       }),
     ))
 
-    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_cancelling')
+    const result = await fetchQueuedKeeperMessageResult(
+      keeperRunRef('kmsg_sangsu_cancelling'),
+    )
 
-    expect(result.status).toBe('cancelling')
+    expect(result.resultContract).toBe('cancellation_requested')
     expect(isTerminalQueuedKeeperMessage(result)).toBe(false)
   })
 
-  it('rejects an unknown request lifecycle instead of coercing it to error', async () => {
+  it('rejects the removed raw request response instead of adapting it', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         request_id: 'kmsg_sangsu_future',
-        keeper_name: 'sangsu',
-        status: 'future_state',
+        status: 'done',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
 
-    await expect(fetchQueuedKeeperMessageResult('kmsg_sangsu_future'))
-      .rejects.toThrow('unsupported keeper message status')
+    await expect(fetchQueuedKeeperMessageResult(keeperRunRef('kmsg_sangsu_future')))
+      .rejects.toThrow('run_ref must be an object')
   })
 
   it('preserves typed persistence failure detail as a terminal result', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_persist_failure',
-        keeper_name: 'sangsu',
-        status: 'persistence_failed',
-        ok: false,
+        run_ref: keeperRunWire('kmsg_sangsu_persist_failure'),
+        result_contract: 'failed',
         result: {
           error: 'request_persistence_failed',
           attempted_status: 'cancelled',
@@ -485,9 +496,11 @@ describe('fetchQueuedKeeperMessageResult', () => {
       }),
     ))
 
-    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_persist_failure')
+    const result = await fetchQueuedKeeperMessageResult(
+      keeperRunRef('kmsg_sangsu_persist_failure'),
+    )
 
-    expect(result.status).toBe('persistence_failed')
+    expect(result.resultContract).toBe('failed')
     expect(isTerminalQueuedKeeperMessage(result)).toBe(true)
     expect(result.result).toEqual(expect.objectContaining({
       attempted_status: 'cancelled',
@@ -497,10 +510,8 @@ describe('fetchQueuedKeeperMessageResult', () => {
 
   it('suppresses queued continuation checkpoints as non-visible replies', () => {
     const result = {
-      requestId: 'kmsg_sangsu_3',
-      keeperName: 'sangsu',
-      status: 'done' as const,
-      ok: true,
+      runRef: keeperRunRef('kmsg_sangsu_3'),
+      resultContract: 'yielded' as const,
       result: {
         reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
         turn_outcome: 'continuation_checkpoint',
@@ -518,10 +529,8 @@ describe('fetchQueuedKeeperMessageResult', () => {
 
   it('suppresses queued no-visible replies as non-visible replies', () => {
     const result = {
-      requestId: 'kmsg_sangsu_4',
-      keeperName: 'sangsu',
-      status: 'done' as const,
-      ok: true,
+      runRef: keeperRunRef('kmsg_sangsu_4'),
+      resultContract: 'completed' as const,
       result: {
         reply: '',
         turn_outcome: 'no_visible_reply',
@@ -540,8 +549,9 @@ describe('cancelQueuedKeeperMessage', () => {
   it('accepts a durable cancelling acknowledgement without claiming terminal cancellation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_cancel',
-        status: 'cancelling',
+        run_ref: keeperRunWire('kmsg_sangsu_cancel'),
+        result_contract: 'cancellation_requested',
+        durability: 'durable',
       }), {
         status: 202,
         headers: { 'Content-Type': 'application/json' },
@@ -549,14 +559,19 @@ describe('cancelQueuedKeeperMessage', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await cancelQueuedKeeperMessage('kmsg_sangsu_cancel')
+    const result = await cancelQueuedKeeperMessage(keeperRunRef('kmsg_sangsu_cancel'))
 
     expect(result).toEqual({
-      requestId: 'kmsg_sangsu_cancel',
-      status: 'cancelling',
-      message: undefined,
+      runRef: keeperRunRef('kmsg_sangsu_cancel'),
+      resultContract: 'cancellation_requested',
+      durability: 'durable',
+      warning: undefined,
     })
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/gate/message/cancel')
+    expect(JSON.parse(String(init.body))).toEqual({
+      run_ref: keeperRunWire('kmsg_sangsu_cancel'),
+    })
     expect(init.signal).toBeUndefined()
   })
 })

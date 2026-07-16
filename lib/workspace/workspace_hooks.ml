@@ -234,31 +234,6 @@ let task_completion_path_observed_fn
   : (path:string -> contract_state:string -> agent_name:string -> unit) Atomic.t
   = Atomic.make (fun ~path:_ ~contract_state:_ ~agent_name:_ -> ())
 
-(** #10421: task_claim_next implicit auto-release observability.
-
-    When a keeper calls [task_claim_next] while still holding a
-    previous claim, the scheduler implicitly transitions that prior
-    claim back to [Todo] before issuing the new one.  Field log
-    showed 43 [claimed → todo] transitions vs 24 [todo → claimed]
-    in a single day (179% release/claim ratio), with only 1/71
-    transitions reaching [done] — the same task hot-potatoed up to
-    5x as keepers churned through claim_next without finishing.
-
-    The structured event already carries [reason] and
-    [from_status], but a Otel_metric_store counter is the missing surface:
-    operators cannot alert on auto-release rate or split it by
-    keeper from a JSONL tail alone.  The split by [from_status]
-    matters because [Claimed → Todo] (just claimed, no work yet)
-    and [InProgress → Todo] (mid-work, lost progress) are
-    operationally distinct symptoms.
-
-    Cardinality bounded by fleet size (~10 keepers) ×
-    [from_status] (claimed | in_progress) = ~20 series.  Emit at
-    [lib/workspace.ml] to avoid a [masc_workspace → Otel_metric_store] dep cycle. *)
-let task_auto_release_observed_fn
-  : (agent_name:string -> from_status:string -> unit) Atomic.t
-  = Atomic.make (fun ~agent_name:_ ~from_status:_ -> ())
-
 (** Wall-clock latency of [Workspace_broadcast.broadcast] including
     [next_seq] (state.json file lock + read + write), agent.json read
     for the cache-invariant check, msg.json write, [backend_publish],

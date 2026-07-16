@@ -215,6 +215,9 @@ let success_json ~audit command
       , `String (Masc_domain.task_status_to_string result.previous_status) )
     ; "status", `String "todo"
     ; "backlog_version", `Int result.backlog_version
+    ; "fully_observed", `Bool (result.post_commit_errors = [])
+    ; ( "post_commit_errors"
+      , `List (List.map (fun detail -> `String detail) result.post_commit_errors) )
     ; "audit", audit
     ]
 ;;

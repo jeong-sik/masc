@@ -1998,8 +1998,6 @@
 
 (include stanzas/test_log_file_sink_self_heal.inc)
 
-(include stanzas/test_claim_outcome_typed.inc)
-
 (include stanzas/test_limit_schema_widen.inc)
 
 (include stanzas/test_parse_outcome.inc)

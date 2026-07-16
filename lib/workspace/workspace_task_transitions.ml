@@ -44,8 +44,6 @@ let transition_task_outcome_r
     | _, Error e -> Error e
     | Ok _, Ok _ -> Ok ()
   in
-(* BUG-006: Resolve agent name to canonical form (e.g. *)
-  let agent_name = resolve_agent_name_strict config agent_name in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock_r config backlog_path (fun () ->
     try
@@ -335,39 +333,6 @@ let transition_task_outcome_r
          | Masc_domain.Release, Masc_domain.AwaitingVerification _
          | Masc_domain.Release, Masc_domain.Done _
          | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
-(* #10719: surface tasks that have crossed oscillation thresholds so dashboards/triage can pick them up before they reach 20+ cycles with zero progress. *)
-        (match action with
-         | Masc_domain.Release ->
-           let cc = task.cycle_count + 1 in
-           let escalation =
-             if task.cycle_count = 19
-             then Some ("severe", 20)
-             else if task.cycle_count = 9
-             then Some ("major", 10)
-             else if task.cycle_count = 4
-             then Some ("threshold", 5)
-             else None
-           in
-           (match escalation with
-            | None -> ()
-            | Some (level, threshold) ->
-(* WARN line is the observability surface: structured [level=] label lets operators grep [task_oscillation_severe] to find the worst cases without scanning every release. *)
-              Log.TaskState.warn
-                "task_oscillation_%s task=%s agent=%s cycle_count=%d threshold=%d \
-                 (sustained claim->release loop, candidate for triage; consider \
-                 reformulation or human escalation if level=severe)"
-                level
-                task_id
-                agent_name
-                cc
-                threshold)
-         | Masc_domain.Claim
-         | Masc_domain.Start
-         | Masc_domain.Done_action
-         | Masc_domain.Cancel
-         | Masc_domain.Submit_for_verification
-         | Masc_domain.Approve_verification
-         | Masc_domain.Reject_verification -> ());
         if new_status = task.task_status && set_current = None
         then
 (* Idempotent no-op: status unchanged, skip write/events. Match None explicitly so set_current=Some is never silently dropped. *)

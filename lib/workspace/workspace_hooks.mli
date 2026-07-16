@@ -86,9 +86,6 @@ val tool_assigned_fn : (agent_id:string ->
            Atomic.t
 val task_completion_path_observed_fn : (path:string -> contract_state:string -> agent_name:string -> unit)
            Atomic.t
-val task_auto_release_observed_fn :
-  (agent_name:string -> from_status:string -> unit) Atomic.t
-
 (** Fires once per [Workspace_broadcast.broadcast] return, with the wall-clock
     duration of the broadcast body (next_seq + agent.json read +
     msg.json write + activity emit + on_broadcast_mention).  Wired at

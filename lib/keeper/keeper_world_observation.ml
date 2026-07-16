@@ -748,10 +748,31 @@ let collect_board_events_with_cursor_policy
     in
     let base_cursor =
       if cursor_ts > 0.0
-      then cursor_ts, cursor_post_id
-      else 0.0, None
+      then Some (cursor_ts, cursor_post_id)
+      else (
+        let initial_cursor =
+          match Board_dispatch.latest_updated_post () with
+          | Some post ->
+            let ts, post_id = board_cursor_token_of_post post in
+            ts, Some post_id
+          | None -> Time_compat.now (), None
+        in
+        if advance_cursor
+        then (
+          let ts, post_id = initial_cursor in
+          Keeper_registry.set_board_cursor ~base_path meta.name ts post_id;
+          Log.Keeper.info
+            "board cursor initialized at current head for %s: (%f, %s)"
+            meta.name
+            ts
+            (Option.value ~default:"" post_id));
+        None)
     in
-    let posts = list_board_posts_after_cursor base_cursor in
+    let posts =
+      match base_cursor with
+      | None -> []
+      | Some cursor -> list_board_posts_after_cursor cursor
+    in
     let self_ids = self_ids meta in
     let recent =
       List.filter
@@ -883,8 +904,9 @@ let collect_board_events_with_cursor_policy
     let final_events, last_cursor = consume_posts None [] recent in
     if advance_cursor
     then (
-      match last_cursor with
-      | Some (ts, post_id)
+      match base_cursor, last_cursor with
+      | None, _ -> ()
+      | Some base_cursor, Some (ts, post_id)
         when compare_board_cursor_token
                (ts, post_id)
                (fst base_cursor, Option.value ~default:"" (snd base_cursor))
@@ -897,7 +919,7 @@ let collect_board_events_with_cursor_policy
           ~post_id:(Some post_id)
           ();
         Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
-      | Some (ts, post_id) ->
+      | Some base_cursor, Some (ts, post_id) ->
         Log.Keeper.debug
           "board cursor not advanced for %s: new=(%f, %s) not greater than base=(%f, %s)"
           meta.name
@@ -905,7 +927,7 @@ let collect_board_events_with_cursor_policy
           post_id
           (fst base_cursor)
           (Option.value ~default:"" (snd base_cursor))
-      | None ->
+      | Some _, None ->
         if final_events <> []
         then (
           Otel_metric_store.inc_counter
@@ -915,7 +937,8 @@ let collect_board_events_with_cursor_policy
           Log.Keeper.warn
             "board cursor not updated for %s despite %d events processed"
             meta.name
-            (List.length final_events)));
+            (List.length final_events))
+    );
     final_events, new_count, mention_count
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

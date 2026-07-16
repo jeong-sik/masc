@@ -284,6 +284,11 @@ val list_posts
   -> unit
   -> post list
 
+(** Returns the post with the greatest [(updated_at, post_id)] cursor token,
+    or [None] when the board is empty. The fold runs under the board lock and
+    does not allocate or sort the complete post history. *)
+val latest_updated_post : store -> post option
+
 (** Full-scan search over every post (no cap on the scan,
     only on the result size).  Returns matches sorted by
     [created_at desc]. *)

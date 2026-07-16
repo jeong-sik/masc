@@ -11,7 +11,6 @@ type t =
   | Stale_turn_timeout_no_progress
   | Stale_turn_timeout_noop
   | Stale_termination_storm
-  | Stale_fleet_batch
   | Heartbeat_failures
   | Turn_failures
   | Provider_runtime_error of string
@@ -32,7 +31,6 @@ let to_wire = function
          not see a sudden cardinality change at PR-3 cutover. *)
     "stale_turn_timeout"
   | Stale_termination_storm -> "stale_termination_storm"
-  | Stale_fleet_batch -> "stale_fleet_batch"
   | Heartbeat_failures -> "heartbeat_failures"
   | Turn_failures -> "turn_failures"
   | Provider_runtime_error code -> code
@@ -52,7 +50,6 @@ let of_wire = function
          wire. PR-4 removes [of_wire] callers. *)
     Some Stale_turn_timeout_in_turn
   | "stale_termination_storm" -> Some Stale_termination_storm
-  | "stale_fleet_batch" -> Some Stale_fleet_batch
   | "heartbeat_failures" -> Some Heartbeat_failures
   | "turn_failures" -> Some Turn_failures
   | "fiber_unresolved" -> Some Fiber_unresolved
@@ -77,7 +74,6 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Stale_turn_timeout (Keeper_registry.Noop_failure_loop _) ->
     Stale_turn_timeout_noop
   | Keeper_registry.Stale_termination_storm _ -> Stale_termination_storm
-  | Keeper_registry.Stale_fleet_batch _ -> Stale_fleet_batch
   | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code
   | Keeper_registry.Fiber_unresolved _ -> Fiber_unresolved
   | Keeper_registry.Turn_overflow_failure -> Turn_overflow_failure

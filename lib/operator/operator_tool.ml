@@ -436,6 +436,33 @@ let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =
     in
     (match result with
      | Ok report ->
+       let observe_cache_invalidation label f =
+         try
+           f ();
+           None
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           let detail = Printf.sprintf "%s: %s" label (Printexc.to_string exn) in
+           Log.Misc.error
+             "operator task recovery cache invalidation failed task=%s detail=%s"
+             report.task_id
+             detail;
+           Some detail
+       in
+       let cache_errors =
+         [ observe_cache_invalidation "operator_snapshot_cache" (fun () ->
+             Operator_control.invalidate_snapshot_cache ())
+         ; observe_cache_invalidation "dashboard_projection_cache" (fun () ->
+             Dashboard_projection_cache.invalidate_snapshot_json ~config:ctx.config)
+         ]
+         |> List.filter_map Fun.id
+       in
+       let report =
+         { report with
+           post_commit_errors = report.post_commit_errors @ cache_errors
+         }
+       in
        Tool_result.make_ok
          ~tool_name
          ~start_time
@@ -515,6 +542,10 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   in
   match name with
   | "masc_operator_snapshot" ->
+      (* The tool is the observation half of operator CAS commands. Dashboard
+         refreshes may use the cache, but an explicit operator observation must
+         not return a stale assignee/backlog version. *)
+      Operator_control.invalidate_snapshot_cache ();
       let actor = get_string_opt args "actor" in
       let view = get_string_opt args "view" in
       let include_messages = get_bool args "include_messages" true in

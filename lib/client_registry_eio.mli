@@ -32,8 +32,6 @@ val reset_for_testing : unit -> unit
 (** {1 Identity Resolution} *)
 
 val get_or_create_identity : ?mcp_session_id:string -> Yojson.Safe.t -> Client_identity.t
-val get_by_name : string -> Client_identity.t option
-val get_by_session : string -> Client_identity.t option
 
 (** {1 Resolved Agent Name Cache}
 
@@ -58,15 +56,9 @@ val set_resolved_name : string -> string -> is_ephemeral:bool -> unit
 (** {1 Statistics} *)
 
 val total_count : unit -> int
-val list_registered : unit -> Client_identity.t list
-(** All explicitly registered identities. [last_seen] remains observation
-    data and is not used as lifecycle authority. *)
 
 (** {1 Cleanup} *)
 
 val clear_session_caches : unit -> unit
-val cleanup_unregistered_session_caches : unit -> int
-(** Removes cache entries whose explicitly registered identity no longer
-    exists. No elapsed-time classification is performed. *)
-
-val unregister : string -> unit
+val unregister_mcp_session : string -> unit
+(** Ends the registration owned by an MCP transport session. *)

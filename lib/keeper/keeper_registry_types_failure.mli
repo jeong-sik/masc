@@ -21,7 +21,6 @@ type failure_reason =
   | Turn_consecutive_failures of int
   | Stale_turn_timeout of stale_kill_class
   | Stale_termination_storm of { count : int; }
-  | Stale_fleet_batch of { distinct_count : int; }
   | Provider_runtime_error of { code : string; detail : string;
       provider_id : string option; http_status : int option;
       runtime_id : string option;

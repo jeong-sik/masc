@@ -187,9 +187,6 @@ let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
        ~title:"Operator tool recovery"
        ~priority:1
        ~description:"");
-  (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
-   | Ok _ -> ()
-   | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
   let ctx : _ Operator_tool.context =
     { config
     ; agent_name = "operator"
@@ -201,6 +198,16 @@ let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
     ; mcp_session_id = None
     }
   in
+  (* Seed the snapshot cache before ownership changes. The explicit operator
+     snapshot below must invalidate this entry and observe the live claim. *)
+  ignore
+    (Operator_tool.dispatch
+       ctx
+       ~name:"masc_operator_snapshot"
+       ~args:(`Assoc []));
+  (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+   | Ok _ -> ()
+   | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
   let snapshot =
     match
       Operator_tool.dispatch
@@ -264,6 +271,8 @@ let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
     (Tool_result.is_success valid);
   Alcotest.(check string) "tool reports todo" "todo"
     Yojson.Safe.Util.(Tool_result.data valid |> member "status" |> to_string);
+  Alcotest.(check bool) "all projections observed" true
+    Yojson.Safe.Util.(Tool_result.data valid |> member "fully_observed" |> to_bool);
   Alcotest.(check bool) "operator recovery audit recorded" true
     Yojson.Safe.Util.
       (Tool_result.data valid |> member "audit" |> member "recorded" |> to_bool);

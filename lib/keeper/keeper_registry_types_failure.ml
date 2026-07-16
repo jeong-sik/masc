@@ -49,11 +49,6 @@ type failure_reason =
   (** #10765 Phase 2: latched when [record_stale_termination] returns a
           window count >= [escalation_threshold]. This remains a typed
           observation; the supervisor restarts only the affected Keeper. *)
-  | Stale_fleet_batch of { distinct_count : int }
-  (** Legacy wire value for stale watchdog fleet-batch state. Current
-          fleet-batch detection is observation-only and must not create this
-          failure reason; if old runtime state still contains it, the
-          supervisor treats it like a restartable watchdog crash. *)
   | Provider_runtime_error of
       { code : string
       ; detail : string
@@ -90,8 +85,6 @@ let failure_reason_to_string = function
     Printf.sprintf "stale_turn_timeout(%s)" (stale_kill_class_to_string cls)
   | Stale_termination_storm { count } ->
     Printf.sprintf "stale_termination_storm(count=%d)" count
-  | Stale_fleet_batch { distinct_count } ->
-    Printf.sprintf "stale_fleet_batch(distinct_count=%d)" distinct_count
   | Provider_runtime_error { code; detail; provider_id; http_status; runtime_id = _ } ->
     let prov =
       Option.fold provider_id ~none:""
@@ -131,7 +124,6 @@ let failure_reason_cohort_key = function
   | Some (Turn_consecutive_failures _) -> "turn_failures"
   | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
-  | Some (Stale_fleet_batch _) -> "stale_fleet_batch"
   | Some (Provider_runtime_error _) -> "provider_runtime_error"
   | Some (Fiber_unresolved Graceful_shutdown) -> "fiber_unresolved_graceful"
   | Some (Fiber_unresolved Cancelled_by_parent) -> "fiber_unresolved_cancelled"
@@ -155,7 +147,6 @@ let stale_kill_failure_reason ~prior ~kill_class =
       | Operator_interrupt ) -> prior
   | Some
       ( Stale_termination_storm _
-      | Stale_fleet_batch _
       | Stale_turn_timeout _
       | Fiber_unresolved _ )
   | None -> Some (Stale_turn_timeout kill_class)

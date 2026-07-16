@@ -1062,6 +1062,7 @@ let cleanup_session session_id =
   let detached = detach_session_for_close session_id in
   update_ws_session_count_metric ();
   Sse.unsubscribe_external session_id;
+  Client_registry_eio.unregister_mcp_session session_id;
   match detached with
   | None -> ()
   | Some session ->

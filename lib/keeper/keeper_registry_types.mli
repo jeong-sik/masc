@@ -68,14 +68,6 @@ type failure_reason =
           persisting [meta.paused = true] instead so an operator must
           investigate the underlying runtime/provider/fd issue before
           resuming the keeper. *)
-  | Stale_fleet_batch of { distinct_count : int }
-      (** Legacy wire value for stale watchdog fleet-batch state. Current
-          fleet-batch detection is observation-only and must not create this
-          failure reason; if old runtime state still contains it, the
-          supervisor treats it like a restartable watchdog crash. *)
-      (** Legacy persisted timeout-loop value. New operator/cohort surfaces
-          normalize it to provider-timeout ownership instead of presenting
-          timeout-budget as a distinct root cause. *)
   | Provider_runtime_error of
       { code : string
       ; detail : string

@@ -130,7 +130,6 @@ describe('mission keeper runtime helpers', () => {
     expect(keeperRuntimeBlockerLabel('turn_failures')).toBe('턴 실패 반복')
     expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe('런타임 호출 오류')
     expect(keeperRuntimeBlockerLabel('exception')).toBe('런타임 예외')
-    expect(keeperRuntimeBlockerLabel('stale_fleet_batch')).toBe('Fleet stale 배치')
   })
 
   it('turns raw backend blocker codes into operator-readable hints', () => {
@@ -157,19 +156,6 @@ describe('mission keeper runtime helpers', () => {
 
     expect(keeperRuntimeHint(keeper)).toBe(
       'Stale watchdog terminated 8 keeper cycle(s) in the storm window; operator investigation is required before restart.',
-    )
-  })
-
-  it('turns stale fleet batch blockers into operator-readable hints', () => {
-    const keeper = {
-      name: 'batch-paused',
-      status: 'paused',
-      runtime_blocker_class: 'stale_fleet_batch',
-      runtime_blocker_summary: 'stale_fleet_batch',
-    } as Keeper
-
-    expect(keeperRuntimeHint(keeper)).toBe(
-      '일시정지 원인 · 여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.',
     )
   })
 

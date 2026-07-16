@@ -531,15 +531,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          in
          if rl_reaped > 0
          then Log.Server.info "Reaped %d stale rate-limit buckets" rl_reaped;
-         (* Agent registry: remove caches whose registered identity is gone. *)
-         let ar_reaped =
-           Client_registry_eio.cleanup_unregistered_session_caches ()
-         in
-         if ar_reaped > 0
-         then
-           Log.Server.info
-             "Removed %d unregistered agent session cache entries"
-             ar_reaped;
          (* Keeper sandbox: remove Docker containers when owner_pid is dead,
              the container is stopped, or its explicit ttl_sec has elapsed.
              Containers without an explicit TTL do not expire by age. Throttled by

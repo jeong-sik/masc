@@ -1842,7 +1842,7 @@ describe('fetchKeeperConfig', () => {
         keepalive_running: 'true',
         registry_state: 'running',
         fiber_health: 'healthy',
-        runtime_blocker_class: 'stale_fleet_batch',
+        runtime_blocker_class: 'stale_termination_storm',
         runtime_blocker_summary: 'Fleet batch paused after stale termination storm.',
       },
       runtime_trust: {
@@ -1916,7 +1916,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.hooks?.deny_list).toEqual(['Execute'])
     expect(result.sources.precedence).toEqual(['live_meta'])
     expect(result.metrics.total_cost_usd).toBe(0.12)
-    expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')
+    expect(result.runtime.runtime_blocker_class).toBe('stale_termination_storm')
     expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
     expect(result.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])

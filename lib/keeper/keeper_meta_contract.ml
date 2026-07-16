@@ -109,10 +109,6 @@ type blocker_class =
         per-keeper meta lacked a structured blocker class for the majority
         cohort during a fleet stall (observed: 6/14 keepers in
         cohort=stale_turn_timeout). *)
-  | Stale_fleet_batch
-    (** Retired blocker class for pre-existing fleet-batch state. Current
-        fleet-batch detection is observation-only and should not stamp keeper
-        meta; stale keepers use their per-keeper watchdog blocker instead. *)
   | Sdk_context_window_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_guardrail_violation
@@ -124,7 +120,6 @@ let blocker_class_to_string = function
   | Capacity_backpressure -> "capacity_backpressure"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
-  | Stale_fleet_batch -> "stale_fleet_batch"
   | Sdk_context_window_exceeded -> "sdk_context_window_exceeded"
   | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
@@ -137,7 +132,6 @@ let blocker_class_of_serialized_string = function
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
-  | "stale_fleet_batch" -> Some Stale_fleet_batch
   | "sdk_context_window_exceeded" -> Some Sdk_context_window_exceeded
   | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation

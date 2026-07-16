@@ -84,6 +84,7 @@ type operator_task_recovery_result =
   ; previous_status : Masc_domain.task_status
   ; previous_assignee : string
   ; backlog_version : int
+  ; post_commit_errors : string list
   }
 
 val recover_owned_task_to_todo_r :
@@ -113,22 +114,19 @@ val link_task_execution_artifacts_r :
   ?session_id:string -> ?operation_id:string ->
   unit -> string Masc_domain.masc_result
 
-(** {1 Re-exported type (backward compatibility)} *)
+(** {1 Re-exported scheduling result} *)
 
 type claim_next_result = Masc_domain.claim_next_result =
   | Claim_next_claimed of {
       task_id : string;
       title : string;
       priority : int;
-      released_task_id : string option;
       message : string;
       scope_widened : bool;
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
       { excluded_count : int
-      ; blocked_count : int
-      ; verification_blocked_count : int
       ; scope_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int

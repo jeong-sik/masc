@@ -252,7 +252,7 @@ let add_task_with_result
                        (append_goal_link_rollback_failures
                           msg
                           (rollback_goal_links config [ task_id, goal_id ])))
-              | Ok () ->
+              | Ok _ ->
                   let created_by_json = Json_util.string_opt_to_json created_by in
                   Workspace_task_classify.emit_task_activity
                     config
@@ -389,7 +389,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                            (List.map
                               (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
                               added_tasks_with_goal_ids))))
-            | Ok () ->
+            | Ok _ ->
                 List.iter
                   (fun ((task : Masc_domain.task), goal_id) ->
                      let created_by_json = Json_util.string_opt_to_json task.created_by in

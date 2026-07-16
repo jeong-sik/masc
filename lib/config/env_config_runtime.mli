@@ -50,12 +50,6 @@ module Executor : sig
       recommended count. *)
 end
 
-(** {1 Task claim} *)
-
-module Claim : sig
-  val ttl_seconds : float
-end
-
 (** {1 Orchestrator} *)
 
 module Orchestrator : sig

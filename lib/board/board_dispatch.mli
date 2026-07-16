@@ -182,6 +182,10 @@ val list_posts :
   unit ->
   Board.post list
 
+val latest_updated_post : unit -> Board.post option
+(** Current Board cursor head without sorting or materializing the full post
+    history. *)
+
 val delete_post : post_id:string -> (unit, Board.board_error) Result.t
 
 val set_thread_id :

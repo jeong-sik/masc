@@ -160,6 +160,29 @@ let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post
     take limit filtered)
 ;;
 
+let latest_updated_post store =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    Hashtbl.fold
+      (fun _ (candidate : post) latest ->
+         match latest with
+         | None -> Some candidate
+         | Some (current : post) ->
+           let updated_cmp =
+             Stdlib.Float.compare candidate.updated_at current.updated_at
+           in
+           if updated_cmp > 0
+              || (updated_cmp = 0
+                  && String.compare
+                       (Post_id.to_string candidate.id)
+                       (Post_id.to_string current.id)
+                     > 0)
+           then Some candidate
+           else latest)
+      store.posts
+      None)
+;;
+
 (** Full-scan search over all posts (no limit on scan, only on results).
     Used by Board_dispatch.search to avoid the list_posts hard cap. *)
 let search_posts store ~predicate ~limit : post list =

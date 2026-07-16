@@ -72,8 +72,9 @@ Call when you want to confirm prerequisites before starting work; returns pass/f
 
   {
     name = "masc_heartbeat";
-    description = "Update your heartbeat timestamp to prove you are still active. \
-Call every few minutes during long tasks; agents silent for 5+ min become zombie candidates.";
+    description = "Publish the caller's heartbeat observation. Heartbeats are \
+telemetry only and do not grant another component authority to stop, evict, or \
+release the caller's work.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

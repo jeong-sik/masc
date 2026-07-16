@@ -39,16 +39,10 @@ let normalize_task_before_status ~action task =
     task
 ;;
 
-(** Upper bound for [cycle_count] to prevent unbounded growth from
-    claim->release hot-potato patterns (issue #18853).  100 allows
-    5x headroom above the [severe] escalation threshold (20) while
-    capping the context bloat measured at 1000+ cycles. *)
-let max_cycle_count = 100
-
 let release_counters ~action task handoff_context =
   match action with
   | Masc_domain.Release ->
-    ( min (task.cycle_count + 1) max_cycle_count
+    ( task.cycle_count + 1
     , Workspace_task_claim.derive_release_reclaim_policy task handoff_context
     , Workspace_task_claim.derive_release_do_not_reclaim_reason task handoff_context )
   | Masc_domain.Cancel -> task.cycle_count, None, None

@@ -54,8 +54,7 @@ export type SSEEventType =
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   | 'gate_mode_changed'
-  // Task claim notifications (#18839: surfaces auto-released task ids to
-  // subscribers). Emitted by lib/task/tool_task_handlers.ml.
+  // Task claim notifications. Emitted by lib/task/tool_task_handlers.ml.
   | 'masc/task_claimed'
   // Yjs WebSocket projection layer for live telemetry. Emitted by
   // lib/dashboard/dashboard_yjs.ml.
@@ -232,9 +231,7 @@ export interface SSEEvent {
   // the JSON-stringified Yjs update body on `dashboard_yjs_update` (a string,
   // not a record — see `frame_base64` below for the actual CRDT frame).
   payload?: Record<string, unknown> | string
-  // masc/task_claimed (#18839): task ids auto-released by the claim, and the
-  // wall-clock time of the claim.
-  auto_released_task_ids?: string[]
+  // Wall-clock time attached to runtime events such as masc/task_claimed.
   timestamp?: number
   // gate_mode_changed: nonhierarchical Gate mode transition fields.
   mode?: string

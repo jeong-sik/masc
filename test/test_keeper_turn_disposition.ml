@@ -146,7 +146,6 @@ let round_trippable : (string * D.t) list =
     "Provider_error/Heartbeat", D.Provider_error Code.Heartbeat_failures
   ; "Provider_error/Turn_failures", D.Provider_error Code.Turn_failures
   ; "Provider_error/Storm", D.Provider_error Code.Stale_termination_storm
-  ; "Provider_error/FleetBatch", D.Provider_error Code.Stale_fleet_batch
   ; "Provider_error/TurnOverflow", D.Provider_error Code.Turn_overflow_failure
   ; "Provider_error/Fiber", D.Provider_error Code.Fiber_unresolved
   ]
@@ -206,7 +205,6 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
   ; "Heartbeat", Code.Heartbeat_failures, D.Provider_error Code.Heartbeat_failures
   ; "Turn_failures", Code.Turn_failures, D.Provider_error Code.Turn_failures
   ; "Storm", Code.Stale_termination_storm, D.Provider_error Code.Stale_termination_storm
-  ; "FleetBatch", Code.Stale_fleet_batch, D.Provider_error Code.Stale_fleet_batch
   ; "TurnOverflow", Code.Turn_overflow_failure, D.Provider_error Code.Turn_overflow_failure
   ; ( "Provider_runtime"
     , Code.Provider_runtime_error "p"

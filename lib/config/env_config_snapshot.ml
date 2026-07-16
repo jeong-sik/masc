@@ -598,12 +598,6 @@ let sse_entries =
       "Per-client SSE event stream capacity (clamped 8-1024)";
   ]
 
-let task_entries =
-  [
-    entry ~default:"3600.0" "MASC_CLAIM_TTL_SECONDS"
-      "Maximum time a task stays claimed without heartbeat before auto-release (seconds)";
-  ]
-
 let telemetry_entries =
   [
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
@@ -699,7 +693,7 @@ let all_categories () =
     category "transport" transport_entries;
     category "storage" (storage_entries @ cache_entries @ memory_entries @ board_entries);
     category "runtime"
-      (runtime_entries @ task_entries
+      (runtime_entries
        @ message_gc_entries @ internal_timer_entries
        @ timeout_entries @ sse_entries @ telemetry_entries
        @ tool_entries);

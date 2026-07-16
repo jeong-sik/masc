@@ -52,7 +52,6 @@ const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'turn_timeout',
   'fiber_unresolved',
   'stale_turn_timeout',
-  'stale_fleet_batch',
   'sdk_context_window_exceeded',
   'sdk_unrecognized_stop_reason',
   'sdk_idle_detected',

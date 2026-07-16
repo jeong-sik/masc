@@ -1122,7 +1122,6 @@ let strict_contract : Masc_domain.task_contract =
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
   ; evidence_claims = []
-  ; stale_claim_timeout_sec = 0
   ; links = { operation_id = None; session_id = None }
   }
 

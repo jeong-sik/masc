@@ -27,6 +27,7 @@ type operator_task_recovery_result =
   ; previous_status : Masc_domain.task_status
   ; previous_assignee : string
   ; backlog_version : int
+  ; post_commit_errors : string list
   }
 
 let recover_owned_task_to_todo_r
@@ -135,47 +136,101 @@ let recover_owned_task_to_todo_r
         backlog.tasks
     in
     let backlog_version = backlog.version + 1 in
-    let* () =
+    let* persistence =
       write_backlog_result
-        ~after_commit:(fun () ->
+        config
+        { tasks; last_updated = now_iso (); version = backlog_version }
+      |> Result.map_error (fun message ->
+        Masc_domain.System (Masc_domain.System_error.IoError message))
+    in
+    let run_post_commit label f =
+      try
+        f ();
+        None
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        let detail = Printf.sprintf "%s: %s" label (Printexc.to_string exn) in
+        Log.TaskState.error
+          "operator task recovery post-commit projection failed task=%s \
+           version=%d detail=%s"
+          task_id
+          backlog_version
+          detail;
+        Some detail
+    in
+    let post_commit_errors =
+      [ Option.map
+          (fun message -> "backlog_primary_mirror: " ^ message)
+          persistence.primary_mirror_error
+      ; Option.map
+          (fun message -> "backlog_recovery_copy: " ^ message)
+          persistence.recovery_error
+      ; Option.map
+          (fun message -> "backlog_post_commit: " ^ message)
+          persistence.post_commit_error
+      ; run_post_commit "task_cache_invariant" (fun () ->
           Task_cache_invariant.clear_stale_agent_task
             config
             ~agent_name:previous_assignee
             ~task_id
             ~status:Masc_domain.Todo
             ~module_name:"recover_owned_task_to_todo_r")
-        config
-        { tasks; last_updated = now_iso (); version = backlog_version }
-      |> Result.map_error (fun message ->
-        Masc_domain.System (Masc_domain.System_error.IoError message))
+      ; run_post_commit "agent_state" (fun () ->
+          update_local_agent_state config ~agent_name:previous_assignee (fun agent ->
+            if agent.current_task = Some task_id
+            then { agent with status = Active; current_task = None }
+            else agent))
+      ; run_post_commit "transition_log" (fun () ->
+          log_event
+            config
+            (transition_log_event
+               ~event_type:Task_transition
+               ~actor_kind:Operator
+               ~agent_name:operator_actor
+               ~task_id
+               ~from_status:task.task_status
+               ~to_status:Masc_domain.Todo
+               ~action:(Masc_domain.task_action_to_string Masc_domain.Release)
+               ~reason
+               ~assignee:previous_assignee
+               ()))
+      ; run_post_commit "task_activity" (fun () ->
+          emit_task_activity
+            ~actor_kind:Operator
+            config
+            ~agent_name:operator_actor
+            ~task_id
+            ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
+            ~payload:
+              (`Assoc
+                [ "task_id", `String task_id
+                ; "operator_recovery", `Bool true
+                ; "previous_assignee", `String previous_assignee
+                ; "reason", `String reason
+                ; "backlog_version", `Int backlog_version
+                ]))
+      ; run_post_commit "transition_observer" (fun () ->
+          observe_task_transition
+            config
+            ~agent_name:operator_actor
+            ~task_id
+            ~transition:Masc_domain.Release
+            ~details:
+              (task_transition_details
+                 ~from_status:task.task_status
+                 ~to_status:Masc_domain.Todo
+                 ~reason
+                 ()))
+      ]
+      |> List.filter_map Fun.id
     in
-    (try
-       log_event
-         config
-         (`Assoc
-           [ "type", `String "task_operator_recovered"
-           ; "operator_actor", `String operator_actor
-           ; "task_id", `String task_id
-           ; "expected_assignee", `String expected_assignee
-           ; "from_status", `String (Masc_domain.task_status_to_string task.task_status)
-           ; "to_status", `String "todo"
-           ; "reason", `String reason
-           ; "backlog_version", `Int backlog_version
-           ; "ts", `String (now_iso ())
-           ])
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.TaskState.error
-         "task operator recovery event append failed task=%s version=%d error=%s"
-         task_id
-         backlog_version
-         (Printexc.to_string exn));
     Ok
       { task_id
       ; previous_status = task.task_status
       ; previous_assignee
       ; backlog_version
+      ; post_commit_errors
       })
   |> Workspace_task_verification.flatten_lock_result
 ;;
@@ -184,7 +239,6 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else (
-    let agent_name = resolve_agent_name_strict config agent_name in
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     let result =
       with_file_lock_r config backlog_path (fun () ->
@@ -220,7 +274,6 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                    (fun (t : task) ->
                       if t.id = task_id
                       then (
-                        let new_cycle = t.cycle_count + 1 in
                         (* Cancellation is terminal by status. Clear reclaim
                            policy so that re-opened tasks remain claimable.
                            Previously Block_reclaim was preserved here (RFC-0288
@@ -234,7 +287,6 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                               ; cancelled_at = now_iso ()
                               ; reason = (if reason = "" then None else Some reason)
                               }
-                        ; cycle_count = new_cycle
                         ; reclaim_policy
                         ; do_not_reclaim_reason
                         })
@@ -337,21 +389,18 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
 ;;
 
 (* Scheduling functions are in Workspace_task_schedule.
-   Re-export claim_next_result from Types for backward compatibility. *)
+   Re-export the shared result type through Workspace_task. *)
 type claim_next_result = Masc_domain.claim_next_result =
   | Claim_next_claimed of
       { task_id : string
       ; title : string
       ; priority : int
-      ; released_task_id : string option
       ; message : string
       ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
       { excluded_count : int
-      ; blocked_count : int
-      ; verification_blocked_count : int
       ; scope_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int

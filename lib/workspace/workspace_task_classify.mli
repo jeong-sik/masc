@@ -58,6 +58,7 @@ val update_local_agent_state
 
 type task_actor_kind =
   | Agent
+  | Operator
   | System
 
 (** Optional [correlation_id] / [run_id] are merged into the activity
@@ -79,16 +80,9 @@ val task_actor_kind_to_string : task_actor_kind -> string
 (** Canonical wire representation for task activity actors. *)
 val trim_opt : string option -> string option
 val working_agents : config -> string list
-val resolve_agent_name_strict : config -> string -> string
 
-(** Stable ownership key for task-assignee comparisons. It collapses keeper
-    transport aliases such as [keeper-nick0cave-agent] and dictionary-generated
-    nicknames such as [nick0cave-happy-shark] to the keeper name, while leaving
-    structured non-keeper identities untouched. *)
-val task_identity_key : config -> string -> string
-
-(** [same_task_actor config a b] is true when [a] and [b] name the same logical
-    task owner after applying {!task_identity_key}. *)
+(** Exact persisted task-owner comparison. Callers must supply the canonical
+    actor identity; name-shape aliases have no ownership authority. *)
 val same_task_actor : config -> string -> string -> bool
 
 val normalize_execution_links
@@ -169,6 +163,7 @@ val transition_event_type_to_string : transition_event_type -> string
 
 val transition_log_event
   :  event_type:transition_event_type
+  -> ?actor_kind:task_actor_kind
   -> agent_name:string
   -> task_id:string
   -> from_status:Masc_domain.task_status

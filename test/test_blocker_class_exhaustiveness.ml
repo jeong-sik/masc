@@ -28,7 +28,6 @@ let all_variants : blocker_class list =
   ; Capacity_backpressure
   ; Fiber_unresolved
   ; Stale_turn_timeout
-  ; Stale_fleet_batch
   ; Sdk_context_window_exceeded
   ; Sdk_unrecognized_stop_reason
   ; Sdk_guardrail_violation

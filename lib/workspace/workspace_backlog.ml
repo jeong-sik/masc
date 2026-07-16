@@ -103,43 +103,78 @@ let read_backlog config =
       Log.Misc.error "%s" msg;
       { tasks = []; last_updated = now_iso (); version = 1 }
 
-(** [write_backlog ?after_commit config backlog] persists the backlog to
-    both the primary and recovery paths, then invokes [after_commit] if
-    provided.  The callback runs only after both writes succeed, making it
-    the correct place for cache-invalidation side-effects that must not
-    fire unless the backlog actually landed on disk (RFC-0221 §3.3). *)
-let write_backlog ?after_commit config backlog =
-  let json = backlog_to_yojson backlog in
-  write_json config (backlog_path config) json;
-  write_json config (backlog_recovery_path config) json;
-  clear_backlog_cache_for (backlog_path config);
-  clear_backlog_cache_for (backlog_recovery_path config);
-  (match after_commit with
-   | Some f -> f ()
-   | None -> ())
+exception Backlog_write_failed of string
 
-(** Result-returning variant that verifies both primary and recovery writes by
-    readback.  Only clears the cache and runs [after_commit] after the primary
-    readback succeeds. *)
+type write_backlog_outcome =
+  { primary_mirror_error : string option
+  ; recovery_error : string option
+  ; post_commit_error : string option
+  }
+
+(** Result-returning variant with the primary backlog as the commit point.
+    Once the primary write succeeds, recovery-copy failure is returned as an
+    explicit committed outcome rather than a false mutation failure. *)
 let write_backlog_result ?after_commit config backlog =
   let json = backlog_to_yojson backlog in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
-  match write_json_result config primary_path json with
+  match write_json_commit_result config primary_path json with
   | Error msg -> Error msg
-  | Ok () -> (
-      match write_json_result config recovery_path json with
-      | Error msg -> Error msg
-      | Ok () -> (
-          match read_json_result config primary_path with
-          | Error msg -> Error (Printf.sprintf "backlog primary readback failed: %s" msg)
-          | Ok read_json -> (
-              match decode_backlog ~path:primary_path read_json with
-              | Error msg -> Error (Printf.sprintf "backlog primary decode failed: %s" msg)
-              | Ok _read_backlog ->
-                  clear_backlog_cache_for primary_path;
-                  clear_backlog_cache_for recovery_path;
-                  (match after_commit with
-                   | Some f -> f ()
-                   | None -> ());
-                  Ok ())))
+  | Ok primary_commit ->
+    Option.iter
+      (fun message ->
+         Log.TaskState.error
+           "backlog primary committed but local mirror write failed path=%s error=%s"
+           primary_path
+           message)
+      primary_commit.mirror_error;
+    let recovery_error =
+      match write_json_commit_result config recovery_path json with
+      | Ok { mirror_error = None } -> None
+      | Ok { mirror_error = Some message } ->
+        Log.TaskState.error
+          "backlog primary and recovery backend committed but recovery local \
+           mirror write failed path=%s error=%s"
+          recovery_path
+          message;
+        Some message
+      | Error message ->
+        Log.TaskState.error
+          "backlog primary committed but recovery copy write failed path=%s error=%s"
+          recovery_path
+          message;
+        Some message
+    in
+    clear_backlog_cache_for primary_path;
+    clear_backlog_cache_for recovery_path;
+    let post_commit_error =
+      match after_commit with
+      | None -> None
+      | Some f ->
+        (try
+           f ();
+           None
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           let message = Printexc.to_string exn in
+           Log.TaskState.error
+             "backlog primary committed but post-commit callback failed path=%s \
+              error=%s"
+             primary_path
+             message;
+           Some message)
+    in
+    Ok
+      { primary_mirror_error = primary_commit.mirror_error
+      ; recovery_error
+      ; post_commit_error
+      }
+
+(** [write_backlog ?after_commit config backlog] persists the primary SSOT,
+    then observes secondary recovery/mirror/projection failures without
+    misreporting the committed mutation as a primary failure. *)
+let write_backlog ?after_commit config backlog =
+  match write_backlog_result ?after_commit config backlog with
+  | Ok _ -> ()
+  | Error message -> raise (Backlog_write_failed message)

@@ -73,15 +73,6 @@ module Executor = struct
   ;;
 end
 
-(** {1 Task Claim Configuration} *)
-
-module Claim = struct
-  (** Maximum time a task can stay Claimed/InProgress without agent heartbeat
-      before being auto-released back to Todo (seconds, default 1 hour). *)
-  let ttl_seconds =
-    get_float ~default:3600.0 "MASC_CLAIM_TTL_SECONDS"
-end
-
 (** {1 Orchestrator Configuration} *)
 
 module Orchestrator = struct

@@ -282,7 +282,7 @@ type tool_result = {
 type claim_next_result =
   | Claim_next_claimed of {
       task_id : string; title : string;
-      priority : int; released_task_id : string option;
+      priority : int;
       message : string;
     }
   | Claim_next_no_unclaimed

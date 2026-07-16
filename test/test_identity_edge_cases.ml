@@ -141,7 +141,10 @@ let test_rapid_creation () =
     let _ = Client_registry_eio.get_or_create_identity params in
     ()
   done;
-  check bool "created 100" true (Client_registry_eio.total_count () >= 100)
+  check int
+    "sessionless identities do not create immortal registry rows"
+    0
+    (Client_registry_eio.total_count ())
 
 let () =
   run "Identity Edge Cases" [

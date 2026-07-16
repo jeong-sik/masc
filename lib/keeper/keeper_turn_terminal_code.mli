@@ -34,10 +34,6 @@ type t =
   | Stale_termination_storm
   (** [Keeper_registry.Stale_termination_storm]: cohort window
           escalation threshold reached. *)
-  | Stale_fleet_batch
-  (** [Keeper_registry.Stale_fleet_batch]: legacy fleet-batch wire value.
-      Current fleet-batch detection is observation-only; fresh watchdog kills
-      retain their per-keeper terminal code. *)
   | Heartbeat_failures (** [Keeper_registry.Heartbeat_consecutive_failures]. *)
   | Turn_failures (** [Keeper_registry.Turn_consecutive_failures]. *)
   | Provider_runtime_error of string

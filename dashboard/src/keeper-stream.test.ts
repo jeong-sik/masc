@@ -597,7 +597,7 @@ describe('applyKeeperStreamEvent', () => {
   it('extracts error messages from events', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'RUN_ERROR',
-      value: { message: 'boom' },
+      message: 'boom',
     })).toBe('boom')
   })
 
@@ -992,7 +992,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
 
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'RUN_ERROR',
-      value: { message: 'request was cancelled by operator' },
+      message: 'request was cancelled by operator',
     })).toBe('request was cancelled by operator')
 
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')

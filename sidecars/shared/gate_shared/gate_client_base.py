@@ -24,6 +24,42 @@ from .gate_response import GateResponse
 logger = logging.getLogger(__name__)
 
 
+class GateStreamError(RuntimeError):
+    """Base class for explicit keeper stream failures."""
+
+
+class GateStreamUnavailable(GateStreamError):
+    """The stream request was not sent because a local dependency is absent."""
+
+
+class GateStreamRejected(GateStreamError):
+    """The Gate returned an HTTP error before opening an SSE stream."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(f"keeper stream rejected with HTTP {status_code}")
+
+
+class GateStreamAcceptedFailure(GateStreamError):
+    """The Gate accepted the stream request, so callers must not resubmit it."""
+
+
+class GateStreamRunError(GateStreamAcceptedFailure):
+    """The accepted Keeper run emitted a terminal RUN_ERROR event."""
+
+
+class GateStreamIncomplete(GateStreamAcceptedFailure):
+    """An accepted stream ended without RUN_FINISHED or RUN_ERROR."""
+
+
+class GateStreamProtocolError(GateStreamAcceptedFailure):
+    """An accepted stream emitted a malformed SSE event."""
+
+
+class GateStreamTransportAmbiguous(GateStreamError):
+    """Transport failed after dispatch began; Keeper acceptance is unknown."""
+
+
 class GateClientBase:
     """HTTP client for the Channel Gate API.
 
@@ -282,12 +318,13 @@ class GateClientBase:
 
         Uses POST /api/v1/keepers/chat/stream which returns AG-UI SSE events.
         Only TEXT_MESSAGE_CONTENT deltas are yielded as strings.
-        Requires httpx-sse; yields nothing if the library is not installed.
-        Transport failures are recorded and raised to the caller.
+        Requires httpx-sse. Every failure is explicit; once dispatch begins,
+        callers must not assume the Keeper did not accept the request.
         """
         if _httpx_sse is None:
-            logger.warning("httpx-sse not installed; streaming unavailable")
-            return
+            error = GateStreamUnavailable("httpx-sse is not installed")
+            logger.warning("Keeper stream unavailable: %s", error)
+            raise error
         payload = {
             "name": keeper_name,
             "message": message,
@@ -309,44 +346,68 @@ class GateClientBase:
                 ),
             ) as event_source:
                 if event_source.response.status_code >= 400:
-                    self._observe_transport_failure(
-                        f"stream returned {event_source.response.status_code}"
-                    )
-                    return
+                    status_code = event_source.response.status_code
+                    if status_code >= 500:
+                        self._observe_transport_failure(
+                            f"stream returned {status_code}"
+                        )
+                    else:
+                        logger.warning(
+                            "Keeper stream rejected with HTTP %d", status_code
+                        )
+                    raise GateStreamRejected(status_code)
                 async for sse in event_source.aiter_sse():
                     if not sse.data:
                         continue
                     try:
                         event = json_mod.loads(sse.data)
-                    except json_mod.JSONDecodeError:
-                        continue
+                    except json_mod.JSONDecodeError as error:
+                        raise GateStreamProtocolError(
+                            "keeper stream emitted invalid JSON"
+                        ) from error
                     if not isinstance(event, dict):
-                        continue
+                        raise GateStreamProtocolError(
+                            "keeper stream emitted a non-object event"
+                        )
                     event_data = cast(dict[str, Any], event)
-                    event_type = str(event_data.get("type", ""))
+                    event_type = event_data.get("type")
+                    if not isinstance(event_type, str) or not event_type:
+                        raise GateStreamProtocolError(
+                            "keeper stream event is missing a string type"
+                        )
                     if event_type == "TEXT_MESSAGE_CONTENT":
-                        delta = str(event_data.get("delta", ""))
+                        delta = event_data.get("delta", "")
+                        if not isinstance(delta, str):
+                            raise GateStreamProtocolError(
+                                "keeper stream text delta is not a string"
+                            )
                         if delta:
                             yield delta
-                    elif event_type == "RUN_ERROR":
-                        custom_raw = event_data.get("customValue", {})
-                        custom = (
-                            cast(dict[str, Any], custom_raw)
-                            if isinstance(custom_raw, dict)
-                            else {}
-                        )
-                        err = str(custom.get("message", ""))
-                        logger.warning("Keeper stream error: %s", err)
+                    elif event_type == "RUN_FINISHED":
                         return
+                    elif event_type == "RUN_ERROR":
+                        message_raw = event_data.get("message")
+                        if not isinstance(message_raw, str) or not message_raw:
+                            raise GateStreamProtocolError(
+                                "keeper stream RUN_ERROR is missing a non-empty "
+                                "string message"
+                            )
+                        message = message_raw
+                        logger.warning("Keeper stream RUN_ERROR: %s", message)
+                        raise GateStreamRunError(message)
+                raise GateStreamIncomplete(
+                    "keeper stream ended without a terminal event"
+                )
+        except GateStreamError:
+            raise
         except httpx.TimeoutException as e:
-            self._observe_transport_failure(f"stream transport timeout: {e}")
-            raise
+            reason = f"stream transport timeout: {e}"
+            self._observe_transport_failure(reason)
+            raise GateStreamTransportAmbiguous(reason) from e
         except httpx.HTTPError as e:
-            self._observe_transport_failure(f"stream http error: {e}")
-            raise
-        except Exception as e:  # pragma: no cover
-            self._observe_transport_failure(f"stream error: {e}")
-            raise
+            reason = f"stream http error: {e}"
+            self._observe_transport_failure(reason)
+            raise GateStreamTransportAmbiguous(reason) from e
 
     # ── Activity Polling ─────────────────────────────────
 

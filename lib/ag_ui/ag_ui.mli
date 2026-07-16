@@ -39,7 +39,7 @@ val role_to_string : role -> string
 
 (** {1 Event Record} *)
 
-type event = {
+type event = private {
   event_type : event_type;
   thread_id : string;
   run_id : string option;
@@ -52,6 +52,10 @@ type event = {
   tool_call_name : string option;
   snapshot : Yojson.Safe.t option;
       (** Full state for [State_snapshot]. *)
+  message : string option;
+      (** Required top-level error message for [Run_error]. *)
+  code : string option;
+      (** Optional top-level error code for [Run_error]. *)
   custom_name : string option;
   custom_value : Yojson.Safe.t option;
   timestamp : float;
@@ -66,13 +70,30 @@ val make_event :
   ?tool_call_id:string option ->
   ?tool_call_name:string option ->
   ?snapshot:Yojson.Safe.t option ->
+  ?message:string option ->
+  ?code:string option ->
   ?custom_name:string option ->
   ?custom_value:Yojson.Safe.t option ->
   thread_id:string ->
   event_type ->
   event
 (** Construct an [event] with sensible defaults. [timestamp] is set to
-    [Time_compat.now ()] at call time. *)
+    [Time_compat.now ()] at call time.
+
+    [Run_error] requires a non-empty [message]. [message] and [code] are
+    rejected for every other event type so the Custom [value] envelope cannot
+    become a second RUN_ERROR wire contract. *)
+
+val run_error :
+  thread_id:string ->
+  ?run_id:string ->
+  message:string ->
+  ?code:string ->
+  unit ->
+  event
+(** Construct a spec-compliant [Run_error] event. This is the concise public
+    path for lifecycle failures; Custom [name]/[value] fields are unavailable
+    by construction. *)
 
 (** {1 Serialization} *)
 

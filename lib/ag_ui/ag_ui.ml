@@ -69,6 +69,8 @@ type event = {
   tool_call_id: string option;
   tool_call_name: string option;
   snapshot: Yojson.Safe.t option;  (** Full state for STATE_SNAPSHOT *)
+  message: string option;          (** Required top-level RUN_ERROR message *)
+  code: string option;             (** Optional top-level RUN_ERROR code *)
   custom_name: string option;      (** Custom event name *)
   custom_value: Yojson.Safe.t option;
   timestamp: float;
@@ -78,8 +80,37 @@ type event = {
 let make_event ?(run_id=None) ?(message_id=None) ?(role=None)
     ?(delta=None) ?(step_name=None) ?(tool_call_id=None)
     ?(tool_call_name=None) ?(snapshot=None)
+    ?(message=None) ?(code=None)
     ?(custom_name=None) ?(custom_value=None)
     ~thread_id event_type =
+  (match event_type with
+   | Run_error ->
+     (match message with
+      | Some error_message
+        when not (String.equal (String.trim error_message) "") -> ()
+      | Some _ | None ->
+        invalid_arg "AG-UI RUN_ERROR requires a non-empty top-level message");
+     (match custom_name, custom_value with
+      | None, None -> ()
+      | Some _, _ | _, Some _ ->
+        invalid_arg "AG-UI RUN_ERROR cannot use the Custom name/value envelope")
+   | ( Run_started
+     | Run_finished
+     | Step_started
+     | Step_finished
+     | Text_message_start
+     | Text_message_content
+     | Text_message_end
+     | Tool_call_start
+     | Tool_call_args
+     | Tool_call_end
+     | State_snapshot
+     | State_delta
+     | Custom ) ->
+     (match message, code with
+      | None, None -> ()
+      | Some _, _ | _, Some _ ->
+        invalid_arg "AG-UI message/code fields are valid only for RUN_ERROR"));
   {
     event_type;
     thread_id;
@@ -91,10 +122,20 @@ let make_event ?(run_id=None) ?(message_id=None) ?(role=None)
     tool_call_id;
     tool_call_name;
     snapshot;
+    message;
+    code;
     custom_name;
     custom_value;
     timestamp = Time_compat.now ();
   }
+
+let run_error ~thread_id ?run_id ~message ?code () =
+  make_event
+    ~thread_id
+    ~run_id
+    ~message:(Some message)
+    ~code
+    Run_error
 
 (** Serialize AG-UI event to JSON (spec-compliant field names) *)
 let event_to_json (e : event) : Yojson.Safe.t =
@@ -116,6 +157,8 @@ let event_to_json (e : event) : Yojson.Safe.t =
     @ optional "toolCallId" (fun s -> `String s) e.tool_call_id
     @ optional "toolCallName" (fun s -> `String s) e.tool_call_name
     @ optional "snapshot" (fun j -> j) e.snapshot
+    @ optional "message" (fun s -> `String s) e.message
+    @ optional "code" (fun s -> `String s) e.code
     @ optional "name" (fun s -> `String s) e.custom_name
     @ optional "value" (fun j -> j) e.custom_value)
 

@@ -11,7 +11,16 @@ from typing import cast
 import httpx
 import pytest
 
-from gate_shared import GateClientBase
+from gate_shared import (
+    GateClientBase,
+    GateStreamIncomplete,
+    GateStreamProtocolError,
+    GateStreamRejected,
+    GateStreamRunError,
+    GateStreamTransportAmbiguous,
+    GateStreamUnavailable,
+)
+from gate_shared import gate_client_base as gate_client_module
 
 
 @asynccontextmanager
@@ -34,7 +43,10 @@ async def _idle_sse_server() -> AsyncIterator[
             await writer.drain()
             accepted.put_nowait(None)
             await release.wait()
-            writer.write(b'data: {"type":"TEXT_MESSAGE_CONTENT","delta":"ready"}\n\n')
+            writer.write(
+                b'data: {"type":"TEXT_MESSAGE_CONTENT","delta":"ready"}\n\n'
+                b'data: {"type":"RUN_FINISHED"}\n\n'
+            )
             await writer.drain()
         finally:
             writer.close()
@@ -152,6 +164,117 @@ class TestSendMessage:
 
 class TestKeeperStream:
     @pytest.mark.asyncio
+    async def test_missing_dependency_is_explicit_before_dispatch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        c = _make_client()
+        monkeypatch.setattr(gate_client_module, "_httpx_sse", None)
+
+        with pytest.raises(GateStreamUnavailable):
+            await anext(
+                c.stream_keeper(
+                    keeper_name="keeper-a",
+                    message="continue",
+                    context={"channel": "test"},
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_unexpected_internal_failure_is_not_transport_ambiguity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert gate_client_module._httpx_sse is not None
+
+        def fail_before_transport(*_args: object, **_kwargs: object) -> object:
+            raise ValueError("internal stream invariant failed")
+
+        monkeypatch.setattr(
+            gate_client_module._httpx_sse,
+            "aconnect_sse",
+            fail_before_transport,
+        )
+        c = _make_client()
+
+        with pytest.raises(ValueError, match="internal stream invariant failed"):
+            await anext(
+                c.stream_keeper(
+                    keeper_name="keeper-a",
+                    message="continue",
+                    context={"channel": "test"},
+                )
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("body", "error_type", "expected_message"),
+        [
+            (
+                b'data: {"type":"RUN_ERROR","message":"boom"}\n\n',
+                GateStreamRunError,
+                "boom",
+            ),
+            (
+                b'data: {"type":"RUN_ERROR","value":{"message":"legacy"}}\n\n',
+                GateStreamProtocolError,
+                ("keeper stream RUN_ERROR is missing a non-empty string message"),
+            ),
+            (b"", GateStreamIncomplete, "keeper stream ended without a terminal event"),
+        ],
+    )
+    async def test_accepted_stream_failure_is_explicit(
+        self, body: bytes, error_type: type[Exception], expected_message: str
+    ) -> None:
+        def respond(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                content=body,
+            )
+
+        c = _make_client()
+        c._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            headers=c._headers,
+        )
+        try:
+            with pytest.raises(error_type) as raised:
+                await anext(
+                    c.stream_keeper(
+                        keeper_name="keeper-a",
+                        message="continue",
+                        context={"channel": "test"},
+                    )
+                )
+        finally:
+            await c.aclose()
+
+        assert str(raised.value) == expected_message
+
+    @pytest.mark.asyncio
+    async def test_http_rejection_is_explicit(self) -> None:
+        def respond(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503)
+
+        c = _make_client()
+        c._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            headers=c._headers,
+        )
+        try:
+            with pytest.raises(GateStreamRejected) as raised:
+                await anext(
+                    c.stream_keeper(
+                        keeper_name="keeper-a",
+                        message="continue",
+                        context={"channel": "test"},
+                    )
+                )
+        finally:
+            await c.aclose()
+
+        assert raised.value.status_code == 503
+
+    @pytest.mark.asyncio
     async def test_accepted_idle_stream_has_no_read_deadline(self) -> None:
         c = _make_client(timeout_sec=0.1)
         observed_timeouts: list[dict[str, float | None]] = []
@@ -223,8 +346,9 @@ class TestKeeperStream:
                 context={"channel": "test"},
             )
             try:
-                with pytest.raises(httpx.PoolTimeout):
+                with pytest.raises(GateStreamTransportAmbiguous) as raised:
                     await anext(second_stream)
+                assert isinstance(raised.value.__cause__, httpx.PoolTimeout)
                 release.set()
                 assert await first_result == ["ready"]
             finally:

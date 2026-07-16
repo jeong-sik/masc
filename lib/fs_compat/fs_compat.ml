@@ -1891,6 +1891,11 @@ let rewrite_private_file_durable_locked_result path decide =
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
   | Invalid_jsonl_suffix
+  | Negative_expected_end_offset of int
+  | End_offset_mismatch of
+      { expected : int
+      ; actual : int
+      }
   | Durable_jsonl_append_failed of durable_append_error
 
 let private_jsonl_append_error_to_string = function
@@ -1898,22 +1903,36 @@ let private_jsonl_append_error_to_string = function
     "existing JSONL file ends with an incomplete row"
   | Invalid_jsonl_suffix ->
     "JSONL append suffix must be non-empty and newline-terminated"
+  | Negative_expected_end_offset offset ->
+    Printf.sprintf "expected JSONL end offset must be non-negative: %d" offset
+  | End_offset_mismatch { expected; actual } ->
+    Printf.sprintf
+      "JSONL end offset mismatch: expected %d, observed %d"
+      expected
+      actual
   | Durable_jsonl_append_failed error -> durable_append_error_to_string error
 ;;
 
-let append_private_jsonl_durable_locked_with_end_offset_result path suffix =
+let append_private_jsonl_durable_locked_with_expected_end_offset_result
+      path
+      ~expected_end_offset
+      suffix
+  =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_jsonl_suffix
-  else (
-    test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
-    let dir = Filename.dirname path in
-    mkdir_p_memoized dir;
-    let path_mu = get_append_path_mutex path in
-    run_blocking_private_file_transaction
-      ~label:"fs-compat-durable-append"
-      ~path
-      (fun () ->
+  else
+    match expected_end_offset with
+    | Some offset when offset < 0 -> Error (Negative_expected_end_offset offset)
+    | _ ->
+      test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
+      let dir = Filename.dirname path in
+      mkdir_p_memoized dir;
+      let path_mu = get_append_path_mutex path in
+      run_blocking_private_file_transaction
+        ~label:"fs-compat-durable-append"
+        ~path
+        (fun () ->
       Stdlib.Mutex.protect path_mu (fun () ->
         let fd =
           Unix.openfile path
@@ -1929,34 +1948,58 @@ let append_private_jsonl_durable_locked_with_end_offset_result path suffix =
              ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
              lock_whole_file fd;
              let original_length = Unix.lseek fd 0 Unix.SEEK_END in
-             let tail_is_complete =
-               if original_length = 0
-               then true
+             match expected_end_offset with
+             | Some expected when expected <> original_length ->
+               Error
+                 (End_offset_mismatch
+                    { expected; actual = original_length })
+             | _ ->
+               let tail_is_complete =
+                 if original_length = 0
+                 then true
+                 else (
+                   (* See Unix.lseek: only the file-position side effect is required. *)
+                   ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
+                   let byte = Bytes.create 1 in
+                   let rec read_tail () =
+                     match Unix.read fd byte 0 1 with
+                     | 1 -> Char.equal (Bytes.get byte 0) '\n'
+                     | 0 -> false
+                     | _ -> false
+                     | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
+                   in
+                   read_tail ())
+               in
+               if not tail_is_complete
+               then Error Incomplete_jsonl_tail
                else (
                  (* See Unix.lseek: only the file-position side effect is required. *)
-                 ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
-                 let byte = Bytes.create 1 in
-                 let rec read_tail () =
-                   match Unix.read fd byte 0 1 with
-                   | 1 -> Char.equal (Bytes.get byte 0) '\n'
-                   | 0 -> false
-                   | _ -> false
-                   | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
-                 in
-                 read_tail ())
-             in
-             if not tail_is_complete
-             then Error Incomplete_jsonl_tail
-             else (
-               (* See Unix.lseek: only the file-position side effect is required. *)
-               ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
-               append_fd_durable
-                 ~io:durable_append_unix_io
-                 ~fd
-                 ~original_length
-                 suffix
-               |> Result.map_error (fun error -> Durable_jsonl_append_failed error)
-               |> Result.map (fun () -> original_length + String.length suffix))))))
+                 ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+                 append_fd_durable
+                   ~io:durable_append_unix_io
+                   ~fd
+                   ~original_length
+                   suffix
+                 |> Result.map_error (fun error -> Durable_jsonl_append_failed error)
+                 |> Result.map (fun () -> original_length + String.length suffix)))))
+;;
+
+let append_private_jsonl_durable_locked_with_end_offset_result path suffix =
+  append_private_jsonl_durable_locked_with_expected_end_offset_result
+    path
+    ~expected_end_offset:None
+    suffix
+;;
+
+let append_private_jsonl_durable_locked_at_end_offset_result
+      path
+      ~expected_end_offset
+      suffix
+  =
+  append_private_jsonl_durable_locked_with_expected_end_offset_result
+    path
+    ~expected_end_offset:(Some expected_end_offset)
+    suffix
 ;;
 
 let append_private_jsonl_durable_locked_result path suffix =

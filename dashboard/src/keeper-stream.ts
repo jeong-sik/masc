@@ -870,9 +870,7 @@ export function applyKeeperStreamEvent(
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
       clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
-      return typeof event.value === 'string'
-        ? event.value
-        : (isRecord(event.value) ? asString(event.value.message) : null) ?? 'Keeper stream failed'
+      return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
       return null
   }

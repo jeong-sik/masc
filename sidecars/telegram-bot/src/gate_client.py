@@ -17,12 +17,22 @@ _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
-from gate_shared import GateClientBase, GateResponse  # noqa: E402
+from gate_shared import (  # noqa: E402
+    GateClientBase,
+    GateResponse,
+    GateStreamError,
+    GateStreamUnavailable,
+)
 
 from .config import get_config  # noqa: E402
 
 # Re-export for convenience
-__all__ = ["GateClient", "GateResponse"]
+__all__ = [
+    "GateClient",
+    "GateResponse",
+    "GateStreamError",
+    "GateStreamUnavailable",
+]
 
 logger = logging.getLogger(__name__)
 

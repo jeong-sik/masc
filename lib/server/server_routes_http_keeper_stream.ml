@@ -1056,10 +1056,7 @@ let send_keeper_error ?on_closed writer mutex closed ~thread_id ~run_id err =
   ignore
     (keeper_stream_send_event ?on_closed writer mutex closed
        Ag_ui.(
-         make_event ~thread_id ~run_id:(Some run_id)
-           ~custom_name:(Some "KEEPER_CHAT_ERROR")
-           ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
-           Run_error))
+         run_error ~thread_id ~run_id ~message:err ()))
 
 type canonical_reply_payload_error =
   | Malformed_reply_json of { parser_detail : string }
@@ -2767,10 +2764,11 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           ignore
             (keeper_stream_send_event ~on_closed writer mutex closed
                Ag_ui.(
-                 make_event ~thread_id:!current_thread_id
-                   ~custom_name:(Some "KEEPER_CHAT_ERROR")
-                   ~custom_value:(Some (`Assoc [ ("message", `String message) ]))
-                   Run_error))
+                 run_error
+                   ~thread_id:!current_thread_id
+                   ?run_id:!current_run_id
+                   ~message
+                   ()))
     in
     let json_opt key value =
       match value with

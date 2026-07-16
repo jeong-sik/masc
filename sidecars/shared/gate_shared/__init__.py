@@ -14,7 +14,17 @@ from .diagnostics import (
     render_json,
     render_pretty,
 )
-from .gate_client_base import GateClientBase
+from .gate_client_base import (
+    GateClientBase,
+    GateStreamAcceptedFailure,
+    GateStreamError,
+    GateStreamIncomplete,
+    GateStreamProtocolError,
+    GateStreamRejected,
+    GateStreamRunError,
+    GateStreamTransportAmbiguous,
+    GateStreamUnavailable,
+)
 from .gate_response import GateResponse
 from .structured_content import (
     SUPPORTED_BLOCK_TYPES,
@@ -30,6 +40,14 @@ __all__ = [
     "FixOutcome",
     "GateClientBase",
     "GateResponse",
+    "GateStreamAcceptedFailure",
+    "GateStreamError",
+    "GateStreamIncomplete",
+    "GateStreamProtocolError",
+    "GateStreamRejected",
+    "GateStreamRunError",
+    "GateStreamTransportAmbiguous",
+    "GateStreamUnavailable",
     "NETWORK_TIMEOUT_SEC",
     "Severity",
     "SUPPORTED_BLOCK_TYPES",

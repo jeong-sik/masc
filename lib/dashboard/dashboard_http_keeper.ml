@@ -712,9 +712,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	            | _ -> `Null
 	          in
 	          let summary =
-	            let compact_ratio_gate = m.compaction.ratio_gate in
-	            let compact_message_gate = m.compaction.message_gate in
-	            let compact_token_gate = m.compaction.token_gate in
               let trust_json =
                 keeper_trust_json ~include_receipt:(not compact) config m
               in
@@ -923,10 +920,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
-              ("compaction_profile", `String m.compaction.profile);
-              ("compaction_ratio_gate", `Float compact_ratio_gate);
-              ("compaction_message_gate", `Int compact_message_gate);
-              ("compaction_token_gate", `Int compact_token_gate);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);

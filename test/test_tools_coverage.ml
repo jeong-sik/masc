@@ -597,8 +597,50 @@ let test_masc_keeper_up_schema () =
           Alcotest.(check bool) "omits allowed_models" false
             (List.mem_assoc "allowed_models" props);
           Alcotest.(check bool) "omits active_model" false
-            (List.mem_assoc "active_model" props)
+            (List.mem_assoc "active_model" props);
+          List.iter
+            (fun key ->
+              Alcotest.(check bool)
+                ("omits removed " ^ key)
+                false
+                (List.mem_assoc key props))
+            [ "compaction_profile"
+            ; "compaction_ratio_gate"
+            ; "compaction_message_gate"
+            ; "compaction_token_gate"
+            ; "compaction_cooldown_sec"
+            ]
       | None -> Alcotest.fail "masc_keeper_up missing properties"
+
+let test_keeper_compaction_config_args_rejected () =
+  let args =
+    `Assoc
+      [ "compaction_profile", `String "balanced"
+      ; "compaction_ratio_gate", `Float 0.85
+      ; "compaction_message_gate", `Int 120
+      ; "compaction_token_gate", `Int 120000
+      ; "compaction_cooldown_sec", `Int 30
+      ]
+  in
+  match
+    Masc.Keeper_config.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_up"
+      args
+  with
+  | Ok () -> Alcotest.fail "removed compaction config args should be rejected"
+  | Error msg ->
+    List.iter
+      (fun key ->
+        Alcotest.(check bool)
+          (key ^ " mentioned")
+          true
+          (contains_substring ~needle:key msg))
+      [ "compaction_profile"
+      ; "compaction_ratio_gate"
+      ; "compaction_message_gate"
+      ; "compaction_token_gate"
+      ; "compaction_cooldown_sec"
+      ]
 
 let test_keeper_sandbox_args_rejected () =
   let args =
@@ -854,6 +896,8 @@ let () =
         test_keeper_goal_arg_rejected;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
+      Alcotest.test_case "keeper-compaction-config-args-rejected" `Quick
+        test_keeper_compaction_config_args_rejected;
       Alcotest.test_case "keeper-sandbox-args-rejected" `Quick
         test_keeper_sandbox_args_rejected;
       Alcotest.test_case "keeper-sandbox-args-dashboard-allowed" `Quick

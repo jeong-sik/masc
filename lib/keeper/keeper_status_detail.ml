@@ -443,10 +443,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let last_compaction_saved_tokens =
            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
          in
-         let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
-           compaction_policy_of_keeper m
-         in
-
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
          let memory_bank_path =
            Keeper_types_support.keeper_memory_bank_path config m.name
@@ -891,13 +887,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
         ] @ runtime_blocker_fields @ attention_fields @ [
-           ("compaction_policy", `Assoc [
-             ("profile", `String m.compaction.profile);
-             ("ratio_gate", `Float compact_ratio_gate);
-             ("message_gate", `Int compact_message_gate);
-             ("token_gate", `Int compact_token_gate);
-             ("token_gate_enabled", `Bool (compact_token_gate > 0));
-           ]);
            ("status_options", `Assoc [
              ("fast", `Bool fast);
              ("include_context", `Bool include_context);

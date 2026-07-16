@@ -28,7 +28,6 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_compaction_ratio_gate : float;
   k_trigger_mode : string;
   k_context_budget : int;
   k_drift_enabled : bool;

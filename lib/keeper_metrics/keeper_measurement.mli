@@ -8,19 +8,6 @@
     Phase 4: pure [capture] function — accepts pre-computed values,
     returns [measurement_snapshot]. All I/O happens upstream in the caller. *)
 
-(** {1 Threshold Parameters} *)
-
-(** Frozen snapshot of all runtime-configurable thresholds.
-    Captured once per decision cycle to eliminate TOCTOU windows
-    where [Runtime_params.get] could return different values. *)
-type threshold_params = {
-  compaction_ratio_gate : float;
-  compaction_message_gate : int;
-  compaction_token_gate : int;
-  compaction_cooldown_sec : int;
-  model_ratio_multiplier : float;
-}
-
 (** {1 Sub-measurements} *)
 
 type context_measurement = {
@@ -53,7 +40,6 @@ type measurement_snapshot = {
   keeper_name : string;
   generation : int;
   timestamp : float;
-  thresholds : threshold_params;
   context : context_measurement;
   timing : timing_measurement;
   failures : failure_measurement;
@@ -69,7 +55,6 @@ val capture :
   keeper_name:string ->
   generation:int ->
   timestamp:float ->
-  thresholds:threshold_params ->
   context_ratio:float ->
   message_count:int ->
   token_count:int ->

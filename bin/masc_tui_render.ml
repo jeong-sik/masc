@@ -927,7 +927,6 @@ let render_keeper_detail (state : state) =
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
     add_row "Last Turn:" (short_ts k.k_last_turn_ts);
     add_row "Compactions:" (string_of_int k.k_compaction_count);
-    add_row "Compaction Gate:" (Printf.sprintf "%.0f%%" (k.k_compaction_ratio_gate *. 100.0));
     add_row "Context Budget:" (string_of_int k.k_context_budget);
     add_empty ();
 

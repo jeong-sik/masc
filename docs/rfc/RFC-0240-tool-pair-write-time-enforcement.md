@@ -233,10 +233,9 @@ than today, where a malformed checkpoint is persisted in repaired
 - This RFC does not change how tool calls are *executed* or how
   `ToolResult` blocks are *built* — only where the pairing invariant is
   checked.
-- This RFC does not address message-content size capping, UTF-8
-  sanitation, or token trimming (`sanitize_checkpoint_messages`,
-  `trim_messages_preserving_pairs`). Those are separate transforms; only
-  the pairing-repair coupling is removed. `trim_messages_preserving_pairs`
+- This RFC does not address explicit MASC LLM compaction or UTF-8 transport
+  validity. Those are separate boundaries; only the pairing-repair coupling
+  is removed. `trim_messages_preserving_pairs`
   (`lib/keeper/keeper_context_tool_message_pairs.mli` **(verified)**)
   already *preserves* pairs rather than repairing, and stays.
 - This RFC does not migrate to a new on-disk checkpoint format; existing

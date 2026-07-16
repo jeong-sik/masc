@@ -15,22 +15,9 @@ open Keeper_types_profile
 module Message_json = Keeper_context_core_message_json
 module Canonical_tool = Agent_sdk.Canonical_tool
 
-(** Hard caps for checkpoint payload hygiene.
-    Message-count capping alone is insufficient when a single message
-    accumulates hundreds of text blocks or multi-MB synthetic context. *)
-let default_max_checkpoint_text_blocks_per_message = 32
-let default_max_checkpoint_text_chars_per_message = 16 * 1024
 let default_max_checkpoint_content_chars_total = 512 * 1024
 let checkpoint_text_cap_marker = "\n[capped]"
-
-(** ToolResult block caps — analogous to text block caps above.
-    Without these, a single message with hundreds of ToolResult blocks
-    (e.g. 280 blocks × 7K chars = 1.95M chars) passes through the
-    sanitizer untouched, causing context window overflow on next load.
-    Values aligned with Claude Code: 200K aggregate, per-result 8K. *)
 let default_max_checkpoint_tool_result_chars = 8_000
-let default_max_checkpoint_tool_results_per_message = 20
-let default_max_checkpoint_tool_result_total_chars = 200_000
 
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)

@@ -14,8 +14,8 @@ let test_get_summary () =
   let name = "test-summary-" ^ string_of_int (Random.int 100000) in
   let s = Health.get_summary ~agent_name:name in
   check string "agent_name matches" name s.agent_name;
-  check int "no recent failures" 0 s.recent_failures;
-  check int "no cooldown" 0 s.cooldown_remaining_sec
+  check int "no failures" 0 s.failure_count;
+  check bool "no success observation" true (Option.is_none s.last_success_at)
 
 (* Test: get_summary shows failures after recording *)
 let test_get_summary_with_failures () =
@@ -26,15 +26,13 @@ let test_get_summary_with_failures () =
   Health.record_failure ~agent_name:name ~reason:"oops2";
   let s = Health.get_summary ~agent_name:name in
   check string "agent_name" name s.agent_name;
-  check bool "has failures" true (s.recent_failures >= 2)
-
-(* Test: health_status_to_string — pure function, no Eio needed *)
-let test_status_to_string () =
-  check string "healthy" "healthy" (Health.health_status_to_string Health.Healthy);
-  check string "recovering" "recovering" (Health.health_status_to_string Health.Recovering);
-  check string "unhealthy" "unhealthy" (Health.health_status_to_string (Health.Unhealthy "x"));
-  (* Issue #8607 *)
-  check string "unknown" "unknown" (Health.health_status_to_string (Health.Unknown "throttled"))
+  check int "all failures counted" 2 s.failure_count;
+  let last_reason =
+    Option.map
+      (fun (failure : Circuit_breaker.failure_record) -> failure.reason)
+      s.last_failure
+  in
+  check (option string) "latest failure observed" (Some "oops2") last_reason
 
 (* Test: summary_to_json produces valid JSON *)
 let test_summary_to_json () =
@@ -49,8 +47,8 @@ let test_summary_to_json () =
   check bool "has agent_name field" true
     (try ignore (Yojson.Safe.Util.member "agent_name" json); true
      with _ -> false);
-  check bool "has status field" true
-    (try ignore (Yojson.Safe.Util.member "status" json); true
+  check bool "has failure_count field" true
+    (try ignore (Yojson.Safe.Util.member "failure_count" json); true
      with _ -> false)
 
 let () =
@@ -59,8 +57,5 @@ let () =
       test_case "get_summary structure" `Quick test_get_summary;
       test_case "get_summary with failures" `Quick test_get_summary_with_failures;
     ];
-    "serialization", [
-      test_case "status_to_string" `Quick test_status_to_string;
-      test_case "summary_to_json" `Quick test_summary_to_json;
-    ];
+    "serialization", [test_case "summary_to_json" `Quick test_summary_to_json];
   ]

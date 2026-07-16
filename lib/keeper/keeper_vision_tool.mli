@@ -98,9 +98,7 @@ val load_artifact
 (** Load image bytes from the content-addressed artifact store. Blocking
     filesystem work is offloaded when the Eio runtime is active. *)
 
-(** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
-    JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
-    placeholder). *)
+(** Typed outcome of {!run_vision}. SSOT rendered by the tool handler as JSON. *)
 type vision_outcome =
   | Vo_ok of string
   | Vo_invalid_request of string

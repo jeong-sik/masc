@@ -485,14 +485,13 @@ let run_keeper_invocation_turn_admitted
        | Error err -> tool_result_error (Agent_sdk.Error.to_string err)
        | Ok profile_defaults ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
-         evict each image to the artifact store + an eager analyze_image reading
-         BEFORE it enters the turn, so the main history stays text-only and
-         RFC-0265 never recomputes required=['image'] from it. No-op for
-         Inherit/Reroute keepers (safe-by-default). *)
+         evict each image to the artifact store before it enters the turn, so
+         the main history stays text-only and RFC-0265 never recomputes
+         required=['image'] from it. The placeholder exposes [analyze_image] to
+         the Keeper; ingestion never starts a provider sub-call. *)
       let user_blocks =
         Option.map
           (Keeper_vision_ingest.evict_blocks
-             ~mode:Keeper_vision_ingest.Eager
              ~policy:meta.multimodal_policy
              ~keeper_name:meta.name)
           user_blocks

@@ -889,29 +889,11 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "policy_rejection")))
 
-let test_eager_eviction_reason_preserves_typed_outcome () =
-  let reason = Vi.eager_read_eviction_reason_of_outcome in
-  assert (reason (Vt.Vo_ok "text") = None);
-  assert (reason Vt.Vo_empty = Some "eager_empty");
-  assert (reason Vt.Vo_truncated = Some "eager_truncated");
-  assert (reason Vt.Vo_timeout = Some "eager_timeout");
-  assert (reason (Vt.Vo_no_runtime "missing") = Some "eager_no_runtime");
-  assert (reason (Vt.Vo_invalid_request "bad") = Some "eager_invalid_request");
-  assert
-    (reason (Vt.Vo_invalid_structured_response "bad json")
-     = Some "eager_invalid_structured_response");
-  assert
-    (reason
-       (Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; detail = "boom" })
-     = Some "eager_provider_error")
-
-let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
+let test_delegate_eviction_stores_image_and_removes_inline_block () =
   with_temp_base (fun _ ->
     let keeper_name = "vision-ingest-delegate" in
     let bytes = "\x89PNG\r\n\x1a\ninline-image" in
-    let metric_labels =
-      [ "mode", "eager"; "result", "ok"; "reason", "stored_unread" ]
-    in
+    let metric_labels = [ "result", "ok"; "reason", "stored" ] in
     let before =
       metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
     in
@@ -927,7 +909,6 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
     in
     match
       Vi.evict_blocks
-        ~mode:Vi.Eager
         ~policy:Masc.Keeper_types_profile.Mm_delegate
         ~keeper_name
         blocks
@@ -938,7 +919,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
       ] ->
       assert (contains_substring placeholder "[image artifact:");
       assert (contains_substring placeholder "media_type:image/png");
-      assert (contains_substring placeholder "not yet read");
+      assert (contains_substring placeholder "awaiting analyze_image tool call");
       let handle = artifact_handle_of_placeholder placeholder in
       (match
          Store.load
@@ -948,7 +929,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
        | Ok stored -> assert (String.equal stored bytes)
        | Error msg -> failwith msg);
       assert_metric_increment
-        "vision_ingest stored_unread"
+        "vision_ingest stored"
         before
         (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
     | _ -> failwith "delegate eviction should replace the image with text")
@@ -957,15 +938,12 @@ let test_delegate_eviction_rejects_invalid_media_type_before_store () =
   with_temp_base (fun _ ->
     let keeper_name = "vision-ingest-invalid-media" in
     let bytes = "\x89PNG\r\n\x1a\ninline-image" in
-    let metric_labels =
-      [ "mode", "store_only"; "result", "error"; "reason", "invalid_media_type" ]
-    in
+    let metric_labels = [ "result", "error"; "reason", "invalid_media_type" ] in
     let before =
       metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
     in
     match
       Vi.evict_blocks
-        ~mode:Vi.Store_only
         ~policy:Masc.Keeper_types_profile.Mm_delegate
         ~keeper_name
         [ Agent_sdk.Types.Image
@@ -990,7 +968,6 @@ let test_delegate_eviction_rejects_oversize_before_store () =
       let bytes = "\x89PNG\r\n\x1a\ninline-image" in
       match
         Vi.evict_blocks
-          ~mode:Vi.Store_only
           ~policy:Masc.Keeper_types_profile.Mm_delegate
           ~keeper_name
           [ Agent_sdk.Types.Image
@@ -1007,7 +984,6 @@ let test_delegate_eviction_rejects_oversize_before_store () =
 let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
   match
     Vi.evict_blocks
-      ~mode:Vi.Store_only
       ~policy:Masc.Keeper_types_profile.Mm_delegate
       ~keeper_name:"vision-ingest-bad-base64"
       [ Agent_sdk.Types.Image
@@ -1027,15 +1003,12 @@ let test_delegate_eviction_rejects_non_base64_source_before_store () =
   List.iter
     (fun source_type ->
       let source_name = Agent_sdk.Types.media_source_kind_to_string source_type in
-      let metric_labels =
-        [ "mode", "store_only"; "result", "error"; "reason", "invalid_source_type" ]
-      in
+      let metric_labels = [ "result", "error"; "reason", "invalid_source_type" ] in
       let before =
         metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
       in
       match
         Vi.evict_blocks
-          ~mode:Vi.Store_only
           ~policy:Masc.Keeper_types_profile.Mm_delegate
           ~keeper_name:("vision-ingest-source-" ^ source_name)
           [ Agent_sdk.Types.Image
@@ -1067,7 +1040,6 @@ let test_non_delegate_eviction_preserves_inline_image () =
   in
   match
     Vi.evict_blocks
-      ~mode:Vi.Eager
       ~policy:Masc.Keeper_types_profile.Mm_inherit
       ~keeper_name:"vision-ingest-inherit"
       blocks
@@ -1097,7 +1069,6 @@ let test_evicted_history_has_no_image_modality () =
     assert (List.mem "image" (modalities [ msg ]));
     let evicted =
       Vi.evict_message
-        ~mode:Vi.Store_only
         ~policy:Masc.Keeper_types_profile.Mm_delegate
         ~keeper_name
         msg
@@ -1105,7 +1076,6 @@ let test_evicted_history_has_no_image_modality () =
     assert (not (List.mem "image" (modalities [ evicted ])));
     let evicted2 =
       Vi.evict_message
-        ~mode:Vi.Store_only
         ~policy:Masc.Keeper_types_profile.Mm_delegate
         ~keeper_name
         evicted
@@ -1139,9 +1109,8 @@ let () =
     test_retryable_provider_error_tries_next_runtime ();
     test_deadline_exhaustion_preserves_provider_error ();
     test_non_retryable_provider_error_stops_without_trying_next_runtime ();
-    test_accept_rejected_is_policy_rejection_without_failover ();
-    test_eager_eviction_reason_preserves_typed_outcome ());
-  test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
+    test_accept_rejected_is_policy_rejection_without_failover ());
+  test_delegate_eviction_stores_image_and_removes_inline_block ();
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();
   test_delegate_eviction_bad_base64_surfaces_redacted_text_error ();

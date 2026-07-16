@@ -79,7 +79,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                     { Fusion_types.failed_role = Refine_pass
                     ; failure
                     ; usage = u2
-                    ; elapsed_s = 0.0
+                    ; elapsed_s = None
                     }
                 ] )
           in
@@ -377,7 +377,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                        { Fusion_types.failed_role = Single
                        ; failure
                        ; usage = u
-                       ; elapsed_s = 0.0
+                       ; elapsed_s = None
                        }
                    ] ))
             | Fusion_types.Refine ->
@@ -388,7 +388,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                        { Fusion_types.failed_role = Single
                        ; failure
                        ; usage = u
-                       ; elapsed_s = 0.0
+                       ; elapsed_s = None
                        }
                    ] )
                | Ok pair -> refine_over pair)
@@ -400,7 +400,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                        { Fusion_types.failed_role = Single
                        ; failure
                        ; usage = u
-                       ; elapsed_s = 0.0
+                       ; elapsed_s = None
                        }
                    ] )
                | Ok ((s1, u1) as pair) ->

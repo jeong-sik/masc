@@ -1346,7 +1346,7 @@ let test_judge_outcome_roundtrip () =
         { failed_role = Meta
         ; failure = Provider_error "boom"
         ; usage = { input_tokens = 9; output_tokens = 10 }
-        ; elapsed_s = 0.0
+        ; elapsed_s = None
         }
     ]
   in
@@ -1550,7 +1550,7 @@ let test_judge_error_node_timed_out () =
       { Fusion_types.failed_role = First "j"
       ; failure = Fusion_types.Timeout
       ; usage = Fusion_types.zero_usage
-      ; elapsed_s = 5.0
+      ; elapsed_s = Some 5.0
       }
   in
   let budget_node =
@@ -1559,7 +1559,7 @@ let test_judge_error_node_timed_out () =
       ; failure =
           Fusion_types.Budget_exceeded "judge j skipped: would exceed wave budget"
       ; usage = Fusion_types.zero_usage
-      ; elapsed_s = 3.0
+      ; elapsed_s = None
       }
   in
   match
@@ -1571,10 +1571,12 @@ let test_judge_error_node_timed_out () =
   | Ok (Judge_failed n1), Ok (Judge_failed n2) ->
     Alcotest.(check bool) "timeout node roundtrips timed_out" true
       (Fusion_types.judge_failure_is_timeout n1.failure);
-    Alcotest.(check (float 0.001)) "timeout node roundtrips elapsed_s" 5.0 n1.elapsed_s;
+    Alcotest.(check (option (float 0.001))) "timeout node roundtrips elapsed_s"
+      (Some 5.0) n1.elapsed_s;
     Alcotest.(check bool) "budget node roundtrips timed_out" false
       (Fusion_types.judge_failure_is_timeout n2.failure);
-    Alcotest.(check (float 0.001)) "budget node roundtrips elapsed_s" 3.0 n2.elapsed_s
+    Alcotest.(check (option (float 0.001))) "unavailable elapsed roundtrips"
+      None n2.elapsed_s
   | _ -> Alcotest.fail "expected Judge_failed roundtrip"
 
 let test_validated_bad_meta_timeout () =

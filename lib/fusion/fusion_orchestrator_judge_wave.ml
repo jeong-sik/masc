@@ -4,7 +4,7 @@ type judge_run =
   * ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result
-  * float
+  * float option
   * bool
 
 type clock =
@@ -28,8 +28,8 @@ let make_runtime_clock () =
 
 let elapsed_since_t0 clock =
   match clock.now_opt (), clock.t0 with
-  | Some now, Some t0 -> now -. t0
-  | _ -> 0.0
+  | Some now, Some t0 -> Some (now -. t0)
+  | _ -> None
 ;;
 
 let run_first_judge

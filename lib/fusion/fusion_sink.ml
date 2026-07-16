@@ -248,7 +248,10 @@ let judge_node_meta (o : Fusion_types.judge_outcome) : Yojson.Safe.t =
          ; ("failure_code", `String (Fusion_types.judge_failure_tag failure))
          ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
          ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
-         ; ("elapsed_s", `Float elapsed_s)
+         ; ( "elapsed_s"
+           , match elapsed_s with
+             | Some value -> `Float value
+             | None -> `Null )
          ; ("timed_out", `Bool timed_out)
          ])
 

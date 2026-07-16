@@ -198,7 +198,23 @@ type resolve_error =
       ; storage_error : storage_error
       }
 
+type auto_judge_delivery_requeue_error =
+  | Requeue_delivery_not_found of string
+  | Requeue_delivery_not_auto_judge of string
+  | Requeue_delivery_summary_not_decisive of string
+  | Requeue_delivery_pending_conflict of string
+  | Requeue_delivery_persistence_failed of storage_error
+
 val resolve_error_to_string : resolve_error -> string
+val auto_judge_delivery_requeue_error_to_string :
+  auto_judge_delivery_requeue_error -> string
+
+(** After origin-lane delivery fails, atomically return an Auto Judge decision
+    to the durable pending queue with its decisive summary intact. Human and
+    explicit Always Allowed resolutions remain delivery journals and are never
+    silently rewritten into model-owned work. *)
+val requeue_failed_auto_judge_delivery :
+  id:string -> (unit, auto_judge_delivery_requeue_error) result
 
 (** Commit a resolution, optionally persist an exact Always Allowed rule for
     [Decision.Approve], then wake only the Keeper captured by the pending entry. *)

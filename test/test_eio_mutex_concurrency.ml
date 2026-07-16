@@ -51,24 +51,19 @@ let test_rate_limit_independent_keys () =
 
 (** {1 Circuit Breaker Concurrency} *)
 
-let test_circuit_breaker_concurrent () =
+let test_failure_observation_concurrent () =
   let cb = CB.create ~failure_threshold:50 ~cooldown:1.0 () in
-  (* Concurrent failure recording + status checking *)
+  (* Concurrent failure recording + observation reads. *)
   Eio.Fiber.all [
     (fun () -> for _ = 1 to 30 do
       CB.record_failure cb ~agent_id:"test-agent" ~reason:"concurrent-test"
     done);
     (fun () -> for _ = 1 to 30 do
-      ignore (CB.check cb ~agent_id:"test-agent")
-    done);
-    (fun () -> for _ = 1 to 30 do
       let _s = CB.get_status cb ~agent_id:"test-agent" in ()
     done);
   ];
-  (* State must be one of the valid states *)
   let status = CB.get_status cb ~agent_id:"test-agent" in
-  check bool "state is valid"
-    true (List.mem status.state_name ["closed"; "open"; "half_open"])
+  check int "all failures observed" 30 status.recent_failures
 
 let test_circuit_breaker_multi_agent () =
   let cb = CB.create () in
@@ -77,7 +72,6 @@ let test_circuit_breaker_multi_agent () =
     let agent_id = Printf.sprintf "agent-%d" i in
     for _ = 1 to 20 do
       CB.record_failure cb ~agent_id ~reason:"test";
-      ignore (CB.check cb ~agent_id)
     done
   ));
   let all = CB.list_all_breakers cb in
@@ -134,7 +128,8 @@ let () =
       test_case "concurrent independent keys" `Quick test_rate_limit_independent_keys;
     ];
     "Circuit Breaker", [
-      test_case "concurrent failure/check" `Quick test_circuit_breaker_concurrent;
+      test_case "concurrent failure observation" `Quick
+        test_failure_observation_concurrent;
       test_case "concurrent multi-agent" `Quick test_circuit_breaker_multi_agent;
     ];
     "Otel_metric_store", [

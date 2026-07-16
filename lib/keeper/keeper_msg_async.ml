@@ -65,6 +65,33 @@ type load_result =
   | Unreadable of string
   | Rejected of access_rejection
 
+type active_inventory_store_error =
+  | Inventory_access_rejected of access_rejection
+  | Inventory_directory_rejected of Fs_compat.owned_directory_chain_rejection
+  | Inventory_directory_read_failed of
+      { path : string
+      ; reason : string
+      }
+
+type active_inventory_record_error_kind =
+  | Invalid_record_name
+  | Record_missing
+  | Record_not_regular of Unix.file_kind
+  | Record_unreadable of string
+  | Record_inspection_failed of { reason : string }
+  | Record_terminal_status of request_status
+
+type active_inventory_record_error =
+  { path : string
+  ; request_id : string option
+  ; kind : active_inventory_record_error_kind
+  }
+
+type durable_active_inventory =
+  { entries : entry list
+  ; record_errors : active_inventory_record_error list
+  }
+
 type durable_terminal_proof = { terminal_entry : entry }
 
 type canonical_terminal_error =
@@ -1006,7 +1033,12 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     }
 ;;
 
-let load_record_at_path ~base_path ~request_id path =
+type record_file_load_result =
+  | Record_file_found of entry
+  | Record_file_absent
+  | Record_file_unreadable of string
+
+let load_record_file_at_path ~base_path ~request_id path =
   let decoded =
     match Fs_compat.load_owned_regular_file ~ownership_root:base_path path with
     | Ok None -> None
@@ -1023,15 +1055,22 @@ let load_record_at_path ~base_path ~request_id path =
          | exn -> Error (Printexc.to_string exn))
   in
   match decoded with
-  | None -> Absent
-  | Some (Ok entry) -> Found entry
+  | None -> Record_file_absent
+  | Some (Ok entry) -> Record_file_found entry
   | Some (Error reason) ->
     Log.Keeper.warn
       "keeper_msg_async: load failed request_id=%s path=%s error=%s"
       request_id
       path
       reason;
-    Unreadable reason
+    Record_file_unreadable reason
+;;
+
+let load_record_at_path ~base_path ~request_id path =
+  match load_record_file_at_path ~base_path ~request_id path with
+  | Record_file_found entry -> Found entry
+  | Record_file_absent -> Absent
+  | Record_file_unreadable reason -> Unreadable reason
 ;;
 
 type record_location =
@@ -1287,6 +1326,118 @@ let request_id_of_record_filename name =
   if has_suffix ~suffix name
   then Some (String.sub name 0 (String.length name - String.length suffix))
   else None
+;;
+
+let active_inventory_record_error ?request_id ~path kind =
+  { path; request_id; kind }
+;;
+
+let read_active_inventory_record ~base_path ~dir name =
+  let path = Filename.concat dir name in
+  match request_id_of_record_filename name with
+  | None ->
+    Error (active_inventory_record_error ~path Invalid_record_name)
+  | Some request_id when not (is_safe_request_id request_id) ->
+    Error
+      (active_inventory_record_error
+         ~request_id
+         ~path
+         Invalid_record_name)
+  | Some request_id ->
+    (try
+       match Unix.lstat path with
+       | { Unix.st_kind = Unix.S_REG; _ } ->
+         (match load_record_file_at_path ~base_path ~request_id path with
+          | Record_file_found
+              ({ status = (Queued | Running | Cancelling _); _ } as entry) ->
+            Ok entry
+          | Record_file_found entry ->
+            Error
+              (active_inventory_record_error
+                 ~request_id
+                 ~path
+                 (Record_terminal_status entry.status))
+          | Record_file_absent ->
+            Error
+              (active_inventory_record_error
+                 ~request_id
+                 ~path
+                 Record_missing)
+          | Record_file_unreadable reason ->
+            Error
+              (active_inventory_record_error
+                 ~request_id
+                 ~path
+                 (Record_unreadable reason)))
+       | { Unix.st_kind; _ } ->
+         Error
+           (active_inventory_record_error
+              ~request_id
+              ~path
+              (Record_not_regular st_kind))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | Unix.Unix_error (Unix.ENOENT, _, _) ->
+       Error
+         (active_inventory_record_error
+            ~request_id
+            ~path
+            Record_missing)
+     | exn ->
+       Error
+         (active_inventory_record_error
+            ~request_id
+            ~path
+            (Record_inspection_failed { reason = Printexc.to_string exn })))
+;;
+
+let compare_active_inventory_entry left right =
+  let by_submitted_at = Float.compare left.submitted_at right.submitted_at in
+  if by_submitted_at <> 0
+  then by_submitted_at
+  else String.compare left.request_id right.request_id
+;;
+
+let compare_active_inventory_record_error
+    (left : active_inventory_record_error)
+    (right : active_inventory_record_error) =
+  let by_path = String.compare left.path right.path in
+  if by_path <> 0
+  then by_path
+  else Option.compare String.compare left.request_id right.request_id
+;;
+
+let read_durable_active_inventory ~base_path =
+  match canonical_base_path base_path with
+  | Error rejection -> Error (Inventory_access_rejected rejection)
+  | Ok base_path ->
+    let dir = active_request_dir ~base_path in
+    (match Fs_compat.inspect_owned_directory_chain ~ownership_root:base_path dir with
+     | Error rejection -> Error (Inventory_directory_rejected rejection)
+     | Ok Fs_compat.Owned_directory_missing ->
+       Ok { entries = []; record_errors = [] }
+     | Ok (Fs_compat.Owned_directory _) ->
+       (try
+          let entries, record_errors =
+            Fs_compat.read_dir dir
+            |> List.fold_left
+                 (fun (entries, record_errors) name ->
+                    match read_active_inventory_record ~base_path ~dir name with
+                    | Ok entry -> entry :: entries, record_errors
+                    | Error error -> entries, error :: record_errors)
+                 ([], [])
+          in
+          Ok
+            { entries = List.sort compare_active_inventory_entry entries
+            ; record_errors =
+                List.sort compare_active_inventory_record_error record_errors
+            }
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Error
+            (Inventory_directory_read_failed
+               { path = dir; reason = Printexc.to_string exn })))
 ;;
 
 let rollback_rejected_record_file_unlocked ~ops ~ownership_root path =

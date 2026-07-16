@@ -1,5 +1,6 @@
 module U = Masc.Keeper_compaction_unit
 module E = Masc.Keeper_compaction_eligible_history
+module P = Masc.Keeper_compaction_eligible_plan
 module T = Agent_sdk.Types
 
 let message role content : T.message =
@@ -275,6 +276,104 @@ let test_identical_summary_is_no_compaction () =
   | Ok (E.No_compaction messages) -> check_exact "identical summary" [ original ] messages
   | _ -> Alcotest.fail "identical summary reported a false compaction"
 
+let plan_decision index action summary =
+  `Assoc
+    [ "unit_index", `Int index
+    ; "action", `String action
+    ; "summary", summary
+    ]
+
+let plan decisions = `Assoc [ "decisions", `List decisions ]
+
+let test_eligible_plan_excludes_protected_history () =
+  let source =
+    E.of_messages
+      [ text T.System "system"
+      ; message T.User [ T.Text "first"; T.Text "second" ]
+      ; { (text T.Assistant "provider") with metadata = [ "id", `String "x" ] }
+      ]
+    |> require_ok
+  in
+  let expected =
+    `List
+      [ `Assoc
+          [ "unit_index", `Int 1
+          ; "role", `String "user"
+          ; "text_blocks", `List [ `String "first"; `String "second" ]
+          ]
+      ]
+  in
+  Alcotest.(check string)
+    "only exact eligible input"
+    (Yojson.Safe.to_string expected)
+    (Yojson.Safe.to_string (P.input_json source))
+
+let test_eligible_plan_decodes_per_unit_actions () =
+  let user = text T.User "user" in
+  let assistant = text T.Assistant "assistant" in
+  let source = E.of_messages [ user; assistant ] |> require_ok in
+  let json =
+    plan
+      [ plan_decision 0 "summarize" (`String "user summary")
+      ; plan_decision 1 "drop" `Null
+      ]
+  in
+  match P.decode ~source json with
+  | Error _ -> Alcotest.fail "valid eligible plan was rejected"
+  | Ok decoded ->
+    (match P.apply ~source decoded with
+     | Ok (E.Compacted messages) ->
+       check_exact
+         "per-unit role-preserving result"
+         [ { user with content = [ T.Text "user summary" ] } ]
+         messages
+     | _ -> Alcotest.fail "valid eligible plan did not compact")
+
+let test_eligible_plan_keeps_semantic_choices_open () =
+  let source = E.of_messages [ text T.User "one" ] |> require_ok in
+  List.iter
+    (fun json ->
+       match P.decode ~source json with
+       | Ok _ -> ()
+       | Error _ -> Alcotest.fail "codec imposed a semantic admission policy")
+    [ plan [ plan_decision 0 "keep" `Null ]
+    ; plan [ plan_decision 0 "drop" `Null ]
+    ]
+
+let test_eligible_plan_rejects_structural_ambiguity () =
+  let source =
+    E.of_messages [ text T.User "one"; text T.Assistant "two" ] |> require_ok
+  in
+  (match P.decode ~source (plan [ plan_decision 0 "keep" `Null ]) with
+   | Error (P.Invalid_binding (E.Missing_decisions [ 1 ])) -> ()
+   | _ -> Alcotest.fail "missing unit decision was not explicit");
+  (match
+     P.decode
+       ~source
+       (plan
+          [ plan_decision 0 "keep" `Null
+          ; plan_decision 0 "drop" `Null
+          ; plan_decision 1 "keep" `Null
+          ])
+   with
+   | Error (P.Invalid_binding (E.Duplicate_decision 0)) -> ()
+   | _ -> Alcotest.fail "duplicate unit decision was not explicit");
+  match P.decode ~source (plan [ plan_decision 9 "keep" `Null ]) with
+  | Error (P.Invalid_decision { position = 0; issue = P.Unknown_unit 9 }) -> ()
+  | _ -> Alcotest.fail "unknown eligible unit was not explicit"
+
+let test_eligible_plan_summary_contract_is_exact () =
+  let source = E.of_messages [ text T.User "one" ] |> require_ok in
+  (match P.decode ~source (plan [ plan_decision 0 "summarize" `Null ]) with
+   | Error (P.Invalid_decision { issue = P.Missing_summary; _ }) -> ()
+   | _ -> Alcotest.fail "missing summary was accepted");
+  (match P.decode ~source (plan [ plan_decision 0 "keep" (`String "unused") ]) with
+   | Error (P.Invalid_decision { issue = P.Unexpected_summary; _ }) -> ()
+   | _ -> Alcotest.fail "ambiguous keep summary was accepted");
+  match P.decode ~source (plan [ plan_decision 0 "summarize" (`String "") ]) with
+  | Error (P.Invalid_decision { issue = P.Empty_summary; _ }) -> ()
+  | _ -> Alcotest.fail "empty summary was accepted"
+
 let () =
   Alcotest.run "keeper_compaction_unit"
     [ ( "partition"
@@ -311,5 +410,17 @@ let () =
             test_eligible_history_preserves_text_block_boundaries
         ; Alcotest.test_case "identical summary is no-compaction" `Quick
             test_identical_summary_is_no_compaction
+        ] )
+    ; ( "eligible_plan"
+      , [ Alcotest.test_case "protected history excluded" `Quick
+            test_eligible_plan_excludes_protected_history
+        ; Alcotest.test_case "per-unit actions" `Quick
+            test_eligible_plan_decodes_per_unit_actions
+        ; Alcotest.test_case "semantic choices remain open" `Quick
+            test_eligible_plan_keeps_semantic_choices_open
+        ; Alcotest.test_case "structural ambiguity rejected" `Quick
+            test_eligible_plan_rejects_structural_ambiguity
+        ; Alcotest.test_case "summary contract exact" `Quick
+            test_eligible_plan_summary_contract_is_exact
         ] )
     ]

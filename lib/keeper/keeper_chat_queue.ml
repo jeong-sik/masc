@@ -1250,13 +1250,33 @@ let sqlite_expect_done db stmt ~operation =
    propagation. [Sqlite3.finalize] is a non-suspending C call, so the
    catch-all cannot swallow Cancelled itself. *)
 let sqlite_finalize db stmt =
-  match Sqlite3.finalize stmt with
-  | rc ->
-    if Sqlite3.Rc.is_success rc
-    then Ok ()
-    else Error (sqlite_error ~operation:"statement finalize" db rc)
-  | exception exn ->
-    Error ("SQLite statement finalize raised: " ^ Printexc.to_string exn)
+  let result =
+    match Sqlite3.finalize stmt with
+    | rc ->
+      if Sqlite3.Rc.is_success rc
+      then Ok ()
+      else Error (sqlite_error ~operation:"statement finalize" db rc)
+    | exception exn ->
+      Error ("SQLite statement finalize raised: " ^ Printexc.to_string exn)
+  in
+  (* GC-liveness pin. The sqlite3 binding's [caml_sqlite3_stmt_finalize]
+     releases the OCaml runtime lock around [sqlite3_finalize] and only
+     nulls the wrap's statement pointer after re-acquiring it
+     (sqlite3_stubs.c, sqlite3.5.4.1). The call above is otherwise the
+     last use of [stmt], so the compiler drops it from the frame's GC
+     map; a GC from another domain during that blocking window can then
+     collect the wrap and run [stmt_wrap_finalize_gc], which calls
+     [sqlite3_finalize] on the same (already freed) pointer —
+     use-after-free, observed as SIGSEGV `checkMutexEnter <-
+     sqlite3_finalize <- stmt_wrap_finalize_gc` in the 2026-07-15 23:32
+     and 2026-07-17 01:31 crash reports. Keeping [stmt] reachable past
+     the call closes the window — [Sys.opaque_identity] is documented to
+     "prevent the argument from being garbage collected until the
+     location where the call would have occurred" (sys.mli). The true
+     fix (null the pointer before releasing the runtime) belongs
+     upstream in the binding. *)
+  ignore (Sys.opaque_identity stmt) (* See GC-liveness pin note above. *);
+  result
 
 let combine_cleanup_error primary cleanup =
   match primary, cleanup with
@@ -1479,6 +1499,12 @@ let close_database handle =
       else Error "SQLite database close reported a busy handle"
     with exn -> Error ("SQLite database close failed: " ^ Printexc.to_string exn)
   in
+  (* Same GC-liveness pin as [sqlite_finalize]: [caml_sqlite3_close]
+     also releases the runtime around [sqlite3_close] and nulls the
+     wrap's pointer only afterwards. [handle] happens to stay reachable
+     through [identity_result] below today; pin it explicitly so the
+     safety does not depend on that incidental use. *)
+  ignore (Sys.opaque_identity handle.db) (* See GC-liveness pin note above. *);
   let identity_result =
     let* () = validate_owned_parent ~ownership_root:handle.ownership_root handle.path in
     match inspect_regular_or_absent handle.path with

@@ -9,7 +9,7 @@
     runtime settings group, see {!surface}):
 
     - [board_policy] — message retention cap
-    - [inference_config] — default model + timeout
+    - [inference_config] — default model
     - [cost_policy] — per-session cost reporting threshold
     - [keeper_lifecycle] — heartbeat / supervisor / restart limits
     - [keeper_handoff] — handoff threshold / cooldown / pressure
@@ -25,7 +25,7 @@
     \[deserialize_string], \[deserialize_bool].  Plus 25+
     keeper.turn / keeper.compaction / keeper.proactive /
     keeper.rule param handles + \[message_max_count] +
-    \[_cost_max_session_usd] + \[inference_timeout] are
+    \[_cost_max_session_usd] are
     intentionally unexported — these are reachable only via
     {!Runtime_params.get_by_key} (runtime settings UI) and are pinned
     in the {!surfaces} catalog by string key. *)

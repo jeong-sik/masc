@@ -150,7 +150,6 @@
   test_multi_workspace
   test_worktree_detection
   test_mention
-  test_mention_dedup
   test_heartbeat_qw
   test_sse_qw
   test_sse_stream
@@ -469,7 +468,6 @@
   test_multi_workspace
   test_worktree_detection
   test_mention
-  test_mention_dedup
   test_heartbeat_qw
   test_sse_qw
   test_sse_stream
@@ -1890,16 +1888,7 @@
 
 (include stanzas/test_keeper_personality_round_trip.inc)
 
-; WORKAROUND: production-blocking, deprecated path — #24598 merged with Build
-; SKIPPED and its new behavioral test never compiled against real main
-; (Masc.Keeper_event_queue moved to masc.keeper_runtime by #24598 itself,
-; meta.runtime field disambiguation, and Tool_result.result shape from #24749).
-; Quarantined so main compiles again; the module stays in-tree for the owner
-; to repair. 근본 해결: #24598 owner reconciles the test with the landed
-; Tool_result/heartbeat_event_intake APIs and restores this include.
-; removal target: owner follow-up PR restoring the include (tracked in the
-; fix PR body).
-; (include stanzas/test_keeper_post_turn_wirein_order.inc)
+(include stanzas/test_keeper_post_turn_wirein_order.inc)
 
 (include stanzas/test_keeper_receipt_authoritative.inc)
 

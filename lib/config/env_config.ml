@@ -23,8 +23,7 @@ let print_summary () =
     Env_config_runtime.Tempo.min_interval_seconds
     Env_config_runtime.Tempo.max_interval_seconds
     Env_config_runtime.Tempo.default_interval_seconds;
-  Log.Env.info "Inference: timeout=%.0fs cache_enabled=%b ttl=%ds max_prompt_chars=%d max_temp=%.2f l1_max=%d spawn_policy=%s"
-    Env_config_runtime_services.Inference.timeout_seconds
+  Log.Env.info "Inference: cache_enabled=%b ttl=%ds max_prompt_chars=%d max_temp=%.2f l1_max=%d spawn_policy=%s"
     Env_config_runtime_services.Inference.cache_enabled
     Env_config_runtime_services.Inference.cache_ttl_seconds
     Env_config_runtime_services.Inference.cache_max_prompt_chars

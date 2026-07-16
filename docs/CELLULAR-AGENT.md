@@ -65,7 +65,6 @@ The record is meant to preserve execution context, not to reproduce the full ori
 | Reason | Description | Example |
 |--------|-------------|---------|
 | `ContextLimit(pct)` | context usage crossed a threshold | `context_limit_85` |
-| `Timeout(secs)` | runtime budget exhausted | `timeout_300s` |
 | `Explicit` | user or agent requested handoff | `explicit` |
 | `FatalError(msg)` | unrecoverable local failure | `error: API rate limit` |
 | `TaskComplete` | work finished and a checkpoint is still useful | `task_complete` |

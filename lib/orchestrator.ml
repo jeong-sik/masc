@@ -43,11 +43,9 @@ let should_orchestrate ~min_priority workspace_config =
         task.task_status = Masc_domain.Todo && task.priority <= min_priority
       ) backlog.tasks in
 
-      (* Get active (non-zombie) agents *)
-      let agents = Workspace.get_agents_raw workspace_config in
-      let active_agents = List.filter (fun (agent: Masc_domain.agent) ->
-        not (Workspace_resilience.Zombie.is_zombie agent.last_seen)
-      ) agents in
+      (* Active membership is declared by workspace/session state. [last_seen]
+         remains telemetry and cannot trigger orchestration by elapsed time. *)
+      let active_agents = Workspace.get_active_agents workspace_config in
 
       (* Need orchestration if: important tasks exist AND no active agents *)
       let needs_orchestration =
@@ -135,15 +133,11 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~workspac
 
 (** RFC-0294 PR-4: single-owner orphan-task surfacer.
 
-    R1g (RFC-0294) removed [audit_orphan_tasks] from the keeper wake-driver, so
-    orphaned tasks would become silently invisible without an independent
-    observation path (broken-but-visible regression). This refreshes
-    [masc_orphan_tasks] (gauge, labeled by status_class) each pulse beat from the
-    same audit, independent of the keeper actor. It is an alertable metric, not
-    an actor wake: if the reaper/pulse itself stalls (the 2026-06-21/22
-    reaper-not-running incident) the gauge goes stale, which is itself alertable.
-    Every class in [Workspace.orphan_status_classes] is emitted (0 when empty) so
-    a cleared class resets rather than leaving a stale value. *)
+    Refreshes [masc_orphan_tasks] (gauge, labeled by status_class) each pulse
+    beat from the explicit workspace membership audit, independent of the
+    keeper actor. It is an alertable metric, not lifecycle authority. Every
+    class in [Workspace.orphan_status_classes] is emitted (0 when empty) so a
+    cleared class resets rather than leaving a stale value. *)
 let surface_orphan_tasks_gauge workspace_config =
   let counts =
     Workspace.orphan_counts_by_status_class

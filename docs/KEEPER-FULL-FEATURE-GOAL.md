@@ -10,6 +10,9 @@ that an open PR, green unit test, or private foundation is already live. Current
 commits, PR dependencies, CI, and purge targets belong in companion execution
 documents and must be refreshed from their authoritative sources.
 
+Current implementation and PR reachability:
+[`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md).
+
 ## 1. Copyable Goal
 
 > Rebuild MASC so every Keeper remains an independently progressing durable

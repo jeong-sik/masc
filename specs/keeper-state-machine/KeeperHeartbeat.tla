@@ -6,7 +6,8 @@
 \* [interruptible_sleep] whose [Atomic.compare_and_set wakeup true false]
 \* IS the HeartbeatTick action), [keeper_heartbeat_loop.ml]
 \* ([run_heartbeat_loop] turns every [Woken] sleep outcome into the next
-\* cycle without an intervening busy/idle/visibility policy), and
+\* cycle and [next_turn_origin] separately represents internal [LaneDrain]
+\* continuation without consuming the wakeup atomic), and
 \* [keeper_keepalive.ml] ([wakeup_keeper_by_agent_name] and
 \* [Atomic.set entry.fiber_wakeup true] on the WakeupSignal side; it
 \* re-exports [Keeper_heartbeat_loop] via [include]).
@@ -99,6 +100,13 @@ HeartbeatTick ==
     /\ turn_state' = "running"
     /\ unserved_signals' = unserved_signals - 1
 
+\* OCaml's exact ready probe is abstracted out: LaneDrain over-approximates
+\* internal transitions and proves wake safety only, not queue liveness.
+LaneDrain ==
+    /\ turn_state = "idle"
+    /\ turn_state' = "running"
+    /\ UNCHANGED << wakeup_signaled, unserved_signals >>
+
 \* The turn finishes; keeper returns to idle, ready for the next
 \* heartbeat poll.  The wakeup atomic is unaffected here.
 TurnComplete ==
@@ -128,7 +136,7 @@ MissedWakeup ==
 
 \* ── Spec wirings ───────────────────────────────────────────────
 
-Next      == WakeupSignal \/ HeartbeatTick \/ TurnComplete \/ Done
+Next      == WakeupSignal \/ HeartbeatTick \/ LaneDrain \/ TurnComplete \/ Done
 NextBuggy == Next \/ MissedWakeup
 
 Spec      == Init /\ [][Next]_vars

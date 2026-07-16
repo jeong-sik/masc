@@ -388,11 +388,13 @@ type turn_attempt_state = {
 type wake_reason =
   | Proactive_tick
   | Woken of Keeper_event_queue.stimulus_payload list
+  | Ready_queue_followup of Keeper_event_queue.stimulus_payload list
 
 val wake_reason_label : wake_reason -> string
-(** Stable low-cardinality label: ["proactive_tick"] or ["woken"]. Use
-    {!Keeper_event_queue.payload_kind_label} on the carried stimuli (for
-    [Woken]) to surface the finer-grained wake cause. *)
+(** Stable low-cardinality provenance label. [Woken] is reserved for an
+    external wakeup CAS; [Ready_queue_followup] is an internal continuation of
+    the same Keeper lane. Use {!Keeper_event_queue.payload_kind_label} on the
+    carried stimuli to surface the finer-grained cause. *)
 
 type turn_measurement = {
   tm_captured_at : float;

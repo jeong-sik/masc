@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-07-12T22:38:15Z (HEAD: dc2ade608c)
+Generated: 2026-07-16T21:56:24Z (HEAD: 81a189fd50)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -80,7 +80,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} | 7077b7639f77 |
 | KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | eb079ef5c342 |
 | KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | cf9b1da37ed0 |
-| KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | d143b5beae39 |
+| KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 1173162cb8cd |
 | KeeperHitlDeferred.tla | KeeperHitlDeferred | manual | 4 | 3 | clean={inv:Safety, prop:UnrelatedLaneKeepsProgressing, prop:ResolutionEventuallyConsumed} blocking-buggy={inv:DeferredImmediately} consume-buggy={inv:ResolutionConsumedAtMostOnce} wake-buggy={inv:ResolutionWakesOriginOnly} | b5b3c09a5b2e |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 0f108e4fd315 |
 | KeeperStateMachine.tla | KeeperStateMachine | manual | 2 | 1 | clean={inv:TypeOK, inv:DeadRequiresTombstone, inv:PausedRequiresOperator, inv:StoppedRequiresOperatorStop, inv:RestartingRequiresTypedIntent, prop:DeadIsForever, prop:StoppedIsForever, prop:TombstoneNeverClears} buggy={inv:TypeOK, inv:StoppedRequiresOperatorStop} | d1dee755cd34 |

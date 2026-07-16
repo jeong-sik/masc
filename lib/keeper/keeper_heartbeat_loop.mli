@@ -113,6 +113,11 @@ type ready_queue_followup =
   | Drain_ready_queue of
       { excluding : Keeper_event_queue.stimulus option }
 
+type turn_origin =
+  | Cadence_tick
+  | External_wakeup
+  | Ready_queue_drain
+
 type keepalive_turn_outcome =
   { meta : keeper_meta
   ; cycle_crashed : bool
@@ -126,6 +131,18 @@ val ready_queue_followup_of_settlement
 (** Decide whether a committed settlement may immediately drain other ready
     work. A retryable/recoverable source is excluded for this one follow-up so
     it cannot monopolize the lane ahead of unrelated stimuli. *)
+
+val next_turn_origin
+  :  ready_queue_followup_count:int
+  -> sleep:(unit -> Keeper_keepalive_signal.sleep_outcome)
+  -> turn_origin option
+(** Select the next cycle provenance. Ready durable work continues the lane
+    without invoking the external wakeup sleep/CAS path. *)
+
+val wake_reason_of_turn_origin
+  :  turn_origin
+  -> Keeper_event_queue.stimulus list
+  -> Keeper_registry.wake_reason
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
     increments the registry turn-failure counter (shared with
@@ -177,7 +194,7 @@ val run_keepalive_unified_turn :
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   stop:bool Atomic.t ->
   proactive_warmup_elapsed:bool ->
-  reactive_wake:bool ->
+  turn_origin:turn_origin ->
   shared_context:Agent_sdk.Context.t ->
   keepalive_turn_outcome
 

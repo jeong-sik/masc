@@ -399,6 +399,8 @@ let wake_reason_kind_and_stimuli (wake : Keeper_registry.wake_reason) : string *
   | Keeper_registry.Proactive_tick -> "proactive_tick", []
   | Keeper_registry.Woken stimuli ->
     "woken", List.map Keeper_event_queue.payload_kind_label stimuli
+  | Keeper_registry.Ready_queue_followup stimuli ->
+    "ready_queue_followup", List.map Keeper_event_queue.payload_kind_label stimuli
 
 let run_state_to_json (rs : run_state) : Yojson.Safe.t =
   match rs with

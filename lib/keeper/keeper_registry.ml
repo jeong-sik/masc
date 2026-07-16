@@ -154,14 +154,6 @@ let mark_turn_finished ~base_path name =
   Option.iter
     (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
     !completed_turn_to_record;
-  (* IR-1 belt-and-suspenders: reset wakeup after turn completes so a stale
-     true cannot suppress the next wakeup signal.  The primary consumer is
-     [interruptible_sleep]'s CAS, but an explicit reset here guarantees the
-     flag is clean regardless of whether the heartbeat loop's sleep path ran. *)
-  (match get ~base_path name with
-   (* tla-lint: allow-mutation: fiber signal — clear stale wakeup flag, paired with [interruptible_sleep] CAS *)
-   | Some entry -> Atomic.set entry.fiber_wakeup false
-   | None -> ());
   if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 

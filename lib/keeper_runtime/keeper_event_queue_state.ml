@@ -444,12 +444,13 @@ let settle ~settled_at ~lease ~settlement state =
       match settlement with
       | Ack -> state.pending
       | Requeue
-          ( Retry_after_observed
+          ( Rotate_now
+          | Retry_after_observed
           | Context_compaction_retry
           | Approval_grant_unconsumed
           | Approval_grant_state_unavailable ) ->
-        (* Retryable provider work, a completed context-compaction handoff,
-           and a durable one-shot grant retain the exact leased stimuli
+        (* Provider rotation/retry, a completed context-compaction handoff,
+           and a durable one-shot grant retain the exact leased stimulus
            without monopolizing the FIFO front. *)
         append_missing [ committed.stimulus ] state.pending
       | Requeue _ -> prepend_missing [ committed.stimulus ] state.pending

@@ -1,6 +1,9 @@
 module Queue = Keeper_event_queue
 module State = Keeper_event_queue_state
 module Persistence = Keeper_event_queue_persistence
+module Heartbeat = Masc.Keeper_heartbeat_loop
+module Intake = Masc.Keeper_heartbeat_stimulus_intake
+module Registry = Masc.Keeper_registry
 
 let require_ok label = function
   | Ok value -> value
@@ -592,52 +595,86 @@ let test_cancelled_and_skipped_cycles_requeue () =
 let test_settlement_controls_immediate_lane_drain () =
   let source = stimulus "drain-source" 1.0 in
   let unrelated = stimulus "unrelated-ready" 2.0 in
-  let lease = lease_for source in
-  let followup settlement =
-    Masc.Keeper_heartbeat_loop.ready_queue_followup_of_settlement
-      ~lease
-      settlement
+  let state = State.with_pending (queue [ source; unrelated ]) State.empty in
+  let state, lease = claim_head state in
+  let lease = require_some "drain source lease" lease in
+  let rotate = State.Requeue State.Rotate_now in
+  let state, settlement =
+    State.settle ~settled_at:3.0 ~lease ~settlement:rotate state
+    |> require_ok "rotate settlement"
   in
-  (match followup Masc.Keeper_registry_event_queue.Ack with
-   | Masc.Keeper_heartbeat_loop.Drain_ready_queue { excluding = None } -> ()
-   | _ -> Alcotest.fail "acknowledged work did not continue ready queue drain");
-  (match
-     followup
-       (Masc.Keeper_registry_event_queue.Requeue
-          Masc.Keeper_registry_event_queue.Retry_after_observed)
-   with
-   | Masc.Keeper_heartbeat_loop.Drain_ready_queue { excluding = Some retained }
-     when Queue.stimulus_identity_equal source retained ->
-     ()
-   | _ -> Alcotest.fail "retryable source was not excluded from immediate follow-up");
-  (match
-     followup
-       (Masc.Keeper_registry_event_queue.Requeue
-          Masc.Keeper_registry_event_queue.Context_compaction_retry)
-   with
-   | Masc.Keeper_heartbeat_loop.Drain_ready_queue { excluding = Some retained }
-     when Queue.stimulus_identity_equal source retained ->
-     ()
-   | _ -> Alcotest.fail "compaction retry source was not excluded from immediate follow-up");
+  let receipt =
+    match settlement with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "first rotate was already settled"
+  in
+  let excluding =
+    match Heartbeat.ready_queue_followup_of_settlement ~lease rotate with
+    | Heartbeat.Drain_ready_queue { excluding } -> excluding
+    | Heartbeat.No_ready_queue_followup ->
+      Alcotest.fail "rotation did not request a ready-lane follow-up"
+  in
+  let state =
+    State.mark_transition_projected ~transition_id:receipt.transition_id state
+    |> require_ok "project rotate settlement"
+  in
   Alcotest.(check int)
-    "retained source does not hide unrelated ready work"
+    "post-settlement probe sees unrelated ready work"
     1
-    (Masc.Keeper_heartbeat_stimulus_intake.ready_stimulus_count
-       ~excluding:(Some source)
-       (queue [ source; unrelated ]));
-  Alcotest.(check int)
-    "retained source alone does not request an immediate loop"
-    0
-    (Masc.Keeper_heartbeat_stimulus_intake.ready_stimulus_count
-       ~excluding:(Some source)
-       (queue [ source ]));
+    (Intake.ready_stimulus_count ~excluding (State.pending state));
+  let state, next_lease =
+    State.claim_when ~claimed_at:4.0 ~ready:(fun _ -> true) state
+    |> require_ok "actual follow-up claim"
+  in
+  let next_lease = require_some "unrelated follow-up lease" next_lease in
+  Alcotest.(check string)
+    "actual claim follows the probe"
+    unrelated.post_id
+    next_lease.stimulus.post_id;
+  Alcotest.(check (list string))
+    "rotated source remains pending behind unrelated work"
+    [ source.post_id ]
+    (post_ids (State.pending state))
+;;
+
+let test_ready_queue_drain_has_internal_provenance_without_wakeup_cas () =
+  let base_path = Sys.getcwd () in
+  let meta = cycle_meta () in
+  let entry = Registry.register ~base_path meta.name meta in
+  Registry.mark_turn_started
+    ~base_path
+    ~wake:(Registry.Ready_queue_followup [ Queue.Bootstrap ])
+    meta.name;
+  Atomic.set entry.fiber_wakeup true;
+  Registry.mark_turn_finished ~base_path meta.name;
+  let sleep_called = ref false in
+  let origin =
+    Heartbeat.next_turn_origin
+      ~ready_queue_followup_count:1
+      ~sleep:(fun () ->
+        sleep_called := true;
+        if Atomic.compare_and_set entry.fiber_wakeup true false
+        then Masc.Keeper_keepalive_signal.Woken
+        else Masc.Keeper_keepalive_signal.Timeout)
+    |> require_some "ready queue turn origin"
+  in
+  Alcotest.(check bool)
+    "external wakeup CAS path was not entered"
+    false
+    !sleep_called;
+  Alcotest.(check bool)
+    "turn cleanup and internal drain preserve external wakeup"
+    true
+    (Atomic.get entry.fiber_wakeup);
+  Registry.unregister ~base_path meta.name;
   match
-    followup
-      (Masc.Keeper_registry_event_queue.Requeue
-         Masc.Keeper_registry_event_queue.Cycle_busy)
+    Heartbeat.wake_reason_of_turn_origin origin [ stimulus "internal-followup" 1.0 ]
   with
-  | Masc.Keeper_heartbeat_loop.No_ready_queue_followup -> ()
-  | _ -> Alcotest.fail "busy turn slot requested an immediate retry loop"
+  | Registry.Ready_queue_followup [ Queue.Bootstrap ] -> ()
+  | Registry.Ready_queue_followup _
+  | Registry.Proactive_tick
+  | Registry.Woken _ ->
+    Alcotest.fail "internal lane continuation used the wrong wake provenance"
 ;;
 
 let test_unconsumed_approval_requeues_behind_other_work () =
@@ -1058,6 +1095,10 @@ let () =
             "settlement controls immediate lane drain"
             `Quick
             test_settlement_controls_immediate_lane_drain
+        ; Alcotest.test_case
+            "ready lane drain keeps internal provenance"
+            `Quick
+            test_ready_queue_drain_has_internal_provenance_without_wakeup_cas
         ; Alcotest.test_case
             "unconsumed approval yields FIFO"
             `Quick

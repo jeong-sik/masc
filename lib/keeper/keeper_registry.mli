@@ -328,7 +328,7 @@ val prepare_turn_retry_after_compaction :
     so the composite observer reverts to idle and stamps
     [runtime.usage.last_turn_ts] for the completed turn. Idempotent —
     safe to call in finally blocks even if [mark_turn_started] was not
-    called. *)
+    called; [fiber_wakeup] remains owned by the heartbeat sleep CAS. *)
 val mark_turn_finished : base_path:string -> string -> unit
 
 (** Store or clear the live [Eio.Switch.t] for the current turn.

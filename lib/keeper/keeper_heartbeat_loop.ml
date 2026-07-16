@@ -118,6 +118,11 @@ type ready_queue_followup =
   | Drain_ready_queue of
       { excluding : Keeper_event_queue.stimulus option }
 
+type turn_origin =
+  | Cadence_tick
+  | External_wakeup
+  | Ready_queue_drain
+
 type keepalive_turn_outcome =
   { meta : keeper_meta
   ; cycle_crashed : bool
@@ -463,6 +468,28 @@ let ready_queue_followup_of_settlement ~lease = function
     No_ready_queue_followup
 ;;
 
+let next_turn_origin ~ready_queue_followup_count ~sleep =
+  if ready_queue_followup_count > 0
+  then Some Ready_queue_drain
+  else
+    match sleep () with
+    | Keeper_keepalive_signal.Stopped -> None
+    | Keeper_keepalive_signal.Woken -> Some External_wakeup
+    | Keeper_keepalive_signal.Timeout -> Some Cadence_tick
+;;
+
+let wake_reason_of_turn_origin origin stimuli =
+  let payloads =
+    List.map
+      (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.payload)
+      stimuli
+  in
+  match origin with
+  | Cadence_tick -> Keeper_registry.Proactive_tick
+  | External_wakeup -> Keeper_registry.Woken payloads
+  | Ready_queue_drain -> Keeper_registry.Ready_queue_followup payloads
+;;
+
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
    [Turn_failed] mapping is unit-testable. *)
@@ -478,7 +505,7 @@ let run_keepalive_unified_turn
       ~pending_board_events
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
-      ~(reactive_wake : bool)
+      ~(turn_origin : turn_origin)
       ~(shared_context : Agent_sdk.Context.t)
   : keepalive_turn_outcome
   =
@@ -575,7 +602,10 @@ let run_keepalive_unified_turn
       in
       let scheduling =
         decide_keepalive_scheduling
-          ~reactive_wake
+          ~reactive_wake:
+            (match turn_origin with
+             | External_wakeup -> true
+             | Cadence_tick | Ready_queue_drain -> false)
           ~event_queue_triggers:event_intake.event_queue_triggers
           ~stop
           ~meta:meta_after_triage
@@ -742,23 +772,12 @@ let run_keepalive_unified_turn
               Some completion.channel
             | [] | [ _ ] | _ :: _ :: _ -> None
           in
-          (* #16 (38-bug campaign PR-5): [reactive_wake] tells us this cycle
-             was triggered by an external signal rather than the proactive
-             cadence tick, but by itself does not say *which* stimulus (or
-             whether the event queue drained anything at all). Pairing it
-             with [!consumed_stimuli] — already drained above, unchanged
-             until the post-turn ack/requeue below — gives
-             [mark_turn_started] a total, typed answer instead of the
-             boolean the registry previously discarded. *)
-          let wake : Keeper_registry.wake_reason =
-            if reactive_wake
-            then
-              Keeper_registry.Woken
-                (List.map
-                   (fun (stim : Keeper_event_queue.stimulus) ->
-                      stim.Keeper_event_queue.payload)
-                   !consumed_stimuli)
-            else Keeper_registry.Proactive_tick
+          (* Preserve whether this turn came from the configured cadence, an
+             external wakeup CAS, or an internal ready-lane continuation.
+             The consumed stimuli provide the exact typed cause without
+             collapsing the internal continuation into [Woken]. *)
+          let wake =
+            wake_reason_of_turn_origin turn_origin !consumed_stimuli
           in
           let cycle_outcome =
             run_keeper_cycle
@@ -932,6 +951,9 @@ let record_keepalive_stage_timing = Keeper_heartbeat_loop_snapshot_timing.record
                       consumes the wakeup via
                       [Atomic.compare_and_set wakeup true false], then
                       the loop body services the pending event.
+     LaneDrain        [next_turn_origin] observes another exact ready
+                      stimulus after settlement and continues the same
+                      Keeper lane without reading or clearing [wakeup].
      TurnComplete     turn body finishes; loop returns to next sleep
                       cycle.
      MissedWakeup     bug action — the wakeup is observed and cleared
@@ -996,12 +1018,9 @@ let run_heartbeat_loop
      no operator has modified it.  Initialized to 0.0 so the first
      cycle always reads. *)
   let last_meta_mtime = ref 0.0 in
-  (* Wake-source carry (thundering-herd fix). Records whether the most recent
-     sleep ended via an external broadcast wakeup ([Woken]) or this keeper's own
-     cadence timer ([Timeout]). Read at turn dispatch so a broadcast-driven early
-     wake does not let the GLOBAL task backlog drive a turn on every keeper at
-     once. Single-fiber owned, like the other loop-local refs above. *)
-  let last_wake_source = ref Keeper_keepalive_signal.Timeout in
+  (* Typed turn provenance. An internal ready-queue drain is distinct from the
+     external wakeup CAS and therefore never masquerades as [Woken]. *)
+  let last_turn_origin = ref Cadence_tick in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1170,15 +1189,6 @@ let run_heartbeat_loop
                pre/post guards mirror the spec's [turn_state] transition
                "running" -> "idle". *)
             turn_running := true;
-            (* [Woken] => this cycle was triggered by an external broadcast, not
-               the keeper's own cadence; suppress global-backlog-driven turns to
-               avoid the all-keeper stampede. *)
-            let reactive_wake =
-              match !last_wake_source with
-              | Keeper_keepalive_signal.Woken -> true
-              | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
-                false
-            in
             let r =
               run_keepalive_unified_turn
                 ~ctx
@@ -1186,7 +1196,7 @@ let run_heartbeat_loop
                 ~pending_board_events
                 ~stop
                 ~proactive_warmup_elapsed
-                ~reactive_wake
+                ~turn_origin:!last_turn_origin
                 ~shared_context
             in
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
@@ -1268,25 +1278,26 @@ let run_heartbeat_loop
             |> Keeper_heartbeat_stimulus_intake.ready_stimulus_count ~excluding
           | Drain_ready_queue _ -> 0
         in
-        (* Carry the inter-cycle sleep result into the next iteration so the
-           turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
-           keeper's configured cadence ([Timeout]). *)
-        last_wake_source :=
-          if ready_queue_followup_count > 0
-          then (
-            let absorbed_wakeup_hint = Atomic.compare_and_set wakeup true false in
-            Log.Keeper.info
-              "%s: keeper lane drain continues without heartbeat sleep ready=%d wake_hint_absorbed=%b"
-              meta_current.name
-              ready_queue_followup_count
-              absorbed_wakeup_hint;
-            Keeper_keepalive_signal.Woken)
-          else
-            Keeper_keepalive_signal.interruptible_sleep
-              ~clock:ctx.clock
-              ~stop
-              ~wakeup
-              interval;
+        (match
+           next_turn_origin
+             ~ready_queue_followup_count
+             ~sleep:(fun () ->
+               Keeper_keepalive_signal.interruptible_sleep
+                 ~clock:ctx.clock
+                 ~stop
+                 ~wakeup
+                 interval)
+         with
+         | None -> ()
+         | Some origin ->
+           (match origin with
+            | Ready_queue_drain ->
+              Log.Keeper.info
+                "%s: keeper lane drain continues without heartbeat sleep ready=%d"
+                meta_current.name
+                ready_queue_followup_count
+            | Cadence_tick | External_wakeup -> ());
+           last_turn_origin := origin);
       if Atomic.get stop then () else loop ())
   in
   loop ()

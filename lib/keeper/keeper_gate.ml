@@ -257,6 +257,7 @@ let resolve_judgment (entry : Keeper_approval_queue.pending_approval) ~approval_
   | Some decision ->
     (match
        Keeper_approval_queue.resolve_with_policy
+         ~base_path:entry.audit_base_path
          ~id:approval_id
          ~decision
          ~source:Keeper_approval_queue.Auto_judge
@@ -536,9 +537,11 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
     ()
 ;;
 
-let retry_failed_auto_judge ~requested_by approval_id =
+let retry_failed_auto_judge ~base_path ~requested_by approval_id =
   match Keeper_approval_queue.get_pending_entry ~id:approval_id with
   | None -> Error ("pending approval not found: " ^ approval_id)
+  | Some entry when not (String.equal entry.audit_base_path base_path) ->
+    Error ("pending approval not found: " ^ approval_id)
   | Some entry ->
     (match retry_auto_judge_entry entry with
      | Error _ as error -> error

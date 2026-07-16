@@ -105,8 +105,8 @@ let submit ~base_path ~keeper_name ~input =
   submit_with_context ~base_path ~keeper_name ~input ()
 ;;
 
-let reject_and_cleanup id =
-  match AQ.resolve ~id ~decision:(AQ.Decision.Reject "test cleanup") with
+let reject_and_cleanup ~base_path id =
+  match AQ.resolve ~base_path ~id ~decision:(AQ.Decision.Reject "test cleanup") with
   | Ok () -> ()
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
@@ -208,7 +208,7 @@ let test_dedup_never_merges_distinct_origins () =
             Alcotest.(check bool) "distinct origin has its own request" true
               (not (String.equal first id)))
          [ another_turn; another_channel; another_goal_context ];
-       List.iter reject_and_cleanup
+       List.iter (reject_and_cleanup ~base_path)
          [ first; another_turn; another_channel; another_goal_context ])
 ;;
 
@@ -390,8 +390,8 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
             (Some request_context)
             entry.request_context
         | None -> Alcotest.fail "pending request was not restored");
-       reject_and_cleanup first;
-       reject_and_cleanup changed)
+       reject_and_cleanup ~base_path first;
+       reject_and_cleanup ~base_path changed)
 ;;
 
 let test_resolution_is_durable_and_origin_scoped () =
@@ -405,6 +405,7 @@ let test_resolution_is_durable_and_origin_scoped () =
        let id = submit ~base_path ~keeper_name ~input in
        let result =
          AQ.resolve_with_policy
+           ~base_path
            ~id
            ~decision:AQ.Decision.Approve
            ~remember_rule:true
@@ -507,7 +508,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
            ~input
            ()
        in
-       (match AQ.resolve ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match AQ.resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -653,7 +654,7 @@ let test_summary_updates_never_resolve_pending_request () =
        Alcotest.(check bool) "model judgment remains pending" true
          (Option.is_some (AQ.get_pending_entry ~id));
        Alcotest.(check bool) "resolved entry cannot be updated" true
-         (match AQ.resolve ~id ~decision:(AQ.Decision.Reject "operator denied") with
+         (match AQ.resolve ~base_path ~id ~decision:(AQ.Decision.Reject "operator denied") with
           | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
           | Ok () ->
             (match AQ.attach_summary ~id summary with
@@ -707,8 +708,8 @@ let test_all_summary_failures_accept_explicit_restart () =
        (match AQ.get_pending_entry ~id:terminal_id with
         | Some { summary_status = AQ.Summary_pending; _ } -> ()
         | Some _ | None -> Alcotest.fail "operator restart was gated by diagnostic state");
-       reject_and_cleanup retryable_id;
-       reject_and_cleanup terminal_id)
+       reject_and_cleanup ~base_path retryable_id;
+       reject_and_cleanup ~base_path terminal_id)
 ;;
 
 let test_operator_recovery_reopens_all_failed_summaries () =
@@ -751,8 +752,114 @@ let test_operator_recovery_reopens_all_failed_summaries () =
             | Some { summary_status = AQ.Summary_not_requested; _ } -> ()
             | Some _ | None -> Alcotest.fail "failed summary was not reopened")
          reopened;
-       reject_and_cleanup retryable_id;
-       reject_and_cleanup terminal_id)
+       reject_and_cleanup ~base_path retryable_id;
+       reject_and_cleanup ~base_path terminal_id)
+;;
+
+let test_dashboard_retry_rejects_cross_workspace_approval () =
+  let base_a = temp_dir () in
+  let base_b = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_a;
+      cleanup_dir base_b)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let approval_id =
+         submit
+           ~base_path:base_a
+           ~keeper_name:"queue-retry-base-a"
+           ~input:(`Assoc [ "request", `String "base-a" ])
+       in
+       check_update "mark pending" true (AQ.mark_summary_pending ~id:approval_id);
+       check_update
+         "mark failed"
+         true
+         (AQ.mark_summary_failed
+            ~id:approval_id
+            ~reason:"base-a-original"
+            ~retryable:true);
+       let args = `Assoc [ "id", `String approval_id ] in
+       (match
+          Server_dashboard_http.dashboard_gate_retry_http_json
+            ~base_path:base_b
+            ~requested_by:"operator-b"
+            ~args
+        with
+        | Error message ->
+          Alcotest.(check string)
+            "cross-workspace id is not addressable"
+            ("pending approval not found: " ^ approval_id)
+            message
+        | Ok _ -> Alcotest.fail "workspace B retried workspace A approval");
+       (match AQ.get_pending_entry ~id:approval_id with
+        | Some
+            { summary_status =
+                AQ.Summary_failed { reason = "base-a-original"; retryable = true }
+            ; _
+            } ->
+          ()
+        | Some _ | None ->
+          Alcotest.fail "cross-workspace retry changed workspace A state");
+       reject_and_cleanup ~base_path:base_a approval_id)
+;;
+
+let test_dashboard_resolve_rejects_cross_workspace_approval () =
+  let base_a = temp_dir () in
+  let base_b = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_a;
+      cleanup_dir base_b)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let approval_id =
+         submit
+           ~base_path:base_a
+           ~keeper_name:"queue-resolve-base-a"
+           ~input:(`Assoc [ "request", `String "base-a" ])
+       in
+       let resolve ~decision ~remember_rule =
+         Server_dashboard_http.dashboard_gate_resolve_http_json
+           ~base_path:base_b
+           ~created_by:"operator-b"
+           ~args:
+             (`Assoc
+                 [ "id", `String approval_id
+                 ; "decision", `String decision
+                 ; "remember_rule", `Bool remember_rule
+                 ])
+       in
+       List.iter
+         (fun (decision, remember_rule) ->
+            match resolve ~decision ~remember_rule with
+            | Error
+                (Server_dashboard_http.Gone
+                   (AQ.Not_found missing_id)) ->
+              Alcotest.(check string)
+                "cross-workspace id is indistinguishable from missing"
+                approval_id
+                missing_id
+            | Error error ->
+              Alcotest.fail
+                (Server_dashboard_http.approval_resolve_http_error_to_string error)
+            | Ok _ -> Alcotest.fail "workspace B resolved workspace A approval")
+         [ "approve", true; "reject", false ];
+       Alcotest.(check bool)
+         "source approval remains pending"
+         true
+         (Option.is_some (AQ.get_pending_entry ~id:approval_id));
+       List.iter
+         (fun base_path ->
+            Alcotest.(check bool)
+              "cross-workspace resolve did not persist a rule"
+              false
+              (Sys.file_exists
+                 (AQ.For_testing.always_allowed_store_path ~base_path)))
+         [ base_a; base_b ];
+       reject_and_cleanup ~base_path:base_a approval_id)
 ;;
 
 let test_lane_activity_does_not_retry_failed_auto_judge () =
@@ -821,8 +928,8 @@ let test_lane_activity_does_not_retry_failed_auto_judge () =
           ()
         | Some _ | None ->
           Alcotest.fail "lane activity changed another Keeper's judge failure");
-       reject_and_cleanup id_a;
-       reject_and_cleanup id_b;
+       reject_and_cleanup ~base_path id_a;
+       reject_and_cleanup ~base_path id_b;
        List.iter
          (fun (keeper_name, approval_id) ->
             match durable_resolution_opt ~base_path ~keeper_name ~approval_id with
@@ -921,7 +1028,7 @@ let test_inflight_auto_judge_preserves_durable_restart_marker () =
          "restart marker remains persisted"
          true
          (Yojson.Safe.equal persisted_status (`String "pending"));
-       reject_and_cleanup id;
+       reject_and_cleanup ~base_path id;
        (match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
         | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
         | None -> Alcotest.fail "cleanup resolution was not durable"))
@@ -1188,7 +1295,7 @@ let test_default_auto_judge_defers_without_blocking () =
             ()
           | Some _ -> Alcotest.fail "Auto Judge failure was not durably retryable"
           | None -> Alcotest.fail "Auto Judge request was not durably queued");
-         reject_and_cleanup approval_id
+         reject_and_cleanup ~base_path approval_id
        | Gate.Deferred { reason = Gate.Judge_requested; _ } ->
          Alcotest.fail "test unexpectedly has a running server Auto Judge context"
        | Gate.Deferred { reason = (Gate.Human_requested | Gate.Mode_state_invalid _); _ } ->
@@ -1208,7 +1315,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
       cleanup_dir base_path)
     (fun () ->
        let approval_id = submit ~base_path ~keeper_name ~input in
-       (match AQ.resolve ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match AQ.resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -1267,6 +1374,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
        let rationale = "Use the project-scoped target." in
        (match
           AQ.resolve
+            ~base_path
             ~id:reject_id
             ~decision:(AQ.Decision.Reject rationale)
         with
@@ -1296,7 +1404,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
        let edited_input =
          `Assoc [ "target", `String "after"; "confirmed", `Bool true ]
        in
-       (match AQ.resolve ~id:edit_id ~decision:(AQ.Decision.Edit edited_input) with
+       (match AQ.resolve ~base_path ~id:edit_id ~decision:(AQ.Decision.Edit edited_input) with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let edited =
@@ -1354,6 +1462,14 @@ let () =
             "all summary failures accept explicit operator restart"
             `Quick
             test_all_summary_failures_accept_explicit_restart
+        ; Alcotest.test_case
+            "dashboard retry rejects cross-workspace approval"
+            `Quick
+            test_dashboard_retry_rejects_cross_workspace_approval
+        ; Alcotest.test_case
+            "dashboard resolve rejects cross-workspace approval"
+            `Quick
+            test_dashboard_resolve_rejects_cross_workspace_approval
         ; Alcotest.test_case
             "lane activity never retries a failed Auto Judge"
             `Quick

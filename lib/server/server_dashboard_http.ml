@@ -363,7 +363,7 @@ let approval_resolve_http_error_to_string = function
   | Unavailable err -> Keeper_approval_queue.resolve_error_to_string err
 ;;
 
-let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
+let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, approval_resolve_http_error) result
   =
   match Safe_ops.json_string_opt "id" args with
@@ -385,6 +385,7 @@ let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
        let decision = approval_resolve_decision_to_queue_decision decision in
        (match
           Keeper_approval_queue.resolve_with_policy
+            ~base_path
             ~id
             ~decision
             ~remember_rule
@@ -412,11 +413,11 @@ let dashboard_gate_resolve_http_json ~created_by ~(args : Yojson.Safe.t)
           Error (Gone err)))
 ;;
 
-let dashboard_gate_retry_http_json ~requested_by ~(args : Yojson.Safe.t) =
+let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
   match Safe_ops.json_string_opt "id" args with
   | None -> Error "id is required"
   | Some id ->
-    (match Keeper_gate.retry_failed_auto_judge ~requested_by id with
+    (match Keeper_gate.retry_failed_auto_judge ~base_path ~requested_by id with
      | Error _ as error -> error
      | Ok () -> Ok (`Assoc [ "ok", `Bool true; "id", `String id ]))
 ;;

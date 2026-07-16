@@ -171,7 +171,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_task_create"
     ; description =
         "Create a new task on the MASC backlog. The task appears for any keeper to \
-         claim. Duplicate titles are rejected automatically (dedup by normalized title)."
+         claim."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

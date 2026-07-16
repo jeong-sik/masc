@@ -1,0 +1,17 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_compaction_operation_codec)
+ (public_name masc.keeper_compaction_operation_codec)
+ (wrapped false)
+ (modules keeper_compaction_operation_codec_support)
+ (libraries
+  masc.compaction_trigger
+  masc.keeper_checkpoint_ref
+  masc.keeper_compaction_evidence
+  masc.keeper_compaction_operation
+  masc.keeper_compaction_operation_identity
+  masc.keeper_registry
+  masc.masc_types
+  masc.tool_invocation_ref
+  yojson))

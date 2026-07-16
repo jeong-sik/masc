@@ -1,4 +1,5 @@
 module Operation = Keeper_compaction_operation
+module Decode_support = Keeper_compaction_operation_codec_support
 module Operation_json = Keeper_compaction_operation_json
 module Reducer = Keeper_compaction_operation_reducer
 
@@ -309,6 +310,43 @@ let test_canonical_json_projection () =
      |> Yojson.Safe.Util.to_string)
 ;;
 
+let test_nested_decode_support () =
+  let projected = Operation_json.to_json (candidate_event ()) in
+  let payload = Yojson.Safe.Util.member "payload" projected in
+  let checkpoint_json = Yojson.Safe.Util.member "source_checkpoint" payload in
+  let evidence_json = Yojson.Safe.Util.member "evidence" payload in
+  let decoded_checkpoint =
+    Decode_support.checkpoint ~path:"payload.source_checkpoint" checkpoint_json
+    |> Result.get_ok
+  in
+  let decoded_evidence =
+    Decode_support.evidence ~path:"payload.evidence" evidence_json
+    |> Result.get_ok
+  in
+  Alcotest.(check bool)
+    "checkpoint identity"
+    true
+    (Keeper_checkpoint_ref.equal source decoded_checkpoint);
+  Alcotest.(check string)
+    "runtime identity"
+    "compact-runtime"
+    (Option.get decoded_evidence.selected_runtime_id)
+;;
+
+let test_nested_decode_support_rejects_unknown_field () =
+  match
+    Decode_support.trigger
+      ~path:"payload.trigger"
+      (`Assoc [ "kind", `String "manual"; "unexpected", `Null ])
+  with
+  | Error
+      (Decode_support.Invalid_field
+         (Decode_support.Unknown_field
+            { path = "payload.trigger"; field = "unexpected" })) ->
+    ()
+  | Ok _ | Error _ -> Alcotest.fail "manual trigger accepted an unknown field"
+;;
+
 let () =
   Alcotest.run
     "keeper compaction operation events"
@@ -336,5 +374,13 @@ let () =
             "canonical JSON projection"
             `Quick
             test_canonical_json_projection
+        ; Alcotest.test_case
+            "nested decode support"
+            `Quick
+            test_nested_decode_support
+        ; Alcotest.test_case
+            "nested decode support rejects unknown field"
+            `Quick
+            test_nested_decode_support_rejects_unknown_field
         ] )
     ]

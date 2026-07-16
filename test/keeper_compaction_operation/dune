@@ -6,6 +6,7 @@
   masc.keeper_checkpoint_ref
   masc.keeper_compaction_evidence
   masc.keeper_compaction_operation
+  masc.keeper_compaction_operation_codec
   masc.keeper_compaction_operation_json
   masc.keeper_compaction_operation_reducer
   masc.keeper_registry

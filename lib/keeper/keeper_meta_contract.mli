@@ -16,14 +16,6 @@
 
 (** {1 Policy types} *)
 
-type compaction_policy = {
-  profile : string;
-  ratio_gate : float;
-  message_gate : int;
-  token_gate : int;
-  cooldown_sec : int;
-}
-
 type proactive_policy = {
   enabled : bool;
 }
@@ -259,7 +251,6 @@ type keeper_meta = {
   allowed_paths : string list;
   mention_targets : string list;
   proactive : proactive_policy;
-  compaction : compaction_policy;
   multimodal_policy : Keeper_types_profile.multimodal_policy;
   (* Lifecycle *)
   created_at : string;

@@ -24,7 +24,6 @@ type parsed_keeper_policy =
   ; pp_allowed_paths : string list
   ; pp_mention_targets : string list
   ; pp_proactive : proactive_policy
-  ; pp_compaction : compaction_policy
   ; pp_always_allow : bool option
   }
 
@@ -125,33 +124,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_allowed_paths = [] in
     let pp_mention_targets = [] in
     let proactive_enabled = default_proactive_enabled in
-    let env_ratio_gate, env_message_gate, env_token_gate =
-      keeper_compaction_policy_from_env ()
-    in
-    let compaction_profile =
-      Safe_ops.json_string ~default:default_compaction_profile "compaction_profile" json
-      |> canonical_compaction_profile
-      |> Option.value ~default:default_compaction_profile
-    in
-    let compaction_ratio_gate =
-      Safe_ops.json_float ~default:env_ratio_gate "compaction_ratio_gate" json
-      |> normalize_compaction_ratio_gate
-    in
-    let compaction_message_gate =
-      Safe_ops.json_int ~default:env_message_gate "compaction_message_gate" json
-      |> normalize_compaction_message_gate
-    in
-    let compaction_token_gate =
-      Safe_ops.json_int ~default:env_token_gate "compaction_token_gate" json
-      |> normalize_compaction_token_gate
-    in
-    let compaction_cooldown_sec =
-      Safe_ops.json_int
-        ~default:(keeper_compaction_cooldown_sec ())
-        "compaction_cooldown_sec"
-        json
-      |> normalize_compaction_cooldown_sec
-    in
     let pp_always_allow = None in
     (* TOML-only (see note above); overlaid by [ensure_keeper_meta]. *)
     Ok
@@ -161,13 +133,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_allowed_paths
       ; pp_mention_targets
       ; pp_proactive = { enabled = proactive_enabled }
-      ; pp_compaction =
-          { profile = compaction_profile
-          ; ratio_gate = compaction_ratio_gate
-          ; message_gate = compaction_message_gate
-          ; token_gate = compaction_token_gate
-          ; cooldown_sec = compaction_cooldown_sec
-          }
       ; pp_always_allow
       }
 ;;
@@ -365,6 +330,11 @@ let parse_keeper_state
 type removed_keeper_meta_field =
   | Legacy_goal
   | Compaction_mode
+  | Compaction_profile
+  | Compaction_ratio_gate
+  | Compaction_message_gate
+  | Compaction_token_gate
+  | Compaction_cooldown_sec
   | Initiative_enabled
   | Persona_profile_path
   | Tool_access
@@ -375,6 +345,11 @@ type removed_keeper_meta_field =
 let removed_keeper_meta_field_of_key = function
   | "goal" -> Some Legacy_goal
   | "compaction_mode" -> Some Compaction_mode
+  | "compaction_profile" -> Some Compaction_profile
+  | "compaction_ratio_gate" -> Some Compaction_ratio_gate
+  | "compaction_message_gate" -> Some Compaction_message_gate
+  | "compaction_token_gate" -> Some Compaction_token_gate
+  | "compaction_cooldown_sec" -> Some Compaction_cooldown_sec
   | "initiative_enabled" -> Some Initiative_enabled
   | "persona_profile_path" -> Some Persona_profile_path
   | "tool_access" -> Some Tool_access
@@ -387,6 +362,11 @@ let removed_keeper_meta_field_of_key = function
 let removed_keeper_meta_field_to_wire = function
   | Legacy_goal -> "goal"
   | Compaction_mode -> "compaction_mode"
+  | Compaction_profile -> "compaction_profile"
+  | Compaction_ratio_gate -> "compaction_ratio_gate"
+  | Compaction_message_gate -> "compaction_message_gate"
+  | Compaction_token_gate -> "compaction_token_gate"
+  | Compaction_cooldown_sec -> "compaction_cooldown_sec"
   | Initiative_enabled -> "initiative_enabled"
   | Persona_profile_path -> "persona_profile_path"
   | Tool_access -> "tool_access"
@@ -407,6 +387,11 @@ let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
       (match removed_keeper_meta_field_of_key key with
        | Some (Legacy_goal as field)
        | Some (Compaction_mode as field)
+       | Some (Compaction_profile as field)
+       | Some (Compaction_ratio_gate as field)
+       | Some (Compaction_message_gate as field)
+       | Some (Compaction_token_gate as field)
+       | Some (Compaction_cooldown_sec as field)
        | Some (Initiative_enabled as field)
        | Some (Persona_profile_path as field)
        | Some (Tool_access as field)
@@ -471,7 +456,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; allowed_paths = policy.pp_allowed_paths
                    ; mention_targets = policy.pp_mention_targets
                    ; proactive = policy.pp_proactive
-                   ; compaction = policy.pp_compaction
                    ; (* RFC vision-delegation §2.4. Parsed inline (mirrors the
                         telemetry fields below): unknown/missing -> default
                         Inherit (fail-closed, safe-by-default). This round-trips

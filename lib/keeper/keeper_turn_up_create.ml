@@ -100,31 +100,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   p.proactive_enabled_opt
             in
               let instructions = Option.value ~default:"" p.instructions_opt in
-              let (env_ratio_gate, env_message_gate, env_token_gate) =
-                keeper_compaction_policy_from_env ()
-              in
-              let compaction_cooldown_sec =
-                Option.value
-                  ~default:(keeper_compaction_cooldown_sec ())
-                  p.compaction_cooldown_sec_opt
-                |> normalize_compaction_cooldown_sec
-              in
-              let
-                ( compaction_profile,
-                  compaction_ratio_gate,
-                  compaction_message_gate,
-                  compaction_token_gate )
-                =
-                resolve_compaction_policy
-                  ~profile_opt:p.compaction_profile_opt
-                  ~ratio_opt:p.compaction_ratio_gate_opt
-                  ~message_opt:p.compaction_message_gate_opt
-                  ~token_opt:p.compaction_token_gate_opt
-                  ~fallback_profile:default_compaction_profile
-                  ~fallback_ratio:env_ratio_gate
-                  ~fallback_message:env_message_gate
-                  ~fallback_token:env_token_gate
-              in
               let primary_max_context =
                 match p.max_context_override_opt with
                 | Some v -> v
@@ -243,13 +218,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         mention_targets;
         proactive = {
           enabled = proactive_enabled;
-        };
-        compaction = {
-          profile = compaction_profile;
-          ratio_gate = compaction_ratio_gate;
-          message_gate = compaction_message_gate;
-          token_gate = compaction_token_gate;
-          cooldown_sec = compaction_cooldown_sec;
         };
         created_at = now_iso ();
         updated_at = now_iso ();
@@ -390,10 +358,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("generation", `Int meta.runtime.generation);
           ("instructions", `String meta.instructions);
           ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("compaction_profile", `String meta.compaction.profile);
-          ("compaction_ratio_gate", `Float meta.compaction.ratio_gate);
-          ("compaction_message_gate", `Int meta.compaction.message_gate);
-          ("compaction_token_gate", `Int meta.compaction.token_gate);
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in

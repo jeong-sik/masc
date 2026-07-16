@@ -26,7 +26,6 @@ type parsed_keeper_policy =
   ; pp_allowed_paths : string list
   ; pp_mention_targets : string list
   ; pp_proactive : proactive_policy
-  ; pp_compaction : compaction_policy
   ; pp_always_allow : bool option
   }
 

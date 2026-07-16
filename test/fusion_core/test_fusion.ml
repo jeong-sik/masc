@@ -48,7 +48,6 @@ let base_policy : Fusion_policy.t =
           ; meta_timeout_s = 300.0
           ; judges = []
           ; min_answered = Fusion_policy.default_min_answered
-          ; judge_wave_budget_s = Float.max_float
           ; adaptive_timeout_factor = 1.0
           ; fallback_judge_model = None
           }
@@ -754,8 +753,6 @@ let test_config_two_judges_not_staged_eligible () =
     ; jsystem_prompt = label ^ " lens"
     ; jweb_tools = false
     ; jmax_output_tokens = None
-    ; jtimeout_s = 300.0
-    ; jmax_timeout_s = None
     }
   in
   let judges =
@@ -861,7 +858,7 @@ let test_config_disabled_with_preset () =
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
     ?(judges = []) ?(min_answered = Fusion_policy.default_min_answered)
-    ?(meta_timeout_s = 300.0) ?(judge_wave_budget_s = Float.max_float)
+    ?(meta_timeout_s = 300.0)
     ?(adaptive_timeout_factor = 1.0) ?(fallback_judge_model = None)
     (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
@@ -873,7 +870,6 @@ let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthe
   ; meta_timeout_s
   ; judges
   ; min_answered
-  ; judge_wave_budget_s
   ; adaptive_timeout_factor
   ; fallback_judge_model
   }
@@ -926,8 +922,6 @@ let base_judge : Fusion_policy.judge_spec =
   ; jsystem_prompt = "lens"
   ; jweb_tools = false
   ; jmax_output_tokens = None
-  ; jtimeout_s = 300.0
-  ; jmax_timeout_s = None
   }
 
 (* judges=[]면 (simple/refine/conditional preset) 기존과 동일하게 유효 = byte-identity. *)
@@ -1004,7 +998,7 @@ let test_staged_judge_groups_bad_size () =
 (* --- JOJ 1차 심판 TOML 파싱 (RFC-0283). parse_judge_spec + finish_preset의
        [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
        검증 테스트는 OCaml record를 직접 구성해 config 레이어를 우회하므로, TOML 키
-       이름(model/label/system_prompt/web_tools/timeout_s)과 getter
+       이름(model/label/system_prompt/web_tools/max_output_tokens)과 getter
        매핑은 이 테스트만 커버한다 — 잘못된 키/getter는 여기서만 잡힌다. panel
        sub-table에는 동형 golden(test_config_panels_golden 등)이 있으나 judge에는
        없었다. --- *)
@@ -1025,7 +1019,6 @@ label = "strict"
 system_prompt = "lens A"
 web_tools = true
 max_output_tokens = 1536
-timeout_s = 222.0
 [[fusion.presets.joj.judges]]
 model = "judge-b"
 label = "lenient"
@@ -1039,22 +1032,19 @@ let test_config_judges_parse () =
      | [ vp ] ->
        (match (raw vp).Fusion_policy.judges with
         | [ ja; jb ] ->
-          (* judge-a: 6개 키를 모두 distinct 값으로 채워 키↔getter 매핑을 핀한다. *)
+          (* judge-a: 5개 키를 모두 distinct 값으로 채워 키↔getter 매핑을 핀한다. *)
           Alcotest.(check string) "ja model" "judge-a" ja.Fusion_policy.jmodel;
           Alcotest.(check string) "ja label" "strict" ja.Fusion_policy.jlabel;
           Alcotest.(check string) "ja prompt" "lens A" ja.Fusion_policy.jsystem_prompt;
           Alcotest.(check bool) "ja web" true ja.Fusion_policy.jweb_tools;
           Alcotest.(check (option int)) "ja max output" (Some 1536)
             ja.Fusion_policy.jmax_output_tokens;
-          Alcotest.(check (float 0.001)) "ja timeout" 222.0 ja.Fusion_policy.jtimeout_s;
-          (* judge-b: 누락 키는 find_or default 경로 (web=false / timeout=default). *)
+          (* judge-b: 누락 키는 find_or default 경로 (web=false). *)
           Alcotest.(check string) "jb model" "judge-b" jb.Fusion_policy.jmodel;
           Alcotest.(check string) "jb prompt" "lens B" jb.Fusion_policy.jsystem_prompt;
           Alcotest.(check bool) "jb web default" false jb.Fusion_policy.jweb_tools;
           Alcotest.(check (option int)) "jb max output default" None
-            jb.Fusion_policy.jmax_output_tokens;
-          Alcotest.(check (float 0.001)) "jb timeout default"
-            Fusion_policy.default_timeout_s jb.Fusion_policy.jtimeout_s
+            jb.Fusion_policy.jmax_output_tokens
         | _ -> Alcotest.fail "expected exactly two parsed judges")
      | _ -> Alcotest.fail "expected exactly one preset")
   | Error es ->
@@ -1365,9 +1355,7 @@ let test_panels_unavailable_failure () =
   Alcotest.(check string) "failure text = rendered skip reason"
     "fusion aborted: none of 3 panels returned an answer"
     (judge_failure_text failure);
-  Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure);
-  Alcotest.(check bool) "not timeout-or-budget (no fallback judge trigger)" false
-    (judge_failure_is_timeout_or_budget failure)
+  Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure)
 
 (* min_answered must be in the policy range 1..total panels (inclusive).
    base_group has 3 models, so 0 and 4 are rejected; full-panel quorum (3) is allowed. *)
@@ -1407,7 +1395,6 @@ judge = "meta"
 judge_system_prompt = "reconcile"
 judge_timeout_s = 120.0
 meta_timeout_s = 90.0
-judge_wave_budget_s = 500.0
 adaptive_timeout_factor = 2.0
 fallback_judge_model = "fallback-model"
 [[fusion.presets.adaptive.panels]]
@@ -1416,12 +1403,9 @@ panel_system_prompt = "answer"
 [[fusion.presets.adaptive.judges]]
 model = "judge-a"
 system_prompt = "lens A"
-timeout_s = 100.0
-max_timeout_s = 180.0
 [[fusion.presets.adaptive.judges]]
 model = "judge-b"
 system_prompt = "lens B"
-timeout_s = 110.0
 |}
 
 let test_config_adaptive_timeout_parse () =
@@ -1432,20 +1416,12 @@ let test_config_adaptive_timeout_parse () =
        let preset = raw vp in
        Alcotest.(check (float 0.001)) "meta_timeout_s" 90.0
          preset.Fusion_policy.meta_timeout_s;
-       Alcotest.(check (float 0.001)) "judge_wave_budget_s" 500.0
-         preset.Fusion_policy.judge_wave_budget_s;
        Alcotest.(check (float 0.001)) "adaptive_timeout_factor" 2.0
          preset.Fusion_policy.adaptive_timeout_factor;
        Alcotest.(check (option string)) "fallback_judge_model"
          (Some "fallback-model")
          preset.Fusion_policy.fallback_judge_model;
-       (match preset.Fusion_policy.judges with
-        | [ ja; _ ] ->
-          Alcotest.(check (float 0.001)) "ja timeout" 100.0 ja.Fusion_policy.jtimeout_s;
-          Alcotest.(check (option (float 0.001))) "ja max_timeout_s"
-            (Some 180.0)
-            ja.Fusion_policy.jmax_timeout_s
-        | _ -> Alcotest.fail "expected two judges")
+       Alcotest.(check int) "two judges" 2 (List.length preset.Fusion_policy.judges)
      | _ -> Alcotest.fail "expected exactly one preset")
   | Error es ->
     Alcotest.failf "expected Ok, got errors: %s"
@@ -1460,9 +1436,6 @@ let test_config_adaptive_timeout_defaults () =
        Alcotest.(check (float 0.001)) "meta_timeout_s defaults to judge_timeout_s"
          preset.Fusion_policy.judge_timeout_s
          preset.Fusion_policy.meta_timeout_s;
-       Alcotest.(check bool) "judge_wave_budget_s defaults to max_float"
-         true
-         (preset.Fusion_policy.judge_wave_budget_s = Float.max_float);
        Alcotest.(check (float 0.001)) "adaptive_timeout_factor defaults to 1.0"
          1.0
          preset.Fusion_policy.adaptive_timeout_factor;
@@ -1516,32 +1489,6 @@ adaptive_timeout_factor = 0.5
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_adaptive_timeout_factor"
 
-let test_config_invalid_judge_wave_budget () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p"
-[fusion.presets.p]
-panel = ["a"]
-judge = "j"
-panel_system_prompt = "x"
-judge_system_prompt = "y"
-judge_wave_budget_s = 50.0
-[[fusion.presets.p.judges]]
-model = "judge-a"
-system_prompt = "lens"
-timeout_s = 100.0
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_judge_wave_budget present" true
-      (List.exists
-         (function Fusion_config.Invalid_judge_wave_budget _ -> true | _ -> false)
-         es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_judge_wave_budget"
-
 let test_judge_error_node_timed_out () =
   let timeout_node =
     Fusion_types.Judge_failed
@@ -1551,11 +1498,10 @@ let test_judge_error_node_timed_out () =
       ; elapsed_s = Some 5.0
       }
   in
-  let budget_node =
+  let unavailable_node =
     Fusion_types.Judge_failed
       { Fusion_types.failed_role = First "j"
-      ; failure =
-          Fusion_types.Budget_exceeded "judge j skipped: would exceed wave budget"
+      ; failure = Fusion_types.Provider_error "provider unavailable"
       ; usage = Fusion_types.zero_usage
       ; elapsed_s = None
       }
@@ -1564,14 +1510,14 @@ let test_judge_error_node_timed_out () =
     ( Fusion_types.judge_outcome_of_yojson
         (Fusion_types.judge_outcome_to_yojson timeout_node)
     , Fusion_types.judge_outcome_of_yojson
-        (Fusion_types.judge_outcome_to_yojson budget_node) )
+        (Fusion_types.judge_outcome_to_yojson unavailable_node) )
   with
   | Ok (Judge_failed n1), Ok (Judge_failed n2) ->
     Alcotest.(check bool) "timeout node roundtrips timed_out" true
       (Fusion_types.judge_failure_is_timeout n1.failure);
     Alcotest.(check (option (float 0.001))) "timeout node roundtrips elapsed_s"
       (Some 5.0) n1.elapsed_s;
-    Alcotest.(check bool) "budget node roundtrips timed_out" false
+    Alcotest.(check bool) "provider node roundtrips timed_out" false
       (Fusion_types.judge_failure_is_timeout n2.failure);
     Alcotest.(check (option (float 0.001))) "unavailable elapsed roundtrips"
       None n2.elapsed_s
@@ -1591,14 +1537,6 @@ let test_validated_bad_adaptive_factor () =
   with
   | Error (Fusion_policy.Validated_preset.Bad_adaptive_factor 0.5) -> ()
   | _ -> Alcotest.fail "expected Bad_adaptive_factor 0.5"
-
-let test_validated_bad_judge_wave_budget () =
-  match
-    Fusion_policy.Validated_preset.of_preset
-      (mk_preset ~judge_wave_budget_s:50.0 ~judges:[ base_judge ] "bad-budget")
-  with
-  | Error (Fusion_policy.Validated_preset.Bad_judge_wave_budget 50.0) -> ()
-  | _ -> Alcotest.fail "expected Bad_judge_wave_budget 50.0"
 
 let () =
   Alcotest.run "fusion_core"
@@ -1659,8 +1597,6 @@ let () =
         ; Alcotest.test_case "invalid_meta_timeout" `Quick test_config_invalid_meta_timeout
         ; Alcotest.test_case "invalid_adaptive_factor" `Quick
             test_config_invalid_adaptive_factor
-        ; Alcotest.test_case "invalid_judge_wave_budget" `Quick
-            test_config_invalid_judge_wave_budget
         ] )
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok
@@ -1679,8 +1615,6 @@ let () =
         ; Alcotest.test_case "bad_meta_timeout" `Quick test_validated_bad_meta_timeout
         ; Alcotest.test_case "bad_adaptive_factor" `Quick
             test_validated_bad_adaptive_factor
-        ; Alcotest.test_case "bad_judge_wave_budget" `Quick
-            test_validated_bad_judge_wave_budget
         ] )
     ; ( "staged_judge_groups"
       , [ Alcotest.test_case "exact_3x3" `Quick test_staged_judge_groups_exact_3x3

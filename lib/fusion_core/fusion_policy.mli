@@ -32,9 +32,6 @@ type judge_spec =
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
   ; jmax_output_tokens : int option
       (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
-  ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초). *)
-  ; jmax_timeout_s : float option
-      (** Legacy observed value; no runtime path extends a Provider timeout. *)
   }
 [@@deriving show, eq]
 
@@ -63,8 +60,6 @@ type preset =
           [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
           허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
           명시적으로 설정할 수 있다. *)
-  ; judge_wave_budget_s : float
-      (** Legacy observed value; it never gates or skips Provider work. *)
   ; adaptive_timeout_factor : float
       (** Legacy observed value; it never extends Provider work. *)
   ; fallback_judge_model : string option
@@ -196,9 +191,6 @@ module Validated_preset : sig
         (** [min_answered]가 패널 모델 총합을 초과. *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_judge_wave_budget of float
-        (** [judge_wave_budget_s]가 0 미만이거나, 양수 유한인데 최장 1차 심판
-            타임아웃 또는 [meta_timeout_s]보다 작음. *)
     | Bad_adaptive_factor of float
         (** [adaptive_timeout_factor]가 1.0 미만. *)
 

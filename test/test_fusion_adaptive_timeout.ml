@@ -19,7 +19,6 @@ judge = "meta"
 judge_system_prompt = "reconcile"
 judge_timeout_s = 120.0
 meta_timeout_s = 90.0
-judge_wave_budget_s = 500.0
 adaptive_timeout_factor = 2.0
 fallback_judge_model = "fallback-model"
 [[fusion.presets.adaptive.panels]]
@@ -28,12 +27,9 @@ panel_system_prompt = "answer"
 [[fusion.presets.adaptive.judges]]
 model = "judge-a"
 system_prompt = "lens A"
-timeout_s = 100.0
-max_timeout_s = 180.0
 [[fusion.presets.adaptive.judges]]
 model = "judge-b"
 system_prompt = "lens B"
-timeout_s = 110.0
 |}
 
 let adaptive_preset () =
@@ -53,18 +49,11 @@ let test_config_adaptive_timeout_parse () =
      | [ vp ] ->
        let preset = Fusion_policy.Validated_preset.preset vp in
        check (float 0.001) "meta_timeout_s" 90.0 preset.Fusion_policy.meta_timeout_s;
-       check (float 0.001) "judge_wave_budget_s" 500.0
-         preset.Fusion_policy.judge_wave_budget_s;
        check (float 0.001) "adaptive_timeout_factor" 2.0
          preset.Fusion_policy.adaptive_timeout_factor;
        check (option string) "fallback_judge_model" (Some "fallback-model")
          preset.Fusion_policy.fallback_judge_model;
-       (match preset.Fusion_policy.judges with
-        | [ ja; _ ] ->
-          check (float 0.001) "ja timeout" 100.0 ja.Fusion_policy.jtimeout_s;
-          check (option (float 0.001)) "ja max_timeout_s" (Some 180.0)
-            ja.Fusion_policy.jmax_timeout_s
-        | _ -> fail "expected two judges")
+       check int "two judges" 2 (List.length preset.Fusion_policy.judges)
      | _ -> fail "expected exactly one preset")
   | Error es ->
     failf "expected Ok, got errors: %s"

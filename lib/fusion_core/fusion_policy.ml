@@ -26,9 +26,6 @@ type judge_spec =
   ; jsystem_prompt : string  (** 이 1차 심판의 lens (config 필수) *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부 *)
   ; jmax_output_tokens : int option  (** 출력 토큰 예산 override *)
-  ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초) *)
-  ; jmax_timeout_s : float option
-      (** Legacy observed value. No runtime path extends a Provider timeout. *)
   }
 [@@deriving show, eq]
 
@@ -47,8 +44,6 @@ type preset =
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   ; min_answered : int
       (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
-  ; judge_wave_budget_s : float
-      (** Legacy observed value. It never gates or skips Provider work. *)
   ; adaptive_timeout_factor : float
       (** Legacy observed value. It never extends Provider work. *)
   ; fallback_judge_model : string option
@@ -247,9 +242,6 @@ module Validated_preset = struct
         (** [min_answered]가 패널 모델 총합을 초과. *)
     | Bad_meta_timeout of float
         (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_judge_wave_budget of float
-        (** [judge_wave_budget_s]가 0 미만이거나, 양수인데 최장 1차 심판 타임아웃 또는
-            [meta_timeout_s]보다 작음. *)
     | Bad_adaptive_factor of float
         (** [adaptive_timeout_factor]가 1.0 미만. *)
 
@@ -298,19 +290,6 @@ module Validated_preset = struct
                   then Error (Bad_meta_timeout p.meta_timeout_s)
                   else if p.adaptive_timeout_factor < 1.0
                   then Error (Bad_adaptive_factor p.adaptive_timeout_factor)
-                  else if p.judge_wave_budget_s < 0.0
-                  then Error (Bad_judge_wave_budget p.judge_wave_budget_s)
-                  else if
-                    p.judge_wave_budget_s > 0.0
-                    && Float.is_finite p.judge_wave_budget_s
-                    && (let longest_judge =
-                          List.fold_left
-                            (fun acc (j : judge_spec) -> Float.max acc j.jtimeout_s)
-                            0.0 p.judges
-                        in
-                        p.judge_wave_budget_s < longest_judge
-                        || p.judge_wave_budget_s < p.meta_timeout_s)
-                  then Error (Bad_judge_wave_budget p.judge_wave_budget_s)
                   else Ok p)))
 
   let preset (t : t) : preset = t

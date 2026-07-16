@@ -20,9 +20,6 @@ type config_error =
       (** (preset 이름, min_answered): policy 허용 범위 밖 *)
   | Invalid_meta_timeout of string * float
       (** (preset 이름, meta_timeout_s): 양수 유한수가 아님. *)
-  | Invalid_judge_wave_budget of string * float
-      (** (preset 이름, judge_wave_budget_s): 0 미만이거나 최장 1차 심판 타임아웃/
-          meta_timeout_s보다 작음. *)
   | Invalid_adaptive_timeout_factor of string * float
       (** (preset 이름, adaptive_timeout_factor): 1.0 미만. *)
   | Toml_type_error of string
@@ -54,7 +51,7 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
   }
 
 (* JOJ 1차 심판 한 명 파싱 (RFC-0283). [[fusion.presets.NAME.judges]] sub-table의
-   키 model/label/system_prompt/web_tools/timeout_s를 읽는다. sub-table
+   키 model/label/system_prompt/web_tools를 읽는다. sub-table
    이름(judges)이 scope를 주므로 키는 비-접두. parse_group과 동형. 누락 system_prompt는
    ""로 읽혀 Validated_preset 검증에서 Judge_panel_prompt_missing으로 fail-fast된다. *)
 let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
@@ -64,11 +61,6 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
       Otoml.find_or ~default:"" tbl Otoml.get_string [ "system_prompt" ]
   ; jweb_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
   ; jmax_output_tokens = Otoml.find_opt tbl Otoml.get_integer [ "max_output_tokens" ]
-  ; jtimeout_s =
-      Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
-        [ "timeout_s" ]
-  ; jmax_timeout_s =
-      Otoml.find_opt tbl Otoml.get_float [ "max_timeout_s" ]
   }
 
 let parse_min_answered _name tbl =
@@ -104,11 +96,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
   in
-  (* 1차 심판 wave 전체 wall-clock 예산. 누락 시 무제한(legacy byte-identical). *)
-  let judge_wave_budget_s =
-    Otoml.find_or ~default:Float.max_float tbl Otoml.get_float
-      [ "judge_wave_budget_s" ]
-  in
   let adaptive_timeout_factor =
     Otoml.find_or ~default:1.0 tbl Otoml.get_float [ "adaptive_timeout_factor" ]
   in
@@ -128,7 +115,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
       ; judges
       ; meta_timeout_s
       ; min_answered
-      ; judge_wave_budget_s
       ; adaptive_timeout_factor
       ; fallback_judge_model
       }
@@ -158,8 +144,6 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Invalid_min_answered (name, v)
          | Fusion_policy.Validated_preset.Bad_meta_timeout v ->
            Invalid_meta_timeout (name, v)
-         | Fusion_policy.Validated_preset.Bad_judge_wave_budget v ->
-           Invalid_judge_wave_budget (name, v)
          | Fusion_policy.Validated_preset.Bad_adaptive_factor v ->
            Invalid_adaptive_timeout_factor (name, v)))
 

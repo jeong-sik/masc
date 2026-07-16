@@ -1110,7 +1110,6 @@ through an EVIDENCE lens: weigh each claim by how well it is supported, flag \
 unsupported assertions, and prefer conclusions grounded in verifiable reasoning. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-timeout_s = 300.0
 
 [[fusion.presets.quorum.judges]]
 model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
@@ -1121,7 +1120,6 @@ through a COVERAGE lens: map what each answer addresses and omits, surface blind
 spots and unique insights, and prefer the most complete resolution. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-timeout_s = 300.0
 
 # ── Staged-JoJ-capable preset (RFC-0283 staged_judge_of_judges) ──────────────
 # staged_judge_of_judges는 judge 수가 [fusion].staged_judge_group_size(=3)의
@@ -1136,9 +1134,7 @@ timeout_s = 300.0
 # 심판 런타임은 전부 supports-structured-output=true 선언 모델만 쓴다.
 # 비용/지연: LLM 호출 12회(panel 3 + 1차 심판 6 + stage meta 2 + 최종 meta 1).
 # 실행은 4단 순차 파이프라인(panel → 1차 심판 병렬 → stage meta 병렬 → 최종
-# meta, fusion_orchestrator run_staged_judge_of_judges)이라 각 단의
-# timeout(300s)이 누적된다 — 동시성 캡이 각 단을 한 웨이브로 소화할 때 최악
-# ~20분. 빠른 종합이 필요하면 단이 짧은 quorum/judge_of_judges 계열을 쓴다.
+# meta, fusion_orchestrator run_staged_judge_of_judges)이며 각 단의 경과 시간은 관측된다.
 # 키퍼 사용: masc_fusion preset="council" topology="staged_judge_of_judges"
 # (judge_of_judges topology도 동일 preset으로 사용 가능 — 6 lens 병렬 후 meta).
 [fusion.presets.council]
@@ -1174,7 +1170,6 @@ through an EVIDENCE lens: weigh each claim by how well it is supported, flag \
 unsupported assertions, and prefer conclusions grounded in verifiable reasoning. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-timeout_s = 300.0
 
 [[fusion.presets.council.judges]]
 model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
@@ -1185,7 +1180,6 @@ through a COVERAGE lens: map what each answer addresses and omits, surface blind
 spots and unique insights, and prefer the most complete resolution. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-timeout_s = 300.0
 
 [[fusion.presets.council.judges]]
 model = "ollama_cloud.ollama-cloud-ministral-3-14b"
@@ -1196,7 +1190,6 @@ through a RISK lens: identify failure modes, hidden assumptions, and worst-case 
 consequences each answer implies, and prefer the resolution that degrades most \
 gracefully. Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-timeout_s = 300.0
 
 [[fusion.presets.council.judges]]
 model = "ollama_cloud.ollama-cloud-devstral-2-123b"
@@ -1207,7 +1200,6 @@ through a FEASIBILITY lens: judge how implementable each proposal is with the \
 stated constraints and resources, and prefer the most actionable resolution. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-timeout_s = 300.0
 
 [[fusion.presets.council.judges]]
 model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
@@ -1218,7 +1210,6 @@ through a SIMPLICITY lens: prefer the resolution with the fewest moving parts \
 that still answers the question fully, and flag accidental complexity. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-timeout_s = 300.0
 
 [[fusion.presets.council.judges]]
 model = "ollama_cloud.ollama-cloud-ministral-3-14b"
@@ -1229,4 +1220,3 @@ through an ADVERSARIAL lens: actively try to refute each answer's key claims, \
 keep only what survives refutation, and prefer the most defensible resolution. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
-timeout_s = 300.0

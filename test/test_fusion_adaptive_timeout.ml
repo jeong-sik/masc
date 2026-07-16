@@ -119,6 +119,11 @@ let test_runtime_clock_does_not_gate_meta_provider_call () =
   Masc_eio_env.reset_for_test ();
   Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
     let clock = Fusion_orchestrator_judge_wave.make_runtime_clock () in
+    check
+      (option (float 0.0))
+      "missing clock is explicit"
+      None
+      (Fusion_orchestrator_judge_wave.elapsed_since_t0 clock);
     match
       Fusion_orchestrator_judge_wave.meta_provider_timeout
         ~preset:(adaptive_preset ())
@@ -134,7 +139,7 @@ let test_sink_failed_node_includes_timeout_fields () =
       { Fusion_types.failed_role = First "j"
       ; failure = Fusion_types.Timeout
       ; usage = sample_usage
-      ; elapsed_s = 5.0
+      ; elapsed_s = Some 5.0
       }
   in
   let json = Fusion_sink.judge_node_meta node in

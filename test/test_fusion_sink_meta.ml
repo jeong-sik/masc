@@ -258,7 +258,7 @@ let test_node_failed_keeps_identity () =
       { failed_role = First "a (m)"
       ; failure = Provider_error "boom"
       ; usage = { input_tokens = 7; output_tokens = 8 }
-      ; elapsed_s = 1.5
+      ; elapsed_s = Some 1.5
       }
   in
   let a = assoc_of (Masc.Fusion_sink.judge_node_meta o) in
@@ -270,7 +270,21 @@ let test_node_failed_keeps_identity () =
   check bool "no consensus on failed node" false (List.mem "consensus" (keys a));
   check (option int) "failed node input_tokens (E)" (Some 7) (int_field a "input_tokens");
   check (option int) "failed node output_tokens (E)" (Some 8)
-    (int_field a "output_tokens")
+    (int_field a "output_tokens");
+  check bool "observed elapsed is numeric" true
+    (List.assoc_opt "elapsed_s" a = Some (`Float 1.5));
+  let unavailable =
+    Judge_failed
+      { failed_role = Meta
+      ; failure = Internal_error "clock unavailable"
+      ; usage = zero_usage
+      ; elapsed_s = None
+      }
+    |> Masc.Fusion_sink.judge_node_meta
+    |> assoc_of
+  in
+  check bool "unavailable elapsed is null" true
+    (List.assoc_opt "elapsed_s" unavailable = Some `Null)
 
 let () =
   run "Fusion_sink.judge_meta"

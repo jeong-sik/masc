@@ -6,7 +6,7 @@ type judge_run =
   * ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result
-  * float
+  * float option
   * bool
 
 type clock
@@ -17,9 +17,9 @@ val make_clock
 
 val make_runtime_clock : unit -> clock
 (** Build a clock from the current domain-local {!Masc_eio_env}. Missing
-    runtime env is represented as [None]; timing observation then reports 0. *)
+    runtime env never blocks execution and produces unavailable elapsed observations. *)
 
-val elapsed_since_t0 : clock -> float
+val elapsed_since_t0 : clock -> float option
 
 val run_first_judges
   :  sw:Eio.Switch.t

@@ -54,7 +54,6 @@ let all_provider_native_schema_cases =
   ; "consolidation_plan", Keeper_structured_output_schema.consolidation_plan_output_schema
   ; "memory_bank_summary", Keeper_structured_output_schema.memory_bank_summary_output_schema
   ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema
-  ; "operator_judge", Keeper_structured_output_schema.operator_judge_output_schema
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
   ; "verification_verdict", Keeper_structured_output_schema.verification_verdict_output_schema
   ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
@@ -167,31 +166,6 @@ let test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected ()
     (match Llm_provider.Provider_config.validate_output_schema_request configured with
      | Ok () -> true
      | Error _ -> false)
-;;
-
-let operator_recommended_action_schema () =
-  Keeper_structured_output_schema.operator_judge_output_schema
-  |> schema_property "workspace"
-  |> schema_property "recommended_action"
-;;
-
-let test_operator_judge_schema_uses_action_approval_ssot () =
-  let action_schema =
-    operator_recommended_action_schema () |> schema_property "action_type"
-  in
-  check
-    (list string)
-    "operator action enum"
-    (List.sort String.compare Operator_action_catalog.strings)
-    (enum_strings action_schema)
-;;
-
-let test_operator_judge_schema_allows_payload_objects () =
-  let payload_schema =
-    operator_recommended_action_schema () |> schema_property "suggested_payload"
-  in
-  check bool "suggested_payload admits object members" true
-    (allows_additional_properties payload_schema)
 ;;
 
 let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
@@ -355,14 +329,6 @@ let () =
         ] )
     ; ( "dashboard schemas"
       , [ test_case
-            "operator judge schema uses action approval SSOT"
-            `Quick
-            test_operator_judge_schema_uses_action_approval_ssot
-        ; test_case
-            "operator judge schema admits payload objects"
-            `Quick
-            test_operator_judge_schema_allows_payload_objects
-        ; test_case
             "operator remote tool-name SSOT matches remote schemas"
             `Quick
             test_operator_remote_tool_name_ssot_matches_remote_schemas

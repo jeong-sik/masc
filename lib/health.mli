@@ -16,9 +16,9 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 module Random = Stdlib.Random
 
-(** Agent Health — Keeper failure observation over Circuit Breaker.
+(** Agent Health — Keeper outcome observation.
 
-    Wraps {!Circuit_breaker} with agent-name semantics for Keeper
+    Wraps {!Failure_observation} with agent-name semantics for Keeper
     Heartbeat. Failure history is diagnostic data and never controls
     Keeper participation.
 
@@ -32,7 +32,7 @@ module Random = Stdlib.Random
 type agent_health_summary = {
   agent_name : string;
   failure_count : int;
-  last_failure : Circuit_breaker.failure_record option;
+  last_failure : Failure_observation.failure_record option;
   last_success_at : float option;
 }
 

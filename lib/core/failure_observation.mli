@@ -1,4 +1,4 @@
-(** Circuit_breaker — failure observation for MASC agents.
+(** Failure_observation records MASC agent outcomes.
 
     Recorded failures are immutable diagnostic facts. They do not classify,
     gate, delay, or suspend Keeper participation.

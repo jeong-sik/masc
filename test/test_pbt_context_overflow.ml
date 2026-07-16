@@ -451,82 +451,6 @@ let test_pair_repair_metadata_samples_bounded () =
   in
   Alcotest.(check int) "metadata ToolUse samples bounded" 8 metadata_sample_count
 
-let test_checkpoint_sanitize_preserves_pair_repair_stats () =
-  let messages =
-    [ user_text "q"
-    ; assistant_text_and_tool_use "assistant kept text" "dangling" "calc"
-    ; user_text "interrupt"
-    ; user_text_and_tool_result "result wrapper kept text" "orphan" "late"
-    ]
-  in
-  let ctx = KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096 in
-  let ctx = KC.append_many ctx messages in
-  let checkpoint = KC.checkpoint_of_context ctx in
-  let sanitized, stats = KC.sanitize_oas_checkpoint checkpoint in
-  Alcotest.(check bool)
-    "sanitize reports pair repair"
-    true
-    (KC.checkpoint_sanitize_changed stats);
-  Alcotest.(check int)
-    "sanitize keeps dropped tool-use count"
-    1
-    stats.tool_pair_repair.dropped_tool_uses;
-  Alcotest.(check int)
-    "sanitize keeps dropped tool-result count"
-    1
-    stats.tool_pair_repair.dropped_tool_results;
-  Alcotest.(check (list (pair string string)))
-    "sanitize keeps dropped tool-use sample"
-    [ "dangling", "calc" ]
-    stats.tool_pair_repair.dropped_tool_use_samples;
-  Alcotest.(check (list string))
-    "sanitize keeps dropped tool-result id"
-    [ "orphan" ]
-    stats.tool_pair_repair.dropped_tool_result_ids;
-  let texts = text_blocks sanitized.Agent_sdk.Checkpoint.messages in
-  Alcotest.(check bool)
-    "sanitize does not create visible repair marker"
-    false
-    (text_contains "unpaired tool use elided" texts)
-
-let test_checkpoint_sanitize_preserves_tool_result_exactly () =
-  let expected =
-    Agent_sdk.Types.ToolResult
-      { tool_use_id = "failed-tool"
-      ; content = String.make 600_000 'x'
-      ; outcome =
-          Agent_sdk.Types.Tool_failed
-            { failure_kind = Agent_sdk.Types.Validation_error
-            ; error_class = Some Agent_sdk.Types.Deterministic
-            }
-      ; json = Some (`Assoc [ "artifact_ref", `String "sha256:exact-source" ])
-      ; content_blocks = Some [ Agent_sdk.Types.Text "typed projection" ]
-      }
-  in
-  let message : Agent_sdk.Types.message =
-    {
-      role = Agent_sdk.Types.Tool;
-      content = [ expected ];
-      name = None;
-      tool_call_id = Some "failed-tool";
-      metadata = [];
-    }
-  in
-  let checkpoint =
-    KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096
-    |> fun ctx -> KC.append ctx message
-    |> KC.checkpoint_of_context
-  in
-  match (fst (KC.sanitize_oas_checkpoint ~repair_orphans:false checkpoint)).messages with
-  | [
-      {
-        content = [ actual ];
-        _;
-      };
-    ] ->
-      Alcotest.(check bool) "full typed ToolResult preserved" true (actual = expected)
-  | _ -> Alcotest.fail "expected one checkpointed ToolResult"
-
 let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =
   let raw_messages =
     [ user_text "q"
@@ -750,10 +674,6 @@ let () =
         test_pair_repair_drops_only_invalid_blocks_in_span;
       Alcotest.test_case "pair repair metadata samples bounded" `Quick
         test_pair_repair_metadata_samples_bounded;
-      Alcotest.test_case "checkpoint sanitize preserves pair repair stats" `Quick
-        test_checkpoint_sanitize_preserves_pair_repair_stats;
-      Alcotest.test_case "checkpoint sanitize preserves full typed ToolResult" `Quick
-        test_checkpoint_sanitize_preserves_tool_result_exactly;
       Alcotest.test_case "checkpoint save repair drops unpaired tool blocks" `Quick
         test_checkpoint_save_repair_drops_unpaired_tool_blocks;
       Alcotest.test_case

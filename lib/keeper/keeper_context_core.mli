@@ -188,26 +188,6 @@ val repair_orphan_tool_result_messages :
 val repair_orphan_tool_result_messages_with_stats :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
 
-type checkpoint_sanitize_stats = {
-  dropped_messages : int;
-  dropped_blocks : int;
-  dropped_chars : int;
-  truncated_blocks : int;
-  truncated_chars : int;
-  tool_pair_repair : tool_pair_repair_stats;
-}
-
-(** When [repair_orphans] is [true] (default), drop orphan
-    tool_use/tool_result pairs. Message content is otherwise preserved
-    exactly. *)
-val sanitize_oas_checkpoint :
-  ?repair_orphans:bool ->
-  Agent_sdk.Checkpoint.t ->
-  Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats
-
-val checkpoint_sanitize_changed : checkpoint_sanitize_stats -> bool
-(** [true] iff any of the counters in [stats] is non-zero. *)
-
 (** Project an OAS checkpoint to a working context without rewriting its
     messages. *)
 val context_of_oas_checkpoint :

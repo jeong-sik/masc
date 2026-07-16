@@ -70,8 +70,11 @@ let tool_result_error_data
 ;;
 
 let tool_result_with_tool_name ~tool_name : tool_result -> tool_result = function
-  | Ok payload -> Ok { payload with tool_name }
-  | Error payload -> Error { payload with tool_name }
+  | Tool_result.Completed payload ->
+    Tool_result.Completed { payload with tool_name }
+  | Tool_result.Deferred payload ->
+    Tool_result.Deferred { payload with tool_name }
+  | Tool_result.Failed payload -> Tool_result.Failed { payload with tool_name }
 ;;
 
 let tool_result_body = Tool_result.message

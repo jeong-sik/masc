@@ -93,15 +93,16 @@ val record_runtime_mcp_keeper_tool_trace :
   tool_name:string ->
   arguments:Yojson.Safe.t ->
   message:string ->
-  success:bool ->
+  disposition:('completed, 'deferred, 'failed) Tool_result.disposition ->
   duration_ms:int ->
   unit
 (** Persists a single tool-call trace row for the keeper.
     Builds the {!keeper_runtime_mcp_log_context}
     internally (so callers do not need to pre-thread it),
     appends to the runtime-MCP trajectory log, emits the
-    SSE payload, and bumps the trajectory-coverage
-    counter.  Errors during persistence are swallowed
+    exact-disposition SSE payload, and bumps the trajectory-coverage
+    counter. Binary observation formats derive their [success]
+    projection only at this boundary. Errors during persistence are swallowed
     with a [Log.Misc.warn] — telemetry must never abort
     the tool call. *)
 

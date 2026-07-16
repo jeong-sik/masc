@@ -887,7 +887,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
       defer_to_existing_work admission_rejection
   in
   match dispatch_result with
-  | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->
+  | `Async_ack (in_flight, Some result) when not (Tool_result.is_failed result) ->
       let body = Tool_result.message result in
       let duration_ms =
         Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
@@ -977,7 +977,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~submission_owne
               "%s is busy; your message was not queued because the durable chat queue rejected it: %s"
               keeper_name
               (Keeper_chat_queue.mutation_error_to_string error)))
-  | `Streaming (Some result) when Tool_result.is_success result ->
+  | `Streaming (Some result) when not (Tool_result.is_failed result) ->
       let body = Tool_result.message result in
       let duration_ms =
         Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)

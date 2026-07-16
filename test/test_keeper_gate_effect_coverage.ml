@@ -36,10 +36,26 @@ let make_meta ?(always_allow = false) name =
     if always_allow then { meta with always_allow = Some true } else meta
 ;;
 
-let json_error raw =
-  Yojson.Safe.from_string raw
-  |> Yojson.Safe.Util.member "error"
-  |> Yojson.Safe.Util.to_string
+let expect_completed label (result : Keeper_tool_execution.t) =
+  match result.disposition with
+  | Tool_result.Completed () -> ()
+  | Tool_result.Deferred () | Tool_result.Failed _ -> fail (label ^ ": not completed")
+;;
+
+let expect_deferred label (result : Keeper_tool_execution.t) =
+  match result.disposition with
+  | Tool_result.Deferred () -> ()
+  | Tool_result.Completed () | Tool_result.Failed _ -> fail (label ^ ": not deferred")
+;;
+
+let expect_failed label expected (result : Keeper_tool_execution.t) =
+  match result.disposition with
+  | Tool_result.Failed actual ->
+    check string
+      label
+      (Tool_result.tool_failure_class_to_string expected)
+      (Tool_result.tool_failure_class_to_string actual)
+  | Tool_result.Completed () | Tool_result.Deferred () -> fail (label ^ ": not failed")
 ;;
 
 let with_clean_gate_runtime f =
@@ -92,10 +108,11 @@ let with_keeper_dispatch_probe f =
     let continue () =
       calls := (name, args) :: !calls;
       Some
-        (Tool_result.ok
+        (Tool_result.make_ok
            ~tool_name:name
            ~start_time:0.0
-           {|{"ok":true,"effect":"ran"}|})
+           ~data:(`Assoc [ "effect", `String "ran" ])
+           ())
     in
     match authorize_external_effect with
     | None -> continue ()
@@ -171,8 +188,8 @@ let test_keeper_effects_defer_without_dispatch () =
   List.iter
     (fun name ->
        let args = `Assoc [ "opaque", `String name ] in
-         let raw =
-           Keeper_tool_in_process_runtime.handle_masc_keeper
+         let result =
+           Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
            ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta
@@ -180,7 +197,7 @@ let test_keeper_effects_defer_without_dispatch () =
            ~args
            ()
        in
-       check string (name ^ " defers") "gate_deferred" (json_error raw))
+       expect_deferred (name ^ " defers") result)
     keeper_effect_names;
   check int "no Keeper effect dispatched" 0 (List.length !calls)
 ;;
@@ -198,8 +215,8 @@ let test_keeper_effects_unavailable_without_dispatch () =
   with_keeper_dispatch_probe @@ fun calls ->
   List.iter
     (fun name ->
-         let raw =
-           Keeper_tool_in_process_runtime.handle_masc_keeper
+         let result =
+           Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
            ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta
@@ -207,7 +224,10 @@ let test_keeper_effects_unavailable_without_dispatch () =
            ~args:(`Assoc [ "opaque", `String name ])
            ()
        in
-       check string (name ^ " unavailable") "gate_unavailable" (json_error raw))
+       expect_failed
+         (name ^ " unavailable")
+         Tool_result.Runtime_failure
+         result)
     keeper_effect_names;
   check int "unavailable Gate executes no Keeper effect" 0 (List.length !calls)
 ;;
@@ -226,8 +246,8 @@ let test_keeper_effects_allow_exact_dispatch () =
   List.iter
     (fun name ->
        let args = `Assoc [ "opaque", `String name ] in
-         let raw =
-           Keeper_tool_in_process_runtime.handle_masc_keeper
+         let result =
+           Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
            ~publication_recovery_provider:publication_recovery.provider
            ~config
            ~meta
@@ -235,10 +255,12 @@ let test_keeper_effects_allow_exact_dispatch () =
            ~args
            ()
        in
+       expect_completed (name ^ " proceeds") result;
+       let data = Option.value ~default:`Null result.data in
        check string
          (name ^ " proceeds")
          "ran"
-         Yojson.Safe.Util.(member "effect" (Yojson.Safe.from_string raw) |> to_string))
+         Yojson.Safe.Util.(member "effect" data |> to_string))
     keeper_effect_names;
   let observed = List.rev !calls in
   check
@@ -275,23 +297,23 @@ let test_ollama_probe_defer_and_unavailable_do_not_dispatch () =
    | Error error -> fail ("failed to select manual Gate mode: " ^ error));
   let meta = make_meta "ollama-gate-deferred-keeper" in
   let deferred =
-    Keeper_tool_in_process_runtime.handle_masc_local_runtime
+    Keeper_tool_in_process_runtime.handle_masc_local_runtime_with_outcome
       ~config:deferred_config
       ~meta
       ~name:ollama_probe_name
       ~args:ollama_probe_input
       ()
   in
-  check string "probe defers" "gate_deferred" (json_error deferred);
+  expect_deferred "probe defers" deferred;
   let unavailable =
-    Keeper_tool_in_process_runtime.handle_masc_local_runtime
+    Keeper_tool_in_process_runtime.handle_masc_local_runtime_with_outcome
       ~config:(Workspace.default_config "/dev/null")
       ~meta
       ~name:ollama_probe_name
       ~args:ollama_probe_input
       ()
   in
-  check string "probe unavailable" "gate_unavailable" (json_error unavailable);
+  expect_failed "probe unavailable" Tool_result.Runtime_failure unavailable;
   ()
 ;;
 
@@ -305,15 +327,16 @@ let test_ollama_probe_allow_dispatches_exact_input () =
   Fun.protect
     ~finally:(fun () -> Keeper_registry.unregister ~base_path meta.name)
   @@ fun () ->
-  let raw =
-    Keeper_tool_in_process_runtime.handle_masc_local_runtime
+  let result =
+    Keeper_tool_in_process_runtime.handle_masc_local_runtime_with_outcome
       ~config
       ~meta
       ~name:ollama_probe_name
       ~args:ollama_probe_input
-      ()
+    ()
   in
-  let json = Yojson.Safe.from_string raw in
+  expect_completed "Always Allow proceeds" result;
+  let json = Option.value ~default:`Null result.data in
   check bool
     "Always Allow proceeds into the runtime handler"
     true

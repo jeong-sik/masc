@@ -100,7 +100,7 @@ describe('SSEMessageSchema', () => {
       keeper_name: 'k1',
       tool_name: 'bash',
       duration_ms: 1234,
-      success: true,
+      disposition: 'completed',
       tool_args: { path: '/tmp/a' },
       tool_result: { ok: true },
       tool_args_preview: '{"path":"/tmp/a"}',
@@ -108,6 +108,16 @@ describe('SSEMessageSchema', () => {
       tool_io_redacted: false,
     })
     expect(r.success).toBe(true)
+  })
+
+  it('rejects a keeper_tool_call without canonical disposition', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_tool_call',
+      tool_name: 'bash',
+      duration_ms: 1234,
+      success: true,
+    })
+    expect(r.success).toBe(false)
   })
 
   it('rejects wrong type on a known field', () => {

@@ -5,13 +5,8 @@
 ;; mega-library so the Board domain can depend on Thompson_sampling.record_vote
 ;; without forcing a Board <-> mega-lib cycle.
 ;;
-;; PR-AE (#19826) extracted Economy but could NOT take Thompson along:
-;; Thompson had two load-bearing edges to mega-lib-root modules —
-;; Health.is_healthy and Otel_metric_store.inc_counter. Both have been
-;; inverted via dependency injection: [select_with_feedback] now takes
-;; [~is_healthy] (required) and [?on_priority_selected] (no-op default).
-;; The coupling moved to the call site of [select_with_feedback] (today
-;; test-only); Thompson itself depends only on the neutral libraries below.
+;; Thompson depends only on the neutral libraries below. Selection records
+;; outcomes; historical health observations do not gate participation.
 ;;
 ;; Tool_call_quality_benchmark (used by [record_quality_signal]) is NOT a
 ;; mega-lib edge — it already lives in the leaf masc.tool_call_quality_benchmark

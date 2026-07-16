@@ -129,6 +129,7 @@ type event_queue_trigger =
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
   | Failure_judgment_stimulus
+  | Manual_compaction_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
@@ -140,6 +141,7 @@ type turn_reason =
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
+  | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of { unclaimed : int; failed : int }

@@ -363,7 +363,10 @@ let test_runtime_base_path_anchors_relative_env_base () =
          with_env Env_config_core.base_path_input_env_key None (fun () ->
            with_env Env_config_core.base_path_env_key (Some "relative-root") (fun () ->
              Config_dir_resolver.reset ();
-             let expected = Ok (Filename.concat dir "relative-root") in
+             (* Relative base anchors to [Sys.getcwd ()], which is the
+                symlink-canonical cwd (macOS temp [/var/…] → [/private/var/…]).
+                Canonicalize [dir] so the expected matches the real anchor. *)
+             let expected = Ok (Filename.concat (Unix.realpath dir) "relative-root") in
              let actual = Routes.runtime_base_path_result () in
              check result_t "relative env base anchors to cwd" expected actual))))
 ;;

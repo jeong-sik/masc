@@ -14,13 +14,16 @@ from .diagnostics import (
     render_json,
     render_pretty,
 )
-from .gate_client_base import BreakerSnapshot, GateClientBase
+from .gate_client_base import GateClientBase
 from .gate_response import GateResponse
-from .structured_content import SUPPORTED_BLOCK_TYPES, response_text, structured_plain_text
+from .structured_content import (
+    SUPPORTED_BLOCK_TYPES,
+    response_text,
+    structured_plain_text,
+)
 
 __all__ = [
     "AutoFix",
-    "BreakerSnapshot",
     "Check",
     "CheckFn",
     "Diagnostics",

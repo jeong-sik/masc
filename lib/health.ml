@@ -16,14 +16,12 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 module Random = Stdlib.Random
 
-(** Agent Health — Autonomy-specific health gate over Circuit Breaker.
+(** Agent Health — Keeper failure observation over Circuit Breaker.
 
     Wraps Circuit_breaker with agent-name semantics for Keeper Heartbeat.
-    Agents with open circuit breakers are skipped during tick selection,
-    preventing cascading failures from repeatedly invoking failing agents.
+    Failure history is diagnostic data and never controls participation.
 
     Integration points:
-    - Pre-action: is_healthy checks before decide_agent_action
     - Statistics: health_summary for dashboard/monitoring
 
     @since 2.75.0 *)
@@ -48,30 +46,6 @@ type agent_health_summary = {
   cooldown_remaining_sec : int;
 }
 
-(** {1 Core API} *)
-
-(** Check if an agent is healthy enough to participate in the tick.
-    Returns Healthy, Unhealthy(reason), or Recovering. *)
-let check_health ~agent_name : health_status =
-  match Circuit_breaker.check_global ~agent_id:agent_name with
-  | Ok () ->
-      let status = Circuit_breaker.get_status_global ~agent_id:agent_name in
-      if String.equal status.state_name "half_open" then Recovering
-      else Healthy
-  | Error reason ->
-      Unhealthy reason
-
-(** Convenience predicate: can this agent participate?
-    Issue #8607: [Unknown] is treated as not-healthy — a fail-closed
-    response to drift. Today [check_health] never returns [Unknown]
-    (only [get_summary] does), but the explicit arm pins the
-    semantic so future paths producing [Unknown] don't accidentally
-    grant participation. *)
-let is_healthy ~agent_name : bool =
-  match check_health ~agent_name with
-  | Healthy | Recovering -> true
-  | Unhealthy _ | Unknown _ -> false
-
 (** Record a successful action — clears half-open state. *)
 let record_success ~agent_name =
   Circuit_breaker.record_success_global ~agent_id:agent_name
@@ -79,29 +53,6 @@ let record_success ~agent_name =
 (** Record a failed action — may open the breaker. *)
 let record_failure ~agent_name ~reason =
   Circuit_breaker.record_failure_global ~agent_id:agent_name ~reason
-
-(** {1 Batch Filtering} *)
-
-(** Filter a list of agent names to only healthy ones.
-    Returns (healthy_agents, skipped_with_reasons). *)
-let filter_healthy (agents : (string * 'a) list) : (string * 'a) list * (string * string) list =
-  let healthy = ref [] in
-  let skipped = ref [] in
-  List.iter (fun (name, data) ->
-    match check_health ~agent_name:name with
-    | Healthy | Recovering ->
-        healthy := (name, data) :: !healthy
-    | Unhealthy reason ->
-        skipped := (name, reason) :: !skipped;
-        Log.Agent_health.debug "Skipping %s: %s" name reason
-    | Unknown raw ->
-        (* Issue #8607: fail-closed for unrecognised breaker states.
-           Surface the raw value so operators can investigate. *)
-        let reason = Printf.sprintf "unknown breaker state %S" raw in
-        skipped := (name, reason) :: !skipped;
-        Log.Agent_health.debug "Skipping %s: %s" name reason
-  ) agents;
-  (List.rev !healthy, List.rev !skipped)
 
 (** {1 Statistics} *)
 

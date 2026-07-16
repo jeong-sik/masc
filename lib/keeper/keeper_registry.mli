@@ -450,6 +450,7 @@ type wakeup_intent =
   | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal
+  | Compaction_signal
 
 type wakeup_outcome =
   | Signaled

@@ -138,16 +138,15 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~workspac
 
 (** RFC-0294 PR-4: single-owner orphan-task surfacer.
 
-    R1g (RFC-0294) removed [audit_orphan_tasks] from the keeper wake-driver, so an
-    orphaned task — in particular an [AwaitingVerification] one, which
-    [cleanup_zombies] Phase 3 does not release (RFC-0220 §5) and so never returns
-    to 0 — would become silently invisible (broken-but-visible regression). This
-    refreshes [masc_orphan_tasks] (gauge, labeled by status_class) each pulse beat
-    from the same audit, independent of the keeper actor. It is an alertable
-    metric, not an actor wake: if the reaper/pulse itself stalls (the 2026-06-21/22
+    R1g (RFC-0294) removed [audit_orphan_tasks] from the keeper wake-driver, so
+    orphaned tasks would become silently invisible without an independent
+    observation path (broken-but-visible regression). This refreshes
+    [masc_orphan_tasks] (gauge, labeled by status_class) each pulse beat from the
+    same audit, independent of the keeper actor. It is an alertable metric, not
+    an actor wake: if the reaper/pulse itself stalls (the 2026-06-21/22
     reaper-not-running incident) the gauge goes stale, which is itself alertable.
-    Every class in [Workspace.orphan_status_classes] is emitted (0 when empty) so a
-    cleared class resets rather than leaving a stale value. *)
+    Every class in [Workspace.orphan_status_classes] is emitted (0 when empty) so
+    a cleared class resets rather than leaving a stale value. *)
 let surface_orphan_tasks_gauge workspace_config =
   let counts =
     Workspace.orphan_counts_by_status_class

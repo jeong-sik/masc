@@ -45,9 +45,9 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_tasks_audit"
     ; description =
-        "Find orphaned tasks: claimed/in_progress tasks assigned to agents that are \
-         offline (no heartbeat >10 min). Returns orphan list with assignee and \
-         last_seen. The workspace GC auto-releases orphaned tasks; this audit is read-only."
+        "Find orphaned tasks reported by workspace lifecycle observation. Returns \
+         the task status and assignee. This audit is read-only: it never releases \
+         or reassigns tasks."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

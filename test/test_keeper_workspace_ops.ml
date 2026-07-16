@@ -97,23 +97,26 @@ let test_process_status_exited_nonzero () =
       (List.assoc_opt "code" fields
        |> fun opt -> Option.bind opt (function `Int i -> Some i | _ -> None))  | other ->
     Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
-let test_process_status_timeout () =
-  (* Exit code 124 is the Eio timeout convention. *)
+let test_process_status_exited_124 () =
   let json = Keeper_alerting_path.process_status_to_json (Unix.WEXITED 124) in
   match json with
   | `Assoc fields ->
-    Alcotest.(check (option string)) "kind = timeout"
-      (Some "timeout")
+    Alcotest.(check (option string)) "kind = exit"
+      (Some "exit")
       (List.assoc_opt "kind" fields
-       |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None))
+       |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None));
+    Alcotest.(check (option int)) "code = 124"
+      (Some 124)
+      (List.assoc_opt "code" fields
+       |> fun opt -> Option.bind opt (function `Int i -> Some i | _ -> None))
   | other ->
     Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
 let test_process_status_signaled () =
   let json = Keeper_alerting_path.process_status_to_json (Unix.WSIGNALED Sys.sigkill) in
   match json with
   | `Assoc fields ->
-    Alcotest.(check (option string)) "kind = signaled"
-      (Some "signaled")
+    Alcotest.(check (option string)) "kind = signal"
+      (Some "signal")
       (List.assoc_opt "kind" fields
        |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None))
   | other ->
@@ -207,7 +210,7 @@ let () =
     ; ( "process_status_to_json"
       , [ Alcotest.test_case "exited 0" `Quick test_process_status_exited_zero
         ; Alcotest.test_case "exited 2" `Quick test_process_status_exited_nonzero
-        ; Alcotest.test_case "timeout (124)" `Quick test_process_status_timeout
+        ; Alcotest.test_case "exit 124" `Quick test_process_status_exited_124
         ; Alcotest.test_case "signaled" `Quick test_process_status_signaled
         ] )
     ; ( "p10_envelope_shape"

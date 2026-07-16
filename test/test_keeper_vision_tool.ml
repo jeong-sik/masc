@@ -53,7 +53,6 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
       [ "name", `String name
       ; "agent_name", `String (name ^ "-agent")
       ; "trace_id", `String (name ^ "-trace")
-      ; "goal", `String "vision tool test"
       ; "allowed_paths", `List [ `String "*" ]
       ; "sandbox_profile", `String "none"
       ]

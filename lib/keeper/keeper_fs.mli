@@ -65,10 +65,15 @@ type durable_write_error =
     [ownership_root] is supplied, both directory chains must be lexically
     contained below it and symbolic-link components are rejected. The caller
     keeps that subtree process-owned while the write runs because OCaml 5.4
-    has no portable dirfd-relative rename API. *)
+    has no portable dirfd-relative rename API. [pretty] (default [true])
+    selects [Yojson.Safe.pretty_to_string] vs [Yojson.Safe.to_string]; pass
+    [~pretty:false] for machine-only artifacts that are never read directly by
+    a human (e.g. checkpoint payloads, which pretty-print to 0.7-1.4MB and are
+    only ever consumed through a JSON parser). *)
 val save_json_durable_atomic
   :  ?ownership_root:string
   -> ?temp_dir:string
+  -> ?pretty:bool
   -> string
   -> Yojson.Safe.t
   -> (unit, durable_write_error) result
@@ -77,10 +82,12 @@ val save_json_durable_atomic
     the process executor pool when it is available. [json_source] must be a
     pure closure. This keeps large queue snapshots from monopolizing the Eio
     scheduler while preserving the same atomic publication and ownership
-    contract; blocking filesystem operations still run in a systhread. *)
+    contract; blocking filesystem operations still run in a systhread. [pretty]
+    has the same meaning as on {!save_json_durable_atomic}. *)
 val save_json_durable_atomic_from
   :  ?ownership_root:string
   -> ?temp_dir:string
+  -> ?pretty:bool
   -> string
   -> (unit -> Yojson.Safe.t)
   -> (unit, durable_write_error) result
@@ -115,6 +122,7 @@ module For_testing : sig
     -> ?before_directory_fsync:(string -> unit)
     -> ?ownership_root:string
     -> ?temp_dir:string
+    -> ?pretty:bool
     -> string
     -> Yojson.Safe.t
     -> (unit, durable_write_error) result
@@ -124,6 +132,7 @@ module For_testing : sig
     -> ?before_directory_fsync:(string -> unit)
     -> ?ownership_root:string
     -> ?temp_dir:string
+    -> ?pretty:bool
     -> string
     -> (unit -> Yojson.Safe.t)
     -> (unit, durable_write_error) result

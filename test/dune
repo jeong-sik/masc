@@ -324,6 +324,7 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_owner_lock
+  test_cross_context_mutex
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
@@ -647,6 +648,7 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_owner_lock
+  test_cross_context_mutex
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
@@ -1021,7 +1023,6 @@
   test_state_product
   test_tool_result
   test_tool_hooks
-  test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
   test_webrtc_signaling
@@ -1195,7 +1196,6 @@
   test_state_product
   test_tool_result
   test_tool_hooks
-  test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
   test_webrtc_signaling
@@ -1230,7 +1230,7 @@
   test_board_core_payload
   test_board_attachment_meta
   test_board_moderation)
- (libraries masc_test_deps bigstringaf)
+ (libraries masc_test_deps masc.embedded_config bigstringaf)
  (deps ../bin/main_eio.exe))
 
 (test
@@ -1892,7 +1892,6 @@
 (include stanzas/test_keeper_mutex_coverage.inc)
 
 
-(include stanzas/test_keeper_pause_silent_failure_source.inc)
 
 (include stanzas/test_keeper_personality_round_trip.inc)
 
@@ -2239,15 +2238,6 @@
  (name test_pr_d_agent_runtime_migration)
  (modules test_pr_d_agent_runtime_migration)
  (libraries masc_test_deps ast_grep))
-
-; server_bootstrap_loops fork helper ratchet.
-; Pins raw Eio.Fiber.fork ownership to the cancel-safe helper instead
-; of repeating ad hoc crash wrappers at each background loop site.
-
-(test
- (name test_server_bootstrap_loop_fork_helper)
- (modules test_server_bootstrap_loop_fork_helper)
- (libraries alcotest masc_test_deps))
 
 ; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
 ; and server bootstrap kept free of provider-specific OAS policy wiring.

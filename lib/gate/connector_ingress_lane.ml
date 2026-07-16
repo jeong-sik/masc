@@ -7,11 +7,18 @@ type event_id =
   ; opaque_id : string
   }
 
+type failure_reason =
+  | Callback_raised of string
+  | Callback_cancelled of string
+  | Owner_released
+
 type failure =
   { lane : lane
   ; event_id : event_id
-  ; reason : string
+  ; reason : failure_reason
   }
+
+type submit_error = Owner_unavailable
 
 type job =
   { event_id : event_id
@@ -31,6 +38,7 @@ type t =
   ; lanes : (lane, lane_state) Hashtbl.t
   ; ready : lane Queue.t
   ; on_failure : failure -> unit
+  ; mutable lifecycle : [ `Open | `Closed ]
   }
 
 let lane_to_string = function
@@ -40,6 +48,16 @@ let lane_to_string = function
 
 let event_id_to_string event_id =
   event_id.source ^ ":" ^ event_id.opaque_id
+;;
+
+let failure_reason_to_string = function
+  | Callback_raised detail -> "callback_raised: " ^ detail
+  | Callback_cancelled detail -> "callback_cancelled: " ^ detail
+  | Owner_released -> "owner_released"
+;;
+
+let submit_error_to_string = function
+  | Owner_unavailable -> "owner_unavailable"
 ;;
 
 let with_lock t f = Stdlib.Mutex.protect t.mutex f
@@ -57,11 +75,22 @@ let report_failure t failure =
 
 let run_job t lane job =
   try job.run () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Cancel.Cancelled cause as exn ->
+    Eio.Cancel.protect (fun () ->
+      report_failure
+        t
+        { lane
+        ; event_id = job.event_id
+        ; reason = Callback_cancelled (Printexc.to_string cause)
+        });
+    raise exn
   | exn ->
     report_failure
       t
-      { lane; event_id = job.event_id; reason = Printexc.to_string exn }
+      { lane
+      ; event_id = job.event_id
+      ; reason = Callback_raised (Printexc.to_string exn)
+      }
 ;;
 
 let take_lane_job t lane state =
@@ -96,7 +125,7 @@ let take_ready_lane t =
        | Some _ | None -> None))
 ;;
 
-let rec run_dispatcher t =
+let rec run_dispatcher t : [ `Stop_daemon ] =
   let lane, state =
     Eio.Condition.loop_no_mutex t.condition (fun () -> take_ready_lane t)
   in
@@ -104,7 +133,41 @@ let rec run_dispatcher t =
   run_dispatcher t
 ;;
 
+let close t =
+  let pending =
+    with_lock t (fun () ->
+      match t.lifecycle with
+      | `Closed -> []
+      | `Open ->
+        t.lifecycle <- `Closed;
+        let pending_by_lane =
+          Hashtbl.fold
+            (fun lane state acc ->
+               let jobs =
+                 Queue.fold
+                   (fun acc job -> (lane, job) :: acc)
+                   []
+                   state.jobs
+                 |> List.rev
+               in
+               jobs :: acc)
+            t.lanes
+            []
+        in
+        Hashtbl.clear t.lanes;
+        Queue.clear t.ready;
+        List.concat pending_by_lane)
+  in
+  List.iter
+    (fun (lane, job) ->
+       report_failure
+         t
+         { lane; event_id = job.event_id; reason = Owner_released })
+    pending
+;;
+
 let create ~sw ~on_failure () =
+  Eio.Switch.check sw;
   let t =
     { sw
     ; mutex = Stdlib.Mutex.create ()
@@ -112,32 +175,44 @@ let create ~sw ~on_failure () =
     ; lanes = Hashtbl.create 16
     ; ready = Queue.create ()
     ; on_failure
+    ; lifecycle = `Open
     }
   in
-  Eio.Fiber.fork ~sw (fun () -> run_dispatcher t);
+  Eio.Switch.on_release sw (fun () -> close t);
+  Eio.Fiber.fork_daemon ~sw (fun () -> run_dispatcher t);
   t
 ;;
 
 let submit t ~lane ~event_id run =
-  let notify =
+  let submission =
     with_lock t (fun () ->
-      let state =
-        match Hashtbl.find_opt t.lanes lane with
-        | Some state -> state
-        | None ->
-          let state =
-            { jobs = Queue.create (); scheduled = false; active = false }
-          in
-          Hashtbl.add t.lanes lane state;
-          state
-      in
-      Queue.add { event_id; run } state.jobs;
-      if state.active || state.scheduled
-      then false
-      else (
-        state.scheduled <- true;
-        Queue.add lane t.ready;
-        true))
+      match t.lifecycle with
+      | `Closed -> Error Owner_unavailable
+      | `Open ->
+        let state =
+          match Hashtbl.find_opt t.lanes lane with
+          | Some state -> state
+          | None ->
+            let state =
+              { jobs = Queue.create (); scheduled = false; active = false }
+            in
+            Hashtbl.add t.lanes lane state;
+            state
+        in
+        Queue.add { event_id; run } state.jobs;
+        let notify =
+          if state.active || state.scheduled
+          then false
+          else (
+            state.scheduled <- true;
+            Queue.add lane t.ready;
+            true)
+        in
+        Ok notify)
   in
-  if notify then Eio.Condition.broadcast t.condition
+  match submission with
+  | Error _ as error -> error
+  | Ok notify ->
+    if notify then Eio.Condition.broadcast t.condition;
+    Ok ()
 ;;

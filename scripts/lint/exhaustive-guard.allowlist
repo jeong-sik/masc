@@ -36,7 +36,7 @@ lib/audit_log.ml:351
 lib/audit_log.ml:384
 lib/audit_log.ml:393
 lib/auth_error_kind.ml:43
-lib/auth_login.ml:36
+lib/auth/auth_login.ml:36
 lib/auth.ml:271
 lib/auth.ml:292
 lib/auth.ml:387

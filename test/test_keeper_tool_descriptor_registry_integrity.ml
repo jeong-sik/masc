@@ -795,19 +795,19 @@ let test_execute_descriptor_spells_out_argv_and_filesystem_basis () =
     descriptor.description;
   check_contains
     "Execute description treats invocation as opaque"
-    ~sub:"never interprets executable or subcommand meaning"
+    ~sub:"never interprets program or subcommand meaning"
     descriptor.description;
   check_contains
-    "Execute description forbids duplicate argv0"
-    ~sub:"do not repeat executable as argv[0]"
+    "Execute description states argv is the sole process vector"
+    ~sub:"one non-empty argv process vector"
     descriptor.description;
   Alcotest.(check bool)
     "Execute description has no forge-specific product knowledge"
     false
     (string_contains ~sub:"git" (String.lowercase_ascii descriptor.description));
   check_contains
-    "Execute argv schema repeats argv0 warning"
-    ~sub:"Do not repeat executable as argv[0]"
+    "Execute argv schema defines argv[0] as the executable"
+    ~sub:"argv[0] is the executable"
     argv_description;
   check_contains
     "Execute argv schema preserves opaque arguments"

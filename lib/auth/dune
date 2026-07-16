@@ -13,10 +13,8 @@
   masc.masc_types
   masc.config
   masc.config_dir_resolver
+  masc.crypto_rng
   eio
-  mirage-crypto
-  mirage-crypto-rng
-  mirage-crypto-rng.unix
   digestif
   masc.fs_compat
   masc.masc_log

@@ -6,6 +6,16 @@
 val oas_checkpoint_path :
   session_dir:string -> session_id:string -> string
 
+(** Path of the fingerprinted watermark sidecar beside a canonical
+    checkpoint file ([<canonical_path>.watermark.json]). RFC-0225 §3.2:
+    the sidecar records [session_id], [turn_count], and the canonical
+    file's own [size]/[mtime] fingerprint at write time, so a later save
+    can skip re-parsing the full canonical JSON when the fingerprint still
+    matches. It is never treated as a source of truth on its own -- every
+    read re-verifies it against a fresh [stat] of the canonical file, and
+    any mismatch, absence, or corruption falls back to a full parse. *)
+val watermark_sidecar_path : string -> string
+
 (** [oas-snapshot-] prefix on OAS history archive entries. *)
 val oas_history_prefix : string
 
@@ -116,3 +126,16 @@ val load_oas :
   session_dir:string ->
   session_id:string ->
   (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
+
+module For_testing : sig
+  (** Number of times the checkpoint watermark resolution has fallen back to
+      a full canonical-file parse (sidecar absent, corrupt, or fingerprint
+      mismatch) since the last {!reset_full_parse_count}. Exists so a test
+      can prove the sidecar fast path actually skips
+      [load_canonical_strict] rather than merely returning the right answer
+      by coincidence. *)
+  val get_full_parse_count : unit -> int
+
+  (** Reset {!get_full_parse_count} to zero. *)
+  val reset_full_parse_count : unit -> unit
+end

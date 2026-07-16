@@ -54,7 +54,6 @@ let make_meta
       [ "name", `String name
       ; "agent_name", `String ("agent-" ^ name)
       ; "trace_id", `String ("trace-" ^ name)
-      ; "goal", `String "visible path projection test"
       ; ( "sandbox_profile"
         , `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) )
       ]

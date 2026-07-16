@@ -25,11 +25,13 @@ val resolve_prompt_markdown_dir :
 type sync_result = {
   copied : string list;
   overwritten : string list;
+  removed : string list;
   failed : (string * string) list;
 }
 (** Outcome of one prompt asset sync pass. Entries are embedded asset
-    paths (e.g. [prompts/keeper.world.md]); [failed] pairs the path with
-    the error message. *)
+    paths (e.g. [prompts/keeper.world.md]); [removed] contains retired
+    distribution assets deleted from the runtime directory, and [failed]
+    pairs the path with the error message. *)
 
 val sync_prompt_assets :
   read:(string -> string option) ->
@@ -41,7 +43,10 @@ val sync_prompt_assets :
     assets (#20929). Only entries under [prompts/] in [files] are
     considered; each is written into [prompts_dir] when missing or when
     its content differs from the embedded copy. Identical files are left
-    untouched; files present only in [prompts_dir] are never deleted.
+    untouched. The embedded cumulative managed-assets manifest identifies
+    distribution-owned paths; a managed path absent from the current embedded
+    assets is removed. Runtime-only paths absent from that manifest are
+    operator-owned and preserved.
 
     Overwrite-on-differ is safe by design: operator prompt customization
     lives in prompt_overrides.json (replayed after directory load), so a
@@ -52,8 +57,10 @@ val sync_prompt_assets :
     [read]/[files] are typically [Embedded_config.read] /
     [Embedded_config.file_list], passed in by the server bootstrap so
     this module stays asset-source agnostic (and unit-testable).
-    [Eio.Cancel.Cancelled] propagates; per-file [Sys_error] is recorded
-    in [failed] without aborting the pass. *)
+    Deletion is fail-closed: an absent, malformed, incomplete, or unsafe
+    manifest records an explicit [failed] entry and no retired path is removed.
+    [Eio.Cancel.Cancelled] propagates; per-file [Sys_error] is recorded in
+    [failed] without aborting the pass. *)
 
 val init : unit -> unit
 (** Initialise prompt defaults from the environment.

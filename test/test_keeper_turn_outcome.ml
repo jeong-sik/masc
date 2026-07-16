@@ -23,7 +23,6 @@ let outcome : TO.t testable =
     TO.equal
 
 let all = [ TO.Visible_reply; TO.Continuation_checkpoint; TO.No_visible_reply ]
-let observed_max_turns = 10
 
 let test_label_round_trip () =
   List.iter
@@ -51,27 +50,6 @@ let test_of_stop_reason () =
   in
   check outcome "completed -> visible" TO.Visible_reply
     (TO.of_stop_reason Runtime_agent.Completed);
-  check outcome "turn limit observation -> visible" TO.Visible_reply
-    (TO.of_stop_reason
-       (Runtime_agent.TurnLimitObserved { turns_used = 3; limit = 3 }));
-  check outcome "execution timeout observation -> no visible reply"
-    TO.No_visible_reply
-    (TO.of_stop_reason
-       (Runtime_agent.ExecutionTimeoutObserved
-          { elapsed_sec = 300.0
-          ; timeout_sec = 300.0
-          ; turn_count = 3
-          ; max_turns = observed_max_turns
-          }));
-  check outcome "idle timeout observation -> no visible reply"
-    TO.No_visible_reply
-    (TO.of_stop_reason
-       (Runtime_agent.ExecutionIdleTimeoutObserved
-          { idle_sec = 120.0
-          ; idle_timeout_sec = 120.0
-          ; turn_count = 3
-          ; max_turns = observed_max_turns
-          }));
   check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
@@ -87,28 +65,7 @@ let test_of_result_surface () =
     (TO.of_result_surface ~response_text:"done" Runtime_agent.Completed);
   check outcome "completed with empty text -> no visible reply"
     TO.No_visible_reply
-    (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed);
-  check outcome "turn limit observation with text -> visible" TO.Visible_reply
-    (TO.of_result_surface ~response_text:"done"
-       (Runtime_agent.TurnLimitObserved { turns_used = 3; limit = 3 }));
-  check outcome "execution timeout observation -> no visible reply"
-    TO.No_visible_reply
-    (TO.of_result_surface ~response_text:"ignored"
-       (Runtime_agent.ExecutionTimeoutObserved
-          { elapsed_sec = 300.0
-          ; timeout_sec = 300.0
-          ; turn_count = 3
-          ; max_turns = observed_max_turns
-          }));
-  check outcome "idle timeout observation -> no visible reply"
-    TO.No_visible_reply
-    (TO.of_result_surface ~response_text:"ignored"
-       (Runtime_agent.ExecutionIdleTimeoutObserved
-          { idle_sec = 120.0
-          ; idle_timeout_sec = 120.0
-          ; turn_count = 3
-          ; max_turns = observed_max_turns
-          }))
+    (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in

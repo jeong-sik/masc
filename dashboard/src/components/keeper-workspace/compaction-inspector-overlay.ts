@@ -476,6 +476,9 @@ export function CompactionInspectorOverlay({
           <div class="cmp-trigger"><span class="sub-k">트리거</span>${ev.trigger}</div>
           <div class="cmp-trigger"><span class="sub-k">수행 런타임</span><span class="mono">${ev.runtime}</span></div>
           <div class="cmp-trigger"><span class="sub-k">소스</span><span class="mono">${ev.detailSource ?? ev.source}${ev.status ? ` · ${ev.status}` : ''}</span></div>
+          ${ev.reinjection
+            ? html`<div class="cmp-trigger"><span class="sub-k">재주입 관측</span><span class="mono">${ev.reinjection.state} · load=${ev.reinjection.checkpoint_loaded_receipts} · inject=${ev.reinjection.context_injected_receipts}</span></div>`
+            : null}
           ${ev.traceId
             ? html`<div class="cmp-trigger"><span class="sub-k">trace</span><span class="mono">${ev.traceId}${ev.keeperTurnId != null ? `#${ev.keeperTurnId}` : ''}</span></div>`
             : null}
@@ -494,6 +497,15 @@ export function CompactionInspectorOverlay({
             ${ev.before.msgs != null && ev.after.msgs != null
               ? html`<${CmpStat} label="메시지" a=${ev.before.msgs} b=${ev.after.msgs} max=${Math.max(ev.before.msgs, 1)} />`
               : null}
+            ${ev.before.bytes != null && ev.after.bytes != null
+              ? html`<${CmpStat} label="checkpoint bytes" a=${ev.before.bytes} b=${ev.after.bytes} max=${Math.max(ev.before.bytes, 1)} />`
+              : null}
+            ${ev.before.toolUses != null && ev.after.toolUses != null
+              ? html`<${CmpStat} label="tool use" a=${ev.before.toolUses} b=${ev.after.toolUses} max=${Math.max(ev.before.toolUses, 1)} />`
+              : null}
+            ${ev.before.toolResults != null && ev.after.toolResults != null
+              ? html`<${CmpStat} label="tool result" a=${ev.before.toolResults} b=${ev.after.toolResults} max=${Math.max(ev.before.toolResults, 1)} />`
+              : null}
             ${ev.before.traces != null && ev.after.traces != null
               ? html`<${CmpStat} label="trace" a=${ev.before.traces} b=${ev.after.traces} max=${Math.max(ev.before.traces, 1)} />`
               : null}
@@ -501,6 +513,9 @@ export function CompactionInspectorOverlay({
 
           <div class="turn-sec">
             <h4>유지 · 요약 · 폐기</h4>
+            ${ev.summarizedCount != null || ev.droppedCount != null
+              ? html`<div class="cmp-trigger"><span class="sub-k">LLM plan</span><span class="mono">summarized=${ev.summarizedCount ?? '—'} · dropped=${ev.droppedCount ?? '—'}</span></div>`
+              : null}
             ${ev.kept.length === 0 && ev.summarized.length === 0 && ev.dropped.length === 0
               ? html`<${DataGapNote}>현재 백엔드 projection은 kept / summarized / dropped 목록을 노출하지 않습니다. 이 snapshot은 "컴팩션 이벤트 발생"과 가능한 token 계측만 증명합니다.</${DataGapNote}>`
               : html`

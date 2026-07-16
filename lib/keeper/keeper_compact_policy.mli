@@ -24,6 +24,29 @@ val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_prepared : compaction_decision -> bool
 val compaction_decision_applied : compaction_decision -> bool
 
+type compaction_evidence =
+  { selected_runtime_id : string option
+  ; before_checkpoint_bytes : int
+  ; after_checkpoint_bytes : int
+  ; before_message_count : int
+  ; after_message_count : int
+  ; summarized_message_count : int
+  ; dropped_message_count : int
+  ; before_tool_use_count : int
+  ; after_tool_use_count : int
+  ; before_tool_result_count : int
+  ; after_tool_result_count : int
+  }
+(** Exact structural evidence from the LLM-selected plan. Byte, message, and
+    tool-block counts are measured from the actual checkpoint on both sides;
+    no token estimate is synthesized. *)
+
+type compaction_preparation =
+  { context : Keeper_context_core.working_context
+  ; decision : compaction_decision
+  ; evidence : compaction_evidence option
+  }
+
 (** Legacy configuration projection retained until the unused ratio/message/
     token gates are removed from [keeper_meta]. It is not consulted by
     {!compact_for_request_typed}. *)
@@ -37,7 +60,7 @@ val compact_for_request_typed
   :  meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
   -> Keeper_context_core.working_context
-  -> Keeper_context_core.working_context * compaction_decision
+  -> compaction_preparation
 
 type pre_compact_event =
   { timestamp : float

@@ -34,12 +34,6 @@ let tool_result_error_json (tr : Tool_result.result) =
     error_json ~fields (Tool_result.message tr)
 ;;
 
-let tool_result_or_error (tr : Tool_result.result) =
-  let ok = Tool_result.is_success tr in
-  let msg = Tool_result.message tr in
-  if ok then msg else tool_result_error_json tr
-;;
-
 let file_not_found_prefix = "File not found:"
 
 let missing_file_error_json
@@ -248,6 +242,45 @@ let resolve_keeper_read_path
   with
   | Error rejection -> user_message_error rejection
   | Ok path -> Ok path
+;;
+
+(* cwd is a caller-declared execution location, not keeper-visible path
+   vocabulary: reinterpreting it (container-root rewrite, playground join
+   for relative input) via [project_keeper_logical_path] hides exactly
+   the ambiguous input the [path_outside_sandbox] Gate exists to reject.
+   File-path arguments keep the projection — a bare relative path inside
+   the sandbox is keeper vocabulary; a cwd must arrive at the Gate raw. *)
+let resolve_keeper_read_cwd
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(raw_path : string)
+  =
+  let allowed_paths = keeper_effective_allowed_paths ~meta in
+  match
+    Keeper_alerting_path.resolve_keeper_read_path
+      ~config
+      ~allowed_paths
+      ~raw_path:(String.trim raw_path)
+  with
+  | Error rejection -> user_message_error rejection
+  | Ok path -> Ok path
+;;
+
+let resolve_keeper_execute_cwd
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(raw_path : string)
+  =
+  let allowed_paths = keeper_effective_write_allowed_paths ~meta in
+  match
+    Keeper_alerting_path.resolve_keeper_confined_path
+      ~config
+      ~allowed_paths
+      ~endpoint:Keeper_alerting_path.Follow_referent
+      ~raw_path:(String.trim raw_path)
+  with
+  | Ok confined -> Ok (Keeper_alerting_path.confined_host_path confined)
+  | Error rejection -> user_message_error rejection
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) = meta.agent_name

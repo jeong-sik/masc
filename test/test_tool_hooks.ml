@@ -49,7 +49,7 @@ let test_pre_hook_short_circuits () =
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre_block";
     Tool_dispatch.Reject
-      (Error
+      (Tool_result.Failed
          { Tool_result.class_ = Tool_result.Runtime_failure
          ; message = "blocked"
          ; data = `String "blocked"
@@ -83,7 +83,7 @@ let test_multiple_pre_hooks_first_wins () =
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre2_block";
     Tool_dispatch.Reject
-      (Error
+      (Tool_result.Failed
          { Tool_result.class_ = Tool_result.Runtime_failure
          ; message = "denied"
          ; data = `String "denied"
@@ -131,8 +131,12 @@ let test_result_transformer_transforms () =
   Tool_dispatch.register_name_tag ~tool_name:"__hook_transform" ~tag:Mod_misc;
   Tool_dispatch.set_result_transformer (fun r ->
     match r with
-    | Ok ok -> Ok { ok with data = `String "transformed" }
-    | Error err -> Error { err with data = `String "transformed" });
+    | Tool_result.Completed output ->
+      Tool_result.Completed { output with data = `String "transformed" }
+    | Tool_result.Deferred output ->
+      Tool_result.Deferred { output with data = `String "transformed" }
+    | Tool_result.Failed failure ->
+      Tool_result.Failed { failure with data = `String "transformed" });
   let token = match Tool_dispatch.mint_token ~name:"__hook_transform" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
@@ -174,8 +178,10 @@ let test_result_transformer_chain_replaces_previous () =
   Tool_dispatch.register_name_tag ~tool_name:"__hook_transform_replace" ~tag:Mod_misc;
   let with_data (s : string) (r : Tool_result.result) : Tool_result.result =
     match r with
-    | Ok ok -> Ok { ok with data = `String s }
-    | Error err -> Error { err with data = `String s }
+    | Tool_result.Completed output ->
+      Tool_result.Completed { output with data = `String s }
+    | Tool_result.Deferred output -> Tool_result.Deferred { output with data = `String s }
+    | Tool_result.Failed failure -> Tool_result.Failed { failure with data = `String s }
   in
   Tool_dispatch.set_result_transformer (fun r ->
     log_call "transformer1";

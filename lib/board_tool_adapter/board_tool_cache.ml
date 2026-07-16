@@ -13,15 +13,21 @@
    #14662 thread 3. Each hit rebuilds a fresh result with the current
    caller's [~start_time].
 
-   RFC-0189 PR-1b.2 — typed payload variant: [Ok message] vs
-   [Error (class_, message)]. The [class_] survives across the cache
-   boundary so a cached failure rebuilds with the same typed
-   classification it had on first call (no [classify_from_*] re-parse,
-   no [Runtime_failure] default). *)
+   The cache uses the same canonical disposition as live tool execution;
+   it never introduces an [Ok]/[Error] shadow outcome. *)
+type cached_output =
+  { data : Yojson.Safe.t
+  ; metadata : Yojson.Safe.t option
+  }
+
+type cached_failure =
+  { class_ : Tool_result.tool_failure_class
+  ; message : string
+  ; data : Yojson.Safe.t
+  }
+
 type cached_payload =
-  ( string
-  , Tool_result.tool_failure_class * string )
-    Stdlib.Result.t
+  (cached_output, cached_output, cached_failure) Tool_result.disposition
 
 type board_list_cache =
   { mutable key : string option
@@ -43,23 +49,41 @@ let cached_board_list ~key ~tool_name ~start_time compute : Tool_result.result =
   let ttl_s = board_list_cache_ttl_s () in
   let rebuild (payload : cached_payload) : Tool_result.result =
     match payload with
-    | Ok message ->
+    | Tool_result.Completed output ->
       Tool_result.make_ok
         ~tool_name
         ~start_time
-        ~data:(`String message)
+        ~data:output.data
+        ?metadata:output.metadata
         ()
-    | Error (class_, message) ->
-      Tool_result.make_err ~tool_name ~class_ ~start_time message
+    | Tool_result.Deferred output ->
+      Tool_result.make_deferred
+        ~tool_name
+        ~start_time
+        ~data:output.data
+        ?metadata:output.metadata
+        ()
+    | Tool_result.Failed failure ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:failure.class_
+        ~start_time
+        ~data:failure.data
+        failure.message
   in
   let store_and_return (result : Tool_result.result) =
     let payload : cached_payload =
       match result with
-      | Ok s ->
-        (match s.data with
-         | `String msg -> Ok msg
-         | other -> Ok (Yojson.Safe.to_string other))
-      | Error f -> Error (f.class_, f.message)
+      | Tool_result.Completed output ->
+        Tool_result.Completed { data = output.data; metadata = output.metadata }
+      | Tool_result.Deferred output ->
+        Tool_result.Deferred { data = output.data; metadata = output.metadata }
+      | Tool_result.Failed failure ->
+        Tool_result.Failed
+          { class_ = failure.class_
+          ; message = failure.message
+          ; data = failure.data
+          }
     in
     board_list_cache.key <- Some key;
     board_list_cache.value <- Some payload;

@@ -26,7 +26,6 @@ let panel_group_to_yojson (g : Fusion_policy.panel_group) : Yojson.Safe.t =
     ; ("label", `String g.Fusion_policy.label)
     ; ("system_prompt", `String g.Fusion_policy.system_prompt)
     ; ("web_tools", `Bool g.Fusion_policy.web_tools)
-    ; ("max_tool_calls", `Int g.Fusion_policy.max_tool_calls)
     ; ("max_output_tokens", opt_int g.Fusion_policy.max_output_tokens)
     ; ("timeout_s", `Float g.Fusion_policy.timeout_s)
     ]
@@ -39,7 +38,6 @@ let judge_spec_to_yojson (j : Fusion_policy.judge_spec) : Yojson.Safe.t =
     ; ("label", `String j.Fusion_policy.jlabel)
     ; ("system_prompt", `String j.Fusion_policy.jsystem_prompt)
     ; ("web_tools", `Bool j.Fusion_policy.jweb_tools)
-    ; ("max_tool_calls", `Int j.Fusion_policy.jmax_tool_calls)
     ; ("max_output_tokens", opt_int j.Fusion_policy.jmax_output_tokens)
     ; ("timeout_s", `Float j.Fusion_policy.jtimeout_s)
     ; ("max_timeout_s", opt_float j.Fusion_policy.jmax_timeout_s)

@@ -21,19 +21,6 @@
 
 type stop_reason = Runtime_agent_context.stop_reason =
   | Completed
-  | TurnLimitObserved of { turns_used : int; limit : int }
-  | ExecutionTimeoutObserved of {
-      elapsed_sec : float;
-      timeout_sec : float;
-      turn_count : int;
-      max_turns : int;
-    }
-  | ExecutionIdleTimeoutObserved of {
-      idle_sec : float;
-      idle_timeout_sec : float;
-      turn_count : int;
-      max_turns : int;
-    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
@@ -53,11 +40,7 @@ type cooperative_yield_probe =
   Agent_sdk.Agent.Advanced.tool_boundary ->
   (cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
 (** Why this single OAS call yielded control. [Completed] is the
-    model's success path. [TurnLimitObserved], [ExecutionTimeoutObserved],
-    and [ExecutionIdleTimeoutObserved] preserve unexpected typed OAS
-    observations; Keeper callers configure execution unbounded and must not
-    promote these observations to a checkpoint, blocker, retry, or follow-up
-    action. [Yielded_to_chat_waiting] fires when an
+    model's success path. [Yielded_to_chat_waiting] fires when an
     autonomous-lane run stopped at a turn boundary to hand the keeper's
     turn slot to a parked dashboard/connector chat request.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when

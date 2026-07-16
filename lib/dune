@@ -58,6 +58,7 @@
   ;; leaf sub-library. The parent library still references those modules
   ;; unqualified, so it must depend on the leaf explicitly.
   masc.tool_types
+  masc.crypto_rng
   masc_schedule
   masc.tool_contract_prompts
   ;; Shared leaf helpers extracted out of include_subdirs-unqualified ownership.

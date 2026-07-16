@@ -1165,7 +1165,9 @@ jobs:
 
       - name: Run OAS boundary ratchet
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
-        run: scripts/oas-boundary-ratchet.sh
+        run: |
+          scripts/test_oas_boundary_ratchet.sh
+          scripts/oas-boundary-ratchet.sh
 
       - name: Run keeper tool boundary matrix ratchet
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'

@@ -75,7 +75,10 @@ OAS owns reusable provider/model catalogs, multimodal protocol values,
 streaming, reasoning/tool feedback, finite Agent-run topology, exact ToolUse and
 ToolResult structure, invocation-local identity, run-local effect receipts,
 provider-native context capacity, typed provider failure, and generic typed
-hooks around one finite tool invocation.
+hooks around one finite tool invocation. OAS also owns the generic typed
+asynchronous accept/reconcile/cancel/observe protocol and its optional
+journal-backed reference runtime. It does not own a MASC long-lived operation
+namespace, worker/wake policy, or Keeper lifecycle.
 
 For one finite run, OAS may privately own:
 
@@ -174,14 +177,18 @@ logical Tool invocation; otherwise retries would merge distinct child history.
 `PreTool` is committed before the handler effect and contains the canonical
 input plus the typed OAS hook outcome. A MASC adapter records its product Gate
 and admission decision in the referenced MASC operation, not by adding
-MASC-specific fields to the OAS node. `PostTool` closes the invocation exactly
-once. A rejected invocation has no Tool attempt and closes with a typed
-rejection; an executed invocation closes after the handler returns with the
-exact canonical ToolResult or typed failure. For an asynchronous MASC adapter,
-that ToolResult closes the finite submission invocation with an acceptance
-receipt; it does not claim that the long-lived child operation has completed.
-Child progress and terminal wake are MASC operation events and do not fire a
-second OAS `PostTool`.
+MASC-specific fields to the OAS node. A rejected invocation has no Tool attempt
+and commits a typed rejection. An executed invocation commits its exact
+canonical ToolResult or typed failure before any post hook. `PostToolUse` then
+observes every committed terminal result; declared failure additionally runs
+`PostToolUseFailure`. Observer failure is recorded but cannot rewrite the
+ToolResult. The runtime closes the invocation lifecycle after all observers
+settle.
+
+For an asynchronous MASC adapter, the ToolResult closes the finite submission
+invocation with an acceptance receipt; it does not claim that the long-lived
+child operation has completed. Child progress and terminal wake are MASC
+operation events and do not fire a second OAS post-hook lifecycle.
 
 The next provider request is constructed only from committed canonical protocol
 values:
@@ -224,7 +231,16 @@ Meaning judgments belong to a configured LLM:
 - whether Task evidence satisfies completion;
 - which history is relevant, summarized, remembered, or forgotten;
 - whether Board, Connector, Goal, or Task information should wake a Keeper;
+- whether a sequence of typed attempts is semantically stalled and should be
+  replanned, delegated, switched to another declared runtime, or surfaced for
+  human input;
 - how Fusion, quorum, or Judge-of-Judges results should be synthesized.
+
+Semantic-stall judgment receives the structured recent invocation tree and
+declared outcomes. It is never triggered by repeated substrings, a consecutive
+count, elapsed time, cost, tokens, or turn budget. Its result schedules another
+explicit activity; it does not silently delete the turn or globally Pause/Stop
+the Keeper.
 
 Risk levels, keyword lists, tool names, shell-command inspection, scores,
 consecutive counts, fixed ratios, elapsed age, and arbitrary numeric thresholds
@@ -325,10 +341,14 @@ same parent/child operation law.
 or public OAS coordinator concepts:
 
 - `Any` is one existentially packed typed invocation with its adapter witness;
-- `Any[]` is an immutable nonempty collection with explicit serial or
-  concurrent composition;
+- programmatic `Any[]` is an immutable collection with explicit serial or
+  concurrent composition; `[]` has the exact empty-result identity;
 - `AsyncAny[]` is concurrent submission of that same collection with durable
   handles, not a second payload schema or execution writer.
+
+A provider-visible collection Tool requires at least one call because an empty
+wire request has no invocation intent. That schema fact does not become a
+programmatic collection-size gate.
 
 The implementation may name these concepts `Invocable`, `Invocation`, or
 `Many`. Correctness comes from the typed request/result witness, not the word
@@ -341,9 +361,12 @@ Tool. Recursive composition uses the same tree: the composite has one outer
 Neither the execution writer nor the dashboard duplicates the child events as
 flat outer events.
 
-- OAS owns generic Tool, Model-call, and finite-Agent adapter mechanics.
-- MASC owns Keeper, Fusion, and other product adapters, durable asynchronous
-  operation state, continuation, wake-up, authorization, and namespace.
+- OAS owns generic Tool, Model-call, finite-Agent adapter mechanics, and the
+  typed asynchronous acceptance/reconciliation/cancellation/observation
+  façade.
+- MASC owns Keeper, Fusion, and other product adapters, the injected
+  long-lived operation backend namespace, worker and wake policy, continuation,
+  authorization, and application switch.
 - An adapter cannot make OAS import or encode Keeper, Fusion, Board, Goal,
   Scheduler, Connector, or MASC variants.
 - A parent submits immutable child requests and stores exact child references.
@@ -351,22 +374,27 @@ flat outer events.
 - Parent waiting releases its claim and later joins by exact continuation.
 - Results use a versioned typed envelope with value, error, artifact, runtime
   attempts, provenance, and terminal state.
-- Collection results preserve declared input order and an all-settled result
-  for every child. Fail-fast, race, quorum, or atomic admission are separate
-  explicit combinators rather than consequences of collection size.
-- Submission returns one ordered receipt containing each child's exact accepted
-  or rejected state. Acceptance is not completion.
-- A terminal child commit enqueues one exact continuation event for the owner
-  lane. Duplicate delivery converges on the persisted operation revision; both
-  success and failure wake the owner.
-- One failed child does not stop siblings, quorum, parent, or unrelated lanes.
+- Collection results preserve declared input order and an all-settled domain
+  outcome for every child. A declared child failure does not cancel siblings.
+  Infrastructure failure cancels unfinished structural siblings, preserves
+  every committed partial outcome, and never affects unrelated lanes.
+- Asynchronous submission atomically commits the submission and every child
+  intent, or commits none. It returns one ordered receipt of exact operation
+  handles. Acceptance is not completion; ambiguous publication reconciles by
+  the same submission identity and request digest.
+- A terminal child commit appends one exact continuation event for the owner
+  lane. Wake notification may coalesce by the persisted cursor/revision, but no
+  terminal event is dropped. Both declared success and declared failure make
+  the owner runnable.
+- One declared child failure does not stop siblings, quorum, parent, or
+  unrelated lanes. Infrastructure failure remains an explicit outer result.
 - Cancellation, orphan detection, cycles, partial failure, and quorum are
   explicit graph semantics.
 - Scale changes queue depth and observed latency, not correctness rules.
 
 There is no semantic branch or hidden admission cap based on collection
 cardinality. Typed backpressure may report unavailable capacity; it cannot
-silently drop children, convert partial admission into success, or become a
+silently drop children, convert ambiguous admission into success, or become a
 budget-derived Stop/Pause gate.
 
 ## 9. MASC-Owned LLM Compaction
@@ -471,7 +499,7 @@ precede EventBus, SSE, log, metric, and dashboard projections.
 | side-effect uncertainty | attempt without receipt becomes `Outcome_unknown` |
 | canonical feedback | failed attempts and projection text never re-enter model history |
 | recursive Journal | nested Agent/Tool/PreTool/PostTool nodes round-trip without flattening |
-| async collection | partial admission returns ordered receipts and every terminal child wakes its owner |
+| async collection | atomic admission returns ordered handles; every terminal child event reaches its owner |
 | interrupted run | cancellation preserves committed partial nodes and explicit terminal state |
 | server isolation | journal work cannot stall the Keeper or server scheduling domain |
 | restart recovery | durable operation and finite OAS run references reconcile |

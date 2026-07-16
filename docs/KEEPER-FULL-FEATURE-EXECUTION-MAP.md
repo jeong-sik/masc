@@ -40,6 +40,8 @@ core:
 - no product governance, implicit execution limits, automatic compaction, or
   hidden retry policy;
 - one canonical finite `Agent.run` execution history with crash fencing;
+- a generic typed asynchronous accept/reconcile/cancel/observe façade whose
+  long-lived backend and worker policy may be injected by the application;
 - a simple Builder/Agent surface that does not expose WAL or reconciliation
   machinery to ordinary users.
 
@@ -52,8 +54,8 @@ classification, and lossy checkpoint mutation into:
 - typed `Any`, `Any[]`, and `AsyncAny[]` composition over Tool, Model, Agent,
   Keeper, Fusion, Connector, and Scheduler adapters;
 - MASC-owned LLM compaction, Memory, reinjection, and product continuation;
-- lossless dashboard projection of both MASC operations and subordinate OAS
-  finite runs.
+- structure-preserving dashboard projection of both MASC operations and
+  subordinate OAS finite runs, with any retention gap rendered explicitly.
 
 The large OAS execution diff is not a return of Keeper governance. It is the
 private implementation cost of making one finite Agent run structurally exact
@@ -288,6 +290,9 @@ Producer
 
 MASC stores an opaque typed reference to the subordinate OAS scope. It does not
 rewrite OAS run history. OAS does not decide when the Keeper resumes.
+For `AsyncAny[]`, OAS owns the generic protocol façade while the injected MASC
+backend remains the sole writer for the long-lived product operation namespace,
+claim policy, and owner wake.
 
 ## 10. Remaining Critical Path
 

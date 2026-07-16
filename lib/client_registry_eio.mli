@@ -57,23 +57,16 @@ val set_resolved_name : string -> string -> is_ephemeral:bool -> unit
 
 (** {1 Statistics} *)
 
-val active_count : ?within_seconds:float -> unit -> int
 val total_count : unit -> int
-val list_active : ?within_seconds:float -> unit -> Client_identity.t list
+val list_registered : unit -> Client_identity.t list
+(** All explicitly registered identities. [last_seen] remains observation
+    data and is not used as lifecycle authority. *)
 
 (** {1 Cleanup} *)
 
 val clear_session_caches : unit -> unit
-val cleanup_stale_sessions : unit -> int
+val cleanup_unregistered_session_caches : unit -> int
+(** Removes cache entries whose explicitly registered identity no longer
+    exists. No elapsed-time classification is performed. *)
+
 val unregister : string -> unit
-
-(** {1 Background Maintenance} *)
-
-(** Start a periodic cleanup fiber.  Call once at server startup within an
-    active Eio switch.  [interval] defaults to 300 seconds. *)
-val start_cleanup_loop :
-  sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
-  ?interval:float ->
-  unit -> unit
-

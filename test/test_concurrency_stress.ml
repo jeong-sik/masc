@@ -88,40 +88,6 @@ let test_session_concurrent_register_unregister () =
 (** {1 Zombie Detection Under Load} *)
 
 
-let test_zombie_detection_concurrent () =
-  Eio_main.run @@ fun _ ->
-  (* Generate ISO timestamps for testing *)
-  let now = Unix.gettimeofday () in
-  let fresh_time = Unix.(gmtime now |> fun t ->
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-      t.tm_hour t.tm_min t.tm_sec) in
-  let stale_time = Unix.(gmtime (now -. 600.0) |> fun t ->  (* 10 min ago *)
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-      t.tm_hour t.tm_min t.tm_sec) in
-
-  let zombie_checks = Atomic.make 0 in
-  let fresh_checks = Atomic.make 0 in
-
-  (* Concurrent zombie/fresh checks *)
-  let checker () =
-    for _ = 1 to 100 do
-      if Workspace_resilience.Zombie.is_zombie stale_time then
-        Atomic.incr zombie_checks;
-      if not (Workspace_resilience.Zombie.is_zombie fresh_time) then
-        Atomic.incr fresh_checks
-    done
-  in
-
-  Eio.Fiber.all [checker; checker; checker; checker];
-
-  let zombies = Atomic.get zombie_checks in
-  let fresh = Atomic.get fresh_checks in
-  Printf.printf "Zombie checks: %d, Fresh checks: %d\n%!" zombies fresh;
-  check bool "stale timestamps detected as zombies" true (zombies = 400);
-  check bool "fresh timestamps not zombies" true (fresh = 400)
-
 (** {1 Test Suite} *)
 
 let () =
@@ -129,8 +95,5 @@ let () =
     "session_lock", [
       test_case "lock contention (20 agents)" `Slow test_session_lock_contention;
       test_case "register/unregister race" `Slow test_session_concurrent_register_unregister;
-    ];
-    "zombie", [
-      test_case "concurrent detection" `Quick test_zombie_detection_concurrent;
     ];
   ]

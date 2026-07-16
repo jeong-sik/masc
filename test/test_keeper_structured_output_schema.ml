@@ -212,6 +212,9 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
     (List.sort String.compare Operator_tool.remote_tool_names);
   check bool "chat recovery cannot bypass operator profile" false
     (Tool_catalog.allow_direct_call "masc_operator_chat_recovery_resolve")
+  ;
+  check bool "task recovery cannot bypass operator profile" false
+    (Tool_catalog.allow_direct_call "masc_operator_task_recovery_resolve")
 ;;
 
 let test_fusion_judge_schema_uses_parser_wire_contract () =

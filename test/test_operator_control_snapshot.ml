@@ -111,12 +111,27 @@ let test_align_keeper_runtime_status_promotes_fresh_runtime_signal () =
           [
             ("status", `String "busy");
             ("last_seen_ago_s", `Float 5.0);
-            ("is_zombie", `Bool false);
           ])
       ~keepalive_running:true
   in
   Alcotest.(check string) "fresh runtime signal promotes keeper status" "busy"
     status
+
+let test_align_keeper_runtime_status_ignores_legacy_zombie_flag () =
+  let status =
+    Operator_control_snapshot.align_keeper_runtime_status
+      ~surface_status:"inactive"
+      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
+      ~agent_status_json:
+        (`Assoc
+          [
+            ("status", `String "busy");
+            ("last_seen_ago_s", `Float 5.0);
+            ("is_zombie", `Bool true);
+          ])
+      ~keepalive_running:true
+  in
+  Alcotest.(check string) "legacy zombie flag has no authority" "busy" status
 
 let test_align_keeper_runtime_status_preserves_attention_health () =
   let status =
@@ -128,28 +143,10 @@ let test_align_keeper_runtime_status_preserves_attention_health () =
           [
             ("status", `String "active");
             ("last_seen_ago_s", `Float 5.0);
-            ("is_zombie", `Bool false);
           ])
       ~keepalive_running:true
   in
   Alcotest.(check string) "degraded health remains inactive" "inactive" status
-
-let test_align_keeper_runtime_status_ignores_zombie_runtime_signal () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive"
-      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
-      ~agent_status_json:
-        (`Assoc
-          [
-            ("status", `String "active");
-            ("last_seen_ago_s", `Float 5.0);
-            ("is_zombie", `Bool true);
-          ])
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "zombie runtime does not override inactive" "inactive"
-    status
 
 let test_align_keeper_runtime_status_tolerates_null_status_json () =
   let status =
@@ -1715,6 +1712,25 @@ let () =
             "operator resume clears persisted dead-tombstone state"
             `Quick
             test_keeper_up_clears_dead_tombstone_resume_state;
+        ] );
+      ( "runtime status"
+      , [
+          Alcotest.test_case
+            "fresh runtime signal promotes status"
+            `Quick
+            test_align_keeper_runtime_status_promotes_fresh_runtime_signal;
+          Alcotest.test_case
+            "legacy zombie flag has no authority"
+            `Quick
+            test_align_keeper_runtime_status_ignores_legacy_zombie_flag;
+          Alcotest.test_case
+            "attention health blocks promotion"
+            `Quick
+            test_align_keeper_runtime_status_preserves_attention_health;
+          Alcotest.test_case
+            "null runtime signal preserves surface status"
+            `Quick
+            test_align_keeper_runtime_status_tolerates_null_status_json;
         ] );
     ]
 ;;

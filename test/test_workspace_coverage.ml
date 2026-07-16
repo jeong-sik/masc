@@ -1222,6 +1222,90 @@ let test_transition_release () =
     | Error _ -> Alcotest.fail "Expected Ok")
 ;;
 
+let test_transition_release_rejects_non_owner () =
+  with_test_env (fun config ->
+    let bind_result =
+      Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[ "test" ] ()
+    in
+    Alcotest.(check bool) "second agent bind succeeds" true (contains_check bind_result);
+    let claude = find_agent_name_by_prefix config "claude" in
+    let gemini = find_agent_name_by_prefix config "gemini" in
+    let _ = Workspace.add_task config ~title:"Owned task" ~priority:1 ~description:"" in
+    (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    (match Workspace.release_task_r config ~agent_name:gemini ~task_id:"task-001" () with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+     | Ok _ -> Alcotest.fail "non-owner released another agent's task"
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    assert_claimed_by config "task-001" claude)
+;;
+
+let test_operator_task_recovery_requires_exact_owner_and_version () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ =
+      Workspace.add_task config ~title:"Operator recovery task" ~priority:1 ~description:""
+    in
+    (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    let observed_version = (Workspace.read_backlog config).version in
+    (match
+       Workspace.recover_owned_task_to_todo_r
+         config
+         ~operator_actor:"operator"
+         ~task_id:"task-001"
+         ~expected_assignee:claude
+         ~expected_version:(observed_version + 1)
+         ~reason:"owner session is irrecoverable"
+         ()
+     with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+     | Ok _ -> Alcotest.fail "recovery accepted a stale backlog version"
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    assert_claimed_by config "task-001" claude;
+    (match
+       Workspace.recover_owned_task_to_todo_r
+         config
+         ~operator_actor:"operator"
+         ~task_id:"task-001"
+         ~expected_assignee:"different-owner"
+         ~expected_version:observed_version
+         ~reason:"owner session is irrecoverable"
+         ()
+     with
+     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState _)) -> ()
+     | Ok _ -> Alcotest.fail "recovery accepted a different persisted owner"
+     | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+    assert_claimed_by config "task-001" claude;
+    let recovered =
+      match
+        Workspace.recover_owned_task_to_todo_r
+          config
+          ~operator_actor:"operator"
+          ~task_id:"task-001"
+          ~expected_assignee:claude
+          ~expected_version:observed_version
+          ~reason:"owner session is irrecoverable"
+          ()
+      with
+      | Ok recovered -> recovered
+      | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err)
+    in
+    Alcotest.(check string) "recovered task id" "task-001" recovered.task_id;
+    Alcotest.(check string) "recovered exact owner" claude recovered.previous_assignee;
+    Alcotest.(check int)
+      "backlog version advanced exactly once"
+      (observed_version + 1)
+      recovered.backlog_version;
+    let task = task_by_id config "task-001" in
+    Alcotest.(check string)
+      "recovered task is claimable"
+      "todo"
+      (Masc_domain.task_status_to_string task.task_status))
+;;
+
 let test_transition_release_keeper_transport_alias () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
@@ -2768,6 +2852,14 @@ let () =
       , [ Alcotest.test_case "claim" `Quick test_transition_claim
         ; Alcotest.test_case "start" `Quick test_transition_start
         ; Alcotest.test_case "release" `Quick test_transition_release
+        ; Alcotest.test_case
+            "release rejects non-owner"
+            `Quick
+            test_transition_release_rejects_non_owner
+        ; Alcotest.test_case
+            "operator recovery requires exact owner and version"
+            `Quick
+            test_operator_task_recovery_requires_exact_owner_and_version
         ; Alcotest.test_case
             "release accepts keeper transport alias"
             `Quick

@@ -75,7 +75,9 @@ module Registry : sig
   val find_by_name : registry -> string -> t option
   val touch : registry -> string -> unit -> unit
   val unregister : registry -> string -> unit
-  val list_active : registry -> within_seconds:float -> t list
+  val list_all : registry -> t list
+  (** All explicitly registered identities. [last_seen] remains observation
+      data and is not used as lifecycle authority. *)
   val count : registry -> int
 end
 

@@ -648,10 +648,14 @@ let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
              [ "keeper_id", `String a.Client_identity.agent_name
              ; "last_seen_ms", `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
              ])
-        (Client_registry_eio.list_active ~within_seconds:300.0 ())
+        (Client_registry_eio.list_registered ())
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _exn -> []
+    | exn ->
+      Log.Server.warn
+        "client registry active projection failed: %s"
+        (Printexc.to_string exn);
+      []
   in
   let events_count = List.length events in
   let cursors_count = List.length cursors in

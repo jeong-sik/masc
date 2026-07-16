@@ -75,6 +75,7 @@ module Operator_name : sig
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
+    | Operator_task_recovery_resolve
 
   val to_string : t -> string
   val of_string : string -> t option

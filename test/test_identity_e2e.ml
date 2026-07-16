@@ -67,7 +67,7 @@ let test_multi_agent_isolation () =
   check int "all unique" 3 (List.length unique_keys);
   
   (* Verify agent count *)
-  check int "3 active agents" 3 (Client_registry_eio.active_count ())
+  check int "3 registered agents" 3 (Client_registry_eio.total_count ())
 
 (** Test identity display string *)
 let test_display_string () =
@@ -90,21 +90,6 @@ let test_display_string () =
     (String.sub display 0 20 |> String.lowercase_ascii |> fun s -> 
      String.length s > 0)
 
-(** Test cleanup of stale sessions *)
-let test_stale_cleanup () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Client_registry_eio.reset_for_testing ();
-  
-  (* Create active agent *)
-  let _ = Client_registry_eio.get_or_create_identity 
-    ~mcp_session_id:"active-session"
-    (`Assoc [("_agent_name", `String "active-agent")]) in
-  
-  (* Cleanup should work without errors *)
-  let cleaned = Client_registry_eio.cleanup_stale_sessions () in
-  check int "cleanup with active session returns 0" 0 cleaned
-
 let () =
   run "Identity E2E" [
     "integration", [
@@ -112,6 +97,5 @@ let () =
       test_case "session_persistence" `Quick test_mcp_session_persistence;
       test_case "multi_agent" `Quick test_multi_agent_isolation;
       test_case "display_string" `Quick test_display_string;
-      test_case "stale_cleanup" `Quick test_stale_cleanup;
     ];
   ]

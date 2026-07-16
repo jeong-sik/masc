@@ -126,22 +126,6 @@ end
    classifier produced. (#8605 family -- exhaustive-match template) *)
 
 
-(* Orphan reconciliation — zombie cleanup needs Task storage mutation without
-   a privileged synthetic actor. *)
-let () =
-  Atomic.set
-    Workspace_hooks.reconcile_orphaned_task_fn
-    (fun config ~task_id ~expected_assignee ~signal () ->
-       let signal =
-         match signal with
-         | `Absent -> Workspace_task.Assignee_absent
-         | `Inactive -> Workspace_task.Assignee_inactive
-       in
-       reconcile_orphaned_task_r config ~task_id ~expected_assignee ~signal ())
-;;
-
-
-
 let clear_agent_current_task_cache config ~task_id =
   let agents_path = agents_dir config in
   if path_exists config agents_path

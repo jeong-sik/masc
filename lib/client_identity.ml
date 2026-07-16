@@ -311,14 +311,13 @@ module Registry = struct
       | None -> ()
     )
 
-  (** List all active identities (active within last N seconds) *)
-  let list_active reg ~within_seconds =
+  (** List all registered identities. Lifecycle authority belongs to explicit
+      registration/unregistration, not an elapsed-time cutoff. *)
+  let list_all reg =
     with_lock reg (fun () ->
-      let cutoff = Time_compat.now () -. within_seconds in
       !(reg.identities)
       |> StringMap.bindings
-      |> List.filter_map (fun (_, id) ->
-        if Stdlib.Float.compare id.last_seen cutoff > 0 then Some id else None)
+      |> List.map snd
     )
 
   (** Get identity count *)

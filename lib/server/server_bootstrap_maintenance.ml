@@ -101,44 +101,87 @@ let runtime_for_memory_os_consolidation () =
        default_runtime ())
 ;;
 
-(* P0-3: per-keeper maintenance timeout. One slow/corrupt keeper must not starve
-   the rest of the fleet. Each keeper fiber gets a bounded time budget; on
-   timeout we log the keeper and increment a metric so operators can see which
-   stores are stalling maintenance. *)
-let run_with_keeper_timeout ~clock ~timeout_sec ~keeper_id ~on_timeout f =
-  match clock with
-  | None -> f ()
-  | Some clock ->
-    (try Eio.Time.with_timeout_exn clock timeout_sec f with
-     | Eio.Time.Timeout ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string MemoryOsMaintenanceKeeperTimeout)
-         ~labels:[ "keeper", keeper_id ]
-         ();
-       on_timeout ())
-;;
-
-type memory_os_consolidation_dispatch =
+type memory_os_lane_dispatch =
   | Dispatch_started
   | Dispatch_already_active
   | Dispatch_executor_unavailable
   | Dispatch_fork_failed
 
-let memory_os_consolidation_dispatch_label = function
+let memory_os_lane_dispatch_label = function
   | Dispatch_started -> "started"
   | Dispatch_already_active -> "already_active"
   | Dispatch_executor_unavailable -> "executor_unavailable"
   | Dispatch_fork_failed -> "fork_failed"
 ;;
 
-let record_memory_os_consolidation_dispatch ~keeper_id outcome =
+let memory_os_lane_dispatch_of_submission = function
+  | Keeper_memory_lane.Idle_submitted -> Dispatch_started
+  | Idle_already_active -> Dispatch_already_active
+  | Idle_executor_unavailable -> Dispatch_executor_unavailable
+  | Idle_fork_failed -> Dispatch_fork_failed
+;;
+
+let observe_memory_os_lane_dispatch ~metric ~operation ~keeper_id submission =
+  let outcome = memory_os_lane_dispatch_of_submission submission in
+  let outcome_label = memory_os_lane_dispatch_label outcome in
   Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string MemoryOsConsolidationDispatches)
-    ~labels:
-      [ "keeper", keeper_id
-      ; "outcome", memory_os_consolidation_dispatch_label outcome
-      ]
-    ()
+    Keeper_metrics.(to_string metric)
+    ~labels:[ "keeper", keeper_id; "outcome", outcome_label ]
+    ();
+  match outcome with
+  | Dispatch_started | Dispatch_already_active ->
+    Log.Server.info
+      "%s: keeper=%s dispatch=%s"
+      operation
+      keeper_id
+      outcome_label
+  | Dispatch_executor_unavailable | Dispatch_fork_failed ->
+    Log.Server.warn
+      "%s: keeper=%s dispatch=%s"
+      operation
+      keeper_id
+      outcome_label
+;;
+
+(* Dispatch exact-expiry cleanup independently for every Keeper fact store.
+   The tick owns no child work: each accepted unit is owned by that Keeper's
+   memory lane, so a blocked file lock or I/O operation cannot hold the fleet
+   tick or prevent peer Keepers from starting. *)
+let run_memory_os_gc_tick
+      ?(run_gc =
+        fun ~keeper_id ~now () -> Keeper_memory_os_gc.run_gc ~keeper_id ~now ())
+      ~base_path
+      ~now
+      ()
+  =
+  let gc_one keeper_id () =
+    try
+      let report = run_gc ~keeper_id ~now () in
+      if report.Keeper_memory_os_gc.ttl_expired > 0
+      then
+        Log.Server.info
+          "memory_os_gc: keeper=%s ttl_expired=%d written=%d"
+          keeper_id
+          report.ttl_expired
+          report.written
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Server.warn
+        "memory_os_gc: keeper=%s tick crashed: %s"
+        keeper_id
+        (Printexc.to_string exn)
+  in
+  Keeper_memory_os_io.list_fact_store_keeper_ids ()
+  |> List.iter (fun keeper_id ->
+    Keeper_memory_lane.submit_if_idle
+      ~base_path
+      ~keeper_name:keeper_id
+      (fun _worker_sw -> gc_one keeper_id ())
+    |> observe_memory_os_lane_dispatch
+         ~metric:Keeper_metrics.MemoryOsGcDispatches
+         ~operation:"memory_os_gc"
+         ~keeper_id)
 ;;
 
 (* Run one consolidation pass over every keeper that currently has a fact store.
@@ -226,28 +269,11 @@ let run_memory_os_consolidation_tick
            ~keeper_name:keeper_id
            (fun worker_sw -> consolidate_one worker_sw keeper_id ())
        in
-       let dispatch, level, detail =
-         match outcome with
-         | Keeper_memory_lane.Idle_submitted ->
-           Dispatch_started, `Info, "started"
-         | Idle_already_active ->
-           Dispatch_already_active, `Info, "already_active"
-         | Idle_executor_unavailable ->
-           Dispatch_executor_unavailable, `Warn, "executor_unavailable"
-         | Idle_fork_failed -> Dispatch_fork_failed, `Warn, "fork_failed"
-       in
-       record_memory_os_consolidation_dispatch ~keeper_id dispatch;
-       match level with
-       | `Info ->
-         Log.Server.info
-           "memory_os_keeper_consolidation: keeper=%s dispatch=%s"
-           keeper_id
-           detail
-       | `Warn ->
-         Log.Server.warn
-           "memory_os_keeper_consolidation: keeper=%s dispatch=%s"
-           keeper_id
-           detail)
+       observe_memory_os_lane_dispatch
+         ~metric:Keeper_metrics.MemoryOsConsolidationDispatches
+         ~operation:"memory_os_keeper_consolidation"
+         ~keeper_id
+         outcome)
     keeper_ids
 ;;
 
@@ -382,56 +408,21 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   (* RFC-0247 §2.3: memory-os expiry sweep. Off the keeper hot path — every
      [interval]s it runs the deterministic per-keeper GC: facts whose explicit
      [valid_until] has passed are removed and every other row is preserved.
-     Default ON; env var [MASC_KEEPER_MEMORY_OS_GC] is the kill switch. Per-keeper
-     fibers run in parallel with a bounded timeout so one slow/corrupt store
-     cannot starve the fleet. *)
+     Default ON; env var [MASC_KEEPER_MEMORY_OS_GC] is the kill switch. Each
+     accepted unit belongs to its Keeper memory lane; the loop never joins or
+     cancels peer work. *)
   if Env_config.KeeperMemoryOs.gc_enabled () then
     fork_logged_fiber
       ~sw
       ~on_error:(log_server_fiber_crash "memory_os_gc")
       (fun () ->
-      (* Coarser than consolidation (300s): GC rewrites stores, so a 10-minute
-         cadence is ample off the hot path. *)
+      (* GC keeps the existing 10-minute maintenance cadence. *)
       let interval = 600.0 in
-      let gc_one keeper_id () =
-        try
-          let report =
-            Keeper_memory_os_gc.run_gc ~keeper_id ~now:(Time_compat.now ()) ()
-          in
-          if report.Keeper_memory_os_gc.ttl_expired > 0
-          then
-            Log.Server.info
-              "memory_os_gc: keeper=%s ttl_expired=%d written=%d"
-              keeper_id
-              report.ttl_expired
-              report.written
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Server.warn
-            "memory_os_gc: keeper=%s tick crashed: %s"
-            keeper_id
-            (Printexc.to_string exn)
-      in
       let rec loop () =
-        let keeper_ids =
-          List.filter
-            (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
-            (Keeper_memory_os_io.list_fact_store_keeper_ids ())
-        in
-        Eio.Fiber.all
-          (List.map
-             (fun keeper_id () ->
-                run_with_keeper_timeout
-                  ~clock:(Some clock)
-                  ~timeout_sec:120.0
-                  ~keeper_id
-                  ~on_timeout:(fun () ->
-                    Log.Server.warn
-                      "memory_os_gc: keeper=%s timeout after 120s"
-                      keeper_id)
-                  (gc_one keeper_id))
-             keeper_ids);
+        run_memory_os_gc_tick
+          ~base_path:(Mcp_server.workspace_config state).base_path
+          ~now:(Time_compat.now ())
+          ();
         Eio.Time.sleep clock interval;
         loop ()
       in

@@ -8,6 +8,7 @@
 
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
+module GC = Masc.Keeper_memory_os_gc
 module Recall = Masc.Keeper_memory_os_recall
 module Lane = Masc.Keeper_memory_lane
 module Atypes = Agent_sdk.Types
@@ -49,6 +50,17 @@ let provider_cfg () =
     ~model_id:"fake"
     ~base_url:"http://localhost"
     ()
+;;
+
+let empty_gc_report =
+  { GC.total_input = 0
+  ; ttl_expired = 0
+  ; ttl_expired_ephemeral = 0
+  ; ttl_expired_non_ephemeral = 0
+  ; ttl_expired_by_category = []
+  ; written = 0
+  ; dry_run = false
+  }
 ;;
 
 let with_temp_keepers ~sw f =
@@ -235,6 +247,58 @@ let test_parallel_natural_completion_per_keeper () =
           Alcotest.(check int) "slow keeper unchanged" slow_count_before slow_count_after))))
 ;;
 
+let test_gc_tick_isolates_active_keeper () =
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      with_temp_keepers ~sw (fun base_path ->
+        let keeper_ids = [ "keeper-gc-a"; "keeper-gc-b" ] in
+        List.iter
+          (fun keeper_id -> Io.append_fact ~keeper_id (fact (keeper_id ^ " fact")))
+          keeper_ids;
+        let calls = Atomic.make 0 in
+        let release_first, set_release_first = Eio.Promise.create () in
+        let first_started, set_first_started = Eio.Promise.create () in
+        let peer_finished, set_peer_finished = Eio.Promise.create () in
+        let peer_repeated, set_peer_repeated = Eio.Promise.create () in
+        let run_gc ~keeper_id ~now:_ () =
+          (match Atomic.fetch_and_add calls 1 with
+           | 0 ->
+             Eio.Promise.resolve set_first_started keeper_id;
+             Eio.Promise.await release_first
+           | 1 -> Eio.Promise.resolve set_peer_finished keeper_id
+           | 2 -> Eio.Promise.resolve set_peer_repeated keeper_id
+           | call_index ->
+             Alcotest.failf "unexpected GC call index: %d" call_index);
+          empty_gc_report
+        in
+        Server_bootstrap_maintenance.run_memory_os_gc_tick
+          ~run_gc
+          ~base_path
+          ~now
+          ();
+        let active_keeper = Eio.Promise.await first_started in
+        let peer_keeper = Eio.Promise.await peer_finished in
+        Alcotest.(check bool)
+          "first tick dispatched a distinct peer"
+          true
+          (not (String.equal active_keeper peer_keeper));
+        await_pending ~base_path ~keeper_ids 1;
+        Alcotest.(check int) "first tick dispatched both keepers" 2 (Atomic.get calls);
+        Server_bootstrap_maintenance.run_memory_os_gc_tick
+          ~run_gc
+          ~base_path
+          ~now
+          ();
+        let repeated_keeper = Eio.Promise.await peer_repeated in
+        Alcotest.(check string)
+          "second tick skipped only the active keeper"
+          peer_keeper
+          repeated_keeper;
+        Alcotest.(check int) "only the idle peer ran again" 3 (Atomic.get calls);
+        Eio.Promise.resolve set_release_first ();
+        await_pending ~base_path ~keeper_ids 0)))
+;;
+
 let () =
   Alcotest.run
     "server_bootstrap_maintenance_memory_os"
@@ -251,6 +315,10 @@ let () =
             "parallel per-keeper natural completion"
             `Quick
             test_parallel_natural_completion_per_keeper
+        ; Alcotest.test_case
+            "GC tick isolates one active Keeper"
+            `Quick
+            test_gc_tick_isolates_active_keeper
         ] )
     ]
 ;;

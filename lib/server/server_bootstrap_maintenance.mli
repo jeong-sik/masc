@@ -6,6 +6,20 @@ val runtime_for_memory_os_consolidation : unit -> Runtime.t option
 (** Resolve the selected consolidation runtime without discarding its identity;
     an unknown explicit selection is logged before falling back to the default. *)
 
+val run_memory_os_gc_tick :
+  ?run_gc:
+    (keeper_id:string ->
+     now:float ->
+     unit ->
+     Keeper_memory_os_gc.gc_report) ->
+  base_path:string ->
+  now:float ->
+  unit ->
+  unit
+(** Dispatch one exact-expiry GC unit per persisted Keeper onto that Keeper's
+    memory lane. The tick never waits for a dispatched unit. An already active
+    Keeper is observed and skipped while peer Keepers continue independently. *)
+
 val run_memory_os_consolidation_tick :
   ?complete:Keeper_memory_os_consolidation_runtime.complete_fn ->
   base_path:string ->

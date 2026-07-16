@@ -1,11 +1,11 @@
-(** Workspace_gc — heartbeat, zombie cleanup, garbage collection.
+(** Workspace_gc — heartbeat and explicit garbage collection.
 
     Public surface for {!Workspace_gc.ml}.  Extracted from [workspace.ml] for
     modularity (#4638).  See issue #10751 for the broader [workspace/]
     [.mli] coverage push.
 
     Side effects:
-    - All three functions touch [agents_dir config] and the locks
+    - Both functions touch [agents_dir config] and the locks
       under it.  Callers must hold no other workspace lock when invoking.
     - Board artifact cleanup is wired via [Workspace_hooks] callbacks at
       startup; this module does not depend on the board layer
@@ -19,24 +19,6 @@
     The agent file is mutated under [with_file_lock]. *)
 val heartbeat :
   Workspace_utils_backend_setup.config -> agent_name:string -> string
-
-type cleanup_zombie_result =
-  | No_agents_dir
-  | No_zombies
-  | Cleaned of { count : int; names : string list; released_tasks : int; skipped : int }
-(** Structured result of zombie cleanup to eliminate string-based parsing at call sites. *)
-
-(** Sweep [.masc/agents/] and remove agents that have not heartbeated
-    within the threshold.
-
-    [keeper_threshold_sec] applies to keeper agents and defaults to
-    {!Env_config.Zombie.keeper_threshold_seconds}; [agent_threshold_sec]
-    applies to all other agents and defaults to
-    {!Env_config.Zombie.threshold_seconds}. *)
-val cleanup_zombies :
-  ?keeper_threshold_sec:float ->
-  ?agent_threshold_sec:float ->
-  Workspace_utils_backend_setup.config -> cleanup_zombie_result
 
 (** Run the explicit workspace garbage-collection pass. [days] has no default:
     the caller owns the retention decision rather than inheriting a fixed

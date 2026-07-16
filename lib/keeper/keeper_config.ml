@@ -36,47 +36,6 @@ include Keeper_config_text
 let keeper_status_fast_default () : bool =
   bool_of_env_default "MASC_KEEPER_STATUS_FAST_DEFAULT" ~default:false
 
-(* MASC-owned explicit compaction threshold. This value is not forwarded to
-   OAS and does not imply an OAS event or retry policy. *)
-let keeper_compact_ratio_rp =
-  _rp_float ~key:"keeper.compaction.ratio"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_COMPACT_RATIO"
-                          ~default:0.85 ~min_v:0.1 ~max_v:0.98)
-    ~min_v:0.1 ~max_v:0.98
-    ~description:"Compaction ratio gate" ()
-let keeper_compact_ratio () : float =
-  Runtime_params.get keeper_compact_ratio_rp
-
-let keeper_compact_max_messages_rp =
-  _rp_int ~key:"keeper.compaction.max_messages"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACT_MAX_MESSAGES"
-                          ~default:0 ~min_v:0 ~max_v:5000)
-    ~min_v:0 ~max_v:5000
-    ~description:"Compaction message gate (0=disabled)" ()
-let keeper_compact_max_messages () : int =
-  Runtime_params.get keeper_compact_max_messages_rp
-
-let keeper_compact_max_tokens_rp =
-  _rp_int ~key:"keeper.compaction.max_tokens"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACT_MAX_TOKENS"
-                          ~default:196608 ~min_v:0 ~max_v:5000000)
-    ~min_v:0 ~max_v:5000000
-    ~description:"Compaction token gate (75%% of 262k context)" ()
-let keeper_compact_max_tokens () : int =
-  Runtime_params.get keeper_compact_max_tokens_rp
-
-(** Cooldown between compaction attempts.  Previous default (90s) exceeded
-    the proactive heartbeat interval (30s), permanently blocking compaction
-    for proactive keepers.  15s allows compaction to fire every other cycle. *)
-let keeper_compaction_cooldown_sec_rp =
-  _rp_int ~key:"keeper.compaction.cooldown_sec"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACTION_COOLDOWN_SEC"
-                          ~default:15 ~min_v:0 ~max_v:two_days_seconds_int)
-    ~min_v:0 ~max_v:two_days_seconds_int
-    ~description:"Compaction cooldown (seconds)" ()
-let keeper_compaction_cooldown_sec () : int =
-  Runtime_params.get keeper_compaction_cooldown_sec_rp
-
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
@@ -103,91 +62,6 @@ let keeper_bootstrap_retry_interval_sec_rp =
     ~description:"Delay between autoboot retry rounds (seconds)" ()
 let keeper_bootstrap_retry_interval_sec () : int =
   Runtime_params.get keeper_bootstrap_retry_interval_sec_rp
-
-let keeper_compaction_policy_from_env () : (float * int * int) =
-  ( keeper_compact_ratio (),
-    keeper_compact_max_messages (),
-    keeper_compact_max_tokens () )
-
-let normalize_compaction_ratio_gate (v : float) : float =
-  max 0.1 (min 0.98 v)
-
-let normalize_compaction_message_gate (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:5000
-
-let normalize_compaction_token_gate (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:5000000
-
-let normalize_compaction_cooldown_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:two_days_seconds_int
-
-let default_compaction_profile = "custom"
-
-let canonical_compaction_profile raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "aggressive" | "tight" -> Some "aggressive"
-  | "balanced" | "default" -> Some "balanced"
-  | "conservative" | "loose" -> Some "conservative"
-  | "custom" | "manual" | "env" -> Some "custom"
-  | _ -> None
-
-let parse_compaction_profile_opt args key : (string option, string) result =
-  match get_string_opt args key with
-  | None -> Ok None
-  | Some raw ->
-      (match canonical_compaction_profile raw with
-       | Some p -> Ok (Some p)
-       | None ->
-           Error
-             (Printf.sprintf
-                "invalid compaction_profile '%s' (allowed: aggressive, balanced, conservative, custom)"
-                raw))
-
-let compaction_policy_of_profile (profile : string) : (float * int * int) =
-  match canonical_compaction_profile profile |> Option.value ~default:default_compaction_profile with
-  | "aggressive" -> (0.35, 120, 60_000)
-  | "balanced" -> (0.50, 240, 120_000)
-  | "conservative" -> (0.70, 480, 250_000)
-  | _ -> keeper_compaction_policy_from_env ()
-
-let resolve_compaction_policy
-    ~(profile_opt : string option)
-    ~(ratio_opt : float option)
-    ~(message_opt : int option)
-    ~(token_opt : int option)
-    ~(fallback_profile : string)
-    ~(fallback_ratio : float)
-    ~(fallback_message : int)
-    ~(fallback_token : int) : string * float * int * int =
-  let has_explicit_gate =
-    Option.is_some ratio_opt || Option.is_some message_opt || Option.is_some token_opt
-  in
-  let base_profile =
-    match profile_opt with
-    | Some p -> p
-    | None ->
-        if has_explicit_gate then "custom" else fallback_profile
-  in
-  let (base_ratio, base_message, base_token) =
-    match profile_opt with
-    | Some p -> compaction_policy_of_profile p
-    | None ->
-        if has_explicit_gate then (fallback_ratio, fallback_message, fallback_token)
-        else (fallback_ratio, fallback_message, fallback_token)
-  in
-  let ratio =
-    Option.value ~default:base_ratio ratio_opt
-    |> normalize_compaction_ratio_gate
-  in
-  let message_gate =
-    Option.value ~default:base_message message_opt
-    |> normalize_compaction_message_gate
-  in
-  let token_gate =
-    Option.value ~default:base_token token_opt
-    |> normalize_compaction_token_gate
-  in
-  (base_profile, ratio, message_gate, token_gate)
 
 let keeper_batch_limit_rp =
   _rp_int ~key:"keeper.turn.batch_limit"

@@ -639,16 +639,6 @@ module KeeperProactive = struct
   ;;
 end
 
-(** {1 Context Ratio Hard Cap}
-
-    Absolute ceiling for compaction ratio_gate and handoff threshold after
-    multiplier adjustment.  Prevents runaway values from disabling
-    compaction/handoff.  Default: 0.95. Range: [0.80, 0.99]. *)
-
-let context_ratio_hard_cap =
-  Float.max 0.80 (Float.min 0.99 (get_float ~default:0.95 "MASC_CONTEXT_RATIO_HARD_CAP"))
-;;
-
 (** {1 Dashboard Health Thresholds}
 
     Thresholds used by the dashboard keeper health scorer and harness health

@@ -13,21 +13,6 @@ open Keeper_tool_shared_runtime
 include Keeper_tool_registry
 include Keeper_tool_policy
 
-type keeper_tool_call_recorder =
-  tool_name:string -> success:bool -> duration_ms:int -> unit
-
-let default_keeper_tool_call_recorder ~tool_name:_ ~success:_ ~duration_ms:_ = ()
-let keeper_tool_call_recorder : keeper_tool_call_recorder Atomic.t =
-  Atomic.make default_keeper_tool_call_recorder
-
-let set_on_keeper_tool_call (f : keeper_tool_call_recorder) =
-  Atomic.set keeper_tool_call_recorder f
-;;
-
-let record_keeper_tool_call ~tool_name ~success ~duration_ms =
-  Atomic.get keeper_tool_call_recorder ~tool_name ~success ~duration_ms
-;;
-
 let unavailable_tool_search () =
   let data =
     `Assoc
@@ -42,30 +27,7 @@ let unavailable_tool_search () =
     data
 ;;
 
-type execution_outcome =
-  [ `Success
-  | `Failure of Tool_result.tool_failure_class
-  ]
-
-type executed_tool_result =
-  { raw_output : string
-  ; data : Yojson.Safe.t option
-  ; outcome : execution_outcome
-  }
-
-let executed_tool_result_of_execution (execution : Keeper_tool_execution.t) =
-  match execution.outcome with
-  | Keeper_tool_execution.Succeeded ->
-    { raw_output = execution.raw_output
-    ; data = execution.data
-    ; outcome = `Success
-    }
-  | Keeper_tool_execution.Failed failure_class ->
-    { raw_output = execution.raw_output
-    ; data = execution.data
-    ; outcome = `Failure failure_class
-    }
-;;
+type executed_tool_result = Keeper_tool_execution.t
 
 (* Descriptor and registered-only routes are distinct dispatch sources.
    The selected producer supplies the authoritative typed outcome. *)
@@ -217,13 +179,12 @@ let execute_keeper_tool_call_with_outcome
          | None -> Undescribed_route
        in
        match resolve_descriptor_dispatch descriptor_dispatch with
-       | Return_output execution -> executed_tool_result_of_execution execution
+       | Return_output execution -> execution
        | Return_descriptor_invariant descriptor ->
-         executed_tool_result_of_execution
-           (descriptor_route_invariant_error
-              ~keeper_name:meta.name
-              ~tool_name:name
-              descriptor)
+         descriptor_route_invariant_error
+           ~keeper_name:meta.name
+           ~tool_name:name
+           descriptor
        | Try_registered_only_route ->
          (* Registered-only tools are a separate dispatch source. A descriptor
             route that resolves but returns [None] is handled above as a typed
@@ -236,7 +197,7 @@ let execute_keeper_tool_call_with_outcome
               ~name:unknown_name
               ~args
           with
-          | Some execution -> executed_tool_result_of_execution execution
+          | Some execution -> execution
           | None ->
             let fields =
               [ "ok", `Bool false
@@ -245,11 +206,10 @@ let execute_keeper_tool_call_with_outcome
               ]
             in
             let data = `Assoc fields in
-            executed_tool_result_of_execution
-              (Keeper_tool_execution.failure_data
-                 ~class_:Tool_result.Runtime_failure
-                 ~message:(Yojson.Safe.to_string data)
-                 data))
+            Keeper_tool_execution.failure_data
+              ~class_:Tool_result.Runtime_failure
+              ~message:(Yojson.Safe.to_string data)
+              data)
 ;;
 
 let execute_keeper_tool_call
@@ -279,7 +239,7 @@ let execute_keeper_tool_call
       ~input
       ()
   in
-  result.raw_output
+  result.Keeper_tool_execution.raw_output
 ;;
 
 module For_testing = struct
@@ -288,8 +248,6 @@ module For_testing = struct
     | Invariant
     | Registered_only
 
-  let set_on_keeper_tool_call = set_on_keeper_tool_call
-  let record_keeper_tool_call = record_keeper_tool_call
   let descriptor_route_invariant_payload = descriptor_route_invariant_payload
 
   let descriptor_route_kind ~descriptor ~output =

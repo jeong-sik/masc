@@ -7,9 +7,9 @@ let setup () = M.clear ()
 
 let make_result ~name ~success ~duration_ms : R.result =
   if success
-  then Ok { R.tool_name = name; data = `Null; duration_ms }
+  then R.Completed { R.tool_name = name; data = `Null; metadata = None; duration_ms }
   else
-    Error
+    R.Failed
       { R.class_ = Runtime_failure
       ; message = ""
       ; data = `Null
@@ -22,10 +22,14 @@ let test_record_and_stats () =
   M.record (make_result ~name:"t1" ~success:true ~duration_ms:10.0);
   M.record (make_result ~name:"t1" ~success:true ~duration_ms:20.0);
   M.record (make_result ~name:"t1" ~success:false ~duration_ms:5.0);
+  M.record
+    (R.Deferred
+       { R.tool_name = "t1"; data = `Null; metadata = None; duration_ms = 7.0 });
   match M.stats_for "t1" with
   | Some s ->
-    Alcotest.(check int) "call_count" 3 s.call_count;
+    Alcotest.(check int) "call_count" 4 s.call_count;
     Alcotest.(check int) "success" 2 s.success_count;
+    Alcotest.(check int) "deferred" 1 s.deferred_count;
     Alcotest.(check int) "failure" 1 s.failure_count;
     Alcotest.(check bool) "mean > 0" true (s.mean_ms > 0.0)
   | None -> Alcotest.fail "expected stats"

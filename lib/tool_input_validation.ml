@@ -437,7 +437,7 @@ let reject_validation ~name ~reason ~message =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
   Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
   Tool_dispatch.Reject
-    (Error
+    (Tool_result.Failed
        { Tool_result.class_ = Tool_result.Policy_rejection
        ; message
        ; data =
@@ -466,7 +466,7 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"validation_exception";
   Log.Tool_validation.error "%s" message;
   Tool_dispatch.Reject
-    (Error
+    (Tool_result.Failed
        { Tool_result.class_ = Tool_result.Runtime_failure
        ; message
        ; data =
@@ -569,7 +569,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
          dispatch-level metric label (failure_class) reflects the
          actual category instead of bucketing as "unclassified". *)
       Tool_dispatch.Reject
-        (Error
+        (Tool_result.Failed
            { Tool_result.class_ = Tool_result.Policy_rejection
            ; message
            ; data =

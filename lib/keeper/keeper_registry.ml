@@ -621,18 +621,29 @@ let set_board_cursor ~base_path name ts post_id =
 (* Safe without a mutex: updates go through [update_entry]'s CAS loop, so
    keeper-turn OAS callbacks and runtime MCP server callbacks can both
    record usage for the same keeper without clobbering each other. *)
-let record_tool_use ~base_path name ~tool_name ~success =
+let record_tool_use ~base_path name ~tool_name ~disposition =
   match
     update_entry ~base_path name (fun entry ->
       let e =
         match StringMap.find_opt tool_name entry.tool_usage with
         | Some e -> e
-        | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
+        | None ->
+          { count = 0; successes = 0; deferred = 0; failures = 0; last_used_at = 0.0 }
       in
       let updated =
         { count = e.count + 1
-        ; successes = (if success then e.successes + 1 else e.successes)
-        ; failures = (if success then e.failures else e.failures + 1)
+        ; successes =
+            (match disposition with
+             | Tool_result.Completed _ -> e.successes + 1
+             | Tool_result.Deferred _ | Tool_result.Failed _ -> e.successes)
+        ; deferred =
+            (match disposition with
+             | Tool_result.Deferred _ -> e.deferred + 1
+             | Tool_result.Completed _ | Tool_result.Failed _ -> e.deferred)
+        ; failures =
+            (match disposition with
+             | Tool_result.Failed _ -> e.failures + 1
+             | Tool_result.Completed _ | Tool_result.Deferred _ -> e.failures)
         ; last_used_at = Time_compat.now ()
         }
       in

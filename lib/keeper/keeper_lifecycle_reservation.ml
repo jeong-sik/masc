@@ -35,7 +35,7 @@ module Lock_table = Ephemeron.K1.Make (Lock_key)
 
 type lock_entry =
   { key : string
-  ; mutex : Mutex.t
+  ; mutex : Cross_context_mutex.t
   }
 
 (* No fleet-size guess or TTL belongs at this boundary. The entry keeps its
@@ -66,7 +66,7 @@ let lock_for_key key =
     match Lock_table.find_opt key_locks key with
     | Some entry -> entry
     | None ->
-      let entry = { key; mutex = Mutex.create () } in
+      let entry = { key; mutex = Cross_context_mutex.create () } in
       Lock_table.add key_locks key entry;
       entry)
 ;;
@@ -74,7 +74,7 @@ let lock_for_key key =
 let with_key_lock ~base_path ~keeper_name f =
   let key = canonical_key ~base_path ~keeper_name in
   let entry = lock_for_key key in
-  Mutex.protect entry.mutex (fun () ->
+  Cross_context_mutex.with_lock entry.mutex (fun () ->
     ignore entry.key;
     f ())
 ;;

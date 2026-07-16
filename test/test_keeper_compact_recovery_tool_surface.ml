@@ -40,6 +40,10 @@ let test_missing_checkpoint_is_typed_tool_failure () =
     (fun () ->
       let config = Workspace.default_config base_path in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let runtime_path =
+        Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+      in
+      Result.get_ok (Runtime.init_default ~config_path:runtime_path);
       let meta = make_meta keeper_name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -68,8 +72,9 @@ let test_missing_checkpoint_is_typed_tool_failure () =
           ~args:(`Assoc [ "name", `String keeper_name ])
       with
       | None -> fail "masc_keeper_compact is not registered"
-      | Some (Ok _) -> fail "missing checkpoint must not report success"
-      | Some (Error failure) ->
+      | Some (Tool_result.Completed _) -> fail "missing checkpoint must not report success"
+      | Some (Tool_result.Deferred _) -> fail "missing checkpoint must not defer"
+      | Some (Tool_result.Failed failure) ->
         check string "tool identity" "masc_keeper_compact" failure.tool_name;
         check string "typed recovery error" "checkpoint_not_found"
           Yojson.Safe.Util.(failure.data |> member "compaction_error" |> to_string);

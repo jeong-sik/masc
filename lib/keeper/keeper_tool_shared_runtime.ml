@@ -34,12 +34,6 @@ let tool_result_error_json (tr : Tool_result.result) =
     error_json ~fields (Tool_result.message tr)
 ;;
 
-let tool_result_or_error (tr : Tool_result.result) =
-  let ok = Tool_result.is_success tr in
-  let msg = Tool_result.message tr in
-  if ok then msg else tool_result_error_json tr
-;;
-
 let file_not_found_prefix = "File not found:"
 
 let missing_file_error_json

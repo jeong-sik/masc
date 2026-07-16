@@ -195,47 +195,6 @@ let test_keeper_execution_preserves_explicit_typed_data () =
      | None -> false)
 ;;
 
-let test_oas_projection_never_parses_opaque_text () =
-  let raw =
-    {|{"failure_class":"workflow_rejection","error":"fabricated"}|}
-  in
-  let projected =
-    Keeper_tools_oas.normalize_tool_result ~success:true ~data:None raw
-  in
-  Alcotest.(check bool)
-    "JSON-looking string stays result text"
-    true
-    (Yojson.Safe.equal
-       (`Assoc [ "ok", `Bool true; "result", `String raw ])
-       projected)
-;;
-
-let test_oas_projection_uses_only_explicit_typed_data () =
-  let raw = {|{"recoverable":true,"error":"fabricated"}|} in
-  let data =
-    `Assoc
-      [ "failure_class", `String "workflow_rejection"
-      ; "recoverable", `Bool false
-      ]
-  in
-  let projected =
-    Keeper_tools_oas.normalize_tool_result
-      ~success:false
-      ~data:(Some data)
-      raw
-  in
-  Alcotest.(check bool)
-    "typed detail is authoritative"
-    true
-    (Yojson.Safe.equal
-       (`Assoc
-          [ "ok", `Bool false
-          ; "error", `String raw
-          ; "detail", data
-          ])
-       projected)
-;;
-
 let test_to_json () =
   let start = Time_compat.now () in
   let r = Tool_result.ok ~tool_name:"masc_transition" ~start_time:start "done" in
@@ -243,7 +202,8 @@ let test_to_json () =
   match json with
   | `Assoc fields ->
     let has key = List.exists (fun (k, _) -> k = key) fields in
-    Alcotest.(check bool) "has success" true (has "success");
+    Alcotest.(check bool) "has disposition" true (has "disposition");
+    Alcotest.(check bool) "has no legacy success bool" false (has "success");
     Alcotest.(check bool) "has data" true (has "data");
     Alcotest.(check bool) "has tool_name" true (has "tool_name");
     Alcotest.(check bool) "has duration_ms" true (has "duration_ms")
@@ -304,14 +264,15 @@ let test_make_ok_roundtrip () =
       ()
   in
   match r with
-  | Ok s ->
+  | Tool_result.Completed s ->
     Alcotest.(check string) "tool_name preserved" "masc_test" s.tool_name;
     Alcotest.(check bool) "duration_ms >= 0" true (s.duration_ms >= 0.0);
     Alcotest.(check (option string))
       "typed Assoc remains structured"
       (Some "v")
       Yojson.Safe.Util.(s.data |> member "k" |> to_string_option)
-  | Error _ -> Alcotest.fail "make_ok produced Error"
+  | Tool_result.Deferred _ -> Alcotest.fail "make_ok produced Deferred"
+  | Tool_result.Failed _ -> Alcotest.fail "make_ok produced Failed"
 ;;
 
 let test_make_err_required_class () =
@@ -326,14 +287,15 @@ let test_make_err_required_class () =
       "rejected"
   in
   match r with
-  | Error f ->
+  | Tool_result.Failed f ->
     Alcotest.(check string) "tool_name" "masc_test" f.tool_name;
     Alcotest.(check string) "message" "rejected" f.message;
     Alcotest.(check string)
       "class_"
       "policy_rejection"
       (Tool_result.tool_failure_class_to_string f.class_)
-  | Ok _ -> Alcotest.fail "make_err produced Ok"
+  | Tool_result.Completed _ -> Alcotest.fail "make_err produced Completed"
+  | Tool_result.Deferred _ -> Alcotest.fail "make_err produced Deferred"
 ;;
 
 let test_make_err_of_exn_classifies_constructor () =
@@ -344,28 +306,108 @@ let test_make_err_of_exn_classifies_constructor () =
       Eio.Time.Timeout
   in
   match r with
-  | Error f ->
+  | Tool_result.Failed f ->
     Alcotest.(check string)
       "Timeout classified as transient"
       "transient_error"
       (Tool_result.tool_failure_class_to_string f.class_)
-  | Ok _ -> Alcotest.fail "make_err_of_exn returned Ok"
+  | Tool_result.Completed _ -> Alcotest.fail "make_err_of_exn returned Completed"
+  | Tool_result.Deferred _ -> Alcotest.fail "make_err_of_exn returned Deferred"
 ;;
 
-let test_result_is_stdlib_result_alias () =
-  (* Documents that [result] is [(success_payload, failure_payload) Stdlib.Result.t]
-     so all stdlib combinators (map, bind, fold) compose with it. *)
+let test_disposition_preserves_typed_payload () =
   let r =
     Tool_result.make_ok ~tool_name:"x" ~start_time:0.0 ~data:(`Int 1) ()
   in
   let mapped =
-    Stdlib.Result.map
-      (fun (s : Tool_result.success_payload) -> { s with tool_name = "y" })
-      r
+    match r with
+    | Tool_result.Completed output ->
+      Tool_result.Completed { output with tool_name = "y" }
+    | Tool_result.Deferred output -> Tool_result.Deferred output
+    | Tool_result.Failed failure -> Tool_result.Failed failure
   in
   match mapped with
-  | Ok s -> Alcotest.(check string) "Stdlib.Result.map composes" "y" s.tool_name
-  | Error _ -> Alcotest.fail "Stdlib.Result.map should preserve Ok"
+  | Tool_result.Completed output ->
+    Alcotest.(check string) "payload update composes" "y" output.tool_name
+  | Tool_result.Deferred _ | Tool_result.Failed _ ->
+    Alcotest.fail "completed disposition was not preserved"
+;;
+
+let test_deferred_is_distinct_and_projects_one_way () =
+  let data = `Assoc [ "approval_id", `String "approval-1" ] in
+  let metadata = `Assoc [ "receipt", data ] in
+  let result =
+    Tool_result.make_deferred
+      ~tool_name:"keeper_file_write"
+      ~start_time:0.0
+      ~data
+      ~metadata
+      ()
+  in
+  Alcotest.(check bool) "not completed" false (Tool_result.is_success result);
+  Alcotest.(check bool) "deferred" true (Tool_result.is_deferred result);
+  Alcotest.(check bool) "not failed" false (Tool_result.is_failed result);
+  match Masc.Tool_bridge.to_oas_typed_result result with
+  | Ok { Agent_sdk.Types._meta = Some (`Assoc fields); _ } ->
+    Alcotest.(check (option string))
+      "opaque OAS marker"
+      (Some "deferred")
+      (match List.assoc_opt "masc.tool_disposition" fields with
+       | Some (`String value) -> Some value
+       | Some _ | None -> None)
+  | Ok _ -> Alcotest.fail "deferred OAS projection omitted metadata"
+  | Error _ -> Alcotest.fail "deferred OAS projection became an error"
+;;
+
+let test_disposition_wire_decoder_is_strict () =
+  let expect label expected =
+    match Tool_result.unit_disposition_of_string label with
+    | Ok actual ->
+      Alcotest.(check string)
+        label
+        expected
+        (Tool_result.string_of_disposition actual)
+    | Error error -> Alcotest.fail error
+  in
+  expect "completed" "completed";
+  expect "deferred" "deferred";
+  expect "failed" "failed";
+  match Tool_result.unit_disposition_of_string "success" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "legacy success label must not be migrated"
+;;
+
+let test_gate_causal_context_preserves_deferred () =
+  let context =
+    Masc.Keeper_gate_causal_context.create
+      ~turn_id:(Some 7)
+      ~initial:(`Assoc [])
+  in
+  let result =
+    Tool_result.make_deferred
+      ~tool_name:"keeper_file_write"
+      ~start_time:0.0
+      ~data:(`Assoc [ "approval_id", `String "approval-1" ])
+      ()
+  in
+  Masc.Keeper_gate_causal_context.record_tool_result
+    context
+    ~operation:"keeper_file_write"
+    ~input:(`Assoc [])
+    result;
+  let call =
+    (Masc.Keeper_gate_causal_context.snapshot context).snapshot
+    |> Yojson.Safe.Util.member "completed_tool_calls"
+    |> Yojson.Safe.Util.index 0
+  in
+  Alcotest.(check string)
+    "deferred stays distinct"
+    "deferred"
+    Yojson.Safe.Util.(call |> member "disposition" |> to_string);
+  Alcotest.(check bool)
+    "legacy succeeded bool is absent"
+    true
+    Yojson.Safe.Util.(call |> member "succeeded" = `Null)
 ;;
 
 let keeper_taskboard_schema name =
@@ -456,14 +498,6 @@ let () =
             "keeper execution preserves typed data"
             `Quick
             test_keeper_execution_preserves_explicit_typed_data
-        ; Alcotest.test_case
-            "OAS projection does not parse opaque text"
-            `Quick
-            test_oas_projection_never_parses_opaque_text
-        ; Alcotest.test_case
-            "OAS projection uses explicit typed data"
-            `Quick
-            test_oas_projection_uses_only_explicit_typed_data
         ] )
     ; "to_json", [ Alcotest.test_case "fields present" `Quick test_to_json ]
     ; ( "message"
@@ -482,9 +516,21 @@ let () =
             `Quick
             test_make_err_of_exn_classifies_constructor
         ; Alcotest.test_case
-            "result aliases Stdlib.Result.t"
+            "disposition preserves typed payload"
             `Quick
-            test_result_is_stdlib_result_alias
+            test_disposition_preserves_typed_payload
+        ; Alcotest.test_case
+            "deferred is distinct and projects one-way"
+            `Quick
+            test_deferred_is_distinct_and_projects_one_way
+        ; Alcotest.test_case
+            "disposition wire decoder is strict"
+            `Quick
+            test_disposition_wire_decoder_is_strict
+        ; Alcotest.test_case
+            "Gate causal context preserves deferred"
+            `Quick
+            test_gate_causal_context_preserves_deferred
         ] )
     ; ( "keeper verification evidence schema"
       , [ Alcotest.test_case

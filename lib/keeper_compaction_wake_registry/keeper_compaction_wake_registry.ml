@@ -92,7 +92,8 @@ let register ~sw owner keeper_name =
   if registered
   then (
     Eio.Switch.on_release sw (fun () ->
-      ignore (unregister registration : unregister_result));
+      match unregister registration with
+      | Unregistered | Registration_not_current -> ());
     Ok registration)
   else Error Already_registered
 ;;

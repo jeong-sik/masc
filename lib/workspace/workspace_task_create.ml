@@ -97,7 +97,10 @@ let rollback_goal_links config task_goal_ids =
     task_goal_ids
 ;;
 
-(** Add task — file-locked to prevent task ID collision under concurrency. *)
+(** Add task — file-locked to prevent task ID collision under concurrency.
+    A title is display content, not task identity or admission authority, so
+    equal titles receive distinct task IDs. A workflow that needs semantic
+    duplicate judgment performs that explicit LLM decision before submission. *)
 let add_task_with_result
       ?contract
       ?goal_id

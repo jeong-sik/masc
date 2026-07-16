@@ -45,6 +45,10 @@ val add_task_error_to_string : add_task_error -> string
 
 val batch_add_tasks_error_to_string : batch_add_tasks_error -> string
 
+(** Creates one new task identity per successful call. Titles are opaque display
+    content; equal titles are valid and receive distinct IDs. Semantic duplicate
+    judgment belongs to an explicit LLM workflow before submission, not this
+    storage boundary. *)
 val add_task_with_result :
   ?contract:Masc_domain.task_contract ->
   ?goal_id:string ->

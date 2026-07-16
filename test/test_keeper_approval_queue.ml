@@ -335,7 +335,16 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
            ]
        in
        let request_context =
-         `Assoc [ "user_message", `String "write the exact document" ]
+         `Assoc
+           [ ( "initial"
+             , `Assoc
+                 [ "history_messages", `List [ `String "older exact turn" ]
+                 ; "base_system_prompt", `String "exact base policy"
+                 ; "turn_system_prompt", `String "exact turn policy"
+                 ; "user_message", `String "write the exact document"
+                 ] )
+           ; "completed_tool_calls", `List []
+           ]
        in
        let first =
          submit_with_context
@@ -723,8 +732,19 @@ let test_operator_recovery_reopens_all_failed_summaries () =
       AQ.For_testing.reset_runtime_state ();
       cleanup_dir base_path)
     (fun () ->
+       let request_context =
+         `Assoc
+           [ "history_messages", `List [ `String "exact prior evidence" ]
+           ; "system_prompt", `String "exact judgment policy"
+           ]
+       in
        let retryable_id =
-         submit ~base_path ~keeper_name ~input:(`String "retryable")
+         submit_with_context
+           ~request_context
+           ~base_path
+           ~keeper_name
+           ~input:(`String "retryable")
+           ()
        in
        let terminal_id =
          submit ~base_path ~keeper_name ~input:(`String "terminal")
@@ -755,6 +775,14 @@ let test_operator_recovery_reopens_all_failed_summaries () =
             | Some { summary_status = AQ.Summary_not_requested; _ } -> ()
             | Some _ | None -> Alcotest.fail "failed summary was not reopened")
          reopened;
+       (match AQ.get_pending_entry ~id:retryable_id with
+        | Some entry ->
+          Alcotest.check
+            (Alcotest.option yojson)
+            "operator recovery preserves exact request context"
+            (Some request_context)
+            entry.request_context
+        | None -> Alcotest.fail "reopened summary disappeared");
        reject_and_cleanup ~base_path retryable_id;
        reject_and_cleanup ~base_path terminal_id)
 ;;

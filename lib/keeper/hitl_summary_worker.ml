@@ -244,7 +244,7 @@ let build_context_bundle ~(entry : pending_approval) : Yojson.Safe.t =
     ; "input", entry.input
     ; ( "request_context"
       , match entry.request_context with
-        | Some context -> Keeper_gate_request_context.project context
+        | Some context -> context
         | None -> `Null )
     ; "task", task_json
     ; "goals", goals_json

@@ -1,11 +1,11 @@
 // Read-only view of a [fusion.presets.<preset>] table for the Settings fusion
-// section (keeper-v2 settings.jsx: trio preset lanes + timeouts).
+// section (keeper-v2 settings.jsx: trio preset lanes and judge runtime).
 //
 // This is a display-only reader — it never writes back, so it deliberately does
 // NOT live in fusion-settings.ts (whose line-surgical write path forbids
 // multi-line values). The preset `panel` value is a possibly multi-line TOML
 // array, which the scalar getRuntimeTomlKey helper cannot read; scalar keys
-// (judge / timeouts) reuse getRuntimeTomlKey so the
+// (`judge`) reuse getRuntimeTomlKey so the
 // section-scoping stays consistent with the rest of the runtime.toml tooling.
 //
 // The source text is the live runtime.toml already fetched by
@@ -27,13 +27,9 @@ export interface FusionPresetView {
   readonly judgeGroupCount: number
   readonly panel: readonly string[]
   readonly judge: string | null
-  readonly panelTimeoutS: number | null
-  readonly judgeTimeoutS: number | null
 }
 
 const KEY_JUDGE = 'judge'
-const KEY_PANEL_TIMEOUT_S = 'panel_timeout_s'
-const KEY_JUDGE_TIMEOUT_S = 'judge_timeout_s'
 
 function presetSection(preset: string): string {
   return `fusion.presets.${preset}`
@@ -140,13 +136,6 @@ function parseScalarString(sourceText: string, section: string, key: string): st
   return value === '' ? null : value
 }
 
-function parseScalarNumber(sourceText: string, section: string, key: string): number | null {
-  const raw = getRuntimeTomlKey(sourceText, section, key)
-  if (raw === undefined) return null
-  const value = Number(raw.trim())
-  return Number.isFinite(value) ? value : null
-}
-
 /**
  * Read the read-only view of `[fusion.presets.<preset>]` from runtime.toml text.
  * Returns null when the preset name is empty or the section is absent.
@@ -171,8 +160,6 @@ export function readFusionPresetView(sourceText: string, preset: string): Fusion
       judgeGroupCount,
       panel: [],
       judge: null,
-      panelTimeoutS: null,
-      judgeTimeoutS: null,
     }
   }
 
@@ -185,7 +172,5 @@ export function readFusionPresetView(sourceText: string, preset: string): Fusion
     judgeGroupCount,
     panel: parseStringArray(body, 'panel'),
     judge: parseScalarString(sourceText, section, KEY_JUDGE),
-    panelTimeoutS: parseScalarNumber(sourceText, section, KEY_PANEL_TIMEOUT_S),
-    judgeTimeoutS: parseScalarNumber(sourceText, section, KEY_JUDGE_TIMEOUT_S),
   }
 }

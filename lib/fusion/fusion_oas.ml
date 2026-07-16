@@ -104,20 +104,6 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid max_output_tokens %d" n
 
-let provider_timeout_opt timeout_s =
-  if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
-
-let apply_provider_timeout ?timeout_s (base_config : Runtime_agent.config) =
-  match Option.bind timeout_s provider_timeout_opt with
-  | None -> base_config
-  | Some timeout_s ->
-    (* OAS selects the single applicable Provider boundary: inter-event idle
-       for streaming, response body for non-streaming. *)
-    { base_config with
-      Runtime_agent.stream_idle_timeout_s = Some timeout_s
-    ; body_timeout_s = Some timeout_s
-    }
-
 (** [Keeper_tool_descriptor]에서 날것의 web tool descriptor를 찾아
     [Agent_sdk.Tool.t]로 변환한다. 패널/심판이 web_search/web_fetch를
     호출할 수 있게 하는 목적으로만 쓰인다. *)
@@ -154,7 +140,6 @@ let build_agent
     ~net
     ~system_prompt
     ?(tools = [])
-    ?timeout_s
     ?max_tokens
     ?name
     ?provider_config_transform
@@ -196,7 +181,6 @@ let build_agent
            ~system_prompt
            ~tools
        in
-       let base_config = apply_provider_timeout ?timeout_s base_config in
        let config =
          match max_tokens with
          | None -> Ok base_config
@@ -218,6 +202,5 @@ let build_agent
                  : Fusion_types.panel_failure))))
 
 module For_testing = struct
-  let apply_provider_timeout = apply_provider_timeout
   let empty_response_detail = empty_response_detail
 end

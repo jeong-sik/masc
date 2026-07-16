@@ -19,7 +19,7 @@ panel = [
 ]
 # judge doc comment
 judge = "old-judge"
-judge_timeout_s = 300.0
+judge_max_output_tokens = 4096
 |}
 
 let comment_lines content =
@@ -47,7 +47,7 @@ let test_scalar_edit_preserves_comments () =
   Alcotest.(check bool) "old judge value gone" false
     (has_line out {|judge = "old-judge"|});
   Alcotest.(check bool) "unrelated scalar untouched" true
-    (has_line out "judge_timeout_s = 300.0");
+    (has_line out "judge_max_output_tokens = 4096");
   Alcotest.(check bool) "multi-line array untouched" true
     (has_line out {|  "provider.a",|})
 
@@ -60,7 +60,7 @@ let test_scalar_remove () =
   Alcotest.(check bool) "judge key removed" false
     (has_line out {|judge = "old-judge"|});
   Alcotest.(check bool) "sibling scalar retained" true
-    (has_line out "judge_timeout_s = 300.0")
+    (has_line out "judge_max_output_tokens = 4096")
 
 let test_multiline_array_edit_preserves_comments () =
   let out =

@@ -167,7 +167,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_ORCHESTRATOR_AGENT` | typed:string | unclassified | unclassified | 108 | Orchestrator agent name |
 | `MASC_ORCHESTRATOR_INTERVAL` | typed:float | unclassified | unclassified | 104 | Orchestrator check interval (seconds) |
 | `MASC_ORCHESTRATOR_MIN_PRIORITY` | typed:int | unclassified | unclassified | 111 |  |
-| `MASC_ORCHESTRATOR_TIMEOUT` | typed:int | unclassified | unclassified | 114 |  |
 | `MASC_PUBLIC_TOOLS_EXTRA` | string_literal | n/a | n/a | 365 | Extra public tools (comma-separated names). |
 | `MASC_RATE_BURST` | typed:int | unclassified | unclassified | 393 | Burst capacity. Default: 150. |
 | `MASC_RATE_LIMIT` | typed:float | unclassified | unclassified | 390 | Requests per second. Default: 100. |

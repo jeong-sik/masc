@@ -19,7 +19,6 @@ lib/keeper/keeper_unified_turn_execution.ml
 # Context budgeting regression harness grew during PR #22925; keep new tests
 # focused here until the provider-timeout strike harness is split.
 test/test_oas_timeout_budget_strike.ml
-# Fusion core test monolith pre-dates the adaptive-timeout schema expansion.
-# New focused cases live in test/test_fusion_adaptive_timeout.ml; full extraction
-# should happen separately from the feature hardening branch.
+# Fusion core test monolith pre-dates the current line cap. Full extraction
+# should happen separately from this schema deletion.
 test/fusion_core/test_fusion.ml

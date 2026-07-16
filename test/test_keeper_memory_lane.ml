@@ -211,6 +211,47 @@ let test_finished_switch_drops_without_leak () =
   | None -> Alcotest.fail "keeper entry missing after finished switch submit"
 ;;
 
+(* Maintenance submission neither queues behind an active Keeper nor blocks a
+   different Keeper's lane. The closure owns a unit-local child switch. *)
+let test_submit_if_idle_is_keeper_local () =
+  Lane.For_testing.reset ();
+  (match
+     Lane.submit_if_idle ~base_path ~keeper_name:"k1" (fun _sw -> ())
+   with
+   | Lane.Idle_executor_unavailable -> ()
+   | _ -> Alcotest.fail "uninitialized idle submission was not rejected");
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let active, set_active = Eio.Promise.create () in
+      let release, set_release = Eio.Promise.create () in
+      let peer_done, set_peer_done = Eio.Promise.create () in
+      let first =
+        Lane.submit_if_idle ~base_path ~keeper_name:"k1" (fun _unit_sw ->
+          Eio.Promise.resolve set_active ();
+          Eio.Promise.await release)
+      in
+      (match first with
+       | Lane.Idle_submitted -> ()
+       | _ -> Alcotest.fail "first idle unit was not submitted");
+      Eio.Promise.await active;
+      let duplicate =
+        Lane.submit_if_idle ~base_path ~keeper_name:"k1" (fun _sw -> ())
+      in
+      (match duplicate with
+       | Lane.Idle_already_active -> ()
+       | _ -> Alcotest.fail "active Keeper accepted duplicate maintenance");
+      let peer =
+        Lane.submit_if_idle ~base_path ~keeper_name:"k2" (fun _sw ->
+          Eio.Promise.resolve set_peer_done ())
+      in
+      (match peer with
+       | Lane.Idle_submitted -> ()
+       | _ -> Alcotest.fail "peer Keeper did not get its independent lane");
+      Eio.Promise.await peer_done;
+      Eio.Promise.resolve set_release ()))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
@@ -238,6 +279,10 @@ let () =
             "finished switch drops without leak"
             `Quick
             test_finished_switch_drops_without_leak
+        ; Alcotest.test_case
+            "idle maintenance is Keeper-local"
+            `Quick
+            test_submit_if_idle_is_keeper_local
         ] )
     ]
 ;;

@@ -197,12 +197,9 @@ type checkpoint_sanitize_stats = {
   tool_pair_repair : tool_pair_repair_stats;
 }
 
-(** Apply [sanitize_checkpoint_messages] (cap blocks / drop oversize
-    payloads) and, when [repair_orphans] is [true] (default), also
-    drop orphan tool_use/tool_result pairs so the resulting checkpoint
-    is safe to persist. Returns the cleaned checkpoint plus aggregated
-    stats, including bounded pair-repair diagnostics so dropped
-    structural blocks are observable without becoming visible text. *)
+(** When [repair_orphans] is [true] (default), drop orphan
+    tool_use/tool_result pairs. Message content is otherwise preserved
+    exactly. *)
 val sanitize_oas_checkpoint :
   ?repair_orphans:bool ->
   Agent_sdk.Checkpoint.t ->
@@ -210,21 +207,6 @@ val sanitize_oas_checkpoint :
 
 val checkpoint_sanitize_changed : checkpoint_sanitize_stats -> bool
 (** [true] iff any of the counters in [stats] is non-zero. *)
-
-val default_max_checkpoint_content_chars_total : int
-(** Total persisted text/reasoning content budget. Typed ToolResult blocks are
-    preserved exactly and remain outside this legacy text cap. *)
-
-val sanitize_checkpoint_message :
-  Agent_sdk.Types.message -> Agent_sdk.Types.message option * checkpoint_sanitize_stats
-(** Cap Text blocks while preserving typed ToolResult blocks exactly. Returns
-    [None] only when every block was dropped, plus its stats. *)
-
-val checkpoint_text_cap_marker : string
-(** Marker suffix appended to a Text block when the
-    sanitizer truncates it (newline followed by the [capped] marker).
-    Tests assert against this literal so the marker is part of the
-    public contract. *)
 
 (** Project an OAS checkpoint to a working context without rewriting its
     messages. *)

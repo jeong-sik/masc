@@ -6,26 +6,9 @@ open Masc_domain
 (* Crypto utilities                             *)
 (* ============================================ *)
 
-let rng_initialization_mutex = Mutex.create ()
-
-(** Return the process-wide default RNG at the token-generation boundary.
-    The Mirage default generator is the state authority; the mutex only
-    serializes the first missing-generator repair across Domains. *)
-let default_rng () =
-  match Mirage_crypto_rng.default_generator () with
-  | rng -> rng
-  | exception Mirage_crypto_rng.No_default_generator ->
-    Mutex.protect rng_initialization_mutex (fun () ->
-      match Mirage_crypto_rng.default_generator () with
-      | rng -> rng
-      | exception Mirage_crypto_rng.No_default_generator ->
-        Mirage_crypto_rng_unix.use_default ();
-        Mirage_crypto_rng.default_generator ())
-
 (** Generate a cryptographically random token (hex string) *)
 let generate_token () =
-  let rng = default_rng () in
-  let random_bytes = Mirage_crypto_rng.generate ~g:rng 32 in
+  let random_bytes = Crypto_rng.generate 32 in
   let hex = Buffer.create 64 in
   String.iter (fun c -> Printf.bprintf hex "%02x" (Char.code c)) random_bytes;
   Buffer.contents hex

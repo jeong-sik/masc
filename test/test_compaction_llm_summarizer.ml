@@ -91,6 +91,61 @@ let test_lane_candidates_keep_declared_order () =
     (Some [ "local.kimi_like"; "fallback.kimi_like" ])
     actual
 
+let response text : Agent_sdk.Types.api_response =
+  { id = "compaction-test"
+  ; model = "test"
+  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; usage = None
+  ; telemetry = None
+  }
+
+let test_terminal_no_compaction_and_invalid_source_do_not_fallback () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  with_temperature_runtime @@ fun _ ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  let calls = Atomic.make 0 in
+  let complete : C.complete_fn =
+    fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+      Atomic.incr calls;
+      Ok
+        (response
+           {|{"kept_indices":[0],"dropped_indices":[],"summarized_units":[]}|})
+  in
+  let summarize =
+    match C.make ~complete ~runtime_id:"compaction" ~keeper_name:"test" () with
+    | Some summarize -> summarize
+    | None -> Alcotest.fail "compaction lane should resolve"
+  in
+  let message = Agent_sdk.Types.text_message Agent_sdk.Types.User "keep" in
+  (match summarize ~messages:[ message ] with
+   | Some C.No_compaction -> ()
+   | Some (C.Planned _) | None -> Alcotest.fail "expected terminal no-compaction");
+  Alcotest.(check int) "no-op does not call fallback" 1 (Atomic.get calls);
+  Atomic.set calls 0;
+  let orphan =
+    { message with
+      content =
+        [ Agent_sdk.Types.ToolResult
+            { tool_use_id = "missing"
+            ; content = "orphan"
+            ; outcome = Agent_sdk.Types.Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    }
+  in
+  Alcotest.(check bool) "invalid source rejected" true
+    (Option.is_none (summarize ~messages:[ orphan ]));
+  Alcotest.(check int) "invalid source makes no provider call" 0 (Atomic.get calls)
+
 let () =
   Alcotest.run "compaction_llm_summarizer"
     [ ( "provider"
@@ -100,5 +155,7 @@ let () =
             test_provider_for_plan_preserves_temperature_omission
         ; Alcotest.test_case "lane candidates keep declared order" `Quick
             test_lane_candidates_keep_declared_order
+        ; Alcotest.test_case "terminal no-op and invalid source" `Quick
+            test_terminal_no_compaction_and_invalid_source_do_not_fallback
         ] )
     ]

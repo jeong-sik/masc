@@ -2,7 +2,7 @@
 (** Tool_misc — miscellaneous MASC tool handlers.
 
     Dispatches: transport_status, websocket_discovery, webrtc,
-    dashboard, verify_handoff, gc, cleanup_zombies, tool_stats,
+    dashboard, verify_handoff, gc, tool_stats,
     tool_help, config introspection, and web helpers. *)
 
 type tool_result = Tool_result.result

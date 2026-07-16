@@ -20,8 +20,7 @@ module Float = Stdlib.Float
     Dispatches config introspection and tool inventory helpers to
     [Tool_misc_introspection].
 
-    Retains: dashboard, verify_handoff, gc, cleanup_zombies,
-    tool_stats, tool_help.
+    Retains: dashboard, verify_handoff, gc, tool_stats, tool_help.
 
     @since 2.187.0 — Decomposed from monolithic tool_misc.ml *)
 
@@ -44,7 +43,7 @@ type context = {
    - [Workflow_rejection] : invalid dashboard scope; missing
                             tool_name; unknown tool.
    - No [Runtime_failure] / [Transient_error] sites here — the
-     [Workspace.gc] / [Workspace.cleanup_zombies] / [Dashboard.generate]
+     [Workspace.gc] / [Dashboard.generate]
      backends assume-success or raise. When a backend later returns
      a typed Error variant, the construction site here gets the
      appropriate class at that time. *)
@@ -99,31 +98,6 @@ let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
   | Some days ->
     let gc_result = Workspace.gc ctx.config ~days () in
     text_ok ~tool_name ~start_time gc_result
-
-let handle_cleanup_zombies ~tool_name ~start_time ctx _args : Tool_result.result =
-  let result = Workspace.cleanup_zombies ctx.config in
-  let msg =
-    match result with
-    | Workspace.No_agents_dir -> "No agents directory"
-    | Workspace.No_zombies -> "No zombie agents found"
-    | Workspace.Cleaned { count; names; released_tasks; skipped } ->
-        let task_note =
-          if released_tasks = 0 then ""
-          else Printf.sprintf ", released %d orphan task(s)" released_tasks
-        in
-        if skipped > 0 then
-          Printf.sprintf
-            "Cleaned %d/%d zombie(s): %s%s (%d skipped due to errors)"
-            count
-            (count + skipped)
-            (String.concat ", " names)
-            task_note
-            skipped
-        else
-          Printf.sprintf "Cleaned up %d zombie agent(s): %s%s"
-            count (String.concat ", " names) task_note
-  in
-  text_ok ~tool_name ~start_time msg
 
 let handle_tool_stats ~tool_name ~start_time _ctx args : Tool_result.result =
   let top_n = max 1 (min 100 (get_int args "top_n" 20)) in
@@ -203,8 +177,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | "masc_keeper_waiting_inventory" ->
       Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
-  | "masc_cleanup_zombies" ->
-      Some (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
   | "masc_tool_stats" ->
       Some (handle_tool_stats ~tool_name:name ~start_time:start ctx args)
   | "masc_tool_help" ->

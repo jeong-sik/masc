@@ -9,7 +9,7 @@ import { operatorSnapshot } from '../../operator-store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import {
   flowState, flowLoading, fetchPauseStatus, pauseWorkspace, resumeWorkspace,
-  maintenanceResult, maintenanceLoading, runGarbageCollection, cleanupZombies,
+  maintenanceResult, maintenanceLoading, runGarbageCollection,
 } from './flow-control-state'
 
 function stateLabel(s: string): string {
@@ -72,12 +72,6 @@ export function FlowControlPanel() {
               if (confirmed) void runGarbageCollection()
             }}>
             ${maintenanceLoading.value ? '...' : 'Run GC'}<//>
-          <${ActionButton} variant="danger" size="md" disabled=${maintenanceLoading.value || !mutationAccess.allowed}
-            onClick=${async () => {
-              const confirmed = await requestConfirm({ title: 'Maintenance', message: 'Clean up zombie agents?', tone: 'danger' })
-              if (confirmed) void cleanupZombies()
-            }}>
-            ${maintenanceLoading.value ? '...' : 'Clean Zombies'}<//>
         </div>
         ${maintenanceResult.value ? html`
           <pre class="mt-3 p-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/30 text-2xs text-text-body font-mono max-h-40 overflow-auto custom-scrollbar whitespace-pre-wrap">${maintenanceResult.value}</pre>

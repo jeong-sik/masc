@@ -309,7 +309,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_persona_delete", broadcast_tool);
     ("masc_runtime_verify", read_state_tool);
     ("masc_runtime_ollama_probe", read_state_tool);
-    ("masc_cleanup_zombies", broadcast_tool);
     ("masc_board_hearths", read_state_tool);
     ("masc_board_search", read_state_tool);
     ("masc_board_profile", read_state_tool);

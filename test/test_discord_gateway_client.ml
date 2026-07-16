@@ -15,6 +15,16 @@ let check_continue label input expected =
   check bool label expected
     (Client.For_testing.reader_should_continue_after_input input)
 
+let run_ingress_test test =
+  Eio_main.run (fun _env ->
+    let exception Test_complete in
+    try
+      Eio.Switch.run (fun sw ->
+        test sw;
+        Eio.Switch.fail sw Test_complete)
+    with Test_complete -> ())
+;;
+
 let test_reader_stops_after_close_input () =
   check_continue "close input stops reader"
     (State.Wss_closed { code = 1000; reason = "remote close" })
@@ -36,8 +46,7 @@ let test_reader_continues_after_non_close_inputs () =
     cases
 
 let test_ingress_isolates_lanes_and_preserves_lane_fifo () =
-  Eio_main.run (fun _env ->
-    Eio.Switch.run (fun sw ->
+  run_ingress_test (fun sw ->
       let trace_mutex = Stdlib.Mutex.create () in
       let trace = ref [] in
       let record value =
@@ -100,11 +109,10 @@ let test_ingress_isolates_lanes_and_preserves_lane_fifo () =
         (list string)
         "same Keeper lane retains connector arrival order"
         [ "first-start"; "first-end"; "second" ]
-        same_lane_trace))
+        same_lane_trace)
 
 let test_ingress_observes_callback_failure_and_continues () =
-  Eio_main.run (fun _env ->
-    Eio.Switch.run (fun sw ->
+  run_ingress_test (fun sw ->
       let failure_seen, resolve_failure_seen = Eio.Promise.create () in
       let later_done, resolve_later_done = Eio.Promise.create () in
       let observed = ref None in
@@ -146,7 +154,7 @@ let test_ingress_observes_callback_failure_and_continues () =
           bool
           "failure detail is explicit"
           true
-          (String.length failure.reason > 0)))
+          (String.length failure.reason > 0))
 
 let () =
   run "discord_gateway_client"

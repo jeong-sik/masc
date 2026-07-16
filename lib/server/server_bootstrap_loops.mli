@@ -160,6 +160,10 @@ module For_testing : sig
 
   val prepared_base_paths : prepared_keeper_persistence -> string * string
 
+  val recovery_candidate_lanes :
+    Keeper_msg_async.recovery_candidate list ->
+    (string * Keeper_msg_async.recovery_candidate list) list
+
   val begin_keeper_loops_start :
     config:Workspace.config ->
     claimed_keeper_persistence ->

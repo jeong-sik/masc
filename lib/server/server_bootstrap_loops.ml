@@ -271,6 +271,22 @@ type keeper_persistence_report =
   ; requests : Keeper_msg_async.recovery_report
   }
 
+let recovery_candidate_lanes candidates =
+  candidates
+  |> List.fold_left
+       (fun lanes (candidate : Keeper_msg_async.recovery_candidate) ->
+          let keeper_name =
+            Keeper_invocation_types.request_target_name candidate.entry.request
+          in
+          match lanes with
+          | (current, rev_candidates) :: rest when String.equal current keeper_name ->
+            (current, candidate :: rev_candidates) :: rest
+          | _ -> (keeper_name, [ candidate ]) :: lanes)
+       []
+  |> List.rev_map (fun (keeper_name, rev_candidates) ->
+    keeper_name, List.rev rev_candidates)
+;;
+
 type keeper_persistence_failure_phase =
   | Resolving_base_path
   | Restoring_shutdown
@@ -1207,6 +1223,110 @@ let start_keeper_loops_owned
     loop ());
   (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
+  let project_recovery_terminal (entry : Keeper_msg_async.entry) =
+    match
+      Keeper_msg_async.load_canonical_durable_terminal
+        ~base_path:config.base_path
+        ~caller:entry.submitted_by
+        entry.request_id
+    with
+    | Ok proof ->
+      ignore
+        (Keeper_tool_surface_ops.project_durable_keeper_completion
+           ~base_path:config.base_path proof
+          : Keeper_tool_surface_ops.keeper_completion_projection)
+    | Error error ->
+      Log.Keeper.error
+        "keeper invocation restart terminal reload failed request_id=%s error=%s"
+        entry.request_id
+        (Keeper_msg_async.canonical_terminal_error_to_string error)
+  in
+  let explicit_recovery_failure request_id reason =
+    Tool_result.error
+      ~tool_name:"keeper_invocation_recovery"
+      ~start_time:(Time_compat.now ())
+      (Printf.sprintf "restart recovery failed request_id=%s: %s" request_id reason)
+  in
+  let run_recovery_candidate (candidate : Keeper_msg_async.recovery_candidate) =
+    let entry = candidate.entry in
+    let settled, resolve_settled = Eio.Promise.create () in
+    let on_worker_settled ~request_id settlement =
+      Fun.protect
+        ~finally:(fun () ->
+          ignore (Eio.Promise.try_resolve resolve_settled () : bool))
+        (fun () ->
+           ignore
+             (Keeper_tool_surface_ops.project_keeper_completion
+                ~base_path:config.base_path
+                ~submitted_by:entry.submitted_by
+                ~request_id
+                settlement
+               : Keeper_tool_surface_ops.keeper_completion_projection))
+    in
+    let f request_sw =
+      match candidate.provenance with
+      | Keeper_msg_async.Running_before_restart ->
+        explicit_recovery_failure
+          entry.request_id
+          "execution had already started before process restart; effect replay was refused"
+      | Keeper_msg_async.Cancelling_before_restart _ ->
+        explicit_recovery_failure
+          entry.request_id
+          "persisted cancellation did not reach the worker admission boundary"
+      | Keeper_msg_async.Queued_before_restart ->
+        (match Keeper_invocation_types.request_direct_delivery entry.request with
+         | Some _ ->
+           explicit_recovery_failure
+             entry.request_id
+             "direct delivery requires its transcript checkpoint executor; delegated replay was refused"
+         | None ->
+           let recovery_ctx : _ Keeper_types_profile.context =
+             { config
+             ; agent_name = entry.submitted_by
+             ; sw = request_sw
+             ; clock
+             ; proc_mgr = Some proc_mgr
+             ; net = state.net
+             ; publication_recovery_provider =
+                 Mcp_server.publication_recovery_availability_provider state
+             }
+           in
+           Keeper_turn.handle_keeper_delegate
+             ~event_bus
+             recovery_ctx
+             entry.request)
+    in
+    match
+      Keeper_msg_async.resume_recovery_candidate
+        ~on_worker_settled
+        ~background_sw:sw
+        ~f
+        candidate
+    with
+    | Ok _ -> Eio.Promise.await settled
+    | Error error ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string LifecycleCallbackFailures)
+        ~labels:[ "callback", "keeper_invocation_restart" ]
+        ();
+      Log.Keeper.error
+        "keeper_msg_async: restart convergence failed request_id=%s keeper=%s error=%s"
+        entry.request_id
+        (Keeper_invocation_types.request_target_name entry.request)
+        (Keeper_msg_async.recovery_resume_error_to_string error);
+      project_recovery_terminal entry
+  in
+  claimed_persistence.claimed_report.requests.candidates
+  |> recovery_candidate_lanes
+  |> List.iter (fun (keeper_name, candidates) ->
+    fork_logged_fiber
+      ~sw
+      ~on_error:(fun exn ->
+        Log.Keeper.error
+          "keeper invocation restart lane crashed keeper=%s error=%s"
+          keeper_name
+          (Printexc.to_string exn))
+      (fun () -> List.iter run_recovery_candidate candidates));
   Board_dispatch.set_board_signal_hook (fun signal ->
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~config:(Mcp_server.workspace_config state)
@@ -1985,6 +2105,8 @@ module For_testing = struct
   let prepared_base_paths prepared =
     prepared.base_path.requested, prepared.base_path.canonical
   ;;
+
+  let recovery_candidate_lanes = recovery_candidate_lanes
 
   let begin_keeper_loops_start = acquire_keeper_loops_start
   let finish_keeper_loops_start = finish_keeper_loops_start

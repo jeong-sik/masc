@@ -1429,6 +1429,45 @@ let test_keeper_msg_async_resumes_exact_queued_candidate_once () =
        | Ok _ -> fail "terminal candidate was restarted")
 ;;
 
+let test_restart_candidates_preserve_fifo_per_keeper_lane () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-restart-lanes-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       [ "kmsg_alpha_2", "alpha", 2.0
+       ; "kmsg_beta_1", "beta", 1.0
+       ; "kmsg_alpha_1", "alpha", 1.0
+       ]
+       |> List.iter (fun (request_id, keeper_name, submitted_at) ->
+         write_request_record
+           ~keeper_name
+           ~submitted_at
+           ~base_path
+           ~request_id
+           ~status:"queued"
+           ~status_fields:[]
+           ());
+       let lanes =
+         (Keeper_msg_async.For_testing.recover_request_records ~base_path ())
+           .candidates
+         |> Server_bootstrap_loops.For_testing.recovery_candidate_lanes
+       in
+       let ids candidates =
+         List.map
+           (fun (candidate : Keeper_msg_async.recovery_candidate) ->
+              candidate.entry.request_id)
+           candidates
+       in
+       match lanes with
+       | [ "alpha", alpha; "beta", beta ] ->
+         check (list string) "alpha FIFO" [ "kmsg_alpha_1"; "kmsg_alpha_2" ]
+           (ids alpha);
+         check (list string) "beta lane" [ "kmsg_beta_1" ] (ids beta)
+       | _ -> failf "expected two independent restart lanes, got %d" (List.length lanes))
+;;
+
 let require_record_path ~location ~base_path ~request_id =
   match disk_record_path ~location ~base_path ~request_id with
   | Some path -> path
@@ -2783,6 +2822,10 @@ let () =
             "queued restart candidate is claimed exactly once"
             `Quick
             test_keeper_msg_async_resumes_exact_queued_candidate_once
+        ; test_case
+            "restart candidates preserve FIFO per Keeper lane"
+            `Quick
+            test_restart_candidates_preserve_fifo_per_keeper_lane
         ; test_case
             "terminal precedence cleans stale active"
             `Quick

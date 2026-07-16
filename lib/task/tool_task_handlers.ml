@@ -52,13 +52,13 @@ type context = {
 }
 
 type task_owner_hooks =
-  { is_registered_agent_alias : Workspace.config -> string -> bool
+  { is_keeper_agent_identity : Workspace.config -> agent_name:string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
   ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
 
 let default_task_owner_hooks =
-  { is_registered_agent_alias = (fun _ _ -> false)
+  { is_keeper_agent_identity = (fun _ ~agent_name:_ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
   ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
@@ -132,39 +132,20 @@ let client_side_transition_gate_error ~task_opt ~action ~action_s =
 
 include Tool_task_payloads
 
-let is_registered_owner_agent_alias_name config agent_name =
-  (current_task_owner_hooks ()).is_registered_agent_alias config agent_name
-
 let sync_planning_current_task_with_owned_task (ctx : context) =
-  let actual_name =
-    (* Asymmetric silent-failure unification: previously [Sys_error _ |
-       Yojson.Json_error _] (the *more common* read-side failure class —
-       missing agents file, malformed JSON) returned [ctx.agent_name]
-       silently while only the rare [exn] catch-all logged. Operators
-       saw the loud path but missed the common one. Single warn arm
-       mirrors [Tool_workspace.safe_read_backlog]. *)
-    try Workspace.resolve_agent_name ctx.config ctx.agent_name with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
-          (Stdlib.Printexc.to_string exn);
-        ctx.agent_name
-  in
   if
-    is_registered_owner_agent_alias_name ctx.config ctx.agent_name
-    || is_registered_owner_agent_alias_name ctx.config actual_name
+    (current_task_owner_hooks ()).is_keeper_agent_identity
+      ctx.config
+      ~agent_name:ctx.agent_name
   then ()
   else
-    let matches_you assignee =
-      String.equal assignee ctx.agent_name || String.equal assignee actual_name
-    in
     let owned_task =
       Workspace.get_tasks_raw ctx.config
       |> List.find_map (fun (task : Masc_domain.task) ->
              match task.task_status with
              | Masc_domain.Claimed { assignee; _ }
              | Masc_domain.InProgress { assignee; _ } ->
-                 if matches_you assignee then Some task.id else None
+                 if String.equal assignee ctx.agent_name then Some task.id else None
              | Masc_domain.Todo
              | Masc_domain.AwaitingVerification _
              | Masc_domain.Done _

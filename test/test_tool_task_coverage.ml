@@ -1096,7 +1096,7 @@ let () = test "handle_transition_submit_does_not_have_a_disable_bypass"
        ^ Masc_domain.task_status_to_string status)
 )
 
-let () = test "handle_transition_submit_uses_canonical_task_actor_identity"
+let () = test "handle_transition_submit_rejects_registered_keeper_alias"
     (fun () ->
   (
     let ctx = make_test_ctx_with_agent "keeper-executor-agent" in
@@ -1136,8 +1136,62 @@ let () = test "handle_transition_submit_uses_canonical_task_actor_identity"
                   reviewable_evidence_ref: artifact:canonical-submit.json" );
            ])
     in
-    if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-    assert_task_awaiting_verification_by ctx "keeper-executor-agent"))
+    assert (not (Tool_result.is_success result));
+    assert (str_contains (Tool_result.message result) "requires owning the task");
+    assert_task_claimed_by ctx "keeper-executor-agent"))
+
+let () = test "keeper_reconciliation_ignores_prefix_matched_agent"
+    (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let keeper_name = "executor" in
+  let keeper_agent_name = "keeper-executor-agent" in
+  let foreign_agent_name = "keeper-executor-agent-shadow" in
+  ignore
+    (Workspace.bind_session
+       ctx.config
+       ~agent_name:foreign_agent_name
+       ~capabilities:[]
+       ());
+  register_test_keeper ctx ~keeper_name ~agent_name:keeper_agent_name;
+  let _ =
+    Task.Tool.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "title", `String "Foreign prefix owner" ])
+  in
+  (match
+     Workspace.claim_task_r
+       ctx.config
+       ~agent_name:foreign_agent_name
+       ~task_id:"task-001"
+       ()
+   with
+   | Ok _ -> ()
+   | Error err -> failwith (Masc_domain.masc_error_to_string err));
+  let meta =
+    match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
+    | Some entry -> entry.meta
+    | None -> failwith "registered keeper is missing"
+  in
+  (match
+     Keeper_current_task_reconcile.owned_active_tasks_for_meta
+       ~config:ctx.config
+       ~meta
+   with
+   | Ok [] -> ()
+   | Ok tasks ->
+     failwith
+       (Printf.sprintf
+          "foreign prefix owner was treated as keeper ownership: %d task(s)"
+          (List.length tasks))
+   | Error detail -> failwith detail);
+  let reconciled =
+    Keeper_current_task_reconcile.sync_current_task_id_from_backlog
+      ~config:ctx.config
+      meta
+  in
+  assert (Option.is_none reconciled.current_task_id))
 
 let () = test "handle_transition_expected_version_mismatch_does_not_retry_without_cas"
     (fun () ->
@@ -1782,7 +1836,7 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
   assert (Tool_result.is_success result);
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
-let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun () ->
+let () = test "keeper_alias_claim_updates_planning_as_exact_agent" (fun () ->
   let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
@@ -1817,9 +1871,9 @@ let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun (
       (`Assoc [ ("task_id", `String "task-002") ])
   in
   assert (Tool_result.is_success result);
-  assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
+  assert (Planning_eio.get_current_task ctx.config = Some "task-002"))
 
-let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_task" (fun () ->
+let () = test "keeper_generated_alias_claim_updates_planning_as_exact_agent" (fun () ->
   let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
@@ -1857,9 +1911,9 @@ let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_ta
       (`Assoc [ ("task_id", `String "task-002") ])
   in
   assert (Tool_result.is_success result);
-  assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
+  assert (Planning_eio.get_current_task ctx.config = Some "task-002"))
 
-let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_task" (fun () ->
+let () = test "keeper_separator_alias_claim_updates_planning_as_exact_agent" (fun () ->
   let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
@@ -1897,7 +1951,7 @@ let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_ta
       (`Assoc [ ("task_id", `String "task-002") ])
   in
   assert (Tool_result.is_success result);
-  assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
+  assert (Planning_eio.get_current_task ctx.config = Some "task-002"))
 
 let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fun () ->
   let ctx = make_test_ctx_with_agent "codex-mcp-client" in

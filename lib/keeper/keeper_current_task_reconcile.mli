@@ -18,9 +18,8 @@ val owned_active_tasks_for_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   (owned_active_task list, string) result
 
-(** Shutdown transaction variant: agent-name resolution and backlog reads are
-    both strict. No fallback name is guessed when ownership identity cannot be
-    resolved. *)
+(** Shutdown transaction variant. Ownership is the exact persisted
+    [meta.agent_name]; backlog read failures are returned. *)
 val owned_active_tasks_for_meta_strict :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

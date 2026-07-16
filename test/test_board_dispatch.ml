@@ -650,43 +650,6 @@ let test_list_posts_with_filters () =
   Alcotest.(check string) "human remains" "filter-human"
     (human_only |> List.hd |> fun (p : Board.post) -> Board.Agent_id.to_string p.author)
 
-let test_keeper_without_cursor_observes_board_origin () =
-  let base_path = Sys.getenv "MASC_BASE_PATH" in
-  let keeper_name = "bootstrap-keeper" in
-  let created =
-    match
-      Board_dispatch.create_post
-        ~author:"external-author"
-        ~content:("@" ^ keeper_name ^ " inspect the existing Board history")
-        ~post_kind:Board.Human_post
-        ()
-    with
-    | Ok post -> post
-    | Error error -> Alcotest.fail (Board.show_board_error error)
-  in
-  let origin_post = { created with created_at = 1.0; updated_at = 1.0 } in
-  (match Board.append_post origin_post with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Board.show_board_error error));
-  Board.reset_global_for_test ();
-  Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
-  let events, new_count, mention_count =
-    Keeper_world_observation.collect_board_events_without_advancing_cursor
-      ~base_path
-      ~meta:(keeper_meta keeper_name)
-  in
-  Alcotest.(check int) "origin post counted" 1 new_count;
-  Alcotest.(check int) "origin mention counted" 1 mention_count;
-  match events with
-  | [ (event : Keeper_world_observation.pending_board_event) ] ->
-    Alcotest.(check string)
-      "origin post delivered"
-      (Board.Post_id.to_string created.id)
-      event.post_id;
-    Alcotest.(check (float 0.0)) "persisted origin timestamp" 1.0 event.updated_at
-  | _ -> Alcotest.failf "expected one origin event, got %d" (List.length events)
-
 let test_list_posts_matches_comment_author () =
   let matching_post =
     match
@@ -1972,8 +1935,6 @@ let () =
       Alcotest.test_case "recent bypasses hot cutoff" `Quick
         (with_eio test_recent_sort_bypasses_hot_cutoff);
       Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
-      Alcotest.test_case "keeper starts at Board origin" `Quick
-        (with_eio test_keeper_without_cursor_observes_board_origin);
       Alcotest.test_case "comment author filter" `Quick
         (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "literal wildcard filter" `Quick

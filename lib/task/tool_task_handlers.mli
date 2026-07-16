@@ -7,7 +7,8 @@ type context =
   }
 
 type task_owner_hooks =
-  { is_registered_agent_alias : Workspace_core.config -> string -> bool
+  { is_keeper_agent_identity :
+      Workspace_core.config -> agent_name:string -> bool
   ; sync_current_task_binding : Workspace_core.config -> agent_name:string -> unit
   ; active_goal_phases_for_agent :
       Workspace_core.config -> agent_name:string -> string list

@@ -182,7 +182,8 @@ val list_posts :
   unit ->
   Board.post list
 
-val latest_updated_post : unit -> Board.post option
+val current_post_cursor : unit -> float * string option
+(** Atomic high-water mark for initializing a Board observation cursor. *)
 (** Current Board cursor head without sorting or materializing the full post
     history. *)
 

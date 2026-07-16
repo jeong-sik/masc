@@ -287,7 +287,12 @@ val list_posts
 (** Returns the post with the greatest [(updated_at, post_id)] cursor token,
     or [None] when the board is empty. The fold runs under the board lock and
     does not allocate or sort the complete post history. *)
-val latest_updated_post : store -> post option
+val current_post_cursor : store -> float * string option
+(** Atomic high-water mark for Board observation.
+
+    When the Board is empty, the timestamp is captured while holding the same
+    lock used by post creation, so a concurrently admitted first post is
+    strictly newer than the returned cursor. *)
 
 (** Full-scan search over every post (no cap on the scan,
     only on the result size).  Returns matches sorted by

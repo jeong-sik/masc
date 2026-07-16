@@ -2,7 +2,7 @@
 
 open Alcotest
 module Aek = Auth_error_kind
-module Sda = Masc.Silent_dashboard_actor_outcome
+module Sda = Silent_dashboard_actor_outcome
 
 let with_eio_runtime f =
   Eio_main.run @@ fun _env -> f ()

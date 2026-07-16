@@ -68,14 +68,8 @@ val compaction_recovery_error_to_string : compaction_recovery_error -> string
 
 (** End-of-turn pipeline. Preserves the checkpoint and persists the result to
     the keeper meta and dashboard surface. Explicit compaction is a separate
-    request path.
-
-    {b Tier A5} (Cycle 22): when the [MASC_AUTONOMOUS] environment
-    variable is on (see {!Autonomous.Wirein_helpers.masc_autonomous_enabled}),
-    the resulting [post_turn_lifecycle.checkpoint]'s working_context
-    is enriched with an ["autonomous_meta"] sub-tree carrying the
-    suspended {!Autonomous_bridge} state. Off-mode behaviour is
-    unchanged (zero impact). *)
+    request path. Keeper autonomy is owned by the per-Keeper heartbeat/turn
+    lane; this pipeline does not run a second autonomous state machine. *)
 val apply_post_turn_lifecycle_with_resilience_handles :
   resilience_audit_store:Shared_audit.Store.t option ->
   resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->

@@ -3,12 +3,11 @@
  *
  * The post-turn wirein sequence is an implementation ordering contract:
  *
- *   apply_autonomous_wirein     (A5)
  *   apply_resilience_wirein     (A6)
  *   apply_tool_emission_wirein  (K4b)
  *   apply_multimodal_wirein     (K1)
  *
- * This test scans [lib/keeper/keeper_post_turn.ml] and confirms the four
+ * This test scans [lib/keeper/keeper_post_turn.ml] and confirms the three
  * wirein calls appear in the correct order inside the body of
  * [apply_post_turn_lifecycle_with_resilience_handles]. An accidental
  * reorder would otherwise compile cleanly and silently violate the
@@ -17,7 +16,7 @@
  * Approach: read the source file as text, locate the function
  * definition by header line, then scan until the next top-level [let]
  * binding. Within that function body, look up the first occurrence of
- * each of the four literal call markers and assert the line numbers are
+ * each of the three literal call markers and assert the line numbers are
  * strictly increasing.
  *)
 
@@ -34,8 +33,7 @@ let function_header = "let apply_post_turn_lifecycle_with_resilience_handles"
    here is load-bearing — the test asserts the first-occurrence line
    numbers are strictly increasing in this sequence. *)
 let wirein_markers =
-  [ "apply_autonomous_wirein";
-    "apply_resilience_wirein";
+  [ "apply_resilience_wirein";
     "apply_tool_emission_wirein";
     "apply_multimodal_wirein" ]
 
@@ -155,7 +153,7 @@ let test_wirein_order_strictly_increasing () =
   check 0 located
 
 let test_wirein_all_present () =
-  (* Independent presence check: each of the four markers must be
+  (* Independent presence check: each marker must be
      present anywhere in the file at least once. Catches an accidental
      deletion of one of the wirein passes even if the function header
      scan logic regresses. *)
@@ -362,9 +360,9 @@ let test_stale_compaction_is_not_applied () =
 let () =
   run "RFC-0065 §3.2.3 WireinOrderPinned (OCaml-side guard)" [
     "WireinOrderPinned", [
-      test_case "ordering: A5 → A6 → K4b → K1 strictly increasing"
+      test_case "ordering: A6 → K4b → K1 strictly increasing"
         `Quick test_wirein_order_strictly_increasing;
-      test_case "all-present: four wirein calls present in source"
+      test_case "all-present: three wirein calls present in source"
         `Quick test_wirein_all_present;
     ];
     "durable compaction", [

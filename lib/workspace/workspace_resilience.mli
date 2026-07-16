@@ -52,11 +52,6 @@ end
 (** {1 Zombie detection} *)
 
 module Zombie : sig
-  val is_keeper_name : string -> bool
-  (** [is_keeper_name name] tests whether [name] matches the
-      keeper convention [keeper-*-agent] (case-insensitive,
-      trimmed).  Used to apply the longer keeper threshold. *)
-
   val is_zombie : ?threshold:float -> string -> bool
   (** [is_zombie ?threshold last_seen_iso] is a thin alias for
       {!Time.is_stale}. *)

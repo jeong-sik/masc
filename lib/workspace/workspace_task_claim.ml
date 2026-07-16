@@ -223,7 +223,10 @@ let claim_task_r config ~agent_name ~task_id ()
              (`Assoc
                [ "type", `String "task_claim_verification"
                ; "agent", `String agent_name
-               ; "actor_kind", `String (Workspace_task_classify.task_actor_kind agent_name)
+               ; ( "actor_kind"
+                 , `String
+                     (Workspace_task_classify.task_actor_kind_to_string
+                        Workspace_task_classify.Agent) )
                ; "task", `String task_id
                ; "ts", `String (now_iso ())
                ]);
@@ -267,7 +270,10 @@ let claim_task_r config ~agent_name ~task_id ()
              (`Assoc
                     [ "type", `String "task_claim"
                     ; "agent", `String agent_name
-                    ; "actor_kind", `String (Workspace_task_classify.task_actor_kind agent_name)
+                    ; ( "actor_kind"
+                      , `String
+                          (Workspace_task_classify.task_actor_kind_to_string
+                             Workspace_task_classify.Agent) )
                     ; "task", `String task_id
                     ; "ts", `String (now_iso ())
                     ]);

@@ -56,13 +56,18 @@ val update_local_agent_state
   -> (Masc_domain.agent -> Masc_domain.agent)
   -> unit
 
+type task_actor_kind =
+  | Agent
+  | System
+
 (** Optional [correlation_id] / [run_id] are merged into the activity
-    payload as additional fields when present, so call sites can opt in
-    without breaking existing callers. Backed by
-    [merge_envelope_into_payload]. *)
+    payload as additional fields when present. [actor_kind] defaults to
+    [Agent]; system-owned mutations must pass [System] explicitly. Backed
+    by [merge_envelope_into_payload]. *)
 val emit_task_activity
   :  ?correlation_id:string
   -> ?run_id:string
+  -> ?actor_kind:task_actor_kind
   -> config
   -> agent_name:string
   -> task_id:string
@@ -70,7 +75,8 @@ val emit_task_activity
   -> payload:Yojson.Safe.t
   -> unit
 
-val task_actor_kind : string -> string
+val task_actor_kind_to_string : task_actor_kind -> string
+(** Canonical wire representation for task activity actors. *)
 val trim_opt : string option -> string option
 val working_agents : config -> string list
 val resolve_agent_name_strict : config -> string -> string

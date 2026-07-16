@@ -30,18 +30,6 @@ end
 
 (** Zombie detection logic *)
 module Zombie = struct
-  (** Check if agent name matches keeper pattern: "keeper-*-agent" (case-insensitive) *)
-  let is_keeper_name (name : string) =
-    let normalized = String.lowercase_ascii (String.trim name) in
-    let prefix = "keeper-" in
-    let suffix = "-agent" in
-    let nlen = String.length normalized in
-    let plen = String.length prefix in
-    let slen = String.length suffix in
-    nlen > plen + slen
-    && String.starts_with normalized ~prefix
-    && String.sub normalized (nlen - slen) slen = suffix
-
   (** Check if an agent is a zombie based on last_seen timestamp *)
   let is_zombie ?(threshold=default_zombie_threshold) last_seen_iso =
     Time.is_stale ~threshold last_seen_iso

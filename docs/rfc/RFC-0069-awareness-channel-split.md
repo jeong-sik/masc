@@ -424,7 +424,7 @@ PR-1.7a를 revert하면 즉시 원상복구.
 |------|------|------|
 | 외부 SSE consumer 호환성 (4.3) | **고** | dual emit 단계로 deprecation period 확보. 외부 consumer audit 선행. |
 | dashboard race (heartbeat가 broadcast보다 늦게 도달) | 중 | 두 stream 사이 ordering guarantee 없음 — dashboard가 timestamp 기반 정렬. presence는 `last_seen` 갱신만 담당하므로 순서 손실 영향 작음. |
-| presence batching debounce가 keeper death 감지를 지연 | 중 | death detection은 `cleanup_zombies` (`workspace_gc.ml:39`) 가 별도로 처리. heartbeat ack는 presence 채널에 의존하지 않음. |
+| presence batching debounce가 keeper death 감지를 지연 | 중 | 실제 fiber 종료는 `Keeper_registry`/supervisor의 typed lifecycle 상태로 관측한다. heartbeat ack는 presence 채널에 의존하지 않음. |
 | gRPC gateway / WebSocket cutover 호환성 | 중 | 같은 단계화 적용. (검증 필요) gRPC가 단일 channel만 노출한다면 server 단에서 union 후 송신. |
 | L1 Workspace pubsub 가입자 (`backend_subscribe`)가 heartbeat 기대 | 저 | 현재 가입자는 in-process. `rg "backend_subscribe"`로 audit. |
 

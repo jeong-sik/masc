@@ -311,8 +311,21 @@ let parse_current_day_events_cached config path : event list =
      | _ ->
        let full_reparse_and_cache () =
          let events = parse_events_from_file config path in
-         Stdlib.Mutex.protect current_day_cache_mu (fun () ->
-           Hashtbl.replace current_day_cache path { cd_boundary = size; cd_events = events });
+         (* Other masc processes (stdio clients, workers) append to the
+            same file. If it grew between the stat above and this parse,
+            the parse may already include lines past [size]; caching
+            [size] as the boundary would make the next delta fold append
+            those lines a second time, and the duplicates would then live
+            in the cache until the next truncation. Only cache when the
+            post-parse size still matches — otherwise skip; the next call
+            re-parses and retries. *)
+         (match Unix.stat path with
+          | exception (Unix.Unix_error _ | Sys_error _) -> ()
+          | st_after when st_after.Unix.st_size = size ->
+            Stdlib.Mutex.protect current_day_cache_mu (fun () ->
+              Hashtbl.replace current_day_cache path
+                { cd_boundary = size; cd_events = events })
+          | _ -> ());
          events
        in
        (match cached with

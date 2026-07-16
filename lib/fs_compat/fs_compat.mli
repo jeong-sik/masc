@@ -788,6 +788,11 @@ val update_private_file_durable_locked_result :
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
   | Invalid_jsonl_suffix
+  | Negative_expected_end_offset of int
+  | End_offset_mismatch of
+      { expected : int
+      ; actual : int
+      }
   | Durable_jsonl_append_failed of durable_append_error
 
 (** Append one or more complete JSONL rows without reading the existing file.
@@ -800,6 +805,16 @@ type private_jsonl_append_error =
     in a system thread so one contended file cannot stop unrelated fibers. *)
 val append_private_jsonl_durable_locked_with_end_offset_result :
   string -> string -> (int, private_jsonl_append_error) result
+
+(** Append only when the file's locked byte length is exactly
+    [expected_end_offset]. A stale writer receives [End_offset_mismatch] and
+    writes no bytes. The successful result is the committed newline-end byte
+    offset. *)
+val append_private_jsonl_durable_locked_at_end_offset_result :
+  string ->
+  expected_end_offset:int ->
+  string ->
+  (int, private_jsonl_append_error) result
 
 (** As {!append_private_jsonl_durable_locked_with_end_offset_result}, discarding
     the committed newline-end byte offset. *)

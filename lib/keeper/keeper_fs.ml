@@ -278,6 +278,7 @@ let save_json_durable_atomic_from_with
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
+      ?(pretty = true)
       path
       json_source
   =
@@ -285,6 +286,9 @@ let save_json_durable_atomic_from_with
   (* DET-OK: an omitted staging directory means the destination directory;
      both paths are derived from the same explicit destination [path]. *)
   let temp_dir = Option.value temp_dir ~default:dir in
+  let encode json =
+    if pretty then Yojson.Safe.pretty_to_string json else Yojson.Safe.to_string json
+  in
   try
     let content =
       run_durable_write_stage
@@ -292,8 +296,7 @@ let save_json_durable_atomic_from_with
         ~before_stage
         Payload_encode
         (fun () ->
-           Executor_pool_ref.submit_or_inline (fun () ->
-             Yojson.Safe.pretty_to_string (json_source ())))
+           Executor_pool_ref.submit_or_inline (fun () -> encode (json_source ())))
     in
     let directory_lease =
       ensure_dir_durable
@@ -436,6 +439,7 @@ let save_json_durable_atomic_with
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
+      ?pretty
       path
       json
   =
@@ -444,24 +448,27 @@ let save_json_durable_atomic_with
     ?before_directory_fsync
     ?ownership_root
     ?temp_dir
+    ?pretty
     path
     (fun () -> json)
 ;;
 
-let save_json_durable_atomic ?ownership_root ?temp_dir path json =
+let save_json_durable_atomic ?ownership_root ?temp_dir ?pretty path json =
   save_json_durable_atomic_with
     ~before_stage:(fun _ -> ())
     ?ownership_root
     ?temp_dir
+    ?pretty
     path
     json
 ;;
 
-let save_json_durable_atomic_from ?ownership_root ?temp_dir path json_source =
+let save_json_durable_atomic_from ?ownership_root ?temp_dir ?pretty path json_source =
   save_json_durable_atomic_from_with
     ~before_stage:(fun _ -> ())
     ?ownership_root
     ?temp_dir
+    ?pretty
     path
     json_source
 ;;
@@ -548,6 +555,7 @@ module For_testing = struct
         ?before_directory_fsync
         ?ownership_root
         ?temp_dir
+        ?pretty
         path
         json
     =
@@ -556,6 +564,7 @@ module For_testing = struct
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
+      ?pretty
       path
       json
   ;;
@@ -565,6 +574,7 @@ module For_testing = struct
         ?before_directory_fsync
         ?ownership_root
         ?temp_dir
+        ?pretty
         path
         json_source
     =
@@ -573,6 +583,7 @@ module For_testing = struct
       ?before_directory_fsync
       ?ownership_root
       ?temp_dir
+      ?pretty
       path
       json_source
   ;;

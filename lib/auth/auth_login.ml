@@ -22,13 +22,7 @@ type t = {
   mcp_token_env_var : string;
 }
 
-let rng_initialized = Atomic.make false
-
-let ensure_rng_initialized () =
-  if not (Atomic.get rng_initialized) then begin
-    Mirage_crypto_rng_unix.use_default ();
-    Atomic.set rng_initialized true
-  end
+let ensure_rng_initialized = Auth_credential_base.ensure_rng_initialized
 
 let auth_change_to_string = function
   | Auth_already_required -> "already_required"

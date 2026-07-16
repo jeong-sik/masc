@@ -6,8 +6,20 @@ open Masc_domain
 (* Crypto utilities                             *)
 (* ============================================ *)
 
+let rng_initialized = Atomic.make false
+
+(** Seed the default RNG exactly once. Guarded here, at the point of use,
+    so token generation does not depend on a caller (auth_login, server
+    boot) having seeded it first. *)
+let ensure_rng_initialized () =
+  if not (Atomic.get rng_initialized) then begin
+    Mirage_crypto_rng_unix.use_default ();
+    Atomic.set rng_initialized true
+  end
+
 (** Generate a cryptographically random token (hex string) *)
 let generate_token () =
+  ensure_rng_initialized ();
   let random_bytes = Mirage_crypto_rng.generate 32 in
   let hex = Buffer.create 64 in
   String.iter (fun c -> Printf.bprintf hex "%02x" (Char.code c)) random_bytes;

@@ -516,26 +516,6 @@ let () =
   Dashboard_briefing_sections.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
   Dashboard_projection_cache.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
   Dashboard_projection_cache.register_operator_digest_json { Dashboard_projection_cache.digest = Operator_control.digest_json };
-  Dashboard_operator_judge.register_record_operator_judgment
-    (fun config ~surface ~target_type_str ~target_id ~summary ~confidence
-         ?model_name ?recommended_action ~evidence_refs ~disagreement_with_truth
-         ~generated_at ~generated_at_unix ~fresh_until ~fresh_until_unix ~keeper_name () ->
-      let target_type =
-        match
-          String.lowercase_ascii target_type_str
-          |> Operator_judgment.target_type_of_string
-        with
-        | Some target_type -> target_type
-        | None ->
-            invalid_arg
-              ("invalid target_type in judgment record: " ^ target_type_str)
-      in
-      ignore (
-        Operator_judgment.record config ~surface ~target_type ~target_id ~summary
-          ~confidence ?model_name ?recommended_action ~evidence_refs
-          ~disagreement_with_truth ~generated_at ~generated_at_unix ~fresh_until
-          ~fresh_until_unix ~keeper_name ()
-      ));
   Atomic.set
     Workspace_hooks.operator_pending_confirm_trace_id_fn
     Operator_pending_confirm.trace_id;

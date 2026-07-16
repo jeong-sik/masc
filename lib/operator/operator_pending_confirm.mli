@@ -4,7 +4,6 @@ val operator_dir : Workspace.config -> string
 val pending_confirms_path : Workspace.config -> string
 val trace_id : string -> string
 val normalized_actor : context_actor:string -> string option -> string
-val operator_judge_runtime_json : Workspace.config -> Yojson.Safe.t
 
 type pending_confirm = {
   token : string;

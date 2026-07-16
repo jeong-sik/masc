@@ -1190,11 +1190,6 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "attention_summary" json <> `Null);
       Alcotest.(check bool) "recommendation summary present" true
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
-      Alcotest.(check bool) "operator judge runtime present" true
-        (Yojson.Safe.Util.member "operator_judge_runtime" json <> `Null);
-      Alcotest.(check bool) "operator judge enabled by default" true
-        Yojson.Safe.Util.
-          (json |> member "operator_judge_runtime" |> member "enabled" |> to_bool);
       Alcotest.(check string) "judgment owner" "fallback_read_model"
         Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "no authoritative judgment" false
@@ -1600,8 +1595,6 @@ let test_digest_workspace_exposes_pending_confirm_attention () =
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
-      Alcotest.(check bool) "operator judge runtime present" true
-        (Yojson.Safe.Util.member "operator_judge_runtime" digest <> `Null);
       let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
       Alcotest.(check bool) "pending confirm attention present" true
         (List.exists

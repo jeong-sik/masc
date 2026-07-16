@@ -664,7 +664,6 @@ let snapshot_json
       `Assoc
         ([ "trace_id", `String trace_id
          ; "server_profile", operator_server_profile_json
-         ; "operator_judge_runtime", operator_judge_runtime_json config
          ; "judgment_owner", `String "fallback_read_model"
          ; "authoritative_judgment_available", `Bool false
          ; "inference_inflight", Inference_inflight_observation.snapshot_json ()

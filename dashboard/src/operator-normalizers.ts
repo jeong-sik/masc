@@ -21,7 +21,6 @@ import type {
   OperatorKeeperSnapshot,
   OperatorReviewDecision,
   OperatorRecommendedAction,
-  OperatorJudgeRuntime,
   OperatorSessionSnapshot,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
@@ -62,20 +61,6 @@ function normalizeStringRecord(raw: unknown): Record<string, string> | undefined
     })
     .filter((entry): entry is [string, string] => entry !== null)
   return entries.length > 0 ? Object.fromEntries(entries) : undefined
-}
-
-function normalizeOperatorJudgeRuntime(raw: unknown): OperatorJudgeRuntime | null {
-  if (!isRecord(raw)) return null
-  return {
-    enabled: asBoolean(raw.enabled),
-    judge_online: asBoolean(raw.judge_online),
-    refreshing: asBoolean(raw.refreshing),
-    generated_at: asString(raw.generated_at) ?? null,
-    expires_at: asString(raw.expires_at) ?? null,
-    model_used: null,
-    keeper_name: asString(raw.keeper_name) ?? null,
-    last_error: asString(raw.last_error) ?? null,
-  }
 }
 
 function normalizeInferenceInflight(raw: unknown): InferenceInflightSnapshot | null {
@@ -174,7 +159,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     health: asString(root.health),
     judgment_owner: asString(root.judgment_owner) ?? null,
     authoritative_judgment_available: asBoolean(root.authoritative_judgment_available),
-    operator_judge_runtime: normalizeOperatorJudgeRuntime(root.operator_judge_runtime),
     judgment: normalizeOperatorJudgment(root.judgment),
     active_guidance_layer: asString(root.active_guidance_layer) ?? null,
     active_summary: normalizeGuidanceSummary(root.active_summary),
@@ -277,7 +261,6 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
     inference_inflight: normalizeInferenceInflight(root.inference_inflight),
-    operator_judge_runtime: normalizeOperatorJudgeRuntime(root.operator_judge_runtime),
     persistent_agents: extractArray(root.persistent_agents, ['items', 'persistent_agents'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),

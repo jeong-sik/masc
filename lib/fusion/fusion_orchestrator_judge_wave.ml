@@ -50,7 +50,6 @@ let run_first_judge
     Fusion_judge.run
       ~sw
       ~net
-      ~timeout_s:j.jtimeout_s
       ~judge_system_prompt:j.jsystem_prompt
       ~judge_model:j.jmodel
       ~question

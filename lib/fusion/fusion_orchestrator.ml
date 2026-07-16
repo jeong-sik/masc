@@ -42,7 +42,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           in
           let run_single_judge () =
             Fusion_judge.run ~sw ~net
-              ~timeout_s:preset.Fusion_policy.judge_timeout_s
               ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
               ~judge_model:preset.Fusion_policy.judge
@@ -55,7 +54,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             in
             match
               Fusion_judge.run_refine ~sw ~net
-                ~timeout_s:preset.Fusion_policy.judge_timeout_s
                 ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                 ~judge_model:preset.Fusion_policy.judge
@@ -152,11 +150,10 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                             ; elapsed_s
                             }
                         ] )
-                  | Ok meta_timeout_s ->
+                  | Ok _meta_timeout_s ->
                     let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                      (match
-                       Fusion_judge.run_meta ~sw ~net
-                         ~timeout_s:meta_timeout_s
+                      Fusion_judge.run_meta ~sw ~net
                          ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge
@@ -248,10 +245,9 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                              ; elapsed_s
                              }
                          ] )
-                   | Ok meta_timeout_s ->
+                   | Ok _meta_timeout_s ->
                      (match
                         Fusion_judge.run_meta ~sw ~net
-                          ~timeout_s:meta_timeout_s
                           ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                           ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                           ~judge_model:preset.Fusion_policy.judge
@@ -318,10 +314,9 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                             ; elapsed_s
                             }
                         ] )
-                  | Ok meta_timeout_s ->
+                  | Ok _meta_timeout_s ->
                     (match
                        Fusion_judge.run_meta ~sw ~net
-                         ~timeout_s:meta_timeout_s
                          ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                          ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                          ~judge_model:preset.Fusion_policy.judge

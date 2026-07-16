@@ -189,7 +189,7 @@ val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
        -> (string * (Types.api_response, Error.sdk_error) Result.t) list
 ```
 - per-agent 에러 격리(한 패널 실패가 나머지 안 죽임), 부모 switch 취소 전파.
-- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → `Async_agent.all ~max_fibers:policy.max_concurrent_panels` → 결과를 `panel_outcome list`로 매핑. 각 호출은 `Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s`로 감싼다.
+- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → `Async_agent.all ~max_fibers:policy.max_concurrent_panels` → 결과를 `panel_outcome list`로 매핑. Fusion은 별도 deadline을 합성하지 않으며 provider/runtime의 typed timeout은 개별 `panel_outcome` 관측으로 보존한다.
 
 ### 7.2 심판 — `Structured.extract`
 

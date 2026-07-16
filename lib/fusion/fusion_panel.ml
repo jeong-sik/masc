@@ -83,7 +83,6 @@ let run ~sw ~net ~max_fibers ~groups ~prompt ()
             let panelist = Fusion_policy.panelist_id ~label:g.label ~model in
             match
               Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
-                ~timeout_s:g.timeout_s
                 ?max_tokens:g.max_output_tokens
                 ~name:panelist model
             with

@@ -298,7 +298,9 @@ let test_manual_compaction_serializes_owner_lane () =
       let outcome =
         Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
           (fun ~runtime_id:_ ~keeper_name:_ () ->
-             Some (fun ~messages:_ -> Some plan))
+             Some
+               (fun ~messages:_ ->
+                  Some (Masc.Keeper_compaction_llm_summarizer.Planned plan)))
           run_cycle
       in
       (match outcome with

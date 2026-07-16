@@ -14,7 +14,11 @@ type compaction_plan =
   ; selected_runtime_id : string option
   }
 
-type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
+type planning_outcome =
+  | Planned of compaction_plan
+  | No_compaction
+
+type summarizer = messages:Agent_sdk.Types.message list -> planning_outcome option
 
 type complete_fn = Keeper_provider_subcall.complete_fn
 
@@ -200,7 +204,7 @@ let run_plan
     ~net
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(messages : Agent_sdk.Types.message list)
-    () : compaction_plan option =
+    () : planning_outcome option =
   let message_count = List.length messages in
   let provider_cfg = provider_for_plan provider_cfg in
   let request = messages_for_plan ~messages in
@@ -215,7 +219,8 @@ let run_plan
     None
   | Ok response ->
     (match plan_of_response ~message_count response with
-     | Ok plan -> Some { plan with selected_runtime_id = Some runtime_id }
+     | Ok plan ->
+       Some (Planned { plan with selected_runtime_id = Some runtime_id })
      | Error detail ->
        Log.Keeper.warn ~keeper_name
          "compaction LLM plan rejected runtime=%s: %s"
@@ -306,11 +311,12 @@ let make_resolved ?complete ~(runtime_id : string) ~(keeper_name : string) ()
                     ~runtime_id:candidate.runtime_id ~sw ~net
                     ~provider_cfg:candidate.provider_cfg ~messages ()
                 with
-                | Some _ as plan ->
+                | Some (Planned _) as outcome ->
                   Log.Keeper.info ~keeper_name
                     "compaction LLM candidate succeeded assignment=%s runtime=%s"
                     runtime_id candidate.runtime_id;
-                  plan
+                  outcome
+                | Some No_compaction -> Some No_compaction
                 | None -> attempt rest)
            in
            attempt candidates)

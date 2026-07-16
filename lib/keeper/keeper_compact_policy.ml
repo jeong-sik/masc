@@ -230,7 +230,9 @@ let requested_messages (meta : keeper_meta) messages =
      | Some summarize ->
        (match summarize ~messages with
         | None -> Error Plan_unavailable_or_invalid
-        | Some plan ->
+        | Some Keeper_compaction_llm_summarizer.No_compaction ->
+          Error Structurally_unchanged
+        | Some (Keeper_compaction_llm_summarizer.Planned plan) ->
           if plan.summarized = [] && plan.dropped = []
           then Error Structurally_unchanged
           else

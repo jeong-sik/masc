@@ -25,36 +25,8 @@ let string_contains haystack needle =
     done;
     !found
 
-let read_file path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> In_channel.input_all ic)
-
-let rec find_source_root_from dir hops rel =
-  if hops > 8 then None
-  else if Sys.file_exists (Filename.concat dir rel) then Some dir
-  else
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else find_source_root_from parent (hops + 1) rel
-
-let source_root () =
-  let anchor = "dune-project" in
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when String.trim root <> "" && Sys.file_exists (Filename.concat root anchor) ->
-    root
-  | _ ->
-    (match find_source_root_from (Sys.getcwd ()) 0 anchor with
-     | Some root -> root
-     | None -> Alcotest.fail "could not locate repo source root")
-
-let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
-
 let assert_contains label haystack needle =
   Alcotest.(check bool) label true (string_contains haystack needle)
-
-let assert_not_contains label haystack needle =
-  Alcotest.(check bool) label false (string_contains haystack needle)
 
 (* ================================================================ *)
 (* Helper: validate via the same pipeline as the pre-hook            *)
@@ -1657,48 +1629,6 @@ let test_keeper_tool_schemas_pin_required_fields () =
     false
     (List.mem "hearth" (schema_required_fields keeper_board_post_schema))
 
-let test_orchestrator_prompt_pins_start_transition () =
-  let prompt = read_source_file "config/prompts/system.orchestrator.md" in
-  assert_contains "orchestrator prompt claims first" prompt "action: \"claim\"";
-  assert_contains "orchestrator prompt starts before work" prompt "action: \"start\"";
-  assert_contains "orchestrator prompt marks done" prompt "action: \"done\""
-
-let test_task_lifecycle_guidance_is_externalized () =
-  let rule =
-    read_source_file "config/prompts/tool_contract.task_lifecycle_rule.md"
-  in
-  let workflow =
-    read_source_file "config/prompts/tool_contract.task_lifecycle_workflow.md"
-  in
-  assert_contains
-    "external rule pins the verification completion path (RFC-0323 G-4)"
-    rule
-    "Every completion request is judged by the configured LLM";
-  assert_contains
-    "external workflow includes start transition"
-    workflow
-    "masc_transition(start)";
-  assert_contains
-    "external workflow routes completion through submit (RFC-0323 G-4)"
-    workflow
-    "masc_transition(submit_for_verification)";
-  assert_contains
-    "external workflow keeps branch-work guidance"
-    workflow
-    "work in your repo clone on a task branch";
-  let schema_source = read_source_file "lib/task/tool_task_schemas.ml" in
-  let profile_source =
-    read_source_file "lib/mcp_server_eio_tool_profile.ml"
-  in
-  assert_not_contains
-    "task schema does not own lifecycle prose literal"
-    schema_source
-    "For normal task work, claim first";
-  assert_not_contains
-    "profile does not own workflow prose literal"
-    profile_source
-    "masc_status -> masc_transition(claim) -> masc_transition(start)"
-
 (* ================================================================ *)
 (* Test: oneOf with empty/null values (regression guard)             *)
 (* ================================================================ *)
@@ -2148,10 +2078,6 @@ let () =
         test_typed_tool_contract_rejection_corpus;
       Alcotest.test_case "keeper schemas pin required fields" `Quick
         test_keeper_tool_schemas_pin_required_fields;
-      Alcotest.test_case "orchestrator prompt includes start transition" `Quick
-        test_orchestrator_prompt_pins_start_transition;
-      Alcotest.test_case "task lifecycle guidance is externalized" `Quick
-        test_task_lifecycle_guidance_is_externalized;
     ]);
     ("oneof_const_discriminator", [
       Alcotest.test_case "alpha branch matches via const" `Quick

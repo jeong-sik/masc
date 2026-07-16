@@ -2459,8 +2459,12 @@ let test_render_if_enabled_empty_store_yields_none () =
 let test_render_if_enabled_surfaces_prompt_render_failure () =
   with_recall_env "true" (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
+      let missing_prompts = Filename.concat keepers_dir "missing-prompts" in
+      Unix.mkdir missing_prompts 0o700;
       Fun.protect
-        ~finally:Prompt_registry.clear
+        ~finally:(fun () ->
+          Prompt_registry.clear ();
+          Unix.rmdir missing_prompts)
         (fun () ->
           let keeper_id = "virtual-memory-keeper" in
           let now = 1_000_000.0 in
@@ -2469,7 +2473,7 @@ let test_render_if_enabled_surfaces_prompt_render_failure () =
           Memory_io.append_fact
             ~keeper_id
             { (fact_fixture ~now ()) with Types.claim = "Hidden fact should not leak" };
-          Prompt_registry.clear ();
+          Prompt_registry.set_markdown_dir missing_prompts;
           match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
           | None -> Alcotest.fail "expected sanitized recall-unavailable block"
           | Some block ->
@@ -4204,7 +4208,9 @@ let check_compaction_snapshot_event_class label expected actual =
 
 let expected_compaction_snapshot_event_class = function
   | Runtime_manifest.Event_bus_correlated
-  | Runtime_manifest.Context_compacted ->
+  | Runtime_manifest.Context_compacted
+  | Runtime_manifest.Context_injected
+  | Runtime_manifest.Checkpoint_loaded ->
     Runtime_manifest.Compaction_snapshot_relevant
   | Runtime_manifest.Turn_started
   | Runtime_manifest.Phase_gate_decided
@@ -4216,8 +4222,6 @@ let expected_compaction_snapshot_event_class = function
   | Runtime_manifest.Provider_lane_resolved
   | Runtime_manifest.Provider_attempt_started
   | Runtime_manifest.Provider_attempt_finished
-  | Runtime_manifest.Context_injected
-  | Runtime_manifest.Checkpoint_loaded
   | Runtime_manifest.Checkpoint_saved
   | Runtime_manifest.Receipt_appended
   | Runtime_manifest.Turn_finished ->
@@ -4253,23 +4257,31 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
     let clock_refs =
       Runtime_manifest.clock_refs
         ~compaction_id:"cmp-42"
-        ~compaction_source:"event_bus"
+        ~compaction_source:"provider_overflow"
         ()
     in
     let decision =
       Runtime_manifest.with_clock_refs
         ~clock_refs
         (Runtime_manifest.with_payload_role
-           ~payload_role:Runtime_manifest.Operator_evidence
+           ~payload_role:Runtime_manifest.Checkpoint
            (`Assoc
-              [ "last_compaction"
+              [ "trigger", `String "provider_overflow"
+              ; "before_tokens", `Int 210_000
+              ; "after_tokens", `Int 120_000
+              ; ( "exact_evidence"
                 , `Assoc
-                    [ "before_tokens", `Int 210_000
-                    ; "after_tokens", `Int 120_000
-                    ; "tokens_freed", `Int 90_000
-                    ; "phase_hint", `String "proactive(85%)"
-                    ]
-              ; "context_compacted_count", `Int 1
+                    [ "before_checkpoint_bytes", `Int 4096
+                    ; "after_checkpoint_bytes", `Int 1024
+                    ; "before_message_count", `Int 8
+                    ; "after_message_count", `Int 3
+                    ; "summarized_message_count", `Int 4
+                    ; "dropped_message_count", `Int 1
+                    ; "before_tool_use_count", `Int 2
+                    ; "after_tool_use_count", `Int 1
+                    ; "before_tool_result_count", `Int 2
+                    ; "after_tool_result_count", `Int 1
+                    ] )
               ]))
     in
     let row =
@@ -4278,15 +4290,33 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
         ~keeper_name:keeper_id
         ~trace_id
         ~keeper_turn_id:12
-        ~event:Runtime_manifest.Event_bus_correlated
+        ~event:Runtime_manifest.Context_compacted
         ~runtime_id:"oas-seoul-1"
         ~status:"observed"
         ~decision
+        ~checkpoint_path:"/checkpoint/trace.json"
         ()
     in
-    (match Runtime_manifest.append config row with
-     | Ok () -> ()
-     | Error msg -> Alcotest.failf "runtime manifest append failed: %s" msg);
+    let append row =
+      Result.get_ok (Runtime_manifest.append config row)
+    in
+    append row;
+    let receipt event decision =
+      Runtime_manifest.make
+        ~ts:"2026-06-26T03:04:00Z"
+        ~keeper_name:keeper_id
+        ~trace_id
+        ~keeper_turn_id:13
+        ~event
+        ~decision
+        ~checkpoint_path:"/checkpoint/trace.json"
+        ()
+    in
+    append
+      (receipt
+         Runtime_manifest.Checkpoint_loaded
+         (`Assoc [ "loaded_checkpoint_present", `Bool true ]));
+    append (receipt Runtime_manifest.Context_injected (`Assoc []));
     let top =
       Server_dashboard_http_keeper_api.compaction_snapshots_json
         ~config
@@ -4322,7 +4352,7 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       (json_string_field "item" item "source");
     Alcotest.(check string)
       "trigger"
-      "proactive(85%)"
+      "provider_overflow"
       (json_string_field "item" item "trigger");
     Alcotest.(check string)
       "runtime"
@@ -4341,6 +4371,11 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       (json_string_field "item" item "compaction_id");
     let links = json_object_field "item" item "links" in
     Alcotest.(check int) "links object exists" 3 (List.length links);
+    let reinjection = json_assoc "reinjection" (List.assoc "reinjection_observation" item) in
+    Alcotest.(check string)
+      "linked reinjection"
+      "reinserted"
+      (json_string_field "reinjection" reinjection "state");
     let item_json = Yojson.Safe.to_string (`Assoc item) in
     List.iter
       (fun forbidden ->

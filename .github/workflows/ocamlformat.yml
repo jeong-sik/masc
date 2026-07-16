@@ -7,6 +7,21 @@ on:
       - '**/*.mli'
       - '.ocamlformat'
       - '.github/workflows/ocamlformat.yml'
+  # Default-branch runs exist to SEED the formatter opam caches into the
+  # main-branch cache scope. Actions caches are ref-scoped: a PR run can only
+  # restore caches created on its own ref or on the default branch. Without a
+  # main-scoped entry every PR cold-misses, rebuilds the opam switch, and saves
+  # a duplicate into its own PR scope — on 2026-07-16 that was 42 duplicate
+  # v3-setup-ocaml entries (5.48 GB of the repo's 10 GB quota) whose LRU
+  # pressure evicted the Build and Test dune cache (dune-linux-oas-otel-02
+  # had zero live entries), forcing every build cold.
+  push:
+    branches: [main]
+    paths:
+      - '**/*.ml'
+      - '**/*.mli'
+      - '.ocamlformat'
+      - '.github/workflows/ocamlformat.yml'
 
 permissions:
   contents: read
@@ -14,7 +29,10 @@ permissions:
 
 concurrency:
   group: ocamlformat-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Never cancel a main seeding run: rapid merge trains would keep aborting it
+  # before the post-job cache save, and the whole point of the push trigger is
+  # to complete one save into the default-branch scope.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ocamlformat-check:
@@ -32,6 +50,17 @@ jobs:
         id: changed
         run: |
           set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            # Default-branch cache-seeding run (see the push trigger comment):
+            # push events carry no PR base/head SHAs to diff, and checking
+            # every file would turn formatter drift into a red main. Run the
+            # toolchain setup with an empty file list so the opam caches get
+            # saved into the default-branch scope, and check nothing.
+            : > /tmp/changed-ocaml-files.txt
+            echo "no_files=false" >> "$GITHUB_OUTPUT"
+            echo "Default-branch run: seeding formatter toolchain caches; no per-file checks."
+            exit 0
+          fi
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
           if ! git cat-file -e "$base" 2>/dev/null; then

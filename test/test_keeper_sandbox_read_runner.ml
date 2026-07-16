@@ -6,7 +6,6 @@ let make_meta () =
       [ "name", `String "read-runner-keeper"
       ; "agent_name", `String "agent-read-runner"
       ; "trace_id", `String "trace-read-runner"
-      ; "goal", `String "sandbox read runner mock test"
       ; "allowed_paths", `List [ `String "*" ]
       ; "sandbox_profile", `String "docker"
       ]

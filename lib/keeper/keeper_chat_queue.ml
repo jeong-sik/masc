@@ -821,6 +821,20 @@ let canonical_message_wire message =
         (fun canonical -> Yojson.Safe.to_string (queued_message_to_yojson canonical))
         (queued_message_of_yojson json))
 
+let canonical_delivery_payload_wire message =
+  let json =
+    `Assoc
+      [ "content", `String message.content
+      ; "user_blocks", Keeper_multimodal_input.user_blocks_to_yojson message.user_blocks
+      ; "attachments", Keeper_multimodal_input.attachments_to_yojson message.attachments
+      ; "source", source_to_yojson message.source
+      ; "user_row_origin", user_row_origin_to_yojson message.user_row_origin
+      ]
+  in
+  Result.map
+    (fun () -> Yojson.Safe.to_string json)
+    (validate_json_utf8 "message" json)
+
 let canonical_queued_message message =
   Result.bind (canonical_message_wire message) (fun wire ->
       try queued_message_of_yojson (Yojson.Safe.from_string wire) with
@@ -2111,10 +2125,27 @@ let get_or_create_entry keeper_name =
         Hashtbl.add registry keeper_name entry;
         entry)
 
+(* Cancellation must not poison the entry mutex. The transaction runner
+   converts an in-flight Cancelled into a coherent [Transaction_cancelled]
+   value (rollback/close bookkeeping done, entry state set by
+   [apply_transaction_result]) and only then re-raises per the Eio
+   protocol; letting that re-raise cross [Eio.Mutex.use_rw] would poison
+   the mutex and wedge every later operation on this keeper's queue with
+   [Eio_mutex.Poisoned]. Catch Cancelled inside the locked region, close
+   the lock normally, and re-raise outside. Any other exception still
+   poisons — protected state may genuinely be torn there. *)
 let with_entry_lock keeper_name entry f =
   Option.iter (fun observer -> observer keeper_name)
     (Atomic.get before_entry_lock_observer_for_testing);
-  Eio.Mutex.use_rw ~protect:true entry.mutex f
+  let outcome =
+    Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+      match f () with
+      | value -> Ok value
+      | exception (Eio.Cancel.Cancelled _ as exception_) -> Error exception_)
+  in
+  match outcome with
+  | Ok value -> value
+  | Error exception_ -> raise exception_
 
 let persistence_configured () =
   match Atomic.get persistence_configuration with
@@ -2377,8 +2408,8 @@ let enqueue_with_receipt ~keeper_name ~receipt_id message =
                                "active receipt has no canonical message payload")
                         | Some stored_message ->
                           (match
-                             canonical_message_wire stored_message,
-                             canonical_message_wire message
+                             canonical_delivery_payload_wire stored_message,
+                             canonical_delivery_payload_wire message
                            with
                            | Ok stored, Ok requested when String.equal stored requested ->
                              Ok
@@ -3564,21 +3595,15 @@ let classify_keeper_directory_entries_blocking entries_path entries =
          ; observed_entries = (entry_name, stats) :: inventory.observed_entries
          }
        | ({ Unix.st_kind = Unix.S_REG; _ } as stats) ->
-         (match Keeper_runtime_root_entry.classify_basename entry_name with
-          | _ :: _ ->
-            { inventory with
-              observed_entries = (entry_name, stats) :: inventory.observed_entries
-            }
-          | [] ->
-            { inventory with
-              rejected_entries =
-                ( entry_name
-                , load_error Invalid_path ~path:entry_path
-                    "Keeper chat queue inventory found an unowned regular entry"
-                )
-                :: inventory.rejected_entries
-            ; observed_entries = (entry_name, stats) :: inventory.observed_entries
-            })
+         (* A regular file in the shared Keeper runtime root is not a chat
+            queue lane. Other subsystems own their canonical artifacts and may
+            retain operator-created backups or diagnostics here. Keep the
+            inode in the inventory snapshot so replacement is still detected,
+            but do not classify or reject a file outside this directory-only
+            queue authority. *)
+         { inventory with
+           observed_entries = (entry_name, stats) :: inventory.observed_entries
+         }
        | ({ Unix.st_kind = st_kind; _ } as stats) ->
          { inventory with
            rejected_entries =

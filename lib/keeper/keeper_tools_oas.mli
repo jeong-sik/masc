@@ -1,6 +1,6 @@
 (** Keeper_tools_oas — Wrap keeper tools as [Agent_sdk.Tool.t] for [Agent.run].
 
-    Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
+    Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] dispatch
     to [Agent_sdk.Tool.t list] via [Tool_bridge.oas_tool_of_masc]. Tool
     execution reads the current context from [ctx_snapshot]
     (immutable), enabling [Agent.run] to manage messages while
@@ -19,9 +19,6 @@ type tool_bundle =
 (** Per-keeper tool usage view from [Keeper_registry]. *)
 val tool_usage_for_keeper : string -> (string * Keeper_types.tool_call_entry) list
 
-(** Project [tool_usage_for_keeper] to a JSON array. *)
-val tool_usage_json : string -> Yojson.Safe.t
-
 (** Most-recently-used tool names for a keeper, capped to [limit]
     (default 5). *)
 val recent_tools_for_keeper : ?limit:int -> string -> string list
@@ -29,18 +26,9 @@ val recent_tools_for_keeper : ?limit:int -> string -> string list
 (** Record an internal keeper tool call in the telemetry registry. *)
 val record_keeper_internal_tool_call
   :  tool_name:string
-  -> success:bool
+  -> disposition:('completed, 'deferred, 'failed) Tool_result.disposition
   -> duration_ms:int
   -> unit
-
-(** Project a producer-owned outcome into the canonical JSON envelope.
-    [raw] remains opaque text. Only explicit [data] is structured; field names
-    or JSON-looking bytes in [raw] never affect the projection. *)
-val normalize_tool_result
-  :  success:bool
-  -> data:Yojson.Safe.t option
-  -> string
-  -> Yojson.Safe.t
 
 (* Handlers moved to [Keeper_tools_oas_handler] — see
    keeper_tools_oas_handler.mli for [make_keeper_tool_handler],

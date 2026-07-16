@@ -25,7 +25,6 @@ val build_agent
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> system_prompt:string
   -> ?tools:Agent_sdk.Tool.t list
-  -> ?max_tool_calls:int
   -> ?timeout_s:float
   -> ?max_tokens:int
   -> ?name:string

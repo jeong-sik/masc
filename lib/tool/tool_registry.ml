@@ -42,6 +42,7 @@ let string_of_source = function
 type call_stats =
   { call_count : int Atomic.t
   ; success_count : int Atomic.t
+  ; deferred_count : int Atomic.t
   ; failure_count : int Atomic.t
   ; last_called_at : float Atomic.t (** Unix timestamp, 0.0 = never *)
   ; total_duration_ms : int Atomic.t
@@ -108,6 +109,7 @@ let get_or_create_stats tool_name =
         let s =
           { call_count = Atomic.make 0
           ; success_count = Atomic.make 0
+          ; deferred_count = Atomic.make 0
           ; failure_count = Atomic.make 0
           ; last_called_at = Atomic.make 0.0
           ; total_duration_ms = Atomic.make 0
@@ -124,7 +126,7 @@ let record_call
       ?(source = External_mcp)
       ?assignment_id
       ~tool_name
-      ~success
+      ~disposition
       ~duration_ms
       ()
   =
@@ -133,7 +135,10 @@ let record_call
   (match source with
    | External_mcp -> Atomic.incr stats.external_mcp_count
    | Agent_internal -> Atomic.incr stats.agent_internal_count);
-  if success then Atomic.incr stats.success_count else Atomic.incr stats.failure_count;
+  (match disposition with
+   | Tool_result.Completed _ -> Atomic.incr stats.success_count
+   | Tool_result.Deferred _ -> Atomic.incr stats.deferred_count
+   | Tool_result.Failed _ -> Atomic.incr stats.failure_count);
   Atomic.set stats.last_called_at (Time_compat.now ());
   ignore (Atomic.fetch_and_add stats.total_duration_ms duration_ms);
   match assignment_id with
@@ -145,12 +150,12 @@ let record_call_if_known
       ?(source = External_mcp)
       ?assignment_id
       ~tool_name
-      ~success
+      ~disposition
       ~duration_ms
       ()
   =
   if is_known_tool tool_name
-  then record_call ~source ?assignment_id ~tool_name ~success ~duration_ms ()
+  then record_call ~source ?assignment_id ~tool_name ~disposition ~duration_ms ()
 ;;
 
 (** Get all stats as a sorted list (by call_count descending).
@@ -219,6 +224,7 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
     [ "name", `String name
     ; "call_count", `Int calls
     ; "success_count", `Int (Atomic.get stats.success_count)
+    ; "deferred_count", `Int (Atomic.get stats.deferred_count)
     ; "failure_count", `Int (Atomic.get stats.failure_count)
     ; ( "avg_duration_ms"
       , `Int (if calls > 0 then Atomic.get stats.total_duration_ms / calls else 0) )
@@ -252,52 +258,6 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
     ; "never_called", `List (List.map (fun s -> `String s) never_called)
     ; "never_called_count", `Int (List.length never_called)
     ]
-;;
-
-(** Structural warm-up input — the per-tool fields the registry needs to
-    seed its counters. Decoupled from [Telemetry_eio.tool_usage_stats] so the
-    Tool dispatch substrate (lib/tool/) does not code-depend on the telemetry
-    persistence layer. The composition root projects the persisted summary
-    into this shape — see [Server_runtime_bootstrap]. *)
-type warm_up_stats = {
-  count : int;
-  success_count : int;
-  failure_count : int;
-  last_used_at : float option;
-}
-
-(** Warm up registry from persisted per-tool stats.
-    Called once at server startup to restore persistent metrics.
-
-    [Eio_guard.with_mutex] degrades to a direct call before the Eio
-    runtime is up, so this stays safe when [warm_up] runs during early
-    bootstrap. *)
-let warm_up (stats_by_tool : (string * warm_up_stats) list) : int =
-  let count = ref 0 in
-  with_registry_rw (fun () ->
-    List.iter
-      (fun (tool_name, (stats : warm_up_stats)) ->
-         if not (Hashtbl.mem registry tool_name)
-         then (
-           Hashtbl.replace
-             registry
-             tool_name
-             { call_count = Atomic.make stats.count
-             ; success_count = Atomic.make stats.success_count
-             ; failure_count = Atomic.make stats.failure_count
-             ; last_called_at =
-                 Atomic.make
-                   (match stats.last_used_at with
-                    | Some t -> t
-                    | None -> 0.0)
-             ; total_duration_ms = Atomic.make 0
-             ; external_mcp_count = Atomic.make 0
-             ; agent_internal_count = Atomic.make 0
-             ; last_assignment_id = Atomic.make None
-             };
-           Stdlib.incr count))
-      stats_by_tool);
-  !count
 ;;
 
 (** Reset all counters (for testing) *)

@@ -433,11 +433,26 @@ let submit_event ingress ~dispatch ~clock (ev : Gw.slack_event) =
         channel_id event_id reason
     | Ok None -> on_event ~dispatch ~clock ev
     | Ok (Some resolution) ->
-      Connector_ingress_lane.submit
-        ingress
-        ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
-        ~event_id:{ source = "slack_triggered"; opaque_id = event_id }
-        (fun () -> on_event ~resolved_binding:resolution ~dispatch ~clock ev)
+      let lane =
+        Connector_ingress_lane.Keeper_lane resolution.State.keeper_name
+      in
+      let ingress_event_id =
+        Connector_ingress_lane.{ source = "slack_triggered"; opaque_id = event_id }
+      in
+      (match
+         Connector_ingress_lane.submit
+           ingress
+           ~lane
+           ~event_id:ingress_event_id
+           (fun () -> on_event ~resolved_binding:resolution ~dispatch ~clock ev)
+       with
+       | Ok () -> ()
+       | Error error ->
+         Log.Server.error
+           "Slack ingress submission rejected lane=%s event=%s: %s"
+           (Connector_ingress_lane.lane_to_string lane)
+           (Connector_ingress_lane.event_id_to_string ingress_event_id)
+           (Connector_ingress_lane.submit_error_to_string error))
   in
   match ev with
   | Gw.Message_create { bot_id = Some _; _ } -> on_event ~dispatch ~clock ev
@@ -509,7 +524,7 @@ let start ~sw ~env ~state =
                "Slack ingress callback failed lane=%s event=%s: %s"
                (Connector_ingress_lane.lane_to_string failure.lane)
                (Connector_ingress_lane.event_id_to_string failure.event_id)
-               failure.reason)
+               (Connector_ingress_lane.failure_reason_to_string failure.reason))
            ()
        in
        let dispatch_for_config config =

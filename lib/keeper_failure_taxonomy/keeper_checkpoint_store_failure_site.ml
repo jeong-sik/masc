@@ -3,10 +3,12 @@ type t =
   | Oas_save
   | Oas_delete
   | Oas_archive
+  | Oas_watermark_sidecar
 
 let to_label = function
   | Oas_cleanup -> "oas_cleanup"
   | Oas_save -> "oas_save"
   | Oas_delete -> "oas_delete"
   | Oas_archive -> "oas_archive"
+  | Oas_watermark_sidecar -> "oas_watermark_sidecar"
 ;;

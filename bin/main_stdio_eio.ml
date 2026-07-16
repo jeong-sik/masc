@@ -47,7 +47,7 @@ let run_cmd cli_base_path =
   Unix.putenv "MASC_BASE_PATH" base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   Eio_main.run @@ fun env ->
-  Mirage_crypto_rng_unix.use_default ();
+  Crypto_rng.ensure_default ();
   Eio_guard.enable ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->

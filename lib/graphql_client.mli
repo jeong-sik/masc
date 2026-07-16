@@ -10,6 +10,10 @@ val request : ?timeout_sec:float -> ?fallback:bool -> string -> (string, string)
 
 module For_testing : sig
   val is_transport_error : string -> bool
+
+  val response_of_curl_process_result
+    :  Unix.process_status * string
+    -> (string, string) result
 end
 
 (** {1 GraphQL Response Parsing} *)

@@ -283,6 +283,84 @@ let test_safe_asset_relative_path_rejects_absolute () =
     (Web_dashboard.is_safe_asset_relative_path "/etc/passwd")
 
 (* ============================================================
+   bundle_freshness Tests — .build-stamp vs. running binary mtime
+   ============================================================ *)
+
+(* Guaranteed older than any real build, and deliberately not 0.0: passing
+   0.0 for both atime and mtime to Unix.utimes means "set to the current
+   time" (POSIX utimes(path, NULL) semantics), not "set to the Unix epoch" —
+   an easy Stdlib-API trap that would have made this fixture a no-op. *)
+let long_ago = 1.0
+
+let with_temp_dashboard_root ?stamp_mtime f =
+  let root = make_temp_dashboard_root "freshness" "freshness-marker" in
+  Fun.protect
+    (fun () ->
+      (match stamp_mtime with
+       | None -> ()
+       | Some mtime ->
+         let stamp =
+           Filename.concat (Filename.concat (Filename.concat root "assets") "dashboard")
+             ".build-stamp"
+         in
+         write_file stamp "";
+         Unix.utimes stamp mtime mtime);
+      with_env [ ("MASC_ASSETS_DIR", Filename.concat root "assets"); ("MASC_BASE_PATH", "") ] f)
+    ~finally:(fun () ->
+      let stamp =
+        Filename.concat (Filename.concat (Filename.concat root "assets") "dashboard")
+          ".build-stamp"
+      in
+      if Sys.file_exists stamp then Sys.remove stamp;
+      cleanup_temp_dashboard_root root)
+
+let test_bundle_freshness_missing_stamp () =
+  with_temp_dashboard_root (fun () ->
+    check bool "missing stamp reported, not silently fresh" true
+      (match Web_dashboard.bundle_freshness () with
+       | Missing_stamp -> true
+       | Fresh | Stale _ -> false))
+
+let test_bundle_freshness_stale_when_stamp_predates_binary () =
+  with_temp_dashboard_root ~stamp_mtime:long_ago (fun () ->
+    check bool "stamp older than the running binary is reported stale" true
+      (match Web_dashboard.bundle_freshness () with
+       | Stale _ -> true
+       | Fresh | Missing_stamp -> false))
+
+let test_bundle_freshness_fresh_when_stamp_after_binary () =
+  (* A stamp far in the future is always newer than the test binary's real
+     build mtime — exercises the Fresh branch without needing to touch the
+     binary itself. *)
+  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
+  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
+    check bool "stamp newer than the running binary is fresh" true
+      (match Web_dashboard.bundle_freshness () with
+       | Fresh -> true
+       | Stale _ | Missing_stamp -> false))
+
+let test_bundle_freshness_build_stamp_path_under_dashboard_assets () =
+  with_temp_dashboard_root (fun () ->
+    check bool "build_stamp_path lives under assets/dashboard/" true
+      (contains_substr "/dashboard/.build-stamp" (Web_dashboard.build_stamp_path ())))
+
+(* log_bundle_freshness_warning has no return value to assert on (there is no
+   existing Log capture harness in this suite) — these are smoke tests
+   confirming it does not raise in any of the three bundle_freshness states,
+   covering the Missing_stamp / Stale / Fresh match arms. *)
+let test_log_bundle_freshness_warning_does_not_raise_on_missing_stamp () =
+  with_temp_dashboard_root (fun () -> Web_dashboard.log_bundle_freshness_warning ())
+
+let test_log_bundle_freshness_warning_does_not_raise_on_stale () =
+  with_temp_dashboard_root ~stamp_mtime:long_ago (fun () ->
+    Web_dashboard.log_bundle_freshness_warning ())
+
+let test_log_bundle_freshness_warning_does_not_raise_on_fresh () =
+  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
+  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
+    Web_dashboard.log_bundle_freshness_warning ())
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -316,5 +394,14 @@ let () =
       test_case "reject nested traversal" `Quick test_safe_asset_relative_path_rejects_nested_parent_traversal;
       test_case "reject empty segment" `Quick test_safe_asset_relative_path_rejects_empty_segment;
       test_case "reject absolute path" `Quick test_safe_asset_relative_path_rejects_absolute;
+    ];
+    "bundle_freshness", [
+      test_case "missing stamp" `Quick test_bundle_freshness_missing_stamp;
+      test_case "stale when stamp predates binary" `Quick test_bundle_freshness_stale_when_stamp_predates_binary;
+      test_case "fresh when stamp postdates binary" `Quick test_bundle_freshness_fresh_when_stamp_after_binary;
+      test_case "build_stamp_path under dashboard assets" `Quick test_bundle_freshness_build_stamp_path_under_dashboard_assets;
+      test_case "warn does not raise on missing stamp" `Quick test_log_bundle_freshness_warning_does_not_raise_on_missing_stamp;
+      test_case "warn does not raise on stale" `Quick test_log_bundle_freshness_warning_does_not_raise_on_stale;
+      test_case "warn does not raise on fresh" `Quick test_log_bundle_freshness_warning_does_not_raise_on_fresh;
     ];
   ]

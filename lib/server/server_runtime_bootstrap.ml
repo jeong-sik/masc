@@ -361,7 +361,7 @@ let lazy_startup_plan () =
       {
         group_name = "tool_state";
         execution = Serial;
-        task_names = [ "telemetry_warmup"; "tool_metrics_restore" ];
+        task_names = [ "tool_metrics_restore" ];
       };
     ]
   in
@@ -694,16 +694,22 @@ let sync_prompt_assets_from_binary () =
       ~prompts_dir:(Config_dir_resolver.prompts_dir ())
       ()
   in
-  (match sync.Prompt_defaults.copied, sync.Prompt_defaults.overwritten with
-   | [], [] -> ()
-   | copied, overwritten ->
-       let names = copied @ overwritten in
+  (match
+     sync.Prompt_defaults.copied,
+     sync.Prompt_defaults.overwritten,
+     sync.Prompt_defaults.removed
+   with
+   | [], [], [] -> ()
+   | copied, overwritten, removed ->
+       let names = copied @ overwritten @ removed in
        let shown =
          List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
        in
        Log.Misc.info
-         "prompt assets synced from binary: %d copied, %d overwritten [%s%s]"
-         (List.length copied) (List.length overwritten)
+         "prompt assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
+         (List.length copied)
+         (List.length overwritten)
+         (List.length removed)
          (String.concat ", " shown)
          (if List.length names > max_logged_prompt_sync_entries then ", …"
           else ""));
@@ -749,38 +755,6 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
       |> String.concat ", ")
   end
 
-let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
-  (try
-     let summary =
-       Telemetry_eio.summarize_tool_usage (Mcp_server.workspace_config state)
-     in
-     if summary.telemetry_available then
-       (* PR-S3: project the persisted Telemetry_eio summary into the registry's
-          neutral [warm_up_stats] shape at the composition root, so
-          [Tool_registry] (lib/tool/, masc_tool_dispatch) does not code-depend
-          on the telemetry persistence layer. *)
-       let stats_by_tool =
-         Hashtbl.fold
-           (fun tool_name (stats : Telemetry_eio.tool_usage_stats) acc ->
-              ( tool_name
-              , { Tool_registry.count = stats.count
-                ; success_count = stats.success_count
-                ; failure_count = stats.failure_count
-                ; last_used_at = stats.last_used_at
-                } )
-              :: acc)
-           summary.stats_by_tool
-           []
-       in
-       let n = Tool_registry.warm_up stats_by_tool in
-       Log.Misc.info "tool registry: warmed up %d tools (%d calls) from telemetry"
-         n summary.total_calls
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Misc.warn "tool registry warm-up failed: %s (lazy init on first call)"
-       (Printexc.to_string exn))
-
 let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
   (try
      let n = Tool_metrics_persist.restore
@@ -812,7 +786,6 @@ let start_owner_lazy_tasks ~sw state =
     | "reconcile_active_agents" -> fun () -> reconcile_active_agents_gauge state
     | "prompt_bootstrap" -> fun () -> bootstrap_prompt_state state
     | "keeper_history_migration" -> fun () -> startup_migrate_keeper_histories state
-    | "telemetry_warmup" -> fun () -> warm_tool_registry_from_telemetry state
     | "tool_metrics_restore" -> fun () -> restore_tool_metrics_from_disk state
     | "jsonl_prune" -> fun () -> startup_prune_jsonl state
     | task_name ->
@@ -996,6 +969,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
+  (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
+     routes the current binary already removed (#24332 governance->gate:
+     the served SPA still called DELETE'd /api/v1/dashboard/governance for
+     3+ days because scripts/build-dashboard-if-needed.sh was never re-run
+     after the binary shipped). Cheap synchronous stat comparison; not worth
+     its own fiber. *)
+  Web_dashboard.log_bundle_freshness_warning ();
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
@@ -1132,7 +1112,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
             state
             ~name:tool_name ~arguments
         in
-        let success = Tool_result.is_success result
+        let success = not (Tool_result.is_failed result)
         and result_str = Tool_result.message result
         in
         if not success then

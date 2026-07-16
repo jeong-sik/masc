@@ -69,7 +69,7 @@ let bridge_failure_of_error (error : Agent_sdk.Error.sdk_error) : Fusion_types.p
 let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
   : Fusion_types.panel_outcome list
   =
-  (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/max_tool_calls/timeout)으로
+  (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/timeout)으로
         에이전트 빌드. 빌드 실패는 격리. 그룹순 × 그룹내 모델순으로 평탄화 —
         순서 보존(단일 그룹이면 원 모델 순서 = 오늘과 동일). *)
   let built, build_failures =
@@ -83,7 +83,7 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
             let panelist = Fusion_policy.panelist_id ~label:g.label ~model in
             match
               Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
-                ~max_tool_calls:g.max_tool_calls ~timeout_s:g.timeout_s
+                ~timeout_s:g.timeout_s
                 ?max_tokens:g.max_output_tokens
                 ~name:panelist model
             with

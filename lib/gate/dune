@@ -59,6 +59,7 @@
   ; existing
   masc_config
   masc_core
+  masc.crypto_rng
   masc_pulse
   masc.http_client
   masc.masc_log

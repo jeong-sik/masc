@@ -1,11 +1,11 @@
 // Read-only view of a [fusion.presets.<preset>] table for the Settings fusion
-// section (keeper-v2 settings.jsx: trio preset lanes + timeout/max_tool_calls).
+// section (keeper-v2 settings.jsx: trio preset lanes + timeouts).
 //
 // This is a display-only reader — it never writes back, so it deliberately does
 // NOT live in fusion-settings.ts (whose line-surgical write path forbids
 // multi-line values). The preset `panel` value is a possibly multi-line TOML
 // array, which the scalar getRuntimeTomlKey helper cannot read; scalar keys
-// (judge / timeouts / max_tool_calls_per_panel) reuse getRuntimeTomlKey so the
+// (judge / timeouts) reuse getRuntimeTomlKey so the
 // section-scoping stays consistent with the rest of the runtime.toml tooling.
 //
 // The source text is the live runtime.toml already fetched by
@@ -29,13 +29,11 @@ export interface FusionPresetView {
   readonly judge: string | null
   readonly panelTimeoutS: number | null
   readonly judgeTimeoutS: number | null
-  readonly maxToolCallsPerPanel: number | null
 }
 
 const KEY_JUDGE = 'judge'
 const KEY_PANEL_TIMEOUT_S = 'panel_timeout_s'
 const KEY_JUDGE_TIMEOUT_S = 'judge_timeout_s'
-const KEY_MAX_TOOL_CALLS = 'max_tool_calls_per_panel'
 
 function presetSection(preset: string): string {
   return `fusion.presets.${preset}`
@@ -175,7 +173,6 @@ export function readFusionPresetView(sourceText: string, preset: string): Fusion
       judge: null,
       panelTimeoutS: null,
       judgeTimeoutS: null,
-      maxToolCallsPerPanel: null,
     }
   }
 
@@ -190,6 +187,5 @@ export function readFusionPresetView(sourceText: string, preset: string): Fusion
     judge: parseScalarString(sourceText, section, KEY_JUDGE),
     panelTimeoutS: parseScalarNumber(sourceText, section, KEY_PANEL_TIMEOUT_S),
     judgeTimeoutS: parseScalarNumber(sourceText, section, KEY_JUDGE_TIMEOUT_S),
-    maxToolCallsPerPanel: parseScalarNumber(sourceText, section, KEY_MAX_TOOL_CALLS),
   }
 }

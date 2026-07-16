@@ -266,6 +266,67 @@ let test_escalates_sigkill_for_unresponsive_holder () =
           | Server_startup_takeover.Already_running _ ->
               Alcotest.fail "unresponsive holder should be reclaimed"))
 
+let test_breadcrumb_round_trip_and_freshness () =
+  with_temp_dir "startup-takeover-breadcrumb" (fun dir ->
+      let path = lock_path dir in
+      (match Server_startup_takeover.read_takeover_breadcrumb ~lock_path:path () with
+       | Server_startup_takeover.Breadcrumb_absent -> ()
+       | _ -> Alcotest.fail "expected no breadcrumb before any takeover");
+      Server_startup_takeover.write_takeover_breadcrumb ~lock_path:path ~port:8935
+        ~target_pid:4242 ~signal_name:"SIGTERM";
+      (match Server_startup_takeover.read_takeover_breadcrumb ~lock_path:path () with
+       | Server_startup_takeover.Breadcrumb_found { killer_pid; payload; age_sec; _ }
+         ->
+           Alcotest.(check (option int)) "killer pid is self"
+             (Some (Unix.getpid ())) killer_pid;
+           Alcotest.(check bool) "fresh" true (age_sec < 60.0);
+           Alcotest.(check bool) "payload names target and signal" true
+             (match Yojson.Safe.from_string payload with
+              | `Assoc fields ->
+                  List.assoc_opt "target_pid" fields = Some (`Int 4242)
+                  && List.assoc_opt "signal" fields = Some (`String "SIGTERM")
+              | _ -> false)
+       | _ -> Alcotest.fail "expected a fresh breadcrumb after write");
+      let breadcrumb_path =
+        Server_startup_takeover.takeover_breadcrumb_path ~lock_path:path
+      in
+      let past = Unix.gettimeofday () -. 3600.0 in
+      Unix.utimes breadcrumb_path past past;
+      match Server_startup_takeover.read_takeover_breadcrumb ~lock_path:path () with
+      | Server_startup_takeover.Breadcrumb_stale { age_sec; _ } ->
+          Alcotest.(check bool) "stale age reported" true (age_sec > 600.0)
+      | _ -> Alcotest.fail "expected an hour-old breadcrumb to be stale")
+
+let test_breadcrumb_written_when_takeover_kills () =
+  with_temp_dir "startup-takeover-breadcrumb-kill" (fun dir ->
+      with_forever_process ~argv0:"main_eio.exe" ~ignore_sigterm:true (fun pid ->
+          let path = lock_path dir in
+          write_file path (Printf.sprintf "%d\n" pid);
+          let port = find_free_port () in
+          match
+            Server_startup_takeover.acquire_pid_lock ~lock_path:path
+              ~probe_timeout_sec:0.1 ~term_timeout_sec:0.05 ~kill_wait_sec:0.2
+              ~poll_interval_sec:0.01 port
+          with
+          | Server_startup_takeover.Acquired -> (
+              match
+                Server_startup_takeover.read_takeover_breadcrumb ~lock_path:path ()
+              with
+              | Server_startup_takeover.Breadcrumb_found { killer_pid; payload; _ }
+                ->
+                  Alcotest.(check (option int)) "killer pid is self"
+                    (Some (Unix.getpid ())) killer_pid;
+                  Alcotest.(check bool)
+                    "escalation recorded SIGKILL against the holder" true
+                    (match Yojson.Safe.from_string payload with
+                     | `Assoc fields ->
+                         List.assoc_opt "signal" fields = Some (`String "SIGKILL")
+                         && List.assoc_opt "target_pid" fields = Some (`Int pid)
+                     | _ -> false)
+              | _ -> Alcotest.fail "takeover kill must leave a breadcrumb")
+          | Server_startup_takeover.Already_running _ ->
+              Alcotest.fail "unresponsive holder should be reclaimed"))
+
 let test_base_path_lock_rejects_concurrent_lease () =
   with_base_and_run "startup-takeover-base-path-live"
     (fun ~base_path ~run_dir ->
@@ -1068,6 +1129,10 @@ let () =
             test_tolerates_invalid_pid_file;
           Alcotest.test_case "unresponsive holder escalates to sigkill" `Quick
             test_escalates_sigkill_for_unresponsive_holder;
+          Alcotest.test_case "breadcrumb round-trips and ages out" `Quick
+            test_breadcrumb_round_trip_and_freshness;
+          Alcotest.test_case "takeover kill leaves a breadcrumb" `Quick
+            test_breadcrumb_written_when_takeover_kills;
           Alcotest.test_case "concurrent BasePath lease blocks takeover" `Quick
             test_base_path_lock_rejects_concurrent_lease;
           Alcotest.test_case "stale base-path owner is reclaimed" `Quick

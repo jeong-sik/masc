@@ -986,7 +986,8 @@ let test_parse_invalid_base_profile_fails_closed () =
   let keeper_path = Filename.concat keepers_dir "parse-base.toml" in
   let invalid_base_path = Filename.concat keepers_dir "base.toml" in
   write_file invalid_base_path "[broken";
-  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"test\"\n";
+  write_file keeper_path
+    "[keeper]\nbase = \"base.toml\"\ninstructions = \"test\"\n";
   ignore
     (expect_profile_load_error
        ~base_path
@@ -1000,13 +1001,14 @@ let test_profile_invalid_base_profile_fails_closed () =
   let invalid_base_path = Filename.concat keepers_dir "base.toml" in
   write_file
     invalid_base_path
-    "[keeper]\ngoal = [\n";
-  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"child\"\n";
+    "[keeper]\ngoal = \"removed\"\n";
+  write_file keeper_path
+    "[keeper]\nbase = \"base.toml\"\ninstructions = \"child\"\n";
   ignore
     (expect_profile_load_error
        ~base_path
        ~keeper_name:"profile-base"
-       ~kind:KTP.Parse_error
+       ~kind:KTP.Profile_error
        ~failing_path:invalid_base_path)
 
 let test_unreadable_base_profile_fails_closed () =
@@ -1014,7 +1016,8 @@ let test_unreadable_base_profile_fails_closed () =
   let keeper_path = Filename.concat keepers_dir "unreadable-base.toml" in
   let directory_base_path = Filename.concat keepers_dir "base.toml" in
   Unix.mkdir directory_base_path 0o755;
-  write_file keeper_path "[keeper]\nbase = \"base.toml\"\ngoal = \"test\"\n";
+  write_file keeper_path
+    "[keeper]\nbase = \"base.toml\"\ninstructions = \"test\"\n";
   ignore
     (expect_profile_load_error
        ~base_path
@@ -1134,6 +1137,7 @@ let with_personas_dir f =
 
 let with_config_dir f =
   with_temp_dir "keeper-config" @@ fun config_dir ->
+  mkdir_p (Filename.concat config_dir "prompts");
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
@@ -1301,44 +1305,6 @@ let test_persona_resolver_rejects_operator_todo_profile () =
   | Error e ->
       check bool "reports persona unavailable" true
         (contains_substring e "persona not found")
-
-let test_persona_resolver_reports_placeholder_defaults_source () =
-  with_personas_dir @@ fun personas_dir ->
-  with_config_dir @@ fun config_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "role": "runtime profile",
-  "keeper": {
-    "instructions": "normal persona instructions"
-  }
-}
-|};
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  mkdir_p keepers_dir;
-  let keeper_path = Filename.concat keepers_dir "probe.toml" in
-  write_file keeper_path
-    {|
-[keeper]
-persona_name = "probe"
-instructions = "OPERATOR_TODO: replace before spawn"
-|};
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc [ ("persona_name", `String "probe") ])
-  with
-  | Ok _ -> fail "placeholder keeper defaults should not resolve"
-  | Error e ->
-      check bool "reports keeper defaults" true
-        (contains_substring e "keeper defaults");
-      check bool "reports manifest path" true
-        (contains_substring e keeper_path);
-      check bool "reports field" true
-        (contains_substring e "keeper.instructions")
 
 let test_persona_resolver_rejects_placeholder_in_resolved_payload () =
   with_personas_dir @@ fun personas_dir ->
@@ -1789,7 +1755,7 @@ let test_health_json_surfaces_typed_keeper_config_error () =
   let keeper_path = Filename.concat keepers_dir "broken.toml" in
   let base_path = Filename.concat keepers_dir "missing-base.toml" in
   write_file keeper_path
-    "[keeper]\nbase = \"missing-base.toml\"\ngoal = \"test\"\n";
+    "[keeper]\nbase = \"missing-base.toml\"\ninstructions = \"test\"\n";
   let request = health_request () in
   let json =
     Runtime.make_health_json
@@ -2070,8 +2036,6 @@ let () =
             test_persona_defaults_reject_removed_shards;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
-          test_case "persona resolver reports placeholder defaults source" `Quick
-            test_persona_resolver_reports_placeholder_defaults_source;
           test_case "persona resolver rejects placeholder in resolved payload" `Quick
             test_persona_resolver_rejects_placeholder_in_resolved_payload;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick

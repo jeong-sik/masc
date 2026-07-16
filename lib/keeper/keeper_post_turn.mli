@@ -50,12 +50,14 @@ type post_turn_lifecycle =
 type overflow_retry_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
   ; compaction : compaction_event
+  ; evidence : Keeper_compact_policy.compaction_evidence
   ; turn_generation : int
   } [@@warning "-69"]
 
 type compaction_recovery_error =
   | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
+  | Compaction_evidence_missing
   | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
   | Checkpoint_superseded of
       { incoming_turn_count : int

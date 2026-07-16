@@ -3,9 +3,7 @@
     Persisted keeper meta JSON is runtime-only; config fields live in TOML.
     The reflection-via-roundtrip pattern in [keeper_meta_json.ml] derives the
     canonical runtime key list by parsing a minimal seed JSON and
-    re-serialising it. The static fallback must stay in sync with the derived
-    list so a future seed parse failure does not flood
-    [warn_unknown_keeper_meta_keys] on every keeper read. *)
+    re-serialising it. *)
 
 open Masc
 
@@ -34,14 +32,6 @@ let test_canonical_includes_runtime_keys () =
         true
         (List.mem key canonical))
     target_keys
-
-let test_canonical_fallback_stays_in_sync () =
-  let canonical = Keeper_meta_json.canonical_keeper_meta_key_names in
-  let fallback = Keeper_meta_json.fallback_canonical_keeper_meta_key_names in
-  Alcotest.(check (list string))
-    "static fallback matches derived runtime key list"
-    canonical
-    fallback
 
 let test_meta_to_json_redacts_last_model_used () =
   let json =
@@ -72,10 +62,6 @@ let () =
             "runtime keys present"
             `Quick
             test_canonical_includes_runtime_keys
-        ; Alcotest.test_case
-            "fallback stays in sync"
-            `Quick
-            test_canonical_fallback_stays_in_sync
         ; Alcotest.test_case
             "meta_to_json redacts last_model_used"
             `Quick

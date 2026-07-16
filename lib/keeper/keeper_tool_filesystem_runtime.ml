@@ -61,6 +61,11 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
   match cwd with
   | None -> Ok (keeper_default_read_root ~config ~meta)
   | Some raw_cwd ->
+    (* File tools keep the logical projection for cwd: a keeper-visible
+       relative cwd ("repos/<repo>") composed with a relative file_path is
+       established Read vocabulary (test_keeper_visible_path_projection).
+       Execute/search cwd goes through the strict no-projection resolvers
+       instead (keeper_tool_execute_path). *)
     let* cwd = resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd in
     if safe_is_dir cwd
     then Ok cwd
@@ -944,23 +949,9 @@ let decide_file_write
     }
 ;;
 
-let file_write_deferred_json ~target ~approval_id ~reason =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "error", `String "gate_deferred"
-       ; ( "message"
-         , `String
-             "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper lane will wake after resolution." )
-       ; "path", `String target
-       ; "gate_request_id", `String approval_id
-       ; "gate_status", `String "pending"
-       ; "gate_nonblocking", `Bool true
-       ; "gate_reason", `String (Keeper_gate.deferred_reason_to_string reason)
-       ])
-;;
-
 type file_write_attempt =
   | Write_succeeded of string
+  | Write_deferred of Keeper_gate_deferred_payload.t
   | Write_failed of
       { payload : string
       ; class_ : Tool_result.tool_failure_class
@@ -1466,6 +1457,8 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
 
 let file_write_attempt_to_execution = function
   | Write_succeeded payload -> Keeper_tool_execution.success payload
+  | Write_deferred deferred ->
+    Keeper_gate_deferred_payload.to_execution deferred
   | Write_failed { payload; class_ } -> Keeper_tool_execution.failure ~class_ payload
   | Write_failed_data { message; data; class_ } ->
     Keeper_tool_execution.failure_data ~class_ ~message data
@@ -1744,10 +1737,13 @@ let handle_file_write_with_outcome
     with
     | Keeper_gate.Deferred { approval_id; reason } ->
       Ok
-        (Write_failed
-           { payload = file_write_deferred_json ~target ~approval_id ~reason
-           ; class_ = Tool_result.Workflow_rejection
-           })
+        (Write_deferred
+           (Keeper_gate_deferred_payload.create
+              ~operation:"filesystem_write"
+              ~approval_id
+              ~reason
+              ~context:(`Assoc [ "path", `String target ])
+              ()))
     | Keeper_gate.Unavailable reason ->
       Ok
         (Write_failed

@@ -19,19 +19,25 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 
 let status_of_result : Tool_result.result -> string = function
-  | Ok _ -> "ok"
-  | Error _ -> "error"
+  | Tool_result.Completed _ -> "ok"
+  | (Tool_result.Deferred _ as result) -> Tool_result.string_of_disposition result
+  | Tool_result.Failed _ -> "error"
 ;;
 
 let structured_content_of_result : Tool_result.result -> Yojson.Safe.t option =
   function
-  | Ok { data = (`Assoc _ as data); _ }
-  | Error { data = (`Assoc _ as data); _ } -> Some data
-  | Ok
+  | Tool_result.Completed { data = (`Assoc _ as data); _ }
+  | Tool_result.Deferred { data = (`Assoc _ as data); _ }
+  | Tool_result.Failed { data = (`Assoc _ as data); _ } -> Some data
+  | Tool_result.Completed
       { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
       ; _
       }
-  | Error
+  | Tool_result.Deferred
+      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      ; _
+      }
+  | Tool_result.Failed
       { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
       ; _
       } -> None
@@ -139,12 +145,25 @@ let record_mcp_server_operation_duration_sample ~tool_name ~success ~duration_se
 let record_mcp_server_operation_duration result ~duration_ms =
   record_mcp_server_operation_duration_sample
     ~tool_name:(Tool_result.tool_name result)
-    ~success:(Tool_result.is_success result)
+    ~success:(not (Tool_result.is_failed result))
     ~duration_seconds:(float_of_int duration_ms /. 1000.0)
+;;
+
+(** MCP tools/call [arguments] is optional (spec: "arguments?: object").
+    Absence therefore means an empty object. An explicitly supplied [`Null]
+    is not absence and must remain [`Null] so OAS strict validation rejects it
+    instead of silently repairing an invalid wire value. *)
+let arguments_of_params = function
+  | `Assoc fields ->
+    (match List.assoc_opt "arguments" fields with
+     | None -> `Assoc []
+     | Some value -> value)
+  | _ -> `Null
 ;;
 
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
+  let arguments_of_params = arguments_of_params
   let record_mcp_server_operation_duration = record_mcp_server_operation_duration
   let record_mcp_server_operation_duration_sample =
     record_mcp_server_operation_duration_sample
@@ -235,7 +254,7 @@ let runtime_mcp_keeper_tool_call_sse_payload
     ~(keeper_name : string)
     ~(tool_name : string)
     ~(duration_ms : int)
-    ~(success : bool)
+    ~(disposition : ('completed, 'deferred, 'failed) Tool_result.disposition)
     ~(arguments : Yojson.Safe.t)
     ~(message : string) : Yojson.Safe.t =
   let base_fields =
@@ -244,13 +263,15 @@ let runtime_mcp_keeper_tool_call_sse_payload
       ("name", `String keeper_name);
       ("tool_name", `String tool_name);
       ("duration_ms", `Int duration_ms);
-      ("success", `Bool success);
+      ("disposition", `String (Tool_result.string_of_disposition disposition));
       ("ts_unix", `Float (Time_compat.now ()));
     ]
   in
   let error_fields =
-    if success then []
-    else [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
+    match disposition with
+    | Tool_result.Completed _ | Tool_result.Deferred _ -> []
+    | Tool_result.Failed _ ->
+      [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
   in
   let io_fields =
     Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
@@ -385,7 +406,7 @@ let record_runtime_mcp_keeper_tool_trace
     ~(tool_name : string)
     ~(arguments : Yojson.Safe.t)
     ~(message : string)
-    ~(success : bool)
+    ~(disposition : ('completed, 'deferred, 'failed) Tool_result.disposition)
     ~(duration_ms : int) : unit =
   let ctx =
     runtime_mcp_keeper_log_context_of_entry
@@ -396,6 +417,11 @@ let record_runtime_mcp_keeper_tool_trace
   (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
      the tool_calls row and the trajectory row below share the value. *)
   let execution_id = Ids.Execution_id.generate () in
+  let success =
+    match disposition with
+    | Tool_result.Completed _ | Tool_result.Deferred _ -> true
+    | Tool_result.Failed _ -> false
+  in
   Keeper_tool_call_log.log_call
     ~keeper_name:ctx.keeper_name
     ~tool_name
@@ -435,14 +461,14 @@ let record_runtime_mcp_keeper_tool_trace
        ~keeper_name:ctx.keeper_name
        ~tool_name
        ~duration_ms
-       ~success
+       ~disposition
        ~arguments
        ~message)
 
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
   let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
-  let arguments = Yojson.Safe.Util.member "arguments" params in
+  let arguments = arguments_of_params params in
   let identity =
     Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
@@ -473,7 +499,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
     | Full | Operator_remote ->
-        (Json_util.get_string params "name" |> Option.value ~default:"", Yojson.Safe.Util.member "arguments" params)
+        (* DET-OK: pre-existing empty-name default fails typed downstream; arguments_of_params maps MCP-optional absence to a typed empty object. *)
+        (Json_util.get_string params "name" |> Option.value ~default:"", arguments_of_params params)
   in
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
@@ -518,7 +545,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let result = execute () in
   let attempts = 1 in
-  let success = Tool_result.is_success result
+  let success = not (Tool_result.is_failed result)
   and message = Tool_result.message result
   in
   let end_time = Eio.Time.now clock in
@@ -614,7 +641,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (match keeper_entry with
    | Some entry ->
        Keeper_registry.record_tool_use
-         ~base_path:entry.base_path entry.name ~tool_name:name ~success;
+         ~base_path:entry.base_path entry.name ~tool_name:name ~disposition:result;
        Keeper_registry_tool_usage_persistence.mark_dirty ~base_path:entry.base_path entry.name
    | None -> ());
 
@@ -694,7 +721,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
 
   (* Track in-memory call counter for all declared tool names (including hidden). *)
   Tool_registry.record_call_if_known ~source ?assignment_id:called_assignment_id_opt
-    ~tool_name:name ~success ~duration_ms ();
+    ~tool_name:name ~disposition:result ~duration_ms ();
 
   let activity_payload =
     let tool_args_preview =
@@ -739,7 +766,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ~tool_name:name
             ~arguments
             ~message
-            ~success
+            ~disposition:result
             ~duration_ms
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn)

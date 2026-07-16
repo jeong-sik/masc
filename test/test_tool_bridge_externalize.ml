@@ -137,7 +137,7 @@ let test_to_oas_typed_error_ignores_json_metadata () =
     {|{"ok":false,"error":"try again","recoverable":true,"error_class":"transient_mutex_contention"}|}
   in
   let tr : Tool_result.result =
-    Error
+    Tool_result.Failed
       { Tool_result.class_ = Tool_result.Runtime_failure
       ; message = msg
       ; data = Yojson.Safe.from_string msg

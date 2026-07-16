@@ -196,7 +196,7 @@ end
 let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
   let open struct
     let client =
-      Mirage_crypto_rng_unix.use_default ();
+      Crypto_rng.ensure_default ();
       Httpc.create net
     ;;
 

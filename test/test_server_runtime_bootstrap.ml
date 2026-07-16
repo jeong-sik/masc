@@ -1056,7 +1056,8 @@ let test_tool_usage_log_uses_cluster_root () =
           Tool_usage_log.init ~base_path:dir ~cluster_name:"cluster-alpha" ();
           Tool_usage_log.log_call
             ~on_io_failure:(fun ~site:_ _ -> ())
-            ~tool_name:"keeper_tasks_list" ~success:true
+            ~tool_name:"keeper_tasks_list"
+            ~disposition:(Tool_result.Completed ())
             ~caller:(Some "oracle");
           let expected_dir =
             Filename.concat
@@ -1072,8 +1073,20 @@ let test_tool_usage_log_uses_cluster_root () =
             (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
           Alcotest.(check bool) "legacy tool_usage dir absent" false
             (Sys.file_exists legacy_dir);
-          Alcotest.(check int) "tool_usage row readable from cluster store" 1
-            (List.length (Tool_usage_log.read_recent ~n:10 ()))))
+          match Tool_usage_log.read_recent ~n:10 () with
+          | [ row ] ->
+            Alcotest.(check string)
+              "tool_usage row preserves disposition"
+              "completed"
+              Yojson.Safe.Util.(row |> member "disposition" |> to_string);
+            Alcotest.(check bool)
+              "tool_usage row has no legacy success bool"
+              true
+              Yojson.Safe.Util.(row |> member "success" = `Null)
+          | rows ->
+            Alcotest.failf
+              "expected one tool_usage row from cluster store, got %d"
+              (List.length rows)))
 
 let test_keeper_tool_call_log_uses_cluster_root () =
   with_temp_dir "startup-tool-call-cluster" (fun dir ->
@@ -3503,7 +3516,7 @@ let test_lazy_startup_plan_groups_independent_tasks () =
             "keeper_history_migration";
           ];
       check_lazy_group tool_state ~name:"tool_state" ~execution:"serial"
-        ~tasks:[ "telemetry_warmup"; "tool_metrics_restore" ];
+        ~tasks:[ "tool_metrics_restore" ];
       check_lazy_group cleanup ~name:"cleanup" ~execution:"serial"
         ~tasks:[ "jsonl_prune" ];
       Alcotest.(check (list string))
@@ -3513,7 +3526,6 @@ let test_lazy_startup_plan_groups_independent_tasks () =
           "reconcile_active_agents";
           "prompt_bootstrap";
           "keeper_history_migration";
-          "telemetry_warmup";
           "tool_metrics_restore";
           "jsonl_prune";
         ]

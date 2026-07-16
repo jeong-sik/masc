@@ -1116,8 +1116,15 @@ let start_keeper_loops_owned
       Eio.Switch.run (fun recovery_sw ->
         List.iter
           (fun operation ->
-             Eio.Fiber.fork ~sw:recovery_sw (fun () ->
-               try
+             fork_logged_fiber
+               ~sw:recovery_sw
+               ~on_error:(fun exn ->
+                 Log.Keeper.error
+                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
+                   operation.Keeper_shutdown_types.keeper_name
+                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                   (Printexc.to_string exn))
+               (fun () ->
                  match Keeper_shutdown_runtime.recover_operation ~config operation with
                  | Ok recovered ->
                    Log.Keeper.info
@@ -1129,15 +1136,7 @@ let start_keeper_loops_owned
                      "shutdown recovery failed keeper=%s operation=%s error=%s"
                      operation.Keeper_shutdown_types.keeper_name
                      (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-                     detail
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn ->
-                 Log.Keeper.error
-                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
-                   operation.Keeper_shutdown_types.keeper_name
-                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-                   (Printexc.to_string exn)))
+                     detail))
           restored.operations));
   fork_logged_fiber
     ~sw
@@ -1578,7 +1577,14 @@ let start_keeper_loops_owned
         in
         List.iteri
           (fun idx name ->
-             Eio.Fiber.fork ~sw (fun () ->
+             fork_logged_fiber
+               ~sw
+               ~on_error:(fun exn ->
+                 Log.Keeper.error
+                   "autoboot retry crashed keeper=%s error=%s"
+                   name
+                   (Printexc.to_string exn))
+               (fun () ->
                let rec retry_loop round =
                  if Keeper_registry.is_registered ~base_path:config.base_path name
                  then

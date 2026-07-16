@@ -74,7 +74,7 @@ if ! $reuse_existing; then
   mkdir -p "$coverage_dir"
   (
     cd "$root_dir"
-    CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+    CI_TEST_HEARTBEAT_SEC=30 \
       ./scripts/ci-run-tests.sh \
       "BISECT_FILE='$coverage_dir/bisect' ./scripts/dune-local.sh test --instrument-with bisect_ppx --force"
   )

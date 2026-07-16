@@ -47,13 +47,12 @@ let run_first_judge
       ~question
       ~clock
       ~judge_web_tools
-      ~judge_max_tool_calls
       ~already_timed_out
       (j : Fusion_policy.judge_spec)
   : judge_run
   =
   let id = Fusion_policy.panelist_id ~label:j.jlabel ~model:j.jmodel in
-  let _ = preset, judge_web_tools, judge_max_tool_calls, already_timed_out in
+  let _ = preset, judge_web_tools, already_timed_out in
   let result =
     Fusion_judge.run
       ~sw
@@ -64,7 +63,6 @@ let run_first_judge
       ~question
       ~panel
       ~web_tools:j.jweb_tools
-      ~max_tool_calls:0
       ()
   in
   let elapsed_s = elapsed_since_t0 clock in
@@ -85,7 +83,6 @@ let run_first_judges
       ~question
       ~clock
       ~judge_web_tools
-      ~judge_max_tool_calls
       judges
   =
   let run_first_judge =
@@ -97,7 +94,6 @@ let run_first_judges
       ~question
       ~clock
       ~judge_web_tools
-      ~judge_max_tool_calls
   in
   let _ = max_concurrent_judges in
   Eio.Fiber.List.map
@@ -189,7 +185,6 @@ let run_fallback_judge
       ~question
       ~clock
       ~judge_web_tools
-      ~judge_max_tool_calls
       ()
   =
   match preset.Fusion_policy.fallback_judge_model with
@@ -201,7 +196,6 @@ let run_fallback_judge
       ; jlabel = "fallback"
       ; jsystem_prompt = preset.Fusion_policy.judge_system_prompt
       ; jweb_tools = judge_web_tools
-      ; jmax_tool_calls = judge_max_tool_calls
       ; jmax_output_tokens = preset.Fusion_policy.judge_max_output_tokens
       ; jtimeout_s = preset.Fusion_policy.judge_timeout_s
       ; jmax_timeout_s = None
@@ -242,7 +236,6 @@ let run_fallback_judge
             ~question
             ~panel
             ~web_tools:judge_web_tools
-            ~max_tool_calls:judge_max_tool_calls
             ()
         in
         let elapsed_s = elapsed_since_t0 clock in

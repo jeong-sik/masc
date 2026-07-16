@@ -2,7 +2,63 @@
 
 let enabled () = Env_config_keeper.KeeperWireCapture.enabled ()
 
-let redact = Llm_provider.Secret_redactor.redact_string
+(* OAS 0.212 (oas@6f3648d6) narrowed Secret_redactor to header-shaped
+   secrets and deliberately stopped classifying bare provider token
+   strings. Wire captures persist raw prompts/responses to disk, so masc
+   restores GitHub-token masking here at its own boundary. GitHub token
+   prefixes are designed for detection (secret-scanning contract), so a
+   prefix scan is the intended mechanism, not a heuristic. *)
+let github_token_prefixes =
+  [ "github_pat_"; "ghp_"; "gho_"; "ghu_"; "ghs_"; "ghr_" ]
+
+let is_github_token_char = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
+  | _ -> false
+
+(* Classic PATs carry 36 random characters after the prefix; requiring a
+   minimum run keeps prose like "ghp_" or "ghs_test" readable. *)
+let min_github_token_suffix = 16
+
+let redact_github_tokens text =
+  let length = String.length text in
+  let buffer = Buffer.create length in
+  let prefix_at index =
+    List.find_opt
+      (fun prefix ->
+         let plen = String.length prefix in
+         index + plen <= length
+         && String.equal (String.sub text index plen) prefix
+         && (index = 0 || not (is_github_token_char text.[index - 1])))
+      github_token_prefixes
+  in
+  let rec scan index =
+    if index >= length
+    then Buffer.contents buffer
+    else (
+      match prefix_at index with
+      | None ->
+        Buffer.add_char buffer text.[index];
+        scan (index + 1)
+      | Some prefix ->
+        let start_of_suffix = index + String.length prefix in
+        let rec run_end at =
+          if at < length && is_github_token_char text.[at]
+          then run_end (at + 1)
+          else at
+        in
+        let stop = run_end start_of_suffix in
+        if stop - start_of_suffix >= min_github_token_suffix
+        then (
+          Buffer.add_string buffer "[REDACTED]";
+          scan stop)
+        else (
+          Buffer.add_string buffer prefix;
+          scan start_of_suffix))
+  in
+  scan 0
+
+let redact text =
+  redact_github_tokens (Llm_provider.Secret_redactor.redact_string text)
 
 (* Dated per-day store, mirroring the cost-ledger appender
    ([Keeper_hooks_oas_cost_events.emit_cost_event]); concurrent keepers

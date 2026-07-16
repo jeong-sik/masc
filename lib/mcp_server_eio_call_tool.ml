@@ -483,6 +483,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
     | Full | Operator_remote ->
+        (* DET-OK: pre-existing empty-name default fails typed downstream; arguments_of_params maps MCP-optional absence to a typed empty object. *)
         (Json_util.get_string params "name" |> Option.value ~default:"", arguments_of_params params)
   in
   (* Measure execution time for telemetry *)

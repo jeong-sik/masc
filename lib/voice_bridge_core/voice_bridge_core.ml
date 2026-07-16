@@ -167,14 +167,6 @@ let local_playback_argvs ?path_value ~audio_file () =
     | Some path -> Some (path :: args @ [ audio_file ])
     | None -> None)
 
-(* Playback subprocess timeout. The Exec_gate default (60s) used to kill any
-   player mid-play on audio longer than a minute; Process_eio reports the
-   kill as WEXITED 124 and the candidate loop then replayed the SAME file
-   from 0:00 through the fallback player — the audible-repeat amplifier in
-   the 2026-06-10 voice incident. Derive the budget from the probed audio
-   duration instead. *)
-let playback_timeout_margin_sec = 30.0
-let unknown_duration_playback_timeout_sec = 300.0
 let duration_probe_timeout_sec = 10.0
 
 let parse_afinfo_duration output =
@@ -202,11 +194,6 @@ let parse_afinfo_duration output =
     else None)
 
 let parse_ffprobe_duration output = float_of_string_opt (String.trim output)
-
-let playback_timeout_sec_for ~duration_sec =
-  match duration_sec with
-  | Some duration -> duration +. playback_timeout_margin_sec
-  | None -> unknown_duration_playback_timeout_sec
 
 let audio_duration_seconds ~audio_file =
   let probe argv parse =
@@ -277,12 +264,6 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
           (Printf.sprintf "local voice playback unavailable: %s" reason);
         `Failed reason
       | candidates ->
-        (* Probe BEFORE taking the playback mutex so a slow probe never
-           extends the global playback serialization window. *)
-        let playback_timeout_sec =
-          playback_timeout_sec_for
-            ~duration_sec:(audio_duration_seconds ~audio_file)
-        in
         File_lock_eio.with_lock (playback_lock_path ()) (fun () ->
           let dedup_hit =
             match message with
@@ -323,7 +304,6 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                       ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
                       ~raw_source
                       ~summary:"voice local playback"
-                      ~timeout_sec:playback_timeout_sec
                       argv
                   with
                   | Unix.WEXITED 0, _ ->
@@ -343,25 +323,6 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                            agent_id audio_file executable dur);
                       `Played dur
                     end
-                  | Unix.WEXITED 124, _ ->
-                    (* WEXITED 124 is Process_eio's synthesized status for a
-                       timeout kill: the player ran past the probed duration
-                       + margin, so partial audio has almost certainly been
-                       heard. Terminal on purpose — falling through to the
-                       next candidate would replay the SAME file from 0:00. *)
-                    let reason =
-                      Printf.sprintf
-                        "%s killed by playback timeout after %.0fs; partial \
-                         audio may have played, not retrying with fallback \
-                         player"
-                        executable playback_timeout_sec
-                    in
-                    log_error
-                      (Printf.sprintf
-                         "local voice playback timed out (terminal): agent=%s \
-                          file=%s via=%s timeout=%.0fs"
-                         agent_id audio_file executable playback_timeout_sec);
-                    `Failed reason
                   | Unix.WEXITED code, output ->
                     let failure =
                       Printf.sprintf "%s exited %d%s" executable code

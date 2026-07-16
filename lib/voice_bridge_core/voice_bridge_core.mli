@@ -75,16 +75,7 @@ val voice_mcp_port : unit -> int
    per-process piaf pool.  See voice_bridge_core.ml for the in-place
    note explaining the migration. *)
 
-(** {1 Playback timeout} *)
-
-val playback_timeout_margin_sec : float
-(** Extra seconds granted on top of the probed audio duration before the
-    player subprocess is killed. *)
-
-val unknown_duration_playback_timeout_sec : float
-(** Player subprocess timeout when the audio duration cannot be probed.
-    Generous on purpose: killing a player mid-play used to cascade into the
-    fallback chain replaying the same file from 0:00. *)
+(** {1 Playback observation} *)
 
 val parse_afinfo_duration : string -> float option
 (** Parse the ["estimated duration: 12.345 sec"] line from [afinfo] output. *)
@@ -92,10 +83,6 @@ val parse_afinfo_duration : string -> float option
 val parse_ffprobe_duration : string -> float option
 (** Parse the bare-seconds stdout of
     [ffprobe -show_entries format=duration -of default=noprint_wrappers=1:nokey=1]. *)
-
-val playback_timeout_sec_for : duration_sec:float option -> float
-(** [duration +. playback_timeout_margin_sec] when the duration is known,
-    {!unknown_duration_playback_timeout_sec} otherwise. *)
 
 val audio_duration_seconds : audio_file:string -> float option
 (** Probe the audio duration via [afinfo] (macOS) or [ffprobe]. [None] when
@@ -132,11 +119,8 @@ val run_local_playback :
       check-then-act race);
     - [`Skipped reason] — playback was intentionally skipped, for example
       because local playback is disabled for the agent;
-    - [`Failed reason] — local playback was requested but no candidate player
-      succeeded, or the player was killed by the playback timeout. A timeout
-      kill is terminal: the fallback chain is NOT tried, because partial audio
-      has likely played and a fallback player would replay the same file from
-      0:00 (the audible-repeat amplifier in the 2026-06-10 voice incident);
+    - [`Failed reason] — local playback was requested but every candidate
+      player exited unsuccessfully, was stopped/signalled, or raised;
     - [`Opened duration_seconds] — the file was handed to macOS [open(1)] after
       all blocking players failed. This is a GUI handoff fallback; playback
       completion is not observable from the runtime;

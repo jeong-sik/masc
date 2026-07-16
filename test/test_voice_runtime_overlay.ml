@@ -801,7 +801,7 @@ let test_keeper_voice_agent_reports_realtime_bridge_capability () =
         end_session ()))
 ;;
 
-let test_playback_timeout_parsers_and_budget () =
+let test_playback_duration_parsers () =
   check (option (float 0.001)) "afinfo duration line parses"
     (Some 236.6)
     (Voice_bridge_core.parse_afinfo_duration
@@ -812,13 +812,7 @@ let test_playback_timeout_parsers_and_budget () =
     (Some 61.25)
     (Voice_bridge_core.parse_ffprobe_duration "61.25\n");
   check (option (float 0.001)) "ffprobe N/A is None" None
-    (Voice_bridge_core.parse_ffprobe_duration "N/A");
-  check (float 0.001) "known duration gets margin"
-    (100.0 +. Voice_bridge_core.playback_timeout_margin_sec)
-    (Voice_bridge_core.playback_timeout_sec_for ~duration_sec:(Some 100.0));
-  check (float 0.001) "unknown duration uses generous default"
-    Voice_bridge_core.unknown_duration_playback_timeout_sec
-    (Voice_bridge_core.playback_timeout_sec_for ~duration_sec:None)
+    (Voice_bridge_core.parse_ffprobe_duration "N/A")
 ;;
 
 let write_local_playback_config () =
@@ -979,11 +973,11 @@ let () =
             `Quick
             test_keeper_voice_agent_reports_realtime_bridge_capability
         ] )
-    ; ( "playback_timeout"
+    ; ( "playback"
       , [ test_case
-            "duration parsers and timeout budget"
+            "duration parsers"
             `Quick
-            test_playback_timeout_parsers_and_budget
+            test_playback_duration_parsers
         ; test_case
             "open fallback reports handoff"
             `Quick

@@ -2,15 +2,27 @@
 
     Recall is intentionally one-way at prompt time: it reads persisted facts
     and episodes and returns their exact text in an advisory block suitable for
-    OAS [extra_system_context]. *)
+    OAS [extra_system_context].
+
+    masc#25052 P1: recall used to inject every current fact/episode in the
+    store, unbounded. It now applies a selection budget
+    ([Keeper_config.keeper_memory_os_recall_max_facts] /
+    [_max_episodes], live-tunable, default sized above all observed real
+    volumes): within budget, nothing changes (same items, same order); over
+    budget, the most-recent-[reference_time]/[created_at] items survive,
+    still rendered in their original relative order, and the drop is logged
+    plus counted (never silent). *)
 
 val render_context
   :  keeper_id:string
   -> now:float
   -> unit
   -> string
-(** Render every current fact and episode in persisted source order, without
-    truncation, ranking, deduplication, or fixed-size slices. *)
+(** Render every current fact and episode in persisted source order, up to
+    the configured selection budget (see the module doc). Below budget this
+    is byte-for-byte the old "no truncation, ranking, deduplication, or
+    fixed-size slices" behavior; over budget, the most recent items are kept
+    and a truncation is logged and counted. *)
 
 val enabled : unit -> bool
 (** Kill-switch flag [MASC_KEEPER_MEMORY_OS_RECALL] (default [true]).

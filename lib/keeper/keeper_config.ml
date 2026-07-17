@@ -65,6 +65,57 @@ let keeper_compact_max_tokens_rp =
 let keeper_compact_max_tokens () : int =
   Runtime_params.get keeper_compact_max_tokens_rp
 
+(* masc#25052 P1: Memory OS recall selection budget. Before this,
+   Keeper_memory_os_recall.render_context_exn injected the keeper's ENTIRE
+   current fact/episode store into every turn's prompt -- no selection
+   contract existed, so a keeper that accumulated facts/episodes without
+   bound (no retention existed either -- see the episode retention wired
+   into Keeper_memory_os_gc below) grew its per-turn prompt injection
+   without limit. These three knobs are the boundary: how many facts, how
+   many episodes, and how many rendered bytes recall may inject per turn.
+
+   Defaults are set at/above the largest volume observed in the 2026-07-17
+   lane analysis that diagnosed this (~300 facts, ~380 episode summaries,
+   ~1.5MB rendered per keeper turn), so a typical keeper today is truncated
+   by NONE of these -- this establishes a ceiling, not a retroactive
+   downsizing. Operators tune live via Runtime_params (no restart) as real
+   volumes grow. Truncation, when it does trigger, is always logged and
+   counted (Keeper_metrics.MemoryOsRecallFactsTruncated /
+   RecallEpisodesTruncated / RecallBytesOverBudget) -- never silent. *)
+let keeper_memory_os_recall_max_facts_rp =
+  _rp_int ~key:"keeper.memory_os.recall.max_facts"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS"
+                          ~default:500 ~min_v:0 ~max_v:100_000)
+    ~min_v:0 ~max_v:100_000
+    ~description:"Max facts Memory OS recall injects per turn (0 = inject none)" ()
+let keeper_memory_os_recall_max_facts () : int =
+  Runtime_params.get keeper_memory_os_recall_max_facts_rp
+
+let keeper_memory_os_recall_max_episodes_rp =
+  _rp_int ~key:"keeper.memory_os.recall.max_episodes"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MEMORY_OS_RECALL_MAX_EPISODES"
+                          ~default:500 ~min_v:0 ~max_v:100_000)
+    ~min_v:0 ~max_v:100_000
+    ~description:"Max episodes Memory OS recall injects per turn (0 = inject none)" ()
+let keeper_memory_os_recall_max_episodes () : int =
+  Runtime_params.get keeper_memory_os_recall_max_episodes_rp
+
+(* Observability-only for now: logged and counted
+   (MemoryOsRecallBytesOverBudget) when the rendered block exceeds this, but
+   not itself used to drop additional facts/episodes -- max_facts/
+   max_episodes above are the enforced boundary. A byte-accurate secondary
+   truncation is a reasonable follow-up once real overage data exists;
+   scope-cut here rather than adding untested incremental-trim logic. 0
+   disables the check (unbounded). *)
+let keeper_memory_os_recall_max_bytes_rp =
+  _rp_int ~key:"keeper.memory_os.recall.max_bytes"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MEMORY_OS_RECALL_MAX_BYTES"
+                          ~default:2_000_000 ~min_v:0 ~max_v:50_000_000)
+    ~min_v:0 ~max_v:50_000_000
+    ~description:"Rendered recall block byte threshold to log/count as over-budget (0 = disabled)" ()
+let keeper_memory_os_recall_max_bytes () : int =
+  Runtime_params.get keeper_memory_os_recall_max_bytes_rp
+
 (** Cooldown between compaction attempts.  Previous default (90s) exceeded
     the proactive heartbeat interval (30s), permanently blocking compaction
     for proactive keepers.  15s allows compaction to fire every other cycle. *)

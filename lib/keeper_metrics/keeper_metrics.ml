@@ -196,6 +196,7 @@ type t =
   | MemoryOsReobserveEchoSuppressed
   | MemoryOsRecallFactsTruncated
   | MemoryOsRecallEpisodesTruncated
+  | MemoryOsRecallBytesOverBudget
   | MemoryOsEpisodeRetentionPruned
   | MemoryOsLibrarianRuntimeSlotBusy
   | RuntimeHttpProbeJsonParseFailures
@@ -427,6 +428,8 @@ let to_string = function
       "masc_keeper_memory_os_recall_facts_truncated_total"
   | MemoryOsRecallEpisodesTruncated ->
       "masc_keeper_memory_os_recall_episodes_truncated_total"
+  | MemoryOsRecallBytesOverBudget ->
+      "masc_keeper_memory_os_recall_bytes_over_budget_total"
   | MemoryOsEpisodeRetentionPruned ->
       "masc_keeper_memory_os_episode_retention_pruned_total"
   | MemoryOsLibrarianRuntimeSlotBusy ->

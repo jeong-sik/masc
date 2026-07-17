@@ -2,8 +2,8 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 14:13 KST
-> MASC `origin/main`: `5d3ba008e6`
+> Checked: 2026-07-17 14:22 KST
+> MASC `origin/main`: `2fa0e6b30d`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
 > Browser matrix: [`2026-07-17-keeper-full-feature-goal-matrix.html`](audit/2026-07-17-keeper-full-feature-goal-matrix.html)
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 14:13 KST; confidence High.
+2026-07-17 14:22 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -266,13 +266,14 @@ domain fact.
 
 | Work | Current truth | Missing proof |
 |---|---|---|
-| #25018 | Draft at `acc33cd728`; mergeable; Build and Test running | merge exact settlement source index after fresh green |
+| #25018 | Draft at `486b89497e`; Build and Test green; #25044 receipt is merged into this stack, not `main` | merge settlement source + canonical receipt stack to `main` |
 | #25026 | rebased to main at `e282d97103`; Build and Test running | fresh full CI, then merge the full durable append transaction |
-| #25044 canonical settlement receipt | Draft stacked on #25018; 218 changed lines; focused build and 15 direct cases green | fresh stacked CI, then WAL leaf |
+| #25044 canonical settlement receipt | Merged into #25018 parent at `486b89497e`; 218 changed lines; focused build and 15 direct cases green | #25018 main merge, then WAL leaf |
 | settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
-| #25046 structural compaction leaf | Draft, rebased to `5d3ba008e6`, 397 lines; static green, exact-head focused build waits on external bare Dune | OAS typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |
-| #25049 per-Keeper Auto Judge drain | Open 397-line parent; full CI running; latest-main rebase and 378-line strict FIFO child in local proof | publish exact parent/child stack after focused build |
-| OAS #2646 checkpoint-stage codec | Draft stacked on #2642; 87 lines; focused build and 9 direct cases green | merge after #2642, then Journal settlement authority |
+| #25046 structural compaction leaf | Draft at `ed6248c7c1`, 397 lines; all completed checks green and Build and Test running | OAS typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |
+| #25049 per-Keeper Auto Judge drain | Open 397-line parent; full CI green; latest-main parent and 379-line strict FIFO child in exact focused proof | publish exact parent/child stack after focused build |
+| OAS #2646 checkpoint-stage codec | Draft stacked on green #2642; 87 lines; focused build and 9 direct cases green | merge after #2642, then Journal settlement authority |
+| OAS #2647 exact request measurement | Draft on `main`; 172 lines; focused build and 6 direct cases green; full OCaml CI running | add Agent-owned same-value measure/dispatch identity boundary |
 | #24993 | conflicting and red | supersede; do not use as current compaction proof |
 | #24994 | Draft, green typed terminal leaf | re-evaluate after clean replacement stack |
 

@@ -47,9 +47,11 @@ Slack WSS ↔ slack_socket_client (OCaml, Eio fiber, reuses discord_wss_connecti
                 ↓ parse envelope, ack, emit
           Slack_gateway_state (pure FSM: hello/connected/reconnect)
                 ↓ Emit_event (message/app_mention)
-          Channel_gate.handle_inbound_streaming (existing)
+          Channel_gate.handle_inbound (existing)
                 ↓
-          keeper workspace (existing)
+          Gate_keeper_backend.accept_connector
+                ↓ durable receipt
+          Keeper_chat_queue (existing)
 
 keeper → Channel_gate_slack_state.send_message → Masc_http_client.post_sync chat.postMessage
 ```
@@ -178,7 +180,9 @@ failure (DNS/TLS/handshake) is fed as `Wss_closed` — there is no separate
    + `slack_rest_client.auth_test` (bot identity) + the leaf-owned typed
    delivery projection. Bridges
    triggered `Message_create`/`App_mention` to
-   `Channel_gate.handle_inbound_streaming` with a threaded streaming reply.
+   `Channel_gate.handle_inbound`, which durably accepts the exact leaf delivery
+   before returning the threaded queue acknowledgement. Final replies are owned
+   by the serial Keeper chat consumer and Slack outbound adapter.
    Ambient recording, idle-keeper wake, and reaction-as-trigger are deferred.
 4. **PR-4 (pending)**: delete `sidecars/slack-bot/` + remove Slack branch from
    `server_routes_http_routes_sidecar` + drop `channel_gate_sidecar_state`

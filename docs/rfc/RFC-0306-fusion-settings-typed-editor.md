@@ -3,7 +3,7 @@ rfc: "0306"
 title: "Typed, comment-preserving fusion settings editor"
 status: Draft
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-17
 author: vincent
 supersedes: []
 superseded_by: null
@@ -16,7 +16,7 @@ implementation_prs:
 
 ## 1. Problem
 
-The dashboard fusion settings surface (`#settings?section=fusion`) exposes four
+The dashboard fusion settings surface (`#settings?section=fusion`) exposes three
 editable scalars while the fusion backend schema and the judge-of-judges (JoJ,
 RFC-0283) engine behind it are fully implemented. The operator cannot edit the
 panel roster, the meta judge, or the JoJ first-round judges from the UI; they
@@ -28,15 +28,18 @@ accurate.
 Editable in the panel (frontend line-surgical scalar writer,
 `dashboard/src/lib/fusion-settings.ts:262-277`):
 
-- `[fusion].enabled`, `[fusion].default_preset`, `[fusion].max_concurrent_panels`
+- `[fusion].enabled`, `[fusion].default_preset`
 - `[fusion.presets.<default>].min_answered`
 
 Read-only display only (`dashboard/src/lib/fusion-preset-view.ts`, header comment
 "display-only reader — it never writes back"):
 
 - `panel = [...]` roster, `judge` (meta), `[[fusion.presets.<name>.judges]]` (JoJ
-  first-round judges),
-  `max_tool_calls_per_panel`, `max_concurrent_judges`, `staged_judge_group_size`.
+  first-round judges), `max_tool_calls_per_panel`, `staged_judge_group_size`.
+
+`max_concurrent_panels` and `max_concurrent_judges` were removed in the Fusion
+concurrency hard-cut. They were inert settings, not execution controls;
+configured model identities are now the only Fusion-local fan-out authority.
 
 Backend schema (`lib/fusion_core/fusion_config.ml`, `lib/fusion_core/fusion_policy.ml`)
 and orchestrator (`lib/fusion/fusion_orchestrator.ml:145` `run_judge_of_judges`)
@@ -48,9 +51,9 @@ The frontend edits `runtime.toml` by line-surgical string replacement of scalar
 keys. That method cannot express multi-line arrays (`panel`) or array-of-tables
 (`[[...judges]]`), so those fields were left read-only rather than given a wrong
 writer. The reason the frontend does line surgery at all is comment preservation:
-`config/runtime.toml`'s `[fusion]` block carries 38 comment lines that document
-per-field intent (concurrency knob separation, capability requirements, prompt
-sourcing). Those comments are load-bearing operator documentation.
+`config/runtime.toml`'s `[fusion]` block carries comments that document
+per-field intent (capability requirements, topology, and prompt sourcing).
+Those comments are load-bearing operator documentation.
 
 Otoml cannot round-trip them: its lexer discards comments
 (`toml_lexer.ml:read_comment` emits no token) and its AST has no comment node

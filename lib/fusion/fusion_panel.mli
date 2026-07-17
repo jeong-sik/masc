@@ -15,6 +15,7 @@
     - [groups]: 각 그룹은 자기 [system_prompt]/[web_tools]로
       모델들을 에이전트로 빌드한다 (그룹마다 다를 수 있음 = 이종). 모든 그룹의
       에이전트를 하나의 [Async_agent.all]에 union으로 던진다.
+      설정된 모델 전체가 정확한 fan-out 집합이며 Fusion은 별도 수치 cap을 두지 않는다.
     - [web_tools]가 true인 그룹은 web_search/web_fetch 도구를 주입한다.
     - 패널 답변 계약은 free text다: 응답의 visible text 전체(trim)가 답변이 된다.
       빈 텍스트만 [Failed Empty_response]. JSON envelope를 요구하지 않는다 —
@@ -27,7 +28,6 @@
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> max_fibers:int
   -> groups:Fusion_policy.panel_group list
   -> prompt:string
   -> unit

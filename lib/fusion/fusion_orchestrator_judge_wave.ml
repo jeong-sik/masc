@@ -69,7 +69,6 @@ let run_first_judge
 let run_first_judges
       ~sw
       ~net
-      ~max_concurrent_judges
       ~preset
       ~panel
       ~question
@@ -87,9 +86,7 @@ let run_first_judges
       ~clock
       ~judge_web_tools
   in
-  let _ = max_concurrent_judges in
   Eio.Fiber.List.map
-    ~max_fibers:(max 1 (List.length judges))
     (run_first_judge ~already_timed_out:false)
     judges
 ;;

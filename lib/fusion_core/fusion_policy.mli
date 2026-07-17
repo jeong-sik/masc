@@ -67,11 +67,6 @@ val min_answered_floor : int
 
 val default_min_answered : int
 
-(** Legacy config default copied from the retired OpenRouter panel bound.
-    Execution does not read it. The stacked schema hard-cut deletes this value
-    with the dead config field. *)
-val default_max_concurrent_judges : int
-
 (** Default staged JOJ group size. A staged judge-of-judges run groups first
     judges into fixed-size cohorts before a final meta reduction; default 3
     expresses the common 3x3x3 shape. *)
@@ -196,8 +191,6 @@ end
 type t =
   { enabled : bool
   ; default_preset : string
-  ; max_concurrent_panels : int
-  ; max_concurrent_judges : int
   ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }

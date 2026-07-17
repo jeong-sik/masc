@@ -13,7 +13,7 @@ Add a keeper-callable tool that starts an arbitrary unit of background work, ret
 
 This is **not a new capability**. The exact mechanism already ships once, as `masc_fusion` (RFC-0252/0266): `register_running` before fork, `Eio.Fiber.fork ~sw` on the server-lifetime switch, immediate `{status: "fusion_started", run_id}` return without awaiting, and completion delivered via `wakeup_keeper ~stimulus:(Fusion_completed ...)` or polled via `masc_fusion_status`. The fusion implementation is hardwired to judge-panel orchestration. This RFC generalizes the same fire-and-forget + wake skeleton into a task-generic surface, so background work other than fusion (subprocess execution, long-running tool calls) can use it without each caller reinventing the fork/registry/wake plumbing.
 
-Honest framing: because the pattern already exists and is exercised in production by fusion, the risk here is not "does the approach work" but "does generalizing it past fusion's narrow shape (LLM-only fibers, bounded panel count) reintroduce resource bugs that fusion's narrowness happened to avoid." Section 7 names three such bugs found by adversarial review of the design and makes fixing them acceptance gates, not follow-ups.
+Honest framing: because the pattern already exists and is exercised in production by fusion, the risk here is not "does the approach work" but "does generalizing it past fusion's narrow shape (LLM-only fibers) reintroduce resource bugs that fusion's narrowness happened to avoid." Section 7 names three such bugs found by adversarial review of the design and makes fixing them acceptance gates, not follow-ups.
 
 ## 2. Motivation
 
@@ -32,7 +32,16 @@ The second shape is what fusion already does and what RFC-0020 (hint signal `fib
 
 ### 2.3 Generalizing fusion is "mechanical" only if the resource model is identical — it is not
 
-Fusion forks LLM judge fibers: no OS file descriptors, and a hard cap (`max_concurrent_panels`, `fusion_orchestrator.ml:42,123`). A generic background tool that runs subprocesses via `Autonomy_exec.run` (`cdal_runtime/autonomy_exec.ml:295`) has neither property for free: the subprocess pipe FDs are registered with `Eio.Switch.on_release ~sw` (`autonomy_exec.ml:231-232`), and there is no built-in concurrency bound. Forking such work onto the server-lifetime root switch without correction leaks FDs for the server's whole lifetime and admits unbounded fibers. These are not theoretical; they are the two P0 findings in §7. The generalization is sound only with the §5 isolation and cap design.
+Fusion forks LLM judge fibers without OS file descriptors, but it has no
+Fusion-local numeric concurrency cap: configured model identities are the exact
+fan-out set. Durable host draining is tracked in #25032. A generic background
+tool that runs subprocesses via `Autonomy_exec.run`
+(`cdal_runtime/autonomy_exec.ml:295`) additionally owns subprocess pipe FDs;
+those are registered with `Eio.Switch.on_release ~sw`
+(`autonomy_exec.ml:231-232`). Forking such work onto the server-lifetime root
+switch without correction leaks FDs for the server's whole lifetime and admits
+unbounded fibers. These are not theoretical; they are acceptance gates in §7.
+The generalization is sound only with the §5 isolation and resource design.
 
 ## 3. Non-goals (explicitly excluded from v1)
 

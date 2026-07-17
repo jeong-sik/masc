@@ -6,6 +6,9 @@
 - Parent: RFC-0252 (fusion-panel-judge-deliberation) — §9(preset)를 개정. 위상 선택은 "Fusion as a Tool" 슬라이스 계열(refine/conditional)의 연장.
 - Scope: `lib/fusion_core/` (preset/config/types/policy), `lib/fusion/` (judge/orchestrator), `lib/keeper/keeper_tool_descriptor.ml` (스키마), `config/runtime.toml` (`[fusion.presets.*]`)
 - Boundary: OAS 0줄 변경. sink 계약 무변경. 기존 단일 `judge` 필드 **유지**(파괴 변경 없음). `simple`/`refine`/`conditional` 위상 동작 불변.
+- Concurrency update (2026-07-17): retired `max_concurrent_judges` never
+  controlled execution. Configured judge identities are the exact fan-out set;
+  MASC-owned durable host draining is tracked separately in #25032.
 
 ---
 
@@ -106,7 +109,8 @@ type preset =
 - judge 수는 group size로 나누어떨어져야 하며, 최소 두 개의 full group을 만들어야 한다.
   예: 9 judges + group size 3 → `3 + 3 + 3` stage meta → final meta. 8 judges + group
   size 3은 ragged라 실행 전 에러로 fail-closed.
-- 1차 judge wave와 stage meta wave는 `max_concurrent_judges` cap을 쓴다. Final meta는 1회 호출이다.
+- 1차 judge wave와 stage meta wave는 구성된 judge/group identity 전체를
+  실행한다. Fusion-local numeric cap은 없으며 Final meta는 1회 호출이다.
 - 각 stage meta 실패는 해당 stage의 첫 성공 1차 종합으로 degrade하고, final meta 실패는 첫 성공
   stage 종합으로 degrade한다. 모든 stage가 실패하면 canonical judge는 Error다.
 

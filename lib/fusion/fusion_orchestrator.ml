@@ -31,9 +31,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               groups
           in
           let panel =
-            let panel_count = max 1 (List.length (Fusion_policy.preset_models preset)) in
             Fusion_panel.run ~sw ~net
-              ~max_fibers:panel_count
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
           let judge_web_tools =
@@ -91,7 +89,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             Fusion_orchestrator_judge_wave.run_first_judges
               ~sw
               ~net
-              ~max_concurrent_judges:(max 1 (List.length judges))
               ~preset
               ~panel
               ~question:req.Fusion_types.prompt
@@ -252,9 +249,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               in
               let indexed_groups = List.mapi (fun i group -> (i + 1, group)) first_groups in
               let stage_runs =
-                Eio.Fiber.List.map
-                  ~max_fibers:(max 1 (List.length indexed_groups))
-                  run_stage_meta indexed_groups
+                Eio.Fiber.List.map run_stage_meta indexed_groups
               in
               let stage_results = List.map fst stage_runs in
               let stage_nodes = List.concat_map snd stage_runs in

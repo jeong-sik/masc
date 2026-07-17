@@ -817,28 +817,36 @@ OAS `Capability_vocab` is the vocabulary SSOT. Its target public hard-cut API is
 `decode_thinking_control_format` over the exact `{ label; token }` wire pair and
 the exhaustive inverse `encode_thinking_control_format`. Decode compares
 canonical labels exactly and returns typed `Unknown_label of string`,
-`Token_required`, or `Token_forbidden` errors.
+`Token_required`, `Token_forbidden`, or `Invalid_token` errors. The token is a
+validated value; empty or padded text cannot cross the codec and no caller
+prevalidation is required.
 
-MASC extracts the two TOML fields into OAS
-`Capability_vocab.thinking_control_format_fields` and calls
-`decode_thinking_control_format` directly. Dashboard output calls
-`encode_thinking_control_format` directly.
-Canonical OAS labels are the only accepted values; current hyphenated aliases
-are migrated in checked-in/deployment configuration and then removed. The
-legacy normalizing `thinking_control_format_of_label_and_token` cannot sit on
-MASC readiness or request paths; any one-time configuration rewrite is an
-offline migration, not a shipped compatibility path. Otherwise an alias table
-and lossy normalization remain hidden semantic inputs despite having moved
-repositories.
+MASC does **not** parse those two capability fields through the OAS decoder.
+That would centralize vocabulary while leaving two declaration authorities.
+The hard cut removes `thinking_control_format` and
+`thinking_control_token` from the MASC runtime schema and checked-in
+`runtime.toml`; the closed schema rejects either retired key. OAS
+`models.toml`, an OAS checked overlay, or an OAS checked custom-binding
+declaration is the only capability authority. A MASC logical runtime role
+contains only its opaque OAS binding reference.
 
-Unknown/noncanonical labels, a missing token for a token-bearing format, and a
-token supplied to a tokenless format return the exact typed configuration error
-before server readiness. There is no local list to update and no silent
-downgrade to `No_thinking_control`.
+Dashboard output loads the effective capability from the resolved OAS binding
+and calls `encode_thinking_control_format` directly. Canonical OAS labels and
+tokens are therefore read-only projections of the effective row, not MASC
+configuration. Current hyphenated aliases and absent-field-to-
+`No_thinking_control` defaults are deleted with their tests. The legacy
+normalizing `thinking_control_format_of_label_and_token` is deleted inside OAS
+when its catalog loaders move to the exact decoder; it cannot remain as an
+alternate catalog path.
 
-The same rule applies to future provider capability axes: MASC may own where a
-field appears in `runtime.toml`, but not a second semantic vocabulary or
-provider/model classifier.
+Unknown/noncanonical labels, a missing token for a token-bearing format, a
+token supplied to a tokenless format, and an invalid token fail the OAS
+catalog/overlay readiness boundary before server readiness. MASC has no local
+list, default, prevalidation, or silent downgrade.
+
+The same rule applies to future provider capability axes: MASC owns only the
+logical product-role-to-OAS-binding reference, never another capability field,
+semantic vocabulary, or provider/model classifier.
 
 An `OpenAI-compatible` declaration identifies a transport/API family, not
 reasoning, Tool, replay, streaming, or multimodal equivalence. MASC passes an
@@ -849,13 +857,20 @@ requests; MASC never probes behavior by catch-and-retry or provider/model name.
 The same hard cut applies to error classification. At the inspected OAS main,
 the public `Agent_sdk.Error` surface exposes full `to_string` and
 `is_retryable`, but no non-identifying typed kind with a canonical printer.
-MASC therefore still owns `Oas_compat.error_kind`, a hand-maintained
-`sdk_error`-to-string table used at two Keeper logging/manifest call sites. The
-target OAS representation-owning unit adds
+MASC therefore still owns three equivalent `sdk_error` category tables
+(`Oas_compat`, `Keeper_agent_error`, and
+`Keeper_turn_runtime_budget_routing`) plus one forwarding alias. The target OAS
+representation-owning unit adds
 `Error.category : sdk_error -> category` and `Error.category_label`. MASC
-consumes those functions directly and deletes `lib/oas_compat`. MASC must not
-add another local category type or expand the compatibility table while that
-upstream generic API is pending.
+consumers call those functions directly and delete all three tables and the
+alias in the same hard cut. MASC must not add another forwarding helper merely
+because one consumer wants a shorter label.
+
+`keeper_event_bridge_error_json` still re-encodes the detailed OAS error
+variants into a MASC execution-event payload. Removing the coarse category
+tables does not close that larger duplicate projection. It is deleted later in
+the same execution-read-model cut that retires `.masc/oas-events/`; until then
+the product cannot claim complete error-projection SSOT.
 
 ## §12 OCaml 5.x and Eio implementation discipline
 
@@ -931,8 +946,9 @@ behind flags.
   catalog binding or checked custom-binding codec, or returns a typed
   unsupported result; no OAS binding row, capability codec, or catalog is
   copied or generated into MASC;
-- current `runtime.toml` examples, including Ollama/OpenAI-compatible bindings,
-  load only through the OAS canonical capability/binding codec;
+- current `runtime.toml` examples contain no MASC capability declaration;
+  every logical role resolves an OAS catalog/overlay/custom-binding reference,
+  and dashboard capability output is encoded from that effective OAS row;
 - local Ollama and Ollama Cloud remain distinct exact binding revisions when
   their verified wire facts differ, while moving an unchanged binding between
   physical endpoints changes no capability; an arbitrary OpenAI-compatible or
@@ -1099,17 +1115,23 @@ authority.
    role assignments to opaque OAS runtime/binding references. Remove local
    transport/credential/capability/price/fallback semantic records, model
    prefix matching, identity/field-copy converters, label tables, aliases, and
-   dashboard encoders after migrating configuration through the exact OAS
-   catalog/custom-binding codec.
+   dashboard encoders. Delete the MASC `thinking_control_format` /
+   `thinking_control_token` fields and their defaults; the closed schema
+   rejects those retired keys. Effective capabilities come only from the exact
+   OAS catalog/overlay/custom-binding row and the dashboard calls the OAS
+   encoder on that row.
 8. Delete prior flat Tool pairing, duplicate transcript/event trees, automatic
    feedback loops, and tests for retired compatibility behavior in the same
    cutover series. Replace the current broad `Keeper_execution_receipt` with the
    reference-only lane settlement; there is no runtime compatibility decoder
    for the retired receipt shape.
-9. Delete `scripts/oas-api-surface.json`, its snapshot/regeneration path, and
-   `lib/oas_compat` after moving its two consumers to `Error.category` /
-   `Error.category_label`; then update `docs/OAS-MASC-BOUNDARY.md` so it no
-   longer advertises those duplicate authorities.
+9. Delete `scripts/oas-api-surface.json`, its snapshot/regeneration path,
+   `lib/oas_compat`, the duplicate classifiers in `Keeper_agent_error` and
+   `Keeper_turn_runtime_budget_routing`, and the forwarding alias after moving
+   every consumer directly to `Error.category` / `Error.category_label`.
+   Step 6 separately deletes the detailed `keeper_event_bridge_error_json`
+   execution projection. Update `docs/OAS-MASC-BOUNDARY.md` so it advertises
+   neither duplicate authority.
 10. Land generated conformance evidence and every product test in §13.
 
 There is no dual-run period in which old and new execution writers or Tool
@@ -1130,13 +1152,16 @@ At this draft baseline the following are real blockers, not future polish:
    product-actor resolution without a MASC root link, cause-only lookup,
    internal ID, or scan.
 3. OAS must release the exact public `decode_thinking_control_format` /
-   `encode_thinking_control_format` pair and the checked catalog/custom-binding
-   declaration codec required by `runtime.toml`; current MASC capability and
-   provider-binding parsing cannot be deleted before both upstream authorities
-   exist, and the thinking parser has already drifted again after #22654.
+   `encode_thinking_control_format` pair, validated token/error surface, and
+   checked catalog/overlay/custom-binding declaration codec. The decoder is
+   consumed by OAS catalog loaders; MASC deletes its capability fields and uses
+   only the encoder over the resolved effective row. Current MASC capability
+   and provider-binding parsing cannot be deleted before those upstream
+   authorities exist, and the thinking parser has already drifted again after
+   #22654.
 4. OAS main has not released public `Error.category` /
-   `Error.category_label`, so the two MASC `Oas_compat.error_kind` consumers
-   cannot yet move to the upstream canonical projection.
+   `Error.category_label`, so the three MASC classifiers, forwarding alias, and
+   their consumers cannot yet move to the upstream canonical projection.
 5. MASC has not implemented the five-case recurrence bridge, Keeper/Fusion
    bindings, activation replay, staged per-owner async terminal inbox,
    reference-only lane settlement, or

@@ -3,8 +3,8 @@
 > Status: implementation deletion and replacement contract
 > Normative goal: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
 > Live map: [`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md)
-> Source checkpoint: MASC `9b61c2ad1d`, OAS `b2a9478ff3`, pinned OAS `v0.215.0` at `a7ea83fbbf`
-> Checked: 2026-07-17 13:44 KST
+> Source checkpoint: MASC `5d3ba008e6`, OAS `b2a9478ff3`, pinned OAS `v0.215.0` at `a7ea83fbbf`
+> Checked: 2026-07-17 14:09 KST
 
 This manifest names what must die, what must be rewritten, and what is an
 objective boundary worth keeping. It is deliberately narrower than a migration
@@ -264,6 +264,12 @@ closed checkpoint prefix reach provider dispatch. The complete next request is
 counted through a provider-native contract, and `Insufficient_reduction` is
 durable work rather than an inline retry cap. Transcript or string inference,
 synthetic ToolResult insertion, and fleet-wide blocking are forbidden.
+
+The fit receipt is valid only for the exact pending source and the immutable
+OAS-prepared request that will be dispatched. MASC does not rebuild provider
+framing, hooks, tools, or model-input projection. A source-free manual request
+may compact semantically but must not report provider fit for an unknown future
+turn.
 
 The OAS dependency is ordered: exact invocation propagation, production
 Execution Journal single-writer settlement authority, and only then a public

@@ -2,8 +2,8 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 13:50 KST
-> MASC `origin/main`: `9b61c2ad1d`
+> Checked: 2026-07-17 14:09 KST
+> MASC `origin/main`: `5d3ba008e6`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
 > Browser matrix: [`2026-07-17-keeper-full-feature-goal-matrix.html`](audit/2026-07-17-keeper-full-feature-goal-matrix.html)
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 13:50 KST; confidence High.
+2026-07-17 14:09 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -112,7 +112,10 @@ fallback order come from declared configuration.
 
 OAS #2623 and #2624 are on `main`: the contract and Anthropic transport expose
 provider-native input-token counting without estimates. MASC does not yet use
-that count to prove a compacted full request fits the selected runtime.
+that count to prove a compacted full request fits the selected runtime. The
+missing boundary is an OAS-owned immutable prepared request measured and later
+dispatched without MASC rebuilding hooks, tools, or provider framing. Without a
+pending source, manual compaction cannot honestly claim future-turn fit.
 
 `v0.215.0` adds exact `WithExecutionEnv` Tool occurrence and binds recursive
 work to the exact Tool attempt. MASC pins release SHA `a7ea83fbbf`; later OAS
@@ -250,6 +253,9 @@ Verified main-reachable changes include:
 - #24957: carry exact OAS Tool invocation identity through the MCP boundary;
 - #24968: remove zombie Fusion concurrency settings;
 - #24964: remove title-based Task dedup admission.
+- #25019: let the compaction-only commit section pass a wedged chat backlog,
+  then return the follow-up turn to standard admission;
+- #24971: append private JSONL at an exact durable cursor.
 
 Why these were removed: elapsed age, retry count, budget, health score,
 circuit state, and arbitrary caps were being used as execution authority.
@@ -261,13 +267,12 @@ domain fact.
 | Work | Current truth | Missing proof |
 |---|---|---|
 | #25018 | Draft at `acc33cd728`; mergeable; Build and Test running | merge exact settlement source index after fresh green |
-| #24971 | Draft, mergeable, full CI green | merge exact private JSONL cursor |
-| #25026 | Draft stacked on #24971, lightweight green | retarget after parent and run full CI |
+| #25026 | retargeted to main after #24971; currently conflicting | rebase the full durable append transaction and run full CI |
 | #25044 canonical settlement receipt | Draft stacked on #25018; 218 changed lines; focused build and 15 direct cases green | fresh stacked CI, then WAL leaf |
 | settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
-| #25046 structural compaction leaf | Draft, 399 changed lines; hostile code findings repaired; focused build and 40 direct cases green | OAS typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |
-| #25049 per-Keeper Auto Judge drain | Draft, 397 changed lines; latest-main focused build and 34 direct cases green | monotonic durable FIFO sequence and direct owner-isolation test leaf |
-| #25019 | Draft, chat-admission slice; CI running | not a durable compaction operation or fit proof |
+| #25046 structural compaction leaf | Draft, rebased to `5d3ba008e6`, 397 lines; static green, exact-head focused build waits on external bare Dune | OAS typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |
+| #25049 per-Keeper Auto Judge drain | Open 397-line parent; full CI running; latest-main rebase and 378-line strict FIFO child in local proof | publish exact parent/child stack after focused build |
+| OAS #2646 checkpoint-stage codec | Draft stacked on #2642; 87 lines; focused build and 9 direct cases green | merge after #2642, then Journal settlement authority |
 | #24993 | conflicting and red | supersede; do not use as current compaction proof |
 | #24994 | Draft, green typed terminal leaf | re-evaluate after clean replacement stack |
 

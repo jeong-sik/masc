@@ -454,16 +454,15 @@ let handle_keeper_reset ctx args : tool_result =
 
     Returns the resolved primary provider/runtime context window, separate from
     any requested [max_context_override].
-    Returns [min_keeper_context_tokens] when meta is unavailable. *)
+    Returns the configured default Runtime capacity when meta is unavailable. *)
 let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option) : int =
-  let min_ctx = Keeper_config.min_keeper_context_tokens in
   match meta with
-  | None -> min_ctx
+  | None -> Runtime.default_max_context ()
   | Some meta ->
     let resolution =
       Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
     in
-    max min_ctx resolution.effective_budget
+    resolution.effective_budget
 
 let manual_compaction_wakeup_observation ~base_path keeper_name =
   match

@@ -172,6 +172,12 @@ max-context = 64000
 tools-support = true
 streaming = true
 
+[models.small]
+api-name = "small"
+max-context = 32000
+tools-support = true
+streaming = true
+
 [models.gpt.capabilities]
 max-output-tokens = 32000
 supports-tool-choice = true
@@ -199,6 +205,9 @@ max-concurrent = 4
 
 [openai.gpt]
 is-default = true
+max-concurrent = 1
+
+[openai.small]
 max-concurrent = 1
 |}
 ;;
@@ -306,6 +315,13 @@ max_context_tokens = 64000
 supports_tools = true
 supports_response_format_json = true
 supports_structured_output = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "openai_compat/small"
+base = "openai_chat"
+max_context_tokens = 32000
+supports_tools = true
 supports_native_streaming = true
 
 [[providers]]
@@ -914,6 +930,11 @@ let test_context_budget_uses_selected_runtime () =
         ~requested_override:None
         [ "openai.gpt" ]
     in
+    let small_budget =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override:None
+        [ "openai.small" ]
+    in
     Alcotest.(check int)
       "default runtime budget"
       128000
@@ -921,7 +942,11 @@ let test_context_budget_uses_selected_runtime () =
     Alcotest.(check int)
       "selected runtime budget"
       64000
-      selected_budget.Keeper_context_runtime.effective_budget)
+      selected_budget.Keeper_context_runtime.effective_budget;
+    Alcotest.(check int)
+      "provider capacity below 64k is not enlarged"
+      32000
+      small_budget.Keeper_context_runtime.effective_budget)
 ;;
 
 let test_context_budget_source_is_shared_ssot () =

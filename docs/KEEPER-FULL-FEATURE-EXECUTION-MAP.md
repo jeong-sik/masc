@@ -2,7 +2,7 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 13:44 KST
+> Checked: 2026-07-17 13:50 KST
 > MASC `origin/main`: `9b61c2ad1d`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 13:44 KST; confidence High.
+2026-07-17 13:50 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -179,7 +179,7 @@ run-local `Commit_outcome_unknown`; it does not schedule product work.
 |---|---|---|
 | `v0.215.0` / #2639 | published and pinned by MASC | KEEP exact occurrence/attempt foundation |
 | #2640 | OAS `main`, after release | KEEP recursion fence; not in MASC pin |
-| #2642 | ready, mergeable; OCaml 5.4.1 job cancelled | REVIEW exact invocation propagation and obtain a non-cancelled full matrix; no MASC semantics |
+| #2642 | Draft, mergeable at `2dcdb20f09`; OCaml 5.4.1/5.5.0 CI running | REVIEW exact invocation propagation and obtain a green full matrix; no MASC semantics |
 | #2643 | Draft design | REVIEW recursive executable contract against the normative Goal |
 | `Durable_event` / `Journal_bridge` | live public and production callers remain | KILL in the activation hard cut |
 | independent `Raw_trace.record_*` | live writer in `agent_trace` | KILL writer; keep cursor-backed projection only |

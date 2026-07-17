@@ -309,6 +309,7 @@
   masc.prompt_registry
   ;; MCP transport/session leaf primitives (extracted sub-libraries)
   masc.mcp_transport_protocol
+  masc.tool_invocation_ref
   masc.mcp_session
   ;; Response envelope leaf primitive (extracted sub-library)
   masc.response

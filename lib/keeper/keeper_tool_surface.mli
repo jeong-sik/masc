@@ -17,7 +17,11 @@ type tool_result = Keeper_types_profile.tool_result
 val schemas : Masc_domain.tool_schema list
 
 val dispatch :
-  _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
+  ?invocation_ref:Tool_invocation_ref.t ->
+  _ context ->
+  name:string ->
+  args:Yojson.Safe.t ->
+  tool_result option
 
 (** Internal async-message entry point for adapters whose authenticated
     submission principal differs from the target turn's [ctx.agent_name].

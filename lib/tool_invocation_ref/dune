@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_tool_invocation_ref)
+ (public_name masc.tool_invocation_ref)
+ (wrapped false)
+ (modules tool_invocation_ref)
+ (flags
+  (:standard -w +4))
+ (libraries masc.mcp_session masc.mcp_transport_protocol yojson))

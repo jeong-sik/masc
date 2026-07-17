@@ -69,7 +69,8 @@ let operator_ctx env sw config agent_name : _ Operator_control.context =
            ~clock:(Eio.Stdenv.clock env)
            ~proc_mgr:(Some (Eio.Stdenv.process_mgr env))
            ~net:(Some (Eio.Stdenv.net env))
-           ~publication_recovery_provider);
+           ~publication_recovery_provider
+           ());
     mcp_session_id = None;
   }
 

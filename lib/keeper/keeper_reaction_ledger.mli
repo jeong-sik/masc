@@ -73,12 +73,13 @@ val record_event_queue_transition_reaction_result :
   base_path:string ->
   keeper_name:string ->
   reaction_kind:reaction_kind ->
+  source_index:int ->
   receipt:Keeper_event_queue_state.transition_receipt ->
   Keeper_event_queue.stimulus ->
   (unit, string) result
-(** Append the outbox-owned terminal transition with a stable event id.  A
-    retry may append the same id after a crash, so readers treat [event_id] as
-    the idempotency identity.  Persistence failures remain explicit [Error]. *)
+(** Append one settlement source at its exact ordered index. Persistence
+    failures remain explicit [Error]. Readers use the deterministic event id
+    as the logical idempotency identity. *)
 
 type event_queue_reaction_evidence =
   { keeper_name : string

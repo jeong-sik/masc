@@ -295,6 +295,7 @@ let test_failure_judgment_external_input_is_typed_history () =
     ~base_path
     ~keeper_name
     ~reaction_kind:Keeper_reaction_ledger.Event_queue_escalated
+    ~source_index:0
     ~receipt
     stimulus
   |> require_ok "record external-input judgment transition";
@@ -320,6 +321,48 @@ let test_failure_judgment_external_input_is_typed_history () =
     (fleet |> member "event_queue_external_input_count" |> to_int);
   check (list string) "fleet has no false current reason" []
     (fleet |> member "status_reasons" |> to_list |> List.map to_string)
+;;
+
+let test_transition_reactions_distinguish_ordered_sources () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "batch-projection-keeper" in
+  let first = board_stimulus ~post_id:"shared-post" ~updated_at:1.0 () in
+  let second = board_stimulus ~post_id:"shared-post" ~updated_at:2.0 () in
+  let receipt =
+    transition_receipt ~settlement:Keeper_event_queue_state.Ack first
+  in
+  let record source_index stimulus =
+    Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+      ~base_path
+      ~keeper_name
+      ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+      ~source_index
+      ~receipt
+      stimulus
+    |> require_ok "record ordered settlement source"
+  in
+  record 0 first;
+  record 1 second;
+  let rows =
+    Keeper_reaction_ledger.read_recent_for_keeper
+      ~base_path
+      ~keeper_name
+      ~limit:10
+  in
+  check (list string)
+    "ordered source ids are collision-free"
+    [ receipt.event_id ^ ":source:0"; receipt.event_id ^ ":source:1" ]
+    (List.map (fun row -> row |> member "event_id" |> to_string) rows);
+  check (list int)
+    "source index remains observable"
+    [ 0; 1 ]
+    (List.map
+       (fun row -> row |> member "reaction" |> member "source_index" |> to_int)
+       rows);
+  check (list string)
+    "shared stimulus id does not collapse ordered sources"
+    [ "board:shared-post"; "board:shared-post" ]
+    (List.map (fun row -> row |> member "stimulus_id" |> to_string) rows)
 ;;
 
 let test_cursor_ack_is_replayable_state_entry () =
@@ -1120,6 +1163,10 @@ let () =
             "failure judgment external input is typed history"
             `Quick
             test_failure_judgment_external_input_is_typed_history
+        ; test_case
+            "transition reactions distinguish ordered sources"
+            `Quick
+            test_transition_reactions_distinguish_ordered_sources
         ; test_case
             "cursor ack is replayable state entry"
             `Quick

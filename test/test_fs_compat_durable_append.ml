@@ -256,6 +256,43 @@ let test_private_jsonl_append_returns_committed_end_offset () =
    | Error error -> fail (Fs_compat.private_jsonl_append_error_to_string error))
 ;;
 
+let test_private_jsonl_append_at_exact_end_offset () =
+  let original = "{\"row\":1}\n" in
+  let suffix = "{\"row\":2}\n" in
+  with_temp_jsonl original @@ fun path ->
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+       path
+       ~expected_end_offset:(String.length original)
+       suffix
+   with
+   | Ok end_offset ->
+     check int
+       "committed newline-end byte offset"
+       (String.length original + String.length suffix)
+       end_offset
+   | Error error -> fail (Fs_compat.private_jsonl_append_error_to_string error));
+  check string "exact append bytes" (original ^ suffix) (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_append_rejects_stale_end_offset () =
+  let original = "{\"row\":1}\n" in
+  with_temp_jsonl original @@ fun path ->
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+       path
+       ~expected_end_offset:0
+       "{\"row\":2}\n"
+   with
+   | Error
+       (Fs_compat.End_offset_mismatch
+          { expected = 0; actual }) ->
+     check int "locked actual byte offset" (String.length original) actual
+   | Error error -> fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Ok _ -> fail "stale cursor unexpectedly appended");
+  check string "stale append writes no bytes" original (Fs_compat.load_file path)
+;;
+
 let test_private_jsonl_slice_reads_exact_cursor_suffix () =
   let row1 = "{\"row\":1}\n" in
   let row2 = "{\"row\":2}\n" in
@@ -361,6 +398,14 @@ let () =
             "private JSONL append returns committed end offset"
             `Quick
             test_private_jsonl_append_returns_committed_end_offset
+        ; test_case
+            "private JSONL append accepts exact end offset"
+            `Quick
+            test_private_jsonl_append_at_exact_end_offset
+        ; test_case
+            "private JSONL append rejects stale end offset"
+            `Quick
+            test_private_jsonl_append_rejects_stale_end_offset
         ; test_case
             "private JSONL cursor read returns exact suffix"
             `Quick

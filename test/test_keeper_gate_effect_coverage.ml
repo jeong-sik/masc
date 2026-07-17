@@ -398,10 +398,7 @@ let test_voice_effect_defers_without_gating_local_reads () =
       ~args:listen_input
       ()
   in
-  check string
-    "microphone/STT effect defers before execution"
-    "gate_deferred"
-    (json_error listen.raw_output);
+  expect_deferred "microphone/STT effect defers before execution" listen;
   check int "one exact voice effect is pending" 1 (Keeper_approval_queue.pending_count ());
   (match Keeper_approval_queue.list_pending_entries () with
    | [ pending ] ->
@@ -417,9 +414,7 @@ let test_voice_effect_defers_without_gating_local_reads () =
       ~args:(`Assoc [])
       ()
   in
-  (match capability_read.outcome with
-   | Keeper_tool_execution.Succeeded -> ()
-   | Keeper_tool_execution.Failed _ -> fail "local voice capability read was gated");
+  expect_completed "local voice capability read remains ungated" capability_read;
   check int
     "local read creates no second Gate request"
     1

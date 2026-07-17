@@ -149,14 +149,7 @@ let handle_speak_with_outcome
               ?audio_device
               ()
           with
-          | Ok json ->
-         let spoken =
-           match Json_util.get_string json "status" with
-           | Some "spoken" -> true
-           | Some _ | None -> false
-         in
-         if spoken
-         then (
+          | Ok { Voice_bridge.completion = Voice_bridge.Spoken; payload = json } ->
            (* RFC-0235 P1 3b: record the utterance to the keeper's chat so a
               connected device can read AND hear it, not just the server's
               speakers. The audio clip carries the token of the synthesized
@@ -219,8 +212,12 @@ let handle_speak_with_outcome
                ~message
            in
            Keeper_tool_execution.success
-             (Yojson.Safe.to_string (attach_memory_status json memory_status)))
-         else Keeper_tool_execution.success (Yojson.Safe.to_string json)
+             (Yojson.Safe.to_string (attach_memory_status json memory_status))
+          | Ok
+              { Voice_bridge.completion = Voice_bridge.Dedup_skipped
+              ; payload = json
+              } ->
+            Keeper_tool_execution.success (Yojson.Safe.to_string json)
           | Error err ->
             Keeper_tool_execution.failure
               ~class_:Tool_result.Runtime_failure

@@ -1704,7 +1704,7 @@ let internal_descriptors : t list =
   ; voice_descriptor
       "keeper_voice_listen"
       "Listen for spoken input on the keeper voice channel."
-      ~readonly:true
+      ~readonly:false
   ; voice_descriptor
       "keeper_voice_agent"
       "Read the keeper voice capability, assigned voice, and active turn-based \

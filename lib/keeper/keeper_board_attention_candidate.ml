@@ -2,6 +2,7 @@
 
 module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
+module Id_set = Set.Make (String)
 
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
@@ -39,10 +40,13 @@ type consumed_state =
   ; consumed_at : float
   }
 
+type expired_state = { expired_at : float }
+
 type status =
   | Pending of pending_state
   | Judged of judged_state
   | Consumed of consumed_state
+  | Expired of expired_state
 
 type candidate =
   { candidate_id : string
@@ -300,6 +304,11 @@ let status_to_yojson = function
       ; "delivery", `String (delivery_to_string consumed.delivery)
       ; "consumed_at", `Float consumed.consumed_at
       ]
+  | Expired expired ->
+    `Assoc
+      [ "kind", `String "expired"
+      ; "expired_at", `Float expired.expired_at
+      ]
 ;;
 
 let candidate_to_json candidate =
@@ -527,6 +536,11 @@ let status_of_yojson json =
     let* consumed_at_json = field ~context "consumed_at" fields in
     let* consumed_at = float_json ~context:(context ^ ".consumed_at") consumed_at_json in
     Ok (Consumed { judgment; delivery; consumed_at })
+  | "expired" ->
+    let* () = exact_fields ~context [ "kind"; "expired_at" ] fields in
+    let* expired_at_json = field ~context "expired_at" fields in
+    let* expired_at = float_json ~context:(context ^ ".expired_at") expired_at_json in
+    Ok (Expired { expired_at })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
 ;;
 
@@ -783,7 +797,7 @@ let record_retryable_failure ~base_path candidate failure =
               { current with
                 status = Judged { judged with last_failure = Some failure }
               })
-       | Consumed _ -> None)
+       | Consumed _ | Expired _ -> None)
 ;;
 
 let record_judgment ~base_path candidate judgment =
@@ -798,7 +812,7 @@ let record_judgment ~base_path candidate judgment =
            { current with
              status = Judged { judgment; last_failure = None }
            }
-       | Judged _ | Consumed _ -> None)
+       | Judged _ | Consumed _ | Expired _ -> None)
 ;;
 
 let mark_consumed ~base_path candidate judgment delivery =
@@ -815,7 +829,7 @@ let mark_consumed ~base_path candidate judgment delivery =
                Consumed
                  { judgment; delivery; consumed_at = Time_compat.now () }
            }
-       | Pending _ | Consumed _ -> None)
+       | Pending _ | Consumed _ | Expired _ -> None)
 ;;
 
 let failure ~kind detail = { kind; detail; failed_at = Time_compat.now () }
@@ -909,20 +923,6 @@ let consume_judged ~base_path candidate (judged : judged_state) =
          (failure ~kind:Durable_delivery_unavailable detail))
 ;;
 
-let build_prompt candidate =
-  Prompt_registry.render_prompt_template
-    prompt_name
-    [ "judgment_request_json", Yojson.Safe.to_string candidate.judgment_request ]
-;;
-
-let apply_output_schema provider_config =
-  Ok
-    (Keeper_structured_output_schema.apply_schema_or_prompt_tier
-       ~log_label:"keeper Board attention judgment output contract"
-       Keeper_structured_output_schema.board_attention_judgment_output_schema
-       provider_config)
-;;
-
 let reject_unregistered_tool ~name ~args:_ =
   Tool_result.error
     ~tool_name:name
@@ -930,68 +930,9 @@ let reject_unregistered_tool ~name ~args:_ =
     "Board attention judgment is a tool-free boundary"
 ;;
 
-let run_judge ~base_path candidate =
-  let runtime_id_result =
-    try Ok (Runtime.runtime_id_for_structured_judge ()) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-      Error
-        (failure
-           ~kind:Runtime_configuration_unavailable
-           (Printexc.to_string exn))
-  in
-  match runtime_id_result with
-  | Error _ as error -> error
-  | Ok runtime_id ->
-    (match build_prompt candidate with
-     | Error detail -> Error (failure ~kind:Prompt_contract_unavailable detail)
-     | Ok prompt ->
-       let provider_result =
-         try
-           match
-             Keeper_turn_driver_wrappers.run_named_with_masc_tools
-               ~runtime_id
-               ~keeper_name:candidate.keeper_name
-               ~goal:prompt
-               ~base_path
-               ~masc_tools:[]
-               ~dispatch:reject_unregistered_tool
-               ~provider_config_transform:apply_output_schema
-               ()
-           with
-           | Ok result -> Ok result
-           | Error error ->
-             Error
-               (failure
-                  ~kind:Provider_unavailable
-                  (Agent_sdk.Error.to_string error))
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Error
-             (failure ~kind:Provider_unavailable (Printexc.to_string exn))
-       in
-       (match provider_result with
-        | Error _ as error -> error
-        | Ok result ->
-          (match
-             Agent_sdk_response.structured_json_of_response
-               ~schema_name:Keeper_board_attention_judgment.schema_name
-               result.response
-           with
-           | Error detail ->
-             Error (failure ~kind:Response_contract_unavailable detail)
-           | Ok json ->
-             (match Keeper_board_attention_judgment.of_yojson json with
-              | Error detail ->
-                Error (failure ~kind:Response_contract_unavailable detail)
-              | Ok verdict ->
-                Ok { verdict; runtime_id; judged_at = Time_compat.now () }))))
-;;
-
 let rec process_with_judge ~base_path ~judge candidate =
   match candidate.status with
-  | Consumed _ -> Ok candidate
+  | Consumed _ | Expired _ -> Ok candidate
   | Judged judged -> consume_judged ~base_path candidate judged
   | Pending _ ->
     (match judge candidate with
@@ -1014,7 +955,7 @@ let record_and_wake ~base_path candidate =
       match persisted.status with
       | Pending _ | Judged _ ->
         Wake_requested (request_owner_wake ~site:"duplicate" ~base_path persisted)
-      | Consumed _ -> Wake_not_required
+      | Consumed _ | Expired _ -> Wake_not_required
     in
     Ok
       { candidate = persisted
@@ -1023,39 +964,341 @@ let record_and_wake ~base_path candidate =
       }
 ;;
 
-let drain_pending_with_judge ~base_path ~keeper_name ~judge =
+(* ── TTL and batch judgment ───────────────────────────── *)
+
+let prompt_name_batch = Keeper_prompt_names.board_attention_judgment_batch
+let batch_max_candidates = 8
+let candidate_ttl_sec = 86_400.0
+
+let is_pending_expired ~now candidate =
+  match candidate.status with
+  | Pending _ ->
+    Float.compare candidate.recorded_at (now -. candidate_ttl_sec) < 0
+  | Judged _ | Consumed _ | Expired _ -> false
+;;
+
+let expire_candidate ~base_path ~now candidate =
+  update_candidate
+    ~base_path
+    candidate.candidate_id
+    candidate.keeper_name
+    (fun current ->
+       match current.status with
+       | Pending _ ->
+         Some { current with status = Expired { expired_at = now } }
+       | Judged _ | Consumed _ | Expired _ -> None)
+;;
+
+let batch_request_json candidates =
+  let keeper_context_of candidate =
+    match candidate.judgment_request with
+    | `Assoc fields -> List.assoc_opt "keeper_context" fields
+    | _ -> None
+  in
+  let item_of candidate =
+    match candidate.judgment_request with
+    | `Assoc fields ->
+      `Assoc
+        (List.filter
+           (fun (key, _) -> not (String.equal key "keeper_context"))
+           fields)
+    | other -> other
+  in
+  match candidates with
+  | [] -> None
+  | first :: _ ->
+    (match keeper_context_of first with
+     | None -> None
+     | Some keeper_context ->
+       Some
+         (`Assoc
+            [ "keeper_context", keeper_context
+            ; "items", `List (List.map item_of candidates)
+            ]))
+;;
+
+let build_batch_prompt candidates =
+  match batch_request_json candidates with
+  | None -> Error "batch request lacks the shared keeper context"
+  | Some json ->
+    Prompt_registry.render_prompt_template
+      prompt_name_batch
+      [ "batch_request_json", Yojson.Safe.to_string json ]
+;;
+
+let apply_batch_output_schema provider_config =
+  Ok
+    (Keeper_structured_output_schema.apply_schema_or_prompt_tier
+       ~log_label:"keeper Board attention batch judgment output contract"
+       Keeper_structured_output_schema.board_attention_judgment_batch_output_schema
+       provider_config)
+;;
+
+let run_judge_batch ~base_path candidates =
+  match candidates with
+  | [] -> Ok Candidate_map.empty
+  | first :: _ ->
+    let runtime_id_result =
+      try Ok (Runtime.runtime_id_for_structured_judge ()) with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Error
+          (failure
+             ~kind:Runtime_configuration_unavailable
+             (Printexc.to_string exn))
+    in
+    (match runtime_id_result with
+     | Error _ as error -> error
+     | Ok runtime_id ->
+       (match build_batch_prompt candidates with
+        | Error detail -> Error (failure ~kind:Prompt_contract_unavailable detail)
+        | Ok prompt ->
+          let provider_result =
+            try
+              match
+                Keeper_turn_driver_wrappers.run_named_with_masc_tools
+                  ~runtime_id
+                  ~keeper_name:first.keeper_name
+                  ~goal:prompt
+                  ~base_path
+                  ~masc_tools:[]
+                  ~dispatch:reject_unregistered_tool
+                  ~provider_config_transform:apply_batch_output_schema
+                  ()
+              with
+              | Ok result -> Ok result
+              | Error error ->
+                Error
+                  (failure
+                     ~kind:Provider_unavailable
+                     (Agent_sdk.Error.to_string error))
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              Error (failure ~kind:Provider_unavailable (Printexc.to_string exn))
+          in
+          (match provider_result with
+           | Error _ as error -> error
+           | Ok result ->
+             (match
+                Agent_sdk_response.structured_json_of_response
+                  ~schema_name:Keeper_board_attention_judgment.batch_schema_name
+                  result.response
+              with
+              | Error detail ->
+                Error (failure ~kind:Response_contract_unavailable detail)
+              | Ok json ->
+                (match Keeper_board_attention_judgment.batch_of_yojson json with
+                 | Error detail ->
+                   Error (failure ~kind:Response_contract_unavailable detail)
+                 | Ok items ->
+                   let ids =
+                     List.fold_left
+                       (fun set candidate -> Id_set.add candidate.candidate_id set)
+                       Id_set.empty
+                       candidates
+                   in
+                   (match
+                      List.find_opt
+                        (fun (item : Keeper_board_attention_judgment.batch_item) ->
+                           not (Id_set.mem item.candidate_id ids))
+                        items
+                    with
+                    | Some item ->
+                      Error
+                        (failure
+                           ~kind:Response_contract_unavailable
+                           (Printf.sprintf
+                              "batch verdict references unknown candidate_id %S"
+                              item.candidate_id))
+                    | None ->
+                      let judged_at = Time_compat.now () in
+                      List.fold_left
+                        (fun result (item : Keeper_board_attention_judgment.batch_item) ->
+                           match result with
+                           | Error _ -> result
+                           | Ok map ->
+                             if Candidate_map.mem item.candidate_id map
+                             then
+                               Error
+                                 (failure
+                                    ~kind:Response_contract_unavailable
+                                    (Printf.sprintf
+                                       "batch verdict duplicates candidate_id %S"
+                                       item.candidate_id))
+                             else
+                               Ok
+                                 (Candidate_map.add
+                                    item.candidate_id
+                                    { verdict = item.verdict
+                                    ; runtime_id
+                                    ; judged_at
+                                    }
+                                    map))
+                        (Ok Candidate_map.empty)
+                        items))))))
+;;
+
+(* ── Owner-lane batch drain ───────────────────────────── *)
+
+let apply_judgment ~base_path candidate judgment =
+  process_with_judge ~base_path ~judge:(fun _ -> Ok judgment) candidate
+;;
+
+let chunks_of size items =
+  let rec loop current count chunks = function
+    | [] ->
+      (match current with
+       | [] -> List.rev chunks
+       | _ -> List.rev (List.rev current :: chunks))
+    | x :: rest ->
+      if count = size
+      then loop [ x ] 1 (List.rev current :: chunks) rest
+      else loop (x :: current) (count + 1) chunks rest
+  in
+  loop [] 0 [] items
+;;
+
+let record_batch_failure ~base_path candidate failure =
+  match record_retryable_failure ~base_path candidate failure with
+  | Ok _ -> ()
+  | Error detail ->
+    Log.Keeper.error
+      "Board attention batch failure evidence could not be persisted keeper=%s \
+       candidate=%s: %s"
+      candidate.keeper_name
+      candidate.candidate_id
+      detail
+;;
+
+let drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch =
   let* candidates = load_candidates ~base_path ~keeper_name in
+  let stale, judged_ready, pending =
+    List.fold_left
+      (fun (stale, judged_ready, pending) candidate ->
+         match candidate.status with
+         | Pending _ when is_pending_expired ~now candidate ->
+           candidate :: stale, judged_ready, pending
+         | Pending _ -> stale, judged_ready, candidate :: pending
+         | Judged judged -> stale, (candidate, judged) :: judged_ready, pending
+         | Consumed _ | Expired _ -> stale, judged_ready, pending)
+      ([], [], [])
+      candidates
+  in
+  (* Stale pending rows expire first: the durable backlog must die even while
+     the provider is unavailable. *)
+  let* () =
+    List.fold_left
+      (fun result candidate ->
+         match result with
+         | Error _ -> result
+         | Ok () ->
+           (match expire_candidate ~base_path ~now candidate with
+            | Ok _ -> Ok ()
+            | Error detail -> Error detail))
+      (Ok ())
+      stale
+  in
+  let expired_count = List.length stale in
+  (* Already-judged verdicts deliver without new model calls. *)
+  let* judged_consumed, judged_remaining =
+    List.fold_left
+      (fun result (candidate, judged) ->
+         match result with
+         | Error _ -> result
+         | Ok (consumed, remaining) ->
+           (match consume_judged ~base_path candidate judged with
+            | Ok current ->
+              (match current.status with
+               | Consumed _ -> Ok (consumed + 1, remaining)
+               | Pending _ | Judged _ | Expired _ -> Ok (consumed, remaining + 1))
+            | Error detail -> Error detail))
+      (Ok (0, 0))
+      judged_ready
+  in
+  (* Fresh pending rows are judged in batches. A failed batch aborts the
+     round: the next keepalive turn owns the retry cadence, not a hot loop. *)
+  let batches = chunks_of batch_max_candidates (List.rev pending) in
   let rec loop report = function
     | [] -> Ok report
-    | { status = Consumed _; _ } :: rest -> loop report rest
-    | candidate :: rest ->
-      let* current = process_with_judge ~base_path ~judge candidate in
-      let report =
-        match current.status with
-        | Consumed _ ->
-          { report with
-            attempted = report.attempted + 1
-          ; consumed = report.consumed + 1
-          }
-        | Pending _ | Judged _ ->
-          { report with
-            attempted = report.attempted + 1
-          ; remaining = report.remaining + 1
-          }
-      in
-      loop report rest
+    | batch :: rest ->
+      (match judge_batch batch with
+       | Error failure ->
+         List.iter
+           (fun candidate -> record_batch_failure ~base_path candidate failure)
+           batch;
+         let deferred =
+           List.fold_left
+             (fun count rest_batch -> count + List.length rest_batch)
+             (List.length batch)
+             rest
+         in
+         Ok
+           { report with
+             attempted = report.attempted + List.length batch
+           ; remaining = report.remaining + deferred
+           }
+       | Ok map ->
+         (match
+            List.fold_left
+              (fun result candidate ->
+                 match result with
+                 | Error _ -> result
+                 | Ok (consumed, remaining) ->
+                   (match Candidate_map.find_opt candidate.candidate_id map with
+                    | None -> Ok (consumed, remaining + 1)
+                    | Some judgment ->
+                      (match apply_judgment ~base_path candidate judgment with
+                       | Ok current ->
+                         (match current.status with
+                          | Consumed _ -> Ok (consumed + 1, remaining)
+                          | Pending _ | Judged _ | Expired _ ->
+                            Ok (consumed, remaining + 1))
+                       | Error detail -> Error detail)))
+              (Ok (0, 0))
+              batch
+          with
+          | Error detail -> Error detail
+          | Ok (consumed, remaining) ->
+            loop
+              { attempted = report.attempted + List.length batch
+              ; consumed = report.consumed + consumed
+              ; remaining = report.remaining + remaining
+              }
+              rest))
   in
-  loop { attempted = 0; consumed = 0; remaining = 0 } candidates
+  let* batch_report = loop { attempted = 0; consumed = 0; remaining = 0 } batches in
+  Ok
+    { attempted = batch_report.attempted + judged_consumed + judged_remaining
+    ; consumed = batch_report.consumed + judged_consumed + expired_count
+    ; remaining = batch_report.remaining + judged_remaining
+    }
 ;;
 
 let drain_pending_on_owner_lane ~base_path ~keeper_name =
-  drain_pending_with_judge
+  drain_pending_with_judge_batch
     ~base_path
     ~keeper_name
-    ~judge:(run_judge ~base_path)
+    ~now:(Time_compat.now ())
+    ~judge_batch:(run_judge_batch ~base_path)
 ;;
 
 module For_testing = struct
-  let drain_pending_with_judge = drain_pending_with_judge
+  let drain_pending_with_judge_batch = drain_pending_with_judge_batch
+
+  let drain_pending_with_judge ~base_path ~keeper_name ~now ~judge =
+    let judge_batch candidates =
+      let rec fold map = function
+        | [] -> Ok map
+        | candidate :: rest ->
+          (match judge candidate with
+           | Ok judgment ->
+             fold (Candidate_map.add candidate.candidate_id judgment map) rest
+           | Error failure -> Error failure)
+      in
+      fold Candidate_map.empty candidates
+    in
+    drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch
+  ;;
 end
 ;;

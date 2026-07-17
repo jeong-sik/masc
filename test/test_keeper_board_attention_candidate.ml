@@ -782,6 +782,27 @@ let test_batch_failure_aborts_round_and_records_evidence () =
      | None -> Alcotest.fail "deferred candidate vanished")
 ;;
 
+let test_batch_failure_evidence_write_error_propagates () =
+  with_temp_base "board-attention-failure-write" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  ignore (record_or_fail ~base_path (candidate ~keeper_name ()) : A.candidate);
+  let path = ledger_path_or_fail ~base_path ~keeper_name in
+  let failure : A.retryable_failure =
+    { kind = A.Provider_unavailable; detail = "provider unavailable"; failed_at = 100.0 }
+  in
+  match
+    A.For_testing.drain_pending_with_judge_batch
+      ~base_path
+      ~keeper_name
+      ~judge_batch:(fun _ ->
+        Sys.remove path;
+        Unix.mkdir path 0o700;
+        Error failure)
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "failure-evidence storage error was silently accepted"
+;;
+
 let test_successful_drain_runs_one_provider_batch_per_admission () =
   with_temp_base "board-attention-one-quantum" @@ fun base_path ->
   let keeper_name = "sangsu" in
@@ -992,6 +1013,10 @@ let () =
             "batch failure aborts round with evidence"
             `Quick
             test_batch_failure_aborts_round_and_records_evidence
+        ; Alcotest.test_case
+            "batch failure evidence write error propagates"
+            `Quick
+            test_batch_failure_evidence_write_error_propagates
         ; Alcotest.test_case
             "successful drain runs one provider batch per admission"
             `Quick

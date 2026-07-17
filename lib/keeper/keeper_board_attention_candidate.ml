@@ -1176,14 +1176,24 @@ let apply_judgment ~base_path candidate judgment =
 
 let record_batch_failure ~base_path candidate failure =
   match record_retryable_failure ~base_path candidate failure with
-  | Ok _ -> ()
+  | Ok _ -> Ok ()
   | Error detail ->
-    Log.Keeper.error
-      "Board attention batch failure evidence could not be persisted keeper=%s \
-       candidate=%s: %s"
-      candidate.keeper_name
-      candidate.candidate_id
-      detail
+    Error
+      (Printf.sprintf
+         "Board attention batch failure evidence could not be persisted keeper=%s \
+          candidate=%s: %s"
+         candidate.keeper_name
+         candidate.candidate_id
+         detail)
+;;
+
+let record_batch_failures ~base_path candidates failure =
+  List.fold_left
+    (fun result candidate ->
+       let* () = result in
+       record_batch_failure ~base_path candidate failure)
+    (Ok ())
+    candidates
 ;;
 
 let validate_batch_coverage batch judgments =
@@ -1251,9 +1261,7 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
     | _ ->
       (match judge_batch batch with
        | Error failure ->
-         List.iter
-           (fun candidate -> record_batch_failure ~base_path candidate failure)
-           batch;
+         let* () = record_batch_failures ~base_path batch failure in
          Ok
            { attempted = List.length batch
            ; consumed = 0
@@ -1262,9 +1270,7 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
        | Ok judgments ->
          (match validate_batch_coverage batch judgments with
           | Error failure ->
-            List.iter
-              (fun candidate -> record_batch_failure ~base_path candidate failure)
-              batch;
+            let* () = record_batch_failures ~base_path batch failure in
             Ok
               { attempted = List.length batch
               ; consumed = 0

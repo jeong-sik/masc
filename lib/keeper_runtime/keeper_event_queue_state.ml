@@ -59,28 +59,44 @@ type outbox_entry =
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
+module Lease_sequence = struct
+  type t = int64
+
+  let compare = Int64.compare
+end
+
+module Sequence_map = Map.Make (Lease_sequence)
+
+type projection_state =
+  | Projection_pending
+  | Projection_complete
+
+type settled_transition =
+  { lease : lease
+  ; receipt : transition_receipt
+  ; projection : projection_state
+  }
+
 type t =
   { revision : int64
   ; next_lease_sequence : int64
   ; pending : Keeper_event_queue.t
   ; leases : lease list
-  ; last_settlement : transition_receipt option
-  ; transition_outbox : outbox_entry list
+  ; settled_transitions : settled_transition Sequence_map.t
   }
 
 type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
-let schema = "keeper.event_queue.state.v2"
+let schema = "keeper.event_queue.state.v3"
 
 let empty =
   { revision = 0L
   ; next_lease_sequence = 1L
   ; pending = Keeper_event_queue.empty
   ; leases = []
-  ; last_settlement = None
-  ; transition_outbox = []
+  ; settled_transitions = Sequence_map.empty
   }
 ;;
 
@@ -88,8 +104,15 @@ let revision state = state.revision
 let next_lease_sequence state = state.next_lease_sequence
 let pending state = state.pending
 let leases state = state.leases
-let last_settlement state = state.last_settlement
-let transition_outbox state = state.transition_outbox
+let transition_outbox state =
+  Sequence_map.bindings state.settled_transitions
+  |> List.filter_map (fun (_, transition) ->
+    match transition.projection with
+    | Projection_pending ->
+      Some { receipt = transition.receipt; stimuli = transition.lease.stimuli }
+    | Projection_complete -> None)
+;;
+
 let lease_kind (lease : lease) = lease.kind
 let active_lease state =
   match state.leases with
@@ -98,21 +121,33 @@ let active_lease state =
 ;;
 
 let mark_transition_projected ~transition_id state =
-  match state.transition_outbox with
-  | [ entry ] when String.equal entry.receipt.transition_id transition_id ->
-    Ok
-      { state with
-        last_settlement = Some entry.receipt
-      ; transition_outbox = []
-      }
-  | [] ->
-    (match state.last_settlement with
-     | Some receipt when String.equal receipt.transition_id transition_id -> Ok state
-     | Some _ | None ->
-       Error (Printf.sprintf "event queue transition not found: %s" transition_id))
-  | [ _ ] ->
+  let matching_sequence =
+    Sequence_map.fold
+      (fun sequence transition found ->
+         match found with
+         | Some _ -> found
+         | None ->
+           if String.equal transition.receipt.transition_id transition_id
+           then Some (sequence, transition)
+           else None)
+      state.settled_transitions
+      None
+  in
+  match matching_sequence with
+  | Some (sequence, transition) ->
+    (match transition.projection with
+     | Projection_complete -> Ok state
+     | Projection_pending ->
+       Ok
+         { state with
+           settled_transitions =
+             Sequence_map.add
+               sequence
+               { transition with projection = Projection_complete }
+               state.settled_transitions
+         })
+  | None ->
     Error (Printf.sprintf "event queue transition not found: %s" transition_id)
-  | _ :: _ :: _ -> Error "event queue state has multiple unprojected transitions"
 ;;
 let with_pending pending state = { state with pending }
 let with_revision revision state = { state with revision }
@@ -178,7 +213,7 @@ let make_lease ~kind ~claimed_at stimuli state =
 ;;
 
 let lease_admission_blocked state =
-  state.leases <> [] || state.transition_outbox <> []
+  state.leases <> [] || transition_outbox state <> []
 ;;
 
 let rec dequeue_first_ready ~ready skipped pending =
@@ -445,16 +480,6 @@ let receipt_for_lease ~settled_at ~settlement (lease : lease) =
   }
 ;;
 
-let find_prior_receipt lease_id state =
-  match state.transition_outbox with
-  | [ entry ] when String.equal entry.receipt.lease_id lease_id -> Some entry.receipt
-  | [] | [ _ ] ->
-    (match state.last_settlement with
-     | Some receipt when String.equal receipt.lease_id lease_id -> Some receipt
-     | Some _ | None -> None)
-  | _ :: _ :: _ -> None
-;;
-
 let remove_lease lease_id leases =
   List.filter
     (fun (lease : lease) -> not (String.equal lease.lease_id lease_id))
@@ -479,15 +504,18 @@ let settle ~settled_at ~lease ~settlement state =
   let* () = validate_settlement settlement in
   match committed_lease lease state with
   | None ->
-    (match find_prior_receipt lease.lease_id state with
-     | Some receipt when settlement_equal receipt.settlement settlement ->
-       Ok (state, Already_settled receipt)
-     | Some receipt ->
+    (match Sequence_map.find_opt lease.sequence state.settled_transitions with
+     | Some transition when not (lease_equal transition.lease lease) ->
+       Error (Printf.sprintf "event queue settled lease payload conflict: %s" lease.lease_id)
+     | Some transition
+       when settlement_equal transition.receipt.settlement settlement ->
+       Ok (state, Already_settled transition.receipt)
+     | Some transition ->
        Error
          (Printf.sprintf
             "event queue lease %s already settled as %s; refusing %s"
             lease.lease_id
-            (settlement_kind_label receipt.settlement)
+            (settlement_kind_label transition.receipt.settlement)
             (settlement_kind_label settlement))
      | None -> Error (Printf.sprintf "event queue lease not found: %s" lease.lease_id))
   | Some committed when not (lease_equal committed lease) ->
@@ -511,16 +539,15 @@ let settle ~settled_at ~lease ~settlement state =
         enqueue_if_missing state.pending successor
     in
     let receipt = receipt_for_lease ~settled_at ~settlement committed in
-    let outbox_entry =
-      { receipt
-      ; stimuli = committed.stimuli
-      }
-    in
     Ok
       ( { state with
           pending
         ; leases = remove_lease committed.lease_id state.leases
-        ; transition_outbox = [ outbox_entry ]
+        ; settled_transitions =
+            Sequence_map.add
+              committed.sequence
+              { lease = committed; receipt; projection = Projection_pending }
+              state.settled_transitions
         }
       , Settled receipt )
 ;;
@@ -763,7 +790,9 @@ let transition_receipt_of_yojson json =
     Printf.sprintf "%s:%s" expected_lease_id (settlement_kind_label settlement)
   in
   let expected_event_id = event_id_of_transition expected_transition_id in
-  if not (String.equal lease_id expected_lease_id)
+  if Int64.compare lease_sequence 1L < 0
+  then Error "event queue receipt lease sequence must be positive"
+  else if not (String.equal lease_id expected_lease_id)
   then Error (Printf.sprintf "event queue receipt lease id mismatch: %s" lease_id)
   else if not (String.equal transition_id expected_transition_id)
   then Error (Printf.sprintf "event queue receipt transition id mismatch: %s" transition_id)
@@ -780,22 +809,40 @@ let transition_receipt_of_yojson json =
       }
 ;;
 
-let outbox_entry_to_yojson entry =
+let settled_transition_to_yojson transition =
   `Assoc
-    [ "receipt", transition_receipt_to_yojson entry.receipt
-    ; "stimuli", `List (List.map Keeper_event_queue.stimulus_to_yojson entry.stimuli)
+    [ "lease", lease_to_yojson transition.lease
+    ; "receipt", transition_receipt_to_yojson transition.receipt
+    ; ( "projection"
+      , `String
+          (match transition.projection with
+           | Projection_pending -> "pending"
+           | Projection_complete -> "complete") )
     ]
 ;;
 
-let outbox_entry_of_yojson json =
-  let context = "event queue outbox entry" in
+let settled_transition_of_yojson json =
+  let context = "event queue settled transition" in
   let* fields = assoc_fields ~context json in
+  let* () = exact_reason_fields ~context [ "lease"; "receipt"; "projection" ] fields in
+  let* lease_json = required_field ~context "lease" fields in
+  let* lease = lease_of_yojson lease_json in
   let* receipt_json = required_field ~context "receipt" fields in
   let* receipt = transition_receipt_of_yojson receipt_json in
-  let* stimuli =
-    list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
+  let* projection_label = string_field ~context "projection" fields in
+  let* projection =
+    match projection_label with
+    | "pending" -> Ok Projection_pending
+    | "complete" -> Ok Projection_complete
+    | label ->
+      Error (Printf.sprintf "unknown event queue projection state: %s" label)
   in
-  Ok { receipt; stimuli }
+  if
+    not
+      (Int64.equal lease.sequence receipt.lease_sequence
+       && String.equal lease.lease_id receipt.lease_id)
+  then Error "event queue settled transition lease/receipt mismatch"
+  else Ok { lease; receipt; projection }
 ;;
 
 let to_yojson state =
@@ -805,83 +852,98 @@ let to_yojson state =
     ; "next_lease_sequence", int64_json state.next_lease_sequence
     ; "pending", Keeper_event_queue.queue_to_yojson state.pending
     ; "leases", `List (List.map lease_to_yojson state.leases)
-    ; ( "last_settlement"
-      , match state.last_settlement with
-        | None -> `Null
-        | Some receipt -> transition_receipt_to_yojson receipt )
-    ; ( "transition_outbox"
-      , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
+    ; ( "settled_transitions"
+      , `List
+          (Sequence_map.bindings state.settled_transitions
+           |> List.map (fun (_, transition) ->
+             settled_transition_to_yojson transition)) )
     ]
 ;;
 
-let duplicate_by key values =
-  let rec loop seen = function
-    | [] -> None
-    | value :: rest ->
-      let key = key value in
-      if List.exists (String.equal key) seen
-      then Some key
-      else loop (key :: seen) rest
-  in
-  loop [] values
-;;
-
 let validate_state state =
+  let projection_count = List.length (transition_outbox state) in
   if Int64.compare state.revision 0L < 0
   then Error "event queue revision must not be negative"
   else if Int64.compare state.next_lease_sequence 1L < 0
   then Error "event queue next lease sequence must be positive"
   else if List.length state.leases > 1
   then Error "event queue state must contain at most one active lease"
-  else if List.length state.transition_outbox > 1
+  else if projection_count > 1
   then Error "event queue state must contain at most one unprojected transition"
-  else if state.leases <> [] && state.transition_outbox <> []
+  else if state.leases <> [] && projection_count > 0
   then Error "event queue state cannot contain both an active lease and an outbox transition"
   else if
-    match state.last_settlement, state.transition_outbox with
-    | Some receipt, [ entry ] ->
-      String.equal receipt.transition_id entry.receipt.transition_id
-    | None, _ | Some _, ([] | _ :: _ :: _) -> false
-  then Error "event queue last settlement duplicates the unprojected transition"
-  else
-    match duplicate_by (fun (lease : lease) -> lease.lease_id) state.leases with
-    | Some lease_id -> Error (Printf.sprintf "duplicate event queue lease id: %s" lease_id)
-    | None ->
-      (match
-         duplicate_by
-           (fun entry -> entry.receipt.transition_id)
-           state.transition_outbox
-       with
-       | Some transition_id ->
-         Error (Printf.sprintf "duplicate event queue transition id: %s" transition_id)
-       | None ->
-         let max_sequence =
-           List.fold_left
-             (fun acc (lease : lease) -> Int64.max acc lease.sequence)
-             0L
-             state.leases
-         in
-         let max_sequence =
-           List.fold_left
-             (fun acc entry -> Int64.max acc entry.receipt.lease_sequence)
-             max_sequence
-             state.transition_outbox
-         in
-         let max_sequence =
-           match state.last_settlement with
-           | None -> max_sequence
-           | Some receipt -> Int64.max max_sequence receipt.lease_sequence
-         in
-         if Int64.compare state.next_lease_sequence max_sequence <= 0
-         then
-           Error
-             "event queue next lease sequence must exceed every lease and receipt sequence"
-         else Ok state)
+    List.exists
+      (fun (lease : lease) ->
+         Sequence_map.mem lease.sequence state.settled_transitions)
+      state.leases
+  then Error "event queue active lease duplicates a settled lease"
+  else if
+    not
+      (Sequence_map.for_all
+         (fun sequence transition ->
+            Int64.equal sequence transition.lease.sequence
+            && Int64.equal sequence transition.receipt.lease_sequence
+            && String.equal transition.lease.lease_id transition.receipt.lease_id)
+         state.settled_transitions)
+  then Error "event queue settled transition identity mismatch"
+  else (
+    let max_sequence =
+      List.fold_left
+        (fun acc (lease : lease) -> Int64.max acc lease.sequence)
+        0L
+        state.leases
+    in
+    let max_sequence =
+      match Sequence_map.max_binding_opt state.settled_transitions with
+      | None -> max_sequence
+      | Some (sequence, _) -> Int64.max max_sequence sequence
+    in
+    if Int64.compare state.next_lease_sequence max_sequence <= 0
+    then
+      Error
+        "event queue next lease sequence must exceed every lease and receipt sequence"
+    else Ok state)
+;;
+
+let settled_transitions_of_list transitions =
+  let rec loop previous settled_transitions = function
+    | [] -> Ok settled_transitions
+    | transition :: rest ->
+      let sequence = transition.lease.sequence in
+      if
+        match previous with
+        | Some previous -> Int64.compare sequence previous <= 0
+        | None -> false
+      then
+        Error
+          (Printf.sprintf
+             "event queue settled transition sequences must be strictly increasing: %Ld"
+             sequence)
+      else
+        loop
+          (Some sequence)
+          (Sequence_map.add sequence transition settled_transitions)
+          rest
+  in
+  loop None Sequence_map.empty transitions
 ;;
 
 let of_yojson json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
+  let* () =
+    exact_reason_fields
+      ~context
+      [ "schema"
+      ; "revision"
+      ; "next_lease_sequence"
+      ; "pending"
+      ; "leases"
+      ; "settled_transitions"
+      ]
+      fields
+  in
   let* schema_value = string_field ~context "schema" fields in
   if not (String.equal schema_value schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
@@ -891,21 +953,17 @@ let of_yojson json =
     let* pending_json = required_field ~context "pending" fields in
     let* pending = Keeper_event_queue.queue_of_yojson pending_json in
     let* leases = list_field ~context "leases" lease_of_yojson fields in
-    let* last_settlement =
-      match List.assoc_opt "last_settlement" fields with
-      | Some `Null -> Ok None
-      | Some json -> transition_receipt_of_yojson json |> Result.map Option.some
-      | None -> Error "keeper event queue state missing required field last_settlement"
+    let* settled_transition_list =
+      list_field ~context "settled_transitions" settled_transition_of_yojson fields
     in
-    let* transition_outbox =
-      list_field ~context "transition_outbox" outbox_entry_of_yojson fields
+    let* settled_transitions =
+      settled_transitions_of_list settled_transition_list
     in
     validate_state
       { revision
       ; next_lease_sequence
       ; pending
       ; leases
-      ; last_settlement
-      ; transition_outbox
+      ; settled_transitions
       }
 ;;

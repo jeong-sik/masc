@@ -76,7 +76,6 @@ val revision : t -> int64
 val next_lease_sequence : t -> int64
 val pending : t -> Keeper_event_queue.t
 val leases : t -> lease list
-val last_settlement : t -> transition_receipt option
 val transition_outbox : t -> outbox_entry list
 val lease_kind : lease -> lease_kind
 
@@ -124,9 +123,9 @@ val active_lease : t -> lease option
     claiming new pending work. *)
 
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
-(** Atomically retire a durable outbox entry after an external projector has
-    materialized its stable [event_id], retaining only the last receipt for an
-    immediate idempotent retry. Unknown transition ids fail closed. *)
+(** Mark the serial outbox entry projected after its stable [event_id] is
+    materialized. The immutable settled transition retains semantic lease
+    identity and the exact receipt. Unknown transition ids fail closed. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
@@ -145,4 +144,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v2"]. *)
+(** ["keeper.event_queue.state.v3"]. *)

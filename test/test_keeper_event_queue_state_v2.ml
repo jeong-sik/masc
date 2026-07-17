@@ -18,6 +18,11 @@ let stimulus ?(payload = Queue.Bootstrap) post_id arrived_at : Queue.stimulus =
 
 let queue stimuli = List.fold_left Queue.enqueue Queue.empty stimuli
 
+let list_head_opt = function
+  | [] -> None
+  | head :: _ -> Some head
+;;
+
 let post_ids queue =
   Queue.to_list queue |> List.map (fun (stimulus : Queue.stimulus) -> stimulus.post_id)
 ;;
@@ -78,14 +83,13 @@ let test_claim_codec_ack_idempotency () =
     "projected outbox is retired"
     0
     (List.length (State.transition_outbox state));
-  let projected = require_some "last projected settlement" (State.last_settlement state) in
-  Alcotest.(check string)
-    "projection acknowledgement retains the last receipt"
-    receipt.transition_id
-    projected.transition_id;
   ignore
     (State.mark_transition_projected ~transition_id:receipt.transition_id state
      |> require_ok "projection acknowledgement is idempotent");
+  let forged_lease = { lease with stimuli = [ stimulus "forged" 12.5 ] } in
+  (match State.settle ~settled_at:12.5 ~lease:forged_lease ~settlement:State.Ack state with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "settled lease accepted a different source identity");
   (match
      State.settle
        ~settled_at:13.0
@@ -94,7 +98,62 @@ let test_claim_codec_ack_idempotency () =
        state
    with
    | Error _ -> ()
-   | Ok _ -> Alcotest.fail "conflicting second settlement was accepted")
+   | Ok _ -> Alcotest.fail "conflicting second settlement was accepted");
+  let state = State.with_pending (queue [ stimulus "second" 14.0 ]) state in
+  let state, second_lease = claim_head state in
+  let second_lease = require_some "second history lease" second_lease in
+  let state, second_result =
+    State.settle ~settled_at:15.0 ~lease:second_lease ~settlement:State.Ack state
+    |> require_ok "second history settlement"
+  in
+  let second_receipt =
+    match second_result with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ ->
+      Alcotest.fail "fresh second history lease was already settled"
+  in
+  let state =
+    State.mark_transition_projected ~transition_id:second_receipt.transition_id state
+    |> require_ok "project second history settlement"
+  in
+  let state_json = State.to_yojson state in
+  let fields =
+    match state_json with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "event queue state codec did not emit an object"
+  in
+  (match State.of_yojson (`Assoc (("last_settlement", `Null) :: fields)) with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "v3 state accepted a legacy authority field");
+  let reversed_transitions =
+    match List.assoc "settled_transitions" fields with
+    | `List transitions -> `List (List.rev transitions)
+    | _ -> Alcotest.fail "settled transitions codec did not emit a list"
+  in
+  let reversed_json =
+    `Assoc
+      (("settled_transitions", reversed_transitions)
+       :: List.remove_assoc "settled_transitions" fields)
+  in
+  (match State.of_yojson reversed_json with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "v3 state accepted reordered receipt history");
+  let state =
+    State.of_yojson state_json
+    |> require_ok "multiple projected receipts roundtrip"
+  in
+  let _, older_retry =
+    State.settle ~settled_at:16.0 ~lease ~settlement:State.Ack state
+    |> require_ok "retry older projected settlement"
+  in
+  (match older_retry with
+   | State.Already_settled older_receipt ->
+     Alcotest.(check string)
+       "older exact receipt survives later projection"
+       receipt.transition_id
+       older_receipt.transition_id
+   | State.Settled _ ->
+     Alcotest.fail "older projected settlement was applied twice")
 ;;
 
 let test_claim_leases_earliest_ready_without_reordering_skipped_work () =
@@ -254,12 +313,12 @@ let test_requeue_and_escalation_are_total () =
     (List.length (State.transition_outbox state));
   let open Yojson.Safe.Util in
   let boundary_failure_settlement =
-    State.to_yojson state
-    |> member "transition_outbox"
-    |> to_list
+    State.transition_outbox state
     |> List.rev
-    |> List.hd
-    |> member "receipt"
+    |> list_head_opt
+    |> require_some "boundary failure transition"
+    |> fun (entry : State.outbox_entry) ->
+    State.transition_receipt_to_yojson entry.receipt
     |> member "settlement"
   in
   Alcotest.(check string)
@@ -357,11 +416,11 @@ let test_judgment_terminal_evidence_is_durable () =
    | _ -> Alcotest.fail "external-input judgment evidence changed during roundtrip");
   let open Yojson.Safe.Util in
   let settlement_json =
-    State.to_yojson state
-    |> member "transition_outbox"
-    |> to_list
-    |> List.hd
-    |> member "receipt"
+    State.transition_outbox state
+    |> list_head_opt
+    |> require_some "external-input transition"
+    |> fun (entry : State.outbox_entry) ->
+    State.transition_receipt_to_yojson entry.receipt
     |> member "settlement"
   in
   Alcotest.(check string)

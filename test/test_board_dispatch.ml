@@ -563,6 +563,69 @@ let test_first_board_observation_starts_at_current_head () =
            event.Keeper_world_observation.post_id
        | _ -> Alcotest.fail "expected exactly one new Board event")
 
+let test_dashboard_projection_does_not_produce_attention_candidate () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "projection-read-only" in
+  let meta = board_observation_meta keeper_name in
+  let entry = Keeper_registry.register ~base_path keeper_name meta in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.unregister ~base_path keeper_name)
+    (fun () ->
+       ignore
+         (Keeper_world_observation.collect_board_events ~base_path ~meta
+           : Keeper_world_observation.pending_board_event list * int * int);
+       Unix.sleepf 0.01;
+       (match
+          Board_dispatch.create_post
+            ~author:"external-author"
+            ~content:"ambient post requiring the structured attention judge"
+            ~post_kind:Board.Human_post
+            ()
+        with
+        | Ok _ -> ()
+        | Error error -> Alcotest.fail (Board.show_board_error error));
+       ignore
+         (Keeper_world_observation.collect_board_events_without_advancing_cursor
+            ~base_path
+            ~meta
+           : Keeper_world_observation.pending_board_event list * int * int);
+       (match
+          Keeper_board_attention_candidate.load_candidates
+            ~base_path
+            ~keeper_name
+        with
+        | Ok [] -> ()
+        | Ok candidates ->
+          Alcotest.failf
+            "read-only projection persisted %d attention candidates"
+            (List.length candidates)
+        | Error detail ->
+          Alcotest.failf "candidate projection read failed: %s" detail);
+       Alcotest.(check bool)
+         "read-only projection did not wake the Keeper"
+         false
+         (Atomic.get entry.fiber_wakeup);
+       ignore
+         (Keeper_world_observation.collect_board_events ~base_path ~meta
+           : Keeper_world_observation.pending_board_event list * int * int);
+       (match
+          Keeper_board_attention_candidate.load_candidates
+            ~base_path
+            ~keeper_name
+        with
+        | Ok [ { status = Keeper_board_attention_candidate.Pending _; _ } ] -> ()
+        | Ok candidates ->
+          Alcotest.failf
+            "live owner collection persisted %d candidates instead of one Pending"
+            (List.length candidates)
+        | Error detail ->
+          Alcotest.failf "owner candidate read failed: %s" detail);
+       Alcotest.(check bool)
+         "live owner collection woke the Keeper"
+         true
+         (Atomic.get entry.fiber_wakeup))
+;;
+
 let test_recent_sort_bypasses_hot_cutoff () =
   let create_post_exn ~author ~content =
     match
@@ -1932,6 +1995,10 @@ let () =
         "first observation starts at current head"
         `Quick
         (with_eio test_first_board_observation_starts_at_current_head);
+      Alcotest.test_case
+        "dashboard projection does not produce attention candidate"
+        `Quick
+        (with_eio test_dashboard_projection_does_not_produce_attention_candidate);
       Alcotest.test_case "recent bypasses hot cutoff" `Quick
         (with_eio test_recent_sort_bypasses_hot_cutoff);
       Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);

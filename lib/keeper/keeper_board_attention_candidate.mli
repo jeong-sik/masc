@@ -1,6 +1,6 @@
 (** Durable Board-attention judgment boundary.
 
-    A candidate is persisted before any asynchronous model call. Its only
+    A candidate is persisted before any model call. Its only
     lifecycle is [Pending -> Judged -> Consumed]. Relevant judgments become
     normal Keeper-lane events only after an exact candidate-id durable queue
     commit; failures retain the latest retryable evidence and never consume the
@@ -12,7 +12,6 @@ type retryable_failure_kind =
   | Provider_unavailable
   | Response_contract_unavailable
   | Durable_delivery_unavailable
-  | Worker_unavailable
 
 type retryable_failure =
   { kind : retryable_failure_kind
@@ -62,6 +61,26 @@ type record_result =
   | Duplicate of candidate
   | Record_error of string
 
+type persistence =
+  | Candidate_recorded
+  | Candidate_already_present
+
+type wake_decision =
+  | Wake_requested of Keeper_registry.wakeup_outcome
+  | Wake_not_required
+
+type record_acceptance =
+  { candidate : candidate
+  ; persistence : persistence
+  ; wake : wake_decision
+  }
+
+type drain_report =
+  { attempted : int
+  ; consumed : int
+  ; remaining : int
+  }
+
 exception Candidate_unavailable of string
 
 val prompt_name : string
@@ -109,15 +128,27 @@ val process_with_judge :
   judge:(candidate -> (judgment, retryable_failure) result) ->
   candidate ->
   (candidate, string) result
-(** Testable state-machine boundary. Production uses the configured structured
-    judge through {!record_and_start} and {!resume_pending}. *)
+(** Testable state-machine boundary. Production drains the configured
+    structured judge through {!drain_pending_on_owner_lane}. *)
 
-val record_and_start :
-  base_path:string -> candidate -> (candidate, string) result
-(** Returns after the Pending row is durably committed. Worker availability or
-    provider failure does not invalidate that acceptance. *)
+val record_and_wake :
+  base_path:string -> candidate -> (record_acceptance, string) result
+(** Persist the exact candidate, then request a live wake from the registered
+    running Keeper. The durable row is authoritative: a deferred wake remains
+    a successful acceptance and is returned as a typed
+    {!Keeper_registry.wakeup_outcome}. A consumed duplicate needs no wake.
+    This function never invokes the model judge. *)
 
-val resume_pending :
-  base_path:string -> keeper_name:string -> (int, string) result
-(** Asynchronously retries every non-consumed candidate in this Keeper lane.
-    The returned count is observability only and never limits retries. *)
+val drain_pending_on_owner_lane :
+  base_path:string -> keeper_name:string -> (drain_report, string) result
+(** Synchronously process every non-consumed durable candidate. Production
+    calls this only while holding the Keeper's turn admission slot; no
+    dashboard/producer domain may call it. There is no count or time cap. *)
+
+module For_testing : sig
+  val drain_pending_with_judge :
+    base_path:string ->
+    keeper_name:string ->
+    judge:(candidate -> (judgment, retryable_failure) result) ->
+    (drain_report, string) result
+end

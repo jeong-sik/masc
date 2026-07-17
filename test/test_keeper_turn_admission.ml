@@ -49,6 +49,10 @@ let reset () =
   Keeper_turn_admission.For_testing.reset ();
   Keeper_chat_queue.For_testing.reset ();
   remove_tree base_path;
+  (* [Keeper_fs] never creates a filesystem root, only descendants
+     (durable-directory ownership guard), so enqueue after this wipe fails
+     with [Missing_root] unless the fixture recreates its own root. *)
+  ensure_dir base_path;
   ignore
     (Keeper_chat_queue.configure_persistence ~base_path
       : Keeper_chat_queue.configure_report)
@@ -638,6 +642,7 @@ let test_shutdown_reservation_fences_and_rolls_back () =
        "autonomous lane sees typed shutdown fence"
        (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
    | `Busy (Keeper_turn_admission.Turn_busy _)
+   | `Busy (Keeper_turn_admission.Chat_backlog _)
    | `Ran () ->
      check "autonomous lane cannot cross shutdown fence" false);
   (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
@@ -723,6 +728,76 @@ let test_shutdown_reservation_restores_durable_owner () =
     check "registration cannot cross restored fence" false
 ;;
 
+let test_compaction_lane_bypasses_chat_backlog () =
+  reset ();
+  Printf.printf
+    "Test 10b: manual-compaction lane admits despite a durable chat backlog (#24865)\n%!";
+  (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
+   | Ok _ -> ()
+   | Error error ->
+     check
+       ("enqueue succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
+       false);
+  (* The standard lane reports the backlog as a typed [Chat_backlog] with the
+     exact counts, not as [Turn_busy None]. Before this variant existed the
+     queue fence logged "holder info not yet published", which mis-directed
+     the #24865 diagnosis toward a stale slot. *)
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy (Keeper_turn_admission.Chat_backlog { pending_count = 1; inflight_count = 0 })
+     -> check "standard lane reports the backlog as typed Chat_backlog" true
+   | `Busy _ | `Ran () ->
+     check "standard lane reports the backlog as typed Chat_backlog" false);
+  (match
+     Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 7)
+   with
+   | `Ran 7 -> check "compaction lane admits despite a pending receipt" true
+   | `Ran _ | `Busy _ -> check "compaction lane admits despite a pending receipt" false);
+  (* Leasing moves the receipt to inflight; the compaction lane still admits
+     (an inflight receipt whose delivery cannot progress is exactly the
+     #24865 wedge), while the standard lane keeps yielding. *)
+  (match Keeper_chat_queue.lease_next ~keeper_name with
+   | `Leased _ -> ()
+   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+     check "lease_next leases the queued message" false);
+  (match
+     Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 8)
+   with
+   | `Ran 8 -> check "compaction lane admits despite an inflight receipt" true
+   | `Ran _ | `Busy _ -> check "compaction lane admits despite an inflight receipt" false);
+  (* Production order (#24865 review): the compaction admission released the
+     slot on return, and a follow-up turn re-entering the standard lane still
+     yields to the remaining backlog — the bypass covers the compaction
+     commit only, never the turn that follows it. *)
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy (Keeper_turn_admission.Chat_backlog _) ->
+     check "standard lane still yields to the backlog after compaction admission" true
+   | `Busy _ | `Ran () ->
+     check "standard lane still yields to the backlog after compaction admission" false);
+  (* A genuinely held slot still refuses the compaction lane: it must never
+     interleave with an in-flight turn. *)
+  Keeper_turn_admission.For_testing.with_unpublished_turn_lock
+    ~base_path
+    ~keeper_name
+    (fun () ->
+       match
+         Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> ())
+       with
+       | `Busy (Keeper_turn_admission.Turn_busy _) ->
+         check "compaction lane still refuses a held slot" true
+       | `Busy _ | `Ran () -> check "compaction lane still refuses a held slot" false);
+  (* A durable shutdown reservation still fences the compaction lane. *)
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore
+    (Keeper_turn_admission.begin_shutdown ~base_path ~keeper_name ~operation_id
+      : Keeper_turn_admission.begin_shutdown_result);
+  match
+    Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> ())
+  with
+  | `Busy (Keeper_turn_admission.Shutdown_requested _) ->
+    check "compaction lane still honors the shutdown fence" true
+  | `Busy _ | `Ran () -> check "compaction lane still honors the shutdown fence" false
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_autonomous_admits_when_chat_persistence_is_not_configured ();
@@ -740,6 +815,7 @@ let () =
   test_autonomous_yields_to_parked_chat ();
   test_idle_loop_yields_to_parked_chat ();
   test_autonomous_yields_to_queued_connector_message ();
+  test_compaction_lane_bypasses_chat_backlog ();
   test_shutdown_reservation_fences_and_rolls_back ();
   test_shutdown_reservation_restores_durable_owner ();
   if !failures > 0

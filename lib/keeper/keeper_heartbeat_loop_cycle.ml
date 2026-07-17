@@ -89,10 +89,6 @@ let manual_compaction_followup_failure = function
   | Judgment_settled _ | Manual_compaction_failed _ -> None
 ;;
 
-let with_manual_compaction applied outcome =
-  if applied then Manual_compaction_applied outcome else outcome
-;;
-
 let record_failure_judgment_outcome
       ~keeper_name
       (request : Keeper_event_queue.failure_judgment)
@@ -210,67 +206,48 @@ let run_keeper_cycle_admitted
       ~shared_context
       ~(wake : Keeper_registry.wake_reason)
       ?failure_judgment
-      ?(manual_compaction_requested = false)
       ()
   =
   let admitted_execution =
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       let prepared =
-        if manual_compaction_requested
-        then
-          (match Keeper_manual_compaction.run ~config:ctx.config ~meta:meta_after_triage with
-           | Error failure -> `Compaction_failed failure
-           | Ok success ->
-             Keeper_manual_compaction.observe_manifest
+        match failure_judgment with
+        | None -> `Run obs
+        | Some request ->
+          (match
+             prepare_failure_judgment_turn
+               ~base_path:ctx.config.base_path
                ~keeper_name:meta_after_triage.name
-               success.manifest;
-             `Run (obs, true))
-        else
-          match failure_judgment with
-          | None -> `Run (obs, false)
-          | Some request ->
-            (match
-               prepare_failure_judgment_turn
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:meta_after_triage.name
-                 ~request
-                 obs
-             with
-             | `Run observation -> `Run (observation, false)
-             | `Settle outcome -> `Settle outcome)
+               ~request
+               obs
+           with
+           | `Run observation -> `Run observation
+           | `Settle outcome -> `Settle outcome)
       in
       match prepared with
-      | `Compaction_failed failure -> `Compaction_failed failure
       | `Settle outcome -> `Judgment outcome
-      | `Run (observation, manual_compaction_applied) ->
+      | `Run observation ->
         `Turn
-          ( Keeper_unified_turn.run_keeper_cycle
-              ~config:ctx.config
-              ~meta:meta_after_triage
-              ~publication_recovery_provider:ctx.publication_recovery_provider
-              ~observation
-              ~generation:meta_after_triage.runtime.generation
-              ~wake
-              ~channel:turn_decision.channel
-              ?hitl_resolution
-              ?continuation_delivery_channel
-              (* RFC-0315: pass the whole decision, not just its channel — the
-                 prompt renders the verdict reasons so the turn knows why it woke. *)
-              ~turn_decision
-              ~shared_context
-              ?event_bus
-              ()
-          , manual_compaction_applied ))
+          (Keeper_unified_turn.run_keeper_cycle
+             ~config:ctx.config
+             ~meta:meta_after_triage
+             ~publication_recovery_provider:ctx.publication_recovery_provider
+             ~observation
+             ~generation:meta_after_triage.runtime.generation
+             ~wake
+             ~channel:turn_decision.channel
+             ?hitl_resolution
+             ?continuation_delivery_channel
+             (* RFC-0315: pass the whole decision, not just its channel — the
+                prompt renders the verdict reasons so the turn knows why it woke. *)
+             ~turn_decision
+             ~shared_context
+             ?event_bus
+             ()))
   in
   match admitted_execution with
-  | `Compaction_failed failure ->
-    Log.Keeper.error
-      ~keeper_name:meta_after_triage.name
-      "manual compaction failed in owner lane: %s"
-      (Keeper_manual_compaction.failure_to_string failure);
-    Manual_compaction_failed { meta = meta_after_triage; failure }
   | `Judgment outcome -> Judgment_settled { meta = meta_after_triage; outcome }
-  | `Turn (Error failure, manual_compaction_applied) ->
+  | `Turn (Error failure) ->
     let err = failure.Keeper_unified_turn.error in
     let e_str = Agent_sdk.Error.to_string err in
     Log.Keeper.debug "%s: keeper cycle failed: %s" meta_after_triage.name e_str;
@@ -324,13 +301,10 @@ let run_keeper_cycle_admitted
           ();
         meta_after_triage
     in
-    with_manual_compaction manual_compaction_applied (Failed { meta; failure })
-  | `Turn (Ok (Keeper_unified_turn.Turn_completed updated), applied) ->
-    with_manual_compaction applied (Completed updated)
-  | `Turn (Ok (Keeper_unified_turn.Turn_cancelled meta), applied) ->
-    with_manual_compaction applied (Cancelled meta)
-  | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta), applied) ->
-    with_manual_compaction applied (Skipped meta)
+    Failed { meta; failure }
+  | `Turn (Ok (Keeper_unified_turn.Turn_completed updated)) -> Completed updated
+  | `Turn (Ok (Keeper_unified_turn.Turn_cancelled meta)) -> Cancelled meta
+  | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta)) -> Skipped meta
 ;;
 
 let run_keeper_cycle
@@ -348,48 +322,83 @@ let run_keeper_cycle
       ?manual_compaction_requested
       ()
   =
-  match
-    Keeper_turn_admission.run_if_free
-      ~base_path:ctx.config.base_path
-      ~keeper_name:meta_after_triage.name
-      (run_keeper_cycle_admitted
-         ~ctx
-         ~meta_after_triage
-         ~stop
-         ~obs
-         ~turn_decision
-         ~shared_context
-         ~wake
-         ?failure_judgment
-         ?manual_compaction_requested
-         ?event_bus
-         ?hitl_resolution
-         ?continuation_delivery_channel)
-  with
-  | `Ran outcome -> outcome
-  | `Busy ((Keeper_turn_admission.Shutdown_requested operation_id) as block) ->
-    Log.Keeper.info
-      "%s: autonomous turn admission closed by shutdown operation %s"
-      meta_after_triage.name
-      (Keeper_shutdown_types.Operation_id.to_string operation_id);
+  let busy_outcome block =
+    (match block with
+     | Keeper_turn_admission.Chat_backlog { pending_count; inflight_count } ->
+       Log.Keeper.info
+         "%s: yielding autonomous cycle to chat backlog (pending=%d inflight=%d); \
+          skipping until next heartbeat"
+         meta_after_triage.name
+         pending_count
+         inflight_count
+     | Keeper_turn_admission.Shutdown_requested operation_id ->
+       Log.Keeper.info
+         "%s: autonomous turn admission closed by shutdown operation %s"
+         meta_after_triage.name
+         (Keeper_shutdown_types.Operation_id.to_string operation_id)
+     | Keeper_turn_admission.Turn_busy in_flight ->
+       (* Another lane holds this keeper's turn slot (RFC-0225 §3.1): skip the
+          cycle and return the pre-cycle meta unchanged. The next heartbeat
+          retries naturally — same shape as the pre-existing skip decisions. *)
+       let holder =
+         match in_flight with
+         | Some { Keeper_turn_admission.lane; started_at } ->
+           Printf.sprintf
+             "%s turn running for %.0fs"
+             (Keeper_turn_admission.lane_to_string lane)
+             (* NDT-OK: gettimeofday renders the in-flight turn age for the log line only *)
+             (Unix.gettimeofday () -. started_at)
+         | None -> "holder info not yet published"
+       in
+       Log.Keeper.info
+         "%s: turn slot busy (%s); skipping autonomous cycle until next heartbeat"
+         meta_after_triage.name
+         holder);
     Busy { meta = meta_after_triage; block }
-  | `Busy ((Keeper_turn_admission.Turn_busy in_flight) as block) ->
-    (* Another lane holds this keeper's turn slot (RFC-0225 §3.1): skip the
-       cycle and return the pre-cycle meta unchanged. The next heartbeat
-       retries naturally — same shape as the pre-existing skip decisions. *)
-    let holder =
-      match in_flight with
-      | Some { Keeper_turn_admission.lane; started_at } ->
-        (* NDT-OK: gettimeofday renders the in-flight turn age for the log line only *)
-        Printf.sprintf
-          "%s turn running for %.0fs"
-          (Keeper_turn_admission.lane_to_string lane)
-          (Unix.gettimeofday () -. started_at)
-      | None -> "holder info not yet published"
-    in
-    Log.Keeper.info
-      "%s: turn slot busy (%s); skipping autonomous cycle until next heartbeat"
-      meta_after_triage.name
-      holder;
-    Busy { meta = meta_after_triage; block }
+  in
+  let run_standard_cycle () =
+    match
+      Keeper_turn_admission.run_if_free
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name
+        (run_keeper_cycle_admitted
+           ~ctx
+           ~meta_after_triage
+           ~stop
+           ~obs
+           ~turn_decision
+           ~shared_context
+           ~wake
+           ?failure_judgment
+           ?event_bus
+           ?hitl_resolution
+           ?continuation_delivery_channel)
+    with
+    | `Ran outcome -> outcome
+    | `Busy block -> busy_outcome block
+  in
+  match manual_compaction_requested with
+  | Some false | None -> run_standard_cycle ()
+  | Some true ->
+    (* #24865: a manual-compaction cycle is the remedy for the overflow that
+       wedges chat delivery, so its compaction-only critical section admits
+       past the durable chat backlog ([run_compaction_if_free] inside
+       [run_admitted]) and releases the slot the moment the checkpoint
+       commits. The follow-up turn then re-enters the standard lane below,
+       where a chat backlog wins — the remedy may cut the line, an arbitrary
+       LLM turn may not. [Manual_compaction_applied (Busy _)] settles the
+       stimulus as Ack, so a yielded follow-up does not replay compaction. *)
+    (match
+       Keeper_manual_compaction.run_admitted
+         ~config:ctx.config
+         ~meta:meta_after_triage
+     with
+     | `Busy block -> busy_outcome block
+     | `Compaction_failed failure ->
+       Log.Keeper.error
+         ~keeper_name:meta_after_triage.name
+         "manual compaction failed in owner lane: %s"
+         (Keeper_manual_compaction.failure_to_string failure);
+       Manual_compaction_failed { meta = meta_after_triage; failure }
+     | `Applied _success -> Manual_compaction_applied (run_standard_cycle ()))
 ;;

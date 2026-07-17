@@ -208,7 +208,7 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 - `v0.215.0`은 OAS execution Journal/store/runtime foundation을 포함하지만 production single-writer hard cut은 아니다. `Durable_event`, `Journal_bridge`, independent `Raw_trace.record_*`, Builder journal surface가 OAS main에 남아 있으므로 Goal의 Journal sole-writer acceptance는 아직 미충족이다.
 - OAS main은 release 뒤 #2640 recursive-work fence까지 전진했다. 미발행 main을 MASC pin으로 간주하지 않으며, 다음 pin은 release artifact와 surface drift 검증 뒤 별도 slice로 진행한다.
 
-> [근거] `bash scripts/check-oas-pin.sh`, `gh api repos/jeong-sik/oas/releases/latest`, OAS writer call-site `rg`; 2026-07-17 13:08 KST 확인; 신뢰도 High. 이후 값은 pin script/release 상태가 정본이다.
+> [근거] `bash scripts/check-oas-pin.sh`, `gh api repos/jeong-sik/oas/releases/latest`, OAS writer call-site `rg`; 2026-07-17 13:44 KST 확인; 신뢰도 High. 이후 값은 pin script/release 상태가 정본이다.
 
 ---
 

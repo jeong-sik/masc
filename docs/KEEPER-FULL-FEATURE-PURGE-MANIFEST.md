@@ -265,6 +265,13 @@ counted through a provider-native contract, and `Insufficient_reduction` is
 durable work rather than an inline retry cap. Transcript or string inference,
 synthetic ToolResult insertion, and fleet-wide blocking are forbidden.
 
+The OAS dependency is ordered: exact invocation propagation, production
+Execution Journal single-writer settlement authority, and only then a public
+pending-tool resume operation. `Agent.resume` in OAS 0.215 reconstructs state
+but does not settle pending Tool effects. MASC must not call internal
+`Agent_tools`, accept a caller-synthesized settlement, or replay an effect whose
+commit outcome is unknown.
+
 Delete the `Deterministic` / `extractive` compaction mode and
 `MASC_KEEPER_COMPACTION_MODE`.
 

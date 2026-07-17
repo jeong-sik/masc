@@ -422,8 +422,8 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 
 - **문제:** OAS 0.215의 execution Journal/store/runtime foundation을 production finite-run sole writer로 활성화하고 옛 writer를 같은 hard cut에서 삭제한다.
 - **경계:** OAS는 generic Agent/Provider/Tool occurrence만 안다. MASC operation/Keeper/Gate/Fusion 의미는 OAS event에 추가하지 않는다.
-- **touch:** `Execution_journal`/`Execution_event_store`/`Execution_lane_writer` activation; `Durable_event`·`Journal_bridge`·Builder journal selector·independent `Raw_trace.record_*` 삭제; #2642 exact invocation lifecycle propagation 검증.
-- **acceptance:** attempt-before-effect, receipt-or-typed-unknown, attempt-owned recursive child edge, committed-cursor Event_bus/Raw_trace projection, projection failure가 commit을 변경하지 않음.
+- **touch:** `Execution_journal`/`Execution_event_store`/`Execution_lane_writer` activation; `Durable_event`·`Journal_bridge`·Builder journal selector·independent `Raw_trace.record_*` 삭제; #2642 exact invocation lifecycle propagation; stable checkpoint-stage codec; hard cut 뒤 public pending-tool resume.
+- **acceptance:** attempt-before-effect, receipt-or-typed-unknown, attempt-owned recursive child edge, committed-cursor Event_bus/Raw_trace projection, projection failure가 commit을 변경하지 않음. `After_assistant_collected` crash recovery는 exact Journal settlement 없이 Tool effect를 재실행하지 않으며, unresolved commit은 typed `Commit_outcome_unknown`이다.
 - **DoD/잔여 검증:** ordinary public Agent API는 단순하게 유지되고 production execution fact writer count가 정확히 1이다. release 후 MASC pin을 별도 slice로 올린다.
 
 ### Goal 2 — 삭제 잔재 숙청 (heuristic estimator / Context_reducer / limit·budget)

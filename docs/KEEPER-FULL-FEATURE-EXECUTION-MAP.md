@@ -183,11 +183,20 @@ run-local `Commit_outcome_unknown`; it does not schedule product work.
 | #2643 | Draft design | REVIEW recursive executable contract against the normative Goal |
 | `Durable_event` / `Journal_bridge` | live public and production callers remain | KILL in the activation hard cut |
 | independent `Raw_trace.record_*` | live writer in `agent_trace` | KILL writer; keep cursor-backed projection only |
+| public `Agent.resume` | reconstructs checkpoint state only | DO NOT replay pending Tool effects until exact Journal settlement authority exists |
 
 Journal/store/lane-writer/codec foundations are now on `main`, but foundation
 is not activation. Production still writes overlapping histories. The next OAS
 execution slice must wire one Journal writer while deleting the old writers and
 public selection surface in the same cut.
+
+`After_assistant_collected` is persisted before Tool execution. A crash after
+an irreversible effect but before `After_tool_results_appended` therefore
+cannot be repaired by merely re-reading the checkpoint. The safe order is
+#2642 exact invocation propagation, one production Journal writer, an
+Agent-owned receipt/unknown join, then a public pending-tool resume API. A
+caller callback, MASC import of internal `Agent_tools`, or synthetic ToolResult
+would move effect authority across the boundary and is forbidden.
 
 ## 6. OAS Single-Writer Hard Cut
 

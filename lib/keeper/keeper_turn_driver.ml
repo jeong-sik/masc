@@ -536,11 +536,7 @@ let run_named
        with
       | Error err -> Error err, None
       | Ok provider_config ->
-        let candidate =
-          Runtime_candidate.of_provider_config
-            ~max_concurrent:runtime.Runtime.binding.max_concurrent
-            provider_config
-        in
+        let candidate = Runtime_candidate.of_provider_config provider_config in
         (* Cached provider health is observation only. Every eligible runtime
            reaches the real provider boundary; only the resulting typed error
            may drive fallback. *)

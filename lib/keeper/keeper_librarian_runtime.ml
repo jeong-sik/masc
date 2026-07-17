@@ -88,7 +88,14 @@ let runtime_slots : (string, provider_slot) Hashtbl.t = Hashtbl.create 16
 
 let runtime_slot_capacity ~runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some runtime -> Option.value runtime.Runtime.binding.max_concurrent ~default:0
+  | Some runtime ->
+    (* Closed mapping, not a permissive default: runtime_toml rejects
+       non-positive max-concurrent at parse ("0 was historically used as an
+       omission sentinel", runtime_toml.ml ~:782), so [Some 0] is unreachable
+       here and 0 unambiguously encodes "no declared bound = gate disabled"
+       (see the .mli contract for with_runtime_slot). *)
+    (* DET-OK: None -> 0 is the closed gate-disabled encoding above. *)
+    Option.value runtime.Runtime.binding.max_concurrent ~default:0
   | None -> 0
 ;;
 

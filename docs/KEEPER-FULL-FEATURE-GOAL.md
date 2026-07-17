@@ -12,6 +12,8 @@ documents and must be refreshed from their authoritative sources.
 
 Current implementation and PR reachability:
 [`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md).
+Current browser-ready Goal Matrix:
+[`2026-07-17-keeper-full-feature-goal-matrix.html`](audit/2026-07-17-keeper-full-feature-goal-matrix.html).
 
 ## 1. Copyable Goal
 
@@ -419,6 +421,13 @@ Capacity is computed from the complete provider request: system prompt, tools,
 memory, multimodal blocks, provider framing, and reserved output. Use
 provider-native token counting when available; otherwise preserve typed
 `Unknown` rather than guessing from characters.
+
+A fit claim is bound to one exact pending source and the same immutable request
+artifact that OAS later dispatches after applying its hooks and model-input
+projection. MASC must not reconstruct that provider request. A manual
+compaction with no pending source may record semantic reduction, but it cannot
+claim that an unknown future turn fits. Source-bound manual and overflow work
+must remeasure after compaction because the request artifact changed.
 
 If one compaction request is itself too large:
 

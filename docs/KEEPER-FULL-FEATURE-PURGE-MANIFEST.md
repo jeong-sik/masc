@@ -3,15 +3,15 @@
 > Status: implementation deletion and replacement contract
 > Normative goal: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
 > Live map: [`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md)
-> Source checkpoint: MASC `dbf140cbdc`, OAS `3a6c92c715`
-> Checked: 2026-07-16 KST
+> Source checkpoint: MASC `9f62efe4a7`, OAS `b2a9478ff3`, pinned OAS `v0.215.0` at `a7ea83fbbf`
+> Checked: 2026-07-17 14:09 KST
 
 This manifest names what must die, what must be rewritten, and what is an
 objective boundary worth keeping. It is deliberately narrower than a migration
 plan: retired execution authorities are not compatibility targets.
 
 [근거] `rg` over both source trees, exact production call-site inspection,
-`git merge-base --is-ancestor`, and current PR ancestry; checked 2026-07-16;
+`git merge-base --is-ancestor`, and current PR ancestry; checked 2026-07-17;
 confidence High.
 
 ## 1. The Entire Journal Law
@@ -232,13 +232,51 @@ is regression evidence for the old behavior, not the desired contract.
 
 The LLM owns semantic keep, summarize, and drop decisions for ordinary
 conversation. Deterministic code owns only typed units, source binding,
-coverage, ordering, protected active anchors, and checkpoint CAS.
+coverage, ordering, protected active anchors, typed continuation stage, and
+checkpoint CAS.
 
 Completed ToolResult or ToolProgress prose cannot be reduced until the durable
 operation Journal, exact receipt, canonical payload digest, and cursor span
 provide an exact join. Canonical bytes may be inline or addressed by an
 Artifact reference. Open ToolUse, active progress, unresolved suffixes, and
 currently unjoined closed Tool cycles remain exact.
+
+Current-main defects that must be removed in the replacement slice:
+
+- `keeper_run_prompt` applies `repair_broken_tool_call_pairs` immediately before
+  provider dispatch and can delete a checkpointed open ToolUse;
+- deleting that repair alone exposes a second defect: an unresolved ToolUse
+  cannot be sent with a new user goal, and the checkpoint does not durably say
+  which exact Tool occurrence is awaiting its ToolResult;
+- the current LLM plan receives no selected-runtime fit target;
+- acceptance checks only that serialized bytes decreased, not that the complete
+  next request fits the provider-native context window;
+- a transcript larger than the compaction model's own window has no durable
+  LLM wave protocol;
+- `primary_model_max_tokens` configures the working context but is not a
+  provider-native full-request count or an acceptance proof.
+
+The replacement uses closed structural units and persists the open suffix with
+a typed exact Tool continuation. While that continuation is unresolved it
+performs zero provider dispatches and defers only that activity. A matching
+typed ToolResult closes the cycle and wakes the exact owner; only then may the
+closed checkpoint prefix reach provider dispatch. The complete next request is
+counted through a provider-native contract, and `Insufficient_reduction` is
+durable work rather than an inline retry cap. Transcript or string inference,
+synthetic ToolResult insertion, and fleet-wide blocking are forbidden.
+
+The fit receipt is valid only for the exact pending source and the immutable
+OAS-prepared request that will be dispatched. MASC does not rebuild provider
+framing, hooks, tools, or model-input projection. A source-free manual request
+may compact semantically but must not report provider fit for an unknown future
+turn.
+
+The OAS dependency is ordered: exact invocation propagation, production
+Execution Journal single-writer settlement authority, and only then a public
+pending-tool resume operation. `Agent.resume` in OAS 0.215 reconstructs state
+but does not settle pending Tool effects. MASC must not call internal
+`Agent_tools`, accept a caller-synthesized settlement, or replay an effect whose
+commit outcome is unknown.
 
 Delete the `Deterministic` / `extractive` compaction mode and
 `MASC_KEEPER_COMPACTION_MODE`.

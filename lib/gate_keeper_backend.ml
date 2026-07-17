@@ -485,6 +485,33 @@ let ensure_metadata key value metadata =
       if Option.is_some (List.assoc_opt key metadata) then metadata
       else metadata @ [ (key, value) ]
 
+let reconcile_delivery_metadata key expected metadata =
+  let observed =
+    List.filter_map
+      (fun (candidate, value) ->
+         if String.equal candidate key then Some value else None)
+      metadata
+  in
+  match expected, observed with
+  | None, [] -> Ok metadata
+  | None, _ :: _ ->
+    Error
+      (Printf.sprintf
+         "connector delivery omitted %s but metadata supplied an independent value"
+         key)
+  | Some expected, [] -> Ok (metadata @ [ (key, expected) ])
+  | Some expected, [ observed ] when String.equal expected observed -> Ok metadata
+  | Some expected, [ observed ] ->
+    Error
+      (Printf.sprintf
+         "connector delivery %s conflicts with metadata (delivery=%S metadata=%S)"
+         key
+         expected
+         observed)
+  | Some _, _ :: _ :: _ ->
+    Error (Printf.sprintf "connector metadata contains duplicate %s fields" key)
+;;
+
 let delivery_key_of_receipt receipt_id =
   match Keeper_chat_delivery_identity.Receipt_ids.of_list [ receipt_id ] with
   | Ok receipt_ids ->
@@ -563,103 +590,114 @@ let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
   let conversation_id = delivery.conversation_id in
   let external_message_id = delivery.external_message_id in
   let metadata =
-    metadata
-    |> ensure_metadata "conversation_id" conversation_id
-    |> ensure_metadata "external_message_id" external_message_id
+    match
+      reconcile_delivery_metadata "conversation_id" conversation_id metadata
+    with
+    | Error _ as error -> error
+    | Ok metadata ->
+      reconcile_delivery_metadata
+        "external_message_id"
+        external_message_id
+        metadata
   in
-  let surface = delivery.surface in
-  let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
-  match
-    Keeper_chat_delivery_identity.Request_id.of_string idempotency_key
-  with
-  | Error detail ->
-    Gate_protocol.Keeper_error_result (redact_text detail)
-  | Ok request_id ->
-    let receipt_id = Keeper_chat_queue.Receipt_id.of_request_id request_id in
-    (match delivery_key_of_receipt receipt_id with
+  match metadata with
+  | Error detail -> Gate_protocol.Keeper_error_result (redact_text detail)
+  | Ok metadata ->
+    let surface = delivery.surface in
+    let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
+    (match
+       Keeper_chat_delivery_identity.Request_id.of_string idempotency_key
+     with
      | Error detail ->
        Gate_protocol.Keeper_error_result (redact_text detail)
-     | Ok delivery_key ->
-       let opt value =
-         match String.trim value with
-         | "" -> None
-         | value -> Some value
-       in
-       (match
-          Keeper_chat_store.append_user_message_once
-            ~base_dir:config.Workspace.base_path ~keeper_name ~delivery_key
-            ~content:(String.trim content) ~surface ?conversation_id
-            ?external_message_id
-            ~speaker:
-              { Keeper_chat_store.speaker_id = opt channel_user_id
-              ; speaker_name = opt channel_user_name
-              ; speaker_authority = Keeper_chat_store.External
-              }
-            ~extra_mentions ()
-        with
+     | Ok request_id ->
+       let receipt_id = Keeper_chat_queue.Receipt_id.of_request_id request_id in
+       (match delivery_key_of_receipt receipt_id with
         | Error detail ->
           Gate_protocol.Keeper_error_result (redact_text detail)
-        | Ok append_result ->
-          let row_id, appended =
-            match append_result with
-            | Keeper_chat_store.Appended { row_id } -> row_id, true
-            | Already_present { row_id } -> row_id, false
+        | Ok delivery_key ->
+          let opt value =
+            match String.trim value with
+            | "" -> None
+            | value -> Some value
           in
-          if appended then
-            Keeper_chat_broadcast.chat_appended
-              ~keeper_name ~source:(String.trim channel) ();
           (match
-             Keeper_chat_queue.enqueue_with_receipt ~keeper_name ~receipt_id
-               { Keeper_chat_queue.content = String.trim content
-               ; user_blocks = []
-               ; attachments = []
-               ; timestamp = Eio.Time.now clock
-               ; source = delivery.source
-               ; user_row_origin =
-                   Keeper_chat_store.Already_persisted { row_id }
-               }
+             Keeper_chat_store.append_user_message_once
+               ~base_dir:config.Workspace.base_path ~keeper_name ~delivery_key
+               ~content:(String.trim content) ~surface ?conversation_id
+               ?external_message_id
+               ~speaker:
+                 { Keeper_chat_store.speaker_id = opt channel_user_id
+                 ; speaker_name = opt channel_user_name
+                 ; speaker_authority = Keeper_chat_store.External
+                 }
+               ~extra_mentions ()
            with
-           | Ok receipt ->
-             let admission_rejection =
-               rejection_snapshot
-                 ~base_path:config.Workspace.base_path
-                 ~keeper_name
+           | Error detail ->
+             Gate_protocol.Keeper_error_result (redact_text detail)
+           | Ok append_result ->
+             let row_id, appended =
+               match append_result with
+               | Keeper_chat_store.Appended { row_id } -> row_id, true
+               | Already_present { row_id } -> row_id, false
              in
-             let message_request =
-               chat_queue_message_request ~channel ~channel_user_id
-                 ~keeper_name ~admission_rejection ~metadata receipt
-             in
-             Gate_protocol.Reply
-               { content =
-                   redact_text
-                     (busy_ack_reply_text_queued ~admission_rejection
-                        ~keeper_name ~receipt_id:message_request.request_id
-                        ~recovery_required_count:
-                          receipt.recovery_required_count)
-               ; structured = None
-               ; stats = None
-               ; message_request = Some message_request
-               }
-           | Error
-               (Keeper_chat_queue.Receipt_already_terminal
-                  { receipt_id; state }) ->
-             (match Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id with
-              | Ok { revision; receipt = Some _ } ->
-                terminal_connector_reply ~redact_text ~channel
-                  ~channel_user_id ~keeper_name ~metadata ~receipt_id
-                  ~revision state
-              | Ok { receipt = None; _ } ->
-                Gate_protocol.Keeper_error_result
-                  (redact_text
-                     "terminal connector receipt disappeared during lookup")
+             if appended then
+               Keeper_chat_broadcast.chat_appended
+                 ~keeper_name ~source:(String.trim channel) ();
+             (match
+                Keeper_chat_queue.enqueue_with_receipt ~keeper_name ~receipt_id
+                  { Keeper_chat_queue.content = String.trim content
+                  ; user_blocks = []
+                  ; attachments = []
+                  ; timestamp = Eio.Time.now clock
+                  ; source = delivery.source
+                  ; user_row_origin =
+                      Keeper_chat_store.Already_persisted { row_id }
+                  }
+              with
+              | Ok receipt ->
+                let admission_rejection =
+                  rejection_snapshot
+                    ~base_path:config.Workspace.base_path
+                    ~keeper_name
+                in
+                let message_request =
+                  chat_queue_message_request ~channel ~channel_user_id
+                    ~keeper_name ~admission_rejection ~metadata receipt
+                in
+                Gate_protocol.Reply
+                  { content =
+                      redact_text
+                        (busy_ack_reply_text_queued ~admission_rejection
+                           ~keeper_name ~receipt_id:message_request.request_id
+                           ~recovery_required_count:
+                             receipt.recovery_required_count)
+                  ; structured = None
+                  ; stats = None
+                  ; message_request = Some message_request
+                  }
+              | Error
+                  (Keeper_chat_queue.Receipt_already_terminal
+                     { receipt_id; state }) ->
+                (match
+                   Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id
+                 with
+                 | Ok { revision; receipt = Some _ } ->
+                   terminal_connector_reply ~redact_text ~channel
+                     ~channel_user_id ~keeper_name ~metadata ~receipt_id
+                     ~revision state
+                 | Ok { receipt = None; _ } ->
+                   Gate_protocol.Keeper_error_result
+                     (redact_text
+                        "terminal connector receipt disappeared during lookup")
+                 | Error error ->
+                   Gate_protocol.Keeper_error_result
+                     (redact_text
+                        (Keeper_chat_queue.mutation_error_to_string error)))
               | Error error ->
                 Gate_protocol.Keeper_error_result
                   (redact_text
-                     (Keeper_chat_queue.mutation_error_to_string error)))
-           | Error error ->
-             Gate_protocol.Keeper_error_result
-               (redact_text
-                  (Keeper_chat_queue.mutation_error_to_string error)))))
+                     (Keeper_chat_queue.mutation_error_to_string error))))))
 
 let persist_connector_assistant_reply ~base_dir ~keeper_name ~source ?surface
     ?conversation_id ?turn_ref ~reply () =

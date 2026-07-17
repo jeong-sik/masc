@@ -58,6 +58,7 @@ val trigger_policy_load_error_to_string : trigger_policy_load_error -> string
 module For_testing : sig
   val submit_event :
     ?deliver:(unit -> unit) ->
+    ?team_id:string ->
     Connector_ingress_lane.t ->
     dispatch_for_delivery:
       (Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->

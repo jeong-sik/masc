@@ -419,7 +419,7 @@ let test_exact_source_identity_converges () =
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some keeper_name));
       configure_queue ~base;
-      let accept () =
+      let accept metadata =
         Gate_keeper_backend.accept_connector
           ~delivery:
             { source =
@@ -440,9 +440,21 @@ let test_exact_source_identity_converges () =
           ~channel_user_name:"Exact User"
           ~channel_workspace_id:"channel-exact" ~keeper_name
           ~idempotency_key:"discord-msg-source-123"
-          ~metadata:[ "external_message_id", "source-123" ]
+          ~metadata
           ~content:"deliver exactly once"
       in
+      (match
+         accept
+           [ "conversation_id", "discord:dm:channel:another-channel"
+           ; "external_message_id", "source-123"
+           ]
+       with
+       | Gate_protocol.Keeper_error_result detail ->
+         check "conflicting metadata identity fails closed"
+           (contains ~affix:"conflicts with metadata" detail)
+       | Gate_protocol.Reply _
+       | Gate_protocol.Unavailable_result ->
+         check "conflicting metadata identity fails closed" false);
       let request_of_reply = function
         | Gate_protocol.Reply { message_request = Some request; _ } -> request
         | Gate_protocol.Reply { message_request = None; _ }
@@ -450,8 +462,9 @@ let test_exact_source_identity_converges () =
         | Gate_protocol.Unavailable_result ->
           failwith "durable connector acceptance did not return a receipt"
       in
-      let first = request_of_reply (accept ()) in
-      let repeated = request_of_reply (accept ()) in
+      let metadata = [ "external_message_id", "source-123" ] in
+      let first = request_of_reply (accept metadata) in
+      let repeated = request_of_reply (accept metadata) in
       check "receipt is the exact producer request identity"
         (first.request_id = "discord-msg-source-123");
       check "active replay returns the same receipt"
@@ -473,7 +486,7 @@ let test_exact_source_identity_converges () =
                ])
        | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
          check "source receipt leases before terminal replay" false);
-      let terminal = request_of_reply (accept ()) in
+      let terminal = request_of_reply (accept metadata) in
       check "terminal replay reports done without redispatch"
         (terminal.status = Gate_protocol.Done);
       let snapshot = Keeper_chat_queue.snapshot ~keeper_name in

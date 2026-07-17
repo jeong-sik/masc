@@ -250,6 +250,7 @@ let test_bound_message_queues_exact_slack_ts () =
         dispatch
       in
       G.For_testing.submit_event
+        ~team_id:"T123"
         ~deliver:(fun () ->
           if not !accepted_before_delivery then
             failwith "delivery ran before durable accept";
@@ -275,11 +276,11 @@ let test_bound_message_queues_exact_slack_ts () =
          check string "Slack delivery channel" "C123" channel_id;
          check string "Slack delivery actor" "U123" user_id;
          check string "Slack delivery actor name" "operator" user_name;
-         check (option string) "Slack delivery team" None team_id;
+         check (option string) "Slack delivery team" (Some "T123") team_id;
          check (option string) "Slack reply thread"
            (Some "1710000000.123456") thread_ts;
          check string "Slack surface channel" "C123" surface_channel_id;
-         check (option string) "Slack surface team" None surface_team_id;
+         check (option string) "Slack surface team" (Some "T123") surface_team_id;
          check (option string) "Slack source message is top-level" None
            surface_thread_ts;
          check (option string) "Slack conversation identity"

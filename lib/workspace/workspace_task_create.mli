@@ -1,4 +1,4 @@
-(** Workspace_task_create — Dedup logic, add_task, batch_add_tasks.
+(** Workspace_task_create — add_task, batch_add_tasks.
 
     This module is [include]d by {!Workspace_task}; all bindings are part of
     the public Workspace interface.  Re-exports {!Workspace_utils} and
@@ -6,16 +6,6 @@
 
 include module type of Workspace_utils
 include module type of Workspace_state
-
-(** {1 Task deduplication} *)
-
-val normalize_title_for_dedup : string -> string
-(** Normalize title for deduplication: lowercase, keep only alphanumeric+space. *)
-
-val find_duplicate_task :
-  Masc_domain.backlog -> title:string -> string option
-(** Check if a task with a similar title already exists in the backlog.
-    Returns [Some existing_task_id] if a duplicate is found, [None] otherwise. *)
 
 (** {1 Task creation} *)
 
@@ -30,7 +20,6 @@ type add_task_success =
 
 type add_task_error =
   | Backlog_read_failed of string
-  | Duplicate of { title : string; existing_id : string }
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
   | Unexpected_error of string
@@ -56,6 +45,10 @@ val add_task_error_to_string : add_task_error -> string
 
 val batch_add_tasks_error_to_string : batch_add_tasks_error -> string
 
+(** Creates one new task identity per successful call. Titles are opaque display
+    content; equal titles are valid and receive distinct IDs. Semantic duplicate
+    judgment belongs to an explicit LLM workflow before submission, not this
+    storage boundary. *)
 val add_task_with_result :
   ?contract:Masc_domain.task_contract ->
   ?goal_id:string ->

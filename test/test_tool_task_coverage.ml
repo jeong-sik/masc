@@ -348,21 +348,25 @@ let () = test "handle_add_task_returns_structured_task_id" (fun () ->
   | Some summary -> assert (str_contains summary "Added task-001")
   | None -> failwith "missing summary")
 
-let () = test "handle_add_task_duplicate_returns_workflow_rejection" (fun () ->
+let () = test "handle_add_task_preserves_identical_titles_as_distinct_tasks" (fun () ->
   let ctx = make_test_ctx () in
   let first =
     Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Duplicate contract task") ])
   in
   if not (Tool_result.is_success first) then failwith (Tool_result.message first);
-  let duplicate =
+  let second =
     Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Duplicate contract task") ])
   in
-  assert (not (Tool_result.is_success duplicate));
-  assert ((Tool_result.failure_class duplicate) = Some Tool_result.Workflow_rejection);
-  assert (str_contains (Tool_result.message duplicate) "Duplicate rejected");
-  assert (str_contains (Tool_result.message duplicate) "task-001"))
+  if not (Tool_result.is_success second) then failwith (Tool_result.message second);
+  assert (Json_util.get_string (Tool_result.data first) "task_id" = Some "task-001");
+  assert (Json_util.get_string (Tool_result.data second) "task_id" = Some "task-002");
+  let backlog = Workspace.read_backlog ctx.config in
+  assert (List.map (fun (task : Masc_domain.task) -> task.id) backlog.tasks
+          = [ "task-001"; "task-002" ]);
+  assert (List.map (fun (task : Masc_domain.task) -> task.title) backlog.tasks
+          = [ "Duplicate contract task"; "Duplicate contract task" ]))
 
 let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
   let ctx = make_test_ctx () in

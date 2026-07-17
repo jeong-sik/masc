@@ -167,6 +167,14 @@ let wrap_event
     Suppressing warning 11 ([@warning "-11"]) is therefore the entire
     point of this function's shape — do not remove it without also
     removing the catch-all. *)
+let invocation_payload_fields invocation =
+  let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
+  [ "turn", `Int (Agent_sdk.Tool.Invocation.turn invocation)
+  ; "planned_index", `Int (Agent_sdk.Tool.Invocation.planned_index invocation)
+  ]
+  @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
+;;
+
 let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
   let { Agent_sdk.Event_bus.correlation_id; run_id; ts; caused_by; _ } = evt.meta in
   let wrap = wrap_event ~ts ~correlation_id ~run_id ?caused_by in
@@ -219,23 +227,22 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~error_retryable:projection.error_retryable
          ~error_detail:projection.error_detail
          ())
-  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; invocation; _ } ->
-    let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
+  | Agent_sdk.Event_bus.ToolCalled { invocation; agent_name; tool_name; _ } ->
     (* tool_called publishes before execution, so the keeper hook has not
        minted an execution_id yet — this row carries the provider call id
        only; the matching tool_completed row carries both. *)
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]
-         @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ]))
+         @ invocation_payload_fields invocation)
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
-  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; invocation; _ } ->
-    let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
+  | Agent_sdk.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
     (* RFC-0233 PR-2: the keeper post_tool_use hook registered the
        tool_use_id ↔ execution_id pair before OAS published this event,
        so the lookup is deterministic. A miss means the execution did not
        go through a keeper hook (worker/eval lanes), not a failure. *)
+    let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
     let execution_id_fields =
       match
         if tool_use_id = "" then None
@@ -247,7 +254,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]
-         @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
+         @ invocation_payload_fields invocation
          @ execution_id_fields)
     in
     Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())

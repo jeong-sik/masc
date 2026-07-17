@@ -8,6 +8,9 @@ let capacity_backpressure_source_to_failure_scope = function
   | Keeper_internal_error.Runtime_slot ->
     Llm_provider.Http_client.Failure_scope_unknown
 
+let http_error ~code ~body =
+  Llm_provider.Http_client.HttpError { code; body; retry_after_header = None }
+
 let provider_error_to_http_error = function
   | Llm_provider.Error.RateLimit { retry_after; detail; _ }
   | Llm_provider.Error.HardQuota { retry_after; detail; _ } ->
@@ -25,13 +28,13 @@ let provider_error_to_http_error = function
       ; message = detail
       }
   | Llm_provider.Error.AuthError { detail; _ } ->
-    Llm_provider.Http_client.HttpError { code = 401; body = detail; retry_after_header = None }
+    http_error ~code:401 ~body:detail
   | Llm_provider.Error.AuthorizationError { detail; _ } ->
-    Llm_provider.Http_client.HttpError { code = 403; body = detail; retry_after_header = None }
+    http_error ~code:403 ~body:detail
   | Llm_provider.Error.ServerError { code; detail; _ } ->
-    Llm_provider.Http_client.HttpError { code; body = detail; retry_after_header = None }
+    http_error ~code ~body:detail
   | Llm_provider.Error.InvalidRequest { reason; _ } ->
-    Llm_provider.Http_client.HttpError { code = 400; body = reason; retry_after_header = None }
+    http_error ~code:400 ~body:reason
   | Llm_provider.Error.ProviderTerminal { reason; detail; _ } ->
     let body = if String.trim detail = "" then reason else detail in
     Llm_provider.Http_client.ProviderFailure
@@ -41,8 +44,9 @@ let provider_error_to_http_error = function
       ; message = body
       }
   | Llm_provider.Error.NotFound { detail; _ } ->
-    Llm_provider.Http_client.HttpError
-      { code = 404; body = if String.trim detail = "" then "model not found" else detail }
+    http_error
+      ~code:404
+      ~body:(if String.trim detail = "" then "model not found" else detail)
   | Llm_provider.Error.Timeout { detail; timeout_phase; _ } ->
     Llm_provider.Http_client.TimeoutError
       { message = detail
@@ -59,11 +63,9 @@ let provider_error_to_http_error = function
       ; message = detail
       }
   | Llm_provider.Error.MissingApiKey { var_name } ->
-    Llm_provider.Http_client.HttpError
-      { code = 401; body = Printf.sprintf "missing API key: %s" var_name }
+    http_error ~code:401 ~body:(Printf.sprintf "missing API key: %s" var_name)
   | Llm_provider.Error.InvalidConfig { field; detail } ->
-    Llm_provider.Http_client.HttpError
-      { code = 400; body = Printf.sprintf "%s: %s" field detail }
+    http_error ~code:400 ~body:(Printf.sprintf "%s: %s" field detail)
   | Llm_provider.Error.UnknownVariant { type_name; value } ->
     Llm_provider.Http_client.ProviderTerminal
       { kind = Llm_provider.Http_client.Other "unknown_variant"
@@ -105,23 +107,23 @@ let sdk_error_to_runtime_outcome err =
        let http_err =
          match api_err with
          | Llm_provider.Retry.InvalidRequest { message; _ } ->
-           Llm_provider.Http_client.HttpError { code = 400; body = message; retry_after_header = None }
+           http_error ~code:400 ~body:message
          | ContextOverflow { message; _ } ->
-           Llm_provider.Http_client.HttpError { code = 400; body = message; retry_after_header = None }
+           http_error ~code:400 ~body:message
          | RateLimited { message; _ } ->
-           Llm_provider.Http_client.HttpError { code = 429; body = message }
+           http_error ~code:429 ~body:message
          | PaymentRequired { message } ->
-           Llm_provider.Http_client.HttpError { code = 402; body = message }
+           http_error ~code:402 ~body:message
          | NotFound { message } ->
-           Llm_provider.Http_client.HttpError { code = 404; body = message }
+           http_error ~code:404 ~body:message
          | ServerError { status; message } ->
-           Llm_provider.Http_client.HttpError { code = status; body = message }
+           http_error ~code:status ~body:message
          | AuthError { message } ->
-           Llm_provider.Http_client.HttpError { code = 401; body = message }
+           http_error ~code:401 ~body:message
          | AuthorizationError { message } ->
-           Llm_provider.Http_client.HttpError { code = 403; body = message }
+           http_error ~code:403 ~body:message
          | Overloaded { message } ->
-           Llm_provider.Http_client.HttpError { code = 529; body = message }
+           http_error ~code:529 ~body:message
          | NetworkError { message; kind } ->
            Llm_provider.Http_client.NetworkError { message; kind }
          | Timeout { message } ->

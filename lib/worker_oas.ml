@@ -177,7 +177,7 @@ let make_tool_tracking_hooks ?context () =
     ; on_error =
         Some
           (function
-            | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
+            | Agent_sdk.Hooks.OnError { detail; context = err_ctx; _ } ->
               Log.LocalWorker.warn "worker on_error: %s (context: %s)" detail err_ctx;
               Agent_sdk.Hooks.Continue
             | Agent_sdk.Hooks.BeforeTurn _
@@ -191,7 +191,7 @@ let make_tool_tracking_hooks ?context () =
     ; on_tool_error =
         Some
           (function
-            | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
+            | Agent_sdk.Hooks.OnToolError { tool_name; error; _ } ->
               Log.LocalWorker.warn "worker tool_error: %s — %s" tool_name error;
               Agent_sdk.Hooks.Continue
             | Agent_sdk.Hooks.BeforeTurn _

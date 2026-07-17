@@ -42,7 +42,7 @@ let decide_and_record ~runtime_id:_ ~accept_on_exhaustion ~is_last outcome =
   decide ~accept_on_exhaustion ~is_last outcome
 
 let to_user_message = function
-  | Some (Llm_provider.Http_client.HttpError { code; body }) ->
+  | Some (Llm_provider.Http_client.HttpError { code; body; _ }) ->
     Printf.sprintf
       "HTTP %d: %s"
       code

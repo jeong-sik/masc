@@ -23,7 +23,7 @@ let to_message (err : Llm_provider.Http_client.http_error) : string =
       Printf.sprintf "provider terminal: %s" message
   | Llm_provider.Http_client.ProviderFailure { kind; message } ->
       Llm_provider.Http_client.provider_failure_to_string ~kind ~message
-  | Llm_provider.Http_client.HttpError { code; body } ->
+  | Llm_provider.Http_client.HttpError { code; body; _ } ->
       Printf.sprintf "HTTP %d: %s" code
         (if String.length body > max_body_length
          then String.sub body 0 max_body_length ^ body_truncation_suffix

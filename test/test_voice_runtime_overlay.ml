@@ -38,6 +38,8 @@ let () =
 
 let test_config () = Masc.Workspace.default_config voice_session_test_base
 
+let allow_external_effect ~operation:_ ~input:_ ~continue = continue ()
+
 let read_lines path =
   if not (Sys.file_exists path)
   then []
@@ -334,6 +336,7 @@ let test_keeper_voice_speak_surfaces_tts_failure () =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
         ~config
         ~meta
+        ~authorize_external_effect:allow_external_effect
         ~name:"keeper_voice_speak"
         ~args:(`Assoc [ "message", `String "hello from sync voice test" ])
         ()
@@ -361,6 +364,7 @@ let test_keeper_voice_speak_failure_writes_no_memory_row () =
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
          ~config
          ~meta
+         ~authorize_external_effect:allow_external_effect
          ~name:"keeper_voice_speak"
          ~args:(`Assoc [ "message", `String message; "priority", `Int 3 ])
          ());
@@ -386,6 +390,7 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
     Masc.Keeper_tool_voice_runtime.handle_voice_tool
       ~config
       ~meta
+      ~authorize_external_effect:allow_external_effect
       ~name:"keeper_voice_speak"
       ~args:(`Assoc [ "message", `String message ])
       ()
@@ -426,6 +431,7 @@ let test_voice_output_row_is_excluded_from_memory_recent_notes () =
     Masc.Keeper_tool_voice_runtime.handle_voice_tool
       ~config
       ~meta
+      ~authorize_external_effect:allow_external_effect
       ~name:"keeper_voice_speak"
       ~args:(`Assoc [ "message", `String message ])
       ()
@@ -463,6 +469,7 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
         ~config
         ~meta
+        ~authorize_external_effect:allow_external_effect
         ~name:"keeper_voice_session_start"
         ~args:(`Assoc [ "session_name", `String session_name ])
         ()
@@ -485,6 +492,7 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
          ~config
          ~meta
+         ~authorize_external_effect:allow_external_effect
          ~name:"keeper_voice_session_end"
          ~args:(`Assoc [])
          ()))
@@ -542,6 +550,7 @@ let test_keeper_voice_session_end_reports_ended () =
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
          ~config
          ~meta
+         ~authorize_external_effect:allow_external_effect
          ~name:"keeper_voice_session_start"
          ~args:(`Assoc [ "session_name", `String "end regression" ])
          ());
@@ -549,6 +558,7 @@ let test_keeper_voice_session_end_reports_ended () =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
         ~config
         ~meta
+        ~authorize_external_effect:allow_external_effect
         ~name:"keeper_voice_session_end"
         ~args:(`Assoc [])
         ()
@@ -578,6 +588,7 @@ let test_keeper_voice_session_start_realtime_requires_bridge_env () =
         (Masc.Keeper_tool_voice_runtime.handle_voice_tool
            ~config
            ~meta
+           ~authorize_external_effect:allow_external_effect
            ~name:"keeper_voice_session_end"
            ~args:(`Assoc [])
            ());
@@ -585,6 +596,7 @@ let test_keeper_voice_session_start_realtime_requires_bridge_env () =
         Masc.Keeper_tool_voice_runtime.handle_voice_tool
           ~config
           ~meta
+          ~authorize_external_effect:allow_external_effect
           ~name:"keeper_voice_session_start"
           ~args:(`Assoc [ "conversation_mode", `String "realtime_bridge" ])
           ()
@@ -606,6 +618,7 @@ let test_keeper_voice_session_start_realtime_requires_bridge_env () =
         Masc.Keeper_tool_voice_runtime.handle_voice_tool
           ~config
           ~meta
+          ~authorize_external_effect:allow_external_effect
           ~name:"keeper_voice_agent"
           ~args:(`Assoc [])
           ()
@@ -631,6 +644,7 @@ let test_keeper_voice_agent_reports_turn_based_capability () =
       Masc.Keeper_tool_voice_runtime.handle_voice_tool
         ~config
         ~meta
+        ~authorize_external_effect:allow_external_effect
         ~name:"keeper_voice_agent"
         ~args:(`Assoc [])
         ()
@@ -641,6 +655,7 @@ let test_keeper_voice_agent_reports_turn_based_capability () =
         (Masc.Keeper_tool_voice_runtime.handle_voice_tool
            ~config
            ~meta
+           ~authorize_external_effect:allow_external_effect
            ~name:"keeper_voice_session_end"
            ~args:(`Assoc [])
            ())
@@ -681,6 +696,7 @@ let test_keeper_voice_agent_reports_turn_based_capability () =
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
          ~config
          ~meta
+         ~authorize_external_effect:allow_external_effect
          ~name:"keeper_voice_session_start"
          ~args:(`Assoc [])
          ());
@@ -718,6 +734,7 @@ let test_keeper_voice_agent_reports_realtime_bridge_capability () =
           Masc.Keeper_tool_voice_runtime.handle_voice_tool
             ~config
             ~meta
+            ~authorize_external_effect:allow_external_effect
             ~name:"keeper_voice_agent"
             ~args:(`Assoc [])
             ()
@@ -728,6 +745,7 @@ let test_keeper_voice_agent_reports_realtime_bridge_capability () =
             (Masc.Keeper_tool_voice_runtime.handle_voice_tool
                ~config
                ~meta
+               ~authorize_external_effect:allow_external_effect
                ~name:"keeper_voice_session_end"
                ~args:(`Assoc [])
                ())
@@ -755,6 +773,7 @@ let test_keeper_voice_agent_reports_realtime_bridge_capability () =
           Masc.Keeper_tool_voice_runtime.handle_voice_tool
             ~config
             ~meta
+            ~authorize_external_effect:allow_external_effect
             ~name:"keeper_voice_session_start"
             ~args:(`Assoc [ "conversation_mode", `String "realtime_bridge" ])
             ()

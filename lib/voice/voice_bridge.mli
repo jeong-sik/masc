@@ -36,6 +36,15 @@ type turn_request_result = {
   queue_position : int;
 }
 
+type agent_speak_completion =
+  | Spoken
+  | Dedup_skipped
+
+type agent_speak_result =
+  { completion : agent_speak_completion
+  ; payload : Yojson.Safe.t
+  }
+
 exception Timeout of string
 
 (** {1 Public API} *)
@@ -52,13 +61,12 @@ val agent_speak :
   ?priority:int ->
   ?audio_device:string ->
   unit ->
-  (Yojson.Safe.t, string) result
+  (agent_speak_result, string) result
 (** Synthesize [message] via the configured TTS endpoint chain and play it
     locally, blocking the calling fiber until playback finishes. Concurrent
-    callers are serialized by the global playback mutex. Returns
-    [status="spoken"] (with [played_seconds] when local playback ran) or
-    [status="dedup_skipped"] when the identical message played within the
-    dedup window; TTS/endpoint failures return [Error] so the caller — and
+    callers are serialized by the global playback mutex. Returns a typed
+    [completion] and preserves the provider payload. TTS/endpoint failures or
+    an invalid provider completion payload return [Error] so the caller — and
     the LLM driving it — sees the failure instead of a fake success.
 
     This is the only speak path: the former fire-and-forget

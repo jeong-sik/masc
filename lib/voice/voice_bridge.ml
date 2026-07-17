@@ -294,6 +294,15 @@ type turn_request_result =
   ; queue_position : int
   }
 
+type agent_speak_completion =
+  | Spoken
+  | Dedup_skipped
+
+type agent_speak_result =
+  { completion : agent_speak_completion
+  ; payload : Yojson.Safe.t
+  }
+
 (** ============================================
     HTTP Client with Timeout and Retry (Eio-native)
     ============================================ *)
@@ -799,7 +808,17 @@ let merge_browser_audio_fields ~audio_file ~file_size ?audio_device json =
     HTTP TTS endpoint is also configured, synthesize a parallel browser
     clip so the dashboard can play the utterance. The MCP server still
     owns local playback; the HTTP clip is dashboard-only. *)
-let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) ?audio_device () =
+let agent_speak_json
+      ~sw
+      ~clock
+      ~net
+      ~agent_id
+      ~message
+      ?provider
+      ?(priority = 1)
+      ?audio_device
+      ()
+  =
   if is_dedup_hit ~agent_id ~message
   then (
     log_info
@@ -890,6 +909,42 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) ?au
                 agent_id);
            Ok result)
       | other -> other)
+;;
+
+let decode_agent_speak_result payload =
+  match Json_util.get_string payload "status" with
+  | Some "spoken" -> Ok { completion = Spoken; payload }
+  | Some "dedup_skipped" -> Ok { completion = Dedup_skipped; payload }
+  | Some status ->
+    Error (Printf.sprintf "voice speak returned unsupported status=%S" status)
+  | None -> Error "voice speak result is missing required status"
+;;
+
+let agent_speak
+      ~sw
+      ~clock
+      ~net
+      ~agent_id
+      ~message
+      ?provider
+      ?priority
+      ?audio_device
+      ()
+  =
+  match
+    agent_speak_json
+      ~sw
+      ~clock
+      ~net
+      ~agent_id
+      ~message
+      ?provider
+      ?priority
+      ?audio_device
+      ()
+  with
+  | Error _ as error -> error
+  | Ok payload -> decode_agent_speak_result payload
 ;;
 
 (** List active voice sessions *)

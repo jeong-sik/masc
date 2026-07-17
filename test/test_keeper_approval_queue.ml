@@ -497,6 +497,61 @@ let test_monotonic_sequence_survives_restart () =
          (read_pending_snapshot ~base_path |> member "next_sequence" |> to_int))
 ;;
 
+let test_same_owner_drain_uses_sequence_not_wall_clock () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let first = submit ~base_path ~keeper_name:"fifo-owner" ~input:(`Int 1) in
+       let second = submit ~base_path ~keeper_name:"fifo-owner" ~input:(`Int 2) in
+       let first = { (pending_entry_exn first) with requested_at = 500.0 } in
+       let second = { (pending_entry_exn second) with requested_at = 1.0 } in
+       match
+         Gate.For_testing.ready_auto_judges_for_owner
+           ~base_path
+           ~keeper_name:"fifo-owner"
+           [ second; first ]
+       with
+       | [ oldest; newest ] ->
+         Alcotest.(check string) "oldest sequence first" first.id oldest.id;
+         Alcotest.(check string) "next sequence second" second.id newest.id
+       | entries ->
+         Alcotest.failf "two same-owner entries expected, got %d" (List.length entries))
+;;
+
+let test_different_owners_claim_in_parallel () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Gate.For_testing.reset_active_auto_judges ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Gate.For_testing.reset_active_auto_judges ();
+       let owner_a =
+         pending_entry_exn (submit ~base_path ~keeper_name:"owner-a" ~input:(`Int 1))
+       in
+       let owner_a_next =
+         pending_entry_exn (submit ~base_path ~keeper_name:"owner-a" ~input:(`Int 2))
+       in
+       let owner_b =
+         pending_entry_exn (submit ~base_path ~keeper_name:"owner-b" ~input:(`Int 1))
+       in
+       Alcotest.(check bool) "first owner activates" true
+         (Gate.For_testing.claim_auto_judge owner_a);
+       Alcotest.(check bool) "same owner remains queued" false
+         (Gate.For_testing.claim_auto_judge owner_a_next);
+       Alcotest.(check bool) "different owner activates in parallel" true
+         (Gate.For_testing.claim_auto_judge owner_b);
+       Gate.For_testing.release_auto_judge owner_a;
+       Alcotest.(check bool) "same owner next activates after release" true
+         (Gate.For_testing.claim_auto_judge owner_a_next))
+;;
+
 let test_resolution_is_durable_and_origin_scoped () =
   let base_path = temp_dir () in
   let keeper_name = "queue-origin" in
@@ -1577,6 +1632,14 @@ let () =
             "durable sequence survives restart"
             `Quick
             test_monotonic_sequence_survives_restart
+        ; Alcotest.test_case
+            "same owner drains by durable sequence"
+            `Quick
+            test_same_owner_drain_uses_sequence_not_wall_clock
+        ; Alcotest.test_case
+            "different owners activate in parallel"
+            `Quick
+            test_different_owners_claim_in_parallel
         ; Alcotest.test_case
             "dedup keeps distinct origins"
             `Quick

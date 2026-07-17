@@ -920,3 +920,13 @@ let decide ?cycle_grant ~keeper_always_allow request =
       ();
     Unavailable reason
 ;;
+
+module For_testing = struct
+  let ready_auto_judges_for_owner ~base_path ~keeper_name entries =
+    ready_auto_judges_for_owner ~base_path ~keeper_name entries
+  ;;
+
+  let claim_auto_judge = claim_auto_judge
+  let release_auto_judge = release_auto_judge
+  let reset_active_auto_judges () = Atomic.set active_auto_judges Auto_judge_owners.empty
+end

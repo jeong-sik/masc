@@ -2,8 +2,8 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 13:16 KST
-> MASC `origin/main`: `16f3d47473`
+> Checked: 2026-07-17 13:23 KST
+> MASC `origin/main`: `fd70c8fc7f`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
 > Browser matrix: [`2026-07-17-keeper-full-feature-goal-matrix.html`](audit/2026-07-17-keeper-full-feature-goal-matrix.html)
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 13:16 KST; confidence High.
+2026-07-17 13:23 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -239,7 +239,8 @@ Verified main-reachable changes include:
 - #24836: scope Gate retry lookup to one workspace;
 - #24907: extract typed compaction evidence without changing compaction authority.
 - #24957: carry exact OAS Tool invocation identity through the MCP boundary;
-- #24968: remove zombie Fusion concurrency settings.
+- #24968: remove zombie Fusion concurrency settings;
+- #24964: remove title-based Task dedup admission.
 
 Why these were removed: elapsed age, retry count, budget, health score,
 circuit state, and arbitrary caps were being used as execution authority.

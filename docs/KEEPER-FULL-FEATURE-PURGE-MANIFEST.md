@@ -3,8 +3,8 @@
 > Status: implementation deletion and replacement contract
 > Normative goal: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
 > Live map: [`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md)
-> Source checkpoint: MASC `16f3d47473`, OAS `b2a9478ff3`, pinned OAS `v0.215.0` at `a7ea83fbbf`
-> Checked: 2026-07-17 13:08 KST
+> Source checkpoint: MASC `fd70c8fc7f`, OAS `b2a9478ff3`, pinned OAS `v0.215.0` at `a7ea83fbbf`
+> Checked: 2026-07-17 13:23 KST
 
 This manifest names what must die, what must be rewritten, and what is an
 objective boundary worth keeping. It is deliberately narrower than a migration

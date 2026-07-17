@@ -870,6 +870,7 @@ let test_transition_outbox_projects_with_stable_identity () =
       ~base_path
       ~keeper_name
       ~reaction_kind:Masc.Keeper_reaction_ledger.Event_queue_ack
+      ~source_index:0
       ~receipt
       source
     |> require_ok "replay stable transition reaction";

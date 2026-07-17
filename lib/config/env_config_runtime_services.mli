@@ -1,6 +1,6 @@
 (** Env_config_runtime_services — env-var-backed runtime service config
     (inference, rate limit, autonomy, agent selection, timeouts,
-    operator judge, dashboard, model defaults, anti-rationalization).
+    dashboard, model defaults, anti-rationalization).
 
     All values cached at module-init from env vars; the cache
     means a runtime env-var change does not propagate without

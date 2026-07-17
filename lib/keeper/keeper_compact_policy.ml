@@ -71,7 +71,7 @@ type compaction_rejection =
   | Plan_unavailable_or_invalid
   | Structurally_unchanged
   | Checkpoint_not_reduced
-  | Invalid_structural_evidence
+  | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
 
 let compaction_rejection_to_string = function
   | Runtime_identity_unavailable -> "runtime_identity_unavailable"
@@ -79,7 +79,9 @@ let compaction_rejection_to_string = function
   | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
-  | Invalid_structural_evidence -> "invalid_structural_evidence"
+  | Invalid_structural_evidence error ->
+    "invalid_structural_evidence:"
+    ^ Keeper_compaction_evidence.decode_error_to_string error
 ;;
 
 type compaction_decision =
@@ -285,8 +287,12 @@ let compact_for_request_typed
       ~message_count:before_messages;
     { context = ctx; decision = Rejected (trigger, reason); evidence = None }
   | Ok requested ->
+    let planned_message_count = List.length requested.messages in
     let messages, pair_repair_stats =
       Keeper_context_core.repair_broken_tool_call_pairs_with_stats requested.messages
+    in
+    let pair_repair_dropped_message_count =
+      planned_message_count - List.length messages
     in
     let compacted_ctx =
       sync_oas_context
@@ -323,12 +329,13 @@ let compact_for_request_typed
           ~after_message_count:after_messages
           ~summarized_message_count:requested.summarized_message_count
           ~dropped_message_count:requested.dropped_message_count
+          ~pair_repair_dropped_message_count
           ~before_tool_use_count
           ~after_tool_use_count
           ~before_tool_result_count
           ~after_tool_result_count
       with
-      | Error _ -> reject Invalid_structural_evidence
+      | Error error -> reject (Invalid_structural_evidence error)
       | Ok evidence ->
         let tool_use_sample_json =
           List.map
@@ -362,6 +369,8 @@ let compact_for_request_typed
                         , `Int pair_repair_stats.dropped_tool_uses )
                       ; ( "dropped_tool_results"
                         , `Int pair_repair_stats.dropped_tool_results )
+                      ; ( "dropped_messages"
+                        , `Int pair_repair_dropped_message_count )
                       ; "dropped_tool_use_samples", `List tool_use_sample_json
                       ; "dropped_tool_result_ids", `List tool_result_id_json
                       ] )

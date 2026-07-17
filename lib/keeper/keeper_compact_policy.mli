@@ -9,7 +9,7 @@ type compaction_rejection =
   | Plan_unavailable_or_invalid
   | Structurally_unchanged
   | Checkpoint_not_reduced
-  | Invalid_structural_evidence
+  | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
 
 (** [Prepared] is structural only; [Applied] requires a durable save. *)
 type compaction_decision =

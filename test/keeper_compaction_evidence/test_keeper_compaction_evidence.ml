@@ -7,6 +7,7 @@ let evidence : Keeper_compaction_evidence.t =
     ~after_message_count:6
     ~summarized_message_count:6
     ~dropped_message_count:1
+    ~pair_repair_dropped_message_count:0
     ~before_tool_use_count:3
     ~after_tool_use_count:1
     ~before_tool_result_count:3
@@ -29,6 +30,13 @@ let replace name value json =
        (fields json))
 ;;
 
+let remove name json =
+  `Assoc
+    (List.filter
+       (fun (key, _) -> not (String.equal key name))
+       (fields json))
+;;
+
 let test_projection_and_roundtrip () =
   let expected =
     `Assoc
@@ -38,6 +46,7 @@ let test_projection_and_roundtrip () =
       ; "after_message_count", `Int 6
       ; "summarized_message_count", `Int 6
       ; "dropped_message_count", `Int 1
+      ; "pair_repair_dropped_message_count", `Int 0
       ; "before_tool_use_count", `Int 3
       ; "after_tool_use_count", `Int 1
       ; "before_tool_result_count", `Int 3
@@ -76,6 +85,12 @@ let test_rejections () =
   let impossible_accounting =
     replace "summarized_message_count" (`Int 999) canonical
   in
+  let inexact_after = replace "after_message_count" (`Int 7) canonical in
+  let excessive_pair_repair =
+    canonical
+    |> replace "after_message_count" (`Int 0)
+    |> replace "pair_repair_dropped_message_count" (`Int 7)
+  in
   List.iter
     (fun (label, runtime_id, expected, json) ->
        check label runtime_id expected json)
@@ -93,6 +108,30 @@ let test_rejections () =
       , evidence.selected_runtime_id
       , Invalid_field (After_message_count, Duplicate)
       , duplicate )
+    ; ( "unknown field"
+      , evidence.selected_runtime_id
+      , Unknown_field "retired_counter"
+      , `Assoc (("retired_counter", `Int 1) :: fields canonical) )
+    ; ( "missing field"
+      , evidence.selected_runtime_id
+      , Invalid_field (Before_tool_use_count, Missing)
+      , remove "before_tool_use_count" canonical )
+    ; ( "non-integer field"
+      , evidence.selected_runtime_id
+      , Invalid_field (Before_tool_result_count, Expected_integer)
+      , replace "before_tool_result_count" (`String "3") canonical )
+    ; ( "message count increase"
+      , evidence.selected_runtime_id
+      , Invalid_transition (Messages, 12, 13)
+      , replace "after_message_count" (`Int 13) canonical )
+    ; ( "tool use count increase"
+      , evidence.selected_runtime_id
+      , Invalid_transition (Tool_uses, 3, 4)
+      , replace "after_tool_use_count" (`Int 4) canonical )
+    ; ( "tool result count increase"
+      , evidence.selected_runtime_id
+      , Invalid_transition (Tool_results, 3, 4)
+      , replace "after_tool_result_count" (`Int 4) canonical )
     ; ( "impossible message accounting"
       , evidence.selected_runtime_id
       , Invalid_message_accounting
@@ -100,9 +139,57 @@ let test_rejections () =
           ; after_message_count = 6
           ; summarized_message_count = 999
           ; dropped_message_count = 1
+          ; pair_repair_dropped_message_count = 0
           }
       , impossible_accounting )
+    ; ( "inexact after count"
+      , evidence.selected_runtime_id
+      , Invalid_message_accounting
+          { before_message_count = 12
+          ; after_message_count = 7
+          ; summarized_message_count = 6
+          ; dropped_message_count = 1
+          ; pair_repair_dropped_message_count = 0
+          }
+      , inexact_after )
+    ; ( "excessive pair repair count"
+      , evidence.selected_runtime_id
+      , Invalid_message_accounting
+          { before_message_count = 12
+          ; after_message_count = 0
+          ; summarized_message_count = 6
+          ; dropped_message_count = 1
+          ; pair_repair_dropped_message_count = 7
+          }
+      , excessive_pair_repair )
     ]
+;;
+
+let test_exact_pair_repair_accounting () =
+  match
+    Keeper_compaction_evidence.create
+      ~selected_runtime_id:evidence.selected_runtime_id
+      ~before_checkpoint_bytes:4096
+      ~after_checkpoint_bytes:1024
+      ~before_message_count:12
+      ~after_message_count:4
+      ~summarized_message_count:6
+      ~dropped_message_count:1
+      ~pair_repair_dropped_message_count:2
+      ~before_tool_use_count:3
+      ~after_tool_use_count:1
+      ~before_tool_result_count:3
+      ~after_tool_result_count:1
+  with
+  | Ok exact ->
+    Alcotest.(check int)
+      "pair-repair message drops preserved"
+      2
+      exact.pair_repair_dropped_message_count
+  | Error error ->
+    Alcotest.failf
+      "exact pair-repair accounting rejected: %s"
+      (Keeper_compaction_evidence.decode_error_to_string error)
 ;;
 
 let () =
@@ -114,5 +201,9 @@ let () =
             `Quick
             test_projection_and_roundtrip
         ; Alcotest.test_case "closed rejections" `Quick test_rejections
+        ; Alcotest.test_case
+            "exact pair-repair accounting"
+            `Quick
+            test_exact_pair_repair_accounting
         ] )
     ]

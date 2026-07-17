@@ -44,12 +44,14 @@ let make_generated_id prefix =
   prefix ^ "_" ^ Uuidm.to_string uuid
 ;;
 
-(* Stdlib.Mutex: rule reads/writes are short filesystem critical sections and
-   are also reached by synchronous dashboard/test paths. Eio.Mutex requires an
-   Eio fiber context and raises Cancel.Get_context outside one. *)
-let rules_mu = Stdlib.Mutex.create ()
+(* Rule reads and writes include Eio file operations and are also reached by
+   synchronous dashboard/test callers. Both contexts therefore share one
+   cross-context authority; writes defer cancellation after acquisition while
+   reads remain cancellable. *)
+let rules_mutex = Cross_context_mutex.create ()
 
-let with_rules_lock f = Stdlib.Mutex.protect rules_mu f
+let with_rules_read_lock f = Cross_context_mutex.with_lock rules_mutex f
+let with_rules_write_lock f = Cross_context_mutex.with_durable_lock rules_mutex f
 
 let rules_path ~base_path () =
   Keeper_gate_path.always_allowed ~base_path
@@ -196,7 +198,7 @@ let save_rules_unlocked ~base_path rules : (unit, rule_store_error) result =
 ;;
 
 let list_rules ~base_path () =
-  with_rules_lock (fun () -> load_rules_unlocked ~base_path ())
+  with_rules_read_lock (fun () -> load_rules_unlocked ~base_path ())
 ;;
 
 let list_rules_dashboard_json ~base_path () =
@@ -218,7 +220,7 @@ let upsert_rule
       ?source_approval_id
       ()
   =
-  with_rules_lock (fun () ->
+  with_rules_write_lock (fun () ->
     match load_rules_unlocked ~base_path () with
     | Error _ as error -> error
     | Ok rules ->
@@ -251,7 +253,7 @@ let upsert_rule
 ;;
 
 let delete_rule ~base_path ~id () =
-  with_rules_lock (fun () ->
+  with_rules_write_lock (fun () ->
     match load_rules_unlocked ~base_path () with
     | Error _ as error -> error
     | Ok rules ->
@@ -275,7 +277,7 @@ let find_matching_rule
       ~input
       ()
   =
-  with_rules_lock (fun () ->
+  with_rules_read_lock (fun () ->
     match load_rules_unlocked ~base_path () with
     | Error _ as error -> error
     | Ok rules ->

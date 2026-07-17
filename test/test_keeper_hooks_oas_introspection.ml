@@ -125,17 +125,19 @@ let test_pre_tool_use_is_observation_only () =
   let hooks = make_runtime_hooks () in
   let event =
     Agent_sdk.Hooks.PreToolUse
-      { tool_use_id = "toolu_observation_only"
+      { invocation =
+          Agent_sdk.Tool.Invocation.create
+            ~tool_use_id:"toolu_observation_only"
+            ~turn:7
+            ~schedule:
+              { Agent_sdk.Tool.planned_index = 0
+              ; batch_index = 0
+              ; batch_size = 1
+              ; execution_mode = Agent_sdk.Tool.Serial
+              }
       ; tool_name = "opaque_internal_name"
       ; input = `Assoc [ "command", `String "opaque external effect" ]
       ; accumulated_cost_usd = 1234.0
-      ; turn = 7
-      ; schedule =
-          { planned_index = 0
-          ; batch_index = 0
-          ; batch_size = 1
-          ; execution_mode = Agent_sdk.Tool.Serial
-          }
       }
   in
   match Agent_sdk.Hooks.invoke_validated hooks.pre_tool_use event with

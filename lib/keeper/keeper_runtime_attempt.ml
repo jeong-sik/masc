@@ -42,7 +42,10 @@ let provider_error_to_http_error = function
       }
   | Llm_provider.Error.NotFound { detail; _ } ->
     Llm_provider.Http_client.HttpError
-      { code = 404; body = if String.trim detail = "" then "model not found" else detail }
+      { code = 404
+      ; body = (if String.trim detail = "" then "model not found" else detail)
+      ; retry_after_header = None
+      }
   | Llm_provider.Error.Timeout { detail; timeout_phase; _ } ->
     Llm_provider.Http_client.TimeoutError
       { message = detail
@@ -60,10 +63,10 @@ let provider_error_to_http_error = function
       }
   | Llm_provider.Error.MissingApiKey { var_name } ->
     Llm_provider.Http_client.HttpError
-      { code = 401; body = Printf.sprintf "missing API key: %s" var_name }
+      { code = 401; body = Printf.sprintf "missing API key: %s" var_name; retry_after_header = None }
   | Llm_provider.Error.InvalidConfig { field; detail } ->
     Llm_provider.Http_client.HttpError
-      { code = 400; body = Printf.sprintf "%s: %s" field detail }
+      { code = 400; body = Printf.sprintf "%s: %s" field detail; retry_after_header = None }
   | Llm_provider.Error.UnknownVariant { type_name; value } ->
     Llm_provider.Http_client.ProviderTerminal
       { kind = Llm_provider.Http_client.Other "unknown_variant"
@@ -108,20 +111,25 @@ let sdk_error_to_runtime_outcome err =
            Llm_provider.Http_client.HttpError { code = 400; body = message; retry_after_header = None }
          | ContextOverflow { message; _ } ->
            Llm_provider.Http_client.HttpError { code = 400; body = message; retry_after_header = None }
-         | RateLimited { message; _ } ->
-           Llm_provider.Http_client.HttpError { code = 429; body = message }
+         | RateLimited { message; retry_after } ->
+           (* Reconstruction boundary: [retry_after] is the resolved value
+              (body-or-header) and the header slot is the only retry-after
+              carrier on [HttpError], so it re-enters here rather than being
+              dropped. *)
+           Llm_provider.Http_client.HttpError
+             { code = 429; body = message; retry_after_header = retry_after }
          | PaymentRequired { message } ->
-           Llm_provider.Http_client.HttpError { code = 402; body = message }
+           Llm_provider.Http_client.HttpError { code = 402; body = message; retry_after_header = None }
          | NotFound { message } ->
-           Llm_provider.Http_client.HttpError { code = 404; body = message }
+           Llm_provider.Http_client.HttpError { code = 404; body = message; retry_after_header = None }
          | ServerError { status; message } ->
-           Llm_provider.Http_client.HttpError { code = status; body = message }
+           Llm_provider.Http_client.HttpError { code = status; body = message; retry_after_header = None }
          | AuthError { message } ->
-           Llm_provider.Http_client.HttpError { code = 401; body = message }
+           Llm_provider.Http_client.HttpError { code = 401; body = message; retry_after_header = None }
          | AuthorizationError { message } ->
-           Llm_provider.Http_client.HttpError { code = 403; body = message }
+           Llm_provider.Http_client.HttpError { code = 403; body = message; retry_after_header = None }
          | Overloaded { message } ->
-           Llm_provider.Http_client.HttpError { code = 529; body = message }
+           Llm_provider.Http_client.HttpError { code = 529; body = message; retry_after_header = None }
          | NetworkError { message; kind } ->
            Llm_provider.Http_client.NetworkError { message; kind }
          | Timeout { message } ->

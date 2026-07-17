@@ -388,10 +388,10 @@ let make_hooks
           ; input
           ; output
           ; duration_ms = hook_duration_ms
-          ; tool_use_id
-          ; schedule
+          ; invocation
           ; _
           } ->
+        let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
         record_progress ("tool_completed:" ^ tool_name);
         incr tool_call_count_ref;
         (* OAS exposes the provider-facing tool body here as text.  It is not a
@@ -489,7 +489,7 @@ let make_hooks
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
              ~tool_use_id
-             ~planned_index:schedule.planned_index
+             ~planned_index:(Agent_sdk.Tool.Invocation.planned_index invocation)
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
              ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id

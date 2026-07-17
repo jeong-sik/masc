@@ -20,7 +20,7 @@ let test_simple_variants () =
   msg "HttpError short body -> HTTP code: body" "HTTP 503: upstream down"
     (Provider_http_error.to_message
        (Llm_provider.Http_client.HttpError
-          { code = 503; body = "upstream down" }))
+          { code = 503; body = "upstream down"; retry_after_header = None }))
 
 let test_http_body_truncation () =
   let body = String.make (Provider_http_error.max_body_length + 50) 'x' in
@@ -31,7 +31,7 @@ let test_http_body_truncation () =
   in
   msg "HTTP body > max_body_length truncated with ellipsis" expected
     (Provider_http_error.to_message
-       (Llm_provider.Http_client.HttpError { code = 500; body }))
+       (Llm_provider.Http_client.HttpError { code = 500; body; retry_after_header = None }))
 
 let () =
   Alcotest.run "provider_http_error"

@@ -109,7 +109,12 @@ let test_oas_invocation_fields_preserve_exact_occurrence () =
     Agent_sdk.Tool.Invocation.create
       ~tool_use_id:""
       ~turn:11
-      ~planned_index:3
+      ~schedule:
+        { Agent_sdk.Tool.planned_index = 3
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_sdk.Tool.Serial
+        }
   in
   let json =
     `Assoc

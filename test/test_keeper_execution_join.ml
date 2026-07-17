@@ -60,14 +60,25 @@ let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
   ; payload
   }
 
+let mk_invocation ?(turn = 0) tool_use_id =
+  Agent_sdk.Tool.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~schedule:
+      { Agent_sdk.Tool.planned_index = 0
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_sdk.Tool.Serial
+      }
+
 let test_tool_called_carries_tool_use_id () =
   Join.For_testing.clear ();
   let json =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
-            { agent_name = "oas-r1"; tool_name = "Read"; tool_use_id = "tu-3"
-            ; input = `Null; turn = 0 }))
+            { agent_name = "oas-r1"; tool_name = "Read"
+            ; invocation = mk_invocation "tu-3"; input = `Null }))
     |> Option.get
   in
   check (option string) "payload tool_use_id" (Some "tu-3")
@@ -85,7 +96,8 @@ let test_tool_completed_stamps_execution_id () =
       (mk_event ~caused_by:"run-called-1"
          (Agent_sdk.Event_bus.ToolCompleted
             { agent_name = "keeper-x-agent"; tool_name = "Read"
-            ; tool_use_id = "tu-4"; output = Ok { content = "ok"; _meta = None }; turn = 1 }))
+            ; invocation = mk_invocation ~turn:1 "tu-4"
+            ; output = Ok { content = "ok"; _meta = None } }))
     |> Option.get
   in
   check (option string) "payload execution_id" (Some "exec-2-0001")
@@ -105,7 +117,8 @@ let test_tool_completed_without_entry_omits_execution_id () =
       (mk_event
          (Agent_sdk.Event_bus.ToolCompleted
             { agent_name = "oas-worker"; tool_name = "Execute"
-            ; tool_use_id = "tu-5"; output = Ok { content = "ok"; _meta = None }; turn = 2 }))
+            ; invocation = mk_invocation ~turn:2 "tu-5"
+            ; output = Ok { content = "ok"; _meta = None } }))
     |> Option.get
   in
   check bool "no execution_id field for non-keeper execution" true
@@ -119,8 +132,8 @@ let test_empty_tool_use_id_omitted_from_payload () =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
-            { agent_name = "oas-r1"; tool_name = "Read"; tool_use_id = ""
-            ; input = `Null; turn = 0 }))
+            { agent_name = "oas-r1"; tool_name = "Read"
+            ; invocation = mk_invocation ""; input = `Null }))
     |> Option.get
   in
   check bool "empty provider id is omitted" true

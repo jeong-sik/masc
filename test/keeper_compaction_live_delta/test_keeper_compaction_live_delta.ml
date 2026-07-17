@@ -160,6 +160,21 @@ let test_generation_mismatch_fails () =
     (snapshot ~generation:3 ~turn_count:8 [ message "a"; message "b" ])
 ;;
 
+let test_current_turn_regression_fails () =
+  let source = snapshot ~turn_count:7 [ message "a" ] in
+  let current = snapshot ~turn_count:6 [ message "a"; message "live" ] in
+  match
+    Live_delta.rebase
+      ~source
+      ~compacted_messages:[ message "summary" ]
+      ~current
+  with
+  | Error
+      (Live_delta.Current_turn_regressed
+         { source_turn_count = 7; current_turn_count = 6 }) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "regressed current turn was accepted"
+;;
+
 let test_current_metadata_is_preserved () =
   let source = snapshot [ message "a" ] in
   let usage =
@@ -212,6 +227,8 @@ let () =
         ; Alcotest.test_case "non-prefix" `Quick test_non_prefix_fails
         ; Alcotest.test_case "trace mismatch" `Quick test_trace_mismatch_fails
         ; Alcotest.test_case "generation mismatch" `Quick test_generation_mismatch_fails
+        ; Alcotest.test_case "current turn regression" `Quick
+            test_current_turn_regression_fails
         ; Alcotest.test_case "metadata preservation" `Quick test_current_metadata_is_preserved
         ] )
     ]

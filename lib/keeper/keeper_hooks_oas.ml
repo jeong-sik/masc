@@ -135,7 +135,6 @@ let make_hooks
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
   let tool_start_time = ref 0.0 in
-  let tool_invocation_turn = ref None in
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
   let tool_call_count_ref = ref 0 in
@@ -150,9 +149,8 @@ let make_hooks
     { Agent_sdk.Hooks.empty with
     pre_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PreToolUse { invocation; _ } ->
+      | Agent_sdk.Hooks.PreToolUse _ ->
         tool_start_time := Time_compat.now ();
-        tool_invocation_turn := Some (Agent_sdk.Tool.Invocation.turn invocation);
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 
@@ -384,12 +382,11 @@ let make_hooks
     post_tool_use = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.PostToolUse
-          { tool_name
+          { invocation
+          ; tool_name
           ; input
           ; output
           ; duration_ms = hook_duration_ms
-          ; tool_use_id
-          ; schedule
           ; _
           } ->
         record_progress ("tool_completed:" ^ tool_name);
@@ -460,12 +457,8 @@ let make_hooks
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
-        let invocation_turn =
-          match !tool_invocation_turn with
-          | Some turn -> Some turn
-          | None -> tctx.turn
-        in
-        tool_invocation_turn := None;
+        let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
+        let invocation_turn = Some (Agent_sdk.Tool.Invocation.turn invocation) in
         (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
@@ -489,7 +482,7 @@ let make_hooks
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
              ~tool_use_id
-             ~planned_index:schedule.planned_index
+             ~planned_index:(Agent_sdk.Tool.Invocation.planned_index invocation)
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
              ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id
@@ -615,7 +608,7 @@ let make_hooks
       | _event -> Agent_sdk.Hooks.Continue);
 
     on_error = Some (function
-      | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
+      | Agent_sdk.Hooks.OnError { detail; context = err_ctx; _ } ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_error)]
@@ -626,7 +619,7 @@ let make_hooks
       | _event -> Agent_sdk.Hooks.Continue);
 
     on_tool_error = Some (function
-      | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
+      | Agent_sdk.Hooks.OnToolError { tool_name; error; _ } ->
         let keeper_name = (!meta_ref).name in
         (* [OnToolError] carries opaque text but no typed MASC failure class.
            Do not reclassify it by decoding a JSON-looking message. *)

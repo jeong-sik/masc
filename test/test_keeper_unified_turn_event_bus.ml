@@ -23,25 +23,35 @@ let dummy_event payload =
   }
 ;;
 
+let invocation name =
+  Agent_sdk.Tool.Invocation.create
+    ~tool_use_id:name
+    ~turn:0
+    ~schedule:
+      { planned_index = 0
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_sdk.Tool.Serial
+      }
+;;
+
 let tool_called name =
   dummy_event
     (Agent_sdk.Event_bus.ToolCalled
-       { agent_name = "a"
+       { invocation = invocation name
+       ; agent_name = "a"
        ; tool_name = name
-       ; tool_use_id = name
        ; input = `Null
-       ; turn = 0
        })
 ;;
 
 let tool_completed name =
   dummy_event
     (Agent_sdk.Event_bus.ToolCompleted
-       { agent_name = "a"
+       { invocation = invocation name
+       ; agent_name = "a"
        ; tool_name = name
-       ; tool_use_id = name
        ; output = Ok { Agent_sdk.Types.content = "done"; _meta = None }
-       ; turn = 0
        })
 ;;
 

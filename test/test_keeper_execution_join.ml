@@ -19,6 +19,10 @@ let string_of_field = function
   | Some (`String s) -> Some s
   | _ -> None
 
+let int_of_field = function
+  | Some (`Int value) -> Some value
+  | _ -> None
+
 (* ── Join table semantics ─────────────────────────────── *)
 
 let test_record_take_roundtrip () =
@@ -60,18 +64,36 @@ let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
   ; payload
   }
 
+let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
+  Agent_sdk.Tool.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~schedule:
+      { planned_index
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_sdk.Tool.Serial
+      }
+
 let test_tool_called_carries_tool_use_id () =
   Join.For_testing.clear ();
   let json =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
-            { agent_name = "oas-r1"; tool_name = "Read"; tool_use_id = "tu-3"
-            ; input = `Null; turn = 0 }))
+            { invocation = invocation "tu-3"
+            ; agent_name = "oas-r1"
+            ; tool_name = "Read"
+            ; input = `Null
+            }))
     |> Option.get
   in
   check (option string) "payload tool_use_id" (Some "tu-3")
     (string_of_field (payload_member "tool_use_id" json));
+  check (option int) "payload turn" (Some 0)
+    (int_of_field (payload_member "turn" json));
+  check (option int) "payload planned_index" (Some 0)
+    (int_of_field (payload_member "planned_index" json));
   check bool "tool_called has no execution_id (mint happens after publish)"
     true
     (payload_member "execution_id" json = None)
@@ -84,14 +106,21 @@ let test_tool_completed_stamps_execution_id () =
     Bridge.native_event_to_json
       (mk_event ~caused_by:"run-called-1"
          (Agent_sdk.Event_bus.ToolCompleted
-            { agent_name = "keeper-x-agent"; tool_name = "Read"
-            ; tool_use_id = "tu-4"; output = Ok { content = "ok"; _meta = None }; turn = 1 }))
+            { invocation = invocation ~turn:1 ~planned_index:3 "tu-4"
+            ; agent_name = "keeper-x-agent"
+            ; tool_name = "Read"
+            ; output = Ok { content = "ok"; _meta = None }
+            }))
     |> Option.get
   in
   check (option string) "payload execution_id" (Some "exec-2-0001")
     (string_of_field (payload_member "execution_id" json));
   check (option string) "payload tool_use_id" (Some "tu-4")
     (string_of_field (payload_member "tool_use_id" json));
+  check (option int) "payload exact turn" (Some 1)
+    (int_of_field (payload_member "turn" json));
+  check (option int) "payload exact planned_index" (Some 3)
+    (int_of_field (payload_member "planned_index" json));
   check (option string) "envelope caused_by survives serialization"
     (Some "run-called-1")
     (string_of_field (member "caused_by" json));
@@ -104,8 +133,11 @@ let test_tool_completed_without_entry_omits_execution_id () =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCompleted
-            { agent_name = "oas-worker"; tool_name = "Execute"
-            ; tool_use_id = "tu-5"; output = Ok { content = "ok"; _meta = None }; turn = 2 }))
+            { invocation = invocation ~turn:2 "tu-5"
+            ; agent_name = "oas-worker"
+            ; tool_name = "Execute"
+            ; output = Ok { content = "ok"; _meta = None }
+            }))
     |> Option.get
   in
   check bool "no execution_id field for non-keeper execution" true
@@ -119,8 +151,11 @@ let test_empty_tool_use_id_omitted_from_payload () =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
-            { agent_name = "oas-r1"; tool_name = "Read"; tool_use_id = ""
-            ; input = `Null; turn = 0 }))
+            { invocation = invocation ""
+            ; agent_name = "oas-r1"
+            ; tool_name = "Read"
+            ; input = `Null
+            }))
     |> Option.get
   in
   check bool "empty provider id is omitted" true

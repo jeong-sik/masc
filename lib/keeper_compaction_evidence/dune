@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_compaction_evidence)
+ (public_name masc.keeper_compaction_evidence)
+ (wrapped false)
+ (modules keeper_compaction_evidence)
+ (libraries yojson))

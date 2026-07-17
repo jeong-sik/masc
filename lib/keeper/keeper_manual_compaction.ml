@@ -52,7 +52,7 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
                 [ "trigger", `String (Compaction_trigger.to_label trigger)
                 ; "trigger_detail", Compaction_trigger.to_detail_json trigger
                 ; ( "exact_evidence"
-                  , Keeper_compact_policy.compaction_evidence_to_json recovery.evidence )
+                  , Keeper_compaction_evidence.to_json recovery.evidence )
                 ])))
       ~checkpoint_path
       ()

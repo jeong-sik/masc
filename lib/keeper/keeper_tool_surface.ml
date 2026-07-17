@@ -102,6 +102,7 @@ let compaction_recovery_error_data ?dispatch_error error =
       Precondition_failed
     | Compaction_rejected Summarizer_unavailable
     | Compaction_rejected Plan_unavailable_or_invalid
+    | Compaction_rejected Invalid_structural_evidence
     | Compaction_evidence_missing
     | Unexpected_compaction_decision _ -> Internal_error
     | Checkpoint_superseded _ -> Conflict

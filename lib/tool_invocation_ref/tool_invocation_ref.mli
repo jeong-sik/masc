@@ -5,14 +5,15 @@
 
 type t
 
-type error = Empty_mcp_session_id
+type error = Invalid_mcp_session_id
 
 val external_mcp :
   request_id:Mcp_transport_protocol.request_id ->
   session_id:string ->
   (t, error) result
 (** Builds an external MCP identity from the exact typed JSON-RPC request id
-    and the stable transport session id. *)
+    and the stable transport session id. The session must satisfy
+    {!Mcp_session.is_valid}. *)
 
 val to_yojson : t -> Yojson.Safe.t
 (** Typed, inspectable projection. *)

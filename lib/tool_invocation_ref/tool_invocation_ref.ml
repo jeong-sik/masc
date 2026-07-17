@@ -4,11 +4,11 @@ type t =
       ; session_id : string
       }
 
-type error = Empty_mcp_session_id
+type error = Invalid_mcp_session_id
 
 let external_mcp ~request_id ~session_id =
-  if String.equal (String.trim session_id) ""
-  then Error Empty_mcp_session_id
+  if not (Mcp_session.is_valid session_id)
+  then Error Invalid_mcp_session_id
   else Ok (External_mcp { request_id; session_id })
 ;;
 
@@ -30,6 +30,6 @@ let equal left right =
 ;;
 
 let error_to_string = function
-  | Empty_mcp_session_id ->
-    "external MCP tool invocation requires a non-empty stable session id"
+  | Invalid_mcp_session_id ->
+    "external MCP tool invocation requires a valid stable MCP session id"
 ;;

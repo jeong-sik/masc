@@ -1143,6 +1143,7 @@ let run_stdio ~handle_request ~sw ~env state =
   let stdin = Eio.Stdenv.stdin env in
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
+  let transport_session_id = Mcp_session.generate () in
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
   Log.Mcp.info "Default workspace: %s" (Mcp_server.workspace_config state).Workspace.base_path;
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
@@ -1212,7 +1213,12 @@ let run_stdio ~handle_request ~sw ~env state =
         | Some "" -> loop (Some mode)
         | Some request_str ->
           let response =
-            handle_request ~clock ~sw ~mcp_session_id:"stdio" state request_str
+            handle_request
+              ~clock
+              ~sw
+              ~mcp_session_id:transport_session_id
+              state
+              request_str
           in
           respond ~mode response;
           loop (Some mode))

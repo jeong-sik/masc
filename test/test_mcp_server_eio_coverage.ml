@@ -257,6 +257,18 @@ let test_tool_invocation_identity_distinguishes_string_and_integer () =
   check bool "typed ids remain distinct" true
     (not (Tool_invocation_ref.equal string_id integer_id))
 
+let test_tool_invocation_identity_rejects_invalid_session () =
+  let request_id =
+    Request_id.request_id_of_yojson (`Int 1) |> Result.get_ok
+  in
+  match
+    Tool_invocation_ref.external_mcp
+      ~request_id
+      ~session_id:"invalid session"
+  with
+  | Error Tool_invocation_ref.Invalid_mcp_session_id -> ()
+  | Ok _ -> fail "expected invalid MCP session id to be rejected"
+
 let test_is_valid_request_id_array () =
   check bool "array invalid" false (Mcp_server.is_valid_request_id (`List []))
 
@@ -522,6 +534,8 @@ let () =
         test_request_id_preserves_large_integer_lexeme;
       test_case "string and integer distinct" `Quick
         test_tool_invocation_identity_distinguishes_string_and_integer;
+      test_case "invalid session rejected" `Quick
+        test_tool_invocation_identity_rejects_invalid_session;
     ];
     "validate_initialize_params", [
       test_case "valid" `Quick test_validate_initialize_params_valid;

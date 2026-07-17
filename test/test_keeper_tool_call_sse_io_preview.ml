@@ -104,6 +104,29 @@ let test_tool_call_event_uses_canonical_disposition () =
     (bool_member "success" event)
 ;;
 
+let test_oas_invocation_fields_preserve_exact_occurrence () =
+  let invocation =
+    Agent_sdk.Tool.Invocation.create
+      ~tool_use_id:""
+      ~turn:11
+      ~planned_index:3
+  in
+  let json =
+    `Assoc
+      (Keeper_tools_oas_handler_telemetry.oas_invocation_fields
+         (Some invocation))
+  in
+  Alcotest.(check (option string))
+    "blank provider id preserved"
+    (Some "")
+    (string_member "tool_use_id" json);
+  Alcotest.(check int) "turn preserved" 11 Yojson.Safe.Util.(member "turn" json |> to_int);
+  Alcotest.(check int)
+    "planned index preserved"
+    3
+    Yojson.Safe.Util.(member "planned_index" json |> to_int)
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_call_sse_io_preview"
@@ -120,6 +143,10 @@ let () =
             "preserves canonical disposition"
             `Quick
             test_tool_call_event_uses_canonical_disposition
+        ; Alcotest.test_case
+            "preserves exact OAS occurrence"
+            `Quick
+            test_oas_invocation_fields_preserve_exact_occurrence
         ] )
     ]
 ;;

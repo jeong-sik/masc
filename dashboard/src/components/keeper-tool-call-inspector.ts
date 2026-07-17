@@ -205,6 +205,10 @@ function entryScopeLabel(entry: ToolCallEntry): string {
   const goalIds = entry.goal_ids ?? []
   const parts = [
     typeof entry.turn === 'number' ? `turn ${entry.turn}` : null,
+    typeof entry.planned_index === 'number' ? `plan ${entry.planned_index}` : null,
+    entry.tool_use_id !== undefined
+      ? `tool_use_id ${entry.tool_use_id === '' ? '(blank)' : entry.tool_use_id}`
+      : null,
     typeof entry.keeper_turn_id === 'number' ? `keeper ${entry.keeper_turn_id}` : null,
     entry.lane ? `lane ${entry.lane}` : null,
     entry.task_id ? `task ${entry.task_id}` : null,
@@ -504,6 +508,9 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           ${entry.model ? html`
             <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
           ` : null}
+          <div class="text-3xs text-[var(--color-fg-muted)]">
+            occurrence: <span class="text-[var(--color-fg-secondary)] font-mono">${entryScopeLabel(entry)}</span>
+          </div>
           ${routeLinks.length > 0 ? html`
             <div class="flex items-center justify-between gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-toolbar">
               <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${routeLinks.map(link => link.evidence).join(' · ')}>

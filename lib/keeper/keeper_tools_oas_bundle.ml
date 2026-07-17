@@ -117,11 +117,15 @@ let make_tool_bundle
                | Keeper_tool_descriptor.Current_task_state ->
                  descriptor.description ^ "\n\n" ^ task_state_hint ~config ~meta
              in
-             Tool_bridge.oas_tool_of_masc
+             Tool_bridge.oas_tool_of_masc_with_execution_env
                ~name:model_name
                ~description
                ~input_schema:descriptor.input_schema
-               (fun input -> h input)))
+               (fun execution_env input ->
+                 h
+                   ?oas_invocation:
+                     (Agent_sdk.Tool.Execution_env.invocation execution_env)
+                   input)))
       model_visible_descriptors
   in
   let bundle =

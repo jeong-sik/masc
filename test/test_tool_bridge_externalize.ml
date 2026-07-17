@@ -200,6 +200,40 @@ let test_round_trip_through_oas () =
            Alcotest.fail "did not expect Stored when externalize=0")
   | Error _ -> Alcotest.fail "expected Ok"
 
+let test_execution_env_preserves_exact_invocation () =
+  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
+  let seen_invocation = ref None in
+  let tool =
+    B.oas_tool_of_masc_with_execution_env
+      ~name:"occurrence_probe"
+      ~description:"capture exact OAS invocation"
+      ~input_schema:(`Assoc [ "type", `String "object" ])
+      (fun execution_env _input ->
+         seen_invocation := Agent_sdk.Tool.Execution_env.invocation execution_env;
+         tool_ok ~tool_name:"occurrence_probe" "ok")
+  in
+  let invocation =
+    Agent_sdk.Tool.Invocation.create
+      ~tool_use_id:""
+      ~turn:7
+      ~planned_index:2
+  in
+  (match Agent_sdk.Tool.execute ~invocation tool (`Assoc []) with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "expected successful bridge execution");
+  match !seen_invocation with
+  | None -> Alcotest.fail "execution environment dropped invocation"
+  | Some seen ->
+    Alcotest.(check string)
+      "blank provider id preserved"
+      ""
+      (Agent_sdk.Tool.Invocation.tool_use_id seen);
+    Alcotest.(check int) "turn preserved" 7 (Agent_sdk.Tool.Invocation.turn seen);
+    Alcotest.(check int)
+      "planned index preserved"
+      2
+      (Agent_sdk.Tool.Invocation.planned_index seen)
+
 (* --- Marker encoding round-trip via the bridge --- *)
 
 let test_externalize_with_temp_base_path () =
@@ -274,6 +308,8 @@ let () =
             test_to_oas_typed_result_preserves_transient_failure_class;
           Alcotest.test_case "round-trip through OAS" `Quick
             test_round_trip_through_oas;
+          Alcotest.test_case "execution env preserves exact invocation" `Quick
+            test_execution_env_preserves_exact_invocation;
         ] );
       ( "externalize",
         [

@@ -145,6 +145,7 @@ val log_call :
   ?prompt_fingerprint:string ->
   ?execution_id:Ids.Execution_id.t ->
   ?tool_use_id:string ->
+  ?planned_index:int ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -166,7 +167,9 @@ val log_call :
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the
     same execution (when the dispatch lane has one) — the key that the
-    oas:tool_called/oas:tool_completed event rows also carry.
+    oas:tool_called/oas:tool_completed event rows also carry. Blank and
+    repeated provider ids remain meaningful when scoped by [turn] and
+    [planned_index], so they are persisted unchanged.
     Output is truncated to 4000 bytes. [model] is a compatibility input only;
     non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],

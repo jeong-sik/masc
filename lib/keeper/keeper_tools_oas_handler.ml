@@ -28,7 +28,7 @@ let make_keeper_tool_handler
       ?(translate_input = fun j -> j)
       ?(validate_translated_input = true)
       ()
-  : Yojson.Safe.t -> Tool_result.result
+  : ?oas_invocation:Agent_sdk.Tool.Invocation.t -> Yojson.Safe.t -> Tool_result.result
   =
   let record_result ~input result =
     Option.iter
@@ -36,7 +36,8 @@ let make_keeper_tool_handler
       record_gate_result;
     result
   in
-  fun raw_input ->
+  fun ?oas_invocation raw_input ->
+    let invocation_fields = oas_invocation_fields oas_invocation in
     let handle_validation_error ~input validation_result =
       let output_text = Tool_result.message validation_result in
       let duration_ms = 0 in
@@ -66,7 +67,8 @@ let make_keeper_tool_handler
         ~disposition:validation_result
         ~error_text
         ~extra_fields:
-          (tool_io_preview_fields ~tool_name:name ~input ~output:output_text ())
+          (tool_io_preview_fields ~tool_name:name ~input ~output:output_text ()
+           @ invocation_fields)
         ~site:"input_validation"
         ~ts
         ();
@@ -79,7 +81,7 @@ let make_keeper_tool_handler
         ~keeper_name:meta.name
         ~site:"input_validation"
         (`Assoc
-            [ "ts_unix", `Float ts
+            ([ "ts_unix", `Float ts
             ; "event", `String "tool_exec"
             ; "keeper_name", `String meta.name
             ; "tool", `String name
@@ -87,7 +89,8 @@ let make_keeper_tool_handler
             ; "result_bytes", `Int (String.length output_text)
             ; "disposition", `String disposition
             ; "error", `String error_text
-            ]);
+            ]
+             @ invocation_fields));
       validation_result |> record_result ~input
     in
     match pre_validate_input raw_input with
@@ -131,6 +134,7 @@ let make_keeper_tool_handler
               ?continuation_channel
               ?gate_context
               ?gate_grant
+              ?oas_invocation
               ~input
               ()
             |> record_result ~input

@@ -26,11 +26,13 @@ let execute_with_observers
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?oas_invocation
       ~(input : Yojson.Safe.t)
       ()
   : Tool_result.result
   =
   let t0 = Time_compat.now () in
+  let invocation_fields = oas_invocation_fields oas_invocation in
   try
     let result, duration_ms =
       Inference_utils.timed (fun () ->
@@ -95,7 +97,8 @@ let execute_with_observers
         ~disposition:result.disposition
         ~error_text:detail
         ~extra_fields:
-          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
+          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ()
+           @ invocation_fields)
         ~site:"error_result"
         ~ts
         ();
@@ -110,7 +113,7 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~site:"error_result"
         (`Assoc
-            [ "ts_unix", `Float ts
+            ([ "ts_unix", `Float ts
             ; "event", `String "tool_exec"
             ; "keeper_name", `String meta.name
             ; "tool", `String name
@@ -118,7 +121,8 @@ let execute_with_observers
             ; "result_bytes", `Int (String.length projected_error)
             ; "disposition", `String disposition
             ; "error_preview", `String detail
-            ]);
+            ]
+             @ invocation_fields));
       Keeper_tool_call_log.set_truncation_info
         ~keeper_name:meta.name
         ~original_bytes:(String.length projected_error)
@@ -158,7 +162,8 @@ let execute_with_observers
         ~duration_ms
         ~disposition:result.disposition
         ~extra_fields:
-          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
+          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ()
+           @ invocation_fields)
         ~site:"success"
         ~ts
         ();
@@ -176,7 +181,8 @@ let execute_with_observers
              ; "duration_ms", `Int duration_ms
              ; "result_bytes", `Int original_len
              ; "disposition", `String disposition
-             ]));
+             ]
+             @ invocation_fields));
       Keeper_tool_call_log.set_truncation_info
         ~keeper_name:meta.name
         ~original_bytes:original_len
@@ -214,7 +220,8 @@ let execute_with_observers
         ~duration_ms
         ~disposition:result.disposition
         ~extra_fields:
-          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
+          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ()
+           @ invocation_fields)
         ~site:"deferred"
         ~ts
         ();
@@ -223,14 +230,15 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~site:"deferred"
         (`Assoc
-            [ "ts_unix", `Float ts
+            ([ "ts_unix", `Float ts
             ; "event", `String "tool_exec"
             ; "keeper_name", `String meta.name
             ; "tool", `String name
             ; "duration_ms", `Int duration_ms
             ; "result_bytes", `Int (String.length projected_result)
             ; "disposition", `String disposition
-            ]);
+            ]
+             @ invocation_fields));
       Keeper_tool_call_log.set_truncation_info
         ~keeper_name:meta.name
         ~original_bytes:(String.length projected_result)
@@ -269,7 +277,8 @@ let execute_with_observers
       ~disposition:exception_result
       ~error_text
       ~extra_fields:
-        (tool_io_preview_fields ~tool_name:name ~input ~output:error_text ())
+        (tool_io_preview_fields ~tool_name:name ~input ~output:error_text ()
+         @ invocation_fields)
       ~site:"exception"
       ~ts
       ();
@@ -285,7 +294,7 @@ let execute_with_observers
       ~keeper_name:meta.name
       ~site:"exception"
       (`Assoc
-          [ "ts_unix", `Float ts
+          ([ "ts_unix", `Float ts
           ; "event", `String "tool_exec"
           ; "keeper_name", `String meta.name
           ; "tool", `String name
@@ -293,7 +302,8 @@ let execute_with_observers
           ; "result_bytes", `Int (String.length projected_error)
           ; "disposition", `String disposition
           ; "error", `String error_text
-          ]);
+          ]
+           @ invocation_fields));
     Keeper_tool_call_log.set_truncation_info
       ~keeper_name:meta.name
       ~original_bytes:(String.length projected_error)

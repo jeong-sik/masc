@@ -243,7 +243,9 @@ describe('KeeperToolCallInspector render', () => {
           success: false,
           duration_ms: 2_600,
           trace_id: 'trace-runtime',
+          tool_use_id: '',
           turn: 9,
+          planned_index: 4,
           lane: 'autonomous',
         },
       ],
@@ -268,6 +270,7 @@ describe('KeeperToolCallInspector render', () => {
     expect(text).toContain('Evidence links')
     expect(text).toContain('Code')
     expect(text).toContain('Task')
+    expect(text).toContain('turn 9 · plan 4 · tool_use_id (blank)')
   })
 
   it('does not render Code links for unsafe absolute tool-call file inputs', async () => {

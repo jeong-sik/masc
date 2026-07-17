@@ -382,6 +382,7 @@ let log_call
       ?prompt_fingerprint
       ?execution_id
       ?tool_use_id
+      ?planned_index
       ?trace_id
       ?session_id
       ?generation
@@ -468,8 +469,13 @@ let log_call
          carry, joining this store to oas:tool_called/oas:tool_completed. *)
       let tool_use_id_field =
         match tool_use_id with
-        | Some value when value <> "" -> [ "tool_use_id", `String value ]
-        | Some _ | None -> []
+        | Some value -> [ "tool_use_id", `String value ]
+        | None -> []
+      in
+      let planned_index_field =
+        match planned_index with
+        | Some value -> [ "planned_index", `Int value ]
+        | None -> []
       in
       let session_id_field =
         match session_id with
@@ -574,6 +580,7 @@ let log_call
            @ prompt_fingerprint_field
            @ execution_id_field
            @ tool_use_id_field
+           @ planned_index_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

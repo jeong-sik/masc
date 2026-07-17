@@ -100,6 +100,35 @@ let test_read_recent_keeper_filter () =
     Alcotest.(check int) "bob gets 1 entry" 1 (List.length bob_entries);
     Alcotest.(check int) "all gets 2 entries" 2 (List.length all_entries))
 
+let test_exact_oas_occurrence_persisted () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k"
+      ~tool_name:"tool_a"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~success:true
+      ~duration_ms:1.0
+      ~tool_use_id:""
+      ~turn:9
+      ~planned_index:4
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "blank provider id persisted"
+        (Some "")
+        (Safe_ops.json_string_opt "tool_use_id" entry);
+      Alcotest.(check int)
+        "turn persisted"
+        9
+        (Safe_ops.json_int ~default:(-1) "turn" entry);
+      Alcotest.(check int)
+        "planned index persisted"
+        4
+        (Safe_ops.json_int ~default:(-1) "planned_index" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 (* ── Redaction: tool names do not suppress evidence ────────────── *)
 
 let test_sensitive_named_tool_logged_with_redaction () =
@@ -1188,6 +1217,7 @@ let () =
         [ eio_test "n=0 returns []" test_read_recent_n_zero
         ; eio_test "n<0 returns []" test_read_recent_n_negative
         ; eio_test "keeper filter" test_read_recent_keeper_filter
+        ; eio_test "exact OAS occurrence" test_exact_oas_occurrence_persisted
         ] )
     ; ( "redaction",
         [ eio_test "sensitive-named tool logged with redaction"

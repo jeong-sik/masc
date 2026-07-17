@@ -32,7 +32,6 @@
     [stable_worker_session_id],
     [oas_worker_evidence_session_id],
     [worker_meta_allowed_fields],
-    [worker_meta_removed_fields],
     [validate_worker_meta_fields], [worker_meta_to_yojson],
     [worker_meta_of_yojson], [worker_container_state],
     [append_worker_turn_log], [start_worker_heartbeat]). *)
@@ -72,8 +71,8 @@ val load_worker_meta :
   worker_container_meta option
 (** Reads [meta.json] under {!worker_container_dir}.
     Returns [None] when the file is missing, the JSON
-    fails to parse, or validation rejects unknown /
-    removed fields.  Validation errors are logged via
+    fails to parse, or validation rejects unknown fields.
+    Validation errors are logged via
     [Log.LocalWorker.warn] for operator visibility. *)
 
 val save_worker_meta :

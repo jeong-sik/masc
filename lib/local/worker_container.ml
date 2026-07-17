@@ -89,25 +89,16 @@ let worker_meta_allowed_fields =
     "last_run_at";
   ]
 
-let worker_meta_removed_fields =
-  [ "max_turns_override"; "tool_profile"; "shell_profile"; "worker_class" ]
-
 let validate_worker_meta_fields fields =
   let field_names = List.map fst fields in
-  match List.find_opt (fun name -> List.mem name worker_meta_removed_fields) field_names with
+  match
+    List.find_opt
+      (fun name -> not (List.mem name worker_meta_allowed_fields))
+      field_names
+  with
   | Some field ->
-      Error
-        (Printf.sprintf
-           "worker meta field %S has been removed; worker runtime state is now backend-only"
-           field)
-  | None -> (
-      match List.find_opt
-              (fun name -> not (List.mem name worker_meta_allowed_fields))
-              field_names
-      with
-      | Some field ->
-          Error (Printf.sprintf "unknown worker meta field %S" field)
-      | None -> Ok ())
+      Error (Printf.sprintf "unknown worker meta field %S" field)
+  | None -> Ok ()
 
 let worker_meta_to_yojson (meta : worker_container_meta) =
   `Assoc

@@ -814,7 +814,7 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
           (Llm_provider.Http_client.HttpError
-             { code = 401; body = "bad credentials" })
+             { code = 401; body = "bad credentials"; retry_after_header = None })
       in
       let raw =
         Eio_main.run (fun env ->

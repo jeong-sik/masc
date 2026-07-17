@@ -17,6 +17,11 @@
     (issue #14624). *)
 val default_runtime_id : unit -> string
 
+(** Validate one persisted/requested context override value. This is a
+    structural invariant only: positive integers are accepted verbatim and no
+    provider/model policy is applied here. *)
+val validate_max_context_override_value : int -> (int, string) result
+
 val default_proactive_enabled : bool
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.

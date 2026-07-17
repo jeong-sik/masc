@@ -18,6 +18,16 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
    도 함께 제거한다. *)
 let default_runtime_id () = Runtime.get_default_runtime_id ()
 
+let validate_max_context_override_value value =
+  if value > 0
+  then Ok value
+  else
+    Error
+      (Printf.sprintf
+         "max_context_override must be positive (received %d)"
+         value)
+;;
+
 include Keeper_config_text
 
 

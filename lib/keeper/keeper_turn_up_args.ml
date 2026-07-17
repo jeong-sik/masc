@@ -73,12 +73,7 @@ let parse_runtime_id_opt args =
 
 let normalize_max_context_override_value v =
   if v = 0 then Ok None
-  else if v > 0 then Ok (Some v)
-  else
-    Error
-      (Printf.sprintf
-         "max_context_override=%d must be positive, or 0 to clear"
-         v)
+  else Keeper_config.validate_max_context_override_value v |> Result.map Option.some
 
 let parse_max_context_override args =
   match Json_util.assoc_member_opt "max_context_override" args with

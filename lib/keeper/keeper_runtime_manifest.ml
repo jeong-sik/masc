@@ -382,14 +382,11 @@ let decision_public_allowlist =
     ; "payload_role"; "trigger"; "trigger_detail"; "kind"; "limit_tokens"
     ; "ratio"; "threshold"; "count"
     ; "source_requeued"; "exact_evidence"
-    ; "before_checkpoint_bytes"; "after_checkpoint_bytes"
-    ; "before_message_count"; "after_message_count"
-    ; "summarized_message_count"; "dropped_message_count"
-    ; "pair_repair_dropped_message_count"
-    ; "before_tool_use_count"; "after_tool_use_count"
-    ; "before_tool_result_count"; "after_tool_result_count"
     ; "clock_refs"
     ]
+
+let compaction_evidence_public_allowlist =
+  StringSet.of_list Keeper_compaction_evidence.wire_field_names
 
 let clock_refs_public_allowlist =
   StringSet.of_list
@@ -398,6 +395,21 @@ let clock_refs_public_allowlist =
     ; "compaction_id"; "compaction_source"; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ]
+
+type decision_projection_scope =
+  | Decision
+  | Clock_refs
+  | Compaction_evidence
+
+let decision_allowlist = function
+  | Decision -> decision_public_allowlist
+  | Clock_refs -> clock_refs_public_allowlist
+  | Compaction_evidence -> compaction_evidence_public_allowlist
+
+let decision_child_scope scope key =
+  if String.equal key "clock_refs" then Clock_refs
+  else if String.equal key "exact_evidence" then Compaction_evidence
+  else scope
 
 let rec reject_unknown_fields ~allowlist path = function
   | `Assoc fields ->
@@ -430,27 +442,24 @@ let reject_retired_manifest_fields fields =
   | None -> Ok ()
 
 let reject_retired_decision_fields decision =
-  let rec check path = function
+  let rec check scope path = function
     | `Assoc fields ->
-        let allowlist =
-          if String.equal path "" then decision_public_allowlist
-          else if String.equal path "clock_refs" then clock_refs_public_allowlist
-          else decision_public_allowlist
-        in
+        let allowlist = decision_allowlist scope in
         List.find_map
           (fun (key, value) ->
             let full_path = if String.equal path "" then key else path ^ "." ^ key in
-            if StringSet.mem key allowlist then check full_path value
+            if StringSet.mem key allowlist then
+              check (decision_child_scope scope key) full_path value
             else Some full_path)
           fields
     | `List values ->
         values
         |> List.mapi (fun idx value -> idx, value)
         |> List.find_map (fun (idx, value) ->
-          check (Printf.sprintf "%s[%d]" path idx) value)
+          check scope (Printf.sprintf "%s[%d]" path idx) value)
     | _ -> None
   in
-  match check "" decision with
+  match check Decision "" decision with
   | Some path ->
       Error
         (Printf.sprintf
@@ -459,13 +468,9 @@ let reject_retired_decision_fields decision =
   | None -> Ok ()
 
 let rec public_projection_of_decision decision =
-  let rec project path = function
+  let rec project scope path = function
     | `Assoc fields ->
-        let allowlist =
-          if String.equal path "" then decision_public_allowlist
-          else if String.equal path "clock_refs" then clock_refs_public_allowlist
-          else decision_public_allowlist
-        in
+        let allowlist = decision_allowlist scope in
         `Assoc
           (List.filter_map
              (fun (key, value) ->
@@ -473,14 +478,15 @@ let rec public_projection_of_decision decision =
                  Some
                    ( key
                    , project
+                       (decision_child_scope scope key)
                        (if String.equal path "" then key else path ^ "." ^ key)
                        value )
                else None)
              fields)
-    | `List values -> `List (List.map (project path) values)
+    | `List values -> `List (List.map (project scope path) values)
     | other -> other
   in
-  project "" decision
+  project Decision "" decision
 
 let to_json manifest =
   `Assoc

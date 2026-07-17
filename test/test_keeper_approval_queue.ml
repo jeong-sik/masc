@@ -48,6 +48,10 @@ let require_some message = function
   | None -> Alcotest.fail message
 ;;
 
+let pending_entry_exn id =
+  AQ.get_pending_entry ~id |> require_some ("pending approval not found: " ^ id)
+;;
+
 let drop_resolution ~base_path ~keeper_name resolution =
   let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
   match Registry_queue.drop_by_post_id ~base_path keeper_name ~post_id with
@@ -258,7 +262,8 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -374,6 +379,11 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        in
        Alcotest.(check bool) "changed field is a different request" true
          (not (String.equal first changed));
+       Alcotest.(check int) "first request sequence" 1 (pending_entry_exn first).sequence;
+       Alcotest.(check int)
+         "dedup does not consume sequence"
+         2
+         (pending_entry_exn changed).sequence;
        (match AQ.get_pending_entry ~id:first with
         | None -> Alcotest.fail "pending request missing"
         | Some entry ->
@@ -394,6 +404,73 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
         | None -> Alcotest.fail "pending request was not restored");
        reject_and_cleanup ~base_path first;
        reject_and_cleanup ~base_path changed)
+;;
+
+let test_monotonic_sequence_survives_restart () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let first = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 1) in
+       let second = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 2) in
+       Alcotest.(check int) "first durable sequence" 1 (pending_entry_exn first).sequence;
+       Alcotest.(check int) "second durable sequence" 2 (pending_entry_exn second).sequence;
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let third = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 3) in
+       Alcotest.(check int) "restart continues sequence" 3 (pending_entry_exn third).sequence;
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "next sequence is durable"
+         4
+         (read_pending_snapshot ~base_path |> member "next_sequence" |> to_int))
+;;
+
+let test_same_owner_head_uses_sequence_not_wall_clock () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let first = submit ~base_path ~keeper_name:"fifo-owner" ~input:(`Int 1) in
+       let second = submit ~base_path ~keeper_name:"fifo-owner" ~input:(`Int 2) in
+       let first = { (pending_entry_exn first) with requested_at = 500.0 } in
+       let second = { (pending_entry_exn second) with requested_at = 1.0 } in
+       match Gate.For_testing.ready_auto_judge_heads ~base_path [ second; first ] with
+       | [ head ] -> Alcotest.(check string) "oldest sequence wins" first.id head.id
+       | heads ->
+         Alcotest.failf "one same-owner head expected, got %d" (List.length heads))
+;;
+
+let test_different_owners_claim_in_parallel () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Gate.For_testing.reset_active_auto_judges ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Gate.For_testing.reset_active_auto_judges ();
+       let owner_a = pending_entry_exn (submit ~base_path ~keeper_name:"owner-a" ~input:(`Int 1)) in
+       let owner_a_next =
+         pending_entry_exn (submit ~base_path ~keeper_name:"owner-a" ~input:(`Int 2))
+       in
+       let owner_b = pending_entry_exn (submit ~base_path ~keeper_name:"owner-b" ~input:(`Int 1)) in
+       Alcotest.(check bool) "first owner activates" true
+         (Gate.For_testing.claim_auto_judge owner_a);
+       Alcotest.(check bool) "same owner remains queued" false
+         (Gate.For_testing.claim_auto_judge owner_a_next);
+       Alcotest.(check bool) "different owner activates in parallel" true
+         (Gate.For_testing.claim_auto_judge owner_b);
+       Gate.For_testing.release_auto_judge owner_a;
+       Alcotest.(check bool) "same owner next activates after release" true
+         (Gate.For_testing.claim_auto_judge owner_a_next))
 ;;
 
 let test_resolution_is_durable_and_origin_scoped () =
@@ -1048,7 +1125,8 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
             ]);
@@ -1078,7 +1156,8 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 2
+               [ "version", `Int 3
+               ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
                ]));
@@ -1117,7 +1196,8 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
               , `List
@@ -1207,7 +1287,8 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 3
             ; "pending", `List []
             ; ( "deliveries"
               , `List
@@ -1445,6 +1526,18 @@ let () =
             "submit is nonblocking and exact"
             `Quick
             test_submit_is_nonblocking_and_exactly_deduplicated
+        ; Alcotest.test_case
+            "durable sequence survives restart"
+            `Quick
+            test_monotonic_sequence_survives_restart
+        ; Alcotest.test_case
+            "same owner drains by durable sequence"
+            `Quick
+            test_same_owner_head_uses_sequence_not_wall_clock
+        ; Alcotest.test_case
+            "different owners activate in parallel"
+            `Quick
+            test_different_owners_claim_in_parallel
         ; Alcotest.test_case
             "dedup keeps distinct origins"
             `Quick

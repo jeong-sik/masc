@@ -18,6 +18,7 @@ let sample_entry : Q.pending_approval =
         ; "body", `String "hello"
         ; "api_key", `String "sk-test-secret"
         ]
+  ; sequence = 1
   ; requested_at = 1780587600.0
   ; turn_id = None
   ; request_context =

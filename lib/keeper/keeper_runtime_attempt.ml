@@ -110,8 +110,13 @@ let sdk_error_to_runtime_outcome err =
            http_error ~code:400 ~body:message
          | ContextOverflow { message; _ } ->
            http_error ~code:400 ~body:message
-         | RateLimited { message; _ } ->
-           http_error ~code:429 ~body:message
+         | RateLimited { message; retry_after } ->
+           (* Reconstruction boundary: [retry_after] is the resolved value
+              (body-or-header) and the header slot is the only retry-after
+              carrier on [HttpError], so it re-enters here rather than being
+              dropped. *)
+           Llm_provider.Http_client.HttpError
+             { code = 429; body = message; retry_after_header = retry_after }
          | PaymentRequired { message } ->
            http_error ~code:402 ~body:message
          | NotFound { message } ->

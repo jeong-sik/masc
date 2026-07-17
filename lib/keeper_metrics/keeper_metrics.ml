@@ -194,6 +194,10 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
+  | MemoryOsRecallFactsTruncated
+  | MemoryOsRecallEpisodesTruncated
+  | MemoryOsEpisodeRetentionPruned
+  | MemoryOsLibrarianRuntimeSlotBusy
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
@@ -419,6 +423,14 @@ let to_string = function
       "masc_keeper_memory_os_recall_unavailable_total"
   | MemoryOsReobserveEchoSuppressed ->
       "masc_keeper_memory_os_reobserve_echo_suppressed_total"
+  | MemoryOsRecallFactsTruncated ->
+      "masc_keeper_memory_os_recall_facts_truncated_total"
+  | MemoryOsRecallEpisodesTruncated ->
+      "masc_keeper_memory_os_recall_episodes_truncated_total"
+  | MemoryOsEpisodeRetentionPruned ->
+      "masc_keeper_memory_os_episode_retention_pruned_total"
+  | MemoryOsLibrarianRuntimeSlotBusy ->
+      "masc_keeper_memory_os_librarian_runtime_slot_busy_total"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"
   | VisionAnalyze -> "masc_keeper_vision_analyze_total"

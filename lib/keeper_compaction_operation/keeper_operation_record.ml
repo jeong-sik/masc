@@ -3,6 +3,8 @@ module Cursor = struct
   type error = Negative of int
   let zero = 0
   let of_int value = if value < 0 then Error (Negative value) else Ok value
+  let equal = Int.equal
+  let compare = Int.compare
   let to_int value = value
 end
 

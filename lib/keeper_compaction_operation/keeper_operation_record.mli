@@ -5,6 +5,8 @@ module Cursor : sig
   type error = Negative of int
   val zero : t
   val of_int : int -> (t, error) result
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
   val to_int : t -> int
 end
 

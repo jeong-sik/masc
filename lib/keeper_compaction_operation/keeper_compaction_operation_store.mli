@@ -2,15 +2,20 @@
     records. The single-writer implementation migrates separately. *)
 module Record = Keeper_operation_record
 module Cursor = Record.Cursor
+module Projection = Keeper_compaction_operation_projection
 type row = Keeper_compaction_operation.event Record.row
-type operation_entry =
+type operation_entry = Projection.operation_entry =
   { snapshot : Keeper_compaction_operation_reducer.snapshot
   ; requested_at : float
   ; request_cursor : Cursor.t
   }
 type replay = { operations : operation_entry list; end_cursor : Cursor.t }
 type slice = { rows : row list; end_cursor : Cursor.t }
-type event_rejection =
+type event_rejection = Projection.rejection =
+  | Cursor_mismatch of
+      { expected : Cursor.t
+      ; actual : Cursor.t
+      }
   | Transition_rejected of Keeper_compaction_operation_reducer.transition_error
   | Keeper_mismatch of
       { expected : Keeper_id.Keeper_name.t

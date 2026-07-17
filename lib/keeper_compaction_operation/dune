@@ -11,6 +11,7 @@
   keeper_compaction_operation_codec_support
   keeper_compaction_operation_identity
   keeper_compaction_operation_json
+  keeper_compaction_operation_projection
   keeper_compaction_operation_reducer
   keeper_compaction_operation_store
   keeper_operation_record)

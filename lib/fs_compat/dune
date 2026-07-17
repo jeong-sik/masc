@@ -30,7 +30,14 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries fs_compat_internal eio eio.unix unix yojson uuidm digestif))
+ (libraries
+  fs_compat_internal
+  eio
+  eio.unix
+  unix
+  yojson
+  uuidm
+  digestif))
 
 (library
  (name fs_compat_test_support)

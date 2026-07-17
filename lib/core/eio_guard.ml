@@ -17,13 +17,11 @@ let enable () = Atomic.set ready true
 let disable () = Atomic.set ready false
 let is_ready () = Atomic.get ready
 
-type execution_context = Eio_fiber | Non_eio
+type execution_context = Fs_compat.execution_context =
+  | Eio_fiber
+  | Non_eio
 
-let execution_context () =
-  match Eio.Fiber.is_cancelled () with
-  | true | false -> Eio_fiber
-  | exception Effect.Unhandled _ -> Non_eio
-;;
+let execution_context = Fs_compat.execution_context
 
 let is_eio_fiber () = execution_context () = Eio_fiber
 

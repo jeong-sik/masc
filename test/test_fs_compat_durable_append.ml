@@ -365,6 +365,32 @@ let test_private_jsonl_append_rejects_incomplete_suffix () =
   | Ok () -> fail "append accepted a non-terminated JSONL suffix"
 ;;
 
+let test_private_jsonl_append_respects_execution_context () =
+  with_temp_jsonl "" @@ fun path ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect
+    ~finally:Fs_compat.clear_fs
+    (fun () ->
+       (match
+          Fs_compat.append_private_jsonl_durable_locked_result path "{\"fiber\":1}\n"
+        with
+        | Ok () -> ()
+        | Error error -> fail (Fs_compat.private_jsonl_append_error_to_string error));
+       let raw_domain_result =
+         Domain.spawn (fun () ->
+           Fs_compat.append_private_jsonl_durable_locked_result path "{\"domain\":2}\n")
+         |> Domain.join
+       in
+       (match raw_domain_result with
+        | Ok () -> ()
+        | Error error -> fail (Fs_compat.private_jsonl_append_error_to_string error));
+       check string
+         "Eio fiber and raw Domain append once"
+         "{\"fiber\":1}\n{\"domain\":2}\n"
+         (Fs_compat.load_file path))
+;;
+
 let () =
   run
     "fs_compat durable append"
@@ -430,6 +456,10 @@ let () =
             "private JSONL append rejects incomplete suffix"
             `Quick
             test_private_jsonl_append_rejects_incomplete_suffix
+        ; test_case
+            "private JSONL append respects execution context"
+            `Quick
+            test_private_jsonl_append_respects_execution_context
         ] )
     ]
 ;;

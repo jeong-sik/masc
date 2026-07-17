@@ -35,6 +35,16 @@ let get_fs_opt () = Atomic.get global_fs
 (** Check if Eio fs is available *)
 let has_fs () = Option.is_some (Atomic.get global_fs)
 
+type execution_context =
+  | Eio_fiber
+  | Non_eio
+
+let execution_context () =
+  match Eio.Fiber.is_cancelled () with
+  | true | false -> Eio_fiber
+  | exception Effect.Unhandled _ -> Non_eio
+;;
+
 (** Normalize [Eio.Io] to [Sys_error] so callers only need one catch.
     Eio operations raise [Eio.Io _] on permission errors, missing files, etc.
     Stdlib I/O already raises [Sys_error], so wrapping only the Eio branch
@@ -1718,11 +1728,10 @@ module Capability_append_for_testing = struct
   let append_fd_observed = append_fd_observed
 end
 
-let run_blocking_private_file_transaction ~label ~path f =
-  with_fs_or_fallback
-    ~path
-    ~fallback:f
-    (fun _fs -> Eio_unix.run_in_systhread ~label f)
+let run_blocking_private_file_transaction ~label ~path:_ f =
+  match execution_context () with
+  | Non_eio -> f ()
+  | Eio_fiber -> Eio_unix.run_in_systhread ~label f
 ;;
 
 module Private_jsonl_slice = struct
@@ -1925,63 +1934,69 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_result
     match expected_end_offset with
     | Some offset when offset < 0 -> Error (Negative_expected_end_offset offset)
     | _ ->
-      test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
-      let dir = Filename.dirname path in
-      mkdir_p_memoized dir;
-      let path_mu = get_append_path_mutex path in
       run_blocking_private_file_transaction
         ~label:"fs-compat-durable-append"
         ~path
         (fun () ->
-      Stdlib.Mutex.protect path_mu (fun () ->
-        let fd =
-          Unix.openfile path
-            [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
-            0o600
-        in
-        Fun.protect
-          ~finally:(fun () -> Unix.close fd)
-          (fun () ->
-             Unix.fchmod fd 0o600;
-             fsync_parent_directory dir;
-             (* See Unix.lseek: only the file-position side effect is required. *)
-             ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-             lock_whole_file fd;
-             let original_length = Unix.lseek fd 0 Unix.SEEK_END in
-             match expected_end_offset with
-             | Some expected when expected <> original_length ->
-               Error
-                 (End_offset_mismatch
-                    { expected; actual = original_length })
-             | _ ->
-               let tail_is_complete =
-                 if original_length = 0
-                 then true
-                 else (
-                   (* See Unix.lseek: only the file-position side effect is required. *)
-                   ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
-                   let byte = Bytes.create 1 in
-                   let rec read_tail () =
-                     match Unix.read fd byte 0 1 with
-                     | 1 -> Char.equal (Bytes.get byte 0) '\n'
-                     | 0 -> false
-                     | _ -> false
-                     | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
-                   in
-                   read_tail ())
-               in
-               if not tail_is_complete
-               then Error Incomplete_jsonl_tail
-               else (
-                 (* See Unix.lseek: only the file-position side effect is required. *)
-                 ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
-                 append_fd_durable
-                   ~io:durable_append_unix_io
-                   ~fd
-                   ~original_length
-                   suffix
-                 |> Result.map_error (fun error -> Durable_jsonl_append_failed error)
-                 |> Result.map (fun () -> original_length + String.length suffix)))))
+           test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
+           let dir = Filename.dirname path in
+           Mkdir_memo.mkdir_p_memoized
+             ~mkdir_p:(fun dir ->
+               test_exec_home_guard ~op:"mkdir_p" dir;
+               mkdir_p_unix dir)
+             dir;
+           let path_mu = get_append_path_mutex path in
+           Stdlib.Mutex.protect path_mu (fun () ->
+             let fd =
+               Unix.openfile path
+                 [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+                 0o600
+             in
+             Fun.protect
+               ~finally:(fun () -> Unix.close fd)
+               (fun () ->
+                  Unix.fchmod fd 0o600;
+                  fsync_parent_directory dir;
+                  (* See Unix.lseek: only the file-position side effect is required. *)
+                  ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+                  lock_whole_file fd;
+                  let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+                  match expected_end_offset with
+                  | Some expected when expected <> original_length ->
+                    Error
+                      (End_offset_mismatch
+                         { expected; actual = original_length })
+                  | _ ->
+                    let tail_is_complete =
+                      if original_length = 0
+                      then true
+                      else (
+                        (* See Unix.lseek: only the file-position side effect is required. *)
+                        ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
+                        let byte = Bytes.create 1 in
+                        let rec read_tail () =
+                          match Unix.read fd byte 0 1 with
+                          | 1 -> Char.equal (Bytes.get byte 0) '\n'
+                          | 0 -> false
+                          | _ -> false
+                          | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
+                        in
+                        read_tail ())
+                    in
+                    if not tail_is_complete
+                    then Error Incomplete_jsonl_tail
+                    else (
+                      (* See Unix.lseek: only the file-position side effect is required. *)
+                      ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+                      append_fd_durable
+                        ~io:durable_append_unix_io
+                        ~fd
+                        ~original_length
+                        suffix
+                      |> Result.map_error (fun error ->
+                        Durable_jsonl_append_failed error)
+                      |> Result.map (fun () ->
+                        original_length + String.length suffix)))))
 ;;
 
 let append_private_jsonl_durable_locked_with_end_offset_result path suffix =

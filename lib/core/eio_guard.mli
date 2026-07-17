@@ -19,7 +19,9 @@ val is_ready : unit -> bool
 
 (** Actual execution context of the current caller. [ready] is process-wide;
     it does not imply that a raw Domain or systhread has an Eio handler. *)
-type execution_context = Eio_fiber | Non_eio
+type execution_context = Fs_compat.execution_context =
+  | Eio_fiber
+  | Non_eio
 
 val execution_context : unit -> execution_context
 val is_eio_fiber : unit -> bool

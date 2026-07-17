@@ -1,17 +1,25 @@
 ---
 rfc: "shared-admission-primitive-knob-binding-policy"
-title: "Shared typed admission primitive + knob-binding policy"
-status: Draft
+title: "Withdraw shared MASC admission and knob-binding policy"
+status: Withdrawn
 created: 2026-07-17
 updated: 2026-07-17
 author: vincent
 supersedes: []
-superseded_by: null
+superseded_by: "0000"
 related: ["0153", "0158", "0206", "0225", "0334", "masc-oas-bridge-total-llm-dispatch-boundary"]
 implementation_prs: []
 ---
 
-# RFC-shared-admission-primitive-knob-binding-policy — Shared typed admission primitive + knob-binding policy
+# RFC-shared-admission-primitive-knob-binding-policy — Withdraw shared MASC admission
+
+> **WITHDRAWN — DO NOT IMPLEMENT.** The proposed global cardinality-N
+> `Admission.Make`, `Skip_if_full`, `Wait_fifo`, and knob-name lint would
+> recreate MASC-side admission authority across independent Keeper lanes.
+> Explicit provider/account concurrency belongs to OAS endpoint admission;
+> MASC observes it and keeps each Keeper owner runnable. A blocked activity
+> may park, but it may not deny, drop, pause, or fleet-serialize other work.
+> Historical analysis below is retained only until the stacked tombstone PR.
 
 ## 0. Summary
 

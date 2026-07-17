@@ -10,13 +10,23 @@ let checkpoint (checkpoint : Keeper_checkpoint_ref.t) =
     ]
 ;;
 
-let evidence evidence =
+let evidence (evidence : Keeper_compaction_evidence.t) =
   `Assoc
     [ ( "selected_runtime_id"
       , match evidence.Keeper_compaction_evidence.selected_runtime_id with
         | Some value -> `String value
         | None -> `Null )
     ; "counts", Keeper_compaction_evidence.to_json evidence
+    ]
+;;
+
+let preserved_evidence
+      (evidence : Keeper_compaction_evidence.preserved)
+  =
+  `Assoc
+    [ ( "selected_runtime_id"
+      , `String evidence.Keeper_compaction_evidence.selected_runtime_id )
+    ; "counts", Keeper_compaction_evidence.preserved_to_json evidence
     ]
 ;;
 
@@ -103,6 +113,14 @@ let to_json event =
       event
       "compacted"
       (candidate ~checkpoint_field:"committed_checkpoint" value)
+  | No_compaction value ->
+    envelope
+      event
+      "no_compaction"
+      [ "attempt_id", `String (Operation.Attempt_id.to_string value.attempt_id)
+      ; "source_checkpoint", checkpoint value.source_checkpoint
+      ; "evidence", preserved_evidence value.evidence
+      ]
   | Reinjected (adopted_checkpoint, adopting_turn) ->
     envelope
       event

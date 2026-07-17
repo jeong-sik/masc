@@ -118,7 +118,11 @@ let select ~mode (replay : Store.replay) =
       let snapshot = entry.Store.snapshot in
       let operation = operation_context entry in
       (match snapshot.phase with
-       | Reducer.Adopted | Reducer.Failed | Reducer.Superseded -> first rest
+       | Reducer.No_compaction_decided
+       | Reducer.Adopted
+       | Reducer.Failed
+       | Reducer.Superseded ->
+         first rest
        | Reducer.Request_pending -> Ok (Selected (Start_attempt operation))
        | Reducer.Attempt_in_progress ->
          let* attempt_id = require snapshot Attempt_id snapshot.attempt_id in

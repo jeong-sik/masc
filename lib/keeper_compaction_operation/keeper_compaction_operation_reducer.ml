@@ -6,6 +6,7 @@ type phase =
   | Candidate_pending_commit
   | Reconciliation_pending
   | Commit_complete
+  | No_compaction_decided
   | Adopted
   | Failed
   | Superseded
@@ -16,6 +17,7 @@ type progress =
   | Prepared of Operation.candidate
   | Reconciling of Operation.candidate * Operation.reconciliation_reason
   | Committed of Operation.candidate
+  | Preserved of Operation.no_compaction
   | Adopted_state of
       Operation.candidate * Keeper_checkpoint_ref.t * Ids.Turn_ref.t
   | Failed_state of Operation.Attempt_id.t * Operation.attempt_failure
@@ -45,6 +47,7 @@ type snapshot =
   ; attempt_id : Operation.Attempt_id.t option
   ; candidate_checkpoint : Keeper_checkpoint_ref.t option
   ; evidence : Keeper_compaction_evidence.t option
+  ; preserved_evidence : Keeper_compaction_evidence.preserved option
   ; reconciliation_reason : Operation.reconciliation_reason option
   ; committed_checkpoint : Keeper_checkpoint_ref.t option
   ; adopted_checkpoint : Keeper_checkpoint_ref.t option
@@ -71,30 +74,35 @@ let phase state =
   | Prepared _ -> Candidate_pending_commit
   | Reconciling _ -> Reconciliation_pending
   | Committed _ -> Commit_complete
+  | Preserved _ -> No_compaction_decided
   | Adopted_state _ -> Adopted
   | Failed_state _ -> Failed
   | Superseded_state _ -> Superseded
 ;;
 
 let projection = function
-  | Pending -> None, None, None, None, None, None, None, None, None
+  | Pending -> None, None, None, None, None, None, None, None, None, None
   | Running attempt ->
-    Some attempt, None, None, None, None, None, None, None, None
+    Some attempt, None, None, None, None, None, None, None, None, None
   | Prepared value ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    None, None, None, None, None, None
+    None, None, None, None, None, None, None
   | Reconciling (value, reason) ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    Some reason, None, None, None, None, None
+    Some reason, None, None, None, None, None, None
   | Committed value ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
-    None, Some value.candidate_checkpoint, None, None, None, None
+    None, Some value.candidate_checkpoint, None, None, None, None, None
+  | Preserved value ->
+    Some value.attempt_id, None, None, None, None, None, None, None, None,
+    Some value.evidence
   | Adopted_state (value, checkpoint, turn) ->
     Some value.attempt_id, Some value.candidate_checkpoint, Some value.evidence,
     None, Some value.candidate_checkpoint, Some checkpoint, Some turn, None,
-    None
+    None, None
   | Failed_state (attempt_id, failure) ->
-    Some attempt_id, None, None, None, None, None, None, Some failure, None
+    Some attempt_id, None, None, None, None, None, None, Some failure, None,
+    None
   | Superseded_state superseded ->
     let candidate_checkpoint, evidence =
       match superseded.candidate with
@@ -105,13 +113,14 @@ let projection = function
       if superseded.committed then candidate_checkpoint else None
     in
     Some superseded.attempt_id, candidate_checkpoint, evidence, None,
-    committed_checkpoint, None, None, None, superseded.observed_checkpoint
+    committed_checkpoint, None, None, None, superseded.observed_checkpoint,
+    None
 ;;
 
 let snapshot state =
   let attempt_id, candidate_checkpoint, evidence, reconciliation_reason,
       committed_checkpoint, adopted_checkpoint, adopting_turn, failure,
-      superseded_by_checkpoint =
+      superseded_by_checkpoint, preserved_evidence =
     projection state.progress
   in
   { operation_id = state.operation_id
@@ -124,6 +133,7 @@ let snapshot state =
   ; attempt_id
   ; candidate_checkpoint
   ; evidence
+  ; preserved_evidence
   ; reconciliation_reason
   ; committed_checkpoint
   ; adopted_checkpoint
@@ -204,6 +214,16 @@ let apply current event =
       match state.progress, view with
       | Pending, Operation.Attempt_started attempt_id ->
         Ok { state with progress = Running attempt_id }
+      | Running expected, Operation.No_compaction value ->
+        if not (Operation.Attempt_id.equal expected value.attempt_id)
+        then Error Attempt_mismatch
+        else if
+          not
+            (Keeper_checkpoint_ref.equal
+               state.request.source_checkpoint
+               value.source_checkpoint)
+        then Error Source_mismatch
+        else Ok { state with progress = Preserved value }
       | Running expected, Operation.Candidate_prepared value ->
         if not (Operation.Attempt_id.equal expected value.attempt_id)
         then Error Attempt_mismatch

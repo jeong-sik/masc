@@ -6,6 +6,7 @@ module Reducer = Keeper_compaction_operation_reducer
 let ok = function Ok value -> value | Error _ -> Alcotest.fail "fixture rejected"
 let operation_id = ok (Operation.Operation_id.of_string "123e4567-e89b-12d3-a456-426614174000")
 let attempt_id = ok (Operation.Attempt_id.of_string "123e4567-e89b-12d3-a456-426614174001")
+let other_attempt_id = ok (Operation.Attempt_id.of_string "123e4567-e89b-12d3-a456-426614174002")
 let keeper_name = ok (Keeper_id.Keeper_name.of_string "keeper-a")
 let trace_id = ok (Keeper_id.Trace_id.of_string "trace-a")
 let checkpoint bytes turn_count =
@@ -33,6 +34,15 @@ let evidence : Keeper_compaction_evidence.t =
   ; after_tool_result_count = 1
   }
 ;;
+let preserved_evidence =
+  ok
+    (Keeper_compaction_evidence.preserved
+       ~selected_runtime_id:"compact-runtime"
+       ~checkpoint_bytes:100
+       ~message_count:10
+       ~tool_use_count:2
+       ~tool_result_count:2)
+;;
 let cause = ok (Operation.Cause.of_string "operator request")
 let producer =
   let request_id = ok (Mcp_transport_protocol.request_id_of_yojson (`String "req-1")) in
@@ -50,6 +60,13 @@ let request_event () =
 ;;
 
 let attempt_event () = Operation.attempt_started ~operation_id ~attempt_id
+let no_compaction_event ?(attempt_id = attempt_id) ?(source = source) () =
+  Operation.no_compaction
+    ~operation_id
+    ~attempt_id
+    ~source_checkpoint:source
+    ~evidence:preserved_evidence
+;;
 
 let candidate_event () =
   Operation.candidate_prepared
@@ -187,6 +204,30 @@ let test_reducer_happy_path () =
     (Option.exists
        (Keeper_checkpoint_ref.equal candidate)
        snapshot.adopted_checkpoint)
+;;
+
+let test_reducer_no_compaction_terminal () =
+  let running = ok (Reducer.fold [ request_event (); attempt_event () ]) in
+  let terminal = ok (Reducer.apply (Some running) (no_compaction_event ())) in
+  let snapshot = Reducer.snapshot terminal in
+  Alcotest.(check bool)
+    "distinct terminal"
+    true
+    (snapshot.phase = Reducer.No_compaction_decided
+     && snapshot.preserved_evidence = Some preserved_evidence);
+  (match Reducer.apply (Some running) (no_compaction_event ~source:advanced ()) with
+   | Error Reducer.Source_mismatch -> ()
+   | Ok _ | Error _ -> Alcotest.fail "different exact source was accepted");
+  (match
+     Reducer.apply
+       (Some running)
+       (no_compaction_event ~attempt_id:other_attempt_id ())
+   with
+   | Error Reducer.Attempt_mismatch -> ()
+   | Ok _ | Error _ -> Alcotest.fail "different attempt was accepted");
+  match Reducer.apply (Some terminal) (candidate_event ()) with
+  | Error (Reducer.Invalid_transition (Some Reducer.No_compaction_decided)) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "terminal no-op restarted"
 ;;
 
 let test_reducer_confirmed_failure () =
@@ -440,6 +481,7 @@ let test_canonical_json_projection () =
         ~source_checkpoint:source
         ~committed_checkpoint:candidate
         ~evidence
+    ; no_compaction_event ()
     ; Operation.reinjected
         ~operation_id
         ~adopted_checkpoint:candidate
@@ -464,6 +506,7 @@ let test_canonical_json_projection () =
     ; "commit_reconciliation_required"
     ; "source_superseded"
     ; "compacted"
+    ; "no_compaction"
     ; "reinjected"
     ]
     kinds;
@@ -519,6 +562,7 @@ let test_codec_roundtrip_all_events () =
         ~source_checkpoint:source
         ~committed_checkpoint:candidate
         ~evidence
+    ; no_compaction_event ()
     ; Operation.reinjected
         ~operation_id
         ~adopted_checkpoint:candidate
@@ -612,6 +656,10 @@ let () =
             `Quick
             test_failure_and_reinjection_views
         ; Alcotest.test_case "reducer happy path" `Quick test_reducer_happy_path
+        ; Alcotest.test_case
+            "reducer no-compaction terminal"
+            `Quick
+            test_reducer_no_compaction_terminal
         ; Alcotest.test_case
             "reducer confirmed failure"
             `Quick

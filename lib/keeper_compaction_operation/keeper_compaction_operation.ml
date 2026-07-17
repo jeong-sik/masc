@@ -28,6 +28,12 @@ type candidate =
   ; evidence : Keeper_compaction_evidence.t
   }
 
+type no_compaction =
+  { attempt_id : Attempt_id.t
+  ; source_checkpoint : Keeper_checkpoint_ref.t
+  ; evidence : Keeper_compaction_evidence.preserved
+  }
+
 type supersession =
   { attempt_id : Attempt_id.t
   ; observed_checkpoint : Keeper_checkpoint_ref.t option
@@ -41,6 +47,7 @@ type event_view =
   | Commit_reconciliation_required of candidate * reconciliation_reason
   | Source_superseded of supersession
   | Compacted of candidate
+  | No_compaction of no_compaction
   | Reinjected of Keeper_checkpoint_ref.t * Ids.Turn_ref.t
 
 type event =
@@ -106,6 +113,12 @@ let compacted ~operation_id ~attempt_id ~source_checkpoint
            ~source_checkpoint
            ~candidate_checkpoint:committed_checkpoint
            ~evidence)
+  }
+;;
+
+let no_compaction ~operation_id ~attempt_id ~source_checkpoint ~evidence =
+  { operation_id
+  ; view = No_compaction { attempt_id; source_checkpoint; evidence }
   }
 ;;
 

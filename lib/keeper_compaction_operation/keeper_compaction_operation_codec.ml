@@ -163,6 +163,25 @@ let decode_source_superseded ~operation_id payload =
        ~observed_checkpoint)
 ;;
 
+let decode_no_compaction ~operation_id payload =
+  let path = "payload" in
+  let fields = [ "attempt_id"; "source_checkpoint"; "evidence" ] in
+  let* values = Support.exact_object ~path ~allowed:fields ~required:fields payload in
+  let* attempt_id = field ~path "attempt_id" Support.attempt_id values in
+  let* source_checkpoint =
+    nested ~path "source_checkpoint" Support.checkpoint values
+  in
+  let* evidence =
+    nested ~path "evidence" Support.preserved_evidence values
+  in
+  Ok
+    (Operation.no_compaction
+       ~operation_id
+       ~attempt_id
+       ~source_checkpoint
+       ~evidence)
+;;
+
 let of_json json =
   let path = "$" in
   let fields = [ "kind"; "operation_id"; "payload" ] in
@@ -201,6 +220,7 @@ let of_json json =
           ~committed_checkpoint:value.candidate_checkpoint
           ~evidence:value.evidence)
       payload
+  | "no_compaction" -> decode_no_compaction ~operation_id payload
   | "reinjected" -> decode_reinjected ~operation_id payload
   | unknown -> Error (Support.Unknown_event_kind unknown)
 ;;

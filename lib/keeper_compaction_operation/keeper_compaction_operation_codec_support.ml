@@ -34,6 +34,7 @@ type decode_error =
   | Invalid_trigger of Compaction_trigger.decode_error
   | Invalid_producer of Tool_invocation_ref.decode_error
   | Invalid_evidence of Keeper_compaction_evidence.decode_error
+  | Invalid_preserved_evidence of Keeper_compaction_evidence.preserved_error
   | Invalid_turn_ref of string
 
 let ( let* ) = Result.bind
@@ -136,6 +137,20 @@ let evidence ~path json =
   let* counts = required_field ~path "counts" values in
   Keeper_compaction_evidence.of_json ~selected_runtime_id counts
   |> Result.map_error (fun error -> Invalid_evidence error)
+;;
+
+let preserved_evidence ~path json =
+  let fields = [ "selected_runtime_id"; "counts" ] in
+  let* values = exact_object ~path ~allowed:fields ~required:fields json in
+  let* runtime_json = required_field ~path "selected_runtime_id" values in
+  let* selected_runtime_id =
+    string_field ~path "selected_runtime_id" runtime_json
+  in
+  let* counts = required_field ~path "counts" values in
+  Keeper_compaction_evidence.preserved_of_json
+    ~selected_runtime_id
+    counts
+  |> Result.map_error (fun error -> Invalid_preserved_evidence error)
 ;;
 
 let trigger ~path json =

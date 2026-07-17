@@ -32,6 +32,7 @@ type decode_error =
   | Invalid_trigger of Compaction_trigger.decode_error
   | Invalid_producer of Tool_invocation_ref.decode_error
   | Invalid_evidence of Keeper_compaction_evidence.decode_error
+  | Invalid_preserved_evidence of Keeper_compaction_evidence.preserved_error
   | Invalid_turn_ref of string
 
 val exact_object
@@ -86,6 +87,11 @@ val evidence
   :  path:string
   -> Yojson.Safe.t
   -> (Keeper_compaction_evidence.t, decode_error) result
+
+val preserved_evidence
+  :  path:string
+  -> Yojson.Safe.t
+  -> (Keeper_compaction_evidence.preserved, decode_error) result
 
 val trigger
   :  path:string

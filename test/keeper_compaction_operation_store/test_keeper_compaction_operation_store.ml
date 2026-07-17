@@ -1,6 +1,7 @@
 module Operation = Keeper_compaction_operation
 module Projection = Keeper_compaction_operation_projection
 module Record = Keeper_operation_record
+module Selector = Keeper_compaction_operation_action_selector
 module Store = Keeper_compaction_operation_store
 let ok = function Ok value -> value | Error _ -> Alcotest.fail "fixture failed"
 let keeper_name = ok (Keeper_id.Keeper_name.of_string "store-keeper")
@@ -18,6 +19,15 @@ let id value = ok (Operation.Operation_id.of_string value)
 let op1 = id "00000000-0000-4000-8000-000000000001"
 let op2 = id "00000000-0000-4000-8000-000000000002"
 let attempt = ok (Operation.Attempt_id.of_string "00000000-0000-4000-8000-000000000011")
+let preserved =
+  ok
+    (Keeper_compaction_evidence.preserved
+       ~selected_runtime_id:"compact-runtime"
+       ~checkpoint_bytes:6
+       ~message_count:1
+       ~tool_use_count:0
+       ~tool_result_count:0)
+;;
 let request ?producer operation_id =
   Operation.requested ~operation_id ~keeper_name ~source_checkpoint:source
     ~trigger:Compaction_trigger.Manual ~cause ~producer_invocation:producer
@@ -116,6 +126,37 @@ let test_rejections_do_not_write () =
    | _ -> Alcotest.fail "cross-Keeper request was not rejected");
   Alcotest.(check string) "rejections wrote no bytes" before (Fs_compat.load_file path)
 ;;
+let test_no_compaction_decision_is_durable () =
+  with_base @@ fun base ->
+  ignore (append base 1.0 (request op1));
+  ignore (append base 2.0 (Operation.attempt_started ~operation_id:op1 ~attempt_id:attempt));
+  let path = Store.journal_path ~base_path:base ~keeper_name in
+  let before = Fs_compat.load_file path in
+  let decision source_checkpoint =
+    Operation.no_compaction
+      ~operation_id:op1
+      ~attempt_id:attempt
+      ~source_checkpoint
+      ~evidence:preserved
+  in
+  (match Store.append ~base_path:base ~keeper_name ~recorded_at:3.0 (decision next_source) with
+   | Error
+       (Store.Event_rejected
+          (Store.Transition_rejected Keeper_compaction_operation_reducer.Source_mismatch))
+     -> ()
+   | _ -> Alcotest.fail "different source decision was accepted");
+  Alcotest.(check string) "rejected decision wrote no bytes" before (Fs_compat.load_file path);
+  ignore (append base 4.0 (decision source));
+  match Store.replay ~base_path:base ~keeper_name with
+  | Ok ({ operations = [ entry ]; _ } as replay)
+    when entry.snapshot.phase
+         = Keeper_compaction_operation_reducer.No_compaction_decided
+         && entry.snapshot.preserved_evidence = Some preserved ->
+    (match Selector.select ~mode:Selector.Startup_recovery replay with
+     | Ok Selector.Idle -> ()
+     | Ok _ | Error _ -> Alcotest.fail "durable decision restarted LLM work")
+  | Ok _ | Error _ -> Alcotest.fail "durable decision did not replay exactly"
+;;
 let test_malformed_history_fails_loud () =
   with_base @@ fun base ->
   let path = Store.journal_path ~base_path:base ~keeper_name in
@@ -138,6 +179,10 @@ let () =
           test_incremental_projection_matches_replay
       ; Alcotest.test_case "append replay slice" `Quick test_append_replay_and_slice
       ; Alcotest.test_case "rejections no write" `Quick test_rejections_do_not_write
+      ; Alcotest.test_case
+          "no-compaction decision is durable"
+          `Quick
+          test_no_compaction_decision_is_durable
       ; Alcotest.test_case "malformed history" `Quick test_malformed_history_fails_loud
       ] ]
 ;;

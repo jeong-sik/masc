@@ -8,6 +8,7 @@ type phase =
   | Candidate_pending_commit
   | Reconciliation_pending
   | Commit_complete
+  | No_compaction_decided  (** Terminal decision; Lane release is queue-owned. *)
   | Adopted
   | Failed  (** Terminal; another objective requires a new operation. *)
   | Superseded
@@ -24,6 +25,7 @@ type snapshot =
   ; attempt_id : Operation.Attempt_id.t option
   ; candidate_checkpoint : Keeper_checkpoint_ref.t option
   ; evidence : Keeper_compaction_evidence.t option
+  ; preserved_evidence : Keeper_compaction_evidence.preserved option
   ; reconciliation_reason : Operation.reconciliation_reason option
   ; committed_checkpoint : Keeper_checkpoint_ref.t option
   ; adopted_checkpoint : Keeper_checkpoint_ref.t option

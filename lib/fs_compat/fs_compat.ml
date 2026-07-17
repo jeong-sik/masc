@@ -1868,6 +1868,26 @@ let update_private_file_durable_locked_result path decide =
               |> Result.map (fun () -> result))))
 ;;
 
+let rewrite_private_file_durable_locked_result path decide =
+  test_exec_home_guard ~op:"rewrite_private_file_durable_locked" path;
+  let dir = Filename.dirname path in
+  mkdir_p_memoized dir;
+  let path_mu = get_append_path_mutex path in
+  run_blocking_private_file_transaction
+    ~label:"fs-compat-durable-rewrite"
+    ~path
+    (fun () ->
+    Stdlib.Mutex.protect path_mu (fun () ->
+      let existing = Option.value (load_file_opt path) ~default:"" in
+      let content, result = decide existing in
+      match content with
+      | None -> Ok result
+      | Some content ->
+        (match save_file_atomic path content with
+         | Ok () -> Ok result
+         | Error message -> Error message)))
+;;
+
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
   | Invalid_jsonl_suffix

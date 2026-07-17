@@ -64,6 +64,86 @@ let test_get_messages_raw_large_history_keeps_newest_window () =
       [ "Message 20"; "Message 19"; "Message 18" ] contents
   )
 
+let test_repeated_mention_delivers_each_canonical_event () =
+  with_test_env (fun config ->
+    let previous_activity = Atomic.get Workspace_hooks.activity_emit_fn in
+    let previous_wake = !Workspace_broadcast.on_broadcast_mention in
+    Eio.Switch.run @@ fun sw ->
+    Eio.Switch.on_release sw (fun () ->
+      Atomic.set Workspace_hooks.activity_emit_fn previous_activity;
+      Workspace_broadcast.on_broadcast_mention := previous_wake);
+    let publications = ref [] in
+    let activities = ref [] in
+    let wakes = ref [] in
+    let channel = Workspace.broadcast_channel config in
+    (match
+       Workspace.backend_subscribe config ~channel
+         ~callback:(fun message -> publications := message :: !publications)
+     with
+     | Ok () -> ()
+     | Error error ->
+         Alcotest.failf "subscribe failed: %s" (Backend_types.show_error error));
+    Atomic.set Workspace_hooks.activity_emit_fn
+      (fun _config ~actor:_ ?subject ~kind ~payload:_ ~tags:_ () ->
+        let subject =
+          Option.map
+            (fun (entity : Workspace_hooks.activity_entity) -> entity.id)
+            subject
+        in
+        activities := (kind, subject) :: !activities);
+    Workspace_broadcast.on_broadcast_mention :=
+      (fun mention -> wakes := mention :: !wakes);
+    let content = "@gemini review the canonical event" in
+    ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
+    ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
+    let persisted =
+      Workspace.get_all_messages_raw config ~since_seq:0
+      |> List.filter (fun (message : Masc_domain.message) ->
+        String.equal message.msg_type "broadcast"
+        && String.equal message.content content)
+    in
+    Alcotest.(check int) "durable messages" 2 (List.length persisted);
+    (match persisted with
+     | first :: second :: _ ->
+         Alcotest.(check bool) "distinct durable sequence" true
+           (first.seq <> second.seq)
+     | _ -> Alcotest.fail "expected two durable messages");
+    let durable_sequences =
+      persisted
+      |> List.map (fun (message : Masc_domain.message) -> message.seq)
+      |> List.sort Int.compare
+    in
+    let published_sequences =
+      !publications
+      |> List.map (fun envelope ->
+        match
+          Yojson.Safe.from_string envelope
+          |> Masc_domain.message_of_yojson
+        with
+        | Ok (message : Masc_domain.message) -> message.seq
+        | Error error ->
+          Alcotest.failf "published message failed typed decode: %s" error)
+      |> List.sort Int.compare
+    in
+    Alcotest.(check (list int))
+      "each publication carries its durable sequence"
+      durable_sequences
+      published_sequences;
+    Alcotest.(check (list (pair string (option string))))
+      "each broadcast emits exact activity kinds and mention subject"
+      [ ( Event_kind.Message.to_string Event_kind.Message.Broadcast
+        , None )
+      ; ( Event_kind.Message.to_string Event_kind.Message.Mentioned
+        , Some "gemini" )
+      ; ( Event_kind.Message.to_string Event_kind.Message.Broadcast
+        , None )
+      ; ( Event_kind.Message.to_string Event_kind.Message.Mentioned
+        , Some "gemini" )
+      ]
+      (List.rev !activities);
+    Alcotest.(check (list (option string))) "mention wake hooks"
+      [ Some "gemini"; Some "gemini" ] (List.rev !wakes))
+
 let () =
   Alcotest.run "Workspace raw message regression" [
     ("messages_raw", [
@@ -73,5 +153,7 @@ let () =
         test_get_messages_raw_since_seq_stops_early;
       Alcotest.test_case "large history keeps newest window" `Quick
         test_get_messages_raw_large_history_keeps_newest_window;
+      Alcotest.test_case "identical mentions each deliver" `Quick
+        test_repeated_mention_delivers_each_canonical_event;
     ]);
   ]

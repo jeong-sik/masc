@@ -31,13 +31,13 @@ let post_id value = board_id Masc.Board.Post_id.of_string "post" value
 let comment_id value = board_id Masc.Board.Comment_id.of_string "comment" value
 let agent_id value = board_id Masc.Board.Agent_id.of_string "agent" value
 
-let meta keeper_name =
+let meta ?(instructions = "Use the lane context and complete the task") keeper_name =
   let json =
     `Assoc
       [ "name", `String keeper_name
       ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
       ; "trace_id", `String ("trace-" ^ keeper_name)
-      ; "instructions", `String "Use the lane context and complete the task"
+      ; "instructions", `String instructions
       ; "sandbox_profile", `String "local"
       ; "network_mode", `String "inherit"
       ; "mention_targets", `List [ `String keeper_name ]
@@ -97,10 +97,15 @@ let comments () : Masc.Board.comment list =
   ]
 ;;
 
-let candidate ?(keeper_name = "sangsu") ?(signal = signal ()) () =
+let candidate
+      ?(keeper_name = "sangsu")
+      ?(instructions = "Use the lane context and complete the task")
+      ?(signal = signal ())
+      ()
+  =
   match
     A.of_board_evidence
-      ~meta:(meta keeper_name)
+      ~meta:(meta ~instructions keeper_name)
       ~recorded_at:100.0
       ~signal
       ~post:(post ~id:signal.post_id ())
@@ -136,7 +141,7 @@ let test_roundtrip_preserves_full_evidence_and_pending_state () =
   let candidate = candidate () in
   (match candidate.status with
    | A.Pending { last_failure = None } -> ()
-   | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ | A.Expired _ ->
+   | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
      Alcotest.fail "new candidate was not clean Pending");
   let request_fields =
     match candidate.judgment_request with
@@ -204,7 +209,7 @@ let test_worker_record_wakes_then_owner_lane_drains () =
             } ->
           (match persisted.status with
            | A.Pending { last_failure = None } -> ()
-           | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ | A.Expired _ ->
+           | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
              Alcotest.fail "worker-side record invoked or mutated the judgment")
         | Ok _ -> Alcotest.fail "worker-side record returned the wrong typed acceptance"
         | Error detail -> Alcotest.failf "worker-side record failed: %s" detail);
@@ -218,7 +223,6 @@ let test_worker_record_wakes_then_owner_lane_drains () =
            A.For_testing.drain_pending_with_judge
              ~base_path
              ~keeper_name:pending.keeper_name
-             ~now:100.0
              ~judge:(fun _ -> Ok (judgment J.Relevant))
          with
          | Ok report -> report
@@ -270,7 +274,7 @@ let test_retryable_judge_failure_remains_pending () =
       "typed failure preserved"
       "provider_unavailable"
       (A.retryable_failure_kind_to_string observed.kind)
-  | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ | A.Expired _ ->
+  | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
     Alcotest.fail "retryable judge failure consumed the candidate"
 ;;
 
@@ -289,7 +293,7 @@ let test_not_relevant_transitions_directly_to_consumed () =
   in
   (match current.status with
    | A.Consumed { delivery = A.Not_relevant; _ } -> ()
-   | A.Consumed _ | A.Pending _ | A.Judged _ | A.Expired _ ->
+   | A.Consumed _ | A.Pending _ | A.Judged _ ->
      Alcotest.fail "not-relevant verdict did not reach Consumed");
   let queue =
     Keeper_event_queue_persistence.load
@@ -317,7 +321,7 @@ let test_relevant_consumes_only_after_exact_durable_enqueue () =
   in
   (match current.status with
    | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ } -> ()
-   | A.Consumed _ | A.Pending _ | A.Judged _ | A.Expired _ ->
+   | A.Consumed _ | A.Pending _ | A.Judged _ ->
      Alcotest.fail "relevant verdict consumed before durable delivery");
   let queue =
     Keeper_event_queue_persistence.load
@@ -368,7 +372,7 @@ let test_delivery_storage_error_retains_judged_state () =
   | A.Judged
       { last_failure = Some { kind = A.Durable_delivery_unavailable; _ }; _ } ->
     ()
-  | A.Judged _ | A.Pending _ | A.Consumed _ | A.Expired _ ->
+  | A.Judged _ | A.Pending _ | A.Consumed _ ->
     Alcotest.fail "durable delivery storage error did not retain Judged"
 ;;
 
@@ -470,7 +474,7 @@ let test_update_ledger_compacts_to_distinct () =
          "latest failure wins after compaction"
          "provider unavailable 5"
          observed.detail
-     | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ | A.Expired _ ->
+     | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
        Alcotest.fail "compaction dropped the latest pending failure")
   | Ok candidates ->
     Alcotest.failf "expected one compacted candidate, got %d" (List.length candidates)
@@ -615,55 +619,58 @@ let all_not_relevant candidates =
        candidates)
 ;;
 
-let test_drain_expires_stale_pending_without_model_call () =
-  with_temp_base "board-attention-ttl" @@ fun base_path ->
+let test_old_pending_is_judged_without_wall_clock_expiry () =
+  with_temp_base "board-attention-no-wall-clock-expiry" @@ fun base_path ->
   let keeper_name = "sangsu" in
-  let _ = record_or_fail ~base_path (candidate ~keeper_name ()) in
+  let old = { (candidate ~keeper_name ()) with recorded_at = -1_000_000.0 } in
+  let _ = record_or_fail ~base_path old in
   let report =
     match
       A.For_testing.drain_pending_with_judge_batch
         ~base_path
         ~keeper_name
-        ~now:(100.0 +. A.candidate_ttl_sec +. 1.0)
-        ~judge_batch:(fun _ ->
-          Alcotest.fail "stale candidate reached the model judge")
-    with
-    | Ok report -> report
-    | Error detail -> Alcotest.failf "ttl drain failed: %s" detail
-  in
-  Alcotest.(check int) "no model attempt for stale rows" 0 report.attempted;
-  Alcotest.(check int) "stale row counted as consumed" 1 report.consumed;
-  Alcotest.(check int) "nothing remains" 0 report.remaining;
-  match (only_loaded ~base_path ~keeper_name).status with
-  | A.Expired _ -> ()
-  | A.Pending _ | A.Judged _ | A.Consumed _ ->
-    Alcotest.fail "stale candidate was not expired"
-;;
-
-let test_drain_fresh_pending_is_not_expired () =
-  with_temp_base "board-attention-fresh" @@ fun base_path ->
-  let keeper_name = "sangsu" in
-  let _ = record_or_fail ~base_path (candidate ~keeper_name ()) in
-  let report =
-    match
-      A.For_testing.drain_pending_with_judge_batch
-        ~base_path
-        ~keeper_name
-        ~now:100.0
         ~judge_batch:all_not_relevant
     with
     | Ok report -> report
-    | Error detail -> Alcotest.failf "fresh drain failed: %s" detail
+    | Error detail -> Alcotest.failf "old pending drain failed: %s" detail
   in
-  Alcotest.(check int) "fresh row attempted" 1 report.attempted;
-  Alcotest.(check int) "fresh row consumed" 1 report.consumed;
+  Alcotest.(check int) "old row reaches judge" 1 report.attempted;
+  Alcotest.(check int) "old row consumed by verdict" 1 report.consumed;
+  Alcotest.(check int) "nothing remains" 0 report.remaining;
   match (only_loaded ~base_path ~keeper_name).status with
   | A.Consumed { delivery = A.Not_relevant; _ } -> ()
-  | A.Consumed _ | A.Pending _ | A.Judged _ | A.Expired _ ->
-    Alcotest.fail "fresh candidate did not consume as not_relevant"
+  | A.Consumed _ | A.Pending _ | A.Judged _ ->
+    Alcotest.fail "old pending candidate was silently discarded"
 ;;
 
-let test_batch_verdict_missing_candidate_stays_pending_without_failure () =
+let test_legacy_expired_row_is_recovered_to_pending () =
+  let legacy_json =
+    match A.candidate_to_json (candidate ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("status", `Assoc [ "kind", `String "expired"; "expired_at", `Float 123.5 ])
+         :: List.remove_assoc "status" fields)
+    | _ -> Alcotest.fail "candidate fixture did not encode as an object"
+  in
+  match A.candidate_of_json legacy_json with
+  | Ok
+      { status =
+          A.Pending
+            { last_failure =
+                Some
+                  { kind = A.Lifecycle_policy_migrated
+                  ; failed_at
+                  ; _
+                  }
+            }
+      ; _
+      } ->
+    Alcotest.(check (float 0.001)) "legacy expiry timestamp retained" 123.5 failed_at
+  | Ok _ -> Alcotest.fail "legacy Expired row was not recovered to Pending"
+  | Error detail -> Alcotest.failf "legacy Expired migration failed: %s" detail
+;;
+
+let test_batch_verdict_missing_candidate_fails_whole_batch_with_evidence () =
   with_temp_base "board-attention-partial" @@ fun base_path ->
   let keeper_name = "sangsu" in
   let first = record_or_fail ~base_path (candidate ~keeper_name ()) in
@@ -677,7 +684,6 @@ let test_batch_verdict_missing_candidate_stays_pending_without_failure () =
       A.For_testing.drain_pending_with_judge_batch
         ~base_path
         ~keeper_name
-        ~now:100.0
         ~judge_batch:(fun _ ->
           Ok
             (A.Candidate_map.add
@@ -689,18 +695,29 @@ let test_batch_verdict_missing_candidate_stays_pending_without_failure () =
     | Error detail -> Alcotest.failf "partial drain failed: %s" detail
   in
   Alcotest.(check int) "both attempted" 2 report.attempted;
-  Alcotest.(check int) "one consumed" 1 report.consumed;
-  Alcotest.(check int) "one remains" 1 report.remaining;
+  Alcotest.(check int) "partial response consumes nothing" 0 report.consumed;
+  Alcotest.(check int) "whole batch remains" 2 report.remaining;
   match A.load_candidates ~base_path ~keeper_name with
   | Ok candidates ->
-    (match
-       List.find_opt
-         (fun (c : A.candidate) -> String.equal c.candidate_id second.candidate_id)
-         candidates
-     with
-     | Some { status = A.Pending { last_failure = None }; _ } -> ()
-     | Some _ -> Alcotest.fail "unjudged candidate gained failure evidence"
-     | None -> Alcotest.fail "unjudged candidate vanished from the ledger")
+    List.iter
+      (fun target ->
+         match
+           List.find_opt
+             (fun (c : A.candidate) -> String.equal c.candidate_id target.candidate_id)
+             candidates
+         with
+         | Some
+             { status =
+                 A.Pending
+                   { last_failure =
+                       Some { kind = A.Response_contract_unavailable; _ }
+                   }
+             ; _
+             } ->
+           ()
+         | Some _ -> Alcotest.fail "partial response lacked contract-failure evidence"
+         | None -> Alcotest.fail "partial-response candidate vanished")
+      [ first; second ]
   | Error detail -> Alcotest.failf "candidate load failed: %s" detail
 ;;
 
@@ -724,7 +741,6 @@ let test_batch_failure_aborts_round_and_records_evidence () =
       A.For_testing.drain_pending_with_judge_batch
         ~base_path
         ~keeper_name
-        ~now:100.0
         ~judge_batch:(fun _ -> Error failure)
     with
     | Ok report -> report
@@ -766,16 +782,90 @@ let test_batch_failure_aborts_round_and_records_evidence () =
      | None -> Alcotest.fail "deferred candidate vanished")
 ;;
 
-let test_expired_status_codec_roundtrip () =
-  let fixture = candidate () in
-  let expired = { fixture with status = A.Expired { expired_at = 123.5 } } in
-  match A.candidate_of_json (A.candidate_to_json expired) with
-  | Ok decoded ->
-    (match decoded.status with
-     | A.Expired { expired_at } -> Alcotest.(check (float 0.001)) "expired_at" 123.5 expired_at
-     | A.Pending _ | A.Judged _ | A.Consumed _ ->
-       Alcotest.fail "expired status did not roundtrip")
-  | Error detail -> Alcotest.failf "expired codec failed: %s" detail
+let test_successful_drain_runs_one_provider_batch_per_admission () =
+  with_temp_base "board-attention-one-quantum" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  List.iter
+    (fun index ->
+       let post_id = Printf.sprintf "post-%d" index in
+       ignore
+         (record_or_fail
+            ~base_path
+            (candidate ~keeper_name ~signal:(signal ~post_id ()) ()))
+         : A.candidate)
+    (List.init (A.batch_max_candidates + 1) (fun index -> index + 1));
+  let calls = ref 0 in
+  let report =
+    match
+      A.For_testing.drain_pending_with_judge_batch
+        ~base_path
+        ~keeper_name
+        ~judge_batch:(fun candidates ->
+          incr calls;
+          all_not_relevant candidates)
+    with
+    | Ok report -> report
+    | Error detail -> Alcotest.failf "one-quantum drain failed: %s" detail
+  in
+  Alcotest.(check int) "one provider call" 1 !calls;
+  Alcotest.(check int) "one batch attempted" A.batch_max_candidates report.attempted;
+  Alcotest.(check int) "one batch consumed" A.batch_max_candidates report.consumed;
+  Alcotest.(check int) "next admission owns remainder" 1 report.remaining
+;;
+
+let test_batch_never_mixes_persisted_keeper_contexts () =
+  with_temp_base "board-attention-context-cohort" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let first =
+    record_or_fail
+      ~base_path
+      (candidate
+         ~keeper_name
+         ~instructions:"context-a"
+         ~signal:(signal ~post_id:"post-a1" ())
+         ())
+  in
+  let second =
+    record_or_fail
+      ~base_path
+      (candidate
+         ~keeper_name
+         ~instructions:"context-b"
+         ~signal:(signal ~post_id:"post-b" ())
+         ())
+  in
+  let third =
+    record_or_fail
+      ~base_path
+      (candidate
+         ~keeper_name
+         ~instructions:"context-a"
+         ~signal:(signal ~post_id:"post-a2" ())
+         ())
+  in
+  let observed_ids = ref [] in
+  let report =
+    match
+      A.For_testing.drain_pending_with_judge_batch
+        ~base_path
+        ~keeper_name
+        ~judge_batch:(fun candidates ->
+          observed_ids := List.map (fun (c : A.candidate) -> c.candidate_id) candidates;
+          all_not_relevant candidates)
+    with
+    | Ok report -> report
+    | Error detail -> Alcotest.failf "context-cohort drain failed: %s" detail
+  in
+  Alcotest.(check int) "same-context cohort attempted" 2 report.attempted;
+  Alcotest.(check int) "same-context cohort consumed" 2 report.consumed;
+  Alcotest.(check int) "different context deferred" 1 report.remaining;
+  List.iter
+    (fun expected ->
+       if not (List.exists (String.equal expected.candidate_id) !observed_ids)
+       then Alcotest.failf "same-context candidate %s was omitted" expected.candidate_id)
+    [ first; third ];
+  if List.exists (String.equal second.candidate_id) !observed_ids
+  then Alcotest.fail "different Keeper contexts were mixed in one provider call"
 ;;
 
 let test_batch_verdict_codec_roundtrip () =
@@ -887,25 +977,29 @@ let () =
         ] )
     ; ( "batch drain"
       , [ Alcotest.test_case
-            "stale pending expires without model call"
+            "old pending is never expired by wall clock"
             `Quick
-            test_drain_expires_stale_pending_without_model_call
+            test_old_pending_is_judged_without_wall_clock_expiry
         ; Alcotest.test_case
-            "fresh pending is not expired"
+            "legacy expired row is recovered to Pending"
             `Quick
-            test_drain_fresh_pending_is_not_expired
+            test_legacy_expired_row_is_recovered_to_pending
         ; Alcotest.test_case
-            "missing verdict keeps candidate pending"
+            "missing verdict fails the whole batch with evidence"
             `Quick
-            test_batch_verdict_missing_candidate_stays_pending_without_failure
+            test_batch_verdict_missing_candidate_fails_whole_batch_with_evidence
         ; Alcotest.test_case
             "batch failure aborts round with evidence"
             `Quick
             test_batch_failure_aborts_round_and_records_evidence
         ; Alcotest.test_case
-            "expired status codec roundtrip"
+            "successful drain runs one provider batch per admission"
             `Quick
-            test_expired_status_codec_roundtrip
+            test_successful_drain_runs_one_provider_batch_per_admission
+        ; Alcotest.test_case
+            "batch never mixes persisted Keeper contexts"
+            `Quick
+            test_batch_never_mixes_persisted_keeper_contexts
         ; Alcotest.test_case
             "batch verdict codec roundtrip"
             `Quick

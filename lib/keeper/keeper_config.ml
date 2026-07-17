@@ -256,12 +256,89 @@ let hitl_summary_max_concurrency_rp =
 let hitl_summary_max_concurrency () : int =
   Runtime_params.get hitl_summary_max_concurrency_rp
 
+(* ── Board attention worker policy (bounded judge/delivery dispatch) ── *)
+(** Float sibling of [two_days_seconds_int] for the [_rp_float] bounds below;
+    [_rp_float] takes float min/max so the int constant cannot be reused
+    directly. *)
+let two_days_seconds_float = float_of_int two_days_seconds_int
+
+(** Maximum concurrent Board-attention judge calls. The prior design forked
+    one fiber per Pending candidate with no bound at all: a durable-backlog
+    recovery of N candidates fired N simultaneous judge calls at the shared
+    ollama_cloud judge endpoint. 2 mirrors [hitl_summary_max_concurrency]'s
+    conservative default for the same shared endpoint class; the endpoint's
+    observed concurrent-request ceiling is well below what a full backlog
+    replay would otherwise burst (issue #24886, root #21960). *)
+let board_attention_max_concurrency_rp =
+  _rp_int ~key:"keeper.board_attention.max_concurrency"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_ATTENTION_MAX_CONCURRENCY"
+                          ~default:2 ~min_v:1 ~max_v:32)
+    ~min_v:1 ~max_v:32
+    ~description:"Maximum concurrent Board attention judge/delivery workers" ()
+let board_attention_max_concurrency () : int =
+  Runtime_params.get board_attention_max_concurrency_rp
+
+(** Base delay before the first retry of a failed judge or delivery attempt.
+    Doubles per attempt up to [board_attention_retry_max_sec]. *)
+let board_attention_retry_base_sec_rp =
+  _rp_float ~key:"keeper.board_attention.retry_base_sec"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_BOARD_ATTENTION_RETRY_BASE_SEC"
+                          ~default:30.0 ~min_v:1.0 ~max_v:two_days_seconds_float)
+    ~min_v:1.0 ~max_v:two_days_seconds_float
+    ~description:"Board attention retry base delay (seconds)" ()
+let board_attention_retry_base_sec () : float =
+  Runtime_params.get board_attention_retry_base_sec_rp
+
+(** Cap on the capped-exponential backoff between retries. *)
+let board_attention_retry_max_sec_rp =
+  _rp_float ~key:"keeper.board_attention.retry_max_sec"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_BOARD_ATTENTION_RETRY_MAX_SEC"
+                          ~default:1800.0 ~min_v:1.0 ~max_v:two_days_seconds_float)
+    ~min_v:1.0 ~max_v:two_days_seconds_float
+    ~description:"Board attention retry delay cap (seconds)" ()
+let board_attention_retry_max_sec () : float =
+  Runtime_params.get board_attention_retry_max_sec_rp
+
+(** Attempts (judge or delivery failures) before a candidate terminalizes via
+    [Retry_budget_exhausted]. With the base/cap above, failures 1-7 defer at
+    30,60,120,240,480,960,1800s (exponent capped at the 7th); the 8th failure
+    terminalizes instead of deferring again, so total backoff before giving up
+    is that sum, ~1h — long enough to ride out a transient endpoint outage,
+    short enough that a permanently broken judge does not retry forever. *)
+let board_attention_max_attempts_rp =
+  _rp_int ~key:"keeper.board_attention.max_attempts"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_ATTENTION_MAX_ATTEMPTS"
+                          ~default:8 ~min_v:1 ~max_v:100)
+    ~min_v:1 ~max_v:100
+    ~description:"Board attention judge/delivery attempt budget" ()
+let board_attention_max_attempts () : int =
+  Runtime_params.get board_attention_max_attempts_rp
+
+(** Age (seconds since the candidate was first recorded) beyond which
+    Pending/Deferred backlog terminalizes via [Expired_backlog] instead of
+    still attempting a judge call. Default 3 days: a Board post this old is
+    unlikely to still warrant a fresh attention judgment, and this bounds how
+    long a durable-backlog recovery keeps calling the judge endpoint at all. *)
+let board_attention_max_pending_age_sec_rp =
+  _rp_float ~key:"keeper.board_attention.max_pending_age_sec"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_BOARD_ATTENTION_MAX_PENDING_AGE_SEC"
+                          ~default:259200.0 ~min_v:60.0 ~max_v:(two_days_seconds_float *. 30.))
+    ~min_v:60.0 ~max_v:(two_days_seconds_float *. 30.)
+    ~description:"Board attention backlog age ceiling (seconds) before Expired_backlog" ()
+let board_attention_max_pending_age_sec () : float =
+  Runtime_params.get board_attention_max_pending_age_sec_rp
+
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
   let (_ : float) = Runtime_params.get hitl_summary_temperature_rp in
   let (_ : int) = Runtime_params.get hitl_summary_max_concurrency_rp in
+  let (_ : int) = Runtime_params.get board_attention_max_concurrency_rp in
+  let (_ : float) = Runtime_params.get board_attention_retry_base_sec_rp in
+  let (_ : float) = Runtime_params.get board_attention_retry_max_sec_rp in
+  let (_ : int) = Runtime_params.get board_attention_max_attempts_rp in
+  let (_ : float) = Runtime_params.get board_attention_max_pending_age_sec_rp in
   ()
 
 let keeper_enable_thinking_rp =

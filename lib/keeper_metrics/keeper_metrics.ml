@@ -212,6 +212,8 @@ type t =
       (* counter: RFC-0320 W3c continuation delivery outcome; label=outcome_tag
          (Delivered/Skipped_unrouted/Skipped_already_replied/Skipped_empty/Failed).
          G5 observability — a dropped/unrouted continuation must never be silent. *)
+  | BoardAttentionWorkerOutcomes (* counter: Board attention judge/delivery worker outcome; label=outcome *)
+  | BoardAttentionWorkerInFlight (* gauge: Board attention judge-worker fibers currently processing a candidate *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -435,6 +437,8 @@ let to_string = function
     "masc_keeper_wire_capture_response_suppressed_total"
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
+  | BoardAttentionWorkerOutcomes -> "masc_keeper_board_attention_worker_outcomes_total"
+  | BoardAttentionWorkerInFlight -> "masc_keeper_board_attention_worker_in_flight"
 ;;
 
 type collection =

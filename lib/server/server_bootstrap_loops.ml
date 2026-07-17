@@ -1414,6 +1414,14 @@ let start_keeper_loops_owned
           ~include_keepers:true
           operator_judge_ctx)
       ());
+  (* Bounded Board attention judge/delivery dispatcher (issue #24886, root
+     #21960). Must start before [keeper_autoboot] so a durable backlog from a
+     prior process is drained through the bounded worker pool from the first
+     observe cycle onward, rather than through the pre-redesign unbounded
+     [resume_pending] path some world-observation call sites still use during
+     the migration. *)
+  fork_subsystem "board_attention_worker" (fun () ->
+    Keeper_board_attention_worker.start ~sw ~clock ~base_path:config.base_path ());
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —

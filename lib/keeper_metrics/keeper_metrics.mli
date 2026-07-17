@@ -199,6 +199,8 @@ type t =
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
+  | BoardAttentionWorkerOutcomes
+  | BoardAttentionWorkerInFlight
 
 val to_string : t -> string
 

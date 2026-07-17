@@ -155,6 +155,14 @@ val keeper_unified_max_tokens : unit -> int
 val hitl_summary_temperature : unit -> float
 val hitl_summary_max_concurrency : unit -> int
 
+(** {2 Board Attention Worker Policy} *)
+
+val board_attention_max_concurrency : unit -> int
+val board_attention_retry_base_sec : unit -> float
+val board_attention_retry_max_sec : unit -> float
+val board_attention_max_attempts : unit -> int
+val board_attention_max_pending_age_sec : unit -> float
+
 val keeper_status_fast_default : unit -> bool
 
 val keeper_enable_thinking : unit -> bool

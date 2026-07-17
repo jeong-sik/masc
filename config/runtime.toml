@@ -1007,6 +1007,27 @@ candidates = [
 [discord]
 trigger_policy = "mention_or_thread"
 
+# ── Board attention worker (bounded judge/delivery dispatch) ─────────
+# Keeper_board_attention_worker의 K개 judge-worker 고정 fiber 풀 설정. 이전
+# 설계는 Pending 후보마다 fiber를 fork해 상한이 없었고(issue #24886), 재기동
+# 후 durable backlog 전량 재판정이 ollama_cloud judge 엔드포인트에 순간
+# burst(HTTP 429)를 유발했다(근본 #21960). 아래 값은 keeper.board_attention.*
+# Runtime_params 키의 부팅 시 env seed이며, 런타임 중에는 operator 대시보드에서
+# 개별 override 가능하다(Runtime_params.set_by_key).
+[board_attention]
+# 동시 judge/delivery 호출 상한. hitl_summary_max_concurrency와 동일하게
+# 같은 계열의 공유 엔드포인트를 보호하는 보수적 기본값.
+max_concurrency = 2
+# 실패 1회당 대기(초). 시도마다 2배씩 증가해 retry_max_sec에서 상한.
+retry_base_sec = 30.0
+retry_max_sec = 1800.0
+# judge 또는 delivery 실패 누적 횟수 상한. 초과 시 후보는 Terminal_failed
+# (Retry_budget_exhausted)로 확정 종료되고 더 이상 재시도하지 않는다.
+max_attempts = 8
+# 후보가 최초 기록된 시점 기준 이 나이(초)를 넘으면 judge를 호출하지 않고
+# Terminal_failed(Expired_backlog)로 종료한다. 기본 3일.
+max_pending_age_sec = 259200.0
+
 # ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.
 # harness(RFC-0252 §11) 미검증 — 카나리 출력(panel 답 + judge 종합)으로 사후 판단.

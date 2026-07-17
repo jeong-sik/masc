@@ -58,6 +58,15 @@ type durable_write_error =
   ; failure : durable_write_failure
   }
 
+(** Strict durable atomic write of the supplied immutable byte string.
+    The payload is written exactly, without parsing or re-encoding. *)
+val save_bytes_durable_atomic
+  :  ?ownership_root:string
+  -> ?temp_dir:string
+  -> string
+  -> string
+  -> (unit, durable_write_error) result
+
 (** Strict durable atomic JSON write. Unlike the compatibility
     [save_json_atomic] boundary, parent-directory fsync failure is returned as
     an error and never downgraded to success. When [temp_dir] differs from the
@@ -117,6 +126,15 @@ module For_testing : sig
       named filesystem operation. [before_directory_fsync] runs immediately
       before anchoring one directory component in the durability systhread.
       Either may raise to verify the typed contract and retry behavior. *)
+  val save_bytes_durable_atomic
+    :  before_stage:(durable_write_stage -> unit)
+    -> ?before_directory_fsync:(string -> unit)
+    -> ?ownership_root:string
+    -> ?temp_dir:string
+    -> string
+    -> string
+    -> (unit, durable_write_error) result
+
   val save_json_durable_atomic
     :  before_stage:(durable_write_stage -> unit)
     -> ?before_directory_fsync:(string -> unit)

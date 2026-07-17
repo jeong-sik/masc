@@ -169,6 +169,22 @@ let board_attention_judgment_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+let board_attention_judgment_batch_output_schema =
+  let item_fields =
+    [ "candidate_id", string_schema
+    ; ( "decision"
+      , enum_schema Keeper_board_attention_judgment.decision_tokens )
+    ; "rationale", string_schema
+    ]
+  in
+  let fields =
+    [ "verdicts"
+    , array_schema (object_schema ~required:(List.map fst item_fields) item_fields)
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let anti_rationalization_verdict_output_schema =
   let fields =
     [ "verdict", enum_schema Task.Anti_rationalization.valid_verdict_strings

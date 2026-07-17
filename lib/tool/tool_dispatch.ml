@@ -101,22 +101,6 @@ let register_pre_hook (hook : pre_hook) =
 let register_dispatch_observer (hook : dispatch_observer) =
   with_dispatch_rw (fun () -> dispatch_observers := !dispatch_observers @ [hook])
 
-(** Result transformer surface.  Today there is exactly one transformer in
-    tree ([Tool_output_validation.transform_result] which caps oversized
-    payloads); the single-ref shape reflects that. *)
-type result_transformer = Tool_result.result -> Tool_result.result
-
-let result_transformer_ref : result_transformer option ref = ref None
-
-let set_result_transformer (t : result_transformer) =
-  with_dispatch_rw (fun () -> result_transformer_ref := Some t)
-
-let apply_result_transformer (r : Tool_result.result) : Tool_result.result =
-  match !result_transformer_ref with
-  | None -> r
-  | Some t -> t r
-;;
-
 (** Dispatch span wrapper surface.
 
     The OTel/Otel_metric_store 4-tuple emission ([Tool_telemetry.with_span]) is
@@ -167,7 +151,6 @@ let clear_hooks () =
   with_dispatch_rw (fun () ->
     pre_hooks := [];
     dispatch_observers := [];
-    result_transformer_ref := None;
     span_wrapper_ref := identity_span_wrapper)
 
 (** Run pre-hooks in order, threading coerced args through the chain.
@@ -205,8 +188,7 @@ let run_dispatch_observers
                                          [Tool_telemetry.with_span] at runtime)
       2. pre-hook chain                (reject / coerce-args)
       3. registry lookup + handler     (handler exception capture)
-      4. result transformer            ([apply_result_transformer])
-      5. observer fan-out              ([run_dispatch_observers])
+      4. observer fan-out              ([run_dispatch_observers])
 
     PR-11 already removed the three-step chain from the public mli.
     PR-14 finishes the consolidation by removing the file-private
@@ -235,30 +217,21 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
               | exn -> Some (Tool_result.make_err_of_exn ~tool_name:name ~start_time exn))
            | None -> None)
       in
-      (* Finalization is done inline here because [Tool_dispatch] cannot
-         depend on [Tool_dispatch_emit] without creating a dependency
-         cycle.  Keep the ordering aligned with
-         [Tool_dispatch_emit.finalize].
-
-         Order: transformer first (mutates the Tool_result.result inside the
-         [Handled] arm), then typed observer fan-out. *)
-      let r' =
-        match r with
-        | Some tr -> Some (apply_result_transformer tr)
-        | None -> r
-      in
+      (* Finalization is done inline because [Tool_dispatch] cannot depend on
+         [Tool_dispatch_emit] without creating a dependency cycle.  Observers
+         receive the exact handler result and cannot mutate it. *)
       let typed_outcome : Dispatch_outcome.t =
-        match r' with
+        match r with
         | Some _ -> Handled
         | None -> No_handler
       in
-      run_dispatch_observers typed_outcome r';
+      run_dispatch_observers typed_outcome r;
       let outcome =
-        match r' with
+        match r with
         | Some _ -> "handled"
         | None -> "no_handler"
       in
-      r', outcome)
+      r, outcome)
   in
   result
 ;;

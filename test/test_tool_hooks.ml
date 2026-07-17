@@ -100,7 +100,7 @@ let test_multiple_pre_hooks_first_wins () =
   Alcotest.(check (list string)) "chain stops at blocker"
     ["pre1"; "pre2_block"] !call_log
 
-(* --- Dispatch observer / result-transformer tests --- *)
+(* --- Dispatch observer tests --- *)
 
 let test_dispatch_observer_observes () =
   setup ();
@@ -120,29 +120,6 @@ let test_dispatch_observer_observes () =
     ["handler"; "observer"] !call_log;
   match result with
   | Some r -> Alcotest.(check bool) "success" true (Tool_result.is_success r)
-  | None -> Alcotest.fail "expected Some"
-
-let test_result_transformer_transforms () =
-  setup ();
-  Tool_dispatch.register
-    ~tool_name:"__hook_transform"
-    ~handler:(fun ~name:_ ~args:_ ->
-      Some (tool_ok "original"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_transform" ~tag:Mod_misc;
-  Tool_dispatch.set_result_transformer (fun r ->
-    match r with
-    | Tool_result.Completed output ->
-      Tool_result.Completed { output with data = `String "transformed" }
-    | Tool_result.Deferred output ->
-      Tool_result.Deferred { output with data = `String "transformed" }
-    | Tool_result.Failed failure ->
-      Tool_result.Failed { failure with data = `String "transformed" });
-  let token = match Tool_dispatch.mint_token ~name:"__hook_transform" with Ok t -> t | Error e -> Alcotest.fail e in
-  match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
-  | Some r ->
-    (match Tool_result.data r with
-     | `String "transformed" -> ()
-     | _ -> Alcotest.fail "result transformer not applied")
   | None -> Alcotest.fail "expected Some"
 
 let test_dispatch_observers_chain () =
@@ -167,35 +144,6 @@ let test_dispatch_observers_chain () =
     (match Tool_result.data r with
      | `String "0" -> ()
      | _ -> Alcotest.fail "dispatch observers must not transform results")
-  | None -> Alcotest.fail "expected Some"
-
-let test_result_transformer_chain_replaces_previous () =
-  setup ();
-  Tool_dispatch.register
-    ~tool_name:"__hook_transform_replace"
-    ~handler:(fun ~name:_ ~args:_ ->
-      Some (tool_ok "0"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_transform_replace" ~tag:Mod_misc;
-  let with_data (s : string) (r : Tool_result.result) : Tool_result.result =
-    match r with
-    | Tool_result.Completed output ->
-      Tool_result.Completed { output with data = `String s }
-    | Tool_result.Deferred output -> Tool_result.Deferred { output with data = `String s }
-    | Tool_result.Failed failure -> Tool_result.Failed { failure with data = `String s }
-  in
-  Tool_dispatch.set_result_transformer (fun r ->
-    log_call "transformer1";
-    with_data "1" r);
-  Tool_dispatch.set_result_transformer (fun r ->
-    log_call "transformer2";
-    with_data "2" r);
-  let token = match Tool_dispatch.mint_token ~name:"__hook_transform_replace" with Ok t -> t | Error e -> Alcotest.fail e in
-  match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
-  | Some r ->
-    Alcotest.(check (list string)) "latest transformer only" ["transformer2"] !call_log;
-    (match Tool_result.data r with
-     | `String "2" -> ()
-     | _ -> Alcotest.fail "latest result transformer should win")
   | None -> Alcotest.fail "expected Some"
 
 (* --- Full lifecycle --- *)
@@ -257,12 +205,7 @@ let () =
     ];
     "dispatch_observer", [
       Alcotest.test_case "observe" `Quick test_dispatch_observer_observes;
-      Alcotest.test_case "transform" `Quick test_result_transformer_transforms;
       Alcotest.test_case "chain order" `Quick test_dispatch_observers_chain;
-      Alcotest.test_case
-        "latest transformer wins"
-        `Quick
-        test_result_transformer_chain_replaces_previous;
     ];
     "lifecycle", [
       Alcotest.test_case "pre→handler→observer" `Quick test_full_lifecycle;

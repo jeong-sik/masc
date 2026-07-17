@@ -2,7 +2,7 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 13:08 KST
+> Checked: 2026-07-17 13:16 KST
 > MASC `origin/main`: `16f3d47473`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 13:08 KST; confidence High.
+2026-07-17 13:16 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -179,7 +179,7 @@ run-local `Commit_outcome_unknown`; it does not schedule product work.
 |---|---|---|
 | `v0.215.0` / #2639 | published and pinned by MASC | KEEP exact occurrence/attempt foundation |
 | #2640 | OAS `main`, after release | KEEP recursion fence; not in MASC pin |
-| #2642 | Draft, current CI running | REVIEW exact invocation propagation; no MASC semantics |
+| #2642 | ready, mergeable; OCaml 5.4.1 job cancelled | REVIEW exact invocation propagation and obtain a non-cancelled full matrix; no MASC semantics |
 | #2643 | Draft design | REVIEW recursive executable contract against the normative Goal |
 | `Durable_event` / `Journal_bridge` | live public and production callers remain | KILL in the activation hard cut |
 | independent `Raw_trace.record_*` | live writer in `agent_trace` | KILL writer; keep cursor-backed projection only |
@@ -253,10 +253,10 @@ domain fact.
 | #25018 | Draft, mergeable, full CI green | merge exact settlement source index |
 | #24971 | Draft, mergeable, full CI green | merge exact private JSONL cursor |
 | #25026 | Draft stacked on #24971, lightweight green | retarget after parent and run full CI |
-| canonical settlement receipt leaf | local, 218 changed lines | latest-main rebase, focused build, Draft PR |
+| canonical settlement receipt leaf | local, 218 changed lines; latest-main rebase and format/static checks clean | focused build after the external bare Dune build, then Draft PR |
 | settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
 | structural compaction leaf | local, 399 changed lines; hostile code findings repaired; focused build and 40 direct cases green | real-provider dispatch regression still required before Draft PR |
-| per-Keeper Auto Judge drain | local, 397 changed lines | latest-main rebase/focused build and a separate monotonic durable FIFO sequence leaf |
+| per-Keeper Auto Judge drain | local, 396 changed lines; latest-main rebase clean | focused build after the external bare Dune build and a separate monotonic durable FIFO sequence leaf |
 | #25019 | Draft, chat-admission slice; CI running | not a durable compaction operation or fit proof |
 | #24993 | conflicting and red | supersede; do not use as current compaction proof |
 | #24994 | Draft, green typed terminal leaf | re-evaluate after clean replacement stack |

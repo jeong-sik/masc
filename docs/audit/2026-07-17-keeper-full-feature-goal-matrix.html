@@ -13,7 +13,7 @@
     <div class="eyebrow">Adversarial execution checkpoint</div>
     <h1>MASC Keeper Full Feature Goal Matrix</h1>
     <p class="lead">Governance와 암묵적 제약을 제거한 뒤 무엇으로 대체해야 하는지, MASC-owned compaction·Lane per Keeper·Gate·Memory·Any-as-a-Tool·OAS finite-run Journal을 하나의 실행 순서로 고정한다. Green foundation이나 “조금 줄어든 compaction”을 완료로 계산하지 않는다.</p>
-    <p class="meta">확인: 2026-07-17 13:08 KST · MASC <code>16f3d47473</code> · OAS main <code>b2a9478ff3</code> · pinned release <code>v0.215.0@a7ea83fbbf</code></p>
+    <p class="meta">확인: 2026-07-17 13:16 KST · MASC <code>16f3d47473</code> · OAS main <code>b2a9478ff3</code> · pinned release <code>v0.215.0@a7ea83fbbf</code></p>
     <div class="cards">
       <div class="card"><div class="number amber">42%</div><div>계획용 closure 점수</div><small class="muted">13 gates: 완료 2 · 부분 7 · 미증명 4</small></div>
       <div class="card"><div class="number green">0.215.0</div><div>현재 OAS pin</div><small class="muted">exact Tool occurrence + attempt-owned child</small></div>
@@ -65,10 +65,10 @@
     <tr><td><a href="https://github.com/jeong-sik/masc/pull/25018">MASC #25018</a></td><td>Draft · mergeable · full CI green</td><td><span class="badge ready">READY CODE</span></td><td>latest-main freshness 후 settlement stack 첫 leaf</td></tr>
     <tr><td><a href="https://github.com/jeong-sik/masc/pull/24971">MASC #24971</a></td><td>Draft · mergeable · full CI green</td><td><span class="badge ready">READY CODE</span></td><td>cursor foundation landing</td></tr>
     <tr><td><a href="https://github.com/jeong-sik/masc/pull/25026">MASC #25026</a></td><td>stacked · lightweight green</td><td><span class="badge partial">WAIT PARENT</span></td><td>#24971 후 main retarget + full CI</td></tr>
-    <tr><td>Canonical receipt</td><td>local 218-line commit</td><td><span class="badge partial">BUILD/REBASE</span></td><td>focused build, hostile review, Draft PR</td></tr>
+    <tr><td>Canonical receipt</td><td>local 218-line commit; latest-main rebase + format/static clean</td><td><span class="badge partial">BUILD WAIT</span></td><td>external bare Dune build 종료 후 focused build, hostile review, Draft PR</td></tr>
     <tr><td>Structural compaction</td><td>local 399; hostile code findings repaired; focused/direct green</td><td><span class="badge open">DISPATCH PROOF</span></td><td>real-provider dispatch regression 후 Draft</td></tr>
-    <tr><td>Gate owner drain</td><td>local 397-line clean commit</td><td><span class="badge partial">REBASE / PROOF</span></td><td>latest main rebase + focused build; monotonic FIFO test leaf stack</td></tr>
-    <tr><td><a href="https://github.com/jeong-sik/oas/pull/2642">OAS #2642</a></td><td>Draft · exact invocation lifecycle · CI running</td><td><span class="badge foundation">REVIEW</span></td><td>generic boundary and recursive tree proof</td></tr>
+    <tr><td>Gate owner drain</td><td>local 396-line clean commit; latest-main rebase complete</td><td><span class="badge partial">BUILD WAIT</span></td><td>focused build; monotonic FIFO test leaf stack</td></tr>
+    <tr><td><a href="https://github.com/jeong-sik/oas/pull/2642">OAS #2642</a></td><td>ready · mergeable · OCaml 5.4.1 job cancelled</td><td><span class="badge foundation">REVIEW / CI</span></td><td>generic boundary proof + non-cancelled full matrix</td></tr>
   </tbody></table></div></section>
   <section id="sequence"><h2>의존 순서</h2><div class="flow"><div class="step"><b>1. Settlement</b><br><span class="muted">receipt · cursor · WAL</span></div><div class="step"><b>2. Structural safety</b><br><span class="muted">open anchors exact</span></div><div class="step"><b>3. Fit & async</b><br><span class="muted">native count · waves · wake</span></div><div class="step"><b>4. Product adapters</b><br><span class="muted">Gate · Memory · Any[]</span></div><div class="step"><b>5. Proof & purge</b><br><span class="muted">dashboard · restart · live</span></div></div>
     <p class="callout">OAS sole-writer hard cut은 G1과 병렬로 진행할 수 있지만, MASC가 새 OAS private module을 직접 import해서는 안 된다. 공개 finite-run reference/cursor contract가 release된 뒤 pin을 올린다.</p>

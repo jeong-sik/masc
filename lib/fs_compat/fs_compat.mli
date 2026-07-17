@@ -785,6 +785,22 @@ val durable_append_error_to_string : durable_append_error -> string
 val update_private_file_durable_locked_result :
   string -> (string -> string option * 'a) -> ('a, durable_append_error) result
 
+(** [rewrite_private_file_durable_locked_result path decide] is the whole-file
+    replacement sibling of {!update_private_file_durable_locked_result}. It takes
+    the same shared per-path append mutex, reads the exact existing bytes (empty
+    string when the file is absent), and calls [decide]. [Some content] replaces
+    the file's entire contents with [content] via a temp-file + atomic rename
+    (see {!save_file_atomic}); [None] performs no write. Because it shares the
+    append mutex, in-process appends and rewrites of the same path are
+    serialized. The atomic rename leaves the original file untouched until it
+    succeeds, so a failed rewrite never leaves a partially written ledger. This
+    coordinates in-process writers only; unlike the append primitive it does not
+    hold a whole-file lock across the read/rewrite, so a second OS process must
+    not write the same path concurrently. Returns the rename failure message on
+    [Error]; [decide] exceptions still propagate. *)
+val rewrite_private_file_durable_locked_result :
+  string -> (string -> string option * 'a) -> ('a, string) result
+
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
   | Invalid_jsonl_suffix

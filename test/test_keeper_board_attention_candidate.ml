@@ -342,6 +342,72 @@ let test_strict_judgment_contract_rejects_extra_fields () =
   | Ok _ -> Alcotest.fail "structured judgment accepted an undeclared score"
 ;;
 
+let count_ledger_lines base_path =
+  let dir =
+    Filename.concat
+      (Filename.concat base_path ".masc")
+      "board_attention_candidates"
+  in
+  Sys.readdir dir
+  |> Array.to_list
+  |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+  |> List.fold_left
+       (fun total name ->
+         let channel = open_in (Filename.concat dir name) in
+         Fun.protect
+           ~finally:(fun () -> close_in channel)
+           (fun () ->
+             let rec loop count =
+               match input_line channel with
+               | (_ : string) -> loop (count + 1)
+               | exception End_of_file -> count
+             in
+             total + loop 0))
+       0
+;;
+
+let test_update_ledger_compacts_to_distinct () =
+  with_temp_base "keeper-board-attention-compaction" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let keeper_name = pending.keeper_name in
+  (* Record several retryable failures against the same candidate id. Each is a
+     committed update; before compaction the ledger grew by one row per update
+     (and each update re-parsed the whole ledger, so writes were O(n^2)). *)
+  let transitions = 6 in
+  ignore
+    (List.fold_left
+       (fun current index ->
+         let failure : A.retryable_failure =
+           { kind = A.Provider_unavailable
+           ; detail = Printf.sprintf "provider unavailable %d" index
+           ; failed_at = 102.0 +. float_of_int index
+           }
+         in
+         match A.record_retryable_failure ~base_path current failure with
+         | Ok candidate -> candidate
+         | Error detail -> Alcotest.failf "failure %d not recorded: %s" index detail)
+       pending
+       (List.init transitions Fun.id)
+     : A.candidate);
+  Alcotest.(check int)
+    "ledger holds one row per distinct candidate_id"
+    1
+    (count_ledger_lines base_path);
+  match A.load_candidates ~base_path ~keeper_name with
+  | Ok [ latest ] ->
+    (match latest.status with
+     | A.Pending { last_failure = Some observed } ->
+       Alcotest.(check string)
+         "latest failure wins after compaction"
+         "provider unavailable 5"
+         observed.detail
+     | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
+       Alcotest.fail "compaction dropped the latest pending failure")
+  | Ok candidates ->
+    Alcotest.failf "expected one compacted candidate, got %d" (List.length candidates)
+  | Error detail -> Alcotest.failf "load after compaction failed: %s" detail
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
@@ -378,6 +444,10 @@ let () =
             "strict judgment rejects undeclared score"
             `Quick
             test_strict_judgment_contract_rejects_extra_fields
+        ; Alcotest.test_case
+            "update ledger compacts to distinct candidate count"
+            `Quick
+            test_update_ledger_compacts_to_distinct
         ] )
     ]
 ;;

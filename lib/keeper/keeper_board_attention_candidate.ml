@@ -621,19 +621,32 @@ let load_candidates ~base_path ~keeper_name =
 
 let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"
 
+let serialize_candidates candidates =
+  String.concat "" (List.map append_row candidates)
+;;
+
 let update_ledger ~base_path ~keeper_name decide =
   let path = candidate_path ~base_path ~keeper_name in
+  (* Compact on write: a committed change rewrites the ledger as the deduped
+     latest-per-id set (via [latest_candidates]) instead of appending one row.
+     The reader already discards all but the latest row per candidate_id, so the
+     older rows are dead weight; appending them grew the file without bound and
+     made every update O(n^2) because the durable transaction re-parses the whole
+     ledger before writing. Rewriting keeps the file bounded to the number of
+     distinct candidates. *)
   match
-    Fs_compat.update_private_file_durable_locked_result path (fun content ->
+    Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
       match load_candidates_from_content content with
       | Error detail -> None, Error detail
       | Ok candidates ->
         (match decide candidates with
          | Error _ as error -> None, error
          | Ok (None, result) -> None, Ok result
-         | Ok (Some candidate, result) -> Some (append_row candidate), Ok result))
+         | Ok (Some candidate, result) ->
+           let compacted = latest_candidates (candidates @ [ candidate ]) in
+           Some (serialize_candidates compacted), Ok result))
   with
-  | Error error -> Error (durable_error_to_string error)
+  | Error error -> Error error
   | Ok result -> result
 ;;
 

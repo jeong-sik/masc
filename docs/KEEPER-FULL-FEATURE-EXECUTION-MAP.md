@@ -255,7 +255,7 @@ domain fact.
 | #25026 | Draft stacked on #24971, lightweight green | retarget after parent and run full CI |
 | canonical settlement receipt leaf | local, 218 changed lines | latest-main rebase, focused build, Draft PR |
 | settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
-| structural compaction leaf | local, 399 changed lines; hostile code findings repaired | real-provider dispatch regression and focused build still required before Draft PR |
+| structural compaction leaf | local, 399 changed lines; hostile code findings repaired; focused build and 40 direct cases green | real-provider dispatch regression still required before Draft PR |
 | per-Keeper Auto Judge drain | local, 397 changed lines | latest-main rebase/focused build and a separate monotonic durable FIFO sequence leaf |
 | #25019 | Draft, chat-admission slice; CI running | not a durable compaction operation or fit proof |
 | #24993 | conflicting and red | supersede; do not use as current compaction proof |

@@ -524,18 +524,25 @@ let registry : (string, queue_entry) Hashtbl.t = Hashtbl.create 16
 
 let continuation_channel_of_message_source = function
   | Dashboard { thread_id } ->
-    Keeper_continuation_channel.Dashboard { thread_id }
+    (match Keeper_continuation_channel.dashboard ~thread_id with
+     | Ok channel -> channel
+     | Error message -> invalid_arg message)
   | Discord { channel_id; user_id } ->
-    Keeper_continuation_channel.Discord
-      { guild_id = None
-      ; channel_id
-      ; parent_channel_id = None
-      ; thread_id = None
-      ; user_id
-      }
+    (match
+       Keeper_continuation_channel.discord
+         ~guild_id:None
+         ~channel_id
+         ~parent_channel_id:None
+         ~thread_id:None
+         ~user_id
+     with
+     | Ok channel -> channel
+     | Error message -> invalid_arg message)
   | Slack { channel_id; user_id; team_id; thread_ts; _ } ->
-    Keeper_continuation_channel.Slack
-      { team_id; channel_id; thread_ts; user_id }
+    (match Keeper_continuation_channel.slack ~team_id ~channel_id ~thread_ts ~user_id with
+     | Ok channel -> channel
+     | Error message -> invalid_arg message)
+;;
 
 let set_transition_observer observer = Atomic.set transition_observer observer
 

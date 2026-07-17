@@ -2742,7 +2742,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
   let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
   let continuation_channel =
-    Keeper_continuation_channel.Dashboard { thread_id }
+    match Keeper_continuation_channel.dashboard ~thread_id with
+    | Ok channel -> channel
+    | Error message -> invalid_arg message
   in
 
   let sse_adapter_loop ~events ~writer ~mutex ~closed ~on_closed ~on_finished =

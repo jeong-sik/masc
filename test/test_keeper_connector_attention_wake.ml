@@ -170,13 +170,13 @@ let test_connector_attention_codec_roundtrips () =
         Q.Connector_attention
           { event_id = "evt-77"
           ; channel =
-              Keeper_continuation_channel.Discord
-                { guild_id = Some "guild-77"
-                ; channel_id = "chan-77"
-                ; parent_channel_id = Some "parent-77"
-                ; thread_id = Some "thread-77"
-                ; user_id = "user-77"
-                }
+              (Keeper_continuation_channel.discord
+                 ~guild_id:(Some "guild-77")
+                 ~channel_id:"chan-77"
+                 ~parent_channel_id:(Some "parent-77")
+                 ~thread_id:(Some "thread-77")
+                 ~user_id:"user-77"
+               |> Result.get_ok)
           }
     }
   in
@@ -188,13 +188,13 @@ let test_connector_attention_codec_roundtrips () =
       check bool "connector coordinates survive the JSON round-trip" true
         (Keeper_continuation_channel.same_route
            channel
-           (Keeper_continuation_channel.Discord
-              { guild_id = Some "guild-77"
-              ; channel_id = "chan-77"
-              ; parent_channel_id = Some "parent-77"
-              ; thread_id = Some "thread-77"
-              ; user_id = "user-77"
-              }))
+           (Keeper_continuation_channel.discord
+              ~guild_id:(Some "guild-77")
+              ~channel_id:"chan-77"
+              ~parent_channel_id:(Some "parent-77")
+              ~thread_id:(Some "thread-77")
+              ~user_id:"user-77"
+            |> Result.get_ok))
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
 
@@ -207,13 +207,13 @@ let connector_stimulus ~event_id ~arrived_at =
       Q.Connector_attention
         { event_id
         ; channel =
-            Keeper_continuation_channel.Discord
-              { guild_id = Some "guild-durable"
-              ; channel_id = "channel-durable"
-              ; parent_channel_id = None
-              ; thread_id = None
-              ; user_id = "user-durable"
-              }
+            (Keeper_continuation_channel.discord
+               ~guild_id:(Some "guild-durable")
+               ~channel_id:"channel-durable"
+               ~parent_channel_id:None
+               ~thread_id:None
+               ~user_id:"user-durable"
+             |> Result.get_ok)
         }
   }
 

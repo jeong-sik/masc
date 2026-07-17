@@ -1,9 +1,9 @@
 (** Durable per-Keeper Event Layer state.
 
-    [event-queue.json] uses one v2 envelope containing pending stimuli, active
+    [event-queue.json] uses one v3 envelope containing pending stimuli, active
     typed leases, the monotonic lease sequence and the transition outbox.
-    [event-queue-inflight.json] is accepted only as a one-time v1 migration
-    input; it is never a second runtime authority. *)
+    Older schemas are unsupported. [event-queue-inflight.json] is rejected
+    explicitly rather than migrated or treated as a second authority. *)
 
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
@@ -110,8 +110,8 @@ val load_snapshot_pair_with_errors :
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Strict state read used by tests and operator projection.  A malformed v2
-    envelope or v2-plus-legacy residue is an [Error], never an empty queue. *)
+(** Strict state read used by tests and operator projection. A malformed v3
+    envelope or v3-plus-legacy residue is an [Error], never an empty queue. *)
 
 val claim_when_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -197,7 +197,7 @@ val persist_snapshot :
 val record_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
 (** Legacy source/test adapter.  Writes a typed [Legacy_inflight] lease into the
-    v2 envelope; it never creates [event-queue-inflight.json]. *)
+    v3 envelope; it never creates [event-queue-inflight.json]. *)
 
 val ack_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit

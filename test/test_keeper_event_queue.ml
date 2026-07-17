@@ -264,13 +264,13 @@ let () =
      ; resolved_answer = "answer"
      ; board_post_id = "post-9"
      ; channel =
-         Keeper_continuation_channel.Discord
-           { guild_id = None
-           ; channel_id = "chan-42"
-           ; parent_channel_id = None
-           ; thread_id = Some "th-1"
-           ; user_id = "u-7"
-           }
+         (Keeper_continuation_channel.discord
+            ~guild_id:None
+            ~channel_id:"chan-42"
+            ~parent_channel_id:None
+            ~thread_id:(Some "th-1")
+            ~user_id:"u-7"
+          |> Result.get_ok)
      }
    in
    let stim : Keeper_event_queue.stimulus =

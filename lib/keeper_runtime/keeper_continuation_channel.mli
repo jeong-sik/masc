@@ -14,7 +14,7 @@
     connector constructors carry the lossless coordinate fields used by
     [Surface_ref] without depending on that higher-level module. *)
 
-type t =
+type t = private
   | Dashboard of { thread_id : string }
   | Discord of {
       guild_id : string option;
@@ -31,8 +31,27 @@ type t =
     }
   | Unrouted of { reason : string }
 
+val dashboard : thread_id:string -> (t, string) result
+
+val discord :
+  guild_id:string option ->
+  channel_id:string ->
+  parent_channel_id:string option ->
+  thread_id:string option ->
+  user_id:string ->
+  (t, string) result
+
+val slack :
+  team_id:string option ->
+  channel_id:string ->
+  thread_ts:string option ->
+  user_id:string ->
+  (t, string) result
+
 (** [unrouted reason] is the fail-closed channel carrying a diagnostic
-    [reason] explaining why no connector could be determined. *)
+    [reason] explaining why no connector could be determined. It raises
+    [Invalid_argument] for a blank diagnostic. Every constructor therefore
+    admits only values replayable by {!of_yojson}. *)
 val unrouted : string -> t
 
 (** [is_routable t] is [false] only for [Unrouted]; a routable channel has a

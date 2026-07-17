@@ -719,7 +719,7 @@ let stimulus_of_yojson json =
   let* payload = payload_of_yojson payload_json in
   Ok { post_id; urgency; arrived_at; payload }
 
-let schema = "keeper.event_queue.v1"
+let schema = "keeper.event_queue.v2"
 
 let queue_to_yojson queue =
   `Assoc

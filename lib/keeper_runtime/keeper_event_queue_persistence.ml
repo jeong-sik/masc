@@ -46,7 +46,7 @@ let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
 
 let snapshot_filename = "event-queue.json"
-let legacy_inflight_filename = "event-queue-inflight.json"
+let unsupported_inflight_filename = "event-queue-inflight.json"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -70,8 +70,8 @@ let snapshot_path_of_owner owner =
   Filename.concat (keeper_runtime_dir_of_owner owner) snapshot_filename
 ;;
 
-let legacy_inflight_path_of_owner owner =
-  Filename.concat (keeper_runtime_dir_of_owner owner) legacy_inflight_filename
+let unsupported_inflight_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) unsupported_inflight_filename
 ;;
 
 let save_json_atomic path json =
@@ -145,8 +145,7 @@ let schema_field = function
 
 type primary_snapshot =
   | Primary_missing
-  | Primary_v1 of Keeper_event_queue.t
-  | Primary_v2 of State.t
+  | Primary_current of State.t
 
 let read_primary_unlocked owner =
   let path = snapshot_path_of_owner owner in
@@ -158,108 +157,36 @@ let read_primary_unlocked owner =
      | Error message -> Error (Printf.sprintf "%s: %s" path message)
      | Ok schema when String.equal schema State.schema ->
        (match State.of_yojson json with
-        | Ok state -> Ok (Primary_v2 state)
-        | Error message -> Error (Printf.sprintf "%s: %s" path message))
-     | Ok schema when String.equal schema "keeper.event_queue.v1" ->
-       (match Keeper_event_queue.queue_of_yojson json with
-        | Ok queue -> Ok (Primary_v1 queue)
+        | Ok state -> Ok (Primary_current state)
         | Error message -> Error (Printf.sprintf "%s: %s" path message))
      | Ok schema ->
        Error (Printf.sprintf "%s: unsupported snapshot schema %s" path schema))
 ;;
 
-let read_legacy_inflight_unlocked owner =
-  let path = legacy_inflight_path_of_owner owner in
-  match read_json_if_present path with
-  | Error _ as error -> error
-  | Ok None -> Ok None
-  | Ok (Some json) ->
-    (match Keeper_event_queue.queue_of_yojson json with
-     | Ok queue -> Ok (Some queue)
-     | Error message -> Error (Printf.sprintf "%s: %s" path message))
-;;
-
-let remove_legacy_inflight_unlocked owner =
-  let path = legacy_inflight_path_of_owner owner in
+let reject_unsupported_inflight owner =
+  let path = unsupported_inflight_path_of_owner owner in
   try
-    if Sys.file_exists path then Sys.remove path;
-    Ok ()
+    if Sys.file_exists path
+    then
+      Error
+        (Printf.sprintf
+           "unsupported event queue sidecar remains at %s; remove it before starting the keeper"
+           path)
+    else Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Error
-      (Printf.sprintf
-         "v2 state committed but failed to remove legacy inflight input %s: %s"
-         path
-         (Printexc.to_string exn))
-;;
-
-let migrate_unlocked owner pending legacy_inflight =
-  let state = State.with_pending pending State.empty in
-  let migration =
-    match legacy_inflight with
-    | None -> Ok (state, None)
-    | Some queue -> State.add_legacy_inflight (Keeper_event_queue.to_list queue) state
-  in
-  match migration with
-  | Error _ as error -> error
-  | Ok (state, _lease) ->
-    let state =
-      match State.recover_leases ~settled_at:(Time_compat.now ()) state with
-      | Ok state -> Ok state
-      | Error _ as error -> error
-    in
-    (match state with
-     | Error _ as error -> error
-     | Ok state ->
-    (match save_state_unlocked owner state with
-     | Error _ as error -> error
-     | Ok () ->
-       remove_legacy_inflight_unlocked owner |> Result.map (fun () -> state)))
-;;
-
-let state_accounts_for_stimulus state stimulus =
-  let same candidate =
-    Keeper_event_queue.stimulus_identity_equal candidate stimulus
-  in
-  List.exists same (Keeper_event_queue.to_list (State.pending state))
-  || List.exists
-       (fun (lease : lease) -> List.exists same lease.stimuli)
-       (State.leases state)
-  || List.exists
-       (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
-       (State.transition_outbox state)
-;;
-
-let reconcile_v2_legacy_residue_unlocked owner state legacy =
-  let legacy_stimuli = Keeper_event_queue.to_list legacy in
-  if List.for_all (state_accounts_for_stimulus state) legacy_stimuli
-  then remove_legacy_inflight_unlocked owner |> Result.map (fun () -> state)
-  else
-    Error
-      (Printf.sprintf
-         "v2 event queue conflicts with legacy inflight residue: %s"
-         (legacy_inflight_path_of_owner owner))
+    Error (Printf.sprintf "failed to inspect unsupported sidecar %s: %s" path (Printexc.to_string exn))
 ;;
 
 let load_state_unlocked owner =
-  match read_primary_unlocked owner with
+  match reject_unsupported_inflight owner with
   | Error _ as error -> error
-  | Ok (Primary_v2 state) ->
-    (match read_legacy_inflight_unlocked owner with
+  | Ok () ->
+    (match read_primary_unlocked owner with
      | Error _ as error -> error
-     | Ok None -> Ok state
-     | Ok (Some legacy) -> reconcile_v2_legacy_residue_unlocked owner state legacy)
-  | Ok Primary_missing ->
-    (match read_legacy_inflight_unlocked owner with
-     | Error _ as error -> error
-     | Ok None -> Ok State.empty
-     | Ok (Some legacy) ->
-       migrate_unlocked owner Keeper_event_queue.empty (Some legacy))
-  | Ok (Primary_v1 pending) ->
-    (match read_legacy_inflight_unlocked owner with
-     | Error _ as error -> error
-     | Ok legacy -> migrate_unlocked owner pending legacy)
+     | Ok (Primary_current state) -> Ok state
+     | Ok Primary_missing -> Ok State.empty)
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -358,7 +285,7 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
   | Error invalid -> [ { kind = Invalid_path; path = None; message = invalid } ]
   | Ok owner ->
     let primary = snapshot_path_of_owner owner in
-    let legacy = legacy_inflight_path_of_owner owner in
+    let unsupported = unsupported_inflight_path_of_owner owner in
     let inspect path =
       try
         if not (Sys.file_exists path)
@@ -377,20 +304,12 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
           ; message = Printexc.to_string exn
           }
     in
-    (match inspect primary with
-     | Some ({ kind = Read_failed; _ } as error) -> [ error ]
-     | Some ({ kind = Parse_failed; _ } as primary_error) ->
-       (match inspect legacy with
-        | Some ({ kind = Read_failed; _ } as error) -> [ error ]
-        | Some ({ kind = Parse_failed; _ } as error) -> [ error ]
-        | Some { kind = Invalid_path; _ } -> [ primary_error ]
-        | None -> [ primary_error ])
-     | Some { kind = Invalid_path; _ } ->
-       [ { kind = Invalid_path; path = None; message } ]
-     | None ->
-       (match inspect legacy with
-        | Some error -> [ error ]
-        | None -> [ { kind = Parse_failed; path = None; message } ]))
+    match inspect unsupported with
+    | Some _ -> [ { kind = Parse_failed; path = Some unsupported; message } ]
+    | None ->
+      (match inspect primary with
+       | Some error -> [ error ]
+       | None -> [ { kind = Parse_failed; path = None; message } ])
 ;;
 
 let load_snapshot_pair_with_errors ~base_path ~keeper_name =
@@ -435,10 +354,9 @@ let discover_keeper_names_with_snapshots ~base_path =
                 (fun (names, errors) name ->
                    let keeper_dir = Filename.concat keepers_dir name in
                    let primary = Filename.concat keeper_dir snapshot_filename in
-                   let legacy = Filename.concat keeper_dir legacy_inflight_filename in
                    if
                      not (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir)
-                     || not (Sys.file_exists primary || Sys.file_exists legacy)
+                     || not (Sys.file_exists primary)
                    then names, errors
                    else
                      match Keeper_id.Keeper_name.of_string name with
@@ -527,6 +445,19 @@ let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present
+
+let state_accounts_for_stimulus state stimulus =
+  let same candidate =
+    Keeper_event_queue.stimulus_identity_equal candidate stimulus
+  in
+  List.exists same (Keeper_event_queue.to_list (State.pending state))
+  || List.exists
+       (fun (lease : lease) -> List.exists same lease.stimuli)
+       (State.leases state)
+  || List.exists
+       (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
+       (State.transition_outbox state)
+;;
 
 let enqueue_stimulus_if_absent_result
       ?(after_commit = fun _ -> ())

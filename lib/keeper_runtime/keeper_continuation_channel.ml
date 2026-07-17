@@ -15,7 +15,50 @@ type t =
     }
   | Unrouted of { reason : string }
 
-let unrouted reason = Unrouted { reason }
+let ( let* ) = Result.bind
+
+let validate_nonblank field value =
+  if String.equal (String.trim value) ""
+  then Error (Printf.sprintf "continuation_channel: field %s must not be blank" field)
+  else Ok value
+;;
+
+let validate_optional_nonblank field = function
+  | None -> Ok None
+  | Some value ->
+    let* value = validate_nonblank field value in
+    Ok (Some value)
+;;
+
+let dashboard ~thread_id =
+  let* thread_id = validate_nonblank "thread_id" thread_id in
+  Ok (Dashboard { thread_id })
+;;
+
+let discord ~guild_id ~channel_id ~parent_channel_id ~thread_id ~user_id =
+  let* guild_id = validate_optional_nonblank "guild_id" guild_id in
+  let* channel_id = validate_nonblank "channel_id" channel_id in
+  let* parent_channel_id =
+    validate_optional_nonblank "parent_channel_id" parent_channel_id
+  in
+  let* thread_id = validate_optional_nonblank "thread_id" thread_id in
+  let* user_id = validate_nonblank "user_id" user_id in
+  Ok (Discord { guild_id; channel_id; parent_channel_id; thread_id; user_id })
+;;
+
+let slack ~team_id ~channel_id ~thread_ts ~user_id =
+  let* team_id = validate_optional_nonblank "team_id" team_id in
+  let* channel_id = validate_nonblank "channel_id" channel_id in
+  let* thread_ts = validate_optional_nonblank "thread_ts" thread_ts in
+  let* user_id = validate_nonblank "user_id" user_id in
+  Ok (Slack { team_id; channel_id; thread_ts; user_id })
+;;
+
+let unrouted reason =
+  match validate_nonblank "reason" reason with
+  | Ok reason -> Unrouted { reason }
+  | Error message -> invalid_arg message
+;;
 
 let is_routable = function
   | Unrouted _ -> false
@@ -129,11 +172,31 @@ let to_yojson = function
   | Unrouted { reason } ->
     `Assoc [ ("kind", `String "unrouted"); ("reason", `String reason) ]
 
-let ( let* ) = Result.bind
-
 let assoc_fields = function
   | `Assoc fields -> Ok fields
   | _ -> Error "continuation_channel must be a JSON object"
+
+let validate_unique_fields fields =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest ->
+      if List.mem name seen
+      then Error (Printf.sprintf "continuation_channel: duplicate field %s" name)
+      else loop (name :: seen) rest
+  in
+  loop [] fields
+;;
+
+let validate_allowed_fields ~kind allowed fields =
+  match List.find_opt (fun (name, _) -> not (List.mem name allowed)) fields with
+  | None -> Ok ()
+  | Some (name, _) ->
+    Error
+      (Printf.sprintf
+         "continuation_channel: field %s is not allowed for kind %s"
+         name
+         kind)
+;;
 
 let string_field name fields =
   match List.assoc_opt name fields with
@@ -154,38 +217,46 @@ let optional_string_field name fields =
 
 let of_yojson json =
   let* fields = assoc_fields json in
+  let* () = validate_unique_fields fields in
   let* kind = string_field "kind" fields in
   match kind with
   | "dashboard" ->
+    let* () = validate_allowed_fields ~kind [ "kind"; "thread_id" ] fields in
     let* thread_id = string_field "thread_id" fields in
-    Ok (Dashboard { thread_id })
+    dashboard ~thread_id
   | "discord" ->
+    let* () =
+      validate_allowed_fields
+        ~kind
+        [ "kind"
+        ; "guild_id"
+        ; "channel_id"
+        ; "parent_channel_id"
+        ; "thread_id"
+        ; "user_id"
+        ]
+        fields
+    in
     let* channel_id = string_field "channel_id" fields in
     let* user_id = string_field "user_id" fields in
     let* guild_id = optional_string_field "guild_id" fields in
     let* parent_channel_id = optional_string_field "parent_channel_id" fields in
     let* thread_id = optional_string_field "thread_id" fields in
-    Ok
-      (Discord
-         { guild_id
-         ; channel_id
-         ; parent_channel_id
-         ; thread_id
-         ; user_id
-         })
+    discord ~guild_id ~channel_id ~parent_channel_id ~thread_id ~user_id
   | "slack" ->
+    let* () =
+      validate_allowed_fields
+        ~kind
+        [ "kind"; "team_id"; "channel_id"; "thread_ts"; "user_id" ]
+        fields
+    in
     let* channel_id = string_field "channel_id" fields in
     let* user_id = string_field "user_id" fields in
     let* team_id = optional_string_field "team_id" fields in
     let* thread_ts = optional_string_field "thread_ts" fields in
-    Ok
-      (Slack
-         { team_id
-         ; channel_id
-         ; thread_ts
-         ; user_id
-         })
+    slack ~team_id ~channel_id ~thread_ts ~user_id
   | "unrouted" ->
+    let* () = validate_allowed_fields ~kind [ "kind"; "reason" ] fields in
     let* reason = string_field "reason" fields in
-    Ok (Unrouted { reason })
+    Ok (unrouted reason)
   | other -> Error (Printf.sprintf "continuation_channel: unknown kind: %s" other)

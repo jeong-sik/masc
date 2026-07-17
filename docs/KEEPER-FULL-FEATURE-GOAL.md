@@ -12,6 +12,8 @@ documents and must be refreshed from their authoritative sources.
 
 Current implementation and PR reachability:
 [`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md).
+Current browser-ready Goal Matrix:
+[`2026-07-17-keeper-full-feature-goal-matrix.html`](audit/2026-07-17-keeper-full-feature-goal-matrix.html).
 
 ## 1. Copyable Goal
 

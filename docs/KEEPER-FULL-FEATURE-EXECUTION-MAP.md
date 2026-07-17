@@ -2,10 +2,11 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-16 21:25 KST
-> MASC `origin/main`: `0ffe7cfe07`
-> OAS `origin/main`: `3a6c92c715`
-> Latest published OAS: `v0.213.0` at `e43baf8fe`
+> Checked: 2026-07-17 13:08 KST
+> MASC `origin/main`: `16f3d47473`
+> OAS `origin/main`: `b2a9478ff3`
+> Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
+> Browser matrix: [`2026-07-17-keeper-full-feature-goal-matrix.html`](audit/2026-07-17-keeper-full-feature-goal-matrix.html)
 
 This document explains why both repositories are changing, what is already on
 `main`, what exists only inside a stacked branch, and where the remaining work
@@ -13,7 +14,8 @@ belongs. Refresh every live fact before acting.
 
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
-`git merge-base --is-ancestor`; checked 2026-07-16 21:25 KST; confidence High.
+`git merge-base --is-ancestor`, and exact source call-path inspection; checked
+2026-07-17 13:08 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -108,24 +110,20 @@ The embedded catalog and typed provider binding replace endpoint/model-name
 inference. Capability, reasoning dialect, request shape, credentials, and
 fallback order come from declared configuration.
 
-OAS #2623 is on `main`: it adds a typed provider-native input-token count
-contract without estimates. OAS #2624 adds Anthropic transport, but is currently
-conflicting, non-Draft, and not on `main`; it needs rebase, review fixes, and
-full CI.
+OAS #2623 and #2624 are on `main`: the contract and Anthropic transport expose
+provider-native input-token counting without estimates. MASC does not yet use
+that count to prove a compacted full request fits the selected runtime.
 
-`v0.213.0` predates #2589 and #2623. MASC's current `v0.213.0` pin therefore
-contains typed overflow/JSON boundary work but not those two later commits.
-OAS #2625 proposes `v0.214.0`; it is a release operation, not execution-stack
-completion.
+`v0.215.0` adds exact `WithExecutionEnv` Tool occurrence and binds recursive
+work to the exact Tool attempt. MASC pins release SHA `a7ea83fbbf`; later OAS
+main commits are not silently treated as part of that release.
 
 ### 4.2 Typed image and audio providers
 
-OAS #2610 -> #2612 -> #2614 -> #2615 is a separate Draft stack for typed
-catalog-driven Image and Audio generation. It belongs in OAS because provider
-wire contracts and model capabilities are generic. MASC later exposes those
-capabilities as Keeper tools and dashboard blocks.
-
-This stack is valuable but must not block Gate, Lane, or compaction completion.
+Typed catalog-driven Image and Audio provider work through #2612, #2615, and
+#2629 is on OAS `main`. It belongs in OAS because provider wire contracts and
+model capabilities are generic. MASC still owns Keeper tools, durable product
+operations, and dashboard blocks that consume those capabilities.
 
 ### 4.3 One finite-run execution SSOT
 
@@ -150,15 +148,12 @@ Agent_run
         -> nested child Agent_run
 ```
 
-The diagram above is current stacked shape, not the complete target hierarchy.
-The current reducer permits `Tool_invocation -> Tool_attempt` and separately
-parents a nested child `Agent_run` directly to `Tool_invocation`. It has no
-typed `PreTool`/`PostTool` closure and cannot parent a child Tool invocation or
-Agent run to the exact Tool attempt that created it. That would merge child
-history across retries and cannot represent recursive Tool/collection
-composition losslessly. Before production wiring, the reducer and projections
-must implement the hierarchy in the normative Goal without adding
-Keeper/Fusion/MASC node kinds to OAS.
+The reducer now binds child work to the exact Tool attempt (#2637) and #2640
+pins flattened-recursion rejection. Exact occurrence propagation through the
+remaining lifecycle hooks/events is still open in OAS #2642. Typed
+`PreTool`/`PostTool` closure and the production single-writer cut remain before
+the normative hierarchy is complete. Keeper/Fusion/MASC node kinds never enter
+OAS.
 
 Every scope admits one top-level Agent run, owns one logical sequence, and
 closes at lifecycle completion. Store directory, application switch, and CPU
@@ -180,26 +175,19 @@ run-local `Commit_outcome_unknown`; it does not schedule product work.
 
 ## 5. OAS Execution Stack: Current Truth
 
-| PR | Current reachability | Verdict |
+| Surface | Current reachability | Verdict |
 |---|---|---|
-| #2608, 5,154 changed lines | Draft, behind `main`, full CI green, not on main | KEEP architecture; update and re-review |
-| #2611, 7,884 changed lines relative parent | non-Draft, stacked on #2608, not on main | return Draft; current-head full CI required |
-| #2618 | merged into #2611's feature branch, not `main` | KEEP run-local writer; not shipped |
-| #2622, 1,989 changed lines | Draft, stacked on #2611, lightweight checks only | KEEP/HOLD; body and full proof are stale |
+| `v0.215.0` / #2639 | published and pinned by MASC | KEEP exact occurrence/attempt foundation |
+| #2640 | OAS `main`, after release | KEEP recursion fence; not in MASC pin |
+| #2642 | Draft, current CI running | REVIEW exact invocation propagation; no MASC semantics |
+| #2643 | Draft design | REVIEW recursive executable contract against the normative Goal |
+| `Durable_event` / `Journal_bridge` | live public and production callers remain | KILL in the activation hard cut |
+| independent `Raw_trace.record_*` | live writer in `agent_trace` | KILL writer; keep cursor-backed projection only |
 
-The cumulative #2608 -> #2611 -> #2622 diff is about 13,741 additions across 67
-files. That size is not proof of a wrong boundary, but it makes review and
-landing risk high. Before production wiring:
-
-1. restore Draft discipline and current-head CI;
-2. resolve reviews against the real Eio 1.3 `Mutex.use_ro` contract;
-3. add typed PreTool/attempt/PostTool, exact attempt-owned child edges,
-   receipt, and unknown-outcome semantics;
-4. prove the normal public Agent API stays simple;
-5. wire the new Journal and delete old writers in one hard cut.
-
-Private and unwired means the stack currently changes no production Agent
-behavior.
+Journal/store/lane-writer/codec foundations are now on `main`, but foundation
+is not activation. Production still writes overlapping histories. The next OAS
+execution slice must wire one Journal writer while deleting the old writers and
+public selection surface in the same cut.
 
 ## 6. OAS Single-Writer Hard Cut
 
@@ -242,28 +230,39 @@ Verified main-reachable changes include:
 - #24727: remove the public heuristic compaction facade;
 - #24810: recover Auto Judge backlog without globally blocking Keepers;
 - #24856: remove fixed checkpoint ToolResult count/byte caps;
-- #24868: pin OAS `v0.213.0` for typed overflow and JSON boundaries;
+- #24868 and later pin slices: reach the current OAS `v0.215.0` release;
 - #24879: begin Board observation from the exact origin boundary.
+- #24961: remove the Fusion provider panel cap;
+- #25001: delete time-window Keeper queue dedup;
+- #25009: name the OAS `WithExecutionEnv` boundary exactly;
+- #25022: surface exact OAS Tool occurrence in MASC;
+- #24836: scope Gate retry lookup to one workspace;
+- #24907: extract typed compaction evidence without changing compaction authority.
+- #24957: carry exact OAS Tool invocation identity through the MCP boundary;
+- #24968: remove zombie Fusion concurrency settings.
 
 Why these were removed: elapsed age, retry count, budget, health score,
 circuit state, and arbitrary caps were being used as execution authority.
 They caused pause, eviction, truncation, or global coupling without proving a
 domain fact.
 
-## 8. MASC: Stack-Internal or Draft, Not Yet on `main`
+## 8. MASC: Open or Local, Not Yet on `main`
 
 | Work | Current truth | Missing proof |
 |---|---|---|
-| #24857 -> #24860 -> #24862 -> #24859 | merged only through feature bases | land semantic-sanitizer purge, structural units, operation projection on main |
-| #24737 | merged into a Memory feature base only | durable Memory owner drain is not on main |
-| #24873 | Draft, main-based, 398 lines, full CI green | production consumer and restart execution |
-| #24875 | Draft, main-based, 399 lines, Build running | durable compaction operation, source CAS, reinjection |
-| #24876 | Draft root, currently conflicting | rebase the Gate stack root |
-| #24877 -> #24880 -> #24883 | clean/green stacked children | parent landing; per-item Judge start/terminal report |
+| #25018 | Draft, mergeable, full CI green | merge exact settlement source index |
+| #24971 | Draft, mergeable, full CI green | merge exact private JSONL cursor |
+| #25026 | Draft stacked on #24971, lightweight green | retarget after parent and run full CI |
+| canonical settlement receipt leaf | local, 218 changed lines | latest-main rebase, focused build, Draft PR |
+| settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
+| structural compaction leaf | local, 399 changed lines; hostile code findings repaired | real-provider dispatch regression and focused build still required before Draft PR |
+| per-Keeper Auto Judge drain | local, 397 changed lines | latest-main rebase/focused build and a separate monotonic durable FIFO sequence leaf |
+| #25019 | Draft, chat-admission slice; CI running | not a durable compaction operation or fit proof |
+| #24993 | conflicting and red | supersede; do not use as current compaction proof |
+| #24994 | Draft, green typed terminal leaf | re-evaluate after clean replacement stack |
 
-This is why the product is substantially less constrained than 48 hours ago
-but not yet “100% full feature.” Much deletion is live; the replacement durable
-composition is still partly foundation or feature-branch-only.
+The removal work is live, but the replacement durability is not. A green
+foundation, local commit, or stack-internal merge is not production behavior.
 
 ## 9. MASC Target Composition
 
@@ -297,18 +296,26 @@ claim policy, and owner wake.
 
 ## 10. Remaining Critical Path
 
-1. land or restack feature-branch-only MASC deletion/foundation commits;
-2. finish the OAS finite-run attempt/receipt contract;
-3. perform the OAS single-writer hard cut and release it;
-4. pin that release in MASC;
-5. persist MASC operation-to-OAS run/node/receipt references;
-6. make progress, waiting, wake, and restart reconciliation durable per Keeper;
-7. make compaction a durable lane operation with exact source CAS;
-8. hard-cut ToolResult externalization/hydration and legacy Memory heuristics;
-9. wire Scheduler, Connector, Fusion, and typed Model/Agent/Keeper/Tool
-   collection adapters without exposing MASC concepts through OAS;
-10. prove mixed multi-Keeper restart, Gate, compaction, and dashboard causality;
-11. delete obsolete implementation, tests, environment knobs, and current docs.
+1. complete settlement source identity, canonical receipt, exact cursor, WAL
+   commit/recovery, and checkpoint outcome;
+2. activate the OAS execution Journal as sole writer and delete
+   `Durable_event`, `Journal_bridge`, and independent Raw_trace writes;
+3. preserve closed structural compaction units and exact open Tool/progress
+   suffix through real provider dispatch;
+4. count the full next request with provider-native truth and run durable LLM
+   compaction waves until it fits, without an attempt cap or truncation;
+5. move compaction to a source-CAS durable operation that releases and wakes
+   only its Keeper lane;
+6. replace Auto Judge global admission with per-Keeper owner drain and a
+   monotonic durable FIFO sequence;
+7. replace volatile/drop Memory and Artifact heuristics with durable owner
+   work and exact identity;
+8. compose Model, Agent, Keeper, Tool, Fusion, Connector, Scheduler, `Any`,
+   `Any[]`, and `AsyncAny[]` under one typed operation law;
+9. prove Task LLM verification, Scheduler fresh Gate/iCalendar semantics,
+   multi-Connector origin, Fusion joins, and causal dashboard projection;
+10. run mixed-lane restart and 48-hour live evidence, then delete stale code,
+    tests, environment knobs, and current docs.
 
 The next companion document is the exact purge manifest. It must distinguish
 true Keeper execution constraints from legitimate transport page sizes,

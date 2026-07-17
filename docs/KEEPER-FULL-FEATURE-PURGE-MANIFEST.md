@@ -3,15 +3,15 @@
 > Status: implementation deletion and replacement contract
 > Normative goal: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
 > Live map: [`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md)
-> Source checkpoint: MASC `dbf140cbdc`, OAS `3a6c92c715`
-> Checked: 2026-07-16 KST
+> Source checkpoint: MASC `16f3d47473`, OAS `b2a9478ff3`, pinned OAS `v0.215.0` at `a7ea83fbbf`
+> Checked: 2026-07-17 13:08 KST
 
 This manifest names what must die, what must be rewritten, and what is an
 objective boundary worth keeping. It is deliberately narrower than a migration
 plan: retired execution authorities are not compatibility targets.
 
 [근거] `rg` over both source trees, exact production call-site inspection,
-`git merge-base --is-ancestor`, and current PR ancestry; checked 2026-07-16;
+`git merge-base --is-ancestor`, and current PR ancestry; checked 2026-07-17;
 confidence High.
 
 ## 1. The Entire Journal Law
@@ -239,6 +239,23 @@ operation Journal, exact receipt, canonical payload digest, and cursor span
 provide an exact join. Canonical bytes may be inline or addressed by an
 Artifact reference. Open ToolUse, active progress, unresolved suffixes, and
 currently unjoined closed Tool cycles remain exact.
+
+Current-main defects that must be removed in the replacement slice:
+
+- `keeper_run_prompt` applies `repair_broken_tool_call_pairs` immediately before
+  provider dispatch and can delete a checkpointed open ToolUse;
+- the current LLM plan receives no selected-runtime fit target;
+- acceptance checks only that serialized bytes decreased, not that the complete
+  next request fits the provider-native context window;
+- a transcript larger than the compaction model's own window has no durable
+  LLM wave protocol;
+- `primary_model_max_tokens` configures the working context but is not a
+  provider-native full-request count or an acceptance proof.
+
+The replacement uses closed structural units, preserves the open suffix
+exactly through real dispatch, counts the complete next request through a
+provider-native contract, and records `Insufficient_reduction` as durable work
+rather than an inline retry cap.
 
 Delete the `Deterministic` / `extractive` compaction mode and
 `MASC_KEEPER_COMPACTION_MODE`.

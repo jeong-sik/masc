@@ -2,8 +2,8 @@
 
 > Status: **Draft / Candidate SSOT** — `main` 병합 전에는 정본이 아님
 > Consolidates: ~65 design/audit sources (see §10 Evidence Source Index); 이 PR은 원문을 archive하지 않음
-> Last-updated: **2026-07-15**
-> OAS pin snapshot: **agent_sdk 0.212.0**. 값의 정본은 `scripts/oas-agent-sdk-pin.sh`와 lockfile이며 이 문서가 아님. See §2.6.
+> Last-updated: **2026-07-17**
+> OAS pin snapshot: **agent_sdk 0.215.0** at `a7ea83fbbf`. 값의 정본은 `scripts/oas-agent-sdk-pin.sh`와 lockfile이며 이 문서가 아님. See §2.6.
 > Scope: MASC (Multi-Agent Streaming Coordination) + OAS (OCaml Agent SDK) product line.
 
 ---
@@ -13,7 +13,7 @@
 - [0. Meta — how agents use this doc](#0-meta)
 - [1. North Star & Non-Goals](#1-north-star--non-goals)
 - [2. The Boundary Law (+ crossover findings)](#2-the-boundary-law)
-- [2.6 OAS Version Pin & Pending 0.213 Contract](#26-oas-version-pin)
+- [2.6 OAS Version Pin & Current 0.215 Contract](#26-oas-version-pin)
 - [3. Subsystem cards (direction + audited snapshot)](#3-subsystem-ssot)
   - [3.1 Board](#31-board) · [3.2 Legacy Goal (retired)](#32-goal) · [3.3 Task](#33-task) · [3.4 Effect Permission Boundary](#34-hitlgate) · [3.5 Scheduler](#35-scheduler) · [3.6 Connector](#36-connector) · [3.7 Fusion](#37-fusion) · [3.8 Keeper (Lane-Per-Keeper)](#38-keeper-lane-per-keeper) · [3.9 Memory](#39-memory) · [3.10 Runtime (Provider/Model catalog)](#310-runtime-providermodel-catalog) · [3.11 Dashboard-Chat](#311-dashboard-chat)
   - [3.12 OAS Internals (pure library)](#312-oas-internals) · [3.13 Keeper-as-a-Tool (cross-model invocation)](#313-keeper-as-a-tool) · [3.14 IDE Observation Plane v2](#314-ide-observation-plane-v2) · [3.15 Keeper-Config SSOT](#315-keeper-config-ssot)
@@ -37,6 +37,9 @@
 
 현재 Keeper 실행 경계 수술의 목표 계약, acceptance proof, ownership, PR
 dependency order는 [`KEEPER-FULL-FEATURE-GOAL.md`](../KEEPER-FULL-FEATURE-GOAL.md)를 따른다.
+실시간 구현 상태와 다음 작업은
+[`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](../KEEPER-FULL-FEATURE-EXECUTION-MAP.md)와
+[`2026-07-17-keeper-full-feature-goal-matrix.html`](../audit/2026-07-17-keeper-full-feature-goal-matrix.html)을 따른다.
 
 **읽는 순서 (Haiku급 에이전트 기준):**
 
@@ -189,23 +192,23 @@ consumer ──▶ MASC (workspace collaboration / orchestration) ──depends 
 상세 근거는 §4.13에 보존한다. §4.13은 별도 first-class goal 묶음이 아니라 이 표의 설명 appendix다.
 
 <a name="26-oas-version-pin"></a>
-### 2.6 OAS Version Pin & Pending 0.213 Contract
+### 2.6 OAS Version Pin & Current 0.215 Contract
 
-MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치**로 고정한다. "0.212 breaking release"라는 서술은 pin 값이 아니다 — 아래가 pin 값이다 (전부 grep 확인).
+MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치**로 고정한다. 과거 crossover 버전 서술은 pin 값이 아니다 — 아래가 현재 pin 값이다.
 
 | 위치 | 내용 | 의미 |
 |------|------|------|
-| `dune-project:62` | `(agent_sdk (>= 0.212.0))` | 빌드 제약(하한) |
-| `masc.opam:33` | `"agent_sdk" {>= "0.212.0"}` | opam 제약(하한) |
-| `masc.opam.locked:14` | `"agent_sdk" {= "0.212.0"}` | **정확 pin (= 0.212.0)** |
-| `masc.opam.locked:220-221` | `agent_sdk.0.212.0` @ `git+https://github.com/jeong-sik/oas.git#b02bc16f57b18542abae17023e1a2b886cda7347` | 소스 SHA 고정 |
+| `dune-project:62` | `(agent_sdk (>= 0.215.0))` | 빌드 제약(하한) |
+| `masc.opam:33` | `"agent_sdk" {>= "0.215.0"}` | opam 제약(하한) |
+| `masc.opam.locked:14` | `"agent_sdk" {= "0.215.0"}` | **정확 pin (= 0.215.0)** |
+| `masc.opam.locked:220-221` | `agent_sdk.0.215.0` @ `git+https://github.com/jeong-sik/oas.git#a7ea83fbbfeb8ff0b79b13f911c134be3895270a` | 소스 SHA 고정 |
 | `scripts/oas-agent-sdk-pin.sh` | pin SHA + rationale | **pin SSOT** (dune-project:60 주석이 이 스크립트를 정본으로 지목) |
 
-- **현재 pinned = agent_sdk 0.212.0** (git SHA `b02bc16f`). 0.212.0이 최신 tagged release.
-- **Pending 0.213 계약 (미tag, OAS `CHANGELOG.md` Unreleased):** agent-as-tool input 계약이 **정확히 하나의 required object 필드 `{"prompt": "..."}`**로 축소. `Agent_tool.config.input_parameters` 및 scalar-string invocation(`Tool.execute tool (\`String prompt)`) 제거. 근거: OAS `docs/migrations/0.213-agent-tool-input.md`, `CHANGELOG.md` Unreleased §Breaking. 0.213 pin bump 시 Goal 5(Keeper-as-a-Tool·Fusion tool 조립)와 §3.13이 이 단일-`prompt`-object 계약에 맞춰 재검증 대상 — MASC가 child agent에 넘기던 다중 필드는 `prompt`로 접거나 별도 typed tool로 분리해야 한다.
-- 함께 Unreleased: 암묵적 60s/30s HTTP deadline 제거(명시 `timeout_s`만 적용, clock 없는 deadline은 typed `AcceptRejected`), hook `Skip`/`Override` 제거. 이 세 breaking은 §3.10 Runtime·§3.12 OAS internals·§3.4 effect permission 경계에 영향 — 0.213 bump는 별도 slice로 다룬다.
+- **현재 pinned = agent_sdk 0.215.0** (release SHA `a7ea83fbbf`). MASC는 `Tool.WithExecutionEnv`의 exact invocation occurrence와 exact `Tool_attempt` child binding을 소비할 수 있다.
+- `v0.215.0`은 OAS execution Journal/store/runtime foundation을 포함하지만 production single-writer hard cut은 아니다. `Durable_event`, `Journal_bridge`, independent `Raw_trace.record_*`, Builder journal surface가 OAS main에 남아 있으므로 Goal의 Journal sole-writer acceptance는 아직 미충족이다.
+- OAS main은 release 뒤 #2640 recursive-work fence까지 전진했다. 미발행 main을 MASC pin으로 간주하지 않으며, 다음 pin은 release artifact와 surface drift 검증 뒤 별도 slice로 진행한다.
 
-> [근거] `bash scripts/check-oas-pin.sh`와 `gh release list --repo jeong-sik/oas`; 2026-07-15 확인; 신뢰도 High. 이 절은 확인 시점 snapshot이며 이후 값은 pin script/release 상태가 정본이다.
+> [근거] `bash scripts/check-oas-pin.sh`, `gh api repos/jeong-sik/oas/releases/latest`, OAS writer call-site `rg`; 2026-07-17 13:08 KST 확인; 신뢰도 High. 이후 값은 pin script/release 상태가 정본이다.
 
 ---
 
@@ -342,7 +345,7 @@ OAS repo 구현자를 위한 카드다. MASC consumer는 OAS 내부를 복제하
 - **경계 계약:** OAS lib에 MASC 어휘 0건(§2.2 grep 확정). pricing은 telemetry-only(execution gate 아님). `max_tokens` synthesis 금지(override 없으면 omit → provider default). capability = serving-runtime × model(WHAT), NOT host/URL(WHERE).
 - **불변식:** 각 streaming retry attempt는 buffered, 정확히 하나의 committed attempt만 consumer에 visible. unknown host/provider/model → typed Unknown/None/fail-closed. **production `assert false`를 control flow로 쓰지 않는다** — unreachable proof arm에만 허용(OAS `.ci/hardening-baseline.json`이 assert false를 ratchet에서 제외하는 근거와 동일). control-flow용 실패는 `` `Internal `` 등 typed error로 반환.
 - **결정론↔LLM:** **OAS는 순수 라이브러리 = 전부 결정론.** 유일한 LLM 호출은 provider adapter의 **opaque forward** — provider가 반환하는 바이트는 OAS에게 불투명하고, OAS는 그 내용에 판단을 하지 않는다(파싱/재직렬화만).
-- **현재 상태:** Stdlib Mutex가 Eio fiber 경로에서 OS thread를 block(`lib/base/context.ml`·`lib/agent/agent_registry.ml`·`lib/llm_provider/provider_registry.ml`·`lib/llm_provider/metrics.ml`; extraction이 명명한 `content_replacement_state.ml`은 HEAD ls-files 미확인 → **NEEDS_LOCATION**). OAS lib 전체 `assert false` = 1건(`lib/error_domain.mli`), `lib/pipeline/` = 0건(extraction의 "pipeline stage assert-false" 사이트는 HEAD 미확인 → **NEEDS_LOCATION**; acceptance는 "control-flow assert false = 0 유지"). 0.213 Unreleased 계약(§2.6) 대기.
+- **현재 상태:** OAS 0.215는 crash-durable Journal/store/runtime foundation과 exact Tool occurrence/attempt-owned child edge를 제공한다. 그러나 production Agent path는 여전히 `Durable_event`와 independent Raw_trace writer를 사용하므로 sole-writer activation과 old-writer deletion이 남아 있다. OAS lib의 MASC product 어휘 부재는 유지된다.
 - **open goals:** DS-3(§4.14 OAS Eio-mutex + assert-false 하드닝), Goal 2(`pricing_for_model` unknown→typed Unknown, RFC-OAS-018 Phase 2).
 
 <a name="313-keeper-as-a-tool"></a>
@@ -352,7 +355,7 @@ Goal 5의 별도 subsystem(현재 §3.7 Fusion 안에 암시만 됨). 한 keeper
 
 - **책임:** typed target + capability로 keeper/model/agent/tool을 조립 호출. K2K messages·@mention·keeper_msg_requests는 live이나 first-class "call a keeper as a tool"은 부재.
 - **소유 타입:** `CollaborationRequest`/`DurableRunRef`/`ResultContract`(미구축, Durable Intelligence C0-C4 unpromoted). `keeper.delegate/status`·`fusion.deliberate/status`가 run ref를 즉시 반환(nonblocking). Fusion 조립은 `lib/fusion/fusion_tool.ml`·`lib/fusion_core/fusion_run_registry.ml` 경유.
-- **경계 계약:** typed target + declared capability로만 라우팅; **untyped agent-name 라우팅 판단 금지.** OAS 0.213 single-`prompt`-object 계약(§2.6) 준수 — delegate 입력은 typed tool 또는 `prompt` 단일 필드.
+- **경계 계약:** typed target + declared capability로만 라우팅; **untyped agent-name 라우팅 판단 금지.** OAS public Tool contract와 `WithExecutionEnv` occurrence를 사용하되 Keeper/Fusion/Connector 의미는 MASC adapter 안에 둔다.
 - **불변식:** delegate는 nonblocking(run ref 반환), 결과는 소유 lane wake로만 도달(다른 lane pause 금지). run registry는 append-only + orphan Running drop.
 - **결정론↔LLM:** **typed target 선택 + capability routing = 결정론; delegated 모델의 출력 = LLM.** 어디로 위임할지는 판단이 아니라 typed 매칭이고, 위임받은 모델의 응답이 판단이다.
 - **현재 상태:** first-class surface 미구축(Goal 5). K2K primitive만 live.
@@ -415,13 +418,13 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 
 각 goal은 문서 안의 구현 후보 label일 뿐 제품의 Legacy Goal 타입·상태·runtime이 아니다. GitHub live queue의 상태를 복제하지 않는다. 구현 전 현재 코드에서 여전히 필요한지 재검증하고, 이미 착지했거나 방향이 폐기된 항목은 재구현하지 않고 DROP한다. 각 goal: **문제 / 결정론 vs LLM 경계 / touch할 modules·types / acceptance test / DoD.**
 
-### Goal 1 — OAS 0.212 bootstrap [MERGED SURFACE, ACCEPTANCE UNVERIFIED]
+### Goal 1 — OAS finite-run Journal activation [0.215 FOUNDATION LANDED, HARD CUT OPEN]
 
-- **문제:** typed cooperative yield + server runtime hard-cut을 400 churn 미만으로 병합.
-- **경계:** yield는 성공 host outcome(SDK error 아님, budget 미소비, lifecycle Ready). callback은 agent fiber에서 synchronous(host state inspect only, no blocking).
-- **touch:** OAS `Agent.Advanced.run_blocks/run_blocks_detailed`(`on_tool_boundary → Continue|Yield`, `run_outcome = Completed|Yielded{turn;checkpoint_stage;checkpoint}`); `Agent.run` stop gate 제거(#2590).
-- **acceptance:** yield가 provider lease 해제 후 반환; Continue가 `on_resume` invoke; checkpoint는 Yield에서만 capture.
-- **DoD/잔여 검증:** "done"은 **stacked-green 아닌 real-build integration proof 필요**. merged surface와 acceptance를 분리하며, §2.5 finding은 생존 판정에 따라 삭제 또는 focused behavior로 검증한다.
+- **문제:** OAS 0.215의 execution Journal/store/runtime foundation을 production finite-run sole writer로 활성화하고 옛 writer를 같은 hard cut에서 삭제한다.
+- **경계:** OAS는 generic Agent/Provider/Tool occurrence만 안다. MASC operation/Keeper/Gate/Fusion 의미는 OAS event에 추가하지 않는다.
+- **touch:** `Execution_journal`/`Execution_event_store`/`Execution_lane_writer` activation; `Durable_event`·`Journal_bridge`·Builder journal selector·independent `Raw_trace.record_*` 삭제; #2642 exact invocation lifecycle propagation 검증.
+- **acceptance:** attempt-before-effect, receipt-or-typed-unknown, attempt-owned recursive child edge, committed-cursor Event_bus/Raw_trace projection, projection failure가 commit을 변경하지 않음.
+- **DoD/잔여 검증:** ordinary public Agent API는 단순하게 유지되고 production execution fact writer count가 정확히 1이다. release 후 MASC pin을 별도 slice로 올린다.
 
 ### Goal 2 — 삭제 잔재 숙청 (heuristic estimator / Context_reducer / limit·budget)
 
@@ -431,12 +434,12 @@ IDE/editor 관측을 흡수하는 **passive projection read model**. extraction 
 - **acceptance:** 구현 PR마다 exact identifier·검색 경로·expected count를 명시한다(placeholder `rg <값>` 금지). caller 0인 saturation flag는 삭제; unknown model pricing은 $0 아닌 typed Unknown/None 반환.
 - **DoD:** limit/heuristic purge target 전부 grep-0 또는 typed로 대체; 이미 통합된 것은 DROP.
 
-### Goal 3 — MASC LLM compaction → configured trigger + typed provider overflow
+### Goal 3 — MASC LLM compaction → explicit request + typed provider overflow
 
-- **문제:** compaction을 configured trigger + typed provider overflow에 연결, durable reinjection·before/after·failover 증명. **단일-gate compaction이 unseen transcript tail 유실할 수 있음(#23908/#23977).**
+- **문제:** Manual 또는 명시 Scheduler request와 typed provider overflow를 durable LLM compaction에 연결하고, active anchors·provider fit·reinjection·before/after·failover를 증명한다.
 - **경계:** compaction은 MASC-owned 별도 state transition이다. trigger는 operator/config의 명시 요청 또는 typed provider overflow이며 임의 N turn/token estimate가 아니다. 최근 N개 보존, tool argument/output 절단, thinking 삭제, synthetic/stub ToolResult, overflow 뒤 동일 실행 hidden retry를 금지한다. reinjection ≠ re-observation(불변식).
 - **touch:** compaction request가 MASC-owned explicit sampling config와 typed provider overflow를 운반; `[runtime.lanes.<id>]` candidates + strategy='ordered'(failover는 이미 `keeper_turn_driver.run_named`의 `attempt_runtime_candidates` candidate-list로 배선됨 → "복원"이 아니라 `Runtime_attempt_fsm.decide` SSOT 경유로 정합 + lanes 선언 배선).
-- **acceptance:** hidden `temperature=0` fallback 없음. 결정론 설정이 요구되면 explicit config 부재가 typed error; 첫 provider 500→두 번째 성공, 전부 소진→typed "runtime lane exhausted", attempt당 manifest row 1개; before/after transcript durable.
+- **acceptance:** hidden `temperature=0` fallback 없음. closed structural unit만 LLM이 판단하고 open ToolUse/progress는 exact 보존. complete next request가 provider-native count로 selected Runtime window 안에 들어올 때만 commit하며, oversized input은 durable LLM wave로 진행. 첫 provider 500→두 번째 성공, 전부 소진→typed "runtime lane exhausted", attempt당 manifest row 1개; before/after/fit/reinjection receipt durable.
 - **DoD:** compaction durability + failover가 stacked-green이 아닌 live로 증명.
 
 ### Goal 4 — Lane Per Keeper drain + partial/question/final wake (비차단)

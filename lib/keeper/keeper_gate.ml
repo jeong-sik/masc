@@ -355,9 +355,7 @@ let rec spawn_claimed_auto_judge_entry
   in
   let provider_selection =
     try
-      Ok
-        (Hitl_summary_worker.provider_config_for_summary
-           ~keeper_name:entry.keeper_name)
+      Ok (Hitl_summary_worker.provider_config_for_summary ())
     with
     | Eio.Cancel.Cancelled _ as exn ->
       release_auto_judge approval_id;
@@ -397,7 +395,8 @@ let rec spawn_claimed_auto_judge_entry
       ~retryable:true
   | Some _, Ok None ->
     fail_before_worker
-      ~reason:"Auto Judge unavailable: no runtime provider is configured"
+      ~reason:
+        "Auto Judge unavailable: explicit [runtime].hitl_summary provider is not loaded"
       ~retryable:true
   | Some _, Error reason -> fail_before_worker ~reason ~retryable:true
 

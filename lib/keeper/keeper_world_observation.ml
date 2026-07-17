@@ -735,14 +735,6 @@ let collect_board_events_with_cursor_policy
   : pending_board_event list * int * int
   =
   try
-    (match
-       Keeper_board_attention_candidate.resume_pending
-         ~base_path
-         ~keeper_name:meta.name
-     with
-     | Ok _ -> ()
-     | Error detail ->
-       raise (Keeper_board_attention_candidate.Candidate_unavailable detail));
     let cursor_ts, cursor_post_id =
       Keeper_registry.get_board_cursor ~base_path meta.name
     in
@@ -836,10 +828,19 @@ let collect_board_events_with_cursor_policy
               | Board_signal.Unavailable unavailable ->
                 Board_signal.raise_unavailable unavailable
               | Board_signal.Available candidate ->
+                (* A read-only dashboard-preview pass (advance_cursor=false)
+                   durably records the candidate (idempotent per exact
+                   candidate identity) but must not schedule provider work:
+                   only the heartbeat path (advance_cursor=true) notifies the
+                   bounded worker. *)
                 (match
-                   Keeper_board_attention_candidate.record_and_start
-                     ~base_path
-                     candidate
+                   (if advance_cursor
+                    then Keeper_board_attention_worker.record_and_notify ~base_path candidate
+                    else (
+                      match Keeper_board_attention_candidate.record ~base_path candidate with
+                      | Keeper_board_attention_candidate.Recorded persisted
+                      | Keeper_board_attention_candidate.Duplicate persisted -> Ok persisted
+                      | Keeper_board_attention_candidate.Record_error detail -> Error detail))
                  with
                  | Ok _ -> ()
                  | Error detail ->
@@ -905,6 +906,11 @@ let collect_board_events_with_cursor_policy
     let final_events, last_cursor = consume_posts None [] recent in
     if advance_cursor
     then (
+      (* Freshness nudge: wake the bounded dispatcher once per heartbeat cycle
+         regardless of whether this cycle recorded a new candidate, so a
+         Deferred candidate whose retry timer already elapsed (or a missed
+         broadcast) is not left waiting for the dispatcher's own idle poll. *)
+      Keeper_board_attention_worker.notify ~base_path ~keeper_name:meta.name;
       match base_cursor, last_cursor with
       | None, _ -> ()
       | Some base_cursor, Some (ts, post_id)

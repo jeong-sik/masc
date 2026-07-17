@@ -15,8 +15,8 @@ type retryable_failure_kind =
   | Response_contract_unavailable
   | Durable_delivery_unavailable
   | Worker_unavailable
-  (** Retained for legacy ledger rows and the pre-redesign [start_async] path
-      (deleted in a later phase). New rows are never written with this kind. *)
+  (** Retained only for legacy ledger rows written before the retry-gate
+      redesign. New rows are never written with this kind. *)
 
 type retryable_failure =
   { kind : retryable_failure_kind
@@ -151,12 +151,6 @@ val load_candidates :
 
 val record : base_path:string -> candidate -> record_result
 
-val record_retryable_failure :
-  base_path:string ->
-  candidate ->
-  retryable_failure ->
-  (candidate, string) result
-
 val record_judgment :
   base_path:string -> candidate -> judgment -> (candidate, string) result
 
@@ -234,20 +228,5 @@ val process_with_judge :
     terminalize with [Expired_backlog] before any judge call. A [Deferred] row
     not yet due, and [Consumed]/[Terminal_failed], are returned unchanged.
     Production uses the configured judge through
-    [Keeper_board_attention_worker]. *)
-
-val record_and_start :
-  base_path:string -> candidate -> (candidate, string) result
-(** Pre-redesign scheduling path: forks a worker fiber directly from the
-    caller's domain. Superseded by
-    [Keeper_board_attention_worker.record_and_notify]; retained only until the
-    call sites migrate. Returns after the Pending row is durably committed;
-    worker availability or provider failure does not invalidate that
-    acceptance. *)
-
-val resume_pending :
-  base_path:string -> keeper_name:string -> (int, string) result
-(** Pre-redesign path: asynchronously retries every non-absorbed candidate in
-    this Keeper lane on every call, with no concurrency bound. Superseded by
-    [Keeper_board_attention_worker]'s bounded dispatcher; retained only until
-    the call sites migrate. The returned count is observability only. *)
+    [Keeper_board_attention_worker], which owns scheduling: this module has
+    no fiber-forking or scheduling API of its own. *)

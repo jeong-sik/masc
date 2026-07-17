@@ -757,22 +757,46 @@ let test_update_ledger_compacts_to_distinct () =
   with_temp_base "keeper-board-attention-compaction" @@ fun base_path ->
   let pending = record_or_fail ~base_path (candidate ()) in
   let keeper_name = pending.keeper_name in
-  (* Record several retryable failures against the same candidate id. Each is a
-     committed update; before compaction the ledger grew by one row per update
-     (and each update re-parsed the whole ledger, so writes were O(n^2)). *)
+  (* Drive several retryable judge failures against the same candidate id via
+     process_with_judge (each commits a Deferred update through update_ledger).
+     Before compaction the ledger grew by one row per update (and each update
+     re-parsed the whole ledger, so writes were O(n^2)); this proves it still
+     holds exactly one row per distinct candidate_id. *)
   let transitions = 6 in
+  let now_ref = ref 1000.0 in
+  let now () = !now_ref in
+  (* max_pending_age_sec widened well past what 6 capped-exponential
+     transitions accumulate (test_policy's default would expire the
+     candidate partway through the drive). *)
+  let policy : A.retry_policy =
+    { test_policy with max_attempts = transitions + 2; max_pending_age_sec = 100_000.0 }
+  in
+  let retryable index =
+    A.Judge_retryable
+      { failure =
+          { kind = A.Provider_unavailable
+          ; detail = Printf.sprintf "provider unavailable %d" index
+          ; failed_at = !now_ref
+          }
+      ; retry_after = None
+      }
+  in
   ignore
     (List.fold_left
        (fun current index ->
-         let failure : A.retryable_failure =
-           { kind = A.Provider_unavailable
-           ; detail = Printf.sprintf "provider unavailable %d" index
-           ; failed_at = 102.0 +. float_of_int index
-           }
-         in
-         match A.record_retryable_failure ~base_path current failure with
-         | Ok candidate -> candidate
-         | Error detail -> Alcotest.failf "failure %d not recorded: %s" index detail)
+          match
+            A.process_with_judge
+              ~base_path
+              ~now
+              ~policy
+              ~judge:(fun _ -> Error (retryable index))
+              current
+          with
+          | Ok ({ status = A.Deferred { retry = { not_before; _ }; _ }; _ } as updated) ->
+            now_ref := not_before +. 0.001;
+            updated
+          | Ok _ -> Alcotest.fail "expected Deferred mid-compaction drive"
+          | Error detail -> Alcotest.failf "failure %d not recorded: %s" index detail)
        pending
        (List.init transitions Fun.id)
      : A.candidate);
@@ -783,14 +807,14 @@ let test_update_ledger_compacts_to_distinct () =
   match A.load_candidates ~base_path ~keeper_name with
   | Ok [ latest ] ->
     (match latest.status with
-     | A.Pending { last_failure = Some observed } ->
+     | A.Deferred { failure = observed; retry = { attempts; _ }; _ } ->
        Alcotest.(check string)
          "latest failure wins after compaction"
-         "provider unavailable 5"
-         observed.detail
-     | A.Pending { last_failure = None } | A.Judged _ | A.Deferred _
-     | A.Consumed _ | A.Terminal_failed _ ->
-       Alcotest.fail "compaction dropped the latest pending failure")
+         (Printf.sprintf "provider unavailable %d" (transitions - 1))
+         observed.detail;
+       Alcotest.(check int) "attempts accumulate across compacted updates" transitions attempts
+     | A.Pending _ | A.Judged _ | A.Consumed _ | A.Terminal_failed _ ->
+       Alcotest.fail "compaction dropped the latest deferred state")
   | Ok candidates ->
     Alcotest.failf "expected one compacted candidate, got %d" (List.length candidates)
   | Error detail -> Alcotest.failf "load after compaction failed: %s" detail

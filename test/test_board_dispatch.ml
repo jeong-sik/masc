@@ -563,6 +563,93 @@ let test_first_board_observation_starts_at_current_head () =
            event.Keeper_world_observation.post_id
        | _ -> Alcotest.fail "expected exactly one new Board event")
 
+(** Counterfactual for the RFC-connector-ambient-attention-wake P1 read/write
+    split: a dashboard-preview scan (advance_cursor=false, reached via
+    [collect_board_events_without_advancing_cursor]) must durably record a
+    freshly-observed, non-mention board post as a board-attention candidate
+    (so relevance judging still eventually happens once a real heartbeat
+    cycle runs) but must never itself schedule provider work by notifying
+    the bounded worker — only the heartbeat path
+    ([collect_board_events], advance_cursor=true) may do that. Without this
+    split, a GET-driven dashboard refresh would wake the judge pool on every
+    page load. *)
+let test_preview_scan_records_without_notifying_worker () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let preview_keeper = "preview-no-notify-gate" in
+  let heartbeat_keeper = "heartbeat-notify-gate" in
+  let preview_meta = board_observation_meta preview_keeper in
+  let heartbeat_meta = board_observation_meta heartbeat_keeper in
+  ignore (Keeper_registry.register ~base_path preview_keeper preview_meta);
+  ignore (Keeper_registry.register ~base_path heartbeat_keeper heartbeat_meta);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.unregister ~base_path preview_keeper;
+      Keeper_registry.unregister ~base_path heartbeat_keeper)
+    (fun () ->
+       (* A dashboard preview scan on a never-before-observed keeper has no
+          persisted cursor to scan "after", so it trivially sees zero posts.
+          Seed a cursor directly (bypassing the advancing path entirely, so
+          this setup step itself cannot notify) to exercise the case that
+          actually matters: a real, new, non-mention post sitting in the
+          keeper's window. *)
+       Keeper_registry.set_board_cursor ~base_path preview_keeper 1.0 None;
+       let preview_post =
+         match
+           Board_dispatch.create_post
+             ~author:"external-author"
+             ~content:"unrelated board chatter, no mention of any keeper"
+             ~post_kind:Board.Human_post
+             ()
+         with
+         | Ok post -> post
+         | Error error -> Alcotest.fail (Board.show_board_error error)
+       in
+       let _events, new_count, _mention_count =
+         Keeper_world_observation.collect_board_events_without_advancing_cursor
+           ~base_path
+           ~meta:preview_meta
+       in
+       Alcotest.(check int)
+         "preview scan still sees the new non-mention post"
+         1
+         new_count;
+       Alcotest.(check bool)
+         "preview scan recorded the candidate to disk"
+         true
+         (match
+            Keeper_board_attention_candidate.load_candidates
+              ~base_path
+              ~keeper_name:preview_keeper
+          with
+          | Ok candidates ->
+            List.exists
+              (fun (c : Keeper_board_attention_candidate.candidate) ->
+                 String.equal
+                   c.signal.post_id
+                   (Board.Post_id.to_string preview_post.id))
+              candidates
+          | Error _ -> false);
+       Alcotest.(check bool)
+         "preview scan (advance_cursor=false) never notifies the worker"
+         false
+         (Keeper_board_attention_worker.For_testing.is_dirty
+            ~base_path
+            ~keeper_name:preview_keeper);
+       (* Contrast: the heartbeat path notifies unconditionally (a freshness
+          nudge for Deferred retries / missed broadcasts) even on its very
+          first call, when it sees zero posts of its own. *)
+       let _events, _new_count, _mention_count =
+         Keeper_world_observation.collect_board_events
+           ~base_path
+           ~meta:heartbeat_meta
+       in
+       Alcotest.(check bool)
+         "heartbeat path (advance_cursor=true) notifies the worker"
+         true
+         (Keeper_board_attention_worker.For_testing.is_dirty
+            ~base_path
+            ~keeper_name:heartbeat_keeper))
+
 let test_recent_sort_bypasses_hot_cutoff () =
   let create_post_exn ~author ~content =
     match
@@ -1932,6 +2019,10 @@ let () =
         "first observation starts at current head"
         `Quick
         (with_eio test_first_board_observation_starts_at_current_head);
+      Alcotest.test_case
+        "preview scan records without notifying worker"
+        `Quick
+        (with_eio test_preview_scan_records_without_notifying_worker);
       Alcotest.test_case "recent bypasses hot cutoff" `Quick
         (with_eio test_recent_sort_bypasses_hot_cutoff);
       Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);

@@ -20,6 +20,16 @@ let current_net : eio_net option Atomic.t = Atomic.make None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option Atomic.t = Atomic.make None
 let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option Atomic.t = Atomic.make None
 let current_sw : Eio.Switch.t option Atomic.t = Atomic.make None
+(* Owner domain of [current_sw]. [Eio.Switch] is domain-local: [Eio.Fiber.fork
+   ~sw] is only legal from the domain that created the switch. The root switch is
+   installed on the main Eio domain at bootstrap, but [get_root_switch_opt] is
+   readable from Domain_pool worker domains. Capturing the owner domain id here
+   lets callers reachable from a worker domain check ownership BEFORE forking and
+   defer instead of crashing with "Switch accessed from wrong domain!". Set
+   together with [current_sw] in [set_switch]. [restore_state] intentionally
+   leaves this untouched: the [current_sw = Some] guard in
+   [root_switch_on_current_domain] makes a stale owner id harmless. See #25015. *)
+let current_sw_domain : int option Atomic.t = Atomic.make None
 (* RFC-0107 Phase D.2c — full Eio standard environment, required by
    piaf [Client.create] (and any other API needing more than just
    [net]/[clock]).  Set once at server bootstrap; read by long-lived
@@ -75,10 +85,16 @@ let get_mono_clock_opt () =
   Atomic.get current_mono_clock
 
 let set_switch sw =
-  Atomic.set current_sw (Some sw)
+  Atomic.set current_sw (Some sw);
+  Atomic.set current_sw_domain (Some (Domain.self () :> int))
 
 let get_root_switch_opt () =
   Atomic.get current_sw
+
+let root_switch_on_current_domain () =
+  match Atomic.get current_sw, Atomic.get current_sw_domain with
+  | Some _, Some owner -> owner = (Domain.self () :> int)
+  | _, _ -> false
 
 let set_env env =
   Atomic.set current_env (Some env)

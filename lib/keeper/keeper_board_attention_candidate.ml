@@ -953,6 +953,20 @@ let start_async ~base_path candidate =
           Worker_unavailable
           "server root switch is not installed";
         false
+      | Some _ when not (Eio_context.root_switch_on_current_domain ()) ->
+        (* The server root switch is domain-local: [Eio.Fiber.fork ~sw] is only
+           legal from the domain that owns it (the main Eio domain). [start_async]
+           is reachable from Domain_pool worker domains (dashboard/status
+           projections that call [resume_pending] / [record_and_start]). Forking
+           on the root switch there raises
+           [Invalid_argument "Switch accessed from wrong domain!"], which is NOT a
+           candidate failure — the judge never ran. Defer silently: release the
+           claim and leave the candidate Pending for the main-domain path (keeper
+           turn / boot [resume_pending]) to start. Recording a retryable_failure
+           here would corrupt the ledger's meaning and drive a write flood
+           (worker retries every projection cycle). See #25015. *)
+        release_active key;
+        false
       | Some sw ->
         (try
            Eio.Fiber.fork ~sw (fun () ->

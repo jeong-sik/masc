@@ -764,6 +764,15 @@ let test_compaction_lane_bypasses_chat_backlog () =
    with
    | `Ran 8 -> check "compaction lane admits despite an inflight receipt" true
    | `Ran _ | `Busy _ -> check "compaction lane admits despite an inflight receipt" false);
+  (* Production order (#24865 review): the compaction admission released the
+     slot on return, and a follow-up turn re-entering the standard lane still
+     yields to the remaining backlog — the bypass covers the compaction
+     commit only, never the turn that follows it. *)
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy (Keeper_turn_admission.Chat_backlog _) ->
+     check "standard lane still yields to the backlog after compaction admission" true
+   | `Busy _ | `Ran () ->
+     check "standard lane still yields to the backlog after compaction admission" false);
   (* A genuinely held slot still refuses the compaction lane: it must never
      interleave with an in-flight turn. *)
   Keeper_turn_admission.For_testing.with_unpublished_turn_lock

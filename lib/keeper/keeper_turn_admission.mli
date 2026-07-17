@@ -142,10 +142,17 @@ val run_compaction_if_free
   -> keeper_name:string
   -> (unit -> 'a)
   -> [ `Ran of 'a | `Busy of autonomous_block ]
-(** [run_if_free] for a cycle that carries a manual-compaction request
-    ([Keeper_manual_compaction]), differing in exactly one fence: it does
-    not yield to the [Keeper_chat_queue] backlog and therefore never
-    returns [`Busy (Chat_backlog _)].
+(** [run_if_free] for the manual-compaction critical section, differing in
+    exactly one fence: it does not yield to the [Keeper_chat_queue] backlog
+    and therefore never returns [`Busy (Chat_backlog _)].
+
+    Sole sanctioned caller: [Keeper_manual_compaction.run_admitted]. The
+    admitted section must be the compaction commit only — a deterministic
+    checkpoint/FSM operation — never a provider turn; any follow-up turn
+    re-enters [run_if_free] and yields to the backlog. This module cannot
+    name [Keeper_manual_compaction] types without inverting the layering,
+    so the closure stays generic here and the compaction-only shape is
+    enforced at that single wrapper.
 
     The standard lane's backlog yield assumes the chat consumer can drain
     the queue. When the keeper's context has overflowed its provider

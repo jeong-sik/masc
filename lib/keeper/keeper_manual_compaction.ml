@@ -131,3 +131,22 @@ let observe_manifest ~keeper_name = function
       ~labels:[ "keeper", keeper_name; "phase", "manual_compaction_manifest" ]
       ()
 ;;
+
+(* Single sanctioned caller of [Keeper_turn_admission.run_compaction_if_free]:
+   the admitted section is exactly [run] (checkpoint recovery + manifest
+   observation), never a provider turn, and the slot releases as soon as it
+   returns. A follow-up turn re-enters the standard admission lane where a
+   chat backlog wins (#24865 review). *)
+let run_admitted ~(config : Workspace.config) ~(meta : keeper_meta) =
+  match
+    Keeper_turn_admission.run_compaction_if_free
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+      (fun () -> run ~config ~meta)
+  with
+  | `Busy block -> `Busy block
+  | `Ran (Error failure) -> `Compaction_failed failure
+  | `Ran (Ok success) ->
+    observe_manifest ~keeper_name:meta.name success.manifest;
+    `Applied success
+;;

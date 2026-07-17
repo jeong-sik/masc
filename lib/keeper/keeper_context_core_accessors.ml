@@ -473,7 +473,6 @@ let deserialize_context ~eio (s : string) ~max_tokens : working_context =
   let system_prompt = (match Json_util.assoc_member_opt "system_prompt" json with Some (`String s) -> s | _ -> "") in
   let messages =
     (match Json_util.assoc_member_opt "messages" json with Some (`List l) -> l | _ -> []) |> List.map message_of_json
-    |> repair_broken_tool_call_pairs
   in
   let context = create_oas_context ~eio in
   let checkpoint =

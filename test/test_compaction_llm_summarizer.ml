@@ -114,21 +114,21 @@ let test_valid_partition_accepted () =
   Alcotest.(check bool)
     "a full disjoint partition of [0,5) parses"
     true
-    (is_ok (C.plan_of_json ~message_count:5 json))
+    (is_ok (C.plan_of_json ~unit_count:5 json))
 
 let test_all_kept_rejected () =
   let json = plan_json ~summary:"n/a" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[] in
   Alcotest.(check bool)
     "keeping everything is not semantic compaction"
     true
-    (is_error (C.plan_of_json ~message_count:3 json))
+    (is_error (C.plan_of_json ~unit_count:3 json))
 
 let test_drop_only_with_kept_accepted () =
   let json = plan_json ~summary:"unused" ~kept:[ 1 ] ~summarized:[] ~dropped:[ 0 ] in
   Alcotest.(check bool)
     "drop-only plans are valid when at least one message remains"
     true
-    (is_ok (C.plan_of_json ~message_count:2 json))
+    (is_ok (C.plan_of_json ~unit_count:2 json))
 
 (* -- plan_of_json: structural violations rejected (no silent repair) -- *)
 
@@ -137,49 +137,49 @@ let test_out_of_range_rejected () =
   Alcotest.(check bool)
     "an index >= message_count is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~unit_count:2 json))
 
 let test_negative_rejected () =
   let json = plan_json ~summary:"x" ~kept:[ -1; 0 ] ~summarized:[ 1 ] ~dropped:[] in
   Alcotest.(check bool)
     "a negative index is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~unit_count:2 json))
 
 let test_duplicate_rejected () =
   let json = plan_json ~summary:"x" ~kept:[ 0; 1 ] ~summarized:[ 1 ] ~dropped:[] in
   Alcotest.(check bool)
     "an index appearing in two lists is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~unit_count:2 json))
 
 let test_missing_index_rejected () =
   let json = plan_json ~summary:"x" ~kept:[ 0 ] ~summarized:[] ~dropped:[] in
   Alcotest.(check bool)
     "a partition that omits an in-range index is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~unit_count:2 json))
 
 let test_all_dropped_rejected () =
   let json = plan_json ~summary:"S" ~kept:[] ~summarized:[] ~dropped:[ 0; 1 ] in
   Alcotest.(check bool)
     "a non-empty working set must not compact to empty output"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~unit_count:2 json))
 
 let test_empty_summary_rejected_when_summarizing () =
   let json = plan_json ~summary:"   " ~kept:[ 1 ] ~summarized:[ 0 ] ~dropped:[] in
   Alcotest.(check bool)
     "a blank summary is rejected when there are summarized indices to fold"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~unit_count:2 json))
 
 let test_missing_field_rejected () =
   let json = `Assoc [ "summary", `String "x"; "kept_indices", `List [] ] in
   Alcotest.(check bool)
     "a plan missing summarized_indices/dropped_indices is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:0 json))
+    (is_error (C.plan_of_json ~unit_count:0 json))
 
 (* -- apply: reconstruction honours the plan -- *)
 
@@ -194,13 +194,16 @@ let sample =
   ; msg Agent_sdk.Types.User "u3"
   ]
 
+let sample_units =
+  List.map (fun message -> Keeper_compaction_unit.Ordinary_message message) sample
+
 let test_apply_keeps_summarizes_drops () =
   (* kept: 3 ; summarized: 0,1 ; dropped: 2 *)
   let json = plan_json ~summary:"S" ~kept:[ 3 ] ~summarized:[ 0; 1 ] ~dropped:[ 2 ] in
-  match C.plan_of_json ~message_count:4 json with
+  match C.plan_of_json ~unit_count:4 json with
   | Error e -> Alcotest.failf "expected valid plan, got %s" e
   | Ok plan ->
-    let out = C.apply plan ~messages:sample in
+    let out = C.apply plan ~units:sample_units in
     let out_texts = texts out in
     (* summary replaces indices 0,1 at position of first summarized (0);
        index 2 dropped; index 3 kept. Result: [summary; u3]. *)
@@ -219,10 +222,10 @@ let test_apply_keeps_summarizes_drops () =
 
 let test_apply_drop_only_preserves_kept () =
   let json = plan_json ~summary:"unused" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[ 3 ] in
-  match C.plan_of_json ~message_count:4 json with
+  match C.plan_of_json ~unit_count:4 json with
   | Error e -> Alcotest.failf "expected valid plan, got %s" e
   | Ok plan ->
-    let out = C.apply plan ~messages:sample in
+    let out = C.apply plan ~units:sample_units in
     Alcotest.(check (list string))
       "drop-only removes only the selected message"
       [ "u0"; "a1"; "t2" ]

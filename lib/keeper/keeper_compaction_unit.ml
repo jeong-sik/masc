@@ -38,6 +38,7 @@ type structural_error =
       { message_index : int
       ; tool_use_id : string
       }
+[@@deriving show]
 
 type partition =
   { closed_prefix : closed_unit list
@@ -108,7 +109,7 @@ let partition messages =
             | Some _, tool_use_id :: _, _ ->
                 Error (Overlapping_tool_cycle { message_index = index; tool_use_id })
             | None, _, _ -> (
-                match add_tool_ids ~message_index:index seen_tools tool_ids with
+                match add_tool_ids ~message_index:index Id_set.empty tool_ids with
                 | Error _ as error -> error
                 | Ok seen_tools -> (
                     match tool_ids, result_ids with
@@ -155,7 +156,7 @@ let partition messages =
                     if Id_set.is_empty pending then
                       loop (index + 1)
                         (Closed_tool_cycle (List.rev messages_rev) :: units_rev)
-                        seen_tools seen_results None rest
+                        Id_set.empty Id_set.empty None rest
                     else
                       loop (index + 1) units_rev seen_tools seen_results
                         (Some { cycle with pending; messages_rev })

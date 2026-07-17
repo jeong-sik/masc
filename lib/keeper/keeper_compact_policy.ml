@@ -69,6 +69,7 @@ type compaction_rejection =
   | Runtime_identity_unavailable
   | Summarizer_unavailable
   | Plan_unavailable_or_invalid
+  | Invalid_structure of Keeper_compaction_unit.structural_error
   | Structurally_unchanged
   | Checkpoint_not_reduced
   | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
@@ -77,6 +78,8 @@ let compaction_rejection_to_string = function
   | Runtime_identity_unavailable -> "runtime_identity_unavailable"
   | Summarizer_unavailable -> "summarizer_unavailable"
   | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
+  | Invalid_structure error ->
+    "invalid_structure:" ^ Keeper_compaction_unit.show_structural_error error
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
   | Invalid_structural_evidence error ->
@@ -182,17 +185,34 @@ type requested_compaction =
   ; dropped_message_count : int
   }
 
+let unit_message_count = function
+  | Keeper_compaction_unit.Ordinary_message _ -> 1
+  | Keeper_compaction_unit.Closed_tool_cycle messages -> List.length messages
+;;
+
+let selected_message_count units selected =
+  let units = Array.of_list units in
+  List.fold_left
+    (fun count index -> count + unit_message_count units.(index))
+    0
+    selected
+;;
+
 let requested_messages (meta : keeper_meta) messages =
-  let runtime_id =
-    try
-      let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
-      if String.trim runtime_id = ""
-      then Error Runtime_identity_unavailable
-      else Ok runtime_id
-    with
-    | Failure _ -> Error Runtime_identity_unavailable
-  in
-  match runtime_id with
+  match Keeper_compaction_unit.partition messages with
+  | Error error -> Error (Invalid_structure error)
+  | Ok { closed_prefix = []; _ } -> Error Structurally_unchanged
+  | Ok { closed_prefix = units; protected_suffix } ->
+    let runtime_id =
+      try
+        let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+        if String.trim runtime_id = ""
+        then Error Runtime_identity_unavailable
+        else Ok runtime_id
+      with
+      | Failure _ -> Error Runtime_identity_unavailable
+    in
+    (match runtime_id with
   | Error _ as error -> error
   | Ok runtime_id ->
     (match
@@ -203,18 +223,22 @@ let requested_messages (meta : keeper_meta) messages =
      with
      | None -> Error Summarizer_unavailable
      | Some summarize ->
-       (match summarize ~messages with
+       (match summarize ~units with
         | None -> Error Plan_unavailable_or_invalid
         | Some plan ->
           if plan.summarized = [] && plan.dropped = []
           then Error Structurally_unchanged
           else
             Ok
-              { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
+              { messages =
+                  Keeper_compaction_llm_summarizer.apply plan ~units
+                  @ protected_suffix
               ; selected_runtime_id = plan.selected_runtime_id
-              ; summarized_message_count = List.length plan.summarized
-              ; dropped_message_count = List.length plan.dropped
+              ; summarized_message_count =
+                  selected_message_count units plan.summarized
+              ; dropped_message_count = selected_message_count units plan.dropped
               }))
+    )
 ;;
 
 let tool_block_counts messages =
@@ -287,16 +311,12 @@ let compact_for_request_typed
       ~message_count:before_messages;
     { context = ctx; decision = Rejected (trigger, reason); evidence = None }
   | Ok requested ->
-    let planned_message_count = List.length requested.messages in
-    let messages, pair_repair_stats =
-      Keeper_context_core.repair_broken_tool_call_pairs_with_stats requested.messages
-    in
-    let pair_repair_dropped_message_count =
-      planned_message_count - List.length messages
-    in
+    let pair_repair_dropped_message_count = 0 in
     let compacted_ctx =
-      sync_oas_context
-        { ctx with checkpoint = { (checkpoint_of_context ctx) with messages } }
+      { ctx with
+        checkpoint =
+          { (checkpoint_of_context ctx) with messages = requested.messages }
+      }
     in
     let after_bytes = serialized_bytes compacted_ctx in
     let reject reason =
@@ -337,20 +357,7 @@ let compact_for_request_typed
       with
       | Error error -> reject (Invalid_structural_evidence error)
       | Ok evidence ->
-        let tool_use_sample_json =
-          List.map
-            (fun (tool_use_id, tool_name) ->
-               `Assoc
-                 [ "tool_use_id", `String tool_use_id
-                 ; "tool_name", `String tool_name
-                 ])
-            pair_repair_stats.dropped_tool_use_samples
-        in
-        let tool_result_id_json =
-          List.map
-            (fun tool_use_id -> `String tool_use_id)
-            pair_repair_stats.dropped_tool_result_ids
-        in
+        let compacted_ctx = sync_oas_context compacted_ctx in
         Log.Harness.emit
           Log.Info
           ~details:
@@ -363,17 +370,6 @@ let compact_for_request_typed
                 ; "saved_checkpoint_bytes", `Int (before_bytes - after_bytes)
                 ; "before_messages", `Int before_messages
                 ; "after_messages", `Int after_messages
-                ; ( "tool_pair_repair"
-                  , `Assoc
-                      [ ( "dropped_tool_uses"
-                        , `Int pair_repair_stats.dropped_tool_uses )
-                      ; ( "dropped_tool_results"
-                        , `Int pair_repair_stats.dropped_tool_results )
-                      ; ( "dropped_messages"
-                        , `Int pair_repair_dropped_message_count )
-                      ; "dropped_tool_use_samples", `List tool_use_sample_json
-                      ; "dropped_tool_result_ids", `List tool_result_id_json
-                      ] )
                 ])
           (Printf.sprintf
              "context compaction prepared keeper=%s saved_checkpoint_bytes=%d"

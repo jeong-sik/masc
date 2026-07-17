@@ -2,7 +2,7 @@
     produces a structured {!compaction_plan}; unavailable providers and invalid
     plans fail explicitly as [None]. *)
 
-(** A validated compaction plan over a working set of [n] messages. Every
+(** A validated compaction plan over [n] closed structural units. Every
     index in [kept]/[summarized]/[dropped] is in [\[0, n)], the three sets are
     pairwise disjoint, and together they cover every index exactly once. For
     non-empty inputs, at least one [kept] or [summarized] index is required so
@@ -18,11 +18,12 @@ type compaction_plan = private
         plan parsed directly through {!plan_of_json} before provider binding. *)
   }
 
-(** [summarizer ~messages] returns [Some plan] when the LLM produced a valid
-    plan over [messages], or [None] on any failure (provider error, empty
+(** [summarizer ~units] returns [Some plan] when the LLM produced a valid plan
+    over [units], or [None] on any failure (provider error, empty
     or invalid structured response). Total and synchronous; the effect is
     hidden in the closure captured by {!make}. *)
-type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
+type summarizer =
+  units:Keeper_compaction_unit.closed_unit list -> compaction_plan option
 
 (** The low-level provider completion the summarizer drives. Defaulted to
     {!Llm_provider.Complete.complete}; overridable in tests. *)
@@ -44,26 +45,19 @@ val make
   -> unit
   -> summarizer option
 
-(** Parse+validate a raw structured response into a plan over [message_count]
-    messages. Exposed for tests. Returns [Error] with a reason on any
+(** Parse+validate a raw structured response into a plan over [unit_count]
+    closed units. Exposed for tests. Returns [Error] with a reason on any
     structural violation (out-of-range / negative / duplicate / non-covering
     indices, empty output for a non-empty working set, or a missing/empty
     summary). *)
 val plan_of_json
-  :  message_count:int
+  :  unit_count:int
   -> Yojson.Safe.t
   -> (compaction_plan, string) result
 
-(** [apply plan ~messages] rebuilds the working set from a validated [plan]:
-    [kept] indices survive verbatim, the [summarized] indices are replaced by a
-    single assistant memory-summary message ([plan.summary]), and [dropped]
-    indices are removed. Original message order is preserved; the summary is
-    inserted at the position of the first summarized index. [plan] is assumed
-    to have been validated against [List.length messages] (it partitions the
-    index space), so this is total. *)
 val apply
   :  compaction_plan
-  -> messages:Agent_sdk.Types.message list
+  -> units:Keeper_compaction_unit.closed_unit list
   -> Agent_sdk.Types.message list
 
 module For_testing : sig

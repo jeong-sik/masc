@@ -84,6 +84,15 @@ let test_closed_interstitial_cycle_is_atomic () =
     output.closed_prefix;
   check_exact "no protected suffix" [] output.protected_suffix
 
+let test_tool_id_can_repeat_after_closed_cycle () =
+  let cycle =
+    [ message T.Assistant [ use "provider-id" ]
+    ; message T.User [ result "provider-id" ] ] in
+  let output = U.partition (cycle @ cycle) |> require_ok in
+  check_exact "cycles remain distinct"
+    [ U.Closed_tool_cycle cycle; U.Closed_tool_cycle cycle ]
+    output.closed_prefix
+
 let test_ordinary_prefix_order () =
   let messages =
     [ text T.System "system"; text T.User "one"; text T.Assistant "two" ]
@@ -157,6 +166,8 @@ let () =
             test_open_interstitial_suffix_is_exact
         ; Alcotest.test_case "closed interstitial cycle" `Quick
             test_closed_interstitial_cycle_is_atomic
+        ; Alcotest.test_case "tool id reuse after closed cycle" `Quick
+            test_tool_id_can_repeat_after_closed_cycle
         ; Alcotest.test_case "ordinary prefix order" `Quick
             test_ordinary_prefix_order
         ; Alcotest.test_case "orphan result" `Quick test_orphan_result_error

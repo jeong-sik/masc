@@ -67,7 +67,7 @@ let canonical_success_replay_checkpoint
       then
         { checkpoint with
           Agent_sdk.Checkpoint.session_id
-        ; messages = Keeper_context_core.repair_broken_tool_call_pairs history_messages
+        ; messages = history_messages
         ; working_context = None
         }
       else
@@ -87,10 +87,7 @@ let canonical_success_replay_checkpoint
             ]
         in
         Keeper_context_core.patch_checkpoint_last_assistant
-          { checkpoint with
-            Agent_sdk.Checkpoint.messages =
-              Keeper_context_core.repair_broken_tool_call_pairs messages
-          }
+          { checkpoint with Agent_sdk.Checkpoint.messages }
           ~session_id
           ~response_text
     in

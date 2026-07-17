@@ -1,17 +1,25 @@
 ---
 rfc: "masc-oas-bridge-total-llm-dispatch-boundary"
 title: "Masc_oas_bridge as the total LLM dispatch boundary"
-status: Draft
+status: Superseded
 created: 2026-07-17
 updated: 2026-07-17
 author: vincent
 supersedes: []
-superseded_by: null
-related: ["0159", "0206", "0338", "shared-admission-primitive-knob-binding-policy"]
+superseded_by: "oas-recursive-execution-masc-integration"
+related: ["0159", "0206", "0338", "shared-admission-primitive-knob-binding-policy", "oas-recursive-execution-masc-integration"]
 implementation_prs: []
 ---
 
 # RFC-masc-oas-bridge-total-llm-dispatch-boundary — Masc_oas_bridge as the total LLM dispatch boundary
+
+> **Superseded 2026-07-17.** The code evidence below remains useful, but its
+> target `run_safe`/`run_bounded` dual path, MASC-owned provider-call budget
+> and admission, `Skip_if_full` product-work disposition, grep allow-list, and
+> compatibility-flag rollout are replaced by
+> `RFC-oas-recursive-execution-masc-integration` §0.1. The replacement keeps
+> one typed MASC product boundary while OAS remains the sole provider/execution
+> authority and durable MASC inputs remain conserved.
 
 ## 0. Summary
 

@@ -1,17 +1,25 @@
 ---
 rfc: "shared-admission-primitive-knob-binding-policy"
 title: "Shared typed admission primitive + knob-binding policy"
-status: Draft
+status: Superseded
 created: 2026-07-17
 updated: 2026-07-17
 author: vincent
 supersedes: []
-superseded_by: null
-related: ["0153", "0158", "0206", "0225", "0334", "masc-oas-bridge-total-llm-dispatch-boundary"]
+superseded_by: "oas-recursive-execution-masc-integration"
+related: ["0153", "0158", "0206", "0225", "0334", "masc-oas-bridge-total-llm-dispatch-boundary", "oas-recursive-execution-masc-integration"]
 implementation_prs: []
 ---
 
 # RFC-shared-admission-primitive-knob-binding-policy — Shared typed admission primitive + knob-binding policy
+
+> **Superseded 2026-07-17.** Its evidence inventory remains historical input,
+> but the proposed budget/concurrency substring registry, MASC-side provider
+> admission, `Skip_if_full` durable-work path, and flag-based dual rollout are
+> not target contracts. `RFC-oas-recursive-execution-masc-integration` §0.1
+> replaces them with typed owner declarations, OAS-owned provider admission,
+> and per-owner durable queue conservation. A future resource-only primitive
+> must be justified by a concrete owner and cannot become a behavioral budget.
 
 ## 0. Summary
 

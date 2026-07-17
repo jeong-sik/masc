@@ -232,7 +232,8 @@ is regression evidence for the old behavior, not the desired contract.
 
 The LLM owns semantic keep, summarize, and drop decisions for ordinary
 conversation. Deterministic code owns only typed units, source binding,
-coverage, ordering, protected active anchors, and checkpoint CAS.
+coverage, ordering, protected active anchors, typed continuation stage, and
+checkpoint CAS.
 
 Completed ToolResult or ToolProgress prose cannot be reduced until the durable
 operation Journal, exact receipt, canonical payload digest, and cursor span
@@ -244,6 +245,9 @@ Current-main defects that must be removed in the replacement slice:
 
 - `keeper_run_prompt` applies `repair_broken_tool_call_pairs` immediately before
   provider dispatch and can delete a checkpointed open ToolUse;
+- deleting that repair alone exposes a second defect: an unresolved ToolUse
+  cannot be sent with a new user goal, and the checkpoint does not durably say
+  which exact Tool occurrence is awaiting its ToolResult;
 - the current LLM plan receives no selected-runtime fit target;
 - acceptance checks only that serialized bytes decreased, not that the complete
   next request fits the provider-native context window;
@@ -252,10 +256,14 @@ Current-main defects that must be removed in the replacement slice:
 - `primary_model_max_tokens` configures the working context but is not a
   provider-native full-request count or an acceptance proof.
 
-The replacement uses closed structural units, preserves the open suffix
-exactly through real dispatch, counts the complete next request through a
-provider-native contract, and records `Insufficient_reduction` as durable work
-rather than an inline retry cap.
+The replacement uses closed structural units and persists the open suffix with
+a typed exact Tool continuation. While that continuation is unresolved it
+performs zero provider dispatches and defers only that activity. A matching
+typed ToolResult closes the cycle and wakes the exact owner; only then may the
+closed checkpoint prefix reach provider dispatch. The complete next request is
+counted through a provider-native contract, and `Insufficient_reduction` is
+durable work rather than an inline retry cap. Transcript or string inference,
+synthetic ToolResult insertion, and fleet-wide blocking are forbidden.
 
 Delete the `Deterministic` / `extractive` compaction mode and
 `MASC_KEEPER_COMPACTION_MODE`.

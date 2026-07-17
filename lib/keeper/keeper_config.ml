@@ -18,18 +18,6 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
    도 함께 제거한다. *)
 let default_runtime_id () = Runtime.get_default_runtime_id ()
 
-(** Minimum context window (tokens) for any keeper turn.
-    64k-class local models are valid keeper backends; do not clamp them upward
-    to 65,536, which can exceed the discovered provider ceiling. *)
-let min_keeper_context_tokens = 64_000
-
-(** Maximum context window (tokens) accepted for [max_context_override] on
-    keeper turn-up args (#9953).  Matches the largest published context
-    window among supported providers (largest published = 1M).
-    Bumps to a 2M-class model must update this constant alongside the
-    provider registry entry. *)
-let max_keeper_context_tokens = 1_000_000
-
 include Keeper_config_text
 
 

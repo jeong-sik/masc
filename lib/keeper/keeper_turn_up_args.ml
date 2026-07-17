@@ -72,19 +72,13 @@ let parse_runtime_id_opt args =
            (Json_util.kind_name other))
 
 let normalize_max_context_override_value v =
-  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-  let max_keeper_context = Keeper_config.max_keeper_context_tokens in
   if v = 0 then Ok None
-  else if v >= min_keeper_context && v <= max_keeper_context then Ok (Some v)
-  else if v > 0 && v < min_keeper_context then (
-    Log.Misc.warn
-      "max_context_override=%d below minimum %d, clamped to %d"
-      v min_keeper_context min_keeper_context;
-    Ok (Some min_keeper_context))
+  else if v > 0 then Ok (Some v)
   else
     Error
-      (Printf.sprintf "max_context_override=%d out of range (0 or %d..%d)"
-         v min_keeper_context max_keeper_context)
+      (Printf.sprintf
+         "max_context_override=%d must be positive, or 0 to clear"
+         v)
 
 let parse_max_context_override args =
   match Json_util.assoc_member_opt "max_context_override" args with

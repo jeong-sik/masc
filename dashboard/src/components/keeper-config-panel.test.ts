@@ -34,10 +34,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     active_goal_ids: ['goal-runtime'],
     autoboot_enabled: true,
     max_context_override: null,
-    limits: {
-      min_context_override_tokens: 64_000,
-      max_context_override_tokens: 1_000_000,
-    },
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_last_error: null,
@@ -444,10 +440,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     active_goal_ids: [],
     autoboot_enabled: true,
     max_context_override: null,
-    limits: {
-      min_context_override_tokens: 64_000,
-      max_context_override_tokens: 1_000_000,
-    },
     sandbox_profile: 'local',
     network_mode: 'inherit',
     allowed_paths: [],
@@ -693,18 +685,14 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.max_context_override).toBeNull()
   })
 
-  it('clamps max_context_override to the backend keeper bound before PATCH', () => {
+  it('preserves an explicit positive max_context_override before PATCH', () => {
     const c = makeKeeperConfigForSandbox({
       max_context_override: null,
-      limits: {
-        min_context_override_tokens: 64_000,
-        max_context_override_tokens: 128_000,
-      },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
       max_context_override: 128_001,
     }), c)
-    expect(payload.max_context_override).toBe(128_000)
+    expect(payload.max_context_override).toBe(128_001)
   })
 })
 

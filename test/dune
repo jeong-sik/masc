@@ -1833,7 +1833,6 @@
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 
 
-(include stanzas/test_keeper_context_bounds_ssot.inc)
 
 (include stanzas/test_keeper_context_isolation.inc)
 

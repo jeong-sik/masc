@@ -133,6 +133,31 @@ type checkpoint_ref_load_error =
       }
   | Ref_lock_failed of string
 
+(** Canonical checkpoint value, exact persisted bytes, and their reference
+    derived from one immutable byte snapshot. *)
+type exact_checkpoint_snapshot
+
+val exact_snapshot_checkpoint :
+  exact_checkpoint_snapshot -> Agent_sdk.Checkpoint.t
+
+val exact_snapshot_reference :
+  exact_checkpoint_snapshot -> Keeper_checkpoint_ref.t
+
+val exact_snapshot_canonical_bytes : exact_checkpoint_snapshot -> string
+
+(** Strictly decode exact canonical bytes and derive their reference without
+    re-encoding. *)
+val exact_snapshot_of_canonical_bytes :
+  expected_session_id:Keeper_id.Trace_id.t ->
+  string ->
+  (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+
+(** Load an exact canonical checkpoint snapshot under the session lock. *)
+val load_oas_exact_snapshot :
+  session_dir:string ->
+  session_id:string ->
+  (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+
 (** Load one canonical checkpoint and its exact source identity from the same
     locked byte snapshot. No size, mtime, timestamp, or process cache
     participates in the identity. *)

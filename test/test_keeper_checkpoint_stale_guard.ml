@@ -442,6 +442,47 @@ let test_checkpoint_ref_requires_generation () =
            Keeper_checkpoint_store.Generation_missing) -> ()
     | _ -> fail "generation-less checkpoint acquired an exact ref")
 
+let test_exact_snapshot_preserves_locked_canonical_bytes () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "sess-exact-snapshot" in
+    save_ok ~session_dir
+      (make_checkpoint ~session_id ~turn_count:4 ~marker:"exact"
+       |> with_generation 2)
+      "exact snapshot seed";
+    let canonical_path = Filename.concat session_dir (session_id ^ ".json") in
+    let expected_bytes =
+      Fs_compat.load_file canonical_path
+      |> Yojson.Safe.from_string
+      |> Yojson.Safe.pretty_to_string
+    in
+    Fs_compat.save_file canonical_path expected_bytes;
+    match
+      Keeper_checkpoint_store.load_oas_exact_snapshot
+        ~session_dir
+        ~session_id
+    with
+    | Error _ -> fail "exact snapshot load failed"
+    | Ok snapshot ->
+      check string "canonical bytes are not re-encoded" expected_bytes
+        (Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot);
+      let reference =
+        Keeper_checkpoint_store.exact_snapshot_reference snapshot
+      in
+      let expected_session_id =
+        Result.get_ok (Keeper_id.Trace_id.of_string session_id)
+      in
+      match
+        Keeper_checkpoint_store.exact_snapshot_of_canonical_bytes
+          ~expected_session_id
+          expected_bytes
+      with
+      | Ok decoded ->
+        check bool "pure decode derives the same exact ref" true
+          (Keeper_checkpoint_ref.equal reference
+             (Keeper_checkpoint_store.exact_snapshot_reference decoded))
+      | Error _ -> fail "exact snapshot bytes did not decode")
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -469,5 +510,7 @@ let () =
             test_exact_source_cas_updates_canonical_watermark;
           test_case "checkpoint refs require keeper generation" `Quick
             test_checkpoint_ref_requires_generation;
+          test_case "exact snapshot preserves canonical bytes" `Quick
+            test_exact_snapshot_preserves_locked_canonical_bytes;
         ] );
     ]

@@ -1,5 +1,5 @@
 ---
-rfc: "0344"
+rfc: "shared-admission-primitive-knob-binding-policy"
 title: "Shared typed admission primitive + knob-binding policy"
 status: Draft
 created: 2026-07-17
@@ -7,21 +7,11 @@ updated: 2026-07-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0153", "0158", "0206", "0225", "0334", "0345"]
+related: ["0153", "0158", "0206", "0225", "0334", "masc-oas-bridge-total-llm-dispatch-boundary"]
 implementation_prs: []
 ---
 
-# RFC-0344 — Shared typed admission primitive + knob-binding policy
-
-> **Numbering note.** `docs/rfc/README.md` (updated 2026-07-16, one day before
-> this draft) retired numbered-RFC issuance in favor of slug filenames for new
-> RFCs (`RFC-<slug>.md`); the numbered-index table is retained only for
-> pre-existing entries. This RFC was assigned `0344` on explicit instruction
-> to continue the numbered series alongside RFC-0341–0343. That instruction
-> predates or was unaware of the README policy change. Flagging here rather
-> than silently renaming or silently complying — resolve before merge
-> (rename to a slug file, or explicitly re-except this pair from the retired
-> policy).
+# RFC-shared-admission-primitive-knob-binding-policy — Shared typed admission primitive + knob-binding policy
 
 ## 0. Summary
 
@@ -65,7 +55,7 @@ time of writing) rather than assumed from the source analysis report:
    display, not enforcement. Provider-side enforcement is tracked
    separately at oas#2641 (open, "admit concurrent dispatches per endpoint
    identity") and is a dependency, not something this RFC re-implements
-   (see RFC-0345 §4).
+   (see RFC-masc-oas-bridge-total-llm-dispatch-boundary §4).
 3. **Parsed-and-discarded config knobs.** See §1.2 — validated at load time,
    consulted nowhere at dispatch time.
 
@@ -85,7 +75,7 @@ checkout; three rows changed disposition since the report was generated
 | 3 | `[fusion.gate] per_hour_budget=20` + 3 keys (`panel_timeout_s`/`judge_timeout_s`/`max_tool_calls_per_panel`) | 〃 | **Confirmed dead, pre-existing.** `rg` across `lib/` and `config/` = 0 hits for all four keys. Parser already rejects them (per report, PR #22051, unrelated to today's fusion churn). Already conforms to this RFC's §3 policy option (b) — no action needed. |
 | 4 | `[fusion] min_answered` quorum | 〃 | **Confirmed live dead knob.** `lib/fusion_core/fusion_config.ml` parses, range-validates (`Validated_preset.of_preset`), and serializes (`fusion_config_json.ml:48`) `min_answered`. `rg 'min_answered' lib/fusion/*.ml` = **0 hits** — the orchestrator that actually decides whether to invoke the judge never reads it. Needs migration (§4). |
 | 5 | `[reactive].concurrency=4` / `[autonomous].concurrency=4` / `semaphore_wait_timeout_sec` | "live config" per report | **COULD NOT VERIFY.** `rg` for `semaphore_wait_timeout` (any casing) across the entire checkout = 0 hits. No `[reactive]`/`[autonomous]` TOML table with a `concurrency` key exists in `config/runtime.toml`, and no OCaml parser references such a table. The only `reactive`/`autonomous` identifiers found are keeper lifecycle-lane labels (`keeper_lifecycle_gate.ml`, `keeper_turn_admission.ml`'s `Autonomous`/`Chat` lanes — RFC-0225), unrelated to a concurrency knob. This may live only in the untracked deployment-local `.masc/config/runtime.toml` (the report itself notes that file is "untracked and absent in this checkout" for other findings). **Not included in the migration table below pending confirmation against the live deployment config** — do not act on this row without re-verifying against `.masc/config/runtime.toml` directly. |
-| 6 | provider `max-concurrent` (e.g. `flash=2`) | `runtime.toml` bindings | **Confirmed.** Enforced only for the lane that reads it (HITL, gemma bindings). Every other binding's `max-concurrent` is either absent or unread. Depends on oas#2641 (open) for provider-side enforcement; masc-side declaration wiring is this RFC + RFC-0345's job. |
+| 6 | provider `max-concurrent` (e.g. `flash=2`) | `runtime.toml` bindings | **Confirmed.** Enforced only for the lane that reads it (HITL, gemma bindings). Every other binding's `max-concurrent` is either absent or unread. Depends on oas#2641 (open) for provider-side enforcement; masc-side declaration wiring is this RFC + RFC-masc-oas-bridge-total-llm-dispatch-boundary's job. |
 | 7 | `MASC_HTTP_MAX_CONNECTIONS` | env | **Confirmed dead in the h1/auto path, live-but-differently-named in h2.** `lib/http_server_eio.ml:14,24` constructs the field from the env var (default 512) and never reads it again in that module — dead. `lib/http_server_h2.ml:19,283` has a same-named field (default 128) that **is** wired, but only as `Eio.Net.listen`'s `~backlog`, not a live-connection cap — two independent config records sharing an env-var name and a superficially similar field name, not one shared knob. |
 | 8 | `MASC_KEEPER_DOMAIN_POOL_ENABLED` | env | **Confirmed dead by the code's own doc comment.** `lib/config/env_config_keeper_supervisor.ml:5-11`: *"The supervisor still reads this for observability, but keepalive fibers remain on the owning Eio domain… routing the whole body through `Domain_pool.submit_io` is not domain-safe."* Read (`keeper_supervisor_launch.ml:92`), logged, never changes dispatch. Adjacent to masc#20681. |
 | 9 | Compaction ratio/message/token gates | keeper meta, all keepers | **Out of this RFC's scope — T1 territory (masc#25051, open, in progress in this session).** No evaluation point; compaction is overflow-reactive only. Cited for completeness, not migrated here. |
@@ -138,12 +128,12 @@ list): `lib/admission/admission.ml` / `.mli`, public name `masc.admission`,
 depending only on `eio` (for `Eio.Condition`).
 
 ```ocaml
-(** Admission — shared typed claim-set primitive (RFC-0344).
+(** Admission — shared typed claim-set primitive (RFC-shared-admission-primitive-knob-binding-policy).
     Generalizes the HITL claim-set exemplar
     (keeper_gate.ml:283-294 claim_auto_judge / hitl_summary_worker.ml:44-61
     max_concurrency) so every concurrency-bounded lane binds to one
     implementation instead of hand-rolling a CAS loop. Bounds concurrency of
-    in-flight work only; never denies a request outright (RFC-0344 §2). *)
+    in-flight work only; never denies a request outright (RFC-shared-admission-primitive-knob-binding-policy §2). *)
 
 type wait_policy =
   | Skip_if_full
@@ -250,14 +240,14 @@ only whether the declared/consumed sets agree.
 | `[fusion.gate] per_hour_budget` + 3 keys | already rejected by parser (§1.2 #3) | none |
 | `[fusion] min_answered` | wire | fusion orchestrator's judge-invocation decision point (`lib/fusion/`) reads `Validated_preset.min_answered` and skips the judge call below threshold, OR delete the field if the product decision is "always judge regardless of quorum" |
 | `[reactive]/[autonomous] concurrency` | **unresolved — could not locate in code (§1.2 #5)** | confirm against live `.masc/config/runtime.toml` before any action; do not delete or wire blind |
-| provider `max-concurrent` (non-HITL bindings) | wire | RFC-0345 §4 — bridge attaches an `Admission.Make` instance per lane, sized from the binding, pending oas#2641 for provider-side enforcement |
+| provider `max-concurrent` (non-HITL bindings) | wire | RFC-masc-oas-bridge-total-llm-dispatch-boundary §4 — bridge attaches an `Admission.Make` instance per lane, sized from the binding, pending oas#2641 for provider-side enforcement |
 | `MASC_HTTP_MAX_CONNECTIONS` (h1/auto) | wire or delete | either wire into a real connection-cap in `http_server_eio.ml`, or delete the field and its env var (keep `MASC_TCP_LISTEN_BACKLOG`, which is live) |
 | `MASC_KEEPER_DOMAIN_POOL_ENABLED` | delete | flag is read-for-observability-only by the code's own admission; either wire `Domain_pool.submit_io` for a domain-safe subset of the keepalive body, or delete the flag — masc#20681 |
 | Compaction ratio/message/token gates | out of scope | T1, masc#25051 |
 | `[ollama.gemma] max-concurrent=1` librarian bypass | out of scope | T2, masc#25052 |
 | `MASC_KEEPER_MEMORY_LLM_SUMMARY` | wire or delete | T2 territory (masc#25052) — 0 production callers today; either wire `compact_memory_bank_if_needed` into a live consolidation path or delete the flag and the dead code behind it |
 | goal-loop OODA rebroadcast | not migrated here | lower-confidence claim (§1.2 #12), needs its own investigation of the Python worker's liveness contract |
-| `Verifier_oas.verify` / `Keeper_adversarial_review` | delete or wire | RFC-0345 §3 — collapse to one verdict-boundary implementation, consumed through the bridge, or delete `Verifier_oas` outright |
+| `Verifier_oas.verify` / `Keeper_adversarial_review` | delete or wire | RFC-masc-oas-bridge-total-llm-dispatch-boundary §3 — collapse to one verdict-boundary implementation, consumed through the bridge, or delete `Verifier_oas` outright |
 | Runtime-manifest journal retention | flip default or gate | change `MASC_RUNTIME_MANIFEST_RETENTION_DAYS` from opt-in-`None` to an explicit bounded default, or add the proactive gate the report's compaction-starvation finding (S3) already motivates |
 
 ## 6. Acceptance
@@ -285,7 +275,7 @@ only whether the declared/consumed sets agree.
 |---|---|---|---|
 | New `lib/admission/` library | 0 existing callers (new code) | low | delete the library |
 | HITL migrated onto `Admission.Make` | `keeper_gate.ml` (claim/release call sites), `hitl_summary_worker.ml` (`max_concurrency`) | 중 — core approval-queue path | keep `Auto_judge_ids`/CAS loop behind a flag one release |
-| Provider `max-concurrent` wiring (non-HITL) | RFC-0345's bridge callers | 중 — first real concurrency cap on previously-unbounded lanes (board attention, failure judge); could introduce backpressure where none existed | ship with `Skip_if_full` first (matches today's unbounded-but-also-uncapped behavior more closely than `Wait_fifo`), promote to `Wait_fifo` in a follow-up once queue depth is observed |
+| Provider `max-concurrent` wiring (non-HITL) | RFC-masc-oas-bridge-total-llm-dispatch-boundary's bridge callers | 중 — first real concurrency cap on previously-unbounded lanes (board attention, failure judge); could introduce backpressure where none existed | ship with `Skip_if_full` first (matches today's unbounded-but-also-uncapped behavior more closely than `Wait_fifo`), promote to `Wait_fifo` in a follow-up once queue depth is observed |
 | CI knob-binding check | new script only | low | script is advisory (warn) before it is required (fail) |
 
 ## 8. Workaround-rejection self-check (CLAUDE.md)

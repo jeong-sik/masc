@@ -1,5 +1,5 @@
 ---
-rfc: "0345"
+rfc: "masc-oas-bridge-total-llm-dispatch-boundary"
 title: "Masc_oas_bridge as the total LLM dispatch boundary"
 status: Draft
 created: 2026-07-17
@@ -7,17 +7,11 @@ updated: 2026-07-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0159", "0206", "0338", "0344"]
+related: ["0159", "0206", "0338", "shared-admission-primitive-knob-binding-policy"]
 implementation_prs: []
 ---
 
-# RFC-0345 — Masc_oas_bridge as the total LLM dispatch boundary
-
-> **Numbering note.** Same caveat as RFC-0344: `docs/rfc/README.md`
-> (updated 2026-07-16) retired numbered-RFC issuance for new RFCs in favor of
-> slug filenames. This pair was assigned `0344`/`0345` on explicit
-> instruction predating that policy's application here. Resolve before
-> merge.
+# RFC-masc-oas-bridge-total-llm-dispatch-boundary — Masc_oas_bridge as the total LLM dispatch boundary
 
 ## 0. Summary
 
@@ -95,12 +89,12 @@ Additionally bypassing, confirmed by the **absence** of any
 `Masc_oas_bridge` reference in the file (verified with `rg
 'Masc_oas_bridge' <file>` = 0 hits each), but whose exact intermediate
 dispatch call this RFC did not trace to a specific line within the scope of
-this draft — flagged as lower-confidence, out of RFC-0344/0345's direct
+this draft — flagged as lower-confidence, out of this RFC pair's direct
 migration scope, and owned by the parallel T1/T2 work already in progress
 in this session:
 
 - `lib/keeper/hitl_summary_worker.ml` (Gate Auto Judge) — has its own
-  admission control (the RFC-0344 §1.1 exemplar) but no bridge-typed
+  admission control (the RFC-shared-admission-primitive-knob-binding-policy §1.1 exemplar) but no bridge-typed
   exception classification layered under it.
 - `lib/keeper/keeper_librarian_runtime.ml` (memory-os librarian) — masc#25052.
 - `lib/keeper/keeper_compaction_llm_summarizer.ml` (compaction summarizer)
@@ -157,14 +151,14 @@ exhaustive). **This RFC does not include operator judge in its lane
 inventory, dead-knob table, or migration plan** — the report's "5 judge
 lanes, 3 bypass" framing is stale; the corrected count (§1.1–1.2) is: 3
 callers fully wired to the bridge's 3 declared variants, 3 confirmed direct
-bypasses, plus 3 lower-confidence bypasses under separate RFC-0344 §5 /
+bypasses, plus 3 lower-confidence bypasses under separate RFC-shared-admission-primitive-knob-binding-policy §5 /
 T1 / T2 ownership.
 
 ## 2. Non-goals
 
 - No pre-dispatch denial and no Keeper pause policy — identical boundary to
-  RFC-0344 §2 and to the still-withdrawn RFC-0153/RFC-0158. Binding a lane
-  to a wall-clock budget or an `Admission.Make` slot (RFC-0344) changes when
+  RFC-shared-admission-primitive-knob-binding-policy §2 and to the still-withdrawn RFC-0153/RFC-0158. Binding a lane
+  to a wall-clock budget or an `Admission.Make` slot (RFC-shared-admission-primitive-knob-binding-policy) changes when
   a call *times out* or *waits for a slot*; it never changes whether a call
   is *attempted*, and it never touches Keeper lifecycle (RFC-0341).
 - Does not re-implement oas#2641 (provider-side per-endpoint admission).
@@ -176,7 +170,7 @@ T1 / T2 ownership.
   deliberately the **last**, not first, lane migrated (§6) because it is the
   highest-traffic, highest-blast-radius call site in the codebase.
 - Does not retroactively fix `Verifier_oas`'s dead-lane status by itself —
-  RFC-0344 §5 already lists it as delete-or-wire; this RFC's enforcement
+  RFC-shared-admission-primitive-knob-binding-policy §5 already lists it as delete-or-wire; this RFC's enforcement
   design (§4) is what makes "wire" mean something (a new caller variant) if
   that path is chosen instead of deletion.
 
@@ -210,7 +204,7 @@ provider aliases. Collapsing both call sites into one `Structured_judge`
 caller variant would erase the per-site error attribution the whole point
 of extending the type is meant to buy. Both lanes may still share one
 `Admission.Make` instance sized from the same `structured_judge` binding
-(RFC-0344 §3) if that is the desired concurrency shape — that is an
+(RFC-shared-admission-primitive-knob-binding-policy §3) if that is the desired concurrency shape — that is an
 admission-instance decision, independent of the typed-lane decision.
 
 `Anti_rationalization`/`Fusion_panel`/`Fusion_judge` are unchanged (existing
@@ -228,7 +222,7 @@ val run_bounded
   -> ('a, Agent_sdk.Error.sdk_error) result
 ```
 
-`run_bounded` claims the admission slot (RFC-0344 `Admission.Make.claim`)
+`run_bounded` claims the admission slot (RFC-shared-admission-primitive-knob-binding-policy `Admission.Make.claim`)
 before invoking the inner function and releases it (via `Fun.protect`,
 covering the exception, `Cancelled`, and normal-return paths identically) no
 matter how the inner call terminates, then delegates to `run_safe`'s
@@ -239,7 +233,7 @@ call sites are added exclusively via `run_bounded`.
 
 `budget_s : float option` is explicit rather than a hidden default: `None`
 preserves today's "MASC does not own a wall-clock budget" contract
-(RFC-0345 does not silently introduce one); a lane may opt into a MASC-side
+(RFC-masc-oas-bridge-total-llm-dispatch-boundary does not silently introduce one); a lane may opt into a MASC-side
 deadline only with an explicit value and an explicit reason in its call
 site comment (mirroring the Magic-Number-avoidance convention already in
 `software-development.md`).
@@ -262,7 +256,7 @@ change.
 
 Today (§1.4): MCP tool-call fiber → synchronous `Anti_rationalization.review`
 → blocks on the LLM round-trip → task transition. Redesigned to the HITL
-shape (`Keeper_approval_queue`/`hitl_summary_worker.ml`, the RFC-0344 §1.1
+shape (`Keeper_approval_queue`/`hitl_summary_worker.ml`, the RFC-shared-admission-primitive-knob-binding-policy §1.1
 exemplar):
 
 ```ocaml
@@ -338,7 +332,7 @@ Two layers, neither a heuristic string classifier:
 |---|---|---|
 | `keeper_board_attention_candidate.ml:896-904` (`run_judge`) | direct `run_named_with_masc_tools`; all exceptions → `Provider_unavailable` | `run_bounded ~caller:Board_attention_judge` — this is also PR-C's board-attention-worker redesign target (in progress this session), so this migration should land as part of that same PR rather than a separate one (same file, same function, avoid two competing edits) |
 | `keeper_failure_judge.ml:106-114` (`run`) | direct call; no timeout/cancel reclassification | `run_bounded ~caller:Failure_judge` |
-| `verifier_oas.ml:100-147` (dead) | direct call; 0 production callers | per RFC-0344 §5: delete, or if kept, wire through `run_bounded ~caller:Board_attention_judge` (RFC-0342-style: reuse an existing lane's admission rather than minting a fourth "action verifier" variant for a lane no caller reaches) |
+| `verifier_oas.ml:100-147` (dead) | direct call; 0 production callers | per RFC-shared-admission-primitive-knob-binding-policy §5: delete, or if kept, wire through `run_bounded ~caller:Board_attention_judge` (RFC-0342-style: reuse an existing lane's admission rather than minting a fourth "action verifier" variant for a lane no caller reaches) |
 
 ## 5. Relation to oas#2641
 
@@ -346,7 +340,7 @@ oas#2641 ("admit concurrent dispatches per endpoint identity", **open**)
 is the provider-side half of concurrency enforcement — it makes a
 `max-concurrent` binding actually throttle the HTTP transport per endpoint.
 masc's pin is `agent_sdk.0.215.0` (`masc.opam.locked:14`), predating
-`#2641`. This RFC's `Admission.Make` instances (RFC-0344 §3) are the
+`#2641`. This RFC's `Admission.Make` instances (RFC-shared-admission-primitive-knob-binding-policy §3) are the
 masc-side half: they bound *masc's own* concurrent LLM-dispatch fibers per
 lane, independent of whether the provider transport also enforces a cap.
 The two are complementary, not redundant — a masc-side `Admission.Make`
@@ -389,7 +383,7 @@ spec invariants, applied to a lint script instead of a TLA+ model.
   to the existing `run_safe` logic (no duplication), and always releases
   its `Admission.Make` claim via `Fun.protect` regardless of outcome.
 - The 3 confirmed bypass sites (§4.1) migrated; `verifier_oas.ml` either
-  deleted or migrated (RFC-0344 §5 disposition resolved either way).
+  deleted or migrated (RFC-shared-admission-primitive-knob-binding-policy §5 disposition resolved either way).
 - `scripts/lint/no-bare-run-named-outside-bridge.sh` exists, is wired into
   CI, and its counterfactual test (§6) is checked in and green.
 - `masc_done` completion review follows the async-verdict-worker shape
@@ -408,9 +402,9 @@ spec invariants, applied to a lint script instead of a TLA+ model.
 |---|---|---|---|
 | `caller` type extension | `lib/masc_oas_bridge.ml`/`.mli` + every existing exhaustive match on `caller` (currently 1: `caller_key`) | low — compiler forces every match site to update | revert the type, callers fall back to direct dispatch (today's behavior) |
 | `run_bounded` addition | new function, additive | low | delete the function; `run_safe` unaffected |
-| Board attention / failure judge migration | 2 files, each 1 call site | medium — first real concurrency cap on previously-unbounded lanes | ship with `Skip_if_full` (RFC-0344 §7), not `Wait_fifo`, for the first release |
+| Board attention / failure judge migration | 2 files, each 1 call site | medium — first real concurrency cap on previously-unbounded lanes | ship with `Skip_if_full` (RFC-shared-admission-primitive-knob-binding-policy §7), not `Wait_fifo`, for the first release |
 | Completion-review async worker | `workspace_metric_hooks.ml`, `tool_task_handlers.ml`, new durable-record type | 중~높음 — changes a user-visible task-transition timing (async instead of sync); the *outcome* (pass/reject/unavailable) is unchanged, only *when* it lands | keep the synchronous path behind a flag one release, matching RFC-0343's precedent for a core-write-path change |
-| Lint script | new script only | low | advisory (warn) before required (fail), same rollout pattern as RFC-0344 §4.1 |
+| Lint script | new script only | low | advisory (warn) before required (fail), same rollout pattern as RFC-shared-admission-primitive-knob-binding-policy §4.1 |
 | `Turn` lane migration (§6, last) | every keeper-turn call site | 높음 — explicitly deferred to its own future RFC-linked PR, not bundled here | n/a — not shipped in this RFC's initial scope |
 
 ## 9. Workaround-rejection self-check (CLAUDE.md)

@@ -2,8 +2,8 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 14:50 KST
-> MASC `origin/main`: `6d8d4364fe`
+> Checked: 2026-07-17 15:26 KST
+> MASC `origin/main`: `9f62efe4a7`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
 > Browser matrix: [`2026-07-17-keeper-full-feature-goal-matrix.html`](audit/2026-07-17-keeper-full-feature-goal-matrix.html)
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 14:50 KST; confidence High.
+2026-07-17 15:26 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -266,10 +266,10 @@ domain fact.
 
 | Work | Current truth | Missing proof |
 |---|---|---|
-| #25018 | Draft at `486b89497e`; Build and Test green; #25044 receipt is merged into this stack, not `main` | merge settlement source + canonical receipt stack to `main` |
+| #25018 | Rebased at `d9894ce2f3`; 306 lines; source + canonical receipt range-diff unchanged; fresh CI running | merge canonical receipt parent to `main` |
 | #25026 | merged on `main` as `6d8d4364fe` with full CI green | durable append setup is available to the WAL join |
-| #25044 canonical settlement receipt | Merged into #25018 parent at `486b89497e`; 218 changed lines; focused build and 15 direct cases green | #25018 main merge, then WAL leaf |
-| settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
+| #25044 canonical settlement receipt | Folded into rebased #25018 parent at `d9894ce2f3`; focused build and 15 direct cases green | #25018 main merge |
+| #25063 settlement WAL | Draft stacked on #25018; 399 lines; production modules compiled, exact-head focused rerun delegated to CI | cursor-bound append+fsync, replay, checkpoint/projection committed outcomes |
 | #25046 structural compaction leaf | Draft at `ed6248c7c1`, 397 lines; full Build and Test green | OAS typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |
 | #25058→#25061 pair-repair purge | Four Draft leaves at 268/264/327/305 lines; structural PBT direct 2/2 green; final named evidence executable delegated to CI | merge into #25046 in order; never land a test-only leaf independently on main |
 | #25049 per-Keeper Auto Judge drain | Parent rebased to `6d8d4364fe` at `7ccc1cb741`; 397 lines; fresh CI running | latest-head parent proof |
@@ -278,7 +278,10 @@ domain fact.
 | OAS #2648 opaque provider Tool ID | Draft stacked on #2646; 36 lines; journal test 19/19 green | preserve exact identity before settlement |
 | OAS #2649 private exact settlement | Draft stacked on #2648; 396 lines; lane-writer test 18/18 green | wire into production Agent, then hard-cut legacy writer |
 | OAS #2650 effect fence | Draft stacked on #2649; 236 lines; lane-writer 18/18 and pipeline 39/39 green | add Agent-owned Journal scope/producers, then hard-cut legacy writers |
-| OAS #2647 exact request measurement | Draft on `main`; 172 lines; focused build and 6 direct cases green; full OCaml CI running | add Agent-owned same-value measure/dispatch identity boundary |
+| OAS #2651 private Agent scope | Draft stacked on #2650; 399 lines; focused SDK build and lane-writer 19/19 green | explicit Agent construction authority, then production producers |
+| OAS #2652 schedule semantics | Draft stacked on #2651; 8 lines; lane-writer 19/19 + tool execution 18/18 green | keep serial batch identity valid before production wiring |
+| OAS #2647 exact request measurement | Draft on `main`; 172 lines; focused and OCaml 5.4.1/5.5.0 full CI green | #2653 same-value use witness, then trusted Pipeline dispatch |
+| OAS #2653 prepared request identity | Draft stacked on #2647; 157 lines; direct 7/7 green | wire trusted Complete/Pipeline consumption; no provider-I/O claim yet |
 | #24993 | conflicting and red | supersede; do not use as current compaction proof |
 | #24994 | Draft, green typed terminal leaf | re-evaluate after clean replacement stack |
 

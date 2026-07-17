@@ -3,7 +3,7 @@
 > Status: implementation deletion and replacement contract
 > Normative goal: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
 > Live map: [`KEEPER-FULL-FEATURE-EXECUTION-MAP.md`](KEEPER-FULL-FEATURE-EXECUTION-MAP.md)
-> Source checkpoint: MASC `6d8d4364fe`, OAS `b2a9478ff3`, pinned OAS `v0.215.0` at `a7ea83fbbf`
+> Source checkpoint: MASC `9f62efe4a7`, OAS `b2a9478ff3`, pinned OAS `v0.215.0` at `a7ea83fbbf`
 > Checked: 2026-07-17 14:09 KST
 
 This manifest names what must die, what must be rewritten, and what is an

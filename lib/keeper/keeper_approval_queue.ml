@@ -2006,6 +2006,7 @@ module For_testing = struct
 end
 
 let resolve_with_policy
+      ~base_path
       ~id
       ~(decision : decision)
       ?(source = Human_operator)
@@ -2014,13 +2015,25 @@ let resolve_with_policy
       ()
   : (resolution_result, resolve_error) result
   =
-  if not (claim_resolution id)
+  let belongs_to_workspace () =
+    match SMap.find_opt id (Atomic.get pending) with
+    | Some entry -> String.equal entry.audit_base_path base_path
+    | None ->
+      (match SMap.find_opt id (Atomic.get deliveries) with
+       | Some delivery -> String.equal delivery.entry.audit_base_path base_path
+       | None -> false)
+  in
+  if not (belongs_to_workspace ())
+  then Error (Not_found id)
+  else if not (claim_resolution id)
   then Error (Already_resolved id)
   else
     Fun.protect
       ~finally:(fun () -> release_resolution_claim id)
       (fun () ->
-         match SMap.find_opt id (Atomic.get pending) with
+         if not (belongs_to_workspace ())
+         then Error (Not_found id)
+         else match SMap.find_opt id (Atomic.get pending) with
          | Some _ ->
            let remember_rule =
              match decision with
@@ -2061,14 +2074,13 @@ let resolve_with_policy
     Called from the dashboard approval HTTP handler
     ([server_dashboard_http.ml]) and MCP runtime.
 
-    [base_path] is sourced from the entry's captured [audit_base_path]
-    rather than threaded from the caller: the convenience wrapper takes
-    only an [id], so the entry is the authoritative workspace source
-    (RFC-0274 Wave A). *)
-let resolve ~id ~(decision : decision)
+    [base_path] is the authenticated caller workspace. The pending or
+    in-progress delivery entry must belong to it exactly before any resolution
+    claim or journal mutation is attempted. *)
+let resolve ~base_path ~id ~(decision : decision)
   : (unit, resolve_error) result
   =
-  match resolve_with_policy ~id ~decision () with
+  match resolve_with_policy ~base_path ~id ~decision () with
   | Ok _ -> Ok ()
   | Error _ as error -> error
 ;;

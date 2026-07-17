@@ -92,10 +92,12 @@ val decide :
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
-val retry_failed_auto_judge : requested_by:string -> string -> (unit, string) result
+val retry_failed_auto_judge :
+  base_path:string -> requested_by:string -> string -> (unit, string) result
 (** Explicitly retry one failed Auto Judge summary. The stored [retryable]
     classification is diagnostic only; operator authority controls this state
-    transition. No cadence, restart hook, or retry budget calls it. *)
+    transition. The approval must belong to the authenticated workspace exactly.
+    No cadence, restart hook, or retry budget calls it. *)
 
 type operator_recovery_report =
   { reopened_ids : string list

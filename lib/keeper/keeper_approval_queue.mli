@@ -203,6 +203,7 @@ val resolve_error_to_string : resolve_error -> string
 (** Commit a resolution, optionally persist an exact Always Allowed rule for
     [Decision.Approve], then wake only the Keeper captured by the pending entry. *)
 val resolve_with_policy :
+  base_path:string ->
   id:string ->
   decision:decision ->
   ?source:decision_source ->
@@ -212,6 +213,7 @@ val resolve_with_policy :
   (resolution_result, resolve_error) result
 
 val resolve :
+  base_path:string ->
   id:string ->
   decision:decision ->
   (unit, resolve_error) result

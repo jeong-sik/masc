@@ -481,10 +481,11 @@ let handle_gate_mode_body state operator_name request reqd body_str =
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
 ;;
 
-let handle_gate_resolve_body operator_name request reqd body_str =
+let handle_gate_resolve_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    match dashboard_gate_resolve_http_json ~created_by:operator_name ~args with
+    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    match dashboard_gate_resolve_http_json ~base_path ~created_by:operator_name ~args with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error (Gone _ as error) ->
       respond_json_value_with_cors
@@ -513,10 +514,11 @@ let handle_gate_resolve_body operator_name request reqd body_str =
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
 ;;
 
-let handle_gate_retry_body operator_name request reqd body_str =
+let handle_gate_retry_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
-    match dashboard_gate_retry_http_json ~requested_by:operator_name ~args with
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    match dashboard_gate_retry_http_json ~base_path ~requested_by:operator_name ~args with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error message ->
       respond_json_value_with_cors
@@ -1248,15 +1250,15 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/resolve" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state operator_name _req reqd ->
+         (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
-             (handle_gate_resolve_body operator_name request reqd))
+             (handle_gate_resolve_body state operator_name request reqd))
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/retry" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state operator_name _req reqd ->
+         (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
-             (handle_gate_retry_body operator_name request reqd))
+             (handle_gate_retry_body state operator_name request reqd))
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/schedule/prune" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

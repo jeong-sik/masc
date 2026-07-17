@@ -371,6 +371,17 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
            ()
        in
        Alcotest.(check string) "same exact request" first same;
+       let open Yojson.Safe.Util in
+       let persisted_entry =
+         read_pending_snapshot ~base_path
+         |> member "pending"
+         |> to_list
+         |> List.find (fun entry -> String.equal (entry |> member "id" |> to_string) first)
+       in
+       Alcotest.(check int)
+         "exact context wire version"
+         1
+         (persisted_entry |> member "request_context_version" |> to_int);
        let changed =
          submit
            ~base_path
@@ -403,6 +414,54 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
         | None -> Alcotest.fail "pending request was not restored");
        reject_and_cleanup ~base_path first;
        reject_and_cleanup ~base_path changed)
+;;
+
+let test_unversioned_request_context_is_not_replayed_as_exact () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-legacy-context" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let id =
+         submit_with_context
+           ~request_context:(`Assoc [ "history_digest", `String "retired-projection" ])
+           ~base_path
+           ~keeper_name
+           ~input:(`String "legacy")
+           ()
+       in
+       let snapshot = read_pending_snapshot ~base_path in
+       let unversioned =
+         match snapshot with
+         | `Assoc fields ->
+           let pending =
+             match List.assoc_opt "pending" fields with
+             | Some (`List entries) ->
+               `List
+                 (List.map
+                    (function
+                      | `Assoc entry_fields ->
+                        `Assoc (List.remove_assoc "request_context_version" entry_fields)
+                      | entry -> entry)
+                    entries)
+             | Some pending -> pending
+             | None -> `List []
+           in
+           `Assoc (("pending", pending) :: List.remove_assoc "pending" fields)
+         | other -> other
+       in
+       AQ.For_testing.reset_runtime_state ();
+       write_pending_snapshot ~base_path unversioned;
+       ignore (install_exn ~base_path);
+       (match AQ.get_pending_entry ~id with
+        | Some { request_context = None; _ } -> ()
+        | Some { request_context = Some _; _ } ->
+          Alcotest.fail "unversioned projected context was treated as exact evidence"
+        | None -> Alcotest.fail "legacy pending request was not restored");
+       reject_and_cleanup ~base_path id)
 ;;
 
 let test_resolution_is_durable_and_origin_scoped () =
@@ -1473,6 +1532,10 @@ let () =
             "submit is nonblocking and exact"
             `Quick
             test_submit_is_nonblocking_and_exactly_deduplicated
+        ; Alcotest.test_case
+            "unversioned context is never replayed as exact"
+            `Quick
+            test_unversioned_request_context_is_not_replayed_as_exact
         ; Alcotest.test_case
             "dedup keeps distinct origins"
             `Quick

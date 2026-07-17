@@ -128,6 +128,8 @@ let report_pending_read_drop ~reason ~path ~detail =
     ~detail
 ;;
 
+let exact_request_context_version = 1
+
 let pending_entry_to_yojson (entry : pending_approval) =
   `Assoc
     [ "id", `String entry.id
@@ -140,6 +142,10 @@ let pending_entry_to_yojson (entry : pending_approval) =
     ; ( "request_context"
       , match entry.request_context with
         | Some context -> context
+        | None -> `Null )
+    ; ( "request_context_version"
+      , match entry.request_context with
+        | Some _ -> `Int exact_request_context_version
         | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
@@ -293,6 +299,7 @@ let pending_entry_of_yojson ~base_path json =
           ; "requested_at"
           ; "turn_id"
           ; "request_context"
+          ; "request_context_version"
           ; "task_id"
           ; "goal_id"
           ; "goal_ids"
@@ -314,10 +321,37 @@ let pending_entry_of_yojson ~base_path json =
     in
     let* requested_at = required_float ~surface "requested_at" fields in
     let* turn_id = optional_nonnegative_int ~surface "turn_id" fields in
-    let request_context =
-      match List.assoc_opt "request_context" fields with
-      | None | Some `Null -> None
-      | Some context -> Some context
+    let* request_context =
+      match
+        List.assoc_opt "request_context" fields,
+        List.assoc_opt "request_context_version" fields
+      with
+      | (None | Some `Null), (None | Some `Null) -> Ok None
+      | Some context, Some (`Int version)
+        when Int.equal version exact_request_context_version ->
+        Ok (Some context)
+      | Some _, (None | Some `Null) ->
+        (* Pre-version records contain the retired projection format. It is
+           intentionally not inspected or migrated: there is no exact causal
+           evidence to recover from a digest projection. *)
+        Ok None
+      | (None | Some `Null), Some (`Int version) ->
+        Error
+          (Printf.sprintf
+             "%s.request_context_version=%d requires request_context"
+             surface
+             version)
+      | Some _, Some (`Int version) ->
+        Error
+          (Printf.sprintf
+             "%s.request_context_version=%d is unsupported"
+             surface
+             version)
+      | _, Some _ ->
+        Error
+          (Printf.sprintf
+             "%s.request_context_version must be an integer or null"
+             surface)
     in
     let* task_id = optional_string ~surface "task_id" fields in
     let* goal_id = optional_string ~surface "goal_id" fields in

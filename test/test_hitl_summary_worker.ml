@@ -151,35 +151,39 @@ let test_schema_is_closed_nonhierarchical_contract () =
 ;;
 
 let test_context_bundle_contains_exact_input_without_derived_classification () =
-  let bundle = Worker.For_testing.build_context_bundle ~entry:sample_entry in
+  let bundle =
+    match Worker.For_testing.build_context_bundle ~entry:sample_entry with
+    | Ok bundle -> bundle
+    | Error error ->
+      fail (Worker.For_testing.context_bundle_error_to_string error)
+  in
   let open Yojson.Safe.Util in
   check yojson "exact input" sample_entry.input (bundle |> member "input");
   check yojson
     "exact outer-turn context"
     (Option.get sample_entry.request_context)
     (bundle |> member "request_context");
-  check bool "complete exact context is not partial" false
-    (bundle |> member "partial_context" |> to_bool);
+  let fields = bundle |> to_assoc in
+  List.iter
+    (fun field ->
+       check bool ("does not reread " ^ field) false (List.mem_assoc field fields))
+    [ "task"; "goals"; "chat_messages"; "partial_context"; "context_notes" ];
   check yojson "no derived classification" `Null (bundle |> member "classification");
   check yojson "no derived level" `Null (bundle |> member "level")
 ;;
 
-let test_missing_request_context_is_explicitly_partial () =
-  let bundle =
+let test_missing_request_context_is_terminal_before_provider () =
+  match
     Worker.For_testing.build_context_bundle
       ~entry:{ sample_entry with request_context = None }
-  in
-  let open Yojson.Safe.Util in
-  check yojson "missing context stays absent" `Null
-    (bundle |> member "request_context");
-  check bool "missing exact context is partial" true
-    (bundle |> member "partial_context" |> to_bool);
-  check bool "missing exact context is explained" true
-    (bundle
-     |> member "context_notes"
-     |> to_list
-     |> List.map to_string
-     |> List.exists (String.equal "exact outer-turn request context is unavailable"))
+  with
+  | Ok _ -> fail "missing exact request context produced a provider payload"
+  | Error Worker.For_testing.Exact_request_context_unavailable ->
+    check string
+      "failure is stable and explicit"
+      "HITL summary: exact outer-turn request context is unavailable"
+      (Worker.For_testing.context_bundle_error_to_string
+         Worker.For_testing.Exact_request_context_unavailable)
 ;;
 
 let test_concurrency_respects_runtime_binding () =
@@ -369,9 +373,9 @@ let () =
             `Quick
             test_concurrency_respects_runtime_binding
         ; test_case
-            "missing request context is explicitly partial"
+            "missing request context is terminal before provider"
             `Quick
-            test_missing_request_context_is_explicitly_partial
+            test_missing_request_context_is_terminal_before_provider
         ; test_case
             "plain JSON requires exact object"
             `Quick

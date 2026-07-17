@@ -1902,7 +1902,6 @@ describe('fetchKeeperConfig', () => {
         ratio_gate: '0.85',
         message_gate: '16',
         token_gate: '24000',
-        cooldown_sec: '120',
       },
       proactive: {
         enabled: 'true',

@@ -176,11 +176,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
       ratio_gate = compaction_ratio_gate;
       message_gate = compaction_message_gate;
       token_gate = compaction_token_gate;
-      cooldown_sec =
-        Option.value
-          ~default:old.compaction.cooldown_sec
-          p.compaction_cooldown_sec_opt
-        |> normalize_compaction_cooldown_sec;
     };
     max_context_override =
       (if p.max_context_override_present then p.max_context_override_opt

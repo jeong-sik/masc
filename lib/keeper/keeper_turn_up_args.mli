@@ -27,7 +27,6 @@ type parsed_args =
   ; compaction_ratio_gate_opt : float option
   ; compaction_message_gate_opt : int option
   ; compaction_token_gate_opt : int option
-  ; compaction_cooldown_sec_opt : int option
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
   ; instructions_arg : string option

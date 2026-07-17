@@ -155,6 +155,22 @@ let test_legacy_goal_meta_rejected () =
       (Astring.String.is_infix ~affix:"removed keeper meta field" msg
        && Astring.String.is_infix ~affix:"goal" msg)
 
+let test_removed_compaction_cooldown_meta_rejected () =
+  match
+    strict_meta_of_fields
+      [ ("name", `String "alice")
+      ; ("agent_name", `String "keeper-alice-agent")
+      ; ("trace_id", `String "alice-001")
+      ; ("compaction_cooldown_sec", `Int 15)
+      ]
+  with
+  | Ok _ -> fail "removed compaction_cooldown_sec meta must be rejected"
+  | Error msg ->
+    check bool
+      "error names removed compaction_cooldown_sec"
+      true
+      (Astring.String.is_infix ~affix:"compaction_cooldown_sec" msg)
+
 let () =
   run "keeper_identity_parse"
     [ ( "parse_keeper_identity"
@@ -172,5 +188,7 @@ let () =
             test_removed_voice_policy_meta_rejected
         ; test_case "removed legacy goal meta" `Quick
             test_legacy_goal_meta_rejected
+        ; test_case "removed compaction cooldown meta" `Quick
+            test_removed_compaction_cooldown_meta_rejected
         ] )
     ]

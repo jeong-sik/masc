@@ -578,6 +578,20 @@ let test_keeper_goal_arg_rejected () =
     Alcotest.(check bool) "goal mentioned" true
       (contains_substring ~needle:"goal" msg)
 
+let test_keeper_compaction_cooldown_arg_rejected () =
+  let args = `Assoc [ "compaction_cooldown_sec", `Int 15 ] in
+  match
+    Masc.Keeper_config.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_up"
+      args
+  with
+  | Ok () -> Alcotest.fail "removed compaction cooldown arg should be rejected"
+  | Error msg ->
+    Alcotest.(check bool)
+      "compaction_cooldown_sec mentioned"
+      true
+      (contains_substring ~needle:"compaction_cooldown_sec" msg)
+
 let test_masc_keeper_up_schema () =
   match find_registered_tool "masc_keeper_up" with
   | None -> Alcotest.fail "masc_keeper_up not found"
@@ -852,6 +866,8 @@ let () =
         test_keeper_shards_arg_rejected;
       Alcotest.test_case "keeper-goal-arg-rejected" `Quick
         test_keeper_goal_arg_rejected;
+      Alcotest.test_case "keeper-compaction-cooldown-arg-rejected" `Quick
+        test_keeper_compaction_cooldown_arg_rejected;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-sandbox-args-rejected" `Quick

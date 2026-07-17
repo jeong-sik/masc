@@ -284,7 +284,6 @@ export type RuntimeDraft = {
   compaction_ratio_gate: number
   compaction_message_gate: number
   compaction_token_gate: number
-  compaction_cooldown_sec: number
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
@@ -360,7 +359,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     compaction_ratio_gate: c.compaction.ratio_gate,
     compaction_message_gate: c.compaction.message_gate,
     compaction_token_gate: c.compaction.token_gate,
-    compaction_cooldown_sec: c.compaction.cooldown_sec,
   }
 }
 
@@ -615,7 +613,6 @@ export function keeperConfigControlInventory(
             'compaction.ratio_gate',
             'compaction.message_gate',
             'compaction.token_gate',
-            'compaction.cooldown_sec',
             'proactive.enabled',
           ],
         ),
@@ -809,7 +806,6 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.compaction_ratio_gate !== orig.compaction.ratio_gate) payload.compaction_ratio_gate = draft.compaction_ratio_gate
   if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
   if (draft.compaction_token_gate !== orig.compaction.token_gate) payload.compaction_token_gate = draft.compaction_token_gate
-  if (draft.compaction_cooldown_sec !== orig.compaction.cooldown_sec) payload.compaction_cooldown_sec = draft.compaction_cooldown_sec
   return payload
 }
 
@@ -851,7 +847,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     compaction_ratio_gate: 'compaction_ratio_gate' in payload,
     compaction_message_gate: 'compaction_message_gate' in payload,
     compaction_token_gate: 'compaction_token_gate' in payload,
-    compaction_cooldown_sec: 'compaction_cooldown_sec' in payload,
   }
 }
 
@@ -1965,16 +1960,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
         min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
         dirty=${dirtyFlags.compaction_token_gate} />
-      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
-        min=${0} max=${3600} step=${30} suffix="s"
-        dirty=${dirtyFlags.compaction_cooldown_sec} />
     ` : html`
       <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
       <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
       <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
       <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
-      <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
     `}
 
     <${SectionHeader} title="프로액티브" />

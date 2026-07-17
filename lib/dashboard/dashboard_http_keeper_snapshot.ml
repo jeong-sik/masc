@@ -216,7 +216,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("ratio_gate", `Float m.compaction.ratio_gate);
           ("message_gate", `Int m.compaction.message_gate);
           ("token_gate", `Int m.compaction.token_gate);
-          ("cooldown_sec", `Int m.compaction.cooldown_sec);
         ]
       in
       let proactive =

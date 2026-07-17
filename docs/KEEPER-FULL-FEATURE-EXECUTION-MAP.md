@@ -2,7 +2,7 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 14:09 KST
+> Checked: 2026-07-17 14:13 KST
 > MASC `origin/main`: `5d3ba008e6`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 14:09 KST; confidence High.
+2026-07-17 14:13 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -267,7 +267,7 @@ domain fact.
 | Work | Current truth | Missing proof |
 |---|---|---|
 | #25018 | Draft at `acc33cd728`; mergeable; Build and Test running | merge exact settlement source index after fresh green |
-| #25026 | retargeted to main after #24971; currently conflicting | rebase the full durable append transaction and run full CI |
+| #25026 | rebased to main at `e282d97103`; Build and Test running | fresh full CI, then merge the full durable append transaction |
 | #25044 canonical settlement receipt | Draft stacked on #25018; 218 changed lines; focused build and 15 direct cases green | fresh stacked CI, then WAL leaf |
 | settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
 | #25046 structural compaction leaf | Draft, rebased to `5d3ba008e6`, 397 lines; static green, exact-head focused build waits on external bare Dune | OAS typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |

@@ -106,7 +106,8 @@ val provider_for_librarian
     the librarian output budget (default 4096, overridable with
     [MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS], floor 1) and requests the
     structured episode output schema. The selected provider config's exact
-    temperature is preserved, including omission. *)
+    temperature and [max_concurrent_requests] are preserved, including
+    omission. OAS [Complete] remains the single endpoint admission owner. *)
 
 type extraction_error =
   | Prompt_render_failed of string
@@ -142,23 +143,6 @@ val with_provider_slot
     provider slot registry is guarded through [Eio_guard.with_mutex], avoiding
     blocking stdlib locks on keeper runtime fibers. Exposed for storm-guard
     regression coverage (#21376). *)
-
-val runtime_slot_capacity : runtime_id:string -> int
-(** [runtime_id]'s declared concurrency ceiling (its [Runtime.t.binding
-    .max_concurrent]), or [0] when the runtime declares none. [0] means
-    {!with_runtime_slot} applies no additional gate for that runtime. *)
-
-val with_runtime_slot : runtime_id:string -> (unit -> 'a) -> 'a option
-(** Run [f] under a process-global slot keyed by [runtime_id], sized by
-    {!runtime_slot_capacity}. Additive to {!with_provider_slot}, not a
-    replacement: the per-keeper slot bounds one keeper's own concurrency,
-    this bounds the SHARED runtime's declared concurrency across all
-    keepers (masc#25052 P3 -- RFC-0257's per-keeper slot alone lets N
-    keepers each call the same capacity-1 local runtime concurrently). At
-    capacity 0 (no declared [max_concurrent]) [f] always runs ([Some]);
-    otherwise the (capacity+1)-th concurrent entrant across all keepers
-    returns [None] (drop, not block). Exposed for concurrency-bound
-    regression coverage. *)
 
 val librarian_provider_clock_unavailable_error : string
 (** Stable error returned before provider I/O when provider-backed librarian
@@ -226,4 +210,5 @@ val run_best_effort
   -> unit
 (** Run the opt-in post-turn librarian path.
 
-    Non-cancel failures are logged and counted, never raised. *)
+    Non-cancel failures are logged and counted, never raised. Runtime dispatch
+    uses OAS endpoint admission; this path adds no runtime-wide MASC slot. *)

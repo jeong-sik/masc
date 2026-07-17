@@ -24,7 +24,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 GH_RETRIES = 3
 
@@ -67,34 +67,15 @@ class RfcCollision:
 def _run_gh(args: List[str]) -> Any:
     """Run gh cli and return JSON output."""
     rendered_args = " ".join(args)
-    for attempt in range(1, GH_RETRIES + 1):
-        result = subprocess.run(
-            ["gh", "api"] + args,
-            capture_output=True,
-            text=True,
+    probe = probe_with_retry(["gh", "api"] + args, accept=_decodes_as_json)
+    if not probe.ok:
+        print(
+            f"gh api error for {rendered_args} after {probe.attempts} attempt(s): "
+            f"{probe.detail}",
+            file=sys.stderr,
         )
-        if result.returncode != 0:
-            if attempt < GH_RETRIES:
-                time.sleep(attempt)
-                continue
-            print(
-                f"gh api error for {rendered_args}: {result.stderr.strip()}",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            if attempt < GH_RETRIES:
-                time.sleep(attempt)
-                continue
-            print(
-                f"gh api invalid JSON for {rendered_args}: {exc}; "
-                f"stdout={result.stdout[:500]!r}; stderr={result.stderr.strip()}",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-    raise AssertionError("unreachable gh api retry loop")
+        sys.exit(2)
+    return json.loads(probe.stdout)
 
 
 def _require_gh_cli() -> None:
@@ -110,67 +91,131 @@ def _combined_output(result: subprocess.CompletedProcess) -> str:
     return combined if combined else "<no output>"
 
 
+@dataclass(frozen=True)
+class GhProbe:
+    """Outcome of a `gh` invocation, after the retry policy ran."""
+
+    ok: bool
+    attempts: int
+    # Combined stdout/stderr of the last failing attempt; empty when ok.
+    detail: str
+    # stdout of the accepted attempt; empty when not ok.
+    stdout: str
+
+
+def _run_capture(argv: List[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, capture_output=True, text=True)
+
+
+def _scripted_runner(
+    *responses: Tuple[int, str, str],
+) -> Callable[[List[str]], subprocess.CompletedProcess]:
+    """Fake runner for [self_test]: yields [responses] in order, repeating the last.
+
+    Each response is (returncode, stdout, stderr).
+    """
+    remaining = [subprocess.CompletedProcess([], c, o, e) for c, o, e in responses]
+
+    def run(_argv: List[str]) -> subprocess.CompletedProcess:
+        return remaining.pop(0) if len(remaining) > 1 else remaining[0]
+
+    return run
+
+
+def _exit_zero(result: subprocess.CompletedProcess) -> bool:
+    return result.returncode == 0
+
+
+def _decodes_as_json(result: subprocess.CompletedProcess) -> bool:
+    if result.returncode != 0:
+        return False
+    try:
+        json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
+def probe_with_retry(
+    argv: List[str],
+    *,
+    accept: Callable[[subprocess.CompletedProcess], bool] = _exit_zero,
+    run: Callable[[List[str]], subprocess.CompletedProcess] = _run_capture,
+    sleep: Callable[[float], None] = time.sleep,
+    retries: int = GH_RETRIES,
+) -> GhProbe:
+    """Run a `gh` command, retrying with linear backoff until [accept] holds.
+
+    Single retry policy for every `gh` call in this module. Preflight probes
+    previously had no retry at all while the query helpers had three, so one
+    API timeout hard-failed a required check on an otherwise-green PR.
+
+    [accept] decides what counts as success: exit status alone for preflight
+    probes, exit status plus a JSON body for query helpers (a 200 with a
+    truncated body is as transient as a timeout).
+
+    [run]/[sleep] are injected so [self_test] can exercise the retry contract
+    without a network or a real delay.
+    """
+    detail = ""
+    for attempt in range(1, retries + 1):
+        result = run(argv)
+        if accept(result):
+            return GhProbe(ok=True, attempts=attempt, detail="", stdout=result.stdout)
+        detail = _combined_output(result)
+        if attempt < retries:
+            sleep(attempt)
+    return GhProbe(ok=False, attempts=retries, detail=detail, stdout="")
+
+
+def _exit_preflight_failed(what: str, probe: GhProbe) -> None:
+    """Report a preflight failure without asserting which cause produced it.
+
+    `gh` returns non-zero for auth failure, missing repo scope, 5xx, rate
+    limiting and network timeouts alike, and the return code does not
+    distinguish them. Naming one cause sends the reader to the wrong fix, so
+    the cause is left to the captured output.
+    """
+    print(
+        f"PR axis preflight could not {what} after {probe.attempts} attempt(s). "
+        "This is a preflight failure, not a finding about the PR: its axis "
+        "risk was not evaluated. The cause (credentials, repository scope, "
+        f"rate limiting, or a transient network/5xx error) is below.\n"
+        f"Details: {probe.detail}",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
 def _require_gh_auth() -> None:
     _require_gh_cli()
-    status = subprocess.run(
-        ["gh", "auth", "status", "--hostname", "github.com"],
-        capture_output=True,
-        text=True,
-    )
-    if status.returncode != 0:
-        print(
-            "gh auth is not usable for github.com; refresh credentials before "
-            f"running PR axis checks. Details: {_combined_output(status)}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+    probe = probe_with_retry(["gh", "auth", "status", "--hostname", "github.com"])
+    if not probe.ok:
+        _exit_preflight_failed("verify gh auth for github.com", probe)
 
 
 def _require_gh_repo_read(owner: str, repo: str) -> None:
     _require_gh_auth()
     repo_slug = f"{owner}/{repo}"
-    repo_check = subprocess.run(
-        ["gh", "api", f"repos/{repo_slug}", "--jq", ".full_name"],
-        capture_output=True,
-        text=True,
+    probe = probe_with_retry(
+        ["gh", "api", f"repos/{repo_slug}", "--jq", ".full_name"]
     )
-    if repo_check.returncode != 0:
-        print(
-            "gh credentials are authenticated but cannot read repo "
-            f"{repo_slug}; check token repository permissions before PR axis "
-            f"checks. Details: {_combined_output(repo_check)}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+    if not probe.ok:
+        _exit_preflight_failed(f"read repo {repo_slug}", probe)
 
 
 def _run_gh_graphql(query: str) -> dict:
     """Run gh graphql query and return data."""
-    for attempt in range(1, GH_RETRIES + 1):
-        result = subprocess.run(
-            ["gh", "api", "graphql", "-f", f"query={query}"],
-            capture_output=True,
-            text=True,
+    probe = probe_with_retry(
+        ["gh", "api", "graphql", "-f", f"query={query}"], accept=_decodes_as_json
+    )
+    if not probe.ok:
+        print(
+            f"gh graphql error after {probe.attempts} attempt(s): {probe.detail}",
+            file=sys.stderr,
         )
-        if result.returncode != 0:
-            if attempt < GH_RETRIES:
-                time.sleep(attempt)
-                continue
-            print(f"gh graphql error: {result.stderr.strip()}", file=sys.stderr)
-            sys.exit(2)
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            if attempt < GH_RETRIES:
-                time.sleep(attempt)
-                continue
-            print(
-                f"gh graphql invalid JSON: {exc}; "
-                f"stdout={result.stdout[:500]!r}; stderr={result.stderr.strip()}",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-    raise AssertionError("unreachable gh graphql retry loop")
+        sys.exit(2)
+    return json.loads(probe.stdout)
 
 
 def get_repo_slug() -> Tuple[str, str]:
@@ -565,7 +610,50 @@ def self_test() -> int:
     assert detect_rfc_collisions(noise) == [], "non-RFC-claim paths must not collide"
     print("self-test: non-RFC paths ignored -> no collision (PASS)")
 
-    print("pr_axis_check self-test: all RFC-collision cases passed")
+    # Preflight retry contract. Without a retry a single API timeout hard-failed
+    # a required check on an otherwise-green PR (#24574, run 29491927277: the
+    # repo probe hit `dial tcp ...: i/o timeout`; the rerun passed untouched).
+    transient = probe_with_retry(
+        ["gh"],
+        run=_scripted_runner(
+            (1, "", "dial tcp: i/o timeout"),
+            (1, "", "dial tcp: i/o timeout"),
+            (0, "ok", ""),
+        ),
+        sleep=lambda _: None,
+    )
+    assert transient.ok, "a transient gh failure must be absorbed by the retry"
+    assert transient.attempts == 3, f"expected 3 attempts, got {transient.attempts}"
+    assert transient.detail == "", "a recovered probe must not carry failure detail"
+    print("self-test: transient gh failure -> absorbed on attempt 3 (PASS)")
+
+    persistent = probe_with_retry(
+        ["gh"],
+        run=_scripted_runner((1, "", "The token in GH_TOKEN is invalid.")),
+        sleep=lambda _: None,
+    )
+    assert not persistent.ok, "a persistent gh failure must not report ok"
+    assert persistent.attempts == GH_RETRIES
+    assert "GH_TOKEN" in persistent.detail, (
+        "the last failure's output must reach the caller so the reader can "
+        "tell auth failure from a network blip"
+    )
+    print("self-test: persistent gh failure -> reported with detail (PASS)")
+
+    # The query helpers accept only a decodable JSON body: a zero exit with a
+    # truncated body is transient, so it must be retried rather than parsed.
+    json_probe = probe_with_retry(
+        ["gh"],
+        accept=_decodes_as_json,
+        run=_scripted_runner((0, '{"ok":', ""), (0, '{"ok":true}', "")),
+        sleep=lambda _: None,
+    )
+    assert json_probe.ok, "a truncated JSON body must be retried, not parsed"
+    assert json_probe.attempts == 2
+    assert json.loads(json_probe.stdout) == {"ok": True}
+    print("self-test: exit-zero with truncated JSON -> retried (PASS)")
+
+    print("pr_axis_check self-test: all cases passed")
     return 0
 
 

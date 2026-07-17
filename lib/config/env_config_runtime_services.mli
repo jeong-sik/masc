@@ -1,6 +1,6 @@
 (** Env_config_runtime_services — env-var-backed runtime service config
     (inference, rate limit, autonomy, agent selection, timeouts,
-    operator judge, dashboard, model defaults, anti-rationalization).
+    dashboard, model defaults, anti-rationalization).
 
     All values cached at module-init from env vars; the cache
     means a runtime env-var change does not propagate without
@@ -85,25 +85,9 @@ module Timeouts : sig
 
 end
 
-(** {1 Operator judge} *)
+(** {1 Operator snapshot cache} *)
 
 module Operator : sig
-  val judge_enabled : bool
-  (** [MASC_OPERATOR_JUDGE_ENABLED] feature flag (default
-      [true]). *)
-
-  val judge_interval_sec : int
-  (** [MASC_OPERATOR_JUDGE_INTERVAL_SEC] (default [60]).
-      Floor [15s]. *)
-
-  val workspace_ttl_sec : int
-  (** [MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC] (default [60]).
-      Floor [15s]. *)
-
-  val session_ttl_sec : int
-  (** [MASC_OPERATOR_JUDGE_SESSION_TTL_SEC] (default [300]).
-      Floor [30s]. *)
-
   val cache_ttl_sec : float
   (** [MASC_OPERATOR_CACHE_TTL] (default [30.0]).  Operator
       snapshot cache TTL. *)

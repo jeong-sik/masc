@@ -89,23 +89,9 @@ module Timeouts = struct
       (get_float ~default:60.0 "MASC_MAINTENANCE_PULSE_INTERVAL_SEC")
 end
 
-(** {1 Operator Judge Configuration} *)
+(** {1 Operator Snapshot Cache Configuration} *)
 
 module Operator = struct
-  (** Whether operator judge background loop is enabled. Default: true. *)
-  let judge_enabled = Feature_flag_registry.get_bool "MASC_OPERATOR_JUDGE_ENABLED"
-
-  (** Operator judge interval, clamped to >= 15s. Default: 60. *)
-  let judge_interval_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_INTERVAL_SEC")
-
-  (** Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60.
-      @category Timeouts
-      @ops_class operator *)
-  let workspace_ttl_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC")
-
-  (** Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. *)
-  let session_ttl_sec = max 30 (get_int ~default:300 "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC")
-
   (** Operator snapshot cache TTL (seconds). Default: 30. *)
   let cache_ttl_sec = get_float ~default:30.0 "MASC_OPERATOR_CACHE_TTL"
 

@@ -410,17 +410,6 @@ export interface OperatorRecommendedAction {
 }
 
 
-export interface OperatorJudgeRuntime {
-  enabled?: boolean
-  judge_online?: boolean
-  refreshing?: boolean
-  generated_at?: string | null
-  expires_at?: string | null
-  model_used?: string | null
-  keeper_name?: string | null
-  last_error?: string | null
-}
-
 export interface OperatorGuidanceSummary {
   summary?: string | null
   confidence?: number | null
@@ -473,7 +462,6 @@ export interface OperatorDigest {
   health?: string
   judgment_owner?: string | null
   authoritative_judgment_available?: boolean
-  operator_judge_runtime?: OperatorJudgeRuntime | null
   judgment?: OperatorJudgment | null
   active_guidance_layer?: string | null
   active_summary?: OperatorGuidanceSummary | null
@@ -512,7 +500,6 @@ export interface OperatorSnapshot {
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
   inference_inflight?: InferenceInflightSnapshot | null
-  operator_judge_runtime?: OperatorJudgeRuntime | null
   persistent_agents?: OperatorKeeperSnapshot[]
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]

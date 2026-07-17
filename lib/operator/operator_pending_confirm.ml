@@ -26,20 +26,6 @@ let normalized_actor ~context_actor = function
       let trimmed = String.trim context_actor in
       if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 
-let operator_judge_runtime_json (config : Workspace.config) =
-  let runtime = Dashboard_operator_judge.runtime_status config.base_path in
-  `Assoc
-    [
-      ("enabled", `Bool runtime.enabled);
-      ("judge_online", `Bool runtime.judge_online);
-      ("refreshing", `Bool runtime.refreshing);
-      ("generated_at", Json_util.string_option_to_yojson runtime.generated_at);
-      ("expires_at", Json_util.string_option_to_yojson runtime.expires_at);
-      ("model_used", `Null);
-      ("keeper_name", `String runtime.keeper_name);
-      ("last_error", Json_util.string_option_to_yojson runtime.last_error);
-    ]
-
 type pending_confirm = {
   token : string;
   trace_id : string;

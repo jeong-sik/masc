@@ -13,6 +13,10 @@ type error =
       ; current_trace_id : Keeper_id.Trace_id.t
       ; current_generation : int
       }
+  | Current_turn_regressed of
+      { source_turn_count : int
+      ; current_turn_count : int
+      }
   | Current_messages_prefix_mismatch of Keeper_replay_prefix.prefix_mismatch
 
 val rebase
@@ -30,5 +34,5 @@ val rebase
 
     Checkpoints and their references arrive as one exact snapshot type, so a
     mismatched pair is not representable.  Diverged lineage and prefix
-    mismatches fail explicitly.  No serialization, semantic matching, size
-    threshold, or time heuristic is used. *)
+    mismatches and a regressed current turn fail explicitly.  No serialization,
+    semantic matching, size threshold, or time heuristic is used. *)

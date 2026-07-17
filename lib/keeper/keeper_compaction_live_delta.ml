@@ -5,6 +5,10 @@ type error =
       ; current_trace_id : Keeper_id.Trace_id.t
       ; current_generation : int
       }
+  | Current_turn_regressed of
+      { source_turn_count : int
+      ; current_turn_count : int
+      }
   | Current_messages_prefix_mismatch of Keeper_replay_prefix.prefix_mismatch
 
 let same_lineage (source_ref : Keeper_checkpoint_ref.t)
@@ -33,6 +37,13 @@ let rebase ~source ~compacted_messages ~current =
          ; source_generation = source_ref.generation
          ; current_trace_id = current_ref.trace_id
          ; current_generation = current_ref.generation
+         })
+  else if current_ref.turn_count < source_ref.turn_count
+  then
+    Error
+      (Current_turn_regressed
+         { source_turn_count = source_ref.turn_count
+         ; current_turn_count = current_ref.turn_count
          })
   else
     match

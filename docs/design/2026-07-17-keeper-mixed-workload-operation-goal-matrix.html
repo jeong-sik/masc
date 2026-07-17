@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC Keeper 10-Lane Mixed Workload Operation Goal Matrix</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071018;
+      --panel: #0d1a24;
+      --panel-2: #122331;
+      --line: #294154;
+      --text: #e9f1f7;
+      --muted: #9fb1be;
+      --cyan: #54d6d2;
+      --green: #73e2a7;
+      --amber: #ffc857;
+      --red: #ff6b6b;
+      --blue: #79a8ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 18% 0%, rgba(84, 214, 210, .12), transparent 32rem),
+        radial-gradient(circle at 90% 18%, rgba(121, 168, 255, .10), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      font: 15px/1.55 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1480px; margin: 0 auto; padding: 38px 24px 80px; }
+    h1, h2, h3 { line-height: 1.22; letter-spacing: -.025em; }
+    h1 { margin: 0 0 12px; font-size: clamp(32px, 5vw, 58px); }
+    h2 { margin: 56px 0 18px; font-size: 28px; }
+    h3 { margin: 24px 0 10px; font-size: 19px; color: var(--cyan); }
+    p { margin: 8px 0 14px; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { color: #b9f4ef; }
+    pre {
+      margin: 12px 0;
+      padding: 16px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #08131c;
+      color: #d9e7ef;
+    }
+    a { color: var(--cyan); }
+    .eyebrow { color: var(--cyan); text-transform: uppercase; letter-spacing: .16em; font-weight: 750; }
+    .lede { max-width: 980px; color: #c8d8e2; font-size: 19px; }
+    .stamp { color: var(--muted); font-size: 13px; }
+    .banner {
+      margin: 28px 0;
+      padding: 20px 22px;
+      border: 1px solid #7a3f45;
+      border-left: 5px solid var(--red);
+      border-radius: 12px;
+      background: rgba(94, 31, 39, .28);
+    }
+    .banner strong { color: #ffd5d5; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); gap: 12px; }
+    .card {
+      min-height: 132px;
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(18, 35, 49, .95), rgba(10, 24, 34, .95));
+    }
+    .card .value { margin-top: 4px; font-size: 30px; font-weight: 800; color: var(--cyan); }
+    .card .label { color: var(--muted); }
+    .card.bad .value { color: var(--red); }
+    .card.warn .value { color: var(--amber); }
+    .card.good .value { color: var(--green); }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .panel { padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+    .flow { white-space: pre-wrap; color: #d4e5ee; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+    table { width: 100%; border-collapse: collapse; min-width: 1020px; background: rgba(13, 26, 36, .92); }
+    th, td { padding: 12px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; z-index: 1; background: #152837; color: #d9f8f5; font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+    .metric { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .tag { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+    .p0 { color: #ffd1d1; border-color: #8f4a52; background: #3b1c23; }
+    .p1 { color: #ffe3aa; border-color: #85692a; background: #332a15; }
+    .p2 { color: #bde9ff; border-color: #376a82; background: #172d39; }
+    .ok { color: var(--green); }
+    .warn-text { color: var(--amber); }
+    .bad-text { color: var(--red); }
+    .muted { color: var(--muted); }
+    ol, ul { padding-left: 22px; }
+    li { margin: 6px 0; }
+    .phase { border-left: 4px solid var(--blue); }
+    .invariant { border-left: 4px solid var(--green); }
+    .decision { border-left: 4px solid var(--amber); }
+    .small { font-size: 13px; }
+    @media (max-width: 850px) {
+      main { padding: 24px 14px 60px; }
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">MASC 1.0 / Executable strategy</div>
+  <h1>10 Keeper Mixed-Workload<br>Operation Goal Matrix</h1>
+  <p class="lede">10개 Keeper가 Discord·Slack·Dashboard·Voice에서 동시에 대화하고, 서로 협업하며, 코드 작성·정보 수집·이미지 생성·장기 작업·메모리 기록·컴팩션을 수행하는 상황을 대상으로 한다. 목표는 평균 처리량이 아니라 <strong>직접 요청의 반응성, 영속 복구, lane 공정성, 자원 상한, 감사 가능한 상태 전이</strong>를 동시에 만족하는 것이다.</p>
+  <p class="stamp">Baseline captured: 2026-07-17 16:28 KST · repo/runtime commit cd9b4f655d · PR target #25073 head 63c58e47d3</p>
+
+  <div class="banner">
+    <strong>현재 판정: 혼합 부하 사용 불가.</strong> HTTP 서버는 응답했지만 13개 bootable Keeper 중 실행 fiber가 0이었고, 당시 16개 event queue가 모두 v2라 v3-only reader에서 거부됐다. 16:30 KST에 원본 snapshot이 외부 작업으로 v3로 변환되고 서버가 재시작 단계에 들어갔으므로, 아래 baseline은 변환 전 장애 상태와 변환 직전 backlog를 고정한 것이다. v3 재기동 검증 전에는 “복구 완료”로 계산하지 않는다.
+  </div>
+
+  <section>
+    <h2>1. Live baseline</h2>
+    <div class="cards">
+      <div class="card bad"><div class="label">Executable Keeper fibers</div><div class="value">0 / 13</div><div>목표 시나리오 10개를 실행할 capacity가 0</div></div>
+      <div class="card bad"><div class="label">Event queue read errors</div><div class="value">16 / 16</div><div>v2 snapshot을 v3-only reader가 거부</div></div>
+      <div class="card warn"><div class="label">Attention candidates</div><div class="value">3,644</div><div>520개 고유 signal이 평균 7.01배 증폭</div></div>
+      <div class="card warn"><div class="label">Pending attention</div><div class="value">890</div><div>439 + 451, age 약 15.3시간</div></div>
+      <div class="card warn"><div class="label">Candidate ledger</div><div class="value">38 MB</div><div>전체 request JSON 26.18 MB</div></div>
+      <div class="card"><div class="label">Health endpoint p50 / p95</div><div class="value">3.6 / 16.7 ms</div><div>20회 cache-hit 측정; 제품 실행 가능성 증거는 아님</div></div>
+      <div class="card warn"><div class="label">Full health recompute</div><div class="value">4.2 s</div><div>snapshot refresh 자체 비용</div></div>
+      <div class="card"><div class="label">Historical relevance</div><div class="value">48.1%</div><div>1,325 relevant / 2,754 consumed</div></div>
+    </div>
+    <p class="small muted">정확한 원본 수치: unique signals 520, candidate fan-out p50 6 / p95 14 / max 14, consumed irrelevant 1,429(51.9%), pending 890, batch request max 208,369 bytes. bytes를 token으로 임의 환산하지 않는다.</p>
+  </section>
+
+  <section>
+    <h2>1.5 Product usefulness gate</h2>
+    <div class="banner">
+      <strong>고객 Job-to-be-done:</strong> 어느 채널에서 Keeper에게 일을 맡겨도 접수 사실을 즉시 알고, 다른 동시 작업 때문에 귀머거리가 되지 않으며, 결과 또는 구조화된 실패가 원래 채널로 정확히 한 번 돌아오고, 재시작·컴팩션 후에도 그 약속이 이어져야 한다. 내부 heartbeat나 HTTP 200은 고객 가치로 점수화하지 않는다.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>제품 축</th><th>Weight</th><th>현재 관측</th><th>#25073 단독 효과</th><th>1.0 정량 gate</th></tr></thead>
+        <tbody>
+          <tr><td>실행 가능성</td><td>25%</td><td>0/13 executable → 0점</td><td>queue schema 장애를 고치지 않으므로 0점 유지</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity &gt; 0</td></tr>
+          <tr><td>End-to-end useful completion</td><td>25%</td><td>실행 fiber 0이라 측정 불가 → fail-closed 0점</td><td>attention 판정 비용만 줄이며 고객 결과 완료를 증명하지 않음</td><td>명시적 거절 제외 요청의 terminal receipt ≥ 99%, duplicate terminal effect = 0</td></tr>
+          <tr><td>직접 요청 반응성</td><td>15%</td><td>owner lane이 ambient provider call에 30–50초 점유될 수 있음</td><td>55/57 calls 연속 점유를 1 call/admission으로 제한; call 자체의 점유는 남음</td><td>enqueue→turn-start p95 ≤ 2s, 접수 응답 p95 ≤ 5s</td></tr>
+          <tr><td>채널·세션 연속성</td><td>15%</td><td>Discord presence만 alive; Slack/Voice E2E 미검증</td><td>영향 없음</td><td>Discord/Slack/Dashboard/Voice route accuracy 100%, restart replay 100%</td></tr>
+          <tr><td>무유실·판정 정확성</td><td>10%</td><td>blind TTL + partial verdict 무증거 Pending</td><td>TTL 제거, exact ID coverage, context cohort로 개선</td><td>silent discard = 0, cross-context batch = 0, 모든 defer에 typed evidence</td></tr>
+          <tr><td>운영자 신뢰</td><td>10%</td><td>health cache는 수 ms이나 fleet는 0</td><td>영향 없음</td><td>incomplete count를 green/zero로 투영한 횟수 = 0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>점수 공식:</strong> <code>Σ(weight × gate achievement)</code>. 각 gate는 통과 1 / 실패·Unknown 0으로 계산한다. 샘플이 없는 주장은 0점, HTTP 생존은 실행 가능성의 대체 지표가 아니다. 따라서 현재 live 제품 점수는 <strong>0.0 / 10</strong>이다. v3 fleet를 복구하고 본 follow-up의 무유실 계약까지 통과해도, completion·latency·channel·operator gate가 미검증이면 최대 <strong>3.5 / 10</strong>이다. 즉 #25073 계열만으로는 출시 점수 9.0에 도달하지 않는다.</p>
+    <p><strong>9.0 release floor:</strong> 위 6개 축의 가중 합 ≥ 9.0이고, 동시에 실행 가능성·terminal exactly-once·silent loss 세 hard gate가 모두 통과해야 한다. 평균 점수가 높아도 이 셋 중 하나가 0이면 출시 불가다.</p>
+  </section>
+
+  <section>
+    <h2>2. Scenario contract</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Work class</th><th>실제 예</th><th>현재 소유 lane</th><th>실패 시 사용자 증상</th><th>1.0 계약</th></tr></thead>
+        <tbody>
+          <tr><td>Direct input</td><td>Discord/Slack/Dashboard mention, 승인 응답</td><td>Keeper turn admission + chat queue</td><td>ambient backlog 뒤에서 응답 지연</td><td>ambient보다 먼저 admission. enqueue→turn-start p95 ≤ 2s</td></tr>
+          <tr><td>Ambient attention</td><td>공개 Board post/comment/reaction의 의미 판정</td><td>현재 owner lane에서 provider 호출</td><td>한 Keeper가 수십 분 deaf</td><td>owner lane 밖의 judgment plane. owner는 판정 결과 commit만 수행</td></tr>
+          <tr><td>K2K collaboration</td><td>다른 Keeper의 post, task handoff, 검증 요청</td><td>Board/event queue</td><td>fan-out·중복·순서 역전</td><td>typed audience + durable identity + exactly-once settlement</td></tr>
+          <tr><td>Code/research job</td><td>긴 shell, repo 분석, 웹 조사</td><td>도구가 inline이면 turn fiber</td><td>작업 중 새 메시지에 반응 불가</td><td>spawn→durable result→wake. turn에서 blocking await 금지</td></tr>
+          <tr><td>Image generation</td><td>이미지 생성·분석·후속 수정</td><td>media-capable runtime/tool call</td><td>모델 capability 실패 또는 장시간 lane 점유</td><td>declared capability gate + background result handle</td></tr>
+          <tr><td>Voice</td><td>TTS/STT/session playback</td><td>voice bridge + per-agent session</td><td>playback lock·provider timeout·대화 lane 정지</td><td>voice session state와 turn state 분리, terminal result를 원 channel로 전달</td></tr>
+          <tr><td>Memory/compaction</td><td>post-turn memory, checkpoint, context overflow</td><td>post-turn / compaction admission</td><td>chat와 compaction이 서로 막는 priority inversion</td><td>checkpoint writer 단일 소유 + compaction reservation + 결과 재개</td></tr>
+          <tr><td>AFK catch-up</td><td>사용자가 명시적으로 Away, 야간 backlog 처리</td><td>현재 별도 계약 없음</td><td>idle 추정 오류 또는 무한 drain</td><td>명시적 persisted mode만 사용. 최근 입력시간으로 추정 금지</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. AS-IS control flow</h2>
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Channel / Board ingress</h3>
+        <pre class="flow">Discord / Slack / Dashboard / Board
+        │
+        ├─ exact address ──► durable event queue
+        │                     │
+        │                     └─► Keeper owner admission
+        │
+        └─ no deterministic address
+              └─► candidate copied per Keeper
+                     └─► owner admission
+                            └─► structured judge call(s)
+                                   └─► durable event queue</pre>
+        <p>Semantic judgment가 owner admission 안에 있다. 느린 provider가 한 Keeper의 모든 입력·도구·메모리 진행을 막는다.</p>
+      </div>
+      <div class="panel">
+        <h3>Long-running tool work</h3>
+        <pre class="flow">Keeper turn
+   ├─ provider reasoning
+   ├─ code / research / voice / image tool
+   │      └─ inline wait이면 같은 turn 계속 점유
+   ├─ post-turn memory
+   └─ compaction / settlement
+
+다른 Keeper는 병렬 실행 가능
+같은 Keeper의 새 Discord/Slack 메시지는 대기</pre>
+        <p>10 Keeper는 10개 lane 병렬성이 있지만 각 Keeper 내부는 single-flight다. 한 lane의 장기 작업을 background job으로 분리하지 않으면 해당 인격은 작업 완료까지 deaf 상태다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. PR #25073 measured Before / After</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Metric</th><th>Before: current main</th><th>PR #25073</th><th>Delta</th><th>남는 문제</th></tr></thead>
+        <tbody>
+          <tr><td>Pending candidates</td><td class="metric">890</td><td class="metric">890</td><td>상태량 동일</td><td>producer fan-out은 바뀌지 않음</td></tr>
+          <tr><td>Judge calls</td><td class="metric">890</td><td class="metric">112</td><td class="ok">−778 / −87.4%</td><td>55회와 57회를 각 owner turn 안에서 연속 실행</td></tr>
+          <tr><td>hitl-switch-verifier</td><td class="metric">439 calls</td><td class="metric">55 calls</td><td class="ok">7.98× 감소</td><td>30–50s/call이면 lane 27.5–45.8분 점유</td></tr>
+          <tr><td>idealist</td><td class="metric">451 calls</td><td class="metric">57 calls</td><td class="ok">7.91× 감소</td><td>30–50s/call이면 lane 28.5–47.5분 점유</td></tr>
+          <tr><td>Batch request bytes</td><td>single request 분포</td><td class="metric">p50 40–41KB<br>p95 70–99KB<br>max 208KB</td><td>request 수 감소</td><td>provider tokenizer/capability에 의한 admission 없음</td></tr>
+          <tr><td>Context integrity</td><td>candidate별 context</td><td>첫 candidate context 공유</td><td class="bad-text">회귀 가능</td><td>현재 890건은 keeper별 context 1종이라 이번 데이터에는 미발현</td></tr>
+          <tr><td>Expiry</td><td>없음</td><td>wall-clock 24h</td><td>backlog 상한</td><td>AFK/주말 종료와 장애를 구분하지 못하는 blind TTL</td></tr>
+          <tr><td>Ledger commits</td><td>candidate별 다중 whole-file rewrite</td><td>동일</td><td class="bad-text">개선 없음</td><td>batch verdict를 candidate별로 commit</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small muted">30–50초는 PR 본문의 2026-07-17 provider 관측 범위다. 이번 측정 시점에는 Keeper fiber가 0이라 live provider latency를 재측정할 수 없었다.</p>
+  </section>
+
+  <section>
+    <h2>5. TO-BE architecture</h2>
+    <div class="panel invariant">
+      <h3>Load-bearing invariant</h3>
+      <p><strong>Keeper owner admission에는 사용자 대화, 상태 결정, 짧은 durable commit만 들어간다.</strong> provider batch 판단, 이미지 생성, 장기 코드 실행, 리서치, 음성 합성은 job plane에서 실행하고 결과를 durable stimulus로 되돌린다.</p>
+    </div>
+    <pre class="flow">Typed ingress
+  ├─ Direct(channel, identity, thread) ───────────────┐
+  ├─ ThreadParticipant(...) ──────────────────────────┤
+  ├─ Broadcast(...) ──────────────────────────────────┤
+  └─ Discoverable(signal) ─► Attention Router         │
+                               │                       │
+                               ├─ provider capability  │
+                               ├─ exact token budget   │
+                               ├─ context fingerprint  │
+                               └─ durable judgments    │
+                                                       ▼
+                                          Per-Keeper Event Queue v3
+                                                       │
+                                                       ▼
+                                       Keeper owner admission (short)
+                                           ├─ decide / spawn job
+                                           ├─ commit checkpoint
+                                           └─ return admission
+                                                       │
+                       ┌───────────────────────────────┴───────────────┐
+                       ▼                                               ▼
+             Background Job Plane                             Memory / Compaction
+        code · research · image · voice              single checkpoint writer + reservation
+                       │                                               │
+                       └──────── durable completion stimulus ──────────┘</pre>
+  </section>
+
+  <section>
+    <h2>6. No-heuristic mechanism</h2>
+    <div class="grid-2">
+      <div class="panel decision">
+        <h3>AFK is explicit, never guessed</h3>
+        <pre>type operator_mode =
+  | Interactive
+  | Catch_up of { operation_id : Operation_id.t }
+
+type mode_source =
+  | Dashboard_operator
+  | Scheduled_operation
+  | Api_operator</pre>
+        <ul>
+          <li>“마지막 키보드 입력 후 N분”으로 Away를 추정하지 않는다.</li>
+          <li>Catch-up 시작/종료는 durable operation으로 기록한다.</li>
+          <li>어떤 mode에서도 direct queue가 존재하면 ambient worker는 owner admission을 얻지 않는다.</li>
+          <li>Catch-up은 provider permit을 늘릴 수 있지만 owner admission의 single-flight invariant는 깨지 않는다.</li>
+        </ul>
+      </div>
+      <div class="panel decision">
+        <h3>Batch capacity is declared, not guessed</h3>
+        <pre>type batch_budget =
+  { runtime_id : Runtime_id.t
+  ; max_context_tokens : int
+  ; max_output_tokens : int option
+  ; tokenizer : Provider_tokenizer.t
+  }
+
+Token_accounting_unavailable
+  ⇒ typed defer, never byte/4 fallback</pre>
+        <ul>
+          <li>model max-context는 Runtime/OAS capability SSOT에서 읽는다.</li>
+          <li>정확한 provider tokenizer가 없으면 batch admission을 거부한다.</li>
+          <li>candidate 개수 8이나 bytes/token 환산을 안전 근거로 사용하지 않는다.</li>
+          <li>output schema의 요청 ID 완전 일치가 아니면 typed partial failure다.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Typed work and state transitions</h3>
+    <pre>type work_class =
+  | Direct_input of Keeper_continuation_channel.t
+  | Approval_resolution
+  | Compaction_recovery
+  | Background_completion of Job_id.t
+  | Ambient_attention of Candidate_id.t
+
+type attention_state =
+  | Pending
+  | Leased of Lease.t
+  | Judged of Judgment.t
+  | Delivery_blocked of Durable_error.t
+  | Consumed of Receipt.t
+  | Superseded of Candidate_id.t
+
+type job_state =
+  | Submitted
+  | Running of Resource_lease.t
+  | Completed of Artifact_ref.t
+  | Failed of Job_error.t
+  | Cancelled of Cancellation_receipt.t</pre>
+    <p>TTL로 임의 폐기하지 않는다. 같은 의미 슬롯의 새 signal이 도착하면 <code>Superseded</code>, Task가 종료되면 명시적 lifecycle transition, 운영자가 폐기하면 operation receipt를 남긴다.</p>
+  </section>
+
+  <section>
+    <h2>7. Goal execution matrix</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Goal</th><th>Baseline</th><th>1.0 target</th><th>Metric / hard gate</th><th>Code owner</th><th>PR</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag p0">G0</span></td><td>v3 queue recovery</td><td>0 executable, 16 read errors</td><td>요청 시나리오 10/10 executable, read error 0</td><td><code>executable=10 ∧ schema_errors=0</code></td><td>event_queue_persistence, bootstrap</td><td>PR-0</td></tr>
+          <tr><td><span class="tag p0">G1</span></td><td>Direct responsiveness</td><td>ambient drain이 owner slot 장기 점유 가능</td><td>enqueue→turn-start p95 ≤ 2s</td><td>10-lane harness에서 direct latency p95</td><td>turn_admission, chat queue</td><td>PR-1</td></tr>
+          <tr><td><span class="tag p0">G2</span></td><td>One provider quantum per admission</td><td>55/57 calls 한 turn</td><td>admission당 provider call ≤ 1</td><td><code>max_calls_per_admission = 1</code></td><td>board_attention_candidate, heartbeat</td><td>PR-1</td></tr>
+          <tr><td><span class="tag p0">G3</span></td><td>No silent loss</td><td>missing verdict 무증거 Pending, blind TTL</td><td>silent drop 0, 모든 defer에 typed reason</td><td><code>requested_ids = terminal_ids ∪ deferred_ids</code></td><td>judgment contract</td><td>PR-1</td></tr>
+          <tr><td><span class="tag p1">G4</span></td><td>Context correctness</td><td>첫 candidate context 공유</td><td>batch context fingerprint cardinality = 1</td><td>mixed-context fixture에서 cross-context 0</td><td>candidate, prompt contract</td><td>PR-1</td></tr>
+          <tr><td><span class="tag p1">G5</span></td><td>Atomic durable batch commit</td><td>whole-file rewrite candidate별 반복</td><td>판정 batch당 durable rewrite = 1</td><td>439 fixture에서 rewrite count 55 이하</td><td>candidate ledger transaction</td><td>PR-2</td></tr>
+          <tr><td><span class="tag p1">G6</span></td><td>Routing amplification</td><td>평균 7.01×, p95 14×</td><td>Targets 신호 amplification = target count; Discoverable 별도 측정</td><td><code>created_candidates / signal</code> audience별 분리</td><td>Board audience, attention router</td><td>PR-3</td></tr>
+          <tr><td><span class="tag p1">G7</span></td><td>Background work isolation</td><td>inline tool이 Keeper를 deaf하게 만들 수 있음</td><td>long job inline-await 0, terminal delivery exactly once</td><td>10 Keeper × mixed jobs에서 direct latency gate 유지</td><td>background job registry/executor</td><td>PR-4..6</td></tr>
+          <tr><td><span class="tag p1">G8</span></td><td>Resource backpressure</td><td>작업 종류별 분산된 제한</td><td>provider/FD/job permit의 단일 typed SSOT</td><td>cap+1이 fork 없이 typed reject; FD baseline 복귀</td><td>resource leases</td><td>PR-5</td></tr>
+          <tr><td><span class="tag p1">G9</span></td><td>Memory/compaction progress</td><td>turn/post-turn/compaction 경쟁</td><td>overflow 상태에서 compaction completion 100%, direct receipt 보존</td><td>compaction starvation 0 / checkpoint writer concurrency 1</td><td>compaction reservation, checkpoint</td><td>PR-7</td></tr>
+          <tr><td><span class="tag p2">G10</span></td><td>Operator truth</td><td>health cache fast여도 fleet 0 가능</td><td>UI가 capacity, queue completeness, stale snapshot을 분리</td><td>green status with incomplete counts = 0</td><td>health/dashboard projection</td><td>PR-8</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>8. PR slicing and exact order</h2>
+    <div class="panel phase">
+      <h3>PR-0 — Restore executable truth</h3>
+      <ol>
+        <li>v3 snapshot validator를 offline/live 동일 parser로 실행한다.</li>
+        <li>10개 목표 Keeper가 등록되고 executable인지 확인한다.</li>
+        <li>queue pending/inflight counts가 complete인지 확인한다.</li>
+        <li>Discord/Slack ingress smoke는 Keeper turn receipt까지 확인한다.</li>
+      </ol>
+      <p><strong>Exit:</strong> 10/10 executable, queue read errors 0, direct receipt 10/10. 이 단계 전에는 성능 실험 금지.</p>
+    </div>
+    <div class="panel phase">
+      <h3>PR-1 — Follow-up to merged #25073: fairness and correctness</h3>
+      <ol>
+        <li>blind TTL/Expired 정책을 제거하고 typed defer/supersession 계획으로 전환한다.</li>
+        <li>동일 keeper_context fingerprint만 한 batch에 포함한다.</li>
+        <li>요청 ID와 응답 ID의 완전성 검증, partial outcome을 typed failure로 기록한다.</li>
+        <li>owner admission당 정확히 한 provider batch만 실행하고 remaining이면 durable continuation wake를 남긴다.</li>
+        <li>현재 890 fixture로 calls 112, admission 112, cross-context 0, silent drop 0을 검증한다.</li>
+      </ol>
+      <p><strong>Live state:</strong> #25073은 2026-07-17 16:31 KST에 merge됐다. 아래 수정은 merge된 TTL·batch 경로를 되돌리는 것이 아니라 최신 main 위 후속 draft PR로 제출한다.</p>
+      <p><strong>Exit:</strong> Build/Test green + mixed context + direct preemption + 439/451 backlog simulation.</p>
+      <p><strong>Exact-token dependency:</strong> OAS draft PR <a href="https://github.com/jeong-sik/oas/pull/2647">#2647</a>가 prepared completion request의 provider-owned input count와 output receipt를 추가 중이다. 현재 구현은 Anthropic만 지원하며, 측정한 request artifact와 실제 dispatch artifact의 동일성을 아직 보장하지 않는다고 인터페이스가 명시한다. 따라서 #25073의 <code>batch_max_candidates = 8</code>은 1.0 승인 기준이 아니며, #2647 merge → OAS release/pin → 동일 artifact fit admission 연결 전까지 hardcoded-cap blocker로 취급한다.</p>
+    </div>
+    <div class="panel phase">
+      <h3>PR-2/3 — Atomic ledger and signal-centric routing</h3>
+      <ol>
+        <li>batch verdict를 한 durable rewrite로 commit한다.</li>
+        <li>Board audience를 Targets/Broadcast/ThreadParticipants/Discoverable closed sum으로 만든다.</li>
+        <li>direct signal을 non-target Keeper candidate로 fan-out하지 않는다.</li>
+        <li>Discoverable만 owner lane 밖의 attention router로 보낸다.</li>
+      </ol>
+      <p><strong>Exit:</strong> direct amplification equals explicit target count; discoverable amplification and cost are 별도 지표.</p>
+    </div>
+    <div class="panel phase">
+      <h3>PR-4..7 — Background jobs, media, memory</h3>
+      <ol>
+        <li>기존 fusion spawn→wake pattern을 generic typed job state로 확장한다.</li>
+        <li>code/research/image/voice를 capability와 resource lease로 admission한다.</li>
+        <li>inner Eio switch로 FD를 job 종료 시 회수한다.</li>
+        <li>결과는 originating continuation channel로 exactly once 전달한다.</li>
+        <li>checkpoint writer와 compaction reservation을 한 소유권 모델로 통합한다.</li>
+      </ol>
+      <p><strong>Exit:</strong> 10 Keeper mixed workload에서 direct latency·FD·terminal delivery·compaction gate 동시 통과.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>9. 10-Keeper release harness</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Lane</th><th>Foreground</th><th>Background</th><th>Memory pressure</th><th>Injected fault</th><th>Pass condition</th></tr></thead>
+        <tbody>
+          <tr><td>K1</td><td>Discord direct chat</td><td>code build</td><td>normal</td><td>none</td><td>turn-start ≤ 2s while build continues</td></tr>
+          <tr><td>K2</td><td>Slack thread</td><td>web research</td><td>normal</td><td>429 Retry-After</td><td>typed retry; other lanes progress</td></tr>
+          <tr><td>K3</td><td>Dashboard approval</td><td>image generation</td><td>normal</td><td>non-image runtime first</td><td>capability reroute or fail-closed before provider</td></tr>
+          <tr><td>K4</td><td>Voice request</td><td>TTS playback</td><td>normal</td><td>voice endpoint timeout</td><td>lane releases; terminal failure delivered once</td></tr>
+          <tr><td>K5</td><td>K2K verification</td><td>long shell</td><td>normal</td><td>process cancellation</td><td>FD baseline, cancelled receipt once</td></tr>
+          <tr><td>K6</td><td>Board mention</td><td>ambient attention</td><td>normal</td><td>partial verdict</td><td>direct wins; omitted IDs typed deferred</td></tr>
+          <tr><td>K7</td><td>Discord + Slack burst</td><td>none</td><td>near context cap</td><td>compaction requested</td><td>compaction completes; both receipts preserved</td></tr>
+          <tr><td>K8</td><td>none</td><td>AFK catch-up</td><td>normal</td><td>operator returns</td><td>new direct work preempts next quantum</td></tr>
+          <tr><td>K9</td><td>Broadcast</td><td>image + research</td><td>normal</td><td>server restart</td><td>jobs/queue recover without duplicate terminal effect</td></tr>
+          <tr><td>K10</td><td>Task handoff</td><td>code + verifier</td><td>compaction boundary</td><td>queue settlement failure</td><td>lease requeues; handoff remains auditable</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>10. Stop / go rules</h2>
+    <div class="grid-2">
+      <div class="panel">
+        <h3 class="bad-text">STOP</h3>
+        <ul>
+          <li>event queue count가 incomplete인데 pending=0으로 표시됨</li>
+          <li>direct 요청이 ambient provider call 두 번 이상 뒤에서 대기</li>
+          <li>provider tokenizer 없이 bytes/4 등으로 batch token을 추정</li>
+          <li>AFK를 wall-clock idle로 추정</li>
+          <li>누락 verdict, job cancellation, delivery failure가 무증거 Pending으로 남음</li>
+          <li>background job이 turn switch 또는 server root switch에 FD를 누수</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3 class="ok">GO</h3>
+        <ul>
+          <li>10/10 executable + queue read errors 0</li>
+          <li>admission당 attention provider call ≤ 1</li>
+          <li>direct enqueue→turn-start p95 ≤ 2s</li>
+          <li>silent loss 0, terminal exactly once</li>
+          <li>batch context fingerprint cardinality 1</li>
+          <li>10-lane mixed harness에서 FD·compaction·connector SLO 동시 통과</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>11. Reproducible evidence commands</h2>
+    <pre># Fleet and durable queue truth
+curl -fsS 'http://127.0.0.1:8935/health?full=1' | jq '{overall_status, keeper_fleet_safety, keeper_event_queue}'
+
+# Snapshot schema inventory
+find /Users/dancer/me/.masc/keepers -name event-queue.json \
+  -exec jq -r '.schema' {} + | sort | uniq -c
+
+# Attention state counts
+jq -s 'group_by(.status.kind) | map({status:.[0].status.kind,count:length})' \
+  /Users/dancer/me/.masc/board_attention_candidates/*.jsonl
+
+# Candidate amplification
+jq -s '[.[]|(.signal|tojson)] | {candidates:length,signals:(unique|length)}' \
+  /Users/dancer/me/.masc/board_attention_candidates/*.jsonl
+
+# Focused OCaml verification
+scripts/dune-local.sh build test/test_keeper_board_attention_candidate.exe
+_build/default/test/test_keeper_board_attention_candidate.exe</pre>
+  </section>
+</main>
+</body>
+</html>

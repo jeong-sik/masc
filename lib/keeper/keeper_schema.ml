@@ -28,15 +28,8 @@ let nonnegative_number_schema description =
     ]
 ;;
 
-(** Issue #8486: hand-mirrored from
-    [Keeper_status_detail.valid_tail_order_strings].  Same cycle
-    constraint — Keeper_schema is upstream of Keeper_status_detail.
-    The test [test_types.ml :: tail_order_ssot] asserts this mirror
-    stays in sync with the SSOT so adding a 3rd ordering constructor
-    fails compilation in [tail_order_to_string] AND fails the test
-    here, instead of silently dropping from the JSON Schema. *)
 let tail_order_enum_strings =
-  [ "oldest_first"; "newest_first" ]
+  Keeper_status_options_defaults.valid_tail_order_strings
 
 let string_array_schema =
   `Assoc [
@@ -279,59 +272,62 @@ let keeper_schemas : tool_schema list = [
   {
     name = "masc_keeper_status";
     description = "Get keeper status (keepalive/live/reconcile state plus current context and monitoring tails).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
+    input_schema = closed_object_schema ~required:[] [
+        (Keeper_status_options_defaults.Argument.name, `Assoc [
           ("type", `String "string");
-          ("description", `String "Keeper handle. Optional; defaults to the caller when omitted.");
+          ("minLength", `Int 1);
+          ("pattern", `String "\\S");
+          ("description", `String "Non-blank Keeper handle. Optional; defaults to the caller only when omitted.");
         ]);
-        ("tail_turns", `Assoc [
+        (Keeper_status_options_defaults.Argument.tail_turns, `Assoc [
           ("type", `String "integer");
+          ("minimum", `Int Keeper_status_options_defaults.min_tail_turns);
           ("description", `String (Printf.sprintf "How many recent turns to include from keeper metrics (default: %d)." Keeper_status_options_defaults.tail_turns));
         ]);
-        ("tail_messages", `Assoc [
+        (Keeper_status_options_defaults.Argument.tail_messages, `Assoc [
           ("type", `String "integer");
+          ("minimum", `Int Keeper_status_options_defaults.min_tail_messages);
           ("description", `String (Printf.sprintf "How many recent history messages to include (default: %d)." Keeper_status_options_defaults.tail_messages));
         ]);
-        ("tail_compactions", `Assoc [
+        (Keeper_status_options_defaults.Argument.tail_compactions, `Assoc [
           ("type", `String "integer");
+          ("minimum", `Int Keeper_status_options_defaults.min_tail_compactions);
           ("description", `String (Printf.sprintf "How many recent compaction events to include (default: %d)." Keeper_status_options_defaults.tail_compactions));
         ]);
-        ("tail_bytes", `Assoc [
+        (Keeper_status_options_defaults.Argument.tail_bytes, `Assoc [
           ("type", `String "integer");
+          ("minimum", `Int Keeper_status_options_defaults.min_tail_bytes);
           ("description", `String (Printf.sprintf "How many bytes from the end of files to scan for tails (default: %d; minimum: %d)." Keeper_status_options_defaults.tail_bytes Keeper_status_options_defaults.min_tail_bytes));
         ]);
-        ("tail_order", `Assoc [
+        (Keeper_status_options_defaults.Argument.tail_order, `Assoc [
           ("type", `String "string");
           ("enum", `List (List.map (fun s -> `String s) tail_order_enum_strings));
           ("description", `String "Ordering for metrics/history/compaction tails and recent memory notes. Default: oldest_first (compat).");
         ]);
-        ("fast", `Assoc [
+        (Keeper_status_options_defaults.Argument.fast, `Assoc [
           ("type", `String "boolean");
           ("description", `String "Enable fast mode (skip heavy sections unless explicitly enabled).");
         ]);
-        ("include_context", `Assoc [
+        (Keeper_status_options_defaults.Argument.include_context, `Assoc [
           ("type", `String "boolean");
           ("description", `String "Include checkpoint-derived context stats (default: !fast).");
         ]);
-        ("include_metrics_overview", `Assoc [
+        (Keeper_status_options_defaults.Argument.include_metrics_overview, `Assoc [
           ("type", `String "boolean");
           ("description", `String "Include metrics overview + skill route scan (default: !fast).");
         ]);
-        ("include_memory_bank", `Assoc [
+        (Keeper_status_options_defaults.Argument.include_memory_bank, `Assoc [
           ("type", `String "boolean");
           ("description", `String "Include memory bank summary (default: !fast).");
         ]);
-        ("include_history_tail", `Assoc [
+        (Keeper_status_options_defaults.Argument.include_history_tail, `Assoc [
           ("type", `String "boolean");
           ("description", `String "Include recent history tail + fragment counters (default: !fast).");
         ]);
-        ("include_compaction_history", `Assoc [
+        (Keeper_status_options_defaults.Argument.include_compaction_history, `Assoc [
           ("type", `String "boolean");
           ("description", `String "Include recent compaction history tail (default: !fast).");
         ]);
-      ]);
     ];
   };
 

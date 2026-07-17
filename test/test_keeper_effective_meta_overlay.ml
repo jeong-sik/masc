@@ -1,7 +1,9 @@
 module Workspace = Masc.Workspace
 module Store = Masc.Keeper_meta_store
 module Profile = Masc.Keeper_types_profile
+module Keeper_schema = Masc.Keeper_schema
 module Status_detail = Masc.Keeper_status_detail
+module Status_options_defaults = Masc.Keeper_status_options_defaults
 module Turn_setup = Masc.Keeper_turn_setup
 module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
@@ -589,7 +591,7 @@ let test_missing_profile_source_fails_loud () =
         true
         (contains_substring ~needle:"sandbox_profile is required" err)
 
-let test_status_cache_tracks_toml_overlay_changes () =
+let test_status_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "statuscache" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
@@ -607,14 +609,13 @@ let test_status_cache_tracks_toml_overlay_changes () =
     "second cache instructions after toml edit"
     (status_instructions config name)
 
-let test_status_cache_distinguishes_normalized_options () =
+let test_status_reports_normalized_options () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-options-cache" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
     ~instructions:"normalized status options";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
-  Status_detail.invalidate_status_cache_all ();
   let common_fields =
     [ "name", `String name
     ; "fast", `Bool false
@@ -652,7 +653,7 @@ let test_status_cache_distinguishes_normalized_options () =
       (`Assoc (("include_context", `Bool false) :: common_fields))
   in
   Alcotest.(check (option bool))
-    "explicit include_context false is not served from the prior cache entry"
+    "explicit include_context false is reported"
     (Some false)
     (json_assoc_field "status_options" context_disabled
      |> json_bool_field "include_context");
@@ -666,13 +667,14 @@ let test_status_cache_distinguishes_normalized_options () =
         [ "name", `String name
         ; "fast", `Bool true
         ; "tail_compactions", `Int 1
-        ; "tail_bytes", `Int 1
+        ; ( "tail_bytes"
+          , `Int Masc.Keeper_status_options_defaults.min_tail_bytes )
         ])
   in
   let first_options = json_assoc_field "status_options" first_window in
   Alcotest.(check (option int))
-    "tail bytes clamp is observable"
-    (Some 1_000)
+    "minimum tail bytes is preserved"
+    (Some Masc.Keeper_status_options_defaults.min_tail_bytes)
     (json_int_field "tail_bytes" first_options);
   let second_window =
     status_json_with_args config
@@ -685,11 +687,11 @@ let test_status_cache_distinguishes_normalized_options () =
   in
   let second_options = json_assoc_field "status_options" second_window in
   Alcotest.(check (option int))
-    "tail compaction window participates in cache identity"
+    "tail compaction window is reported"
     (Some 7)
     (json_int_field "tail_compactions" second_options);
   Alcotest.(check (option int))
-    "tail byte window participates in cache identity"
+    "tail byte window is reported"
     (Some 8_000)
     (json_int_field "tail_bytes" second_options)
 
@@ -719,14 +721,135 @@ let test_status_rejects_tail_order_outside_schema () =
        ~needle:"allowed: oldest_first, newest_first"
        (Profile.tool_result_body result))
 
-let test_status_cache_tracks_persisted_meta_without_updated_at () =
+let test_status_rejects_malformed_options () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-malformed-options" in
+  write_keeper_toml
+    ~keepers_dir
+    ~name
+    ~sandbox_profile:"local"
+    ~instructions:"strict status options";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let check_rejected label args needle =
+    let result = status_result_with_args config args in
+    Alcotest.(check bool)
+      (label ^ " fails")
+      false
+      (Profile.tool_result_success result);
+    Alcotest.(check bool)
+      (label ^ " explains the rejected field")
+      true
+      (contains_substring ~needle (Profile.tool_result_body result))
+  in
+  check_rejected
+    "tail bytes below schema minimum"
+    (`Assoc
+      [ "name", `String name
+      ; ( "tail_bytes"
+        , `Int (Masc.Keeper_status_options_defaults.min_tail_bytes - 1) )
+      ])
+    "tail_bytes\" must be at least";
+  check_rejected
+    "negative tail turns"
+    (`Assoc [ "name", `String name; "tail_turns", `Int (-1) ])
+    "tail_turns\" must be at least";
+  check_rejected
+    "string tail messages"
+    (`Assoc [ "name", `String name; "tail_messages", `String "10" ])
+    "tail_messages\" must be an integer";
+  check_rejected
+    "integer fast flag"
+    (`Assoc [ "name", `String name; "fast", `Int 1 ])
+    "fast\" must be a boolean";
+  check_rejected
+    "non-string tail order"
+    (`Assoc [ "name", `String name; "tail_order", `Bool true ])
+    "tail_order\" must be a string";
+  check_rejected
+    "non-string keeper name"
+    (`Assoc [ "name", `Int 7 ])
+    "name\" must be a string";
+  check_rejected
+    "non-object arguments"
+    (`List [])
+    "must be a JSON object";
+  check_rejected
+    "unknown argument"
+    (`Assoc [ "name", `String name; "mystery", `Bool true ])
+    "unknown keeper_status argument \"mystery\"";
+  check_rejected
+    "duplicate known argument"
+    (`Assoc
+      [ "name", `String name
+      ; "fast", `Bool true
+      ; "fast", `Bool false
+      ])
+    "argument \"fast\" must occur at most once";
+  check_rejected
+    "blank keeper name"
+    (`Assoc [ "name", `String " " ])
+    "argument \"name\" must not be blank";
+  check_rejected
+    "blank tail order"
+    (`Assoc
+      [ "name", `String name
+      ; "tail_order", `String " "
+      ])
+    "invalid tail_order"
+
+let test_status_schema_tracks_argument_contract () =
+  let schema =
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) ->
+        String.equal schema.name "masc_keeper_status")
+      Keeper_schema.keeper_schemas
+    |> Option.get
+  in
+  let properties =
+    match json_field "properties" schema.input_schema with
+    | Some (`Assoc fields) -> List.map fst fields
+    | _ -> Alcotest.fail "keeper_status schema has no object properties"
+  in
+  Alcotest.(check (list string))
+    "schema properties use the runtime argument SSOT"
+    (List.sort String.compare Status_options_defaults.Argument.all)
+    (List.sort String.compare properties);
+  Alcotest.(check (option bool))
+    "schema rejects unknown properties"
+    (Some false)
+    (json_bool_field "additionalProperties" schema.input_schema);
+  let tail_order_values =
+    match
+      List.assoc_opt
+        Status_options_defaults.Argument.tail_order
+        (match json_field "properties" schema.input_schema with
+         | Some (`Assoc fields) -> fields
+         | _ -> [])
+    with
+    | Some (`Assoc fields) ->
+        (match List.assoc_opt "enum" fields with
+         | Some (`List values) ->
+             List.filter_map
+               (function
+                 | `String value -> Some value
+                 | _ -> None)
+               values
+         | _ -> [])
+    | _ -> []
+  in
+  Alcotest.(check (list string))
+    "tail order schema follows the typed variants"
+    Status_detail.valid_tail_order_strings
+    tail_order_values
+
+let test_status_tracks_persisted_meta_without_updated_at () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-persisted-meta-cache" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
     ~instructions:"persisted meta cache";
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Status_detail.invalidate_status_cache_all ();
   let initial = status_json_with ~name config in
   Alcotest.(check (option bool))
     "initial status is active"
@@ -738,9 +861,49 @@ let test_status_cache_tracks_persisted_meta_without_updated_at () =
     (Masc.Keeper_meta_json.meta_to_json paused |> Yojson.Safe.to_string);
   let refreshed = status_json_with ~name config in
   Alcotest.(check (option bool))
-    "persisted paused change invalidates cache without updated_at change"
+    "persisted paused change is observed without updated_at change"
     (Some true)
     (json_assoc_field "meta" refreshed |> json_bool_field "paused")
+
+let test_status_reads_live_registry_each_call () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-live-registry" in
+  write_keeper_toml
+    ~keepers_dir
+    ~name
+    ~sandbox_profile:"local"
+    ~instructions:"live registry observation";
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc.Keeper_registry.clear ();
+  Fun.protect
+    ~finally:Masc.Keeper_registry.clear
+    (fun () ->
+      ignore
+        (Masc.Keeper_registry.register
+           ~base_path:config.base_path
+           name
+           meta);
+      let status () =
+        status_json_with_args config
+          (`Assoc [ "name", `String name; "fast", `Bool true ])
+      in
+      Masc.Keeper_registry.set_last_error_entry
+        ~base_path:config.base_path
+        ~name
+        "first live error";
+      Alcotest.(check (option string))
+        "first registry observation"
+        (Some "first live error")
+        (json_string_field "sandbox_last_error" (status ()));
+      Masc.Keeper_registry.set_last_error_entry
+        ~base_path:config.base_path
+        ~name
+        "second live error";
+      Alcotest.(check (option string))
+        "second registry observation is not frozen by a response cache"
+        (Some "second live error")
+        (json_string_field "sandbox_last_error" (status ())))
 
 let test_status_surfaces_chat_queue_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -957,15 +1120,20 @@ let () =
           Alcotest.test_case
             "missing profile source fails loudly"
             `Quick test_missing_profile_source_fails_loud;
-          Alcotest.test_case "status cache tracks TOML overlay edits" `Quick
-            test_status_cache_tracks_toml_overlay_changes;
-          Alcotest.test_case "status cache distinguishes normalized options"
-            `Quick test_status_cache_distinguishes_normalized_options;
+          Alcotest.test_case "status tracks TOML overlay edits" `Quick
+            test_status_tracks_toml_overlay_changes;
+          Alcotest.test_case "status reports normalized options"
+            `Quick test_status_reports_normalized_options;
           Alcotest.test_case "status rejects tail order outside schema" `Quick
             test_status_rejects_tail_order_outside_schema;
-          Alcotest.test_case
-            "status cache tracks persisted meta without updated_at" `Quick
-            test_status_cache_tracks_persisted_meta_without_updated_at;
+          Alcotest.test_case "status rejects malformed options" `Quick
+            test_status_rejects_malformed_options;
+          Alcotest.test_case "status schema tracks argument contract" `Quick
+            test_status_schema_tracks_argument_contract;
+          Alcotest.test_case "status tracks persisted meta without updated_at"
+            `Quick test_status_tracks_persisted_meta_without_updated_at;
+          Alcotest.test_case "status reads live registry each call" `Quick
+            test_status_reads_live_registry_each_call;
           Alcotest.test_case "status surfaces chat queue runtime" `Quick
             test_status_surfaces_chat_queue_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"

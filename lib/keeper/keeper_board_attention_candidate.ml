@@ -725,20 +725,29 @@ let update_ledger ~base_path ~keeper_name decide =
      made every update O(n^2) because the durable transaction re-parses the whole
      ledger before writing. Rewriting keeps the file bounded to the number of
      distinct candidates. *)
-  match
-    Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
-      match load_candidates_from_content content with
-      | Error detail -> None, Error detail
-      | Ok candidates ->
-        (match decide candidates with
-         | Error _ as error -> None, error
-         | Ok (None, result) -> None, Ok result
-         | Ok (Some candidate, result) ->
-           let compacted = latest_candidates (candidates @ [ candidate ]) in
-           Some (serialize_candidates compacted), Ok result))
+  try
+    match
+      Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
+        match load_candidates_from_content content with
+        | Error detail -> None, Error detail
+        | Ok candidates ->
+          (match decide candidates with
+           | Error _ as error -> None, error
+           | Ok (None, result) -> None, Ok result
+           | Ok (Some candidate, result) ->
+             let compacted = latest_candidates (candidates @ [ candidate ]) in
+             Some (serialize_candidates compacted), Ok result))
+    with
+    | Error error -> Error error
+    | Ok result -> result
   with
-  | Error error -> Error error
-  | Ok result -> result
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    Error
+      (Printf.sprintf
+         "Board attention ledger update failed path=%s: %s"
+         path
+         (Printexc.to_string exn))
 ;;
 
 let find_candidate candidates candidate_id =

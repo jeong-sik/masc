@@ -106,20 +106,20 @@
   <div class="eyebrow">MASC 1.0 / Executable strategy</div>
   <h1>10 Keeper Mixed-Workload<br>Operation Goal Matrix</h1>
   <p class="lede">10개 Keeper가 Discord·Slack·Dashboard·Voice에서 동시에 대화하고, 서로 협업하며, 코드 작성·정보 수집·이미지 생성·장기 작업·메모리 기록·컴팩션을 수행하는 상황을 대상으로 한다. 목표는 평균 처리량이 아니라 <strong>직접 요청의 반응성, 영속 복구, lane 공정성, 자원 상한, 감사 가능한 상태 전이</strong>를 동시에 만족하는 것이다.</p>
-  <p class="stamp">Failure baseline: 2026-07-17 16:28 KST · recovery observation: 2026-07-17 17:28 KST · live runtime commit f887c86aff · follow-up PR #25092</p>
+  <p class="stamp">Failure baseline: 2026-07-17 16:28 KST · latest observation: 2026-07-17 17:53 KST · live runtime commit f887c86aff · follow-up PR #25092</p>
 
   <div class="banner">
-    <strong>현재 판정: 인프라 회복, 고객 제품은 No-Go.</strong> 16:28 KST에는 13개 bootable Keeper 중 실행 fiber가 0이고 16개 event queue가 모두 v2라 v3-only reader에서 거부됐다. 17:28 KST 재측정에서는 16/16 snapshot이 v3이고 13/13 Keeper가 executable이지만, durable event 1,130개가 모두 pending이며 oldest age는 약 41.9시간이다. 따라서 서버와 fleet는 다시 실행 가능하지만 “고객 작업이 끝난다”는 제품 계약은 아직 증명되지 않았다.
+    <strong>현재 판정: 기능은 부분 사용 가능, 고객 제품은 No-Go.</strong> 16:28 KST에는 13개 bootable Keeper 중 실행 fiber가 0이고 16개 event queue가 모두 v2라 v3-only reader에서 거부됐다. 17:53 KST 재측정에서는 16/16 snapshot이 v3이고 13/13 Keeper가 executable이지만, effective reaction capacity는 11/13, durable event는 pending 1,054 + inflight 4, oldest age는 약 42.3시간이다. 따라서 새 요청 일부는 실행될 수 있어도 “맡긴 작업이 예측 가능한 시간 안에 끝난다”는 고객 계약은 증명되지 않았다.
   </div>
 
   <section>
     <h2>1. Live baseline</h2>
     <div class="cards">
-      <div class="card warn"><div class="label">Executable Keeper fibers</div><div class="value">0 → 13 / 13</div><div>point-in-time capacity 회복; 8시간 지속성은 미검증</div></div>
+      <div class="card warn"><div class="label">Executable / effective</div><div class="value">13 / 13 · 11 / 13</div><div>6 running, 5 recovering, 2 compacting-blocked</div></div>
       <div class="card warn"><div class="label">Event queue read errors</div><div class="value">16 → 0</div><div>16/16 v3 변환 완료; backlog settlement는 별개</div></div>
-      <div class="card bad"><div class="label">Durable events pending</div><div class="value">1,130 / 1,130</div><div>inflight 0, oldest 약 41.9시간, 13 Keeper에서 stale</div></div>
+      <div class="card bad"><div class="label">Durable event queue</div><div class="value">1,054 + 4</div><div>pending + inflight, oldest 약 42.3시간, read errors 0</div></div>
       <div class="card warn"><div class="label">Attention candidates</div><div class="value">3,644</div><div>520개 고유 signal이 평균 7.01배 증폭</div></div>
-      <div class="card warn"><div class="label">Pending attention</div><div class="value">890</div><div>439 + 451, age 약 15.3시간</div></div>
+      <div class="card warn"><div class="label">Pending attention</div><div class="value">890 / 7.46 MB</div><div>439 + 451; fixed 8-cap은 실제 context capacity와 무관</div></div>
       <div class="card warn"><div class="label">Candidate ledger</div><div class="value">38 MB</div><div>전체 request JSON 26.18 MB</div></div>
       <div class="card"><div class="label">Health endpoint p50 / p95</div><div class="value">3.6 / 16.7 ms</div><div>20회 cache-hit 측정; 제품 실행 가능성 증거는 아님</div></div>
       <div class="card warn"><div class="label">Full health recompute</div><div class="value">4.2 s</div><div>snapshot refresh 자체 비용</div></div>
@@ -137,17 +137,17 @@
       <table>
         <thead><tr><th>제품 축</th><th>Weight</th><th>현재 관측</th><th>#25073 단독 효과</th><th>1.0 정량 gate</th></tr></thead>
         <tbody>
-          <tr><td>실행 가능성</td><td>25%</td><td>13/13 executable point sample; 8시간 증거 없음 → 0점</td><td>queue schema 장애와 무관</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity &gt; 0</td></tr>
-          <tr><td>End-to-end useful completion</td><td>25%</td><td>durable event 1,130/1,130 pending, mixed-workload terminal SLO 표본 없음 → 0점</td><td>attention 판정 비용만 줄이며 고객 결과 완료를 증명하지 않음</td><td>명시적 거절 제외 요청의 terminal receipt ≥ 99%, duplicate terminal effect = 0</td></tr>
+          <tr><td>실행 가능성</td><td>25%</td><td>13/13 executable이나 effective 11/13; 8시간 증거 없음 → 0점</td><td>queue schema 장애와 무관</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity = 10</td></tr>
+          <tr><td>End-to-end useful completion</td><td>25%</td><td>durable event pending 1,054, oldest 42.3시간, mixed-workload terminal SLO 표본 없음 → 0점</td><td>attention 판정 비용만 줄이며 고객 결과 완료를 증명하지 않음</td><td>명시적 거절 제외 요청의 terminal receipt ≥ 99%, duplicate terminal effect = 0</td></tr>
           <tr><td>직접 요청 반응성</td><td>15%</td><td>owner lane이 ambient provider call에 30–50초 점유될 수 있고 direct-input p95 미측정 → 0점</td><td>55/57 calls 연속 점유를 1 call/admission으로 제한; call 자체의 점유는 남음</td><td>enqueue→turn-start p95 ≤ 2s, 접수 응답 p95 ≤ 5s</td></tr>
           <tr><td>채널·세션 연속성</td><td>15%</td><td>transport/presence 생존만 확인; Slack/Voice/원채널 terminal E2E 미검증 → 0점</td><td>영향 없음</td><td>Discord/Slack/Dashboard/Voice route accuracy 100%, restart replay 100%</td></tr>
           <tr><td>무유실·판정 정확성</td><td>10%</td><td>live main은 blind TTL + partial verdict 계약을 보유; follow-up 미병합 → 0점</td><td>후속 #25092에서 TTL 제거, exact ID coverage, context cohort로 개선</td><td>silent discard = 0, cross-context batch = 0, 모든 defer에 typed evidence</td></tr>
-          <tr><td>운영자 신뢰</td><td>10%</td><td>overall degraded/operator action required, stale pending 1,130 → 0점</td><td>영향 없음</td><td>incomplete count를 green/zero로 투영한 횟수 = 0</td></tr>
+          <tr><td>운영자 신뢰</td><td>10%</td><td>HTTP status는 ok지만 overall degraded/operator action required, stale pending 1,054 → 0점</td><td>영향 없음</td><td>incomplete count를 green/zero로 투영한 횟수 = 0</td></tr>
         </tbody>
       </table>
     </div>
     <p><strong>점수 공식:</strong> <code>Σ(weight × gate achievement)</code>. 각 gate는 통과 1 / 실패·Unknown 0으로 계산한다. 샘플이 없는 주장은 0점, HTTP 생존과 point-in-time fiber 수는 8시간 실행 가능성의 대체 지표가 아니다. 따라서 fleet가 회복된 현재도 엄격한 live 제품 점수는 <strong>0.0 / 10</strong>이다. v3 fleet가 8시간 gate를 통과하고 본 follow-up의 무유실 계약까지 통과하면 최대 <strong>3.5 / 10</strong>이지만, completion·latency·channel·operator gate 없이는 그 이상을 받을 수 없다. 즉 #25073 계열만으로는 출시 점수 9.0에 도달하지 않는다.</p>
-    <p><strong>고객 유용성 결론:</strong> 개발자·운영자가 제한된 canary를 시작할 기반은 회복됐지만, 일반 고객에게 “맡기고 떠나도 결과가 온다”고 약속할 수 있는 제품은 아니다. 1,130개 pending을 정상 처리·격리·실패 종결하는 증거 없이 채널 수나 Keeper 수를 늘리면 고객 가치는 늘지 않고 지연과 불신만 증폭된다.</p>
+    <p><strong>고객 유용성 결론:</strong> 개발자·운영자가 제한된 canary를 시작하고 새 요청 일부를 처리할 기반은 회복됐다. 그러나 일반 고객에게 “맡기고 떠나도 결과가 온다”고 약속할 수 있는 제품은 아니다. 1,054개 pending을 정상 처리·격리·실패 종결하는 증거 없이 채널 수나 Keeper 수를 늘리면 고객 가치는 늘지 않고 지연과 불신만 증폭된다.</p>
     <p><strong>9.0 release floor:</strong> 위 6개 축의 가중 합 ≥ 9.0이고, 동시에 실행 가능성·terminal exactly-once·silent loss 세 hard gate가 모두 통과해야 한다. 평균 점수가 높아도 이 셋 중 하나가 0이면 출시 불가다.</p>
   </section>
 
@@ -367,7 +367,8 @@ type job_state =
       </ol>
       <p><strong>Live state:</strong> #25073은 2026-07-17 16:31 KST에 merge됐다. 아래 수정은 merge된 TTL·batch 경로를 되돌리는 것이 아니라 최신 main 위 후속 draft PR로 제출한다.</p>
       <p><strong>Exit:</strong> Build/Test green + mixed context + direct preemption + 439/451 backlog simulation.</p>
-      <p><strong>Exact-token dependency:</strong> OAS PR <a href="https://github.com/jeong-sik/oas/pull/2647">#2647</a>은 2026-07-17에 merge되어 prepared completion request의 provider-owned input count와 output receipt를 제공한다. 현재 구현은 Anthropic만 지원하며, 측정한 request artifact와 실제 dispatch artifact의 동일성을 아직 보장하지 않는다고 인터페이스가 명시한다. 따라서 #25073의 <code>batch_max_candidates = 8</code>은 1.0 승인 기준이 아니며, OAS release/pin → 동일 artifact fit admission 연결 전까지 hardcoded-cap blocker로 취급한다. 즉 dependency merge는 완료됐지만 MASC 제품 경로는 아직 완료되지 않았다.</p>
+      <p><strong>Exact-token dependency:</strong> OAS PR <a href="https://github.com/jeong-sik/oas/pull/2647">#2647</a>은 2026-07-17에 merge됐고 v0.216.1로 release되어 prepared completion request의 provider-owned input count와 output receipt를 제공한다. 그러나 구현은 Anthropic wire만 지원하고, 현재 MASC structured judge는 <code>ollama_cloud_native.minimax-m3-native-structured</code>다. 측정한 request artifact와 실제 dispatch artifact의 동일성도 인터페이스가 보장하지 않는다. 따라서 OAS pin만 올리거나 Anthropic-only fail-close를 연결하면 현재 고객 경로가 정지한다. #25073의 <code>batch_max_candidates = 8</code> 역시 1.0 승인 기준이 아니다. 필요한 선행 계약은 현재 judge wire의 exact count 또는 provider-edge typed context-overflow, 그리고 동일 prepared artifact admission/dispatch다.</p>
+      <p><strong>Provider-product contradiction:</strong> Ollama 공식 문서는 2026-07-17 확인 기준 Ollama Cloud structured outputs 미지원이라고 명시하지만, repo config는 native <code>/api/chat</code> schema path를 live-verified 계약으로 선언한다. 이 차이는 코드 주석으로 해소할 수 없다. 동일 Cloud endpoint에 대한 반복 가능한 contract test와 실패 시 typed startup rejection이 없으면 고객 환경에 따라 구조화 판정이 조용히 prose로 퇴행할 수 있다.</p>
     </div>
     <div class="panel phase">
       <h3>PR-2/3 — Atomic ledger and signal-centric routing</h3>

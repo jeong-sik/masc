@@ -700,7 +700,7 @@ let test_batch_verdict_missing_candidate_fails_whole_batch_with_evidence () =
   match A.load_candidates ~base_path ~keeper_name with
   | Ok candidates ->
     List.iter
-      (fun target ->
+      (fun (target : A.candidate) ->
          match
            List.find_opt
              (fun (c : A.candidate) -> String.equal c.candidate_id target.candidate_id)
@@ -812,8 +812,7 @@ let test_successful_drain_runs_one_provider_batch_per_admission () =
        ignore
          (record_or_fail
             ~base_path
-            (candidate ~keeper_name ~signal:(signal ~post_id ()) ()))
-         : A.candidate)
+            (candidate ~keeper_name ~signal:(signal ~post_id ()) ())))
     (List.init (A.batch_max_candidates + 1) (fun index -> index + 1));
   let calls = ref 0 in
   let report =
@@ -881,7 +880,7 @@ let test_batch_never_mixes_persisted_keeper_contexts () =
   Alcotest.(check int) "same-context cohort consumed" 2 report.consumed;
   Alcotest.(check int) "different context deferred" 1 report.remaining;
   List.iter
-    (fun expected ->
+    (fun (expected : A.candidate) ->
        if not (List.exists (String.equal expected.candidate_id) !observed_ids)
        then Alcotest.failf "same-context candidate %s was omitted" expected.candidate_id)
     [ first; third ];

@@ -48,6 +48,10 @@ let require_some message = function
   | None -> Alcotest.fail message
 ;;
 
+let pending_entry_exn id =
+  AQ.get_pending_entry ~id |> require_some ("pending approval not found: " ^ id)
+;;
+
 let drop_resolution ~base_path ~keeper_name resolution =
   let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
   match Registry_queue.drop_by_post_id ~base_path keeper_name ~post_id with
@@ -258,7 +262,8 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -394,6 +399,11 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        in
        Alcotest.(check bool) "changed field is a different request" true
          (not (String.equal first changed));
+       Alcotest.(check int) "first request sequence" 1 (pending_entry_exn first).sequence;
+       Alcotest.(check int)
+         "dedup does not consume sequence"
+         2
+         (pending_entry_exn changed).sequence;
        (match AQ.get_pending_entry ~id:first with
         | None -> Alcotest.fail "pending request missing"
         | Some entry ->
@@ -462,6 +472,29 @@ let test_unversioned_request_context_is_not_replayed_as_exact () =
           Alcotest.fail "unversioned projected context was treated as exact evidence"
         | None -> Alcotest.fail "legacy pending request was not restored");
        reject_and_cleanup ~base_path id)
+;;
+
+let test_monotonic_sequence_survives_restart () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let first = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 1) in
+       let second = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 2) in
+       Alcotest.(check int) "first durable sequence" 1 (pending_entry_exn first).sequence;
+       Alcotest.(check int) "second durable sequence" 2 (pending_entry_exn second).sequence;
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let third = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 3) in
+       Alcotest.(check int) "restart continues sequence" 3 (pending_entry_exn third).sequence;
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "next sequence is durable"
+         4
+         (read_pending_snapshot ~base_path |> member "next_sequence" |> to_int))
 ;;
 
 let test_resolution_is_durable_and_origin_scoped () =
@@ -1135,7 +1168,8 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
             ]);
@@ -1165,7 +1199,8 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 2
+               [ "version", `Int 3
+               ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
                ]));
@@ -1204,7 +1239,8 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
               , `List
@@ -1294,7 +1330,8 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 3
             ; "pending", `List []
             ; ( "deliveries"
               , `List
@@ -1536,6 +1573,10 @@ let () =
             "unversioned context is never replayed as exact"
             `Quick
             test_unversioned_request_context_is_not_replayed_as_exact
+        ; Alcotest.test_case
+            "durable sequence survives restart"
+            `Quick
+            test_monotonic_sequence_survives_restart
         ; Alcotest.test_case
             "dedup keeps distinct origins"
             `Quick

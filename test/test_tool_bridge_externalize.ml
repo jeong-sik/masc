@@ -216,7 +216,7 @@ let test_execution_env_preserves_exact_invocation () =
     Agent_sdk.Tool.Invocation.create
       ~tool_use_id:""
       ~turn:7
-      ~planned_index:2
+      ~schedule:{ Agent_sdk.Tool.planned_index = 2; batch_index = 0; batch_size = 1; execution_mode = Agent_sdk.Tool.Serial }
   in
   (match Agent_sdk.Tool.execute ~invocation tool (`Assoc []) with
    | Ok _ -> ()

@@ -1,8 +1,18 @@
 ---
-status: draft
+rfc: "oas-recursive-execution-masc-integration"
+title: "OAS recursive execution integration for Keeper, Fusion, and the dashboard"
+status: Draft
+created: 2026-07-17
+updated: 2026-07-17
+author: codex
 last_verified: 2026-07-17
 source_baseline: masc/main@d5bd126498f88e256c2e5e912d20ae1f7a22baeb
 oas_source_baseline: oas/main@fd713eb0cfc4ffa9887a5d4830f497be7263004d
+supersedes:
+  - masc-oas-bridge-total-llm-dispatch-boundary
+  - shared-admission-primitive-knob-binding-policy
+superseded_by: null
+implementation_prs: []
 depends_on:
   - oas/RFC-OAS-029
   - oas/RFC-OAS-037

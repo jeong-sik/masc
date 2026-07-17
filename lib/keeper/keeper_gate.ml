@@ -274,31 +274,94 @@ type auto_judge_start_outcome =
   | Started
   | Skipped
 
-module Auto_judge_ids = Set_util.StringSet
+type auto_judge_retry_outcome =
+  | Retry_started
+  | Retry_queued
+  | Retry_skipped
 
-let active_auto_judges : Auto_judge_ids.t Atomic.t =
-  Atomic.make Auto_judge_ids.empty
+module Auto_judge_owner = struct
+  type t = string * string
+
+  let compare (left_base, left_keeper) (right_base, right_keeper) =
+    let by_base = String.compare left_base right_base in
+    if by_base <> 0 then by_base else String.compare left_keeper right_keeper
+  ;;
+end
+
+module Auto_judge_owners = Map.Make (Auto_judge_owner)
+module Auto_judge_owner_set = Set.Make (Auto_judge_owner)
+
+let auto_judge_owner (entry : Keeper_approval_queue.pending_approval) =
+  entry.audit_base_path, entry.keeper_name
 ;;
 
-let rec claim_auto_judge id =
+(** Immutable process projection of the one active approval for each exact
+    workspace/Keeper owner. The durable approval queue remains the work SSOT. *)
+let active_auto_judges : string Auto_judge_owners.t Atomic.t =
+  Atomic.make Auto_judge_owners.empty
+;;
+
+let rec claim_auto_judge (entry : Keeper_approval_queue.pending_approval) =
   let active = Atomic.get active_auto_judges in
-  if Auto_judge_ids.mem id active
-     || Auto_judge_ids.cardinal active
-        >= Hitl_summary_worker.max_concurrency ()
-  then false
-  else
-    let claimed = Auto_judge_ids.add id active in
+  let owner = auto_judge_owner entry in
+  match Auto_judge_owners.find_opt owner active with
+  | Some _ -> false
+  | None ->
+    let claimed = Auto_judge_owners.add owner entry.id active in
     if Atomic.compare_and_set active_auto_judges active claimed
     then true
-    else claim_auto_judge id
+    else claim_auto_judge entry
 ;;
 
-let rec release_auto_judge id =
+let rec release_auto_judge (entry : Keeper_approval_queue.pending_approval) =
   let active = Atomic.get active_auto_judges in
-  let released = Auto_judge_ids.remove id active in
-  if not (Atomic.compare_and_set active_auto_judges active released)
-  then release_auto_judge id
+  let owner = auto_judge_owner entry in
+  match Auto_judge_owners.find_opt owner active with
+  | Some active_id when String.equal active_id entry.id ->
+    let released = Auto_judge_owners.remove owner active in
+    if not (Atomic.compare_and_set active_auto_judges active released)
+    then release_auto_judge entry
+  | Some _ | None -> ()
 ;;
+
+let active_auto_judge_for_owner ~base_path ~keeper_name =
+  Auto_judge_owners.find_opt
+    (base_path, keeper_name)
+    (Atomic.get active_auto_judges)
+;;
+
+let auto_judge_entry_ready (entry : Keeper_approval_queue.pending_approval) =
+  match entry.summary_status with
+  | Keeper_approval_queue.Summary_not_requested
+  | Keeper_approval_queue.Summary_pending -> true
+  | Keeper_approval_queue.Summary_available _
+  | Keeper_approval_queue.Summary_failed _ -> false
+;;
+
+let compare_auto_judge_entries
+      (left : Keeper_approval_queue.pending_approval)
+      (right : Keeper_approval_queue.pending_approval)
+  =
+  let by_time = Float.compare left.requested_at right.requested_at in
+  if by_time <> 0 then by_time else String.compare left.id right.id
+;;
+
+let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
+  entries
+  |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+    String.equal entry.audit_base_path base_path
+    && String.equal entry.keeper_name keeper_name
+    && (match exclude_id with
+        | Some id -> not (String.equal id entry.id)
+        | None -> true)
+    && auto_judge_entry_ready entry)
+  |> List.sort compare_auto_judge_entries
+;;
+
+type auto_judge_drain_outcome =
+  { started_id : string option
+  ; failures : (string * string) list
+  }
 
 let rec spawn_claimed_auto_judge_entry
       (entry : Keeper_approval_queue.pending_approval)
@@ -348,7 +411,7 @@ let rec spawn_claimed_auto_judge_entry
   in
   let fail_before_worker ~reason ~retryable =
     Fun.protect
-      ~finally:(fun () -> release_auto_judge approval_id)
+      ~finally:(fun () -> release_auto_judge entry)
       (fun () ->
          on_failure ~reason ~retryable;
          Error reason)
@@ -358,7 +421,7 @@ let rec spawn_claimed_auto_judge_entry
       Ok (Hitl_summary_worker.provider_config_for_summary ())
     with
     | Eio.Cancel.Cancelled _ as exn ->
-      release_auto_judge approval_id;
+      release_auto_judge entry;
       raise exn
     | exn ->
       Error
@@ -375,14 +438,18 @@ let rec spawn_claimed_auto_judge_entry
          ~on_summary
          ~on_failure
          ~on_finish:(fun () ->
-           release_auto_judge approval_id;
-           (* fire-and-forget: the queue owns subsequent worker completion. *)
-           ignore (drain_auto_judges ~base_path:entry.audit_base_path))
+           release_auto_judge entry;
+           ignore
+             (drain_auto_judge_owner
+                ~exclude_id:entry.id
+                ~base_path:entry.audit_base_path
+                ~keeper_name:entry.keeper_name
+                ()))
          ();
        Ok Started
      with
      | Eio.Cancel.Cancelled _ as exn ->
-       release_auto_judge approval_id;
+       release_auto_judge entry;
        raise exn
      | exn ->
        let reason =
@@ -401,104 +468,158 @@ let rec spawn_claimed_auto_judge_entry
   | Some _, Error reason -> fail_before_worker ~reason ~retryable:true
 
 and spawn_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
-  if claim_auto_judge entry.id
+  if claim_auto_judge entry
   then spawn_claimed_auto_judge_entry entry
   else Ok Skipped
 
 and retry_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
-  if not (claim_auto_judge entry.id)
-  then Ok Skipped
-  else
-    match Keeper_approval_queue.restart_failed_summary ~id:entry.id with
-    | Error error ->
-      release_auto_judge entry.id;
-      Error (Keeper_approval_queue.storage_error_to_string error)
-    | Ok false ->
-      release_auto_judge entry.id;
-      Ok Skipped
-    | Ok true -> spawn_claimed_auto_judge_entry entry
+  match Keeper_approval_queue.restart_failed_summary ~id:entry.id with
+  | Error error -> Error (Keeper_approval_queue.storage_error_to_string error)
+  | Ok false -> Ok Retry_skipped
+  | Ok true ->
+    (match
+       drain_auto_judge_owner
+         ~base_path:entry.audit_base_path
+         ~keeper_name:entry.keeper_name
+         ()
+     with
+     | Error reason -> Error reason
+     | Ok outcome ->
+       (match List.assoc_opt entry.id outcome.failures, outcome.started_id with
+        | Some reason, _ -> Error reason
+        | None, Some id when String.equal id entry.id -> Ok Retry_started
+        | None, (Some _ | None) -> Ok Retry_queued))
 
 and start_auto_judge approval_id =
   match Keeper_approval_queue.get_pending_entry ~id:approval_id with
   | None -> Ok Skipped
   | Some entry ->
-    if not (claim_auto_judge approval_id)
+    if not (claim_auto_judge entry)
     then Ok Skipped
     else
       (match Keeper_approval_queue.mark_summary_pending ~id:approval_id with
        | Error error ->
-         release_auto_judge approval_id;
+         release_auto_judge entry;
          Error (Keeper_approval_queue.storage_error_to_string error)
        | Ok false ->
-         release_auto_judge approval_id;
+         release_auto_judge entry;
          Ok Skipped
        | Ok true -> spawn_claimed_auto_judge_entry entry)
 
+and start_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
+  match Keeper_approval_queue.get_pending_entry ~id:entry.id with
+  | None -> Ok Skipped
+  | Some current ->
+    (match current.summary_status with
+     | Keeper_approval_queue.Summary_not_requested -> start_auto_judge current.id
+     | Keeper_approval_queue.Summary_pending -> spawn_auto_judge_entry current
+     | Keeper_approval_queue.Summary_available _
+     | Keeper_approval_queue.Summary_failed _ -> Ok Skipped)
+
+and drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name () =
+  let rec loop failures = function
+    | [] -> { started_id = None; failures = List.rev failures }
+    | entry :: rest ->
+      (match start_auto_judge_entry entry with
+       | Ok Started ->
+         { started_id = Some entry.id; failures = List.rev failures }
+       | Ok Skipped ->
+         (match active_auto_judge_for_owner ~base_path ~keeper_name with
+          | Some _ -> { started_id = None; failures = List.rev failures }
+          | None -> loop failures rest)
+       | Error reason ->
+         Log.Keeper.error
+           ~keeper_name
+           "Auto Judge owner drain failed approval=%s: %s"
+           entry.id
+           reason;
+         loop ((entry.id, reason) :: failures) rest)
+  in
+  Keeper_approval_queue.list_pending_entries ()
+  |> ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name
+  |> loop []
+
+and drain_auto_judge_owner ?exclude_id ~base_path ~keeper_name () =
+  match Keeper_gate_mode.read ~base_path with
+  | Ok Keeper_gate_mode.Auto_judge ->
+    Ok (drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name ())
+  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
+    Ok { started_id = None; failures = [] }
+  | Error detail ->
+    Log.Keeper.error
+      ~keeper_name
+      "Auto Judge owner drain unavailable workspace=%s: %s"
+      base_path
+      detail;
+    Error detail
+
 and drain_auto_judges ~base_path =
   match Keeper_gate_mode.read ~base_path with
-  | Error _
+  | Error detail ->
+    Log.Keeper.error
+      "Auto Judge workspace drain unavailable workspace=%s: %s"
+      base_path
+      detail;
+    []
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) -> []
   | Ok Keeper_gate_mode.Auto_judge ->
-    let capacity =
-      Hitl_summary_worker.max_concurrency ()
-      - Auto_judge_ids.cardinal (Atomic.get active_auto_judges)
-    in
-    if capacity <= 0
-    then []
-    else
+    let owners =
       Keeper_approval_queue.list_pending_entries ()
-      |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
-        String.equal entry.audit_base_path base_path
-        &&
-        match entry.summary_status with
-        | Keeper_approval_queue.Summary_not_requested
-        | Keeper_approval_queue.Summary_pending -> true
-        | Keeper_approval_queue.Summary_available _
-        | Keeper_approval_queue.Summary_failed _ -> false)
-      |> List.sort
-           (fun (left : Keeper_approval_queue.pending_approval)
-                (right : Keeper_approval_queue.pending_approval) ->
-              Float.compare left.requested_at right.requested_at)
-      |> List.filteri (fun index _ -> index < capacity)
-      |> List.filter_map (fun (entry : Keeper_approval_queue.pending_approval) ->
-        let started =
-          match entry.summary_status with
-          | Keeper_approval_queue.Summary_not_requested -> start_auto_judge entry.id
-          | Keeper_approval_queue.Summary_pending -> spawn_auto_judge_entry entry
-          | Keeper_approval_queue.Summary_available _
-          | Keeper_approval_queue.Summary_failed _ -> Ok Skipped
-        in
-        match started with
-        | Ok Started -> Some entry.id
-        | Ok Skipped -> None
-        | Error reason ->
-          Log.Keeper.error
-            ~keeper_name:entry.keeper_name
-            "Auto Judge bounded drain failed approval=%s: %s"
-            entry.id
-            reason;
-          None)
+      |> List.fold_left
+           (fun owners (entry : Keeper_approval_queue.pending_approval) ->
+              if String.equal entry.audit_base_path base_path
+                 && auto_judge_entry_ready entry
+              then Auto_judge_owner_set.add (auto_judge_owner entry) owners
+              else owners)
+           Auto_judge_owner_set.empty
+    in
+    Auto_judge_owner_set.fold
+      (fun (_, keeper_name) started_ids ->
+         let outcome =
+           drain_auto_judge_owner_queue ~base_path ~keeper_name ()
+         in
+         match outcome.started_id with
+         | Some id -> id :: started_ids
+         | None -> started_ids)
+      owners
+      []
+    |> List.rev
 ;;
 
 type recovered_work =
-  | Restart_worker of Keeper_approval_queue.pending_approval
+  | Activate_worker of Keeper_approval_queue.pending_approval
   | Finalize_judgment of
       Keeper_approval_queue.pending_approval
       * Keeper_approval_queue.hitl_context_summary
 
 let recovered_work_for_base_path ~base_path =
-  Keeper_approval_queue.list_pending_entries ()
-  |> List.filter_map (fun (entry : Keeper_approval_queue.pending_approval) ->
+  let enabled =
+    match Keeper_gate_mode.read ~base_path with
+    | Ok Keeper_gate_mode.Auto_judge -> true
+    | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) -> false
+    | Error detail ->
+      Log.Keeper.error
+        "Auto Judge recovery unavailable workspace=%s: %s"
+        base_path
+        detail;
+      false
+  in
+  if not enabled
+  then []
+  else
+    Keeper_approval_queue.list_pending_entries ()
+    |> List.sort compare_auto_judge_entries
+    |> List.filter_map (fun (entry : Keeper_approval_queue.pending_approval) ->
     if not (String.equal entry.audit_base_path base_path)
     then None
     else
       match entry.summary_status with
-      | Keeper_approval_queue.Summary_pending -> Some (Restart_worker entry)
+      | Keeper_approval_queue.Summary_not_requested
+      | Keeper_approval_queue.Summary_pending -> Some (Activate_worker entry)
       | Keeper_approval_queue.Summary_available
           ({ judgment = (Keeper_approval_queue.Approve | Keeper_approval_queue.Deny); _ }
            as summary) ->
         Some (Finalize_judgment (entry, summary))
-      | Keeper_approval_queue.Summary_not_requested
       | Keeper_approval_queue.Summary_available
           { judgment = Keeper_approval_queue.Require_human; _ }
       | Keeper_approval_queue.Summary_failed _ ->
@@ -508,7 +629,7 @@ let recovered_work_for_base_path ~base_path =
 let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval) =
   let event_type, outcome =
     match kind with
-    | `Restart_worker ->
+    | `Activate_worker ->
       "auto_judge_restart_worker_recovered", "restart_worker_recovered"
     | `Finalize_judgment ->
       "auto_judge_restart_judgment_recovered", "restart_judgment_recovered"
@@ -543,10 +664,18 @@ let retry_failed_auto_judge ~base_path ~requested_by approval_id =
     Error ("pending approval not found: " ^ approval_id)
   | Some entry ->
     (match retry_auto_judge_entry entry with
-     | Error _ as error -> error
-     | Ok Skipped ->
+     | Error reason -> Error reason
+     | Ok Retry_skipped ->
        Error ("approval summary is not failed or is already active: " ^ approval_id)
-     | Ok Started ->
+     | Ok Retry_queued ->
+       Log.Keeper.info
+         ~keeper_name:entry.keeper_name
+         "auto judge operator retry queued approval=%s operation=%s actor=%s"
+         entry.id
+         entry.tool_name
+         requested_by;
+       Ok ()
+     | Ok Retry_started ->
        Log.Keeper.info
          ~keeper_name:entry.keeper_name
          "auto judge operator retry started approval=%s operation=%s actor=%s"
@@ -580,9 +709,9 @@ let resume_persisted_auto_judges ~base_path =
       (fun (started_ids, finalized_ids, skipped_ids, failures) work ->
          let entry, result =
            match work with
-           | Restart_worker entry ->
-             observe_recovered_work `Restart_worker entry;
-             entry, `Start (spawn_auto_judge_entry entry)
+           | Activate_worker entry ->
+             observe_recovered_work `Activate_worker entry;
+             entry, `Start (start_auto_judge_entry entry)
            | Finalize_judgment (entry, summary) ->
              observe_recovered_work `Finalize_judgment entry;
              entry, `Finalize (resolve_judgment entry ~approval_id:entry.id summary)
@@ -654,17 +783,25 @@ let defer request reason =
     let reason =
       match reason with
       | Judge_requested ->
-        let started =
-          try start_auto_judge approval_id with
+        let drained =
+          try
+            drain_auto_judge_owner
+              ~base_path:request.base_path
+              ~keeper_name:request.keeper_name
+              ()
+          with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
             Error
               ("Auto Judge start failed before worker launch: "
                ^ Printexc.to_string exn)
         in
-        (match started with
-         | Ok (Started | Skipped) -> Judge_requested
-         | Error detail -> Auto_judge_unavailable detail)
+        (match drained with
+         | Error detail -> Auto_judge_unavailable detail
+         | Ok outcome ->
+           (match List.assoc_opt approval_id outcome.failures with
+            | Some detail -> Auto_judge_unavailable detail
+            | None -> Judge_requested))
       | Human_requested | Auto_judge_unavailable _ | Mode_state_invalid _ -> reason
     in
     Deferred { approval_id; reason }

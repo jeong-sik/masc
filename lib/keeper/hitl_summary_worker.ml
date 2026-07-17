@@ -39,25 +39,6 @@ let readiness () =
             runtime_id))
 ;;
 
-let effective_max_concurrency ~configured ~runtime_limit =
-  match runtime_limit with
-  | Some limit -> Int.min configured limit
-  | None -> configured
-;;
-
-let max_concurrency () =
-  let configured = Keeper_config.hitl_summary_max_concurrency () in
-  let runtime_limit =
-    match Runtime.hitl_summary_runtime_id () with
-    | Some runtime_id ->
-      (match Runtime.get_runtime_by_id runtime_id with
-       | Some runtime -> runtime.Runtime.binding.max_concurrent
-       | None -> None)
-    | None -> None
-  in
-  effective_max_concurrency ~configured ~runtime_limit
-;;
-
 (* ── Metrics ────────────────────────────────────── *)
 
 let () =
@@ -389,7 +370,6 @@ module For_testing = struct
   let summary_llm_error_outcomes = summary_llm_error_outcomes
   let summary_llm_error_retryable = summary_llm_error_retryable
   let sdk_error_of_http_error = sdk_error_of_http_error
-  let effective_max_concurrency = effective_max_concurrency
   let body_timeout_clock = body_timeout_clock
   let system_prompt = system_prompt
   let summary_version = summary_version

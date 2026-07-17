@@ -186,17 +186,6 @@ let test_missing_request_context_is_terminal_before_provider () =
          Worker.For_testing.Exact_request_context_unavailable)
 ;;
 
-let test_concurrency_respects_runtime_binding () =
-  check int "runtime binding narrows subsystem cap" 1
-    (Worker.For_testing.effective_max_concurrency
-       ~configured:4
-       ~runtime_limit:(Some 1));
-  check int "subsystem cap remains when runtime omits a limit" 4
-    (Worker.For_testing.effective_max_concurrency
-       ~configured:4
-       ~runtime_limit:None)
-;;
-
 let test_plain_json_requires_exact_object () =
   let expected = judgment_json "require_human" in
   match Worker.For_testing.extract_json_object (Yojson.Safe.to_string expected) with
@@ -368,10 +357,6 @@ let () =
             "context carries exact input"
             `Quick
             test_context_bundle_contains_exact_input_without_derived_classification
-        ; test_case
-            "runtime binding caps judge concurrency"
-            `Quick
-            test_concurrency_respects_runtime_binding
         ; test_case
             "missing request context is terminal before provider"
             `Quick

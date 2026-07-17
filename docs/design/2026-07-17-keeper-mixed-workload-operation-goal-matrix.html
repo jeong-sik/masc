@@ -365,7 +365,7 @@ type job_state =
       </ol>
       <p><strong>Live state:</strong> #25073은 2026-07-17 16:31 KST에 merge됐다. 아래 수정은 merge된 TTL·batch 경로를 되돌리는 것이 아니라 최신 main 위 후속 draft PR로 제출한다.</p>
       <p><strong>Exit:</strong> Build/Test green + mixed context + direct preemption + 439/451 backlog simulation.</p>
-      <p><strong>Exact-token dependency:</strong> OAS draft PR <a href="https://github.com/jeong-sik/oas/pull/2647">#2647</a>가 prepared completion request의 provider-owned input count와 output receipt를 추가 중이다. 현재 구현은 Anthropic만 지원하며, 측정한 request artifact와 실제 dispatch artifact의 동일성을 아직 보장하지 않는다고 인터페이스가 명시한다. 따라서 #25073의 <code>batch_max_candidates = 8</code>은 1.0 승인 기준이 아니며, #2647 merge → OAS release/pin → 동일 artifact fit admission 연결 전까지 hardcoded-cap blocker로 취급한다.</p>
+      <p><strong>Exact-token dependency:</strong> OAS PR <a href="https://github.com/jeong-sik/oas/pull/2647">#2647</a>은 2026-07-17에 merge되어 prepared completion request의 provider-owned input count와 output receipt를 제공한다. 현재 구현은 Anthropic만 지원하며, 측정한 request artifact와 실제 dispatch artifact의 동일성을 아직 보장하지 않는다고 인터페이스가 명시한다. 따라서 #25073의 <code>batch_max_candidates = 8</code>은 1.0 승인 기준이 아니며, OAS release/pin → 동일 artifact fit admission 연결 전까지 hardcoded-cap blocker로 취급한다. 즉 dependency merge는 완료됐지만 MASC 제품 경로는 아직 완료되지 않았다.</p>
     </div>
     <div class="panel phase">
       <h3>PR-2/3 — Atomic ledger and signal-centric routing</h3>

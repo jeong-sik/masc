@@ -73,6 +73,17 @@ describe('ConnectorOverviewStrip', () => {
     expect(imessageTile.textContent).toContain('Config와 Start')
   })
 
+  it('shows the Discord leaf trigger policy in the overview header', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ trigger_policy: 'mention_or_thread' })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    expect(container.textContent).toContain('trigger: mention_or_thread')
+  })
+
   it('Start All button counts only sidecars currently down', () => {
     _testResetBulkInflight()
     render(

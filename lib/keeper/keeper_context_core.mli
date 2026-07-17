@@ -67,15 +67,6 @@ val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
     history classification. *)
 val text_of_history_jsonl_json : Yojson.Safe.t -> string
 
-(** {1 Message repair} *)
-
-(** Drop dangling tool-use and orphan tool-result blocks so OAS checkpoint
-    replay never sees a mismatched pair.  The repair is intentionally
-    metadata-only: it must not fabricate visible text that can leak to the
-    model or dashboard. *)
-val repair_broken_tool_call_pairs :
-  Agent_sdk.Types.message list -> Agent_sdk.Types.message list
-
 type tool_pair_repair_stats =
   { dropped_tool_uses : int
   ; dropped_tool_results : int
@@ -84,18 +75,6 @@ type tool_pair_repair_stats =
   }
 
 val tool_pair_repair_stats_changed : tool_pair_repair_stats -> bool
-val pair_repair_diagnostic_max_bytes : int
-val bound_pair_repair_diagnostic_string : string -> string
-
-val pair_repair_metadata_key : string
-(** Message metadata key carrying bounded provenance for tool-pair repair
-    drops. Repaired messages also carry [was_repaired=true]. *)
-
-(** Same repair as {!repair_broken_tool_call_pairs}, plus counters for
-    ToolUse/ToolResult blocks dropped from visible content. This keeps the
-    repair path observable without changing the legacy return type. *)
-val repair_broken_tool_call_pairs_with_stats :
-  Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
 
 (** {1 Context (de)serialization} *)
 
@@ -176,17 +155,6 @@ val save_oas_checkpoint_classified :
 
 val checkpoint_generation : Agent_sdk.Checkpoint.t -> fallback:int -> int
 val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
-
-(** Drop orphan [tool_result] blocks (those without a matching
-    preceding [tool_use]) so a checkpoint payload satisfies the
-    Anthropic API invariant that every tool_result references a known
-    tool_use. Public so [Keeper_post_turn] can
-    reuse it before persisting a checkpoint. *)
-val repair_orphan_tool_result_messages :
-  Agent_sdk.Types.message list -> Agent_sdk.Types.message list
-
-val repair_orphan_tool_result_messages_with_stats :
-  Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
 
 (** Project an OAS checkpoint to a working context without rewriting its
     messages. *)

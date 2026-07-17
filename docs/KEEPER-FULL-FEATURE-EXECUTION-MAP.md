@@ -2,7 +2,7 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 14:45 KST
+> Checked: 2026-07-17 14:50 KST
 > MASC `origin/main`: `6d8d4364fe`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 14:45 KST; confidence High.
+2026-07-17 14:50 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -271,11 +271,13 @@ domain fact.
 | #25044 canonical settlement receipt | Merged into #25018 parent at `486b89497e`; 218 changed lines; focused build and 15 direct cases green | #25018 main merge, then WAL leaf |
 | settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
 | #25046 structural compaction leaf | Draft at `ed6248c7c1`, 397 lines; full Build and Test green | OAS typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |
+| #25058→#25061 pair-repair purge | Four Draft leaves at 268/264/327/305 lines; structural PBT direct 2/2 green; final named evidence executable delegated to CI | merge into #25046 in order; never land a test-only leaf independently on main |
 | #25049 per-Keeper Auto Judge drain | Parent rebased to `6d8d4364fe` at `7ccc1cb741`; 397 lines; fresh CI running | latest-head parent proof |
 | #25057 monotonic owner FIFO | Draft stacked on #25049; 379 lines; prior exact direct 24/24 + 13/13 green, latest local build starved by unrelated bare Dune | fresh PR CI, then merge stack in order |
 | OAS #2646 checkpoint-stage codec | Draft stacked on green #2642; 85 lines; focused build and 9 direct cases green; format follow-up pushed | merge after #2642, then #2648 |
 | OAS #2648 opaque provider Tool ID | Draft stacked on #2646; 36 lines; journal test 19/19 green | preserve exact identity before settlement |
 | OAS #2649 private exact settlement | Draft stacked on #2648; 396 lines; lane-writer test 18/18 green | wire into production Agent, then hard-cut legacy writer |
+| OAS #2650 effect fence | Draft stacked on #2649; 236 lines; lane-writer 18/18 and pipeline 39/39 green | add Agent-owned Journal scope/producers, then hard-cut legacy writers |
 | OAS #2647 exact request measurement | Draft on `main`; 172 lines; focused build and 6 direct cases green; full OCaml CI running | add Agent-owned same-value measure/dispatch identity boundary |
 | #24993 | conflicting and red | supersede; do not use as current compaction proof |
 | #24994 | Draft, green typed terminal leaf | re-evaluate after clean replacement stack |

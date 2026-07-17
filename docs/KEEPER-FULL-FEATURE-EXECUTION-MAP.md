@@ -2,7 +2,7 @@
 
 > Status: live implementation checkpoint, not normative architecture
 > Normative contract: [`KEEPER-FULL-FEATURE-GOAL.md`](KEEPER-FULL-FEATURE-GOAL.md)
-> Checked: 2026-07-17 14:22 KST
+> Checked: 2026-07-17 14:27 KST
 > MASC `origin/main`: `2fa0e6b30d`
 > OAS `origin/main`: `b2a9478ff3`
 > Latest published OAS and MASC pin: `v0.215.0` at `a7ea83fbbf`
@@ -15,7 +15,7 @@ belongs. Refresh every live fact before acting.
 [근거] `git fetch origin --prune`, `git rev-parse origin/main`,
 `gh pr view/list/checks`, and commit ancestry checks with
 `git merge-base --is-ancestor`, and exact source call-path inspection; checked
-2026-07-17 14:22 KST; confidence High.
+2026-07-17 14:27 KST; confidence High.
 
 ## 1. Read “Merged” Correctly
 
@@ -272,7 +272,9 @@ domain fact.
 | settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
 | #25046 structural compaction leaf | Draft at `ed6248c7c1`, 397 lines; all completed checks green and Build and Test running | OAS typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |
 | #25049 per-Keeper Auto Judge drain | Open 397-line parent; full CI green; latest-main parent and 379-line strict FIFO child in exact focused proof | publish exact parent/child stack after focused build |
-| OAS #2646 checkpoint-stage codec | Draft stacked on green #2642; 87 lines; focused build and 9 direct cases green | merge after #2642, then Journal settlement authority |
+| OAS #2646 checkpoint-stage codec | Draft stacked on green #2642; 85 lines; focused build and 9 direct cases green; format follow-up pushed | merge after #2642, then #2648 |
+| OAS #2648 opaque provider Tool ID | Draft stacked on #2646; 36 lines; journal test 19/19 green | preserve exact identity before settlement |
+| OAS #2649 private exact settlement | Draft stacked on #2648; 396 lines; lane-writer test 18/18 green | wire into production Agent, then hard-cut legacy writer |
 | OAS #2647 exact request measurement | Draft on `main`; 172 lines; focused build and 6 direct cases green; full OCaml CI running | add Agent-owned same-value measure/dispatch identity boundary |
 | #24993 | conflicting and red | supersede; do not use as current compaction proof |
 | #24994 | Draft, green typed terminal leaf | re-evaluate after clean replacement stack |

@@ -3,7 +3,7 @@
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
 readonly OAS_AGENT_SDK_BASE_VERSION="v0.215.0"
 # Pinned to the v0.215.0 release (tracks main). On top of 0.214.1:
-# - BREAKING (oas#2631): Tool.handler_kind gains WithInvocation so handlers
+# - BREAKING (oas#2631): Tool.handler_kind gains WithExecutionEnv so handlers
 #   can receive the exact turn/index occurrence for each tool call. MASC uses
 #   Tool.create and does not exhaustively match handler_kind, so its existing
 #   tool bridge remains source-compatible.

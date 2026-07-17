@@ -25,13 +25,13 @@ let provider_error_to_http_error = function
       ; message = detail
       }
   | Llm_provider.Error.AuthError { detail; _ } ->
-    Llm_provider.Http_client.HttpError { code = 401; body = detail }
+    Llm_provider.Http_client.HttpError { code = 401; body = detail; retry_after_header = None }
   | Llm_provider.Error.AuthorizationError { detail; _ } ->
-    Llm_provider.Http_client.HttpError { code = 403; body = detail }
+    Llm_provider.Http_client.HttpError { code = 403; body = detail; retry_after_header = None }
   | Llm_provider.Error.ServerError { code; detail; _ } ->
-    Llm_provider.Http_client.HttpError { code; body = detail }
+    Llm_provider.Http_client.HttpError { code; body = detail; retry_after_header = None }
   | Llm_provider.Error.InvalidRequest { reason; _ } ->
-    Llm_provider.Http_client.HttpError { code = 400; body = reason }
+    Llm_provider.Http_client.HttpError { code = 400; body = reason; retry_after_header = None }
   | Llm_provider.Error.ProviderTerminal { reason; detail; _ } ->
     let body = if String.trim detail = "" then reason else detail in
     Llm_provider.Http_client.ProviderFailure
@@ -105,9 +105,9 @@ let sdk_error_to_runtime_outcome err =
        let http_err =
          match api_err with
          | Llm_provider.Retry.InvalidRequest { message; _ } ->
-           Llm_provider.Http_client.HttpError { code = 400; body = message }
+           Llm_provider.Http_client.HttpError { code = 400; body = message; retry_after_header = None }
          | ContextOverflow { message; _ } ->
-           Llm_provider.Http_client.HttpError { code = 400; body = message }
+           Llm_provider.Http_client.HttpError { code = 400; body = message; retry_after_header = None }
          | RateLimited { message; _ } ->
            Llm_provider.Http_client.HttpError { code = 429; body = message }
          | PaymentRequired { message } ->

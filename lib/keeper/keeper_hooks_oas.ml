@@ -150,9 +150,9 @@ let make_hooks
     { Agent_sdk.Hooks.empty with
     pre_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PreToolUse { turn; _ } ->
+      | Agent_sdk.Hooks.PreToolUse { invocation; _ } ->
         tool_start_time := Time_compat.now ();
-        tool_invocation_turn := Some turn;
+        tool_invocation_turn := Some (Agent_sdk.Tool.Invocation.turn invocation);
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 

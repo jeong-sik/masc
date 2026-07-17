@@ -9,7 +9,7 @@
 open Runtime_attempt_fsm
 
 let mk_http_err ?(code = 429) ?(body = "") () =
-  Llm_provider.Http_client.HttpError { code; body }
+  Llm_provider.Http_client.HttpError { code; body; retry_after_header = None }
 
 let mk_network_err ?(message = "net err") () =
   Llm_provider.Http_client.NetworkError

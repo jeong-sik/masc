@@ -31,7 +31,7 @@ let test_http_body_truncation () =
   in
   msg "HTTP body > max_body_length truncated with ellipsis" expected
     (Provider_http_error.to_message
-       (Llm_provider.Http_client.HttpError { code = 500; body }))
+       (Llm_provider.Http_client.HttpError { code = 500; body; retry_after_header = None }))
 
 let () =
   Alcotest.run "provider_http_error"

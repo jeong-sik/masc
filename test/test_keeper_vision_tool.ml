@@ -743,7 +743,7 @@ let test_retryable_provider_error_tries_next_runtime () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         if !calls = 1 then
-          Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
+          Error (Llm_provider.Http_client.HttpError { code = 500; body = "down"; retry_after_header = None })
         else Ok (ok_response "second runtime answered")
       in
       let raw =
@@ -782,7 +782,7 @@ let test_candidate_failover_is_not_cut_off_by_local_deadline () =
       let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
-        Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
+        Error (Llm_provider.Http_client.HttpError { code = 500; body = "down"; retry_after_header = None })
       in
       let raw =
         Eio_main.run (fun env ->

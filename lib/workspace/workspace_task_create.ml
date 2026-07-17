@@ -56,7 +56,6 @@ type add_task_success =
 
 type add_task_error =
   | Backlog_read_failed of string
-  | Rejected of string
   | Duplicate of { title : string; existing_id : string }
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
@@ -78,7 +77,6 @@ type batch_add_tasks_error =
 
 let add_task_error_to_string = function
   | Backlog_read_failed msg -> Printf.sprintf "Error: %s" msg
-  | Rejected msg -> Printf.sprintf "Error: %s" msg
   | Duplicate { title; existing_id } ->
     Printf.sprintf
       "Duplicate rejected: '%s' matches existing %s. Use that task instead."
@@ -145,7 +143,6 @@ let add_task_with_result
       ?goal_id
       ?created_by
       ?predecessor_task_id
-      ?reject_if
       config
       ~title
       ~priority
@@ -161,12 +158,6 @@ let add_task_with_result
       match read_backlog_r config with
       | Error msg -> Error (Backlog_read_failed msg)
       | Ok backlog ->
-        (match reject_if with
-         | Some reject_if -> reject_if backlog
-         | None -> None)
-        |> (function
-          | Some msg -> Error (Rejected msg)
-          | None ->
         (* RFC-0323 W2: a re-run link must point at an existing, terminal task.
            Validated inside the lock against the same backlog snapshot the new
            task is appended to, so the check cannot race a concurrent write. *)
@@ -282,20 +273,19 @@ let add_task_with_result
                       ~content:(Printf.sprintf "New quest: %s" title)
                   in
                   let summary = Printf.sprintf "Added %s: %s" task_id title in
-                  Ok { task_id; summary; title; priority; description; goal_id }))))))
+                  Ok { task_id; summary; title; priority; description; goal_id })))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
 ;;
 
-let add_task ?contract ?goal_id ?created_by ?reject_if config ~title ~priority
+let add_task ?contract ?goal_id ?created_by config ~title ~priority
     ~description =
   match
     add_task_with_result
       ?contract
       ?goal_id
       ?created_by
-      ?reject_if
       config
       ~title
       ~priority

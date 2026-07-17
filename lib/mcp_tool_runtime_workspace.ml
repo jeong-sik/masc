@@ -182,12 +182,8 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
                 agent_name
                 masc_add_task_name))
       else begin
-        (* RFC-0034.v2: per-goal cap guard. masc_start does not pass a
-           [goal_id], so the guard is a no-op for orphan tasks. Wired so
-           a future goal-aware variant inherits the cap automatically. *)
         let add_result =
           Workspace_task.add_task
-            ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
             active_config ~title:task_title ~priority:3 ~description:""
         in
         (* Extract task ID from result like "Added task-001: title" *)

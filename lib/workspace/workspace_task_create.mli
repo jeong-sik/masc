@@ -30,7 +30,6 @@ type add_task_success =
 
 type add_task_error =
   | Backlog_read_failed of string
-  | Rejected of string
   | Duplicate of { title : string; existing_id : string }
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
@@ -62,7 +61,6 @@ val add_task_with_result :
   ?goal_id:string ->
   ?created_by:string ->
   ?predecessor_task_id:string ->
-  ?reject_if:(Masc_domain.backlog -> string option) ->
   config ->
   title:string ->
   priority:int ->
@@ -73,7 +71,6 @@ val add_task :
   ?contract:Masc_domain.task_contract ->
   ?goal_id:string ->
   ?created_by:string ->
-  ?reject_if:(Masc_domain.backlog -> string option) ->
   config -> title:string -> priority:int -> description:string -> string
 
 val batch_add_tasks :

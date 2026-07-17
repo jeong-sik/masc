@@ -8,9 +8,7 @@ author: codex
 last_verified: 2026-07-17
 source_baseline: masc/main@d5bd126498f88e256c2e5e912d20ae1f7a22baeb
 oas_source_baseline: oas/main@fd713eb0cfc4ffa9887a5d4830f497be7263004d
-supersedes:
-  - masc-oas-bridge-total-llm-dispatch-boundary
-  - shared-admission-primitive-knob-binding-policy
+supersedes: []
 superseded_by: null
 implementation_prs: []
 depends_on:
@@ -99,9 +97,12 @@ would create a second OAS policy authority or a second live path:
    dual path keeps the retired authority alive. Rollback is a source revert,
    not a second runtime implementation.
 
-The bridge Draft and admission Draft must be updated to reference these
-ownership decisions in the same documentation cut. Until their conflicting
-target clauses are removed, none of the three Drafts may claim to be the
+The parallel hard-cut stack
+[#25103](https://github.com/jeong-sik/masc/pull/25103) through
+[#25106](https://github.com/jeong-sik/masc/pull/25106) withdraws and replaces
+those two Draft bodies. This RFC does not edit the same files or create a
+second tombstone path. Until that stack lands, the older Drafts remain
+explicit blockers and none of these documents may claim to be the
 implementation SSOT.
 
 ## §1 Product result

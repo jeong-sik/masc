@@ -332,10 +332,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | conn | Durable Keeper chat receipts and connector delivery settlement | Active | 9d59e83655 2026-07-14 | - |
 | elim | Withdrawn command-policy classification experiment | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 7b62a87d44 2026-07-13 | - |
-| masc | Masc_oas_bridge as the total LLM dispatch boundary | Superseded | d5bd126498 2026-07-17 | - |
-| oas- | OAS recursive execution integration for Keeper, Fusion, and the dashboard | Draft | (this PR) | - |
+| masc | Masc_oas_bridge as the total LLM dispatch boundary | Draft | (untracked) | - |
 | runt | Per-runtime note field & dashboard surfacing | Draft | 03d5feaf25 2026-07-08 | - |
-| shar | Shared typed admission primitive + knob-binding policy | Superseded | d5bd126498 2026-07-17 | - |
+| shar | Shared typed admission primitive + knob-binding policy | Draft | (untracked) | - |
 | type | Withdraw product-specific egress effect classification | Withdrawn | 7b62a87d44 2026-07-13 | - |
 
 ### 신규 RFC

@@ -65,6 +65,67 @@ let with_provider_slot ~keeper_id ~clock:_ f =
         (fun () -> Some (f ()))
 ;;
 
+(* masc#25052 P3: process-global per-RUNTIME slot, additive to (not a
+   replacement for) the per-keeper slot above. RFC-0257 fixed keeper
+   starvation by giving each keeper its own capacity-1 budget, but that
+   means N keepers can each hold their OWN slot and call the SAME shared
+   runtime (e.g. a single local model declared max_concurrent=1)
+   concurrently -- the runtime's own declared concurrency ceiling was never
+   enforced, only the per-keeper one was. This gate is keyed by [runtime_id]
+   and sized from the runtime's own [binding.max_concurrent] declaration
+   (mirrors Hitl_summary_worker.effective_max_concurrency's shape: the
+   runtime's declaration is authoritative, not a separately configured
+   default). A runtime that declares no [max_concurrent] gets capacity 0
+   here, which disables the gate entirely -- unchanged behavior for runtimes
+   that never asked for a cap.
+
+   oas#2641 (Provider_config.max_concurrent_requests, applied at binding
+   construction) is the eventual convergence point once the pinned agent_sdk
+   reaches it; this worktree is pinned to v0.215.0 (pre-#2641), so the gate
+   lives here in MASC in the meantime. *)
+let runtime_slots_mu = Eio.Mutex.create ()
+let runtime_slots : (string, provider_slot) Hashtbl.t = Hashtbl.create 16
+
+let runtime_slot_capacity ~runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some runtime -> Option.value runtime.Runtime.binding.max_concurrent ~default:0
+  | None -> 0
+;;
+
+let runtime_slot_for ~runtime_id capacity =
+  Eio_guard.with_mutex runtime_slots_mu (fun () ->
+    match Hashtbl.find_opt runtime_slots runtime_id with
+    | Some slot when slot.capacity = capacity -> slot
+    | _ ->
+      let slot = { capacity; in_use = 0 } in
+      Hashtbl.replace runtime_slots runtime_id slot;
+      slot)
+;;
+
+let with_runtime_slot ~runtime_id f =
+  let capacity = runtime_slot_capacity ~runtime_id in
+  if capacity <= 0
+  then Some (f ())
+  else (
+    let slot = runtime_slot_for ~runtime_id capacity in
+    let acquired =
+      Eio_guard.with_mutex runtime_slots_mu (fun () ->
+        if slot.in_use >= slot.capacity
+        then false
+        else (
+          slot.in_use <- slot.in_use + 1;
+          true))
+    in
+    if not acquired
+    then None
+    else
+      Fun.protect
+        ~finally:(fun () ->
+          Eio_guard.with_mutex runtime_slots_mu (fun () ->
+            slot.in_use <- Int.max 0 (slot.in_use - 1)))
+        (fun () -> Some (f ())))
+;;
+
 let enabled () =
   (* Default on: a keeper without conversation ingestion is the pathology
      the Memory OS exists to fix (2026-06-12 diagnosis, issue #20909).
@@ -554,15 +615,16 @@ let run_best_effort ?complete ~runtime_id ~keeper_id (inp : Keeper_librarian.inp
              | Some clock -> (
              match
                with_provider_slot ~keeper_id ~clock (fun () ->
-                 extract_and_append_with_provider_classified
-                   ?complete
-                   ~clock
-                   ~sw
-                   ~net
-                   ~keeper_id
-                   ~runtime_id
-                   ~provider_cfg
-                   inp)
+                 with_runtime_slot ~runtime_id (fun () ->
+                   extract_and_append_with_provider_classified
+                     ?complete
+                     ~clock
+                     ~sw
+                     ~net
+                     ~keeper_id
+                     ~runtime_id
+                     ~provider_cfg
+                     inp))
              with
              | None ->
                Otel_metric_store.inc_counter
@@ -574,14 +636,26 @@ let run_best_effort ?complete ~runtime_id ~keeper_id (inp : Keeper_librarian.inp
                  "memory os librarian skipped runtime=%s: per-keeper provider slot busy (capacity=%d)"
                  runtime_id
                  (per_keeper_slot_capacity ())
-             | Some (Ok episode) ->
+             | Some None ->
+               (* Per-keeper slot acquired, but the shared runtime's declared
+                  max_concurrent is already saturated by other keepers. *)
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string MemoryOsLibrarianRuntimeSlotBusy)
+                 ~labels:[ "keeper", keeper_id; "runtime_id", runtime_id ]
+                 ();
+               Log.Keeper.warn ~keeper_name:keeper_id
+                 "memory os librarian skipped runtime=%s: shared runtime provider slot busy \
+                  (capacity=%d)"
+                 runtime_id
+                 (runtime_slot_capacity ~runtime_id)
+             | Some (Some (Ok episode)) ->
                cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
                Log.Keeper.info ~keeper_name:keeper_id
                  "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
                  episode.Keeper_memory_os_types.trace_id
                  episode.generation
                  (List.length episode.claims)
-             | Some (Error err) ->
+             | Some (Some (Error err)) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)
                  ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]

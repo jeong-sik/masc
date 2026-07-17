@@ -59,6 +59,15 @@ let tool_io_preview_fields ~tool_name ~input ?output () =
   @ string_preview_field "tool_output_preview" output_preview
 ;;
 
+let oas_invocation_fields = function
+  | None -> []
+  | Some invocation ->
+    [ "tool_use_id", `String (Agent_sdk.Tool.Invocation.tool_use_id invocation)
+    ; "turn", `Int (Agent_sdk.Tool.Invocation.turn invocation)
+    ; "planned_index", `Int (Agent_sdk.Tool.Invocation.planned_index invocation)
+    ]
+;;
+
 let broadcast_keeper_tool_call_event
       ~keeper_name
       ~tool_name

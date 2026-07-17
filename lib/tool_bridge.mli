@@ -69,3 +69,14 @@ val oas_tool_of_masc :
     never infers mutation, permission, or concurrency semantics from a tool
     name or catalog read-only flag. Without a descriptor OAS uses its ordinary
     sequential default. *)
+
+val oas_tool_of_masc_with_execution_env :
+  ?descriptor:Agent_sdk.Tool.descriptor ->
+  name:string ->
+  description:string ->
+  input_schema:Yojson.Safe.t ->
+  (Agent_sdk.Tool.Execution_env.t -> Yojson.Safe.t -> Tool_result.result) ->
+  Agent_sdk.Tool.t
+(** Create an OAS [Tool.t] whose handler also receives the exact OAS execution
+    environment. This is for correlation and observability; callers must not
+    treat invocation metadata as authorization. *)

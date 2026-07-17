@@ -39,6 +39,9 @@ export type ToolCallEntry = {
   // join this entry's output onto the transcript. Absent when the call carried
   // no provider id (synthesised tc-<position> rows) or on pre-PR-2 logs.
   tool_use_id?: string
+  // OAS model-tool occurrence slot. Together with turn it scopes provider ids
+  // that may be blank or repeated.
+  planned_index?: number
   // Goal id(s) this call was attributed to (conditional on the row carrying
   // them), for goal-scoped drill-down alongside task_id/turn.
   goal_ids?: string[]
@@ -93,7 +96,8 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
     execution_id: asString(raw.execution_id),
-    tool_use_id: asString(raw.tool_use_id),
+    tool_use_id: typeof raw.tool_use_id === 'string' ? raw.tool_use_id : undefined,
+    planned_index: asNumber(raw.planned_index),
     goal_ids: asStringArray(raw.goal_ids),
   }
 }

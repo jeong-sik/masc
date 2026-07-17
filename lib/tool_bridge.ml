@@ -222,6 +222,25 @@ let oas_tool_of_masc ?descriptor ~name ~description ~input_schema
   in
   Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler
 
+let oas_tool_of_masc_with_execution_env
+    ?descriptor
+    ~name
+    ~description
+    ~input_schema
+    handler
+  : Agent_sdk.Tool.t
+  =
+  let parameters = params_of_json_schema input_schema in
+  let oas_handler execution_env json_args =
+    to_oas_typed_result (handler execution_env json_args)
+  in
+  Agent_sdk.Tool.create_with_execution_env
+    ?descriptor
+    ~name
+    ~description
+    ~parameters
+    oas_handler
+
 let () =
   Runtime_agent.set_oas_tool_of_masc_hook (fun ~name ~description ~input_schema handler ->
     oas_tool_of_masc ~name ~description ~input_schema handler)

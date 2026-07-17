@@ -396,7 +396,7 @@ describe('keeper tool telemetry fetchers', () => {
     })
   })
 
-  it('decodes objective success and goal_ids on an entry', async () => {
+  it('decodes objective success, goals, and exact OAS occurrence', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -411,6 +411,9 @@ describe('keeper tool telemetry fetchers', () => {
             output: 'ok',
             success: true,
             duration_ms: 5,
+            tool_use_id: '',
+            turn: 6,
+            planned_index: 2,
             goal_ids: ['g-1', 'g-2'],
           },
         ],
@@ -422,6 +425,9 @@ describe('keeper tool telemetry fetchers', () => {
     const entry = result.entries[0]
     expect(entry?.success).toBe(true)
     expect(entry?.goal_ids).toEqual(['g-1', 'g-2'])
+    expect(entry?.tool_use_id).toBe('')
+    expect(entry?.turn).toBe(6)
+    expect(entry?.planned_index).toBe(2)
   })
 
   it('keeps missing or malformed tool-call duration unmeasured', async () => {

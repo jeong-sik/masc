@@ -39,5 +39,6 @@ val make_keeper_tool_handler
   -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)
   -> ?validate_translated_input:bool
   -> unit
+  -> ?oas_invocation:Agent_sdk.Tool.Invocation.t
   -> Yojson.Safe.t
   -> Tool_result.result

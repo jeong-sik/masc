@@ -135,6 +135,7 @@ let make_hooks
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
   let tool_start_time = ref 0.0 in
+  let tool_invocation_turn = ref None in
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
   let tool_call_count_ref = ref 0 in
@@ -149,8 +150,9 @@ let make_hooks
     { Agent_sdk.Hooks.empty with
     pre_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PreToolUse _ ->
+      | Agent_sdk.Hooks.PreToolUse { turn; _ } ->
         tool_start_time := Time_compat.now ();
+        tool_invocation_turn := Some turn;
         Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 
@@ -382,7 +384,14 @@ let make_hooks
     post_tool_use = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.PostToolUse
-          { tool_name; input; output; duration_ms = hook_duration_ms; tool_use_id; _ } ->
+          { tool_name
+          ; input
+          ; output
+          ; duration_ms = hook_duration_ms
+          ; tool_use_id
+          ; schedule
+          ; _
+          } ->
         record_progress ("tool_completed:" ^ tool_name);
         incr tool_call_count_ref;
         (* OAS exposes the provider-facing tool body here as text.  It is not a
@@ -451,6 +460,12 @@ let make_hooks
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
+        let invocation_turn =
+          match !tool_invocation_turn with
+          | Some turn -> Some turn
+          | None -> tctx.turn
+        in
+        tool_invocation_turn := None;
         (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
@@ -473,10 +488,11 @@ let make_hooks
              ?thinking_budget:tctx.thinking_budget
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
-             ?tool_use_id:(if tool_use_id = "" then None else Some tool_use_id)
+             ~tool_use_id
+             ~planned_index:schedule.planned_index
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
-             ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
+             ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id
              ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
              ?sandbox_profile:tctx.sandbox_profile
              ?sandbox_root:tctx.sandbox_root

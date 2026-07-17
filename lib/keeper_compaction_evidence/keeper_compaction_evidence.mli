@@ -8,6 +8,7 @@ type t =
   ; after_message_count : int
   ; summarized_message_count : int
   ; dropped_message_count : int
+  ; pair_repair_dropped_message_count : int
   ; before_tool_use_count : int
   ; after_tool_use_count : int
   ; before_tool_result_count : int
@@ -21,6 +22,7 @@ type field =
   | After_message_count
   | Summarized_message_count
   | Dropped_message_count
+  | Pair_repair_dropped_message_count
   | Before_tool_use_count
   | After_tool_use_count
   | Before_tool_result_count
@@ -49,8 +51,11 @@ type decode_error =
       ; after_message_count : int
       ; summarized_message_count : int
       ; dropped_message_count : int
+      ; pair_repair_dropped_message_count : int
       }
   | No_messages_compacted
+
+val decode_error_to_string : decode_error -> string
 
 val create
   :  selected_runtime_id:string option
@@ -60,13 +65,17 @@ val create
   -> after_message_count:int
   -> summarized_message_count:int
   -> dropped_message_count:int
+  -> pair_repair_dropped_message_count:int
   -> before_tool_use_count:int
   -> after_tool_use_count:int
   -> before_tool_result_count:int
   -> after_tool_result_count:int
   -> (t, decode_error) result
 (** Construct evidence through the same closed validation boundary used by
-    persisted JSON restoration. *)
+    persisted JSON restoration. Message accounting is exact:
+    [after = before - dropped - summarized + summary_message
+     - pair_repair_dropped], where [summary_message] is one exactly when
+    [summarized] is non-zero. *)
 
 val to_json : t -> Yojson.Safe.t
 (** Structural observation projection of the exact measured counts.

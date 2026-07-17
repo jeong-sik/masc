@@ -28,6 +28,48 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
     stim
 ;;
 
+(* Board-unavailable-result: the intake layer is where the poison/transient
+   distinction is acted on (Keeper_world_observation only reports the read
+   failure). Both dispositions return [] for this turn — the leased stimulus
+   is treated as consumed either way; see [keeper_heartbeat_loop.ml]'s
+   settlement path, which acks the claimed lease based on the turn outcome,
+   not on whether any one board rendering succeeded. Permanent unavailability
+   (the dominant real cause, e.g. a swept post) must never resurface, so
+   dropping it is the fix. Transient unavailability is logged distinctly so
+   operators can tell the two apart, but — unlike the cursor-based scan path
+   in [Keeper_world_observation.collect_board_events], which can locally
+   retain its cursor — this queued-stimulus path has no per-stimulus
+   requeue lever below the whole-lease Ack/Requeue decision, so a genuine
+   retry for this one stimulus is not wired here. *)
+let pending_board_events_of_stimulus_result ~meta_after_triage stim =
+  match pending_board_event_of_stimulus ~meta_after_triage stim with
+  | Ok events_opt -> Option.to_list events_opt
+  | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ObservationQueryFailures)
+      ~labels:
+        [ ( "operation"
+          , Runtime_observation_query_operation.(to_label Board_stimulus_intake) )
+        ]
+      ();
+    (match Keeper_world_observation_board_signal.disposition_of_unavailable unavailable with
+     | Keeper_world_observation_board_signal.Permanent ->
+       Log.Keeper.warn
+         "stimulus intake: board read permanently unavailable, consuming stimulus \
+          without retry stimulus_id=%s keeper=%s: %s"
+         stim.Keeper_event_queue.post_id
+         meta_after_triage.name
+         (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+     | Keeper_world_observation_board_signal.Transient ->
+       Log.Keeper.warn
+         "stimulus intake: board read transiently unavailable, dropping this turn's \
+          rendering stimulus_id=%s keeper=%s: %s"
+         stim.Keeper_event_queue.post_id
+         meta_after_triage.name
+         (Keeper_world_observation_board_signal.unavailable_to_string unavailable));
+    []
+;;
+
 let record_event_queue_stimulus_reaction
       ~(ctx : _ context)
       ~keeper_name
@@ -127,7 +169,7 @@ let consume_single_heartbeat_stimulus
     meta_after_triage.name;
   match stim.payload with
   | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+    pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Fusion_completed c ->
     (* RFC-0266: an async fusion deliberation finished and woke this keeper.
        Surface the resolved answer as a pending_board_event so this turn acts
@@ -138,7 +180,7 @@ let consume_single_heartbeat_stimulus
       c.run_id
       c.ok
       meta_after_triage.name;
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+    pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Bg_completed c ->
     (* RFC-0290: a background job finished and woke this keeper. Surface the
        outcome as a pending_board_event so the turn acts on it. Returning []
@@ -151,14 +193,14 @@ let consume_single_heartbeat_stimulus
        | Keeper_event_queue.Bg_ok _ -> true
        | Keeper_event_queue.Bg_failed _ -> false)
       meta_after_triage.name;
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+    pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Schedule_due sw ->
     Log.Keeper.info
       "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
       sw.schedule_id
       sw.due_at
       meta_after_triage.name;
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+    pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Goal_assigned ga ->
     (* RFC-0315 P3 W0: a newly assigned standing objective is actionable
        work. Promote it to a pending observation so the assignment turn does
@@ -168,7 +210,7 @@ let consume_single_heartbeat_stimulus
       ga.ga_goal_id
       ga.ga_assigned_by
       meta_after_triage.name;
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+    pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Failure_judgment fj ->
     (* RFC-0313 W2: a deterministic turn failure awaits an LLM-boundary
        verdict. Promote it to a pending observation so the judgment turn does
@@ -180,7 +222,7 @@ let consume_single_heartbeat_stimulus
       (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
       (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
       meta_after_triage.name;
-    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+    pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Manual_compaction_requested ->
     Log.Keeper.info
       "turn entry: manual compaction request delivered (keeper=%s)"
@@ -255,7 +297,7 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
       "turn digest: coalesced %d board signals into one turn (keeper=%s)"
       batch_len
       meta_after_triage.name;
-  List.filter_map
+  List.concat_map
     (fun (stim : Keeper_event_queue.stimulus) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string StimulusConsumed)
@@ -267,7 +309,7 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
          stim.post_id
          (stimulus_urgency_to_string stim.urgency)
          meta_after_triage.name;
-       pending_board_event_of_stimulus ~meta_after_triage stim)
+       pending_board_events_of_stimulus_result ~meta_after_triage stim)
     batch
 ;;
 

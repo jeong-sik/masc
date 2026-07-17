@@ -15,11 +15,27 @@ val stimulus_urgency_to_string : Keeper_event_queue.urgency -> string
 
 (** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
     stimulus into a pending board event, threading the keeper meta's
-    continuity summary. *)
+    continuity summary. [Error unavailable] reports a failed board read
+    (board-unavailable-result); this function only reports, it does not
+    decide disposition — see [pending_board_events_of_stimulus_result] for
+    the consuming layer's classify + drop/retain behavior. *)
 val pending_board_event_of_stimulus
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
-  -> Keeper_world_observation.pending_board_event option
+  -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
+
+(** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
+    [stim] into zero-or-one pending board events. On [Error unavailable] it
+    classifies the failure via
+    {!Keeper_world_observation_board_signal.disposition_of_unavailable},
+    logs and counts it, and returns [] — the stimulus is treated as consumed
+    for this turn either way. See the [.ml] for why a queued stimulus has no
+    per-item requeue lever distinct from the whole-lease Ack/Requeue
+    decision. *)
+val pending_board_events_of_stimulus_result
+  :  meta_after_triage:keeper_meta
+  -> Keeper_event_queue.stimulus
+  -> Keeper_world_observation.pending_board_event list
 
 (** [record_event_queue_stimulus_turn_started ~ctx ~keeper_name stim] writes
     a generic [Turn_started] reaction for an event-queue stimulus after the

@@ -33,7 +33,62 @@ type comment_state =
 
 type comment_status = comment_state board_read
 
-exception Board_unavailable of board_unavailable
+(* Board-unavailable disposition: whether a failed board read is worth
+   retrying. Closed set so a new [Board.board_error] variant forces a
+   classification decision here rather than defaulting to either
+   "retry forever" (the old crash-loop bug: [Post_not_found] modeled as
+   transient) or "silently drop" (would swallow a real transient hiccup). *)
+type disposition =
+  | Permanent
+      (** Retrying the same read produces the same error. Callers must
+          consume/drop the stimulus and must not requeue it. *)
+  | Transient
+      (** An environment-level hiccup unrelated to whether the post/comment
+          exists. Callers may retain the stimulus for a later cycle. *)
+
+let disposition_of_error : Board.board_error -> disposition = function
+  | Board.Post_not_found _ ->
+    (* The post was deleted or swept from the store. Post ids are
+       cryptographically random (never reused), so this never resolves on
+       retry — the dominant real-world cause of the crash-loop this type
+       replaces (masc keeper cycle exception incident, board post swept
+       from the in-memory store). *)
+    Permanent
+  | Board.Comment_not_found _ ->
+    (* Same permanence argument as [Post_not_found], for a comment id. *)
+    Permanent
+  | Board.Invalid_id _ ->
+    (* The id string embedded in the stimulus is malformed. Retrying with
+       the same string reproduces the same validation failure. *)
+    Permanent
+  | Board.Io_error _ ->
+    (* Store/disk-level hiccup unrelated to whether the target exists; the
+       next read is expected to succeed once the environment recovers. *)
+    Transient
+  | Board.Validation_error _ ->
+    (* Not reachable from [get_post]/[get_comments] today (only write paths
+       produce it). Classified [Permanent] for exhaustiveness: it signals
+       the input itself fails a business rule, which retrying does not
+       change. *)
+    Permanent
+  | Board.Already_voted _ ->
+    (* Not reachable from a read path. Classified [Permanent]: it names an
+       already-settled action conflict, not a timing issue that retry
+       resolves. *)
+    Permanent
+  | Board.Already_exists _ ->
+    (* Not reachable from a read path. Same deterministic-conflict
+       reasoning as [Already_voted]. *)
+    Permanent
+  | Board.Unauthorized _ ->
+    (* Not reachable from a read path. An identity/ownership gate rejection
+       is deterministic and does not resolve by retrying. *)
+    Permanent
+;;
+
+let disposition_of_unavailable (unavailable : board_unavailable) =
+  disposition_of_error unavailable.error
+;;
 
 let board_read_operation_to_string = function
   | Get_post -> "get_post"
@@ -47,8 +102,6 @@ let unavailable_to_string unavailable =
     unavailable.post_id
     (Board.show_board_error unavailable.error)
 ;;
-
-let raise_unavailable unavailable = raise (Board_unavailable unavailable)
 
 let board_reaction_target_of_queue = function
   | Keeper_event_queue.Reaction_post -> Board.Reaction_post

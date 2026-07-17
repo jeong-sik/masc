@@ -1,6 +1,6 @@
 open Alcotest
 
-module Identity = Masc.Keeper_chat_delivery_identity
+module Identity = Keeper_chat_delivery_identity
 
 let expect_ok = function
   | Ok value -> value

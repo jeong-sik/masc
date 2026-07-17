@@ -1,3 +1,4 @@
+(** Exact identities shared by Keeper delivery producers and consumers. *)
 module Request_id = struct
   type t = string
 

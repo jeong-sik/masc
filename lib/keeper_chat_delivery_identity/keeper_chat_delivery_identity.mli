@@ -1,4 +1,4 @@
-(** Typed identity shared by direct Keeper chat requests, queued receipts,
+(** Typed immutable identity shared by direct Keeper chat requests, queued receipts,
     durable delivery journals, and transcript idempotency slots. *)
 
 module Request_id : sig

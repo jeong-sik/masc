@@ -151,43 +151,39 @@ let test_schema_is_closed_nonhierarchical_contract () =
 ;;
 
 let test_context_bundle_contains_exact_input_without_derived_classification () =
-  let bundle = Worker.For_testing.build_context_bundle ~entry:sample_entry in
+  let bundle =
+    match Worker.For_testing.build_context_bundle ~entry:sample_entry with
+    | Ok bundle -> bundle
+    | Error error ->
+      fail (Worker.For_testing.context_bundle_error_to_string error)
+  in
   let open Yojson.Safe.Util in
   check yojson "exact input" sample_entry.input (bundle |> member "input");
-  let initial = bundle |> member "request_context" |> member "initial" in
-  check string "exact current user message"
-    "inspect the exact requested operation"
-    (initial |> member "user_message" |> to_string);
-  check yojson "executing-agent turn policy omitted" `Null
-    (initial |> member "turn_system_prompt");
-  let turn_policy_evidence = initial |> member "turn_system_prompt_evidence" in
-  check int "turn policy byte count" 11
-    (turn_policy_evidence |> member "bytes" |> to_int);
-  check int "turn policy digest is sha256" 64
-    (turn_policy_evidence |> member "sha256" |> to_string |> String.length);
-  check yojson "historical messages omitted" `Null
-    (initial |> member "history_messages");
-  let evidence = initial |> member "history_messages_evidence" in
-  check bool "historical omission is explicit" false
-    (evidence |> member "included" |> to_bool);
-  check string "historical evidence schema"
-    "masc.keeper_gate.history_evidence.v1"
-    (evidence |> member "schema" |> to_string);
-  check int "historical message count" 1
-    (evidence |> member "count" |> to_int);
-  check int "historical digest is sha256" 64
-    (evidence |> member "sha256" |> to_string |> String.length);
+  check yojson
+    "exact outer-turn context"
+    (Option.get sample_entry.request_context)
+    (bundle |> member "request_context");
+  let fields = bundle |> to_assoc in
+  List.iter
+    (fun field ->
+       check bool ("does not reread " ^ field) false (List.mem_assoc field fields))
+    [ "task"; "goals"; "chat_messages"; "partial_context"; "context_notes" ];
   check yojson "no derived classification" `Null (bundle |> member "classification");
   check yojson "no derived level" `Null (bundle |> member "level")
 ;;
 
-let test_request_context_projection_is_idempotent () =
-  let projected =
-    Option.get sample_entry.request_context
-    |> Masc.Keeper_gate_request_context.project
-  in
-  check yojson "projection is idempotent" projected
-    (Masc.Keeper_gate_request_context.project projected)
+let test_missing_request_context_is_terminal_before_provider () =
+  match
+    Worker.For_testing.build_context_bundle
+      ~entry:{ sample_entry with request_context = None }
+  with
+  | Ok _ -> fail "missing exact request context produced a provider payload"
+  | Error Worker.For_testing.Exact_request_context_unavailable ->
+    check string
+      "failure is stable and explicit"
+      "HITL summary: exact outer-turn request context is unavailable"
+      (Worker.For_testing.context_bundle_error_to_string
+         Worker.For_testing.Exact_request_context_unavailable)
 ;;
 
 let test_concurrency_respects_runtime_binding () =
@@ -377,9 +373,9 @@ let () =
             `Quick
             test_concurrency_respects_runtime_binding
         ; test_case
-            "request context projection is idempotent"
+            "missing request context is terminal before provider"
             `Quick
-            test_request_context_projection_is_idempotent
+            test_missing_request_context_is_terminal_before_provider
         ; test_case
             "plain JSON requires exact object"
             `Quick

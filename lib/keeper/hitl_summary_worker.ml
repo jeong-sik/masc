@@ -66,7 +66,7 @@ let () =
     ~help:
       "Total HITL context-summary worker outcomes classified by [outcome]. \
        Labels: [outcome] (ok_summary | parse_error | provider_error | timeout | \
-       no_provider_config | no_net | prompt_error | crashed | \
+       exact_context_unavailable | no_provider_config | no_net | prompt_error | crashed | \
        degraded_plain_json | restart_worker_recovered | \
        restart_judgment_recovered | operator_retry_started). \
        [degraded_plain_json] is emitted alongside the terminal outcome when \
@@ -83,175 +83,30 @@ let record_outcome outcome =
     ()
 ;;
 
-(* ── Context collection ─────────────────────────── *)
+(* ── Exact request evidence ─────────────────────── *)
 
-type context_acc =
-  { partial : bool
-  ; notes : string list
-  }
+type context_bundle_error = Exact_request_context_unavailable
 
-let note acc msg = { partial = true; notes = msg :: acc.notes }
-
-let task_context config ~task_id acc =
-  try
-    let tasks = Workspace_query.get_tasks_safe config in
-    match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
-    | None ->
-      let acc = note acc (Printf.sprintf "task %s not found" task_id) in
-      `Assoc [ "task_id", `String task_id; "found", `Bool false ], [], acc
-    | Some task ->
-      let task_goal_ids =
-        let index = Workspace_goal_index.build_task_goal_index_for_config config in
-        match Hashtbl.find_opt index task_id with
-        | Some goal_ids -> List.sort_uniq String.compare goal_ids
-        | None -> []
-      in
-      `Assoc
-        [ "task_id", `String task_id
-        ; "title", `String task.title
-        ; "status", `String (Masc_domain.task_status_to_string task.task_status)
-        ; "goal_ids", Json_util.json_string_list task_goal_ids
-        ; "found", `Bool true
-        ], task_goal_ids, acc
-  with
-  | exn ->
-    let acc = note acc (Printf.sprintf "task %s lookup failed: %s" task_id (Printexc.to_string exn)) in
-    `Assoc [ "task_id", `String task_id; "found", `Bool false ], [], acc
+let context_bundle_error_to_string = function
+  | Exact_request_context_unavailable ->
+    "HITL summary: exact outer-turn request context is unavailable"
 ;;
 
-let goal_context config ~goal_id acc =
-  try
-    match Goal_store.get_goal config ~goal_id with
-    | None ->
-      let acc = note acc (Printf.sprintf "goal %s not found" goal_id) in
-      `Assoc [ "goal_id", `String goal_id; "found", `Bool false ], acc
-    | Some goal ->
-      let status_label =
-        match Goal_store.goal_status_to_yojson goal.status with
-        | `String s -> s
-        | other ->
-          (* Schema change guard: fail loud instead of silently degrading to
-             "unknown". The caller catches and records the exception. *)
-          raise
-            (Failure
-               (Printf.sprintf
-                  "goal_status_to_yojson returned non-string for goal %s: %s"
-                  goal_id
-                  (Yojson.Safe.to_string other)))
-      in
-      `Assoc
-        [ "goal_id", `String goal_id
-        ; "title", `String goal.title
-        ; "phase", `String (Goal_phase.to_string goal.phase)
-        ; "status", `String status_label
-        ; "priority", `Int goal.priority
-        ; "found", `Bool true
-        ], acc
-  with
-  | exn ->
-    let acc = note acc (Printf.sprintf "goal %s lookup failed: %s" goal_id (Printexc.to_string exn)) in
-    `Assoc [ "goal_id", `String goal_id; "found", `Bool false ], acc
-;;
-
-let chat_context ~base_dir ~keeper_name ~turn_id acc =
-  try
-    let messages = Keeper_chat_store.load ~base_dir ~keeper_name in
-    let filtered =
-      List.filter
-        (fun (m : Keeper_chat_store.chat_message) ->
-           match m.turn_ref with
-           | None -> false
-           | Some tr -> Int.equal (Ids.Turn_ref.absolute_turn tr) turn_id)
-        messages
-    in
-    Keeper_chat_store.to_json_array filtered, acc
-  with
-  | exn ->
-    let acc = note acc (Printf.sprintf "chat lookup failed: %s" (Printexc.to_string exn)) in
-    `List [], acc
-;;
-
-let collect_context_parts entry =
-  let acc0 =
-    match entry.request_context with
-    | Some _ -> { partial = false; notes = [] }
-    | None ->
-      note
-        { partial = false; notes = [] }
-        "exact outer-turn request context is unavailable"
-  in
-  let config_opt, acc =
-    try Some (Workspace_utils.default_config entry.audit_base_path), acc0 with
-    | exn ->
-      ( None
-      , note acc0 (Printf.sprintf "workspace config unavailable: %s" (Printexc.to_string exn)) )
-  in
-  let task_json, task_goal_ids, acc =
-    match entry.task_id, config_opt with
-    | Some task_id, Some config -> task_context config ~task_id acc
-    | Some task_id, None ->
-      let acc = note acc (Printf.sprintf "task %s skipped (no workspace config)" task_id) in
-      `Assoc [ "task_id", `String task_id; "found", `Bool false ], [], acc
-    | None, _ -> `Null, [], acc
-  in
-  let goal_ids =
-    (match entry.goal_id with
-     | Some g -> [ g ]
-     | None -> [])
-    @ entry.goal_ids
-    @ task_goal_ids
-    |> List.filter (fun s -> not (String.equal s ""))
-    |> List.sort_uniq String.compare
-  in
-  let goals_json, acc =
-    match config_opt with
-    | Some config ->
-      let goals, acc =
-        List.fold_left
-          (fun (goals, acc) goal_id ->
-             let g, acc = goal_context config ~goal_id acc in
-             g :: goals, acc)
-          ([], acc)
-          goal_ids
-      in
-      `List (List.rev goals), acc
-    | None ->
-      let acc =
-        if goal_ids <> [] then note acc "goals skipped (no workspace config)" else acc
-      in
-      `List [], acc
-  in
-  let chat_json, acc =
-    match entry.turn_id with
-    | Some turn_id ->
-      chat_context ~base_dir:entry.audit_base_path ~keeper_name:entry.keeper_name ~turn_id acc
-    | None -> `Null, acc
-  in
-  task_json, goals_json, chat_json, acc.partial, acc.notes
-;;
-
-let build_context_bundle ~(entry : pending_approval) : Yojson.Safe.t =
-  let task_json, goals_json, chat_json, partial_context, context_notes =
-    collect_context_parts entry
-  in
-  `Assoc
-    [ "keeper_name", `String entry.keeper_name
-    ; "tool_name", `String entry.tool_name
-    ; "turn_id", Json_util.int_opt_to_json entry.turn_id
-    ; "task_id", Json_util.string_opt_to_json entry.task_id
-    ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-    ; "goal_ids", `List (List.map (fun g -> `String g) entry.goal_ids)
-    ; "input", entry.input
-    ; ( "request_context"
-      , match entry.request_context with
-        | Some context -> Keeper_gate_request_context.project context
-        | None -> `Null )
-    ; "task", task_json
-    ; "goals", goals_json
-    ; "chat_messages", chat_json
-    ; "partial_context", `Bool partial_context
-    ; "context_notes", `List (List.rev_map (fun s -> `String s) context_notes)
-    ]
+let build_context_bundle ~(entry : pending_approval) =
+  match entry.request_context with
+  | None -> Error Exact_request_context_unavailable
+  | Some request_context ->
+    Ok
+      (`Assoc
+         [ "keeper_name", `String entry.keeper_name
+         ; "tool_name", `String entry.tool_name
+         ; "turn_id", Json_util.int_opt_to_json entry.turn_id
+         ; "task_id", Json_util.string_opt_to_json entry.task_id
+         ; "goal_id", Json_util.string_opt_to_json entry.goal_id
+         ; "goal_ids", `List (List.map (fun g -> `String g) entry.goal_ids)
+         ; "input", entry.input
+         ; "request_context", request_context
+         ])
 ;;
 
 (* ── LLM call ───────────────────────────────────── *)
@@ -439,75 +294,82 @@ let spawn
       ()
   =
   let generated_at = Time_compat.now () in
-  match provider_config with
-  | None ->
+  match build_context_bundle ~entry with
+  | Error error ->
     Fun.protect
       ~finally:on_finish
       (fun () ->
-         record_outcome "no_provider_config";
-         on_failure ~reason:"HITL summary: no provider config available" ~retryable:true)
-  | Some provider_config ->
-    Eio.Fiber.fork ~sw (fun () ->
-      Fun.protect
-        ~finally:on_finish
-        (fun () ->
-        try
-          let context_bundle = build_context_bundle ~entry in
-          match Eio_context.get_net_opt () with
-          | None ->
-            record_outcome "no_net";
-            on_failure
-              ~reason:"HITL summary worker: Eio net unavailable"
-              ~retryable:true
-          | Some net ->
-            (match
-               call_summary_llm ~sw ~net ~runtime_id ~provider_config ~context_bundle ()
-             with
-             | Ok (response, mode) ->
-               (* Record the degradation itself (not just its outcome) so
-                  operators can see when the judge fleet lacks native structured
-                  output, rather than it being invisible behind ok/parse_error. *)
-               (match mode with
-                | Plain_json_text ->
-                  record_outcome "degraded_plain_json"
-                | Native_structured -> ());
-               (match summary_of_response ~generated_at ~mode response with
-                | Ok summary ->
-                  record_outcome "ok_summary";
-                  on_summary summary
-                | Error reason ->
-                  record_outcome "parse_error";
-                  on_failure ~reason ~retryable:true)
-             | Error (Prompt_unavailable detail) ->
-               record_outcome "prompt_error";
+         record_outcome "exact_context_unavailable";
+         on_failure ~reason:(context_bundle_error_to_string error) ~retryable:false)
+  | Ok context_bundle ->
+    (match provider_config with
+     | None ->
+       Fun.protect
+         ~finally:on_finish
+         (fun () ->
+            record_outcome "no_provider_config";
+            on_failure ~reason:"HITL summary: no provider config available" ~retryable:true)
+     | Some provider_config ->
+       Eio.Fiber.fork ~sw (fun () ->
+         Fun.protect
+           ~finally:on_finish
+           (fun () ->
+           try
+             match Eio_context.get_net_opt () with
+             | None ->
+               record_outcome "no_net";
                on_failure
-                 ~reason:("HITL Gate judgment prompt unavailable: " ^ detail)
+                 ~reason:"HITL summary worker: Eio net unavailable"
                  ~retryable:true
-             | Error
-                 (Llm_call_error
-                    { mode; error = (Agent_sdk.Error.Api (Timeout _) as error) }) ->
-               List.iter
-                 record_outcome
-                 (summary_llm_error_outcomes ~mode error);
-               on_failure
-                 ~reason:"HITL summary LLM call timed out"
-                 ~retryable:true
-             | Error (Llm_call_error { mode; error }) ->
-               List.iter
-                 record_outcome
-                 (summary_llm_error_outcomes ~mode error);
-               on_failure
-                 ~reason:(Agent_sdk.Error.to_string error)
-                 ~retryable:(summary_llm_error_retryable error))
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        record_outcome "crashed";
-        Log.Keeper.warn
-          "HITL summary worker crashed approval_id=%s err=%s"
-          entry.id
-          (Printexc.to_string exn);
-          on_failure ~reason:(Printexc.to_string exn) ~retryable:true))
+             | Some net ->
+               (match
+                  call_summary_llm ~sw ~net ~runtime_id ~provider_config ~context_bundle ()
+                with
+                | Ok (response, mode) ->
+                  (* Record the degradation itself (not just its outcome) so
+                     operators can see when the judge fleet lacks native structured
+                     output, rather than it being invisible behind ok/parse_error. *)
+                  (match mode with
+                   | Plain_json_text ->
+                     record_outcome "degraded_plain_json"
+                   | Native_structured -> ());
+                  (match summary_of_response ~generated_at ~mode response with
+                   | Ok summary ->
+                     record_outcome "ok_summary";
+                     on_summary summary
+                   | Error reason ->
+                     record_outcome "parse_error";
+                     on_failure ~reason ~retryable:true)
+                | Error (Prompt_unavailable detail) ->
+                  record_outcome "prompt_error";
+                  on_failure
+                    ~reason:("HITL Gate judgment prompt unavailable: " ^ detail)
+                    ~retryable:true
+                | Error
+                    (Llm_call_error
+                       { mode; error = (Agent_sdk.Error.Api (Timeout _) as error) }) ->
+                  List.iter
+                    record_outcome
+                    (summary_llm_error_outcomes ~mode error);
+                  on_failure
+                    ~reason:"HITL summary LLM call timed out"
+                    ~retryable:true
+                | Error (Llm_call_error { mode; error }) ->
+                  List.iter
+                    record_outcome
+                    (summary_llm_error_outcomes ~mode error);
+                  on_failure
+                    ~reason:(Agent_sdk.Error.to_string error)
+                    ~retryable:(summary_llm_error_retryable error))
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           record_outcome "crashed";
+           Log.Keeper.warn
+             "HITL summary worker crashed approval_id=%s err=%s"
+             entry.id
+             (Printexc.to_string exn);
+           on_failure ~reason:(Printexc.to_string exn) ~retryable:true)))
 ;;
 
 module For_testing = struct
@@ -515,7 +377,11 @@ module For_testing = struct
     | Native_structured
     | Plain_json_text
 
+  type nonrec context_bundle_error = context_bundle_error =
+    | Exact_request_context_unavailable
+
   let build_context_bundle = build_context_bundle
+  let context_bundle_error_to_string = context_bundle_error_to_string
   let parse_summary = parse_summary
   let summary_of_response = summary_of_response
   let provider_config_for_summary = prepare_provider_config

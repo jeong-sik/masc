@@ -20,7 +20,9 @@ val readiness : unit -> (unit, string) result
     parse failure. The caller is responsible for writing the result back to the
     approval entry (e.g. via [Keeper_approval_queue.attach_summary]). This
     keeps the worker decoupled from the queue and avoids a module cycle.
-    [on_finish] runs exactly once even when the fiber is cancelled. *)
+    [on_finish] runs exactly once even when the fiber is cancelled. A persisted
+    request without its exact outer-turn context fails before provider
+    selection and is reported as non-retryable. *)
 val spawn
   :  sw:Eio.Switch.t
   -> runtime_id:string
@@ -42,8 +44,13 @@ module For_testing : sig
     | Native_structured
     | Plain_json_text
 
+  type context_bundle_error = Exact_request_context_unavailable
+
   val build_context_bundle
-    : entry:Keeper_approval_queue.pending_approval -> Yojson.Safe.t
+    :  entry:Keeper_approval_queue.pending_approval
+    -> (Yojson.Safe.t, context_bundle_error) result
+
+  val context_bundle_error_to_string : context_bundle_error -> string
 
   val parse_summary
     :  generated_at:float

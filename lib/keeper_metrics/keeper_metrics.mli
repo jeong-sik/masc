@@ -31,11 +31,9 @@ type t =
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
-  | CompactionPairRepairDrops
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
-  | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
   | ToolUnderusedAllowedCount

@@ -311,7 +311,6 @@ let compact_for_request_typed
       ~message_count:before_messages;
     { context = ctx; decision = Rejected (trigger, reason); evidence = None }
   | Ok requested ->
-    let pair_repair_dropped_message_count = 0 in
     let compacted_ctx =
       { ctx with
         checkpoint =
@@ -349,7 +348,6 @@ let compact_for_request_typed
           ~after_message_count:after_messages
           ~summarized_message_count:requested.summarized_message_count
           ~dropped_message_count:requested.dropped_message_count
-          ~pair_repair_dropped_message_count
           ~before_tool_use_count
           ~after_tool_use_count
           ~before_tool_result_count

@@ -6,7 +6,6 @@ type t =
   ; after_message_count : int
   ; summarized_message_count : int
   ; dropped_message_count : int
-  ; pair_repair_dropped_message_count : int
   ; before_tool_use_count : int
   ; after_tool_use_count : int
   ; before_tool_result_count : int
@@ -20,7 +19,6 @@ type field =
   | After_message_count
   | Summarized_message_count
   | Dropped_message_count
-  | Pair_repair_dropped_message_count
   | Before_tool_use_count
   | After_tool_use_count
   | Before_tool_result_count
@@ -49,7 +47,6 @@ type decode_error =
       ; after_message_count : int
       ; summarized_message_count : int
       ; dropped_message_count : int
-      ; pair_repair_dropped_message_count : int
       }
   | No_messages_compacted
 
@@ -60,7 +57,6 @@ let field_name = function
   | After_message_count -> "after_message_count"
   | Summarized_message_count -> "summarized_message_count"
   | Dropped_message_count -> "dropped_message_count"
-  | Pair_repair_dropped_message_count -> "pair_repair_dropped_message_count"
   | Before_tool_use_count -> "before_tool_use_count"
   | After_tool_use_count -> "after_tool_use_count"
   | Before_tool_result_count -> "before_tool_result_count"
@@ -74,7 +70,6 @@ let all_fields =
   ; After_message_count
   ; Summarized_message_count
   ; Dropped_message_count
-  ; Pair_repair_dropped_message_count
   ; Before_tool_use_count
   ; After_tool_use_count
   ; Before_tool_result_count
@@ -120,15 +115,13 @@ let decode_error_to_string = function
       ; after_message_count
       ; summarized_message_count
       ; dropped_message_count
-      ; pair_repair_dropped_message_count
       } ->
     Printf.sprintf
-      "invalid_message_accounting:before=%d:after=%d:summarized=%d:dropped=%d:pair_repair_dropped=%d"
+      "invalid_message_accounting:before=%d:after=%d:summarized=%d:dropped=%d"
       before_message_count
       after_message_count
       summarized_message_count
       dropped_message_count
-      pair_repair_dropped_message_count
   | No_messages_compacted -> "no_messages_compacted"
 ;;
 
@@ -139,7 +132,6 @@ let message_accounting_is_exact
       ~after_message_count
       ~summarized_message_count
       ~dropped_message_count
-      ~pair_repair_dropped_message_count
   =
   summarized_message_count <= before_message_count
   && dropped_message_count <= before_message_count - summarized_message_count
@@ -150,8 +142,7 @@ let message_accounting_is_exact
     - summarized_message_count
     + if summarized_message_count = 0 then 0 else 1
   in
-  pair_repair_dropped_message_count <= after_plan
-  && after_message_count = after_plan - pair_repair_dropped_message_count
+  after_message_count = after_plan
 ;;
 
 let decode_nonnegative_integer fields field =
@@ -175,7 +166,6 @@ let create
       ~after_message_count
       ~summarized_message_count
       ~dropped_message_count
-      ~pair_repair_dropped_message_count
       ~before_tool_use_count
       ~after_tool_use_count
       ~before_tool_result_count
@@ -188,7 +178,6 @@ let create
     ; After_message_count, after_message_count
     ; Summarized_message_count, summarized_message_count
     ; Dropped_message_count, dropped_message_count
-    ; Pair_repair_dropped_message_count, pair_repair_dropped_message_count
     ; Before_tool_use_count, before_tool_use_count
     ; After_tool_use_count, after_tool_use_count
     ; Before_tool_result_count, before_tool_result_count
@@ -230,8 +219,7 @@ let create
               ~before_message_count
               ~after_message_count
               ~summarized_message_count
-              ~dropped_message_count
-              ~pair_repair_dropped_message_count)
+              ~dropped_message_count)
        then
          Error
            (Invalid_message_accounting
@@ -239,7 +227,6 @@ let create
               ; after_message_count
               ; summarized_message_count
               ; dropped_message_count
-              ; pair_repair_dropped_message_count
               })
        else
          Ok
@@ -250,7 +237,6 @@ let create
            ; after_message_count
            ; summarized_message_count
            ; dropped_message_count
-           ; pair_repair_dropped_message_count
            ; before_tool_use_count
            ; after_tool_use_count
            ; before_tool_result_count
@@ -276,9 +262,6 @@ let of_json ~selected_runtime_id = function
     let* after_message_count = integer After_message_count in
     let* summarized_message_count = integer Summarized_message_count in
     let* dropped_message_count = integer Dropped_message_count in
-    let* pair_repair_dropped_message_count =
-      integer Pair_repair_dropped_message_count
-    in
     let* before_tool_use_count = integer Before_tool_use_count in
     let* after_tool_use_count = integer After_tool_use_count in
     let* before_tool_result_count = integer Before_tool_result_count in
@@ -291,7 +274,6 @@ let of_json ~selected_runtime_id = function
       ~after_message_count
       ~summarized_message_count
       ~dropped_message_count
-      ~pair_repair_dropped_message_count
       ~before_tool_use_count
       ~after_tool_use_count
       ~before_tool_result_count
@@ -307,8 +289,6 @@ let to_json evidence =
     ; "after_message_count", `Int evidence.after_message_count
     ; "summarized_message_count", `Int evidence.summarized_message_count
     ; "dropped_message_count", `Int evidence.dropped_message_count
-    ; ( "pair_repair_dropped_message_count"
-      , `Int evidence.pair_repair_dropped_message_count )
     ; "before_tool_use_count", `Int evidence.before_tool_use_count
     ; "after_tool_use_count", `Int evidence.after_tool_use_count
     ; "before_tool_result_count", `Int evidence.before_tool_result_count

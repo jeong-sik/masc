@@ -40,11 +40,9 @@ type t =
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
-  | CompactionPairRepairDrops
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
-  | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
   | ToolUnderusedAllowedCount
@@ -252,13 +250,10 @@ let to_string = function
   | Compactions -> "masc_keeper_compactions_total"
   | CompactionRatioChange -> "masc_keeper_compaction_ratio_change"
   | CompactionSavedTokens -> "masc_keeper_compaction_saved_tokens_total"
-  | CompactionPairRepairDrops ->
-    "masc_keeper_compaction_pair_repair_drops_total"
   | EmergencyCompactRatioThreshold ->
     "masc_keeper_emergency_compact_ratio_threshold"
   | OperatorCompact -> "masc_keeper_operator_compact_total"
   | OperatorClear -> "masc_keeper_operator_clear_total"
-  | ToolPairRepair -> "masc_keeper_tool_pair_repair_total"
   | ToolEmissionRegistrySize -> "masc_keeper_tool_emission_registry_size"
   | ToolEmissionPushes -> "masc_keeper_tool_emission_pushes_total"
   | ToolUnderusedAllowedCount -> "masc_keeper_tool_underused_allowed_count"

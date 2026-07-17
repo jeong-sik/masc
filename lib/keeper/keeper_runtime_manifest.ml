@@ -385,7 +385,6 @@ let decision_public_allowlist =
     ; "before_checkpoint_bytes"; "after_checkpoint_bytes"
     ; "before_message_count"; "after_message_count"
     ; "summarized_message_count"; "dropped_message_count"
-    ; "pair_repair_dropped_message_count"
     ; "before_tool_use_count"; "after_tool_use_count"
     ; "before_tool_result_count"; "after_tool_result_count"
     ; "clock_refs"

@@ -67,15 +67,6 @@ val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
     history classification. *)
 val text_of_history_jsonl_json : Yojson.Safe.t -> string
 
-type tool_pair_repair_stats =
-  { dropped_tool_uses : int
-  ; dropped_tool_results : int
-  ; dropped_tool_use_samples : (string * string) list
-  ; dropped_tool_result_ids : string list
-  }
-
-val tool_pair_repair_stats_changed : tool_pair_repair_stats -> bool
-
 (** {1 Context (de)serialization} *)
 
 val serialize_context : working_context -> string

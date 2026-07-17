@@ -135,31 +135,6 @@ let text_of_history_jsonl_json = Message_json.text_of_history_jsonl_json
 
 let trim_messages_preserving_pairs = Keeper_context_tool_message_pairs.trim_messages_preserving_pairs
 
-type tool_pair_repair_stats = Keeper_context_core_pair_repair_stats.tool_pair_repair_stats =
-  { dropped_tool_uses : int
-  ; dropped_tool_results : int
-  ; dropped_tool_use_samples : (string * string) list
-  ; dropped_tool_result_ids : string list
-  }
-
-let empty_tool_pair_repair_stats =
-  Keeper_context_core_pair_repair_stats.empty_tool_pair_repair_stats
-let add_tool_pair_repair_stats =
-  Keeper_context_core_pair_repair_stats.add_tool_pair_repair_stats
-let tool_pair_repair_stats_changed =
-  Keeper_context_core_pair_repair_stats.tool_pair_repair_stats_changed
-let pair_repair_diagnostic_max_bytes =
-  Keeper_context_core_pair_repair_stats.pair_repair_diagnostic_max_bytes
-let bound_pair_repair_diagnostic_string =
-  Keeper_context_core_pair_repair_stats.bound_pair_repair_diagnostic_string
-let pair_repair_metadata_key =
-  Keeper_context_core_pair_repair_stats.pair_repair_metadata_key
-let pair_repair_metadata_keys =
-  Keeper_context_core_pair_repair_stats.pair_repair_metadata_keys
-let with_pair_repair_metadata =
-  Keeper_context_core_pair_repair_stats.with_pair_repair_metadata
-
-
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [
     ( "system_prompt",

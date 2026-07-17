@@ -121,41 +121,6 @@ let compaction_recovery_error_to_string = function
       known_turn_count
   | Checkpoint_save_failed detail -> detail
 
-let log_tool_pair_repair
-    ~keeper_name
-    ~site
-    (stats : Keeper_context_core.tool_pair_repair_stats) =
-  if Keeper_context_core.tool_pair_repair_stats_changed stats then
-    Log.Harness.emit
-      Log.Warn
-      ~details:
-        (`Assoc
-            [ "keeper_name", `String keeper_name
-            ; "site", `String site
-            ; "dropped_tool_uses", `Int stats.dropped_tool_uses
-            ; "dropped_tool_results", `Int stats.dropped_tool_results
-            ; ( "dropped_tool_use_samples"
-              , `List
-                  (List.map
-                     (fun (tool_use_id, tool_name) ->
-                        `Assoc
-                          [ "tool_use_id", `String tool_use_id
-                          ; "tool_name", `String tool_name
-                          ])
-                     stats.dropped_tool_use_samples) )
-            ; ( "dropped_tool_result_ids"
-              , `List
-                  (List.map
-                     (fun tool_use_id -> `String tool_use_id)
-                     stats.dropped_tool_result_ids) )
-            ])
-      (Printf.sprintf
-         "tool_pair_repair keeper=%s site=%s dropped_tool_uses=%d \
-          dropped_tool_results=%d"
-         keeper_name
-         site
-         stats.dropped_tool_uses
-         stats.dropped_tool_results)
 
 (* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
    Feature-flag-gated layer that runs before tool emission and

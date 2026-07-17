@@ -42,7 +42,10 @@ let provider_error_to_http_error = function
       }
   | Llm_provider.Error.NotFound { detail; _ } ->
     Llm_provider.Http_client.HttpError
-      { code = 404; body = if String.trim detail = "" then "model not found" else detail }
+      { code = 404
+      ; body = (if String.trim detail = "" then "model not found" else detail)
+      ; retry_after_header = None
+      }
   | Llm_provider.Error.Timeout { detail; timeout_phase; _ } ->
     Llm_provider.Http_client.TimeoutError
       { message = detail

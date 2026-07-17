@@ -397,7 +397,7 @@ let reaction_kind_of_settlement = function
 ;;
 
 let project_transition_outbox ~base_path ~keeper_name =
-  let rec project_stimuli ~reaction_kind ~receipt = function
+  let rec project_stimuli ~reaction_kind ~receipt ~source_index = function
     | [] -> Ok ()
     | stimulus :: rest ->
       (match
@@ -405,11 +405,17 @@ let project_transition_outbox ~base_path ~keeper_name =
            ~base_path
            ~keeper_name
            ~reaction_kind
+           ~source_index
            ~receipt
            stimulus
        with
        | Error _ as error -> error
-       | Ok () -> project_stimuli ~reaction_kind ~receipt rest)
+       | Ok () ->
+         project_stimuli
+           ~reaction_kind
+           ~receipt
+           ~source_index:(source_index + 1)
+           rest)
   in
   match Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name with
   | Error _ as error -> error
@@ -417,7 +423,7 @@ let project_transition_outbox ~base_path ~keeper_name =
   | Ok [ (entry : Keeper_registry_event_queue.outbox_entry) ] ->
     let receipt = entry.receipt in
     let reaction_kind = reaction_kind_of_settlement receipt.settlement in
-    (match project_stimuli ~reaction_kind ~receipt entry.stimuli with
+    (match project_stimuli ~reaction_kind ~receipt ~source_index:0 entry.stimuli with
      | Error _ as error -> error
      | Ok () ->
        Keeper_registry_event_queue.mark_transition_projected_result

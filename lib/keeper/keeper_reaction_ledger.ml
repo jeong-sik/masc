@@ -307,28 +307,38 @@ let record_event_queue_reaction ~base_path ~keeper_name ~reaction_kind stimulus 
     (event_queue_reaction_json ~keeper_name ~reaction_kind stimulus)
 ;;
 
+let event_queue_transition_event_id
+      (receipt : Keeper_event_queue_state.transition_receipt)
+      source_index
+  =
+  Printf.sprintf "%s:source:%d" receipt.event_id source_index
+;;
+
 let event_queue_transition_reaction_json
       ~keeper_name
       ~reaction_kind
+      ~source_index
       (receipt : Keeper_event_queue_state.transition_receipt)
       stimulus
   =
   let stimulus_id = stimulus_id_of_event_queue stimulus in
+  let event_id = event_queue_transition_event_id receipt source_index in
   `Assoc
     (base_fields
        ~record_kind:"reaction"
-       ~event_id:(digest_id "krl" (receipt.event_id ^ "|" ^ stimulus_id))
+       ~event_id
        ~keeper_name
        ~recorded_at:receipt.settled_at
      @ [ "stimulus_id", `String stimulus_id
        ; ( "reaction"
          , `Assoc
              [ "kind", `String (reaction_kind_to_string reaction_kind)
-             ; "source", `String "keeper_event_queue_transition_outbox"
+             ; "source", `String "keeper_event_queue_settlement"
              ; "post_id", `String stimulus.post_id
              ; ( "stimulus_kind"
                , `String
                    (stimulus_kind_to_string (stimulus_kind_of_event_queue stimulus)) )
+             ; "source_index", `Int source_index
              ; "transition_id", `String receipt.transition_id
              ; ( "transition_receipt"
                , Keeper_event_queue_state.transition_receipt_to_yojson receipt )
@@ -340,15 +350,18 @@ let record_event_queue_transition_reaction_result
       ~base_path
       ~keeper_name
       ~reaction_kind
+      ~source_index
       ~receipt
       stimulus
   =
+  let event_id = event_queue_transition_event_id receipt source_index in
   try
     Dated_jsonl.append
       (store_for_base_path ~base_path ~keeper_name)
       (event_queue_transition_reaction_json
          ~keeper_name
          ~reaction_kind
+         ~source_index
          receipt
          stimulus);
     Ok ()
@@ -357,9 +370,9 @@ let record_event_queue_transition_reaction_result
   | exn ->
     Error
       (Printf.sprintf
-         "event queue transition ledger append failed keeper=%s transition=%s: %s"
+         "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
          keeper_name
-         receipt.Keeper_event_queue_state.transition_id
+         event_id
          (Printexc.to_string exn))
 ;;
 

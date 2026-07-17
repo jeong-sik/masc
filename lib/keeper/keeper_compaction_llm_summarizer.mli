@@ -28,18 +28,21 @@ type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan optio
     {!Llm_provider.Complete.complete}; overridable in tests. *)
 type complete_fn = Keeper_provider_subcall.complete_fn
 
-(** [make ~runtime_id ~keeper_name ()] resolves [runtime_id] as a Runtime or
-    Runtime Lane. A Runtime contributes its exact provider config; a Lane tries
-    its configured Runtime candidates in declared order until one returns a
-    valid plan. Missing, ineligible, and failed candidates are logged with
-    their Runtime id. No default Runtime is substituted. [complete] overrides
-    the Provider boundary in tests.
+(** [make ~runtime_ids ~keeper_name ()] resolves each id in [runtime_ids],
+    most-preferred first, exactly as a single {!candidate_runtime_ids_for_assignment}
+    would: a Runtime contributes its exact provider config, a Lane tries its
+    configured Runtime candidates in declared order. Every eligible candidate
+    across every seed id is tried, seed order first and then per-seed lane
+    order, with candidates that resolve to the same Runtime id collapsed to
+    their first (highest-priority) occurrence. Missing, ineligible, and failed
+    candidates are logged with their Runtime id. No default Runtime is
+    substituted. [complete] overrides the Provider boundary in tests.
 
     The compaction owner imposes no wall-clock deadline. Cancellation belongs
     to the owning Keeper lane or to the Provider transport boundary. *)
 val make
   :  ?complete:complete_fn
-  -> runtime_id:string
+  -> runtime_ids:string list
   -> keeper_name:string
   -> unit
   -> summarizer option
@@ -68,7 +71,7 @@ val apply
 
 module For_testing : sig
   val with_make_override
-    :  (runtime_id:string -> keeper_name:string -> unit -> summarizer option)
+    :  (runtime_ids:string list -> keeper_name:string -> unit -> summarizer option)
     -> (unit -> 'a)
     -> 'a
 
@@ -78,10 +81,20 @@ module For_testing : sig
     :  Llm_provider.Provider_config.t
     -> Llm_provider.Provider_config.t
 
-  (** Eligible Runtime ids for a Runtime/Lane assignment, in exact declaration
-      order. Provider configs are intentionally not exposed. *)
+  (** Eligible Runtime ids for a single Runtime/Lane assignment, in exact
+      declaration order. Provider configs are intentionally not exposed. *)
   val candidate_runtime_ids_for_assignment
     :  keeper_name:string
     -> runtime_id:string
     -> string list option
+
+  (** Eligible Runtime ids across a priority-ordered list of seed
+      Runtime/Lane assignments, in exact seed-then-declaration order, with
+      cross-seed duplicates collapsed to their first occurrence. Unlike
+      {!candidate_runtime_ids_for_assignment}, this never returns [None]: a
+      seed that fails to resolve simply contributes no candidates. *)
+  val candidate_runtime_ids_for_assignments
+    :  keeper_name:string
+    -> runtime_ids:string list
+    -> string list
 end

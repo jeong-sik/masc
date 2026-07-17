@@ -275,20 +275,50 @@ let candidates_for_assignment ~keeper_name assignment_id =
   | `Lane lane ->
     resolve_lane [] (Runtime_lane.ordered_candidates lane)
 
-type make_fn = runtime_id:string -> keeper_name:string -> unit -> summarizer option
+(* Collapse duplicate runtime ids while keeping the first (highest-priority)
+   occurrence, so a seed assignment that resolves to the same runtime as a
+   later seed is only ever tried once. *)
+let dedup_candidates candidates =
+  let seen = Hashtbl.create 8 in
+  List.filter
+    (fun candidate ->
+      if Hashtbl.mem seen candidate.runtime_id
+      then false
+      else begin
+        Hashtbl.add seen candidate.runtime_id ();
+        true
+      end)
+    candidates
+
+(* [assignment_ids] is a priority-ordered list of seed ids (each independently
+   a Runtime or a Runtime Lane, per {!candidates_for_assignment}). Every
+   eligible candidate from every seed is tried, seed order first and then
+   per-seed lane order, with cross-seed duplicates collapsed. A seed that
+   fails to resolve (Missing, or a Lane candidate that disappeared)
+   contributes no candidates rather than aborting the other seeds — the
+   overall chain is empty only when every seed is empty. *)
+let candidates_for_assignments ~keeper_name assignment_ids =
+  assignment_ids
+  |> List.concat_map (fun assignment_id ->
+    match candidates_for_assignment ~keeper_name assignment_id with
+    | None -> []
+    | Some candidates -> candidates)
+  |> dedup_candidates
+
+type make_fn = runtime_ids:string list -> keeper_name:string -> unit -> summarizer option
 let make_override : make_fn option Atomic.t = Atomic.make None
 
-let make_resolved ?complete ~(runtime_id : string) ~(keeper_name : string) ()
+let make_resolved ?complete ~(runtime_ids : string list) ~(keeper_name : string) ()
   : summarizer option
   =
-  match candidates_for_assignment ~keeper_name runtime_id with
-  | None -> None
-  | Some [] ->
+  let assignments_label = String.concat "," runtime_ids in
+  match candidates_for_assignments ~keeper_name runtime_ids with
+  | [] ->
     Log.Keeper.warn ~keeper_name
-      "compaction LLM summarizer has no eligible candidate assignment=%s"
-      runtime_id;
+      "compaction LLM summarizer has no eligible candidate assignments=%s"
+      assignments_label;
     None
-  | Some candidates ->
+  | candidates ->
     (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
      | Some sw, Some net ->
        let clock = Eio_context.get_clock_opt () in
@@ -297,8 +327,8 @@ let make_resolved ?complete ~(runtime_id : string) ~(keeper_name : string) ()
            let rec attempt = function
              | [] ->
                Log.Keeper.warn ~keeper_name
-                 "compaction LLM candidate chain exhausted assignment=%s"
-                 runtime_id;
+                 "compaction LLM candidate chain exhausted assignments=%s"
+                 assignments_label;
                None
              | candidate :: rest ->
                (match
@@ -308,8 +338,8 @@ let make_resolved ?complete ~(runtime_id : string) ~(keeper_name : string) ()
                 with
                 | Some _ as plan ->
                   Log.Keeper.info ~keeper_name
-                    "compaction LLM candidate succeeded assignment=%s runtime=%s"
-                    runtime_id candidate.runtime_id;
+                    "compaction LLM candidate succeeded assignments=%s runtime=%s"
+                    assignments_label candidate.runtime_id;
                   plan
                 | None -> attempt rest)
            in
@@ -318,16 +348,16 @@ let make_resolved ?complete ~(runtime_id : string) ~(keeper_name : string) ()
        List.iter
          (fun candidate ->
            Log.Keeper.warn ~keeper_name
-             "compaction LLM candidate skipped runtime=%s assignment=%s: Eio \
+             "compaction LLM candidate skipped runtime=%s assignments=%s: Eio \
               context unavailable"
-             candidate.runtime_id runtime_id)
+             candidate.runtime_id assignments_label)
        candidates;
        None)
 
-let make ?complete ~runtime_id ~keeper_name () =
+let make ?complete ~runtime_ids ~keeper_name () =
   match Atomic.get make_override with
-  | Some override -> override ~runtime_id ~keeper_name ()
-  | None -> make_resolved ?complete ~runtime_id ~keeper_name ()
+  | Some override -> override ~runtime_ids ~keeper_name ()
+  | None -> make_resolved ?complete ~runtime_ids ~keeper_name ()
 
 module For_testing = struct
   let with_make_override override f =
@@ -339,4 +369,8 @@ module For_testing = struct
   let candidate_runtime_ids_for_assignment ~keeper_name ~runtime_id =
     candidates_for_assignment ~keeper_name runtime_id
     |> Option.map (List.map (fun candidate -> candidate.runtime_id))
+
+  let candidate_runtime_ids_for_assignments ~keeper_name ~runtime_ids =
+    candidates_for_assignments ~keeper_name runtime_ids
+    |> List.map (fun candidate -> candidate.runtime_id)
 end

@@ -7,6 +7,7 @@
 
 open Masc
 module C = Keeper_compaction_llm_summarizer
+module Compact_policy = Keeper_compact_policy
 
 let plan_json ~summary ~kept ~summarized ~dropped : Yojson.Safe.t =
   let ints xs = `List (List.map (fun i -> `Int i) xs) in
@@ -106,6 +107,137 @@ let test_lane_candidates_keep_declared_order () =
   Alcotest.(check (option (list string))) "declared candidate order"
     (Some [ "local.kimi_like"; "fallback.kimi_like" ])
     actual
+
+(* -- #25051 P0: structured-judge lane precedes an ineligible chat runtime --
+
+   On the live fleet, most keepers inherit [runtime].default for chat, which
+   is picked for chat throughput and is not guaranteed to support the
+   provider-native structured-output schema the compaction plan call needs.
+   [runtime].structured_judge, by contrast, is explicitly reserved for
+   schema-capable requests (RFC-0307), the same lane board-attention judgment
+   and failure judgment already use. These fixtures give "chat" no
+   [supports-structured-output] (ineligible, mirrors deepseek-v4-flash in
+   config/runtime.toml) and "judge" [supports-structured-output = true]
+   (eligible), so the tests below can tell the two candidate sources apart. *)
+
+let ineligible_chat_runtime_id = "lane_split_chat.chat_model"
+let eligible_judge_runtime_id = "lane_split_judge.judge_model"
+
+let lane_split_runtime_toml =
+  "[providers.lane_split_chat]\n\
+   display-name = \"Lane Split Chat\"\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://localhost:11434\"\n\
+   \n\
+   [providers.lane_split_judge]\n\
+   display-name = \"Lane Split Judge\"\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://localhost:11436\"\n\
+   \n\
+   [models.chat_model]\n\
+   api-name = \"chat-model\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.chat_model.capabilities]\n\
+   supports-structured-output = false\n\
+   \n\
+   [models.judge_model]\n\
+   api-name = \"judge-model\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.judge_model.capabilities]\n\
+   supports-structured-output = true\n\
+   \n\
+   [lane_split_chat.chat_model]\n\
+   \n\
+   [lane_split_judge.judge_model]\n\
+   \n\
+   [runtime]\n\
+   default = \"lane_split_chat.chat_model\"\n\
+   structured_judge = \"lane_split_judge.judge_model\"\n"
+
+let with_lane_split_runtime f =
+  let path = Filename.temp_file "compaction_lane_split_runtime" ".toml" in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let oc = open_out path in
+  output_string oc lane_split_runtime_toml;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+      match Runtime.save_config_text ~runtime_config_path:path lane_split_runtime_toml with
+      | Error detail -> Alcotest.failf "runtime config should load: %s" detail
+      | Ok () -> f ())
+
+let test_ineligible_chat_runtime_alone_has_no_candidate () =
+  with_lane_split_runtime @@ fun () ->
+  (* Reproduces the #25051 P0 symptom directly: when the keeper's own chat
+     runtime is the only seed (the pre-fix behaviour), an ineligible model
+     resolves to zero candidates, so the summarizer is permanently
+     unavailable for that keeper. *)
+  Alcotest.(check (option (list string)))
+    "an ineligible seed alone resolves no candidates"
+    (Some [])
+    (C.For_testing.candidate_runtime_ids_for_assignment
+       ~keeper_name:"keeper-test"
+       ~runtime_id:ineligible_chat_runtime_id)
+
+let test_structured_judge_seed_reaches_eligible_candidate () =
+  with_lane_split_runtime @@ fun () ->
+  (* The fix: seeding the chain with the structured-judge id first gives the
+     chain an eligible candidate even though the keeper's own chat runtime
+     (still present as a lower-priority seed) remains ineligible. *)
+  Alcotest.(check (list string))
+    "structured-judge seed supplies the only eligible candidate, ordered first"
+    [ eligible_judge_runtime_id ]
+    (C.For_testing.candidate_runtime_ids_for_assignments
+       ~keeper_name:"keeper-test"
+       ~runtime_ids:[ eligible_judge_runtime_id; ineligible_chat_runtime_id ])
+
+let test_both_seeds_unresolvable_yields_no_candidate () =
+  with_lane_split_runtime @@ fun () ->
+  (* No silent fallback: an unresolvable structured-judge id alongside an
+     ineligible chat runtime must still resolve to zero candidates, never a
+     surprise fallback onto the ineligible model. *)
+  Alcotest.(check (list string))
+    "no candidate when every seed fails to resolve or is ineligible"
+    []
+    (C.For_testing.candidate_runtime_ids_for_assignments
+       ~keeper_name:"keeper-test"
+       ~runtime_ids:[ "no.such.runtime"; ineligible_chat_runtime_id ])
+
+let test_duplicate_seed_collapses_to_one_candidate () =
+  with_lane_split_runtime @@ fun () ->
+  Alcotest.(check (list string))
+    "the same runtime id named twice as a seed is tried once"
+    [ eligible_judge_runtime_id ]
+    (C.For_testing.candidate_runtime_ids_for_assignments
+       ~keeper_name:"keeper-test"
+       ~runtime_ids:[ eligible_judge_runtime_id; eligible_judge_runtime_id ])
+
+let make_test_meta name =
+  match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
+  | Ok m -> m
+  | Error e -> Alcotest.failf "meta fixture failed: %s" e
+
+let test_compact_policy_prefers_structured_judge_over_chat_runtime () =
+  with_lane_split_runtime @@ fun () ->
+  (* End-to-end proof at the Keeper_compact_policy call site (not just the
+     summarizer's candidate resolution): a keeper with no explicit runtime
+     assignment inherits [runtime].default for chat (ineligible here), yet
+     the candidate-id list built for the compaction plan call still puts the
+     structured-judge runtime first. Counterfactual: on the pre-#25051 code,
+     [Compact_policy.For_testing] does not exist (single [runtime_id] sourced
+     solely from the keeper's own chat assignment), so this fails to compile
+     on that base — verified by stashing this fix and re-running the build. *)
+  let meta = make_test_meta "lane-split-keeper" in
+  Alcotest.(check (list string))
+    "structured-judge runtime precedes the keeper's own chat runtime"
+    [ eligible_judge_runtime_id; ineligible_chat_runtime_id ]
+    (Compact_policy.For_testing.compaction_runtime_ids meta)
 
 (* -- plan_of_json: valid partition accepted -- *)
 
@@ -237,6 +369,18 @@ let () =
             test_provider_for_plan_preserves_temperature_omission
         ; Alcotest.test_case "lane candidates keep declared order" `Quick
             test_lane_candidates_keep_declared_order
+        ] )
+    ; ( "structured_judge_lane_split_25051"
+      , [ Alcotest.test_case "ineligible chat runtime alone has no candidate" `Quick
+            test_ineligible_chat_runtime_alone_has_no_candidate
+        ; Alcotest.test_case "structured-judge seed reaches an eligible candidate" `Quick
+            test_structured_judge_seed_reaches_eligible_candidate
+        ; Alcotest.test_case "both seeds unresolvable yields no candidate" `Quick
+            test_both_seeds_unresolvable_yields_no_candidate
+        ; Alcotest.test_case "duplicate seed collapses to one candidate" `Quick
+            test_duplicate_seed_collapses_to_one_candidate
+        ; Alcotest.test_case "compact policy prefers structured judge over chat runtime" `Quick
+            test_compact_policy_prefers_structured_judge_over_chat_runtime
         ] )
     ; ( "plan_of_json"
       , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted

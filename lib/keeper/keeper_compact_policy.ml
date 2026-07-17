@@ -182,22 +182,55 @@ type requested_compaction =
   ; dropped_message_count : int
   }
 
+(* Non-empty, trimmed runtime id from a lazily-invoked source, or [None] on a
+   blank result or an unresolvable identity ([Failure], e.g.
+   [default_runtime_id_or_fail] when the runtime state is uninitialized). [f]
+   must be a thunk, not an already-evaluated value: OCaml forces arguments
+   before a function call, so catching [Failure] here only works if the
+   raising call happens inside this match. *)
+let trimmed_runtime_id_opt (f : unit -> string) =
+  match f () with
+  | runtime_id ->
+    let trimmed = String.trim runtime_id in
+    if trimmed = "" then None else Some trimmed
+  | exception Failure _ -> None
+;;
+
+(* The structured-judge lane is schema-capable by construction (RFC-0307):
+   every consumer that needs provider-native structured output (board
+   attention judgment, failure judgment, HITL summary) routes there instead of
+   inheriting a keeper's own chat assignment. Compaction used to be the one
+   exception, sourcing its runtime solely from the keeper's chat assignment
+   ([Keeper_meta_contract.runtime_id_of_meta]) — which, for most of the fleet,
+   resolves to [runtime].default. That default is picked for chat throughput,
+   not schema support, so schema-ineligible chat models (e.g.
+   deepseek-v4-flash) left compaction permanently rejecting with
+   [Summarizer_unavailable]: those keepers could never compact, so their
+   history only grew until every turn hit a provider ContextOverflow (#25051).
+
+   Trying the structured-judge id first fixes that without weakening the
+   fail-closed schema check in
+   [Keeper_compaction_llm_summarizer.eligible_candidate]: it is just a
+   higher-priority *candidate*, still filtered for schema support like any
+   other. The keeper's own chat runtime stays as a later candidate — sound
+   only because that per-candidate schema filter still applies to it, so an
+   already-eligible chat model (or an operator-configured compaction lane) is
+   never displaced. *)
+let compaction_runtime_ids (meta : keeper_meta) =
+  List.filter_map
+    Fun.id
+    [ trimmed_runtime_id_opt Runtime.runtime_id_for_structured_judge
+    ; trimmed_runtime_id_opt (fun () -> Keeper_meta_contract.runtime_id_of_meta meta)
+    ]
+;;
+
 let requested_messages (meta : keeper_meta) messages =
-  let runtime_id =
-    try
-      let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
-      if String.trim runtime_id = ""
-      then Error Runtime_identity_unavailable
-      else Ok runtime_id
-    with
-    | Failure _ -> Error Runtime_identity_unavailable
-  in
-  match runtime_id with
-  | Error _ as error -> error
-  | Ok runtime_id ->
+  match compaction_runtime_ids meta with
+  | [] -> Error Runtime_identity_unavailable
+  | runtime_ids ->
     (match
        Keeper_compaction_llm_summarizer.make
-         ~runtime_id
+         ~runtime_ids
          ~keeper_name:meta.name
          ()
      with
@@ -384,3 +417,7 @@ let compact_for_request_typed
         ; evidence = Some evidence
         })
 ;;
+
+module For_testing = struct
+  let compaction_runtime_ids = compaction_runtime_ids
+end

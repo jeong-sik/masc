@@ -387,6 +387,15 @@ let settlement_equal left right =
     false
 ;;
 
+let transition_receipt_equal left right =
+  String.equal left.transition_id right.transition_id
+  && String.equal left.event_id right.event_id
+  && String.equal left.lease_id right.lease_id
+  && Int64.equal left.lease_sequence right.lease_sequence
+  && Float.equal left.settled_at right.settled_at
+  && left.settlement = right.settlement
+;;
+
 let validate_settlement = function
   | Ack | Requeue _ -> Ok ()
   | Escalate
@@ -476,6 +485,11 @@ let lease_equal (left : lease) (right : lease) =
 ;;
 
 let settle ~settled_at ~lease ~settlement state =
+  let* () =
+    if Float.is_finite settled_at
+    then Ok ()
+    else Error "event queue settlement time must be finite"
+  in
   let* () = validate_settlement settlement in
   match committed_lease lease state with
   | None ->
@@ -523,6 +537,39 @@ let settle ~settled_at ~lease ~settlement state =
         ; transition_outbox = [ outbox_entry ]
         }
       , Settled receipt )
+;;
+
+let replay_transition_receipt receipt state =
+  match
+    List.find_opt
+      (fun (lease : lease) -> Int64.equal lease.sequence receipt.lease_sequence)
+      state.leases
+  with
+  | Some lease ->
+    let* state, result =
+      settle
+        ~settled_at:receipt.settled_at
+        ~lease
+        ~settlement:receipt.settlement
+        state
+    in
+    let actual =
+      match result with
+      | Settled actual | Already_settled actual -> actual
+    in
+    if transition_receipt_equal receipt actual
+    then Ok state
+    else Error (Printf.sprintf "event queue receipt replay conflict: %s" receipt.lease_id)
+  | None ->
+    (match find_prior_receipt receipt.lease_id state with
+     | Some prior when transition_receipt_equal prior receipt -> Ok state
+     | Some _ ->
+       Error (Printf.sprintf "event queue receipt replay conflict: %s" receipt.lease_id)
+     | None ->
+       Error
+         (Printf.sprintf
+            "event queue receipt has no matching active lease: %s"
+            receipt.lease_id))
 ;;
 
 let recover_leases ~settled_at state =
@@ -594,6 +641,19 @@ let required_field ~context name fields =
   match List.assoc_opt name fields with
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s missing required field %s" context name)
+;;
+
+let exact_fields ~context ~expected fields =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest ->
+      if not (List.exists (String.equal name) expected)
+      then Error (Printf.sprintf "%s contains unknown field %s" context name)
+      else if List.exists (String.equal name) seen
+      then Error (Printf.sprintf "%s contains duplicate field %s" context name)
+      else loop (name :: seen) rest
+  in
+  loop [] fields
 ;;
 
 let string_field ~context name fields =
@@ -711,25 +771,31 @@ let settlement_of_yojson json =
   let* fields = assoc_fields ~context json in
   let* kind = string_field ~context "kind" fields in
   match kind with
-  | "ack" -> Ok Ack
+  | "ack" ->
+    let* () = exact_fields ~context ~expected:[ "kind" ] fields in
+    Ok Ack
   | "requeue" ->
+    let* () = exact_fields ~context ~expected:[ "kind"; "reason" ] fields in
     let* reason = string_field ~context "reason" fields in
     let* reason = requeue_reason_of_label reason in
     Ok (Requeue reason)
   | "escalate" ->
-    let* reason_label = string_field ~context "reason" fields in
-    let reason_detail =
-      match List.assoc_opt "reason_detail" fields with
-      | Some json -> json
-      | None -> `Null
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "reason"; "reason_detail"; "successor" ]
+        fields
     in
+    let* reason_label = string_field ~context "reason" fields in
+    let* reason_detail = required_field ~context "reason_detail" fields in
     let* reason = escalation_reason_of_wire ~label:reason_label ~detail_json:reason_detail in
     let* successor =
       match List.assoc_opt "successor" fields with
-      | None | Some `Null -> Ok None
+      | Some `Null -> Ok None
       | Some json ->
         let* successor = Keeper_event_queue.stimulus_of_yojson json in
         Ok (Some successor)
+      | None -> Error "event queue settlement missing required field successor"
     in
     let settlement = Escalate { reason; successor } in
     let* () = validate_settlement settlement in
@@ -751,6 +817,19 @@ let transition_receipt_to_yojson receipt =
 let transition_receipt_of_yojson json =
   let context = "event queue transition receipt" in
   let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "transition_id"
+        ; "event_id"
+        ; "lease_id"
+        ; "lease_sequence"
+        ; "settled_at_unix"
+        ; "settlement"
+        ]
+      fields
+  in
   let* transition_id = string_field ~context "transition_id" fields in
   let* event_id = string_field ~context "event_id" fields in
   let* lease_id = string_field ~context "lease_id" fields in
@@ -763,7 +842,11 @@ let transition_receipt_of_yojson json =
     Printf.sprintf "%s:%s" expected_lease_id (settlement_kind_label settlement)
   in
   let expected_event_id = event_id_of_transition expected_transition_id in
-  if not (String.equal lease_id expected_lease_id)
+  if Int64.compare lease_sequence 1L < 0
+  then Error "event queue receipt lease sequence must be positive"
+  else if not (Float.is_finite settled_at)
+  then Error "event queue receipt settlement time must be finite"
+  else if not (String.equal lease_id expected_lease_id)
   then Error (Printf.sprintf "event queue receipt lease id mismatch: %s" lease_id)
   else if not (String.equal transition_id expected_transition_id)
   then Error (Printf.sprintf "event queue receipt transition id mismatch: %s" transition_id)

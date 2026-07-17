@@ -113,7 +113,13 @@ val settle :
 
     [Retry_after_observed] and [Context_compaction_retry] retain the exact
     leased stimuli at the pending FIFO tail so unrelated work in the same lane
-    can proceed before another provider attempt. *)
+    can proceed before another provider attempt. Non-finite settlement times
+    are rejected. *)
+
+val replay_transition_receipt : transition_receipt -> t -> (t, string) result
+(** Apply one canonical durable receipt to its exact active lease. Replaying
+    the same retained receipt is idempotent; a different receipt or a missing
+    lease is an explicit conflict. *)
 
 val recover_leases : settled_at:float -> t -> (t, string) result
 (** Requeue every active lease with [Registration_recovery], preserving claim
@@ -139,6 +145,7 @@ val release_legacy_inflight :
 
 val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
+val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
 val to_yojson : t -> Yojson.Safe.t

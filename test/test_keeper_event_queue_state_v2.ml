@@ -97,6 +97,108 @@ let test_claim_codec_ack_idempotency () =
    | Ok _ -> Alcotest.fail "conflicting second settlement was accepted")
 ;;
 
+let test_canonical_receipt_replay () =
+  let state =
+    State.with_pending (queue [ stimulus "replay" 1.0 ]) State.empty
+  in
+  let claimed, lease = claim_head state in
+  let lease = require_some "replay lease" lease in
+  let settled, result =
+    State.settle ~settled_at:11.0 ~lease ~settlement:State.Ack claimed
+    |> require_ok "settle replay fixture"
+  in
+  let receipt =
+    match result with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "replay fixture was already settled"
+  in
+  let decoded =
+    State.transition_receipt_to_yojson receipt
+    |> State.transition_receipt_of_yojson
+    |> require_ok "canonical receipt roundtrip"
+  in
+  Alcotest.(check bool)
+    "receipt equality survives codec"
+    true
+    (State.transition_receipt_equal receipt decoded);
+  let replayed =
+    State.replay_transition_receipt decoded claimed
+    |> require_ok "replay canonical receipt"
+  in
+  Alcotest.(check string)
+    "replay reconstructs exact state"
+    (State.to_yojson settled |> Yojson.Safe.to_string)
+    (State.to_yojson replayed |> Yojson.Safe.to_string);
+  let repeated =
+    State.replay_transition_receipt decoded replayed
+    |> require_ok "replay canonical receipt idempotently"
+  in
+  Alcotest.(check string)
+    "idempotent replay preserves state"
+    (State.to_yojson replayed |> Yojson.Safe.to_string)
+    (State.to_yojson repeated |> Yojson.Safe.to_string);
+  let conflicting = { decoded with event_id = "wrong-event-id" } in
+  match State.replay_transition_receipt conflicting claimed with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "conflicting receipt replay was accepted"
+;;
+
+let test_receipt_codec_is_closed_and_finite () =
+  let state =
+    State.with_pending (queue [ stimulus "codec" 1.0 ]) State.empty
+  in
+  let claimed, lease = claim_head state in
+  let lease = require_some "codec lease" lease in
+  (match State.settle ~settled_at:Float.nan ~lease ~settlement:State.Ack claimed with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "non-finite settlement time was accepted");
+  let _, result =
+    State.settle ~settled_at:12.0 ~lease ~settlement:State.Ack claimed
+    |> require_ok "settle codec fixture"
+  in
+  let receipt =
+    match result with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "codec fixture was already settled"
+  in
+  let fields =
+    match State.transition_receipt_to_yojson receipt with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "receipt encoder did not return an object"
+  in
+  let rejects label json =
+    match State.transition_receipt_of_yojson json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s was accepted" label
+  in
+  rejects "unknown receipt field" (`Assoc (("extra", `Null) :: fields));
+  rejects
+    "duplicate receipt field"
+    (`Assoc (("transition_id", `String receipt.transition_id) :: fields));
+  rejects
+    "non-finite receipt time"
+    (`Assoc
+       (List.map
+          (fun (name, value) ->
+             if String.equal name "settled_at_unix"
+             then name, `Float Float.infinity
+             else name, value)
+          fields));
+  rejects
+    "unknown settlement field"
+    (`Assoc
+       (List.map
+          (fun (name, value) ->
+             if String.equal name "settlement"
+             then (
+               match value with
+               | `Assoc settlement_fields ->
+                 name, `Assoc (("extra", `Null) :: settlement_fields)
+               | _ -> Alcotest.fail "settlement encoder did not return an object")
+             else name, value)
+          fields))
+;;
+
 let test_claim_leases_earliest_ready_without_reordering_skipped_work () =
   let blocked =
     { (stimulus "blocked" 1.0) with urgency = Queue.Immediate }
@@ -1023,6 +1125,14 @@ let () =
     "keeper event queue v2"
     [ ( "state"
       , [ Alcotest.test_case "claim codec ack idempotency" `Quick test_claim_codec_ack_idempotency
+        ; Alcotest.test_case
+            "canonical receipt replay"
+            `Quick
+            test_canonical_receipt_replay
+        ; Alcotest.test_case
+            "receipt codec is closed and finite"
+            `Quick
+            test_receipt_codec_is_closed_and_finite
         ; Alcotest.test_case
             "claim earliest ready without reordering"
             `Quick

@@ -189,6 +189,16 @@ let start_flusher_actor ~sw store =
 let ensure_flusher_actor store =
   match Eio_context.get_switch_opt () with
   | None -> ()
+  | Some _ when not (Eio_context.root_switch_on_current_domain ()) ->
+      (* The flusher forks a daemon on the server root switch (get_switch_opt's
+         atomic fallback outside a turn). Eio.Fiber.fork_daemon ~sw is only legal
+         on the switch's owning (main) domain, but ensure_flusher_actor is
+         reachable from Domain_pool worker domains (board/dashboard projections).
+         Defer on a non-owning domain: the flusher is a single CAS-guarded daemon
+         started on the main domain at boot (mcp_server init_jsonl), so skipping
+         here starts nothing twice and loses nothing. Mirrors the
+         Keeper_board_attention_candidate.start_async guard (#25015). *)
+      ()
   | Some sw ->
       let rec loop attempts_left =
         let current = Atomic.get backend_state in

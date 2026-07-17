@@ -2,7 +2,6 @@
 
 module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
-module Active_set = Set.Make (String)
 
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
@@ -10,7 +9,6 @@ type retryable_failure_kind =
   | Provider_unavailable
   | Response_contract_unavailable
   | Durable_delivery_unavailable
-  | Worker_unavailable
 
 type retryable_failure =
   { kind : retryable_failure_kind
@@ -60,6 +58,26 @@ type record_result =
   | Duplicate of candidate
   | Record_error of string
 
+type persistence =
+  | Candidate_recorded
+  | Candidate_already_present
+
+type wake_decision =
+  | Wake_requested of Keeper_registry.wakeup_outcome
+  | Wake_not_required
+
+type record_acceptance =
+  { candidate : candidate
+  ; persistence : persistence
+  ; wake : wake_decision
+  }
+
+type drain_report =
+  { attempted : int
+  ; consumed : int
+  ; remaining : int
+  }
+
 exception Candidate_unavailable of string
 
 let prompt_name = Keeper_prompt_names.board_attention_judgment
@@ -70,7 +88,6 @@ let retryable_failure_kind_to_string = function
   | Provider_unavailable -> "provider_unavailable"
   | Response_contract_unavailable -> "response_contract_unavailable"
   | Durable_delivery_unavailable -> "durable_delivery_unavailable"
-  | Worker_unavailable -> "worker_unavailable"
 ;;
 
 let retryable_failure_kind_of_string = function
@@ -79,7 +96,6 @@ let retryable_failure_kind_of_string = function
   | "provider_unavailable" -> Some Provider_unavailable
   | "response_contract_unavailable" -> Some Response_contract_unavailable
   | "durable_delivery_unavailable" -> Some Durable_delivery_unavailable
-  | "worker_unavailable" -> Some Worker_unavailable
   | _ -> None
 ;;
 
@@ -614,12 +630,12 @@ let read_locked path parse =
   | Ok result -> result
 ;;
 
-(* Read-side stat memo. Keeper cycles call [resume_pending] (and thus
-   [load_candidates]) far more often than the ledger changes, and every call
-   re-read and re-parsed the whole file — with multi-MB ledgers this was a
-   dominant CPU source (issue #25003: concurrent whole-file Yojson parses in
-   systhreads starving the domain's main event loop). Every producer replaces
-   the ledger through an atomic temp+rename ([update_ledger] via
+(* Read-side stat memo. Owner-lane drains call [load_candidates] far more often
+   than the ledger changes, and every call otherwise re-reads and re-parses the
+   whole file — with multi-MB ledgers this was a dominant CPU source (issue
+   #25003: concurrent whole-file Yojson parses in systhreads starving the
+   domain's main event loop). Every producer replaces the ledger through an
+   atomic temp+rename ([update_ledger] via
    [Fs_compat.rewrite_private_file_durable_locked_result]), so any content
    change allocates a new inode; (dev, ino, mtime, size) equality therefore
    implies unchanged content. One entry per keeper ledger path, so the table
@@ -816,6 +832,49 @@ let board_attention_stimulus candidate =
   }
 ;;
 
+let observe_wakeup ~site candidate = function
+  | Keeper_registry.Signaled ->
+    Log.Keeper.info
+      "Board attention owner lane signaled keeper=%s candidate=%s site=%s"
+      candidate.keeper_name
+      candidate.candidate_id
+      site
+  | Keeper_registry.Deferred_unregistered ->
+    Log.Keeper.info
+      "Board attention candidate durable; owner lane unregistered keeper=%s \
+       candidate=%s site=%s"
+      candidate.keeper_name
+      candidate.candidate_id
+      site
+  | Keeper_registry.Deferred_not_running phase ->
+    Log.Keeper.info
+      "Board attention candidate durable; owner lane not running keeper=%s \
+       candidate=%s phase=%s site=%s"
+      candidate.keeper_name
+      candidate.candidate_id
+      (Keeper_state_machine.phase_to_string phase)
+      site
+  | Keeper_registry.Deferred_lifecycle denial ->
+    Log.Keeper.info
+      "Board attention candidate durable; owner lane lifecycle-deferred \
+       keeper=%s candidate=%s reason=%s site=%s"
+      candidate.keeper_name
+      candidate.candidate_id
+      (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+      site
+;;
+
+let request_owner_wake ~site ~base_path candidate =
+  let outcome =
+    Keeper_registry.wakeup_running
+      ~intent:Keeper_registry.Reactive_signal
+      ~base_path
+      candidate.keeper_name
+  in
+  observe_wakeup ~site candidate outcome;
+  outcome
+;;
+
 let consume_judged ~base_path candidate (judged : judged_state) =
   match judged.judgment.verdict.decision with
   | Keeper_board_attention_judgment.Not_relevant ->
@@ -839,10 +898,7 @@ let consume_judged ~base_path candidate (judged : judged_state) =
            Enqueued_to_keeper_lane
        in
        let (_ : Keeper_registry.wakeup_outcome) =
-         Keeper_registry.wakeup
-           ~intent:Keeper_registry.Reactive_signal
-           ~base_path
-           candidate.keeper_name
+         request_owner_wake ~site:"durable_delivery" ~base_path consumed
        in
        Ok consumed
      | Keeper_registry_event_queue.Identity_conflict detail
@@ -945,143 +1001,61 @@ let rec process_with_judge ~base_path ~judge candidate =
        process_with_judge ~base_path ~judge current)
 ;;
 
-let process ~base_path candidate =
-  process_with_judge ~base_path ~judge:(run_judge ~base_path) candidate
-;;
-
-let active_candidates = Atomic.make Active_set.empty
-
-let active_key ~base_path candidate =
-  String.concat "\031" [ base_path; candidate.keeper_name; candidate.candidate_id ]
-;;
-
-let rec claim_active key =
-  let current = Atomic.get active_candidates in
-  if Active_set.mem key current
-  then false
-  else if Atomic.compare_and_set active_candidates current (Active_set.add key current)
-  then true
-  else claim_active key
-;;
-
-let rec release_active key =
-  let current = Atomic.get active_candidates in
-  if not (Active_set.mem key current)
-  then ()
-  else if
-    Atomic.compare_and_set active_candidates current (Active_set.remove key current)
-  then ()
-  else release_active key
-;;
-
-let observe_worker_failure ~base_path candidate kind detail =
-  Log.Keeper.warn
-    "Board attention worker deferred keeper=%s candidate=%s: %s"
-    candidate.keeper_name
-    candidate.candidate_id
-    detail;
-  match
-    record_retryable_failure
-      ~base_path
-      candidate
-      (failure ~kind detail)
-  with
-  | Ok _ -> ()
-  | Error storage_detail ->
-    Log.Keeper.error
-      "Board attention worker failure could not be persisted keeper=%s candidate=%s: %s"
-      candidate.keeper_name
-      candidate.candidate_id
-      storage_detail
-;;
-
-let start_async ~base_path candidate =
-  match candidate.status with
-  | Consumed _ -> false
-  | Pending _ | Judged _ ->
-    let key = active_key ~base_path candidate in
-    if not (claim_active key)
-    then false
-    else (
-      match Eio_context.get_root_switch_opt () with
-      | None ->
-        release_active key;
-        observe_worker_failure
-          ~base_path
-          candidate
-          Worker_unavailable
-          "server root switch is not installed";
-        false
-      | Some _ when not (Eio_context.root_switch_on_current_domain ()) ->
-        (* The server root switch is domain-local: [Eio.Fiber.fork ~sw] is only
-           legal from the domain that owns it (the main Eio domain). [start_async]
-           is reachable from Domain_pool worker domains (dashboard/status
-           projections that call [resume_pending] / [record_and_start]). Forking
-           on the root switch there raises
-           [Invalid_argument "Switch accessed from wrong domain!"], which is NOT a
-           candidate failure — the judge never ran. Defer silently: release the
-           claim and leave the candidate Pending for the main-domain path (keeper
-           turn / boot [resume_pending]) to start. Recording a retryable_failure
-           here would corrupt the ledger's meaning and drive a write flood
-           (worker retries every projection cycle). See #25015. *)
-        release_active key;
-        false
-      | Some sw ->
-        (try
-           Eio.Fiber.fork ~sw (fun () ->
-             Fun.protect
-               ~finally:(fun () -> release_active key)
-               (fun () ->
-                  try
-                    match process ~base_path candidate with
-                    | Ok _ -> ()
-                    | Error detail ->
-                      observe_worker_failure
-                        ~base_path
-                        candidate
-                        Worker_unavailable
-                        detail
-                  with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | exn ->
-                    observe_worker_failure
-                      ~base_path
-                      candidate
-                      Worker_unavailable
-                      (Printexc.to_string exn)));
-           true
-         with
-         | Eio.Cancel.Cancelled _ as exn ->
-           release_active key;
-           raise exn
-         | exn ->
-           release_active key;
-           observe_worker_failure
-             ~base_path
-             candidate
-             Worker_unavailable
-             (Printexc.to_string exn);
-           false))
-;;
-
-let record_and_start ~base_path candidate =
+let record_and_wake ~base_path candidate =
   match record ~base_path candidate with
   | Record_error detail -> Error detail
-  | Recorded persisted | Duplicate persisted ->
-    (* The durable candidate is the authority. Worker startup is best-effort
-       scheduling only; [start_async] records every startup failure itself. *)
-    let (_worker_started : bool) = start_async ~base_path persisted in
-    Ok persisted
+  | Recorded persisted ->
+    let wake =
+      Wake_requested (request_owner_wake ~site:"recorded" ~base_path persisted)
+    in
+    Ok { candidate = persisted; persistence = Candidate_recorded; wake }
+  | Duplicate persisted ->
+    let wake =
+      match persisted.status with
+      | Pending _ | Judged _ ->
+        Wake_requested (request_owner_wake ~site:"duplicate" ~base_path persisted)
+      | Consumed _ -> Wake_not_required
+    in
+    Ok
+      { candidate = persisted
+      ; persistence = Candidate_already_present
+      ; wake
+      }
 ;;
 
-let resume_pending ~base_path ~keeper_name =
+let drain_pending_with_judge ~base_path ~keeper_name ~judge =
   let* candidates = load_candidates ~base_path ~keeper_name in
-  let started =
-    List.fold_left
-      (fun count candidate ->
-         if start_async ~base_path candidate then count + 1 else count)
-      0
-      candidates
+  let rec loop report = function
+    | [] -> Ok report
+    | { status = Consumed _; _ } :: rest -> loop report rest
+    | candidate :: rest ->
+      let* current = process_with_judge ~base_path ~judge candidate in
+      let report =
+        match current.status with
+        | Consumed _ ->
+          { report with
+            attempted = report.attempted + 1
+          ; consumed = report.consumed + 1
+          }
+        | Pending _ | Judged _ ->
+          { report with
+            attempted = report.attempted + 1
+          ; remaining = report.remaining + 1
+          }
+      in
+      loop report rest
   in
-  Ok started
+  loop { attempted = 0; consumed = 0; remaining = 0 } candidates
+;;
+
+let drain_pending_on_owner_lane ~base_path ~keeper_name =
+  drain_pending_with_judge
+    ~base_path
+    ~keeper_name
+    ~judge:(run_judge ~base_path)
+;;
+
+module For_testing = struct
+  let drain_pending_with_judge = drain_pending_with_judge
+end
 ;;

@@ -30,13 +30,10 @@ val get_root_switch_opt : unit -> Eio.Switch.t option
     keeper turn, such as queued background voice playback. *)
 
 val root_switch_on_current_domain : unit -> bool
-(** [true] iff a root switch is installed ([set_switch] was called) AND the
-    calling domain is the one that installed it. [Eio.Switch] is domain-local,
-    so [Eio.Fiber.fork ~sw:(root switch)] is only legal when this returns
-    [true]; reachable-from-worker-domain callers must consult this before
-    forking on {!get_root_switch_opt} and defer otherwise, rather than let the
-    fork raise [Invalid_argument "Switch accessed from wrong domain!"].
-    Returns [false] before bootstrap and on any Domain_pool worker domain. *)
+(** [true] iff a root switch is installed and the caller is running on the
+    domain that installed it. Eio root-switch fork sites reachable from worker
+    domains must check this exact ownership boundary before forking. This guard
+    does not transfer work to the owner domain. *)
 
 val set_env : Eio_unix.Stdenv.base -> unit
 (** Set the global Eio standard environment.  Required by long-lived

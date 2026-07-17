@@ -741,14 +741,6 @@ let collect_board_events_with_cursor_policy
   : pending_board_event list * int * int
   =
   try
-    (match
-       Keeper_board_attention_candidate.resume_pending
-         ~base_path
-         ~keeper_name:meta.name
-     with
-     | Ok _ -> ()
-     | Error detail ->
-       raise (Keeper_board_attention_candidate.Candidate_unavailable detail));
     let cursor_ts, cursor_post_id =
       Keeper_registry.get_board_cursor ~base_path meta.name
     in
@@ -867,29 +859,37 @@ let collect_board_events_with_cursor_policy
            in
            let matched = board_signal_match ~meta ~signal in
            if not matched.explicit_mention
-           then (
-             match
-               Keeper_board_attention_candidate.of_board_signal
-                 ~meta
-                 ~recorded_at:(Time_compat.now ())
-                 signal
-             with
-             | Board_signal.Unavailable unavailable ->
-               (match log_and_count_unavailable ~context:"candidate" unavailable with
-                | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
-                | Board_signal.Transient -> List.rev acc, last_cursor)
-             | Board_signal.Available candidate ->
-               (match
-                  Keeper_board_attention_candidate.record_and_start
-                    ~base_path
-                    candidate
-                with
-                | Ok _ -> ()
-                | Error detail ->
-                  raise
-                    (Keeper_board_attention_candidate.Candidate_unavailable
-                       detail));
-               consume_posts (Some next_cursor) acc rest)
+           then
+             (* Only the live Keeper collector owns durable candidate
+                production. Dashboard prompt preview uses
+                [advance_cursor:false] and must remain a read-only projection:
+                observing the page cannot schedule a model judgment or wake a
+                Keeper lane. *)
+             if not advance_cursor
+             then consume_posts (Some next_cursor) acc rest
+             else (
+               match
+                 Keeper_board_attention_candidate.of_board_signal
+                   ~meta
+                   ~recorded_at:(Time_compat.now ())
+                   signal
+               with
+               | Board_signal.Unavailable unavailable ->
+                 (match log_and_count_unavailable ~context:"candidate" unavailable with
+                  | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
+                  | Board_signal.Transient -> List.rev acc, last_cursor)
+               | Board_signal.Available candidate ->
+                 (match
+                    Keeper_board_attention_candidate.record_and_wake
+                      ~base_path
+                      candidate
+                  with
+                  | Ok _ -> ()
+                  | Error detail ->
+                    raise
+                      (Keeper_board_attention_candidate.Candidate_unavailable
+                         detail));
+                 consume_posts (Some next_cursor) acc rest)
            else
              consume_posts
                

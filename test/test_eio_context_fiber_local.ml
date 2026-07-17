@@ -132,19 +132,16 @@ let test_get_https_connector_result_is_idempotent () =
   | _ ->
     Alcotest.fail "HTTPS connector result is not stable across repeated reads"
 
-(** [root_switch_on_current_domain] is the domain-ownership guard that keeps
-    board-attention (and any future root-switch fork site) from crashing with
-    "Switch accessed from wrong domain!" when reached from a Domain_pool worker
-    domain. The owner (main) domain that installed the switch via [set_switch]
-    must see [true]; a spawned worker domain reading the same process-global
-    switch must see [false] — the exact condition under which
-    [Eio.Fiber.fork ~sw:root_sw] would otherwise raise. See issue #25015. *)
+(** The Board flusher is a process-lifetime daemon that may attach to the
+    server root switch. The owner domain that installed that switch must see
+    [true], while a worker domain reading the same process-global binding must
+    see [false]. The switch and owner are published as one atomic binding. *)
 let test_root_switch_ownership_is_domain_local () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun root_sw ->
   Eio_context.set_switch root_sw;
   Alcotest.(check bool)
-    "owner (main) domain sees itself as root switch owner"
+    "owner domain owns the root switch"
     true
     (Eio_context.root_switch_on_current_domain ());
   let worker_saw_ownership =
@@ -152,7 +149,7 @@ let test_root_switch_ownership_is_domain_local () =
       Eio_context.root_switch_on_current_domain ())
   in
   Alcotest.(check bool)
-    "worker domain is NOT the root switch owner (fork ~sw would raise there)"
+    "worker domain does not own the root switch"
     false
     worker_saw_ownership
 
@@ -189,9 +186,9 @@ let () =
             `Quick
             test_get_https_connector_result_is_idempotent;
         ] );
-      ( "root switch domain ownership (#25015)",
+      ( "root switch domain ownership",
         [
-          Alcotest.test_case "owner domain true, worker domain false"
+          Alcotest.test_case "owner true, worker false"
             `Quick
             test_root_switch_ownership_is_domain_local;
         ] );

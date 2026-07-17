@@ -1,5 +1,8 @@
 module A = Masc.Keeper_board_attention_candidate
 module J = Masc.Keeper_board_attention_judgment
+module Event_queue = Keeper_event_queue
+module Event_queue_persistence = Keeper_event_queue_persistence
+module Registry = Masc.Keeper_registry
 
 let rec remove_tree path =
   if Sys.file_exists path
@@ -174,6 +177,71 @@ let test_record_dedupes_exact_candidate_identity () =
    | A.Recorded _ -> Alcotest.fail "exact duplicate appended as a new candidate"
    | A.Record_error detail -> Alcotest.failf "duplicate check failed: %s" detail);
   ignore (only_loaded ~base_path ~keeper_name:first.keeper_name : A.candidate)
+;;
+
+let test_worker_record_wakes_then_owner_lane_drains () =
+  with_temp_base "keeper-board-attention-owner-lane" @@ fun base_path ->
+  let pending = candidate () in
+  let entry =
+    Registry.register
+      ~base_path
+      pending.keeper_name
+      (meta pending.keeper_name)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Registry.unregister ~base_path pending.keeper_name)
+    (fun () ->
+       let accepted =
+         Domain.spawn (fun () -> A.record_and_wake ~base_path pending)
+         |> Domain.join
+       in
+       (match accepted with
+        | Ok
+            { A.candidate = persisted
+            ; persistence = A.Candidate_recorded
+            ; wake = A.Wake_requested Registry.Signaled
+            } ->
+          (match persisted.status with
+           | A.Pending { last_failure = None } -> ()
+           | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
+             Alcotest.fail "worker-side record invoked or mutated the judgment")
+        | Ok _ -> Alcotest.fail "worker-side record returned the wrong typed acceptance"
+        | Error detail -> Alcotest.failf "worker-side record failed: %s" detail);
+       Alcotest.(check bool)
+         "worker producer signaled the registered owner lane"
+         true
+         (Atomic.get entry.fiber_wakeup);
+       Atomic.set entry.fiber_wakeup false;
+       let report =
+         match
+           A.For_testing.drain_pending_with_judge
+             ~base_path
+             ~keeper_name:pending.keeper_name
+             ~judge:(fun _ -> Ok (judgment J.Relevant))
+         with
+         | Ok report -> report
+         | Error detail -> Alcotest.failf "owner-lane drain failed: %s" detail
+       in
+       Alcotest.(check int) "one candidate attempted" 1 report.attempted;
+       Alcotest.(check int) "one candidate consumed" 1 report.consumed;
+       Alcotest.(check int) "no candidate remains" 0 report.remaining;
+       Alcotest.(check bool)
+         "durable delivery signaled the owner lane"
+         true
+         (Atomic.get entry.fiber_wakeup);
+       match
+         Event_queue_persistence.load
+           ~base_path
+           ~keeper_name:pending.keeper_name
+         |> Event_queue.to_list
+       with
+       | [ { payload = Event_queue.Board_attention attention; _ } ] ->
+         Alcotest.(check string)
+           "owner drain delivered the exact candidate"
+           pending.candidate_id
+           attention.candidate_id
+       | _ -> Alcotest.fail "owner drain did not commit one Board_attention event")
 ;;
 
 let test_retryable_judge_failure_remains_pending () =
@@ -549,6 +617,10 @@ let () =
             "record dedupes exact candidate identity"
             `Quick
             test_record_dedupes_exact_candidate_identity
+        ; Alcotest.test_case
+            "worker record wakes and owner lane drains"
+            `Quick
+            test_worker_record_wakes_then_owner_lane_drains
         ; Alcotest.test_case
             "retryable judge failure remains Pending"
             `Quick

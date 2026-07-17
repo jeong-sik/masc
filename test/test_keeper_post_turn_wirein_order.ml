@@ -297,7 +297,7 @@ let test_manual_compaction_serializes_owner_lane () =
       Atomic.set owner_entry.fiber_stop true;
       let outcome =
         Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-          (fun ~runtime_id:_ ~keeper_name:_ () ->
+          (fun ~runtime_ids:_ ~keeper_name:_ () ->
              Some (fun ~messages:_ -> Some plan))
           run_cycle
       in

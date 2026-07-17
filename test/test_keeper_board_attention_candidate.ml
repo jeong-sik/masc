@@ -408,6 +408,135 @@ let test_update_ledger_compacts_to_distinct () =
   | Error detail -> Alcotest.failf "load after compaction failed: %s" detail
 ;;
 
+(* --- read-side stat memo (#25003) -------------------------------------
+   The memo key is (dev, ino, mtime, size). Production writes always go
+   through atomic temp+rename (new inode), so the only way to observe a
+   cache HIT deterministically is to mutate the file while preserving all
+   four key fields: an in-place same-length byte flip plus [Unix.utimes]
+   restore. A stale (pre-flip) result then proves the parse was skipped;
+   bumping mtime afterwards proves invalidation. *)
+
+let loaded_ids ~base_path ~keeper_name =
+  match A.load_candidates ~base_path ~keeper_name with
+  | Ok candidates -> List.map (fun (c : A.candidate) -> c.candidate_id) candidates
+  | Error detail -> Alcotest.failf "candidate load failed: %s" detail
+;;
+
+(* µs-aligned so the utimes(float µs) -> stat(float ns) round trip is exact
+   and the memo key compares equal across the in-place mutation. *)
+let fixed_mtime = 1700000000.5
+let bumped_mtime = 1700000001.5
+
+let index_of_substring haystack needle =
+  let hay_len = String.length haystack
+  and needle_len = String.length needle in
+  let rec loop i =
+    if i + needle_len > hay_len
+    then None
+    else if String.equal (String.sub haystack i needle_len) needle
+    then Some i
+    else loop (i + 1)
+  in
+  loop 0
+;;
+
+let rec find_file_named ~name path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then
+      Array.fold_left
+        (fun found entry ->
+           match found with
+           | Some _ -> found
+           | None -> find_file_named ~name (Filename.concat path entry))
+        None
+        (Sys.readdir path)
+    else if String.equal (Filename.basename path) name
+    then Some path
+    else None
+  else None
+;;
+
+let ledger_path_or_fail ~base_path ~keeper_name =
+  match find_file_named ~name:(keeper_name ^ ".jsonl") base_path with
+  | Some path -> path
+  | None -> Alcotest.failf "ledger file for %s not found under %s" keeper_name base_path
+;;
+
+let flip_candidate_id_in_place path =
+  let ic = open_in_bin path in
+  let len = in_channel_length ic in
+  let content = really_input_string ic len in
+  close_in ic;
+  let marker = {|"candidate_id":"|} in
+  let start =
+    match index_of_substring content marker with
+    | Some index -> index + String.length marker
+    | None -> Alcotest.fail "candidate_id marker not found in ledger"
+  in
+  let original = content.[start] in
+  let flipped = if Char.equal original 'f' then '0' else 'f' in
+  let mutated =
+    String.mapi (fun i c -> if i = start then flipped else c) content
+  in
+  Alcotest.(check int) "in-place mutation keeps length" len (String.length mutated);
+  let fd = Unix.openfile path [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close fd)
+    (fun () ->
+      let written = Unix.write_substring fd mutated 0 len in
+      Alcotest.(check int) "in-place write is complete" len written)
+;;
+
+let test_load_memo_skips_reparse_when_stat_key_unchanged () =
+  with_temp_base "attention-read-memo-hit" (fun base_path ->
+    let keeper_name = "sangsu" in
+    let recorded = record_or_fail ~base_path (candidate ()) in
+    let path = ledger_path_or_fail ~base_path ~keeper_name in
+    Unix.utimes path fixed_mtime fixed_mtime;
+    (match loaded_ids ~base_path ~keeper_name with
+     | [ id ] ->
+       Alcotest.(check string) "first load parses the ledger" recorded.candidate_id id
+     | ids -> Alcotest.failf "expected one candidate, got %d" (List.length ids));
+    flip_candidate_id_in_place path;
+    Unix.utimes path fixed_mtime fixed_mtime;
+    (match loaded_ids ~base_path ~keeper_name with
+     | [ id ] ->
+       Alcotest.(check string)
+         "unchanged stat key serves the memoized parse"
+         recorded.candidate_id
+         id
+     | ids -> Alcotest.failf "expected one candidate, got %d" (List.length ids));
+    Unix.utimes path bumped_mtime bumped_mtime;
+    (* Invalidation proof: a re-read parses the mutated bytes, and the flipped
+       candidate_id no longer matches the content-identity digest, so the
+       loader must surface the integrity error. A stale cache hit would keep
+       returning [Ok] with the original id instead. *)
+    match A.load_candidates ~base_path ~keeper_name with
+    | Ok _ -> Alcotest.fail "mtime bump did not invalidate the memo (stale Ok served)"
+    | Error detail ->
+      (match index_of_substring detail "does not match" with
+       | Some _ -> ()
+       | None -> Alcotest.failf "unexpected load error after invalidation: %s" detail))
+;;
+
+let test_load_memo_invalidated_by_atomic_rewrite () =
+  with_temp_base "attention-read-memo-rewrite" (fun base_path ->
+    let keeper_name = "sangsu" in
+    let first = record_or_fail ~base_path (candidate ()) in
+    (match loaded_ids ~base_path ~keeper_name with
+     | [ id ] -> Alcotest.(check string) "first load" first.candidate_id id
+     | ids -> Alcotest.failf "expected one candidate, got %d" (List.length ids));
+    let second =
+      record_or_fail ~base_path (candidate ~signal:(signal ~post_id:"post-2" ()) ())
+    in
+    let ids = loaded_ids ~base_path ~keeper_name in
+    Alcotest.(check int) "rename-rewrite is observed" 2 (List.length ids);
+    if not (List.exists (String.equal second.candidate_id) ids)
+    then Alcotest.fail "second candidate missing after atomic rewrite")
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
@@ -448,6 +577,16 @@ let () =
             "update ledger compacts to distinct candidate count"
             `Quick
             test_update_ledger_compacts_to_distinct
+        ] )
+    ; ( "read memo"
+      , [ Alcotest.test_case
+            "unchanged stat key skips reparse"
+            `Quick
+            test_load_memo_skips_reparse_when_stat_key_unchanged
+        ; Alcotest.test_case
+            "atomic rewrite invalidates memo"
+            `Quick
+            test_load_memo_invalidated_by_atomic_rewrite
         ] )
     ]
 ;;

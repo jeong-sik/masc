@@ -614,9 +614,68 @@ let read_locked path parse =
   | Ok result -> result
 ;;
 
+(* Read-side stat memo. Keeper cycles call [resume_pending] (and thus
+   [load_candidates]) far more often than the ledger changes, and every call
+   re-read and re-parsed the whole file — with multi-MB ledgers this was a
+   dominant CPU source (issue #25003: concurrent whole-file Yojson parses in
+   systhreads starving the domain's main event loop). Every producer replaces
+   the ledger through an atomic temp+rename ([update_ledger] via
+   [Fs_compat.rewrite_private_file_durable_locked_result]), so any content
+   change allocates a new inode; (dev, ino, mtime, size) equality therefore
+   implies unchanged content. One entry per keeper ledger path, so the table
+   stays as small as the fleet. *)
+type ledger_stat_key =
+  { stat_dev : int
+  ; stat_ino : int
+  ; stat_mtime : float
+  ; stat_size : int
+  }
+
+let ledger_stat_key_opt path =
+  match Unix.stat path with
+  | stats ->
+    Some
+      { stat_dev = stats.st_dev
+      ; stat_ino = stats.st_ino
+      ; stat_mtime = stats.st_mtime
+      ; stat_size = stats.st_size
+      }
+  | exception Unix.Unix_error _ -> None
+;;
+
+let candidate_read_memo : (string, ledger_stat_key * candidate list) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+(* Stdlib mutex on purpose: touched from systhread read paths and module-level
+   state; the critical sections are Hashtbl lookups with no yield. *)
+let candidate_read_memo_mutex = Stdlib.Mutex.create ()
+
 let load_candidates ~base_path ~keeper_name =
   let path = candidate_path ~base_path ~keeper_name in
-  read_locked path load_candidates_from_content
+  let before = ledger_stat_key_opt path in
+  let cached =
+    match before with
+    | None -> None
+    | Some key ->
+      Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
+        match Hashtbl.find_opt candidate_read_memo path with
+        | Some (cached_key, candidates) when cached_key = key -> Some candidates
+        | Some _ | None -> None)
+  in
+  match cached with
+  | Some candidates -> Ok candidates
+  | None ->
+    let* candidates = read_locked path load_candidates_from_content in
+    (* Double-stat: memoize only when the file identity is unchanged across
+       the read; a concurrent rewrite lands as a new inode and skips the
+       store, so the next call re-reads. *)
+    (match before, ledger_stat_key_opt path with
+     | Some key_before, Some key_after when key_before = key_after ->
+       Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
+         Hashtbl.replace candidate_read_memo path (key_before, candidates))
+     | Some _, (Some _ | None) | None, (Some _ | None) -> ());
+    Ok candidates
 ;;
 
 let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"

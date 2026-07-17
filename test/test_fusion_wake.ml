@@ -286,9 +286,13 @@ let test_fusion_completion_is_actionable () =
       ~meta
       (fusion_stimulus ~resolved_answer:"ANSWER-TOKEN-xyz" ())
   with
-  | Some (ev : Keeper_world_observation.pending_board_event) ->
+  | Ok (Some (ev : Keeper_world_observation.pending_board_event)) ->
     check bool "stimulus path preview carries the answer" true (contains ~needle:"ANSWER-TOKEN-xyz" ev.preview)
-  | None -> fail "Fusion_completed stimulus must produce Some pending_board_event, not None"
+  | Ok None -> fail "Fusion_completed stimulus must produce Some pending_board_event, not None"
+  | Error unavailable ->
+    fail
+      ("Fusion_completed stimulus must not hit a board read: "
+       ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
 ;;
 
 (* RFC-0290: a completed background job follows the same non-empty delivery
@@ -327,13 +331,17 @@ let test_bg_completion_is_actionable () =
       ~meta
       (bg_stimulus ~bg_outcome:(Keeper_event_queue.Bg_ok "BG-ANSWER-TOKEN") ())
   with
-  | Some (ev : Keeper_world_observation.pending_board_event) ->
+  | Ok (Some (ev : Keeper_world_observation.pending_board_event)) ->
     check
       bool
       "stimulus path preview carries the background output"
       true
       (contains ~needle:"BG-ANSWER-TOKEN" ev.preview)
-  | None -> fail "Bg_completed stimulus must produce Some pending_board_event, not None"
+  | Ok None -> fail "Bg_completed stimulus must produce Some pending_board_event, not None"
+  | Error unavailable ->
+    fail
+      ("Bg_completed stimulus must not hit a board read: "
+       ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
 ;;
 
 let test_bg_failure_missing_board_post_id_fallback () =
@@ -381,10 +389,14 @@ let test_scheduled_wake_is_actionable () =
       ~meta
       (schedule_stimulus ~message:"SCHEDULE-ANSWER-TOKEN" ())
   with
-  | Some (ev : Keeper_world_observation.pending_board_event) ->
+  | Ok (Some (ev : Keeper_world_observation.pending_board_event)) ->
     check bool "stimulus path preview carries the schedule message" true
       (contains ~needle:"SCHEDULE-ANSWER-TOKEN" ev.preview)
-  | None -> fail "Schedule_due stimulus must produce Some pending_board_event, not None"
+  | Ok None -> fail "Schedule_due stimulus must produce Some pending_board_event, not None"
+  | Error unavailable ->
+    fail
+      ("Schedule_due stimulus must not hit a board read: "
+       ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
 ;;
 
 (* (3) an empty board_post_id (sink failed to create the post) still delivers

@@ -738,6 +738,16 @@
  (modules test_fusion_wake)
  (libraries masc_test_deps masc.fusion_core))
 
+; Board-unavailable-result: keeper_world_observation_board_signal's
+; Board_unavailable exception -> (_, board_unavailable) result conversion.
+; Pins the poison/transient classification table and the reported incident
+; (a stimulus naming a swept post crashing the keeper heartbeat forever).
+
+(test
+ (name test_keeper_board_unavailable)
+ (modules test_keeper_board_unavailable)
+ (libraries masc_test_deps))
+
 ; Fusion OAS failure-detail tests need Fusion_types constructors from
 ; masc.fusion_core, which is intentionally not re-exported via masc.
 

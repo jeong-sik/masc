@@ -280,11 +280,16 @@ val apply_failure_judgment_guidance :
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
     [Bg_completed] (RFC-0290), and [Schedule_due] produce [Some];
-    [Bootstrap] returns [None] (no prompt injection). *)
+    [Bootstrap] returns [None] (no prompt injection).
+    [Error unavailable] means the underlying board read for [Board_signal] /
+    [Board_attention] failed (board-unavailable-result). Callers classify via
+    {!Keeper_world_observation_board_signal.disposition_of_unavailable} and
+    decide whether to drop or retain the stimulus — this function only
+    reports the read failure, it does not decide. *)
 val pending_board_event_of_stimulus :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
-  pending_board_event option
+  (pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
 val read_scheduled_automation_observation :
   keeper_name:string option ->

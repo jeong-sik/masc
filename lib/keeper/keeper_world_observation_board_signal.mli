@@ -27,11 +27,24 @@ type comment_state =
 
 type comment_status = comment_state board_read
 
-exception Board_unavailable of board_unavailable
+(** Whether a failed board read is worth retrying (RFC board-unavailable-result).
+    Closed set: adding a new {!Board.board_error} variant forces a
+    classification decision in {!disposition_of_error} rather than defaulting
+    to "retry forever" or "silently drop". *)
+type disposition =
+  | Permanent
+      (** Retrying the same read reproduces the same error (e.g. the post
+          was deleted). Callers must consume/drop the affected stimulus and
+          must not requeue it. *)
+  | Transient
+      (** An environment-level hiccup unrelated to whether the target
+          exists. Callers may retain the stimulus for a later cycle. *)
+
+val disposition_of_error : Board.board_error -> disposition
+val disposition_of_unavailable : board_unavailable -> disposition
 
 val board_read_operation_to_string : board_read_operation -> string
 val unavailable_to_string : board_unavailable -> string
-val raise_unavailable : board_unavailable -> 'a
 
 val board_signal_of_board_stimulus
   :  post_id:string

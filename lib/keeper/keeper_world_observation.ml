@@ -330,62 +330,61 @@ let pending_board_event_of_board_signal
       ~(meta : keeper_meta)
       ~arrived_at:(_ : float)
       (signal : Board_dispatch.board_signal)
-  : pending_board_event
+  : (pending_board_event, Board_signal.board_unavailable) result
   =
   let self_ids = self_ids meta in
   let matched = board_signal_match ~meta ~signal in
-  let post_snapshot =
-    match Board_dispatch.get_post ~post_id:signal.post_id with
-    | Ok post -> post
-    | Error error ->
-      Board_signal.raise_unavailable
-        { operation = Board_signal.Get_post; post_id = signal.post_id; error }
-  in
-  let title, preview, hearth, post_kind, updated_at =
-    let post : Board.post = post_snapshot in
-    ( post.title
-    , short_preview ~max_len:80 post.content
-    , post.hearth
-    , post.post_kind
-    , post.updated_at )
-  in
-  let event_kind = pending_board_event_kind_of_signal signal in
-  let self_commented, new_external_since, latest_external_author, latest_external_preview =
-    match signal.kind with
-    | Board_dispatch.Board_post_created -> false, 0, None, None
-    | Board_dispatch.Board_comment_added ->
-      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-       | Board_signal.Unavailable unavailable ->
-         Board_signal.raise_unavailable unavailable
-       | Board_signal.Available (`New_external (count, author, preview)) ->
-         true, count, Some author, Some preview
-       | Board_signal.Available `No_new_external ->
-         true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content)
-       | Board_signal.Available `Never ->
-         false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content))
-    | Board_dispatch.Board_reaction_changed _ ->
-      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-       | Board_signal.Unavailable unavailable ->
-         Board_signal.raise_unavailable unavailable
-       | Board_signal.Available `Never -> false, 0, None, None
-       | Board_signal.Available (`No_new_external | `New_external _) ->
-         true, 0, None, None)
-  in
-  { event_kind
-  ; post_id = signal.post_id
-  ; author = signal.author
-  ; title
-  ; preview
-  ; hearth
-  ; post_kind
-  ; updated_at
-  ; explicit_mention = matched.explicit_mention
-  ; matched_targets = matched.matched_targets
-  ; self_commented
-  ; new_external_since
-  ; latest_external_author
-  ; latest_external_preview
-  }
+  match Board_dispatch.get_post ~post_id:signal.post_id with
+  | Error error ->
+    Error { Board_signal.operation = Board_signal.Get_post; post_id = signal.post_id; error }
+  | Ok post_snapshot ->
+    let title, preview, hearth, post_kind, updated_at =
+      let post : Board.post = post_snapshot in
+      ( post.title
+      , short_preview ~max_len:80 post.content
+      , post.hearth
+      , post.post_kind
+      , post.updated_at )
+    in
+    let event_kind = pending_board_event_kind_of_signal signal in
+    let comment_derived =
+      match signal.kind with
+      | Board_dispatch.Board_post_created -> Ok (false, 0, None, None)
+      | Board_dispatch.Board_comment_added ->
+        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+         | Board_signal.Unavailable unavailable -> Error unavailable
+         | Board_signal.Available (`New_external (count, author, preview)) ->
+           Ok (true, count, Some author, Some preview)
+         | Board_signal.Available `No_new_external ->
+           Ok (true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content))
+         | Board_signal.Available `Never ->
+           Ok (false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content)))
+      | Board_dispatch.Board_reaction_changed _ ->
+        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+         | Board_signal.Unavailable unavailable -> Error unavailable
+         | Board_signal.Available `Never -> Ok (false, 0, None, None)
+         | Board_signal.Available (`No_new_external | `New_external _) ->
+           Ok (true, 0, None, None))
+    in
+    (match comment_derived with
+     | Error unavailable -> Error unavailable
+     | Ok (self_commented, new_external_since, latest_external_author, latest_external_preview) ->
+       Ok
+         { event_kind
+         ; post_id = signal.post_id
+         ; author = signal.author
+         ; title
+         ; preview
+         ; hearth
+         ; post_kind
+         ; updated_at
+         ; explicit_mention = matched.explicit_mention
+         ; matched_targets = matched.matched_targets
+         ; self_commented
+         ; new_external_since
+         ; latest_external_author
+         ; latest_external_preview
+         })
 ;;
 
 (* RFC-0266: fusion answers are the deliberation result the keeper requested,
@@ -671,17 +670,19 @@ let pending_board_event_of_goal_assignment
 let pending_board_event_of_stimulus
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
-  : pending_board_event option
+  : (pending_board_event option, Board_signal.board_unavailable) result
   =
   match stimulus.payload with
   | Keeper_event_queue.Board_signal bs ->
-    Some
+    Result.map
+      (fun ev -> Some ev)
       (pending_board_event_of_board_signal
          ~meta
          ~arrived_at:stimulus.arrived_at
          (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
   | Keeper_event_queue.Board_attention attention ->
-    Some
+    Result.map
+      (fun ev -> Some ev)
       (pending_board_event_of_board_signal
          ~meta
          ~arrived_at:stimulus.arrived_at
@@ -689,25 +690,30 @@ let pending_board_event_of_stimulus
             ~post_id:stimulus.post_id
             attention.signal))
   | Keeper_event_queue.Fusion_completed fc ->
-    Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc)
+    Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
   | Keeper_event_queue.Bg_completed c ->
-    Some
-      (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
+    Ok
+      (Some
+         (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c))
   | Keeper_event_queue.Schedule_due sw ->
-    Some
-      (pending_board_event_of_scheduled_wake
-         ~meta
-         ~post_id:stimulus.post_id
-         ~arrived_at:stimulus.arrived_at
-         sw)
+    Ok
+      (Some
+         (pending_board_event_of_scheduled_wake
+            ~meta
+            ~post_id:stimulus.post_id
+            ~arrived_at:stimulus.arrived_at
+            sw))
   | Keeper_event_queue.Failure_judgment fj ->
-    Some (pending_board_event_of_failure_judgment ~meta ~arrived_at:stimulus.arrived_at fj)
+    Ok
+      (Some
+         (pending_board_event_of_failure_judgment ~meta ~arrived_at:stimulus.arrived_at fj))
   | Keeper_event_queue.Goal_assigned ga ->
-    Some
-      (pending_board_event_of_goal_assignment
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         ga)
+    Ok
+      (Some
+         (pending_board_event_of_goal_assignment
+            ~meta
+            ~arrived_at:stimulus.arrived_at
+            ga))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
@@ -716,7 +722,7 @@ let pending_board_event_of_stimulus
        fires via the trigger itself; [Hitl_resolved] carries no observation to
        inject — the keeper resumes on its own state once the approval is gone
        from the queue. *)
-    None
+    Ok None
 ;;
 
 (** Collect recent board activity using cursor-based tracking.
@@ -799,6 +805,39 @@ let collect_board_events_with_cursor_policy
               (board_signal_match ~meta ~signal).explicit_mention)
            recent)
     in
+    (* Board-unavailable-result: classify + log + count a failed read
+       encountered mid-scan, without raising. [Permanent] means this one post
+       can never resolve (e.g. swept from the store) — the caller skips it
+       and keeps scanning. [Transient] means the caller stops scanning here
+       and returns what it already has, so the cursor is not advanced past
+       the blocked post and the same post is retried next cycle (preserves
+       the pre-existing "retained cursor" semantics, now via Result instead
+       of exception + re-raise). *)
+    let log_and_count_unavailable ~context (unavailable : Board_signal.board_unavailable) =
+      let disposition = Board_signal.disposition_of_unavailable unavailable in
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
+        ();
+      (match disposition with
+       | Board_signal.Permanent ->
+         Log.Keeper.warn
+           "board event collection (%s): permanently unavailable, skipping post_id=%s \
+            keeper=%s: %s"
+           context
+           unavailable.Board_signal.post_id
+           meta.name
+           (Board_signal.unavailable_to_string unavailable)
+       | Board_signal.Transient ->
+         Log.Keeper.warn
+           "board event collection (%s): retained cursor (transient unavailable) \
+            post_id=%s keeper=%s: %s"
+           context
+           unavailable.Board_signal.post_id
+           meta.name
+           (Board_signal.unavailable_to_string unavailable));
+      disposition
+    in
     let rec consume_posts last_cursor acc = function
       | [] -> List.rev acc, last_cursor
       | (p : Board.post) :: rest ->
@@ -807,7 +846,9 @@ let collect_board_events_with_cursor_policy
         let comment_status = check_self_comment_status ~self_ids ~post_id in
         (match comment_status with
          | Board_signal.Unavailable unavailable ->
-           Board_signal.raise_unavailable unavailable
+           (match log_and_count_unavailable ~context:"comment status" unavailable with
+            | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
+            | Board_signal.Transient -> List.rev acc, last_cursor)
          | Board_signal.Available `No_new_external ->
            Log.Keeper.debug
              "board dedup: skipping post_id=%s (no new external since my comment)"
@@ -827,26 +868,28 @@ let collect_board_events_with_cursor_policy
            let matched = board_signal_match ~meta ~signal in
            if not matched.explicit_mention
            then (
-             (match
-                Keeper_board_attention_candidate.of_board_signal
-                  ~meta
-                  ~recorded_at:(Time_compat.now ())
-                  signal
-              with
-              | Board_signal.Unavailable unavailable ->
-                Board_signal.raise_unavailable unavailable
-              | Board_signal.Available candidate ->
-                (match
-                   Keeper_board_attention_candidate.record_and_start
-                     ~base_path
-                     candidate
-                 with
-                 | Ok _ -> ()
-                 | Error detail ->
-                   raise
-                     (Keeper_board_attention_candidate.Candidate_unavailable
-                        detail)));
-             consume_posts (Some next_cursor) acc rest)
+             match
+               Keeper_board_attention_candidate.of_board_signal
+                 ~meta
+                 ~recorded_at:(Time_compat.now ())
+                 signal
+             with
+             | Board_signal.Unavailable unavailable ->
+               (match log_and_count_unavailable ~context:"candidate" unavailable with
+                | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
+                | Board_signal.Transient -> List.rev acc, last_cursor)
+             | Board_signal.Available candidate ->
+               (match
+                  Keeper_board_attention_candidate.record_and_start
+                    ~base_path
+                    candidate
+                with
+                | Ok _ -> ()
+                | Error detail ->
+                  raise
+                    (Keeper_board_attention_candidate.Candidate_unavailable
+                       detail));
+               consume_posts (Some next_cursor) acc rest)
            else
              consume_posts
                
@@ -943,18 +986,6 @@ let collect_board_events_with_cursor_policy
     final_events, new_count, mention_count
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | Board_signal.Board_unavailable unavailable as exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ObservationQueryFailures)
-      ~labels:
-        [ ( "operation"
-          , Runtime_observation_query_operation.(to_label Board_events) )
-        ]
-      ();
-    Log.Keeper.warn
-      "board event collection retained cursor: %s"
-      (Board_signal.unavailable_to_string unavailable);
-    raise exn
   | Keeper_board_attention_candidate.Candidate_unavailable detail as exn ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)

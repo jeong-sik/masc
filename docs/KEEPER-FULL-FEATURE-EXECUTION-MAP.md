@@ -251,7 +251,7 @@ domain fact.
 
 | Work | Current truth | Missing proof |
 |---|---|---|
-| #25018 | Draft, mergeable, full CI green | merge exact settlement source index |
+| #25018 | Draft, rebased to `fd70c8fc7f`, current CI running | merge exact settlement source index after fresh green |
 | #24971 | Draft, mergeable, full CI green | merge exact private JSONL cursor |
 | #25026 | Draft stacked on #24971, lightweight green | retarget after parent and run full CI |
 | canonical settlement receipt leaf | local, 218 changed lines; latest-main rebase and format/static checks clean | focused build after the external bare Dune build, then Draft PR |

@@ -1,4 +1,4 @@
-(** Closed JSONL record codec around one typed compaction operation event. *)
+(** Closed JSONL envelope around one caller-owned typed operation codec. *)
 
 module Cursor : sig
   type t
@@ -8,42 +8,46 @@ module Cursor : sig
   val to_int : t -> int
 end
 
-type row =
+type 'event row =
   { recorded_at : float
   ; start_cursor : Cursor.t
   ; end_cursor : Cursor.t
-  ; event : Keeper_compaction_operation.event
+  ; event : 'event
   }
 
-type envelope_error =
+type 'event_error envelope_error =
   | Expected_object
   | Unknown_field of string
   | Duplicate_field of string
   | Missing_field of string
   | Invalid_recorded_at
-  | Invalid_event of Keeper_compaction_operation_codec.decode_error
+  | Invalid_event of 'event_error
 
-type issue =
+type encode_error = Non_finite_recorded_at
+
+type 'event_error issue =
   | Incomplete_tail
   | Malformed_json of string
-  | Invalid_envelope of envelope_error
+  | Invalid_envelope of 'event_error envelope_error
 
-type decode_error =
+type 'event_error decode_error =
   { row_number : int option
   ; start_cursor : Cursor.t
   ; end_cursor : Cursor.t
-  ; issue : issue
+  ; issue : 'event_error issue
   }
 
 val encode :
+  encode_event:('event -> Yojson.Safe.t) ->
   recorded_at:float ->
-  Keeper_compaction_operation.event ->
-  (string, envelope_error) result
+  'event ->
+  (string, encode_error) result
 (** Returns exactly one newline-terminated JSONL row. *)
 
 val decode_rows :
+  decode_event:(Yojson.Safe.t -> ('event, 'event_error) result) ->
   from:Cursor.t ->
   row_number:int option ->
   string ->
-  (row list, decode_error) result
+  ('event row list, 'event_error decode_error) result
 (** [row_number] is [Some] only when the caller owns the complete prefix. *)

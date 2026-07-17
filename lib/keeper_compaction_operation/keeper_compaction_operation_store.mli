@@ -1,7 +1,8 @@
-(** Sole durable mutation facade for one Keeper's compaction operations. *)
-module Record = Keeper_compaction_operation_record
+(** Current compaction reducer/append facade over generic Keeper operation
+    records. The single-writer implementation migrates separately. *)
+module Record = Keeper_operation_record
 module Cursor = Record.Cursor
-type row = Record.row
+type row = Keeper_compaction_operation.event Record.row
 type operation_entry =
   { snapshot : Keeper_compaction_operation_reducer.snapshot
   ; requested_at : float
@@ -20,7 +21,7 @@ type event_rejection =
       ; existing_operation_id : Keeper_compaction_operation.Operation_id.t
       }
 type history_error =
-  | Invalid_record of Record.decode_error
+  | Invalid_record of Keeper_compaction_operation_codec.decode_error Record.decode_error
   | Rejected_row of
       { row_number : int
       ; start_cursor : Cursor.t
@@ -35,7 +36,7 @@ type transaction_error =
   | Outcome_unknown of Fs_compat.durable_append_error
   | Access_failed of exn
 type append_error =
-  | Encode_failed of Record.envelope_error
+  | Encode_failed of Record.encode_error
   | Existing_history_invalid of history_error
   | Event_rejected of event_rejection
   | Transaction_error of transaction_error

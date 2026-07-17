@@ -1,8 +1,9 @@
 module Operation = Keeper_compaction_operation
 module Reducer = Keeper_compaction_operation_reducer
-module Record = Keeper_compaction_operation_record
+module Codec = Keeper_compaction_operation_codec
+module Record = Keeper_operation_record
 module Cursor = Record.Cursor
-type row = Record.row
+type row = Operation.event Record.row
 type operation_entry =
   { snapshot : Reducer.snapshot
   ; requested_at : float
@@ -21,7 +22,7 @@ type event_rejection =
       ; existing_operation_id : Operation.Operation_id.t
       }
 type history_error =
-  | Invalid_record of Record.decode_error
+  | Invalid_record of Codec.decode_error Record.decode_error
   | Rejected_row of
       { row_number : int
       ; start_cursor : Cursor.t
@@ -36,7 +37,7 @@ type transaction_error =
   | Outcome_unknown of Fs_compat.durable_append_error
   | Access_failed of exn
 type append_error =
-  | Encode_failed of Record.envelope_error
+  | Encode_failed of Record.encode_error
   | Existing_history_invalid of history_error
   | Event_rejected of event_rejection
   | Transaction_error of transaction_error
@@ -131,7 +132,13 @@ let fold_rows ~keeper_name rows =
   loop 1 empty_state rows
 ;;
 let decode_history ~keeper_name bytes =
-  match Record.decode_rows ~from:Cursor.zero ~row_number:(Some 1) bytes with
+  match
+    Record.decode_rows
+      ~decode_event:Codec.of_json
+      ~from:Cursor.zero
+      ~row_number:(Some 1)
+      bytes
+  with
   | Error error -> Error (Invalid_record error)
   | Ok rows ->
     fold_rows ~keeper_name rows |> Result.map (fun state -> rows, state)
@@ -168,12 +175,18 @@ let read_slice ~base_path ~keeper_name ~from =
   with
   | Error error -> Error (Read_failed error)
   | Ok source ->
-    (match Record.decode_rows ~from ~row_number:None source.bytes with
+    (match
+       Record.decode_rows
+         ~decode_event:Codec.of_json
+         ~from
+         ~row_number:None
+         source.bytes
+     with
      | Error error -> Error (Invalid_history (Invalid_record error))
      | Ok rows -> Ok { rows; end_cursor = cursor source.end_offset })
 ;;
 let append ~base_path ~keeper_name ~recorded_at event =
-  match Record.encode ~recorded_at event with
+  match Record.encode ~encode_event:Codec.to_json ~recorded_at event with
   | Error error -> Error (Encode_failed error)
   | Ok suffix ->
     let path = journal_path ~base_path ~keeper_name in
@@ -187,7 +200,13 @@ let append ~base_path ~keeper_name ~recorded_at event =
            let end_cursor =
              cursor (Cursor.to_int start_cursor + String.length suffix)
            in
-           let row = { Record.recorded_at; start_cursor; end_cursor; event } in
+           let row =
+             { Record.recorded_at
+             ; start_cursor
+             ; end_cursor
+             ; event
+             }
+           in
            (match apply_row ~keeper_name state row with
             | Error error -> None, Error (Event_rejected error)
             | Ok _ -> Some suffix, Ok row))

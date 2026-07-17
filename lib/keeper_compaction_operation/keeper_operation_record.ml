@@ -1,5 +1,3 @@
-module Codec = Keeper_compaction_operation_codec
-
 module Cursor = struct
   type t = int
   type error = Negative of int
@@ -8,31 +6,33 @@ module Cursor = struct
   let to_int value = value
 end
 
-type row =
+type 'event row =
   { recorded_at : float
   ; start_cursor : Cursor.t
   ; end_cursor : Cursor.t
-  ; event : Keeper_compaction_operation.event
+  ; event : 'event
   }
 
-type envelope_error =
+type 'event_error envelope_error =
   | Expected_object
   | Unknown_field of string
   | Duplicate_field of string
   | Missing_field of string
   | Invalid_recorded_at
-  | Invalid_event of Codec.decode_error
+  | Invalid_event of 'event_error
 
-type issue =
+type encode_error = Non_finite_recorded_at
+
+type 'event_error issue =
   | Incomplete_tail
   | Malformed_json of string
-  | Invalid_envelope of envelope_error
+  | Invalid_envelope of 'event_error envelope_error
 
-type decode_error =
+type 'event_error decode_error =
   { row_number : int option
   ; start_cursor : Cursor.t
   ; end_cursor : Cursor.t
-  ; issue : issue
+  ; issue : 'event_error issue
   }
 
 let ( let* ) = Result.bind
@@ -44,13 +44,15 @@ let required_field name fields =
   | _ -> Error (Duplicate_field name)
 ;;
 
-let decode_envelope = function
+let decode_envelope ~decode_event = function
   | `Assoc fields ->
     let* () =
       match
         List.find_opt
           (fun (name, _) ->
-             not (String.equal name "recorded_at" || String.equal name "event"))
+             not
+               (String.equal name "recorded_at"
+                || String.equal name "event"))
           fields
       with
       | None -> Ok ()
@@ -63,24 +65,26 @@ let decode_envelope = function
       | _ -> Error Invalid_recorded_at
     in
     let* event_json = required_field "event" fields in
-    Codec.of_json event_json
+    decode_event event_json
     |> Result.map_error (fun error -> Invalid_event error)
     |> Result.map (fun event -> recorded_at, event)
   | _ -> Error Expected_object
 ;;
 
-let encode ~recorded_at event =
+let encode ~encode_event ~recorded_at event =
   if not (Float.is_finite recorded_at)
-  then Error Invalid_recorded_at
+  then Error Non_finite_recorded_at
   else
     Ok
       (`Assoc
-         [ "recorded_at", `Float recorded_at; "event", Codec.to_json event ]
+         [ "recorded_at", `Float recorded_at
+         ; "event", encode_event event
+         ]
        |> Yojson.Safe.to_string
        |> fun value -> value ^ "\n")
 ;;
 
-let decode_rows ~from ~row_number bytes =
+let decode_rows ~decode_event ~from ~row_number bytes =
   let base = Cursor.to_int from in
   let length = String.length bytes in
   let locate number start_cursor end_cursor issue =
@@ -103,7 +107,7 @@ let decode_rows ~from ~row_number bytes =
          with
          | Error issue -> locate number start_cursor end_cursor issue
          | Ok json ->
-           (match decode_envelope json with
+           (match decode_envelope ~decode_event json with
             | Error error ->
               locate number start_cursor end_cursor (Invalid_envelope error)
             | Ok (recorded_at, event) ->

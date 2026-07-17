@@ -455,23 +455,52 @@ let test_config_empty_presets () =
       (List.mem Fusion_config.Empty_presets es)
   | Ok _ -> Alcotest.fail "expected Error Empty_presets"
 
-let test_config_invalid_size () =
+let test_config_large_panel_is_valid () =
   let s =
     {|
 [fusion]
 enabled = true
-[fusion.presets.toomany]
-panel = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+default_preset = "large"
+[fusion.presets.large]
+panel = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"]
+panel_system_prompt = "analyze"
 judge = "a"
+judge_system_prompt = "synthesize"
 |}
   in
   match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_panel_size present" true
-      (List.exists
-         (function Fusion_config.Invalid_panel_size _ -> true | _ -> false)
-         es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_panel_size"
+  | Ok policy ->
+    let preset =
+      Fusion_policy.find_preset policy "large"
+      |> Option.map Fusion_policy.Validated_preset.preset
+    in
+    Alcotest.(check int)
+      "all configured panel models survive validation"
+      12
+      (Option.fold ~none:0 ~some:(fun value ->
+         List.length (Fusion_policy.preset_models value)) preset)
+  | Error _ -> Alcotest.fail "provider-independent panel width was rejected"
+
+let test_config_no_panel_models () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "empty"
+[fusion.presets.empty]
+panel = []
+panel_system_prompt = "analyze"
+judge = "a"
+judge_system_prompt = "synthesize"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error errors ->
+    Alcotest.(check bool)
+      "No_panel_models present"
+      true
+      (List.mem (Fusion_config.No_panel_models "empty") errors)
+  | Ok _ -> Alcotest.fail "model-free panel preset was accepted"
 
 let test_config_invalid_min_answered () =
   let check_invalid value =
@@ -869,13 +898,13 @@ let test_validated_ok () =
       (List.length (raw vp).Fusion_policy.panels)
   | Error _ -> Alcotest.fail "expected Ok for a valid preset"
 
-let test_validated_bad_size () =
+let test_validated_no_panel_models () =
   let empty_group = { base_group with Fusion_policy.models = [] } in
   match
     Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ empty_group ] "empty")
   with
-  | Error (Fusion_policy.Validated_preset.Bad_size 0) -> ()
-  | _ -> Alcotest.fail "expected Bad_size 0 for zero models"
+  | Error Fusion_policy.Validated_preset.No_panel_models -> ()
+  | _ -> Alcotest.fail "expected No_panel_models for zero models"
 
 let test_validated_missing_prompt () =
   let no_prompt = { base_group with Fusion_policy.system_prompt = "" } in
@@ -1433,7 +1462,8 @@ let () =
         ; Alcotest.test_case "panelist_id_collision_fail_closed" `Quick
             test_config_panelist_id_collision_fail_closed
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
-        ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
+        ; Alcotest.test_case "large_panel_is_valid" `Quick test_config_large_panel_is_valid
+        ; Alcotest.test_case "no_panel_models" `Quick test_config_no_panel_models
         ; Alcotest.test_case "invalid_min_answered" `Quick
             test_config_invalid_min_answered
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
@@ -1459,7 +1489,7 @@ let () =
         ] )
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok
-        ; Alcotest.test_case "bad_size" `Quick test_validated_bad_size
+        ; Alcotest.test_case "no_panel_models" `Quick test_validated_no_panel_models
         ; Alcotest.test_case "missing_prompt" `Quick test_validated_missing_prompt
         ; Alcotest.test_case "missing_judge" `Quick test_validated_missing_judge
         ; Alcotest.test_case "duplicate_panelist" `Quick test_validated_duplicate_panelist

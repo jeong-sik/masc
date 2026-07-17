@@ -41,10 +41,54 @@ type consumed_state =
   ; consumed_at : float
   }
 
+type retry_gate =
+  { not_before : float
+  ; attempts : int
+  }
+
+type deferred_resume =
+  | Resume_judge
+  | Resume_delivery of judgment
+
+type deferred_state =
+  { resume : deferred_resume
+  ; failure : retryable_failure
+  ; retry : retry_gate
+  }
+
+type permanent_class =
+  | Auth
+  | Authorization
+  | Payment_required
+  | Invalid_request
+  | Not_found
+  | Context_overflow
+
+type terminal_reason =
+  | Judge_rejected of
+      { class_ : permanent_class
+      ; detail : string
+      }
+  | Retry_budget_exhausted of
+      { last : retryable_failure
+      ; attempts : int
+      }
+  | Expired_backlog of
+      { age_s : float
+      ; max_age_s : float
+      }
+
+type terminal_state =
+  { reason : terminal_reason
+  ; failed_at : float
+  }
+
 type status =
   | Pending of pending_state
   | Judged of judged_state
+  | Deferred of deferred_state
   | Consumed of consumed_state
+  | Terminal_failed of terminal_state
 
 type candidate =
   { candidate_id : string
@@ -59,6 +103,23 @@ type record_result =
   | Recorded of candidate
   | Duplicate of candidate
   | Record_error of string
+
+type retry_policy =
+  { retry_base_sec : float
+  ; retry_max_sec : float
+  ; max_attempts : int
+  ; max_pending_age_sec : float
+  }
+
+type judge_error =
+  | Judge_retryable of
+      { failure : retryable_failure
+      ; retry_after : float option
+      }
+  | Judge_permanent of
+      { class_ : permanent_class
+      ; detail : string
+      }
 
 exception Candidate_unavailable of string
 
@@ -80,6 +141,25 @@ let retryable_failure_kind_of_string = function
   | "response_contract_unavailable" -> Some Response_contract_unavailable
   | "durable_delivery_unavailable" -> Some Durable_delivery_unavailable
   | "worker_unavailable" -> Some Worker_unavailable
+  | _ -> None
+;;
+
+let permanent_class_to_string = function
+  | Auth -> "auth"
+  | Authorization -> "authorization"
+  | Payment_required -> "payment_required"
+  | Invalid_request -> "invalid_request"
+  | Not_found -> "not_found"
+  | Context_overflow -> "context_overflow"
+;;
+
+let permanent_class_of_string = function
+  | "auth" -> Some Auth
+  | "authorization" -> Some Authorization
+  | "payment_required" -> Some Payment_required
+  | "invalid_request" -> Some Invalid_request
+  | "not_found" -> Some Not_found
+  | "context_overflow" -> Some Context_overflow
   | _ -> None
 ;;
 
@@ -263,6 +343,33 @@ let judgment_to_yojson judgment =
     ]
 ;;
 
+let deferred_resume_to_yojson = function
+  | Resume_judge -> `Assoc [ "kind", `String "judge" ]
+  | Resume_delivery judgment ->
+    `Assoc [ "kind", `String "delivery"; "judgment", judgment_to_yojson judgment ]
+;;
+
+let terminal_reason_to_yojson = function
+  | Judge_rejected { class_; detail } ->
+    `Assoc
+      [ "kind", `String "judge_rejected"
+      ; "class", `String (permanent_class_to_string class_)
+      ; "detail", `String detail
+      ]
+  | Retry_budget_exhausted { last; attempts } ->
+    `Assoc
+      [ "kind", `String "retry_budget_exhausted"
+      ; "last", retryable_failure_to_yojson last
+      ; "attempts", `Int attempts
+      ]
+  | Expired_backlog { age_s; max_age_s } ->
+    `Assoc
+      [ "kind", `String "expired_backlog"
+      ; "age_s", `Float age_s
+      ; "max_age_s", `Float max_age_s
+      ]
+;;
+
 let status_to_yojson = function
   | Pending pending ->
     `Assoc
@@ -277,12 +384,26 @@ let status_to_yojson = function
       ; ( "last_failure"
         , option_json retryable_failure_to_yojson judged.last_failure )
       ]
+  | Deferred deferred ->
+    `Assoc
+      [ "kind", `String "deferred"
+      ; "resume", deferred_resume_to_yojson deferred.resume
+      ; "failure", retryable_failure_to_yojson deferred.failure
+      ; "not_before", `Float deferred.retry.not_before
+      ; "attempts", `Int deferred.retry.attempts
+      ]
   | Consumed consumed ->
     `Assoc
       [ "kind", `String "consumed"
       ; "judgment", judgment_to_yojson consumed.judgment
       ; "delivery", `String (delivery_to_string consumed.delivery)
       ; "consumed_at", `Float consumed.consumed_at
+      ]
+  | Terminal_failed terminal ->
+    `Assoc
+      [ "kind", `String "terminal_failed"
+      ; "reason", terminal_reason_to_yojson terminal.reason
+      ; "failed_at", `Float terminal.failed_at
       ]
 ;;
 
@@ -338,6 +459,11 @@ let float_json ~context = function
   | `Float value -> Ok value
   | `Int value -> Ok (float_of_int value)
   | _ -> Error (context ^ " must be a number")
+;;
+
+let int_json ~context = function
+  | `Int value -> Ok value
+  | _ -> Error (context ^ " must be an integer")
 ;;
 
 let optional_json parser = function
@@ -470,6 +596,58 @@ let judgment_of_yojson json =
   Ok { verdict; runtime_id; judged_at }
 ;;
 
+let deferred_resume_of_yojson json =
+  let context = "candidate.status.resume" in
+  let* fields = assoc ~context json in
+  let* kind_json = field ~context "kind" fields in
+  let* kind = string_json ~context:(context ^ ".kind") kind_json in
+  match kind with
+  | "judge" ->
+    let* () = exact_fields ~context [ "kind" ] fields in
+    Ok Resume_judge
+  | "delivery" ->
+    let* () = exact_fields ~context [ "kind"; "judgment" ] fields in
+    let* judgment_json = field ~context "judgment" fields in
+    let* judgment = judgment_of_yojson judgment_json in
+    Ok (Resume_delivery judgment)
+  | value -> Error (Printf.sprintf "unknown Board attention resume kind %S" value)
+;;
+
+let terminal_reason_of_yojson json =
+  let context = "candidate.status.reason" in
+  let* fields = assoc ~context json in
+  let* kind_json = field ~context "kind" fields in
+  let* kind = string_json ~context:(context ^ ".kind") kind_json in
+  match kind with
+  | "judge_rejected" ->
+    let* () = exact_fields ~context [ "kind"; "class"; "detail" ] fields in
+    let* class_json = field ~context "class" fields in
+    let* class_raw = string_json ~context:(context ^ ".class") class_json in
+    let* class_ =
+      match permanent_class_of_string class_raw with
+      | Some class_ -> Ok class_
+      | None -> Error (Printf.sprintf "unknown Board attention permanent class %S" class_raw)
+    in
+    let* detail_json = field ~context "detail" fields in
+    let* detail = string_json ~context:(context ^ ".detail") detail_json in
+    Ok (Judge_rejected { class_; detail })
+  | "retry_budget_exhausted" ->
+    let* () = exact_fields ~context [ "kind"; "last"; "attempts" ] fields in
+    let* last_json = field ~context "last" fields in
+    let* last = retryable_failure_of_yojson last_json in
+    let* attempts_json = field ~context "attempts" fields in
+    let* attempts = int_json ~context:(context ^ ".attempts") attempts_json in
+    Ok (Retry_budget_exhausted { last; attempts })
+  | "expired_backlog" ->
+    let* () = exact_fields ~context [ "kind"; "age_s"; "max_age_s" ] fields in
+    let* age_s_json = field ~context "age_s" fields in
+    let* age_s = float_json ~context:(context ^ ".age_s") age_s_json in
+    let* max_age_s_json = field ~context "max_age_s" fields in
+    let* max_age_s = float_json ~context:(context ^ ".max_age_s") max_age_s_json in
+    Ok (Expired_backlog { age_s; max_age_s })
+  | value -> Error (Printf.sprintf "unknown Board attention terminal reason %S" value)
+;;
+
 let status_of_yojson json =
   let context = "candidate.status" in
   let* fields = assoc ~context json in
@@ -492,6 +670,22 @@ let status_of_yojson json =
       optional_json retryable_failure_of_yojson failure_json
     in
     Ok (Judged { judgment; last_failure })
+  | "deferred" ->
+    let* () =
+      exact_fields
+        ~context
+        [ "kind"; "resume"; "failure"; "not_before"; "attempts" ]
+        fields
+    in
+    let* resume_json = field ~context "resume" fields in
+    let* resume = deferred_resume_of_yojson resume_json in
+    let* failure_json = field ~context "failure" fields in
+    let* failure = retryable_failure_of_yojson failure_json in
+    let* not_before_json = field ~context "not_before" fields in
+    let* not_before = float_json ~context:(context ^ ".not_before") not_before_json in
+    let* attempts_json = field ~context "attempts" fields in
+    let* attempts = int_json ~context:(context ^ ".attempts") attempts_json in
+    Ok (Deferred { resume; failure; retry = { not_before; attempts } })
   | "consumed" ->
     let* () =
       exact_fields
@@ -511,6 +705,13 @@ let status_of_yojson json =
     let* consumed_at_json = field ~context "consumed_at" fields in
     let* consumed_at = float_json ~context:(context ^ ".consumed_at") consumed_at_json in
     Ok (Consumed { judgment; delivery; consumed_at })
+  | "terminal_failed" ->
+    let* () = exact_fields ~context [ "kind"; "reason"; "failed_at" ] fields in
+    let* reason_json = field ~context "reason" fields in
+    let* reason = terminal_reason_of_yojson reason_json in
+    let* failed_at_json = field ~context "failed_at" fields in
+    let* failed_at = float_json ~context:(context ^ ".failed_at") failed_at_json in
+    Ok (Terminal_failed { reason; failed_at })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
 ;;
 
@@ -708,7 +909,11 @@ let record_retryable_failure ~base_path candidate failure =
               { current with
                 status = Judged { judged with last_failure = Some failure }
               })
-       | Consumed _ -> None)
+       | Deferred _ | Consumed _ | Terminal_failed _ ->
+         (* Legacy no-op path only: [Worker_unavailable] (the sole caller,
+            [observe_worker_failure]) predates the retry-gate states and is
+            deleted alongside [start_async] in a later phase. *)
+         None)
 ;;
 
 let record_judgment ~base_path candidate judgment =
@@ -718,12 +923,13 @@ let record_judgment ~base_path candidate judgment =
     candidate.keeper_name
     (fun current ->
        match current.status with
-       | Pending _ ->
+       | Pending _ | Deferred { resume = Resume_judge; _ } ->
          Some
            { current with
              status = Judged { judgment; last_failure = None }
            }
-       | Judged _ | Consumed _ -> None)
+       | Deferred { resume = Resume_delivery _; _ }
+       | Judged _ | Consumed _ | Terminal_failed _ -> None)
 ;;
 
 let mark_consumed ~base_path candidate judgment delivery =
@@ -733,17 +939,43 @@ let mark_consumed ~base_path candidate judgment delivery =
     candidate.keeper_name
     (fun current ->
        match current.status with
-       | Judged _ ->
+       | Judged _ | Deferred { resume = Resume_delivery _; _ } ->
          Some
            { current with
              status =
                Consumed
                  { judgment; delivery; consumed_at = Time_compat.now () }
            }
-       | Pending _ | Consumed _ -> None)
+       | Pending _ | Deferred { resume = Resume_judge; _ }
+       | Consumed _ | Terminal_failed _ -> None)
+;;
+
+let record_deferred ~base_path candidate deferred =
+  update_candidate
+    ~base_path
+    candidate.candidate_id
+    candidate.keeper_name
+    (fun current ->
+       match current.status with
+       | Consumed _ | Terminal_failed _ -> None
+       | Pending _ | Judged _ | Deferred _ ->
+         Some { current with status = Deferred deferred })
+;;
+
+let record_terminal ~base_path candidate terminal =
+  update_candidate
+    ~base_path
+    candidate.candidate_id
+    candidate.keeper_name
+    (fun current ->
+       match current.status with
+       | Consumed _ | Terminal_failed _ -> None
+       | Pending _ | Judged _ | Deferred _ ->
+         Some { current with status = Terminal_failed terminal })
 ;;
 
 let failure ~kind detail = { kind; detail; failed_at = Time_compat.now () }
+let judge_retryable ~kind ?retry_after detail = Judge_retryable { failure = failure ~kind detail; retry_after }
 
 let board_attention_stimulus candidate =
   { Keeper_event_queue.post_id = candidate.signal.post_id
@@ -757,41 +989,260 @@ let board_attention_stimulus candidate =
   }
 ;;
 
-let consume_judged ~base_path candidate (judged : judged_state) =
-  match judged.judgment.verdict.decision with
+(* Deterministic jitter derived from [candidate_id], not [Random]: a replayed
+   ledger (audit, test) always derives the identical [not_before], and no
+   process-global RNG state is shared across domains. Bounded to a fraction of
+   the computed backoff so many candidates deferred at the same instant do not
+   all become due at exactly the same tick (thundering-herd on the judge
+   endpoint). *)
+let jitter_fraction = 0.1
+
+let jitter_seconds ~candidate_id ~bound =
+  if bound <= 0.0
+  then 0.0
+  else (
+    let raw = Digestif.SHA256.(to_raw_string (digest_string candidate_id)) in
+    let sample =
+      String.fold_left
+        (fun acc c -> (acc * 256 + Char.code c) land max_int)
+        0
+        (String.sub raw 0 7)
+    in
+    bound *. (float_of_int sample /. float_of_int max_int))
+;;
+
+let next_not_before ~now ~attempts ~retry_after ~policy ~candidate_id =
+  match retry_after with
+  | Some hint ->
+    (* Provider-supplied retry-after wins over our own schedule. *)
+    now +. Float.max 0.0 hint
+  | None ->
+    let backoff = policy.retry_base_sec *. (2. ** float_of_int attempts) in
+    let capped = Float.min backoff policy.retry_max_sec in
+    let jitter = jitter_seconds ~candidate_id ~bound:(capped *. jitter_fraction) in
+    now +. capped +. jitter
+;;
+
+let warn_terminal candidate ~reason detail =
+  Log.Keeper.warn
+    "Board attention candidate terminalized keeper=%s candidate=%s reason=%s: %s"
+    candidate.keeper_name
+    candidate.candidate_id
+    reason
+    detail
+;;
+
+(* Shared by judge-attempt and delivery-attempt failures: both defer with the
+   same capped-exponential/jitter schedule and terminalize on the same budget.
+   [retry_after] is [Some _] only for judge failures with a provider hint
+   (delivery failures are local storage errors with no such hint). *)
+let retry_or_terminalize ~base_path ~now ~policy candidate ~resume ~current_attempts ~retry_after failure =
+  let new_attempts = current_attempts + 1 in
+  if new_attempts < policy.max_attempts
+  then (
+    let not_before =
+      next_not_before
+        ~now
+        ~attempts:current_attempts
+        ~retry_after
+        ~policy
+        ~candidate_id:candidate.candidate_id
+    in
+    record_deferred
+      ~base_path
+      candidate
+      { resume; failure; retry = { not_before; attempts = new_attempts } })
+  else (
+    warn_terminal candidate ~reason:"retry_budget_exhausted" failure.detail;
+    record_terminal
+      ~base_path
+      candidate
+      { reason = Retry_budget_exhausted { last = failure; attempts = new_attempts }
+      ; failed_at = now
+      })
+;;
+
+let apply_judge_outcome ~base_path ~now ~policy candidate ~current_attempts = function
+  | Judge_permanent { class_; detail } ->
+    warn_terminal candidate ~reason:"judge_rejected" detail;
+    record_terminal
+      ~base_path
+      candidate
+      { reason = Judge_rejected { class_; detail }; failed_at = now }
+  | Judge_retryable { failure; retry_after } ->
+    retry_or_terminalize
+      ~base_path
+      ~now
+      ~policy
+      candidate
+      ~resume:Resume_judge
+      ~current_attempts
+      ~retry_after
+      failure
+;;
+
+let apply_delivery_outcome ~base_path ~now ~policy candidate ~current_attempts judgment
+  : Keeper_registry_event_queue.enqueue_if_missing_durable_result -> (candidate, string) result
+  = function
+  | Keeper_registry_event_queue.Enqueued | Keeper_registry_event_queue.Already_present ->
+    let* consumed = mark_consumed ~base_path candidate judgment Enqueued_to_keeper_lane in
+    let (_ : Keeper_registry.wakeup_outcome) =
+      Keeper_registry.wakeup
+        ~intent:Keeper_registry.Reactive_signal
+        ~base_path
+        candidate.keeper_name
+    in
+    Ok consumed
+  | Keeper_registry_event_queue.Identity_conflict detail
+  | Keeper_registry_event_queue.Storage_error detail ->
+    retry_or_terminalize
+      ~base_path
+      ~now
+      ~policy
+      candidate
+      ~resume:(Resume_delivery judgment)
+      ~current_attempts
+      ~retry_after:None
+      (failure ~kind:Durable_delivery_unavailable detail)
+;;
+
+let delivery_current_attempts candidate =
+  match candidate.status with
+  | Deferred { resume = Resume_delivery _; retry; _ } -> retry.attempts
+  | Pending _ | Judged _ | Deferred { resume = Resume_judge; _ }
+  | Consumed _ | Terminal_failed _ -> 0
+;;
+
+let attempt_delivery ~base_path ~now ~policy candidate judgment =
+  match judgment.verdict.decision with
   | Keeper_board_attention_judgment.Not_relevant ->
-    mark_consumed ~base_path candidate judged.judgment Not_relevant
+    mark_consumed ~base_path candidate judgment Not_relevant
   | Keeper_board_attention_judgment.Relevant ->
     let stimulus = board_attention_stimulus candidate in
-    (match
-       Keeper_registry_event_queue.enqueue_if_missing_durable_result
-         ~base_path
-         ~event_id:candidate.candidate_id
-         candidate.keeper_name
-         stimulus
-     with
-     | Keeper_registry_event_queue.Enqueued
-     | Keeper_registry_event_queue.Already_present ->
-       let* consumed =
-         mark_consumed
-           ~base_path
-           candidate
-           judged.judgment
-           Enqueued_to_keeper_lane
-       in
-       let (_ : Keeper_registry.wakeup_outcome) =
-         Keeper_registry.wakeup
-           ~intent:Keeper_registry.Reactive_signal
-           ~base_path
-           candidate.keeper_name
-       in
-       Ok consumed
-     | Keeper_registry_event_queue.Identity_conflict detail
-     | Keeper_registry_event_queue.Storage_error detail ->
-       record_retryable_failure
-         ~base_path
-         candidate
-         (failure ~kind:Durable_delivery_unavailable detail))
+    let current_attempts = delivery_current_attempts candidate in
+    let outcome =
+      Keeper_registry_event_queue.enqueue_if_missing_durable_result
+        ~base_path
+        ~event_id:candidate.candidate_id
+        candidate.keeper_name
+        stimulus
+    in
+    apply_delivery_outcome ~base_path ~now ~policy candidate ~current_attempts judgment outcome
+;;
+
+let age_seconds candidate ~now = now -. candidate.recorded_at
+
+let expire ~base_path ~now ~policy candidate =
+  let age_s = age_seconds candidate ~now in
+  warn_terminal candidate ~reason:"expired_backlog" (Printf.sprintf "age_s=%.1f" age_s);
+  record_terminal
+    ~base_path
+    candidate
+    { reason = Expired_backlog { age_s; max_age_s = policy.max_pending_age_sec }
+    ; failed_at = now
+    }
+;;
+
+let terminalize_expired ~base_path ~now ~policy candidate =
+  match candidate.status with
+  | Pending _ | Deferred _ ->
+    if age_seconds candidate ~now > policy.max_pending_age_sec
+    then expire ~base_path ~now ~policy candidate
+    else Ok candidate
+  | Judged _ | Consumed _ | Terminal_failed _ -> Ok candidate
+;;
+
+let is_eligible_for_dispatch ~now candidate =
+  match candidate.status with
+  | Pending _ | Judged _ -> true
+  | Deferred { retry; _ } -> now >= retry.not_before
+  | Consumed _ | Terminal_failed _ -> false
+;;
+
+let rec process_with_judge ~base_path ~now ~policy ~judge candidate =
+  let now_value = now () in
+  match candidate.status with
+  | Consumed _ | Terminal_failed _ -> Ok candidate
+  | Judged judged -> attempt_delivery ~base_path ~now:now_value ~policy candidate judged.judgment
+  | Pending _ ->
+    if age_seconds candidate ~now:now_value > policy.max_pending_age_sec
+    then expire ~base_path ~now:now_value ~policy candidate
+    else (
+      match judge candidate with
+      | Error outcome ->
+        apply_judge_outcome ~base_path ~now:now_value ~policy candidate ~current_attempts:0 outcome
+      | Ok judgment ->
+        let* current = record_judgment ~base_path candidate judgment in
+        process_with_judge ~base_path ~now ~policy ~judge current)
+  | Deferred deferred ->
+    if age_seconds candidate ~now:now_value > policy.max_pending_age_sec
+    then expire ~base_path ~now:now_value ~policy candidate
+    else if now_value < deferred.retry.not_before
+    then Ok candidate
+    else (
+      match deferred.resume with
+      | Resume_judge ->
+        (match judge candidate with
+         | Error outcome ->
+           apply_judge_outcome
+             ~base_path
+             ~now:now_value
+             ~policy
+             candidate
+             ~current_attempts:deferred.retry.attempts
+             outcome
+         | Ok judgment ->
+           let* current = record_judgment ~base_path candidate judgment in
+           process_with_judge ~base_path ~now ~policy ~judge current)
+      | Resume_delivery judgment ->
+        attempt_delivery ~base_path ~now:now_value ~policy candidate judgment)
+;;
+
+let classify_judge_sdk_error (error : Agent_sdk.Error.sdk_error) : judge_error =
+  let detail = Agent_sdk.Error.to_string error in
+  match Agent_sdk.Error_domain.of_sdk_error error with
+  (* Provider gave an explicit backoff window; honor it over our own schedule. *)
+  | `Rate_limited retry_after -> judge_retryable ~kind:Provider_unavailable ?retry_after detail
+  (* Transient provider/transport failures with no explicit retry hint. *)
+  | `Overloaded
+  | `Server_error _
+  | `Network_error _
+  | `Provider_timeout _
+  | `Streaming_timeout _ -> judge_retryable ~kind:Provider_unavailable detail
+  (* Credential, authorization, billing, and request-shape rejections repeat
+     identically without operator intervention: never worth retrying. *)
+  | `Auth_error _ -> Judge_permanent { class_ = Auth; detail }
+  | `Authorization_error _ -> Judge_permanent { class_ = Authorization; detail }
+  | `Payment_required _ -> Judge_permanent { class_ = Payment_required; detail }
+  | `Invalid_request _ -> Judge_permanent { class_ = Invalid_request; detail }
+  | `Not_found _ -> Judge_permanent { class_ = Not_found; detail }
+  | `Context_overflow _ -> Judge_permanent { class_ = Context_overflow; detail }
+  (* Non-provider SDK domains surface while attempting the same provider call
+     (tool dispatch, guardrails, config resolution, MCP transport, (de)serialization,
+     local IO, orchestration, or an unclassified internal fault). They are
+     environment/operator-fixable, not a judge verdict on the candidate, so
+     they get the same attempt budget as a provider hiccup instead of a
+     permanent rejection. *)
+  | `Tool_exec_failed _
+  | `Tool_timeout _
+  | `Guardrail_violation _
+  | `Tripwire_violation _
+  | `Input_required _
+  | `Hook_execution_failed _
+  | `Unrecognized_stop_reason _
+  | `Missing_env_var _
+  | `Unsupported_provider _
+  | `Invalid_config _
+  | `Sensitive_value_in_config _
+  | `Mcp_server_start_failed _
+  | `Mcp_init_failed _
+  | `Mcp_tool_list_failed _
+  | `Mcp_tool_call_failed _
+  | `Mcp_http_failed _
+  | `Serialization _
+  | `Io _
+  | `Orchestration _
+  | `Internal _ -> judge_retryable ~kind:Provider_unavailable detail
 ;;
 
 let build_prompt candidate =
@@ -821,7 +1272,7 @@ let run_judge ~base_path candidate =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
       Error
-        (failure
+        (judge_retryable
            ~kind:Runtime_configuration_unavailable
            (Printexc.to_string exn))
   in
@@ -829,7 +1280,7 @@ let run_judge ~base_path candidate =
   | Error _ as error -> error
   | Ok runtime_id ->
     (match build_prompt candidate with
-     | Error detail -> Error (failure ~kind:Prompt_contract_unavailable detail)
+     | Error detail -> Error (judge_retryable ~kind:Prompt_contract_unavailable detail)
      | Ok prompt ->
        let provider_result =
          try
@@ -845,16 +1296,11 @@ let run_judge ~base_path candidate =
                ()
            with
            | Ok result -> Ok result
-           | Error error ->
-             Error
-               (failure
-                  ~kind:Provider_unavailable
-                  (Agent_sdk.Error.to_string error))
+           | Error error -> Error (classify_judge_sdk_error error)
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
-           Error
-             (failure ~kind:Provider_unavailable (Printexc.to_string exn))
+           Error (judge_retryable ~kind:Provider_unavailable (Printexc.to_string exn))
        in
        (match provider_result with
         | Error _ as error -> error
@@ -865,29 +1311,37 @@ let run_judge ~base_path candidate =
                result.response
            with
            | Error detail ->
-             Error (failure ~kind:Response_contract_unavailable detail)
+             Error (judge_retryable ~kind:Response_contract_unavailable detail)
            | Ok json ->
              (match Keeper_board_attention_judgment.of_yojson json with
               | Error detail ->
-                Error (failure ~kind:Response_contract_unavailable detail)
+                Error (judge_retryable ~kind:Response_contract_unavailable detail)
               | Ok verdict ->
                 Ok { verdict; runtime_id; judged_at = Time_compat.now () }))))
 ;;
 
-let rec process_with_judge ~base_path ~judge candidate =
-  match candidate.status with
-  | Consumed _ -> Ok candidate
-  | Judged judged -> consume_judged ~base_path candidate judged
-  | Pending _ ->
-    (match judge candidate with
-     | Error failure -> record_retryable_failure ~base_path candidate failure
-     | Ok judgment ->
-       let* current = record_judgment ~base_path candidate judgment in
-       process_with_judge ~base_path ~judge current)
+(* Phase 1 scaffolding: [start_async]/[resume_pending]/[record_and_start]/
+   [process] below are the pre-redesign unbounded-fork call path. They are
+   deleted once [Keeper_world_observation]/[Keeper_keepalive_signal] call
+   [Keeper_board_attention_worker] directly. Until then they need a concrete
+   [retry_policy] to keep compiling; this mirrors the worker module's
+   Keeper_config-backed defaults without this lower-level module depending on
+   Keeper_config. *)
+let default_retry_policy =
+  { retry_base_sec = 30.0
+  ; retry_max_sec = 1800.0
+  ; max_attempts = 8
+  ; max_pending_age_sec = 259200.0
+  }
 ;;
 
 let process ~base_path candidate =
-  process_with_judge ~base_path ~judge:(run_judge ~base_path) candidate
+  process_with_judge
+    ~base_path
+    ~now:Time_compat.now
+    ~policy:default_retry_policy
+    ~judge:(run_judge ~base_path)
+    candidate
 ;;
 
 let active_candidates = Atomic.make Active_set.empty
@@ -938,8 +1392,8 @@ let observe_worker_failure ~base_path candidate kind detail =
 
 let start_async ~base_path candidate =
   match candidate.status with
-  | Consumed _ -> false
-  | Pending _ | Judged _ ->
+  | Consumed _ | Terminal_failed _ -> false
+  | Pending _ | Judged _ | Deferred _ ->
     let key = active_key ~base_path candidate in
     if not (claim_active key)
     then false

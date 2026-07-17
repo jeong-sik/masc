@@ -1,5 +1,6 @@
 module A = Masc.Keeper_board_attention_candidate
 module J = Masc.Keeper_board_attention_judgment
+module Retry = Llm_provider.Retry
 
 let rec remove_tree path =
   if Sys.file_exists path
@@ -129,11 +130,40 @@ let only_loaded ~base_path ~keeper_name =
   | Error detail -> Alcotest.failf "candidate load failed: %s" detail
 ;;
 
+(* Small, fast-moving policy shared by the retry-gate tests: retry_base=10s
+   doubling to a retry_max=40s cap, budget of 3 attempts, and a generous
+   pending-age ceiling so only the dedicated expiry test crosses it. *)
+let test_policy : A.retry_policy =
+  { retry_base_sec = 10.0
+  ; retry_max_sec = 40.0
+  ; max_attempts = 3
+  ; max_pending_age_sec = 1000.0
+  }
+;;
+
+(* Same shape as [test_policy] but with headroom on [max_attempts] so the
+   backoff-growth test can observe three successive doublings without hitting
+   the budget wall. *)
+let backoff_policy : A.retry_policy = { test_policy with max_attempts = 10 }
+
+let block_keepers_path base_path =
+  let keepers_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers" in
+  let oc = open_out_bin keepers_path in
+  output_string oc "event queue directory blocker";
+  close_out oc
+;;
+
+let unblock_keepers_path base_path =
+  let keepers_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers" in
+  Sys.remove keepers_path
+;;
+
 let test_roundtrip_preserves_full_evidence_and_pending_state () =
   let candidate = candidate () in
   (match candidate.status with
    | A.Pending { last_failure = None } -> ()
-   | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
+   | A.Pending { last_failure = Some _ } | A.Judged _ | A.Deferred _
+   | A.Consumed _ | A.Terminal_failed _ ->
      Alcotest.fail "new candidate was not clean Pending");
   let request_fields =
     match candidate.judgment_request with
@@ -176,42 +206,354 @@ let test_record_dedupes_exact_candidate_identity () =
   ignore (only_loaded ~base_path ~keeper_name:first.keeper_name : A.candidate)
 ;;
 
-let test_retryable_judge_failure_remains_pending () =
-  with_temp_base "keeper-board-attention-retry" @@ fun base_path ->
-  let pending = record_or_fail ~base_path (candidate ()) in
-  let failure : A.retryable_failure =
-    { kind = A.Provider_unavailable
-    ; detail = "provider unavailable"
-    ; failed_at = 102.0
+let test_legacy_pending_row_loads_unchanged () =
+  with_temp_base "keeper-board-attention-legacy-pending" @@ fun base_path ->
+  let fixture = candidate () in
+  let keeper_name = fixture.keeper_name in
+  let dir =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) "board_attention_candidates"
+  in
+  Fs_compat.mkdir_p dir;
+  let path = Filename.concat dir (keeper_name ^ ".jsonl") in
+  (* Hand-typed row in the pre-redesign wire shape: only
+     pending/judged/consumed existed, with none of the new fields this phase
+     adds. A pre-existing ledger written by an older binary must still parse. *)
+  let legacy_json =
+    `Assoc
+      [ "candidate_id", `String fixture.candidate_id
+      ; "keeper_name", `String fixture.keeper_name
+      ; "signal", A.signal_to_yojson fixture.signal
+      ; "judgment_request", fixture.judgment_request
+      ; "recorded_at", `Float fixture.recorded_at
+      ; "status", `Assoc [ "kind", `String "pending"; "last_failure", `Null ]
+      ]
+  in
+  let oc = open_out_bin path in
+  output_string oc (Yojson.Safe.to_string legacy_json ^ "\n");
+  close_out oc;
+  match A.load_candidates ~base_path ~keeper_name with
+  | Ok [ loaded ] ->
+    Alcotest.(check string) "legacy candidate_id preserved" fixture.candidate_id loaded.candidate_id;
+    (match loaded.status with
+     | A.Pending { last_failure = None } -> ()
+     | A.Pending { last_failure = Some _ } | A.Judged _ | A.Deferred _
+     | A.Consumed _ | A.Terminal_failed _ ->
+       Alcotest.fail "legacy pending row did not load as clean Pending")
+  | Ok candidates ->
+    Alcotest.failf "expected exactly one legacy candidate, got %d" (List.length candidates)
+  | Error detail -> Alcotest.failf "legacy row failed to load: %s" detail
+;;
+
+let test_deferred_judge_strict_roundtrip () =
+  let candidate =
+    { (candidate ()) with
+      status =
+        A.Deferred
+          { resume = A.Resume_judge
+          ; failure = { kind = A.Provider_unavailable; detail = "provider unavailable"; failed_at = 102.0 }
+          ; retry = { not_before = 200.0; attempts = 2 }
+          }
     }
   in
-  let current =
+  match A.candidate_of_json (A.candidate_to_json candidate) with
+  | Ok decoded -> Alcotest.(check bool) "deferred/judge strict roundtrip" true (decoded = candidate)
+  | Error detail -> Alcotest.failf "deferred/judge decode failed: %s" detail
+;;
+
+let test_deferred_delivery_strict_roundtrip () =
+  let carried_judgment = judgment J.Relevant in
+  let candidate =
+    { (candidate ()) with
+      status =
+        A.Deferred
+          { resume = A.Resume_delivery carried_judgment
+          ; failure =
+              { kind = A.Durable_delivery_unavailable
+              ; detail = "storage unavailable"
+              ; failed_at = 103.0
+              }
+          ; retry = { not_before = 250.0; attempts = 1 }
+          }
+    }
+  in
+  match A.candidate_of_json (A.candidate_to_json candidate) with
+  | Ok decoded -> Alcotest.(check bool) "deferred/delivery strict roundtrip" true (decoded = candidate)
+  | Error detail -> Alcotest.failf "deferred/delivery decode failed: %s" detail
+;;
+
+let test_terminal_states_strict_roundtrip () =
+  let base = candidate () in
+  let variants : (string * A.terminal_reason) list =
+    [ "judge_rejected", A.Judge_rejected { class_ = A.Invalid_request; detail = "bad request shape" }
+    ; ( "retry_budget_exhausted"
+      , A.Retry_budget_exhausted
+          { last = { kind = A.Provider_unavailable; detail = "still failing"; failed_at = 104.0 }
+          ; attempts = 8
+          } )
+    ; "expired_backlog", A.Expired_backlog { age_s = 400000.0; max_age_s = 259200.0 }
+    ]
+  in
+  List.iter
+    (fun (label, reason) ->
+       let candidate = { base with status = A.Terminal_failed { reason; failed_at = 105.0 } } in
+       match A.candidate_of_json (A.candidate_to_json candidate) with
+       | Ok decoded -> Alcotest.(check bool) (label ^ " strict roundtrip") true (decoded = candidate)
+       | Error detail -> Alcotest.failf "%s decode failed: %s" label detail)
+    variants
+;;
+
+let wrap_status base_candidate status_json =
+  `Assoc
+    [ "candidate_id", `String base_candidate.A.candidate_id
+    ; "keeper_name", `String base_candidate.A.keeper_name
+    ; "signal", A.signal_to_yojson base_candidate.A.signal
+    ; "judgment_request", base_candidate.A.judgment_request
+    ; "recorded_at", `Float base_candidate.A.recorded_at
+    ; "status", status_json
+    ]
+;;
+
+let test_deferred_exact_fields_rejects_extras () =
+  let base = candidate () in
+  let status_with_extra =
+    `Assoc
+      [ "kind", `String "deferred"
+      ; "resume", `Assoc [ "kind", `String "judge" ]
+      ; ( "failure"
+        , `Assoc
+            [ "kind", `String "provider_unavailable"
+            ; "detail", `String "x"
+            ; "failed_at", `Float 1.0
+            ] )
+      ; "not_before", `Float 2.0
+      ; "attempts", `Int 1
+      ; "unexpected", `Bool true
+      ]
+  in
+  match A.candidate_of_json (wrap_status base status_with_extra) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "deferred status accepted an undeclared field"
+;;
+
+let test_terminal_failed_exact_fields_rejects_extras () =
+  let base = candidate () in
+  let status_with_extra =
+    `Assoc
+      [ "kind", `String "terminal_failed"
+      ; ( "reason"
+        , `Assoc
+            [ "kind", `String "expired_backlog"
+            ; "age_s", `Float 400000.0
+            ; "max_age_s", `Float 259200.0
+            ] )
+      ; "failed_at", `Float 105.0
+      ; "unexpected", `String "surplus"
+      ]
+  in
+  match A.candidate_of_json (wrap_status base status_with_extra) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "terminal_failed status accepted an undeclared field"
+;;
+
+let test_judge_retryable_with_provider_hint_honors_retry_after () =
+  with_temp_base "keeper-board-attention-retry-after" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let now () = 1000.0 in
+  let outcome =
+    A.Judge_retryable
+      { failure = { kind = A.Provider_unavailable; detail = "rate limited"; failed_at = 1000.0 }
+      ; retry_after = Some 42.0
+      }
+  in
+  match A.process_with_judge ~base_path ~now ~policy:test_policy ~judge:(fun _ -> Error outcome) pending with
+  | Ok { status = A.Deferred { resume = A.Resume_judge; retry = { not_before; attempts = 1 }; _ }; _ } ->
+    Alcotest.(check (float 0.0001)) "retry-after hint honored exactly" 1042.0 not_before
+  | Ok _ -> Alcotest.fail "retry-after hint was not honored"
+  | Error detail -> Alcotest.failf "retryable transition failed: %s" detail
+;;
+
+let test_judge_retryable_backs_off_with_capped_exponential_growth () =
+  with_temp_base "keeper-board-attention-backoff" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let now_ref = ref 1000.0 in
+  let now () = !now_ref in
+  let retryable () =
+    A.Judge_retryable
+      { failure = { kind = A.Provider_unavailable; detail = "backoff probe"; failed_at = !now_ref }
+      ; retry_after = None
+      }
+  in
+  (* retry_base=10s doubling to retry_max=40s: attempts 0,1,2 -> 10,20,40. *)
+  let expected_caps = [ 10.0; 20.0; 40.0 ] in
+  ignore
+    (List.fold_left
+       (fun current expected_cap ->
+          let judge_calls = ref 0 in
+          match
+            A.process_with_judge
+              ~base_path
+              ~now
+              ~policy:backoff_policy
+              ~judge:(fun _ ->
+                 incr judge_calls;
+                 Error (retryable ()))
+              current
+          with
+          | Ok ({ status = A.Deferred { retry = { not_before; _ }; _ }; _ } as updated) ->
+            Alcotest.(check int) "judge invoked exactly once per due attempt" 1 !judge_calls;
+            let delta = not_before -. !now_ref in
+            Alcotest.(check bool)
+              (Printf.sprintf "delta >= base cap %.1f" expected_cap)
+              true
+              (delta >= expected_cap -. 0.0001);
+            Alcotest.(check bool)
+              (Printf.sprintf "delta <= cap %.1f plus jitter headroom" expected_cap)
+              true
+              (delta <= (expected_cap *. 1.10001));
+            now_ref := not_before +. 0.001;
+            updated
+          | Ok _ -> Alcotest.fail "expected Deferred{Resume_judge} mid-backoff"
+          | Error detail -> Alcotest.failf "backoff transition failed: %s" detail)
+       pending
+       expected_caps
+     : A.candidate)
+;;
+
+let test_deferred_before_not_before_skips_judge () =
+  with_temp_base "keeper-board-attention-not-due" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let candidate_before =
+    { pending with
+      status =
+        A.Deferred
+          { resume = A.Resume_judge
+          ; failure = { kind = A.Provider_unavailable; detail = "prior failure"; failed_at = 900.0 }
+          ; retry = { not_before = 2000.0; attempts = 1 }
+          }
+    }
+  in
+  (* Stay well under [test_policy.max_pending_age_sec] (1000s past
+     recorded_at=100.0) so the expiry check does not preempt the not_before
+     gate this test exercises. *)
+  let now () = 500.0 in
+  match
+    A.process_with_judge
+      ~base_path
+      ~now
+      ~policy:test_policy
+      ~judge:(fun _ -> Alcotest.fail "judge invoked before the retry gate was due")
+      candidate_before
+  with
+  | Ok unchanged ->
+    Alcotest.(check bool) "not-due Deferred row is unchanged" true (unchanged = candidate_before)
+  | Error detail -> Alcotest.failf "not-due Deferred transition failed: %s" detail
+;;
+
+let test_due_deferred_reinvokes_judge () =
+  with_temp_base "keeper-board-attention-due" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let candidate_before =
+    { pending with
+      status =
+        A.Deferred
+          { resume = A.Resume_judge
+          ; failure = { kind = A.Provider_unavailable; detail = "prior failure"; failed_at = 900.0 }
+          ; retry = { not_before = 1000.0; attempts = 1 }
+          }
+    }
+  in
+  let judge_calls = ref 0 in
+  let now () = 1000.0 in
+  match
+    A.process_with_judge
+      ~base_path
+      ~now
+      ~policy:test_policy
+      ~judge:(fun _ ->
+         incr judge_calls;
+         Ok (judgment J.Not_relevant))
+      candidate_before
+  with
+  | Ok { status = A.Consumed { delivery = A.Not_relevant; _ }; _ } ->
+    Alcotest.(check int) "judge invoked exactly once for the due retry" 1 !judge_calls
+  | Ok _ -> Alcotest.fail "due Deferred did not re-judge"
+  | Error detail -> Alcotest.failf "due Deferred transition failed: %s" detail
+;;
+
+let test_permanent_judge_error_terminalizes_and_absorbs () =
+  with_temp_base "keeper-board-attention-permanent" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let now () = 1000.0 in
+  let permanent = A.Judge_permanent { class_ = A.Invalid_request; detail = "malformed request shape" } in
+  let terminalized =
+    match A.process_with_judge ~base_path ~now ~policy:test_policy ~judge:(fun _ -> Error permanent) pending with
+    | Ok candidate -> candidate
+    | Error detail -> Alcotest.failf "permanent transition failed: %s" detail
+  in
+  (match terminalized.status with
+   | A.Terminal_failed { reason = A.Judge_rejected { class_ = A.Invalid_request; _ }; _ } -> ()
+   | A.Terminal_failed _ | A.Pending _ | A.Judged _ | A.Deferred _ | A.Consumed _ ->
+     Alcotest.fail "permanent judge error did not terminalize with Judge_rejected");
+  let replayed =
     match
       A.process_with_judge
         ~base_path
-        ~judge:(fun _ -> Error failure)
-        pending
+        ~now
+        ~policy:test_policy
+        ~judge:(fun _ -> Alcotest.fail "Terminal_failed candidate invoked judge")
+        terminalized
     with
     | Ok candidate -> candidate
-    | Error detail -> Alcotest.failf "retryable transition failed: %s" detail
+    | Error detail -> Alcotest.failf "Terminal_failed replay failed: %s" detail
   in
-  match current.status with
-  | A.Pending { last_failure = Some observed } ->
-    Alcotest.(check string)
-      "typed failure preserved"
-      "provider_unavailable"
-      (A.retryable_failure_kind_to_string observed.kind)
-  | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
-    Alcotest.fail "retryable judge failure consumed the candidate"
+  Alcotest.(check bool) "Terminal_failed replay is idempotent" true (replayed = terminalized)
+;;
+
+let test_retry_budget_exhaustion_terminalizes () =
+  with_temp_base "keeper-board-attention-budget" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let now_ref = ref 1000.0 in
+  let now () = !now_ref in
+  let retryable () =
+    A.Judge_retryable
+      { failure = { kind = A.Provider_unavailable; detail = "still failing"; failed_at = !now_ref }
+      ; retry_after = None
+      }
+  in
+  let step current =
+    match
+      A.process_with_judge ~base_path ~now ~policy:test_policy ~judge:(fun _ -> Error (retryable ())) current
+    with
+    | Ok updated -> updated
+    | Error detail -> Alcotest.failf "budget-exhaustion transition failed: %s" detail
+  in
+  let after_first = step pending in
+  (match after_first.status with
+   | A.Deferred { retry = { attempts = 1; not_before }; _ } -> now_ref := not_before +. 0.001
+   | A.Deferred _ | A.Pending _ | A.Judged _ | A.Consumed _ | A.Terminal_failed _ ->
+     Alcotest.fail "first retryable failure did not defer with attempts=1");
+  let after_second = step after_first in
+  (match after_second.status with
+   | A.Deferred { retry = { attempts = 2; not_before }; _ } -> now_ref := not_before +. 0.001
+   | A.Deferred _ | A.Pending _ | A.Judged _ | A.Consumed _ | A.Terminal_failed _ ->
+     Alcotest.fail "second retryable failure did not defer with attempts=2");
+  let after_third = step after_second in
+  match after_third.status with
+  | A.Terminal_failed { reason = A.Retry_budget_exhausted { attempts = 3; _ }; _ } -> ()
+  | A.Terminal_failed _ | A.Pending _ | A.Judged _ | A.Deferred _ | A.Consumed _ ->
+    Alcotest.fail "third retryable failure did not exhaust the retry budget"
 ;;
 
 let test_not_relevant_transitions_directly_to_consumed () =
   with_temp_base "keeper-board-attention-not-relevant" @@ fun base_path ->
   let pending = record_or_fail ~base_path (candidate ()) in
+  let now () = 1000.0 in
   let current =
     match
       A.process_with_judge
         ~base_path
+        ~now
+        ~policy:test_policy
         ~judge:(fun _ -> Ok (judgment J.Not_relevant))
         pending
     with
@@ -220,7 +562,7 @@ let test_not_relevant_transitions_directly_to_consumed () =
   in
   (match current.status with
    | A.Consumed { delivery = A.Not_relevant; _ } -> ()
-   | A.Consumed _ | A.Pending _ | A.Judged _ ->
+   | A.Consumed _ | A.Pending _ | A.Judged _ | A.Deferred _ | A.Terminal_failed _ ->
      Alcotest.fail "not-relevant verdict did not reach Consumed");
   let queue =
     Keeper_event_queue_persistence.load
@@ -236,10 +578,13 @@ let test_not_relevant_transitions_directly_to_consumed () =
 let test_relevant_consumes_only_after_exact_durable_enqueue () =
   with_temp_base "keeper-board-attention-relevant" @@ fun base_path ->
   let pending = record_or_fail ~base_path (candidate ()) in
+  let now () = 1000.0 in
   let current =
     match
       A.process_with_judge
         ~base_path
+        ~now
+        ~policy:test_policy
         ~judge:(fun _ -> Ok (judgment J.Relevant))
         pending
     with
@@ -248,7 +593,7 @@ let test_relevant_consumes_only_after_exact_durable_enqueue () =
   in
   (match current.status with
    | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ } -> ()
-   | A.Consumed _ | A.Pending _ | A.Judged _ ->
+   | A.Consumed _ | A.Pending _ | A.Judged _ | A.Deferred _ | A.Terminal_failed _ ->
      Alcotest.fail "relevant verdict consumed before durable delivery");
   let queue =
     Keeper_event_queue_persistence.load
@@ -267,6 +612,8 @@ let test_relevant_consumes_only_after_exact_durable_enqueue () =
     match
       A.process_with_judge
         ~base_path
+        ~now
+        ~policy:test_policy
         ~judge:(fun _ -> Alcotest.fail "Consumed candidate invoked judge")
         current
     with
@@ -276,31 +623,71 @@ let test_relevant_consumes_only_after_exact_durable_enqueue () =
   Alcotest.(check bool) "Consumed replay is idempotent" true (replayed = current)
 ;;
 
-let test_delivery_storage_error_retains_judged_state () =
-  with_temp_base "keeper-board-attention-delivery-error" @@ fun base_path ->
+let test_delivery_failure_defers_and_retries_without_rejudge () =
+  with_temp_base "keeper-board-attention-delivery-defer" @@ fun base_path ->
   let pending = record_or_fail ~base_path (candidate ()) in
-  let keepers_path =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+  block_keepers_path base_path;
+  let now_ref = ref 1000.0 in
+  let now () = !now_ref in
+  let judge_calls = ref 0 in
+  let judge _ =
+    incr judge_calls;
+    Ok (judgment J.Relevant)
   in
-  let oc = open_out_bin keepers_path in
-  output_string oc "event queue directory blocker";
-  close_out oc;
-  let current =
+  let after_first =
+    match A.process_with_judge ~base_path ~now ~policy:test_policy ~judge pending with
+    | Ok candidate -> candidate
+    | Error detail -> Alcotest.failf "delivery-failure transition failed: %s" detail
+  in
+  Alcotest.(check int) "judge invoked exactly once before delivery failed" 1 !judge_calls;
+  let preserved_runtime_id =
+    match after_first.status with
+    | A.Deferred
+        { resume = A.Resume_delivery delivered_judgment
+        ; retry = { attempts = 1; not_before }
+        ; _
+        } ->
+      now_ref := not_before +. 0.001;
+      delivered_judgment.runtime_id
+    | A.Deferred _ | A.Pending _ | A.Judged _ | A.Consumed _ | A.Terminal_failed _ ->
+      Alcotest.fail "delivery failure did not defer with the judgment preserved"
+  in
+  unblock_keepers_path base_path;
+  let after_second =
     match
       A.process_with_judge
         ~base_path
-        ~judge:(fun _ -> Ok (judgment J.Relevant))
-        pending
+        ~now
+        ~policy:test_policy
+        ~judge:(fun _ -> Alcotest.fail "delivery retry re-invoked judge")
+        after_first
     with
     | Ok candidate -> candidate
-    | Error detail -> Alcotest.failf "delivery failure transition failed: %s" detail
+    | Error detail -> Alcotest.failf "delivery retry transition failed: %s" detail
   in
-  match current.status with
-  | A.Judged
-      { last_failure = Some { kind = A.Durable_delivery_unavailable; _ }; _ } ->
-    ()
-  | A.Judged _ | A.Pending _ | A.Consumed _ ->
-    Alcotest.fail "durable delivery storage error did not retain Judged"
+  match after_second.status with
+  | A.Consumed { judgment = delivered; delivery = A.Enqueued_to_keeper_lane; _ } ->
+    Alcotest.(check string) "same judgment delivered" preserved_runtime_id delivered.runtime_id
+  | A.Consumed _ | A.Pending _ | A.Judged _ | A.Deferred _ | A.Terminal_failed _ ->
+    Alcotest.fail "delivery retry did not consume once unblocked"
+;;
+
+let test_expired_backlog_terminalizes_without_judging () =
+  with_temp_base "keeper-board-attention-expired" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let now () = pending.recorded_at +. test_policy.max_pending_age_sec +. 1.0 in
+  match
+    A.process_with_judge
+      ~base_path
+      ~now
+      ~policy:test_policy
+      ~judge:(fun _ -> Alcotest.fail "judge invoked for expired backlog")
+      pending
+  with
+  | Ok { status = A.Terminal_failed { reason = A.Expired_backlog { max_age_s; _ }; _ }; _ } ->
+    Alcotest.(check (float 0.0001)) "expiry policy recorded" test_policy.max_pending_age_sec max_age_s
+  | Ok _ -> Alcotest.fail "stale backlog did not terminalize with Expired_backlog"
+  | Error detail -> Alcotest.failf "expiry transition failed: %s" detail
 ;;
 
 let test_malformed_ledger_is_explicit_and_not_overwritten () =
@@ -401,11 +788,84 @@ let test_update_ledger_compacts_to_distinct () =
          "latest failure wins after compaction"
          "provider unavailable 5"
          observed.detail
-     | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
+     | A.Pending { last_failure = None } | A.Judged _ | A.Deferred _
+     | A.Consumed _ | A.Terminal_failed _ ->
        Alcotest.fail "compaction dropped the latest pending failure")
   | Ok candidates ->
     Alcotest.failf "expected one compacted candidate, got %d" (List.length candidates)
   | Error detail -> Alcotest.failf "load after compaction failed: %s" detail
+;;
+
+let test_classify_judge_sdk_error_matches_provider_domain () =
+  let check_retryable label error =
+    match A.classify_judge_sdk_error error with
+    | A.Judge_retryable _ -> ()
+    | A.Judge_permanent _ -> Alcotest.failf "%s classified as permanent" label
+  in
+  let check_permanent label expected_class error =
+    match A.classify_judge_sdk_error error with
+    | A.Judge_permanent { class_; _ } ->
+      Alcotest.(check bool) (label ^ " permanent class") true (class_ = expected_class)
+    | A.Judge_retryable _ -> Alcotest.failf "%s classified as retryable" label
+  in
+  (* Provider errors with an explicit retry-after or no hint: retryable. *)
+  check_retryable
+    "rate_limited"
+    (Agent_sdk.Error.Api (Retry.RateLimited { retry_after = Some 5.0; message = "rate limited" }));
+  check_retryable "overloaded" (Agent_sdk.Error.Api (Retry.Overloaded { message = "overloaded" }));
+  check_retryable
+    "server_error"
+    (Agent_sdk.Error.Api (Retry.ServerError { status = 500; message = "server error" }));
+  check_retryable
+    "network_error"
+    (Agent_sdk.Error.Api
+       (NetworkError { message = "refused"; kind = Llm_provider.Http_client.Connection_refused }));
+  check_retryable
+    "provider_timeout"
+    (Agent_sdk.Error.Api (Timeout { message = "deadline"; phase = Some Llm_provider.Http_client.Wall_clock }));
+  check_retryable
+    "streaming_timeout"
+    (Agent_sdk.Error.Api
+       (Timeout { message = "no first token"; phase = Some Llm_provider.Http_client.First_token }));
+  (* Provider rejections that repeat identically without operator
+     intervention: permanent, with the exact class carried through. *)
+  check_permanent
+    "auth_error"
+    A.Auth
+    (Agent_sdk.Error.Api (Retry.AuthError { message = "bad credential" }));
+  check_permanent
+    "authorization_error"
+    A.Authorization
+    (Agent_sdk.Error.Api (Retry.AuthorizationError { message = "forbidden" }));
+  check_permanent
+    "payment_required"
+    A.Payment_required
+    (Agent_sdk.Error.Api (Retry.PaymentRequired { message = "quota exhausted" }));
+  check_permanent
+    "invalid_request"
+    A.Invalid_request
+    (Agent_sdk.Error.Api
+       (Retry.InvalidRequest { message = "bad shape"; reason = Retry.Unknown_invalid_request }));
+  check_permanent "not_found" A.Not_found (Agent_sdk.Error.Api (Retry.NotFound { message = "missing model" }));
+  check_permanent
+    "context_overflow"
+    A.Context_overflow
+    (Agent_sdk.Error.Api (ContextOverflow { message = "too large"; limit = Some 131072 }));
+  (* Non-provider SDK domains: environment/operator-fixable, retryable via the
+     same attempt budget rather than a permanent judge rejection. *)
+  check_retryable "internal" (Agent_sdk.Error.Internal "unclassified fault");
+  check_retryable
+    "missing_env_var"
+    (Agent_sdk.Error.Config (Agent_sdk.Error.MissingEnvVar { var_name = "OAS_KEY" }));
+  check_retryable
+    "mcp_init_failed"
+    (Agent_sdk.Error.Mcp (Agent_sdk.Error.InitializeFailed { detail = "mcp down" }));
+  check_retryable
+    "serialization"
+    (Agent_sdk.Error.Serialization (Agent_sdk.Error.JsonParseError { detail = "bad json" }));
+  check_retryable
+    "unrecognized_stop_reason"
+    (Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason { reason = "weird stop" }))
 ;;
 
 let () =
@@ -421,9 +881,53 @@ let () =
             `Quick
             test_record_dedupes_exact_candidate_identity
         ; Alcotest.test_case
-            "retryable judge failure remains Pending"
+            "legacy pending row loads unchanged"
             `Quick
-            test_retryable_judge_failure_remains_pending
+            test_legacy_pending_row_loads_unchanged
+        ; Alcotest.test_case
+            "deferred/judge strict roundtrip"
+            `Quick
+            test_deferred_judge_strict_roundtrip
+        ; Alcotest.test_case
+            "deferred/delivery strict roundtrip"
+            `Quick
+            test_deferred_delivery_strict_roundtrip
+        ; Alcotest.test_case
+            "terminal states strict roundtrip"
+            `Quick
+            test_terminal_states_strict_roundtrip
+        ; Alcotest.test_case
+            "deferred status rejects undeclared fields"
+            `Quick
+            test_deferred_exact_fields_rejects_extras
+        ; Alcotest.test_case
+            "terminal_failed status rejects undeclared fields"
+            `Quick
+            test_terminal_failed_exact_fields_rejects_extras
+        ; Alcotest.test_case
+            "provider retry-after hint sets the exact not_before"
+            `Quick
+            test_judge_retryable_with_provider_hint_honors_retry_after
+        ; Alcotest.test_case
+            "no-hint retryable failure backs off with a capped exponential"
+            `Quick
+            test_judge_retryable_backs_off_with_capped_exponential_growth
+        ; Alcotest.test_case
+            "Deferred row not yet due skips the judge call"
+            `Quick
+            test_deferred_before_not_before_skips_judge
+        ; Alcotest.test_case
+            "due Deferred row re-invokes the judge"
+            `Quick
+            test_due_deferred_reinvokes_judge
+        ; Alcotest.test_case
+            "permanent judge error terminalizes and absorbs replay"
+            `Quick
+            test_permanent_judge_error_terminalizes_and_absorbs
+        ; Alcotest.test_case
+            "retry budget exhaustion terminalizes"
+            `Quick
+            test_retry_budget_exhaustion_terminalizes
         ; Alcotest.test_case
             "not relevant transitions directly to Consumed"
             `Quick
@@ -433,9 +937,13 @@ let () =
             `Quick
             test_relevant_consumes_only_after_exact_durable_enqueue
         ; Alcotest.test_case
-            "delivery storage error retains Judged"
+            "delivery failure defers and retries without re-judging"
             `Quick
-            test_delivery_storage_error_retains_judged_state
+            test_delivery_failure_defers_and_retries_without_rejudge
+        ; Alcotest.test_case
+            "expired backlog terminalizes without judging"
+            `Quick
+            test_expired_backlog_terminalizes_without_judging
         ; Alcotest.test_case
             "malformed ledger is explicit and preserved"
             `Quick
@@ -448,6 +956,10 @@ let () =
             "update ledger compacts to distinct candidate count"
             `Quick
             test_update_ledger_compacts_to_distinct
+        ; Alcotest.test_case
+            "judge SDK error classifier is exhaustive over Error_domain"
+            `Quick
+            test_classify_judge_sdk_error_matches_provider_domain
         ] )
     ]
 ;;

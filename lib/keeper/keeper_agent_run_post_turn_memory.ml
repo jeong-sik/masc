@@ -28,99 +28,117 @@ let run
          meta.Keeper_meta_contract.name)
   in
   (* (1) deterministic write and (2) LLM librarian extraction run on this
-     keeper's memory lane (RFC-0257), detached from the turn lane. Both may
-     touch the keeper's memory stores; the lane's
-     per-keeper mutex serializes them. meta/config are immutable snapshots, so
-     using them after the turn returns does not race a later turn.
-     See RFC #3646 Section 3: Det/NonDet boundary. *)
-  let memory_series () =
-  (try
-     let notes_written =
-       Memory.append_from_tool_results
-         config
-         meta
-         ~turn
-         ~results:tool_results_snapshot
-     in
-     let kinds_written =
-       if notes_written > 0 then [ "long_term" ] else []
-     in
-     if notes_written > 0
-     then
-       Keeper_turn_telemetry.log_keeper_memory_write
-         ~keeper_name:meta.name
-         ~notes_written
-         ~kinds_written
-   with
-   | exn ->
-     Log.Keeper.error ~keeper_name:meta.name
-       "memory_write failed: %s"
-       (Printexc.to_string exn);
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string MemoryWriteFailures)
-       ~labels:[ "keeper", meta.name ]
-       ());
+     keeper's memory lane (RFC-0257), detached from the turn lane, as TWO
+     separate submissions rather than one bundled unit (masc#25052 P3).
+     Before this split, both lived in one closure sharing one
+     Keeper_memory_lane reservation: a librarian call stuck on provider
+     queue wait held that reservation (and the lane's per-keeper mutex) for
+     the whole wait, so a subsequent turn's deterministic write -- bundled
+     in the SAME unit -- could be dropped alongside a saturated librarian
+     attempt, even though the write itself never touches a provider. Split,
+     the deterministic write's own reservation is held only for its (fast,
+     file-only) duration, so provider latency on the librarian side can no
+     longer cause it to be dropped for saturation. Both units still share
+     the keeper's per-keeper mutex (RFC-0257's fairness boundary is
+     unchanged); meta/config are immutable snapshots, so using them after
+     the turn returns does not race a later turn. See RFC #3646 Section 3:
+     Det/NonDet boundary. *)
+  let det_write_series () =
+    (try
+       let notes_written =
+         Memory.append_from_tool_results
+           config
+           meta
+           ~turn
+           ~results:tool_results_snapshot
+       in
+       let kinds_written =
+         if notes_written > 0 then [ "long_term" ] else []
+       in
+       if notes_written > 0
+       then
+         Keeper_turn_telemetry.log_keeper_memory_write
+           ~keeper_name:meta.name
+           ~notes_written
+           ~kinds_written
+     with
+     | exn ->
+       Log.Keeper.error ~keeper_name:meta.name
+         "memory_write failed: %s"
+         (Printexc.to_string exn);
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string MemoryWriteFailures)
+         ~labels:[ "keeper", meta.name ]
+         ());
 
-  (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. *)
-  let librarian_input : Keeper_librarian.input =
-    { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-    ; generation
-    ; messages = librarian_messages
-    }
+    (* Advisory delegation request drafts: keep review artifact persistence on
+       the same bounded post-turn memory lane as draft-skill projection, not
+       on the decision-record append path. Deterministic (no provider call),
+       so it stays in this unit rather than the librarian one. *)
+    (try
+       match deliberation_execution with
+       | None -> ()
+       | Some execution -> (
+         match
+           Keeper_delegation_request_store.write_execution_result
+             ~base_path:config.base_path
+             ~requester:meta.name
+             execution
+         with
+         | Ok [] -> ()
+         | Ok stored ->
+           Log.Keeper.info ~keeper_name:meta.name
+             "delegation_requests wrote=%d dir=%s"
+             (List.length stored)
+             (Keeper_delegation_request_store.requests_dir
+                ~base_path:config.base_path)
+         | Error msg ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string DispatchEventFailures)
+             ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
+             ();
+           Log.Keeper.warn ~keeper_name:meta.name
+             "delegation_requests failed: %s"
+             msg)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string DispatchEventFailures)
+         ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
+         ();
+       Log.Keeper.warn ~keeper_name:meta.name
+         "delegation_requests failed: %s"
+         (Printexc.to_string exn))
   in
-  Keeper_librarian_runtime.run_best_effort
-    ~runtime_id
-    ~keeper_id:meta.name
-    librarian_input;
-
-  (* Advisory delegation request drafts: keep review artifact persistence on the
-     same bounded post-turn memory lane as draft-skill projection, not on the
-     decision-record append path. *)
-  (try
-     match deliberation_execution with
-     | None -> ()
-     | Some execution -> (
-       match
-         Keeper_delegation_request_store.write_execution_result
-           ~base_path:config.base_path
-           ~requester:meta.name
-           execution
-       with
-       | Ok [] -> ()
-       | Ok stored ->
-         Log.Keeper.info ~keeper_name:meta.name
-           "delegation_requests wrote=%d dir=%s"
-           (List.length stored)
-           (Keeper_delegation_request_store.requests_dir
-              ~base_path:config.base_path)
-       | Error msg ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string DispatchEventFailures)
-           ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
-           ();
-         Log.Keeper.warn ~keeper_name:meta.name
-           "delegation_requests failed: %s"
-           msg)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string DispatchEventFailures)
-       ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
-       ();
-     Log.Keeper.warn ~keeper_name:meta.name
-       "delegation_requests failed: %s"
-       (Printexc.to_string exn));
-
+  (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. Its
+     own lane unit, separate from [det_write_series] above. *)
+  let librarian_series () =
+    let librarian_input : Keeper_librarian.input =
+      { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      ; generation
+      ; messages = librarian_messages
+      }
+    in
+    Keeper_librarian_runtime.run_best_effort
+      ~runtime_id
+      ~keeper_id:meta.name
+      librarian_input
   in
-  (* RFC-0257: detach (1)-(2) onto the per-keeper memory lane. When the executor
-     switch is not initialized (tests, early startup) the lane runs them inline,
-     so no memory work is lost. *)
+  (* RFC-0257: detach onto the per-keeper memory lane. When the executor
+     switch is not initialized (tests, early startup) the lane runs units
+     inline, so no memory work is lost. *)
   let (_ : Keeper_memory_lane.outcome) =
     Keeper_memory_lane.submit
       ~base_path:config.base_path
       ~keeper_name:meta.name
-      memory_series
+      det_write_series
+  in
+  let (_ : Keeper_memory_lane.outcome) =
+    Keeper_memory_lane.submit
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+      librarian_series
   in
   (* Post-turn memory recall evidence is logged to decisions.jsonl. *)
   (try

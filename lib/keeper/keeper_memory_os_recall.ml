@@ -112,23 +112,100 @@ type render_result =
   ; failure_reason : unavailable_reason option
   }
 
+(* masc#25052 P1: selection budget. Before this, every current fact/episode
+   in the store was injected every turn -- no selection contract existed.
+   [select_most_recent ~budget ~key ~recency items] keeps the [budget] most
+   recent items (by [recency], descending) and returns them in their
+   ORIGINAL relative order (a stable filter over [items], not a reordering)
+   alongside the drop count, so turns that fit within budget see byte-for-
+   byte the same order they always did -- only the truncation CASE picks
+   which items survive, never how the survivors are arranged. [key] must be
+   a stable per-item identity (claim_identity for facts, "trace_id:gN" for
+   episodes) so membership after sorting can be checked without relying on
+   structural/physical equality. *)
+let select_most_recent ~budget ~key ~recency items =
+  let n = List.length items in
+  if n <= budget
+  then items, 0
+  else (
+    let kept_keys =
+      items
+      |> List.map (fun item -> item, recency item)
+      |> List.stable_sort (fun (_, a) (_, b) -> Float.compare b a)
+      |> List.filteri (fun i _ -> i < budget)
+      |> List.map (fun (item, _) -> key item)
+      |> Set_util.StringSet.of_list
+    in
+    let selected = List.filter (fun item -> Set_util.StringSet.mem (key item) kept_keys) items in
+    selected, n - budget)
+;;
+
+let episode_key (e : episode) = Printf.sprintf "%s:g%d" e.trace_id e.generation
+
+let log_truncation ~keeper_id ~kind ~metric ~store_count ~injected_count ~dropped ~budget =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string metric)
+    ~labels:[ "keeper", keeper_id ]
+    ~delta:(Float.of_int dropped)
+    ();
+  Log.Keeper.warn
+    "memory os recall truncated %s keeper=%s: store=%d injected=%d dropped=%d budget=%d"
+    kind
+    keeper_id
+    store_count
+    injected_count
+    dropped
+    budget
+;;
+
 let render_context_exn ~keeper_id ~now () =
-  let facts =
+  let all_facts =
     File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
       Keeper_memory_os_io.read_facts_all ~keeper_id
       |> List.filter (fact_is_current ~now))
   in
-  let n_facts_in_store = List.length facts in
-  let episodes =
+  (* Diagnostic: the TOTAL store size, independent of the selection budget
+     below -- this is what tells an operator "the store has grown past what
+     recall injects" rather than silently equalling whatever got selected. *)
+  let n_facts_in_store = List.length all_facts in
+  let all_episodes =
     Keeper_memory_os_io.read_episodes_all ~keeper_id
     |> List.filter (episode_is_current ~now)
   in
-  let injected_fact_keys = List.map (fun f -> claim_identity f) facts in
-  let injected_episode_keys =
-    List.map
-      (fun (e : episode) -> Printf.sprintf "%s:g%d" e.trace_id e.generation)
-      episodes
+  let max_facts = Keeper_config.keeper_memory_os_recall_max_facts () in
+  let max_episodes = Keeper_config.keeper_memory_os_recall_max_episodes () in
+  let facts, facts_dropped =
+    select_most_recent ~budget:max_facts ~key:claim_identity ~recency:reference_time all_facts
   in
+  let episodes, episodes_dropped =
+    select_most_recent
+      ~budget:max_episodes
+      ~key:episode_key
+      ~recency:(fun (e : episode) -> e.created_at)
+      all_episodes
+  in
+  if facts_dropped > 0
+  then
+    log_truncation
+      ~keeper_id
+      ~kind:"facts"
+      ~metric:Keeper_metrics.MemoryOsRecallFactsTruncated
+      ~store_count:n_facts_in_store
+      ~injected_count:(List.length facts)
+      ~dropped:facts_dropped
+      ~budget:max_facts;
+  if episodes_dropped > 0
+  then
+    log_truncation
+      ~keeper_id
+      ~kind:"episodes"
+      ~metric:Keeper_metrics.MemoryOsRecallEpisodesTruncated
+      ~store_count:(List.length all_episodes)
+      ~injected_count:(List.length episodes)
+      ~dropped:episodes_dropped
+      ~budget:max_episodes;
+  let injected_fact_keys = List.map (fun f -> claim_identity f) facts in
+  let injected_episode_keys = List.map episode_key episodes in
   let block, injected_fact_keys, injected_episode_keys, failure_reason =
     match facts, episodes with
     | [], [] -> "", [], [], None
@@ -144,6 +221,19 @@ let render_context_exn ~keeper_id ~now () =
          , []
          , Some Prompt_render_error ))
   in
+  let max_bytes = Keeper_config.keeper_memory_os_recall_max_bytes () in
+  if max_bytes > 0 && String.length block > max_bytes
+  then (
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MemoryOsRecallBytesOverBudget)
+      ~labels:[ "keeper", keeper_id ]
+      ();
+    Log.Keeper.warn
+      "memory os recall block over byte budget keeper=%s: bytes=%d budget=%d (not truncated; \
+       raise keeper.memory_os.recall.max_bytes or lower max_facts/max_episodes)"
+      keeper_id
+      (String.length block)
+      max_bytes);
   { block; injected_fact_keys; injected_episode_keys; n_facts_in_store; failure_reason }
 ;;
 

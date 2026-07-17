@@ -284,41 +284,52 @@ let empty_recall_quality_summary ~decode_error_records ~error =
   }
 ;;
 
+(* masc#25052: the ledger now writes v2 delta rows (only the keys that
+   changed since the keeper's previous row), so a raw [record] no longer
+   carries the full injected set on its own. [Keeper_recall_injection_ledger
+   .materialize] replays [payload] per keeper over this sample (already
+   chronological -- see [load_recall_quality_records] below) to reconstruct
+   it. This is exact whenever the sample includes a keeper's own genesis row,
+   which is far more likely now than under the old schema: v2 rows are only
+   written when the injected set actually changes, so a fixed-size recent
+   sample now spans much more of each keeper's real history. Legacy
+   (schema v1) rows replay to exactly their own list, so this is a
+   behavior-preserving generalization for any all-legacy sample (e.g. the
+   existing fixtures in test_server_dashboard_http_memory_subsystems.ml). *)
 let summarize_recall_quality ({ records; decode_error_records } : memory_quality_rows) =
   let initial = empty_recall_quality_summary ~decode_error_records ~error:None in
-  List.fold_left
-    (fun summary (record : Keeper_recall_injection_ledger.record) ->
-       let failure_counts =
-         match record.failure_reason with
-         | None -> summary.failure_counts
-         | Some reason ->
-           let reason =
-             Keeper_recall_injection_ledger.bounded_failure_reason_label reason
-           in
-           increment_count reason summary.failure_counts
-       in
-       let has_recall =
-         record.injected_fact_keys <> [] || record.injected_episode_keys <> []
-       in
-       let fact_counts, total_fact_injections =
-         List.fold_left
-           (fun (counts, total) key -> increment_count key counts, total + 1)
-           (summary.fact_counts, summary.total_fact_injections)
-           record.injected_fact_keys
-       in
-       { summary with
-         sampled_records = summary.sampled_records + 1
-       ; records_with_recall =
-           summary.records_with_recall + (if has_recall then 1 else 0)
-       ; failure_records =
-           summary.failure_records
-           + (if Option.is_some record.failure_reason then 1 else 0)
-       ; failure_counts
-       ; fact_counts
-       ; total_fact_injections
-       })
-    initial
-    records
+  records
+  |> Keeper_recall_injection_ledger.materialize
+  |> List.fold_left
+       (fun summary (m : Keeper_recall_injection_ledger.materialized) ->
+          let failure_counts =
+            match m.record.failure_reason with
+            | None -> summary.failure_counts
+            | Some reason ->
+              let reason =
+                Keeper_recall_injection_ledger.bounded_failure_reason_label reason
+              in
+              increment_count reason summary.failure_counts
+          in
+          let has_recall = m.fact_keys <> [] || m.episode_keys <> [] in
+          let fact_counts, total_fact_injections =
+            List.fold_left
+              (fun (counts, total) key -> increment_count key counts, total + 1)
+              (summary.fact_counts, summary.total_fact_injections)
+              m.fact_keys
+          in
+          { summary with
+            sampled_records = summary.sampled_records + 1
+          ; records_with_recall =
+              summary.records_with_recall + (if has_recall then 1 else 0)
+          ; failure_records =
+              summary.failure_records
+              + (if Option.is_some m.record.failure_reason then 1 else 0)
+          ; failure_counts
+          ; fact_counts
+          ; total_fact_injections
+          })
+       initial
 ;;
 
 let recall_quality_summary_json ~sample_limit ~top_key_limit summary =

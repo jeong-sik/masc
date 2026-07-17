@@ -96,7 +96,11 @@ let test_surfaces_bad_rows_and_uses_typed_outcome () =
   with_temp_masc_root (fun masc_root ->
     write_lines
       (Filename.concat masc_root "recall_injections/2026-06/27.jsonl")
-      [ {|{"keeper_id":"alpha","trace_id":"trace-1","turn":1,"injected_fact_keys":["a"],"injected_fact_key_count":7,"injected_episode_keys":[],"ts":1.0}|}
+      [ (* "injected_fact_key_count" here is deliberately unrelated to the
+           actual list length: this schema field is dead (masc#25052 —
+           no writer ever produced it) and is no longer read, so the
+           divergence below asserts it is now IGNORED rather than trusted. *)
+        {|{"keeper_id":"alpha","trace_id":"trace-1","turn":1,"injected_fact_keys":["a"],"injected_fact_key_count":7,"injected_episode_keys":[],"ts":1.0}|}
       ; {|{"keeper_id":"alpha","turn":2,"injected_fact_keys":[],"injected_episode_keys":[]}|}
       ; {|{"keeper_id":|}
       ];
@@ -113,7 +117,8 @@ let test_surfaces_bad_rows_and_uses_typed_outcome () =
     let report = Eval.evaluate ~masc_root in
     Alcotest.(check int) "recall records" 1 report.recall_records;
     Alcotest.(check int) "typed cancelled outcome" 1 report.outcome_cancelled;
-    Alcotest.(check int) "explicit injected count" 7 report.injected_fact_keys;
+    Alcotest.(check int) "count derived from actual list, not the dead override field" 1
+      report.injected_fact_keys;
     Alcotest.(check int) "malformed rows" 1 report.malformed_jsonl_rows;
     Alcotest.(check int) "invalid recall rows" 1 report.invalid_recall_rows;
     Alcotest.(check int) "invalid receipt rows" 1 report.invalid_receipt_rows;

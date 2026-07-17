@@ -141,6 +141,13 @@ val keeper_compact_max_tokens : unit -> int
 val keeper_compaction_cooldown_sec : unit -> int
 val keeper_compaction_policy_from_env : unit -> float * int * int
 
+(** Memory OS recall selection budget (masc#25052 P1). See the .ml for the
+    growth problem this bounds and the default-sizing rationale. *)
+val keeper_memory_os_recall_max_facts : unit -> int
+val keeper_memory_os_recall_max_episodes : unit -> int
+val keeper_memory_os_recall_max_bytes : unit -> int
+(** Observability-only threshold (see .ml); not itself an enforced drop. *)
+
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int

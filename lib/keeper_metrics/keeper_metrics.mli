@@ -185,6 +185,11 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
+  | MemoryOsRecallFactsTruncated
+  | MemoryOsRecallEpisodesTruncated
+  | MemoryOsRecallBytesOverBudget
+  | MemoryOsEpisodeRetentionPruned
+  | MemoryOsLibrarianRuntimeSlotBusy
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts

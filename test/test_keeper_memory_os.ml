@@ -3316,6 +3316,89 @@ let with_env name value f =
   Fun.protect ~finally:(fun () -> restore_env name old) f
 ;;
 
+(* masc#25052 P1: selection budget. Below budget, recall's behavior is
+   unchanged (asserted throughout the rest of this file, all of which use far
+   fewer than the 500-fact/500-episode default). This proves the truncation
+   case: over budget, only the most-recent-[last_verified_at] facts survive,
+   the drop is counted, and the dropped items are gone from the block. *)
+let test_recall_selection_budget_truncates_facts_by_recency () =
+  with_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS" "3" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "budget-truncation-keeper" in
+        let now = 1_000_000.0 in
+        (* last_verified_at strictly increases with i, so i=5 is most recent
+           and i=1 is oldest; with a budget of 3 only i=3,4,5 should survive. *)
+        List.iter
+          (fun i ->
+            let f =
+              { (fact_fixture ~now ()) with
+                Types.claim = Printf.sprintf "fact number %d" i
+              ; Types.claim_id = Some (Printf.sprintf "fact-%d" i)
+              ; Types.last_verified_at = Some (now -. (float_of_int (5 - i) *. 100.0))
+              }
+            in
+            Memory_io.append_fact ~keeper_id f)
+          [ 1; 2; 3; 4; 5 ];
+        let ctx = Recall.render_context ~keeper_id ~now () in
+        List.iter
+          (fun i ->
+            Alcotest.(check bool)
+              (Printf.sprintf "most recent fact %d survives the budget" i)
+              true
+              (contains (Printf.sprintf "fact number %d" i) ctx))
+          [ 3; 4; 5 ];
+        List.iter
+          (fun i ->
+            Alcotest.(check bool)
+              (Printf.sprintf "oldest fact %d is truncated" i)
+              false
+              (contains (Printf.sprintf "fact number %d" i) ctx))
+          [ 1; 2 ];
+        Alcotest.(check bool)
+          "truncation is counted (masc_keeper_memory_os_recall_facts_truncated_total)"
+          true
+          (Metrics.metric_value_or_zero
+             Keeper_metrics.(to_string MemoryOsRecallFactsTruncated)
+             ~labels:[ "keeper", keeper_id ]
+             ()
+           >= 2.0))))
+;;
+
+let test_recall_selection_budget_no_truncation_below_budget () =
+  with_env "MASC_KEEPER_MEMORY_OS_RECALL_MAX_FACTS" "3" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "budget-under-keeper" in
+        let now = 1_000_000.0 in
+        List.iter
+          (fun i ->
+            let f =
+              { (fact_fixture ~now ()) with
+                Types.claim = Printf.sprintf "under budget fact %d" i
+              ; Types.claim_id = Some (Printf.sprintf "under-fact-%d" i)
+              ; Types.last_verified_at = Some (now -. (float_of_int (3 - i) *. 100.0))
+              }
+            in
+            Memory_io.append_fact ~keeper_id f)
+          [ 1; 2; 3 ];
+        let ctx = Recall.render_context ~keeper_id ~now () in
+        List.iter
+          (fun i ->
+            Alcotest.(check bool)
+              (Printf.sprintf "fact %d present at exactly the budget" i)
+              true
+              (contains (Printf.sprintf "under budget fact %d" i) ctx))
+          [ 1; 2; 3 ];
+        Alcotest.(check (float 0.001))
+          "no truncation counted when store fits the budget"
+          0.0
+          (Metrics.metric_value_or_zero
+             Keeper_metrics.(to_string MemoryOsRecallFactsTruncated)
+             ~labels:[ "keeper", keeper_id ]
+             ()))))
+;;
+
 let test_librarian_provider_slot_gate_caps_at_capacity () =
   with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "1" (fun () ->
     with_eio (fun ~sw ~net:_ ~clock ->
@@ -3412,6 +3495,149 @@ let test_librarian_provider_slot_gate_is_per_keeper () =
         "different keeper runs despite capacity 1 held"
         (Some "ran")
         other_keeper;
+      Alcotest.(check (option (option string)))
+        "slot holder ran"
+        (Some (Some "ran"))
+        !first))
+;;
+
+(* masc#25052 P3: process-global per-runtime slot, additive to the
+   per-keeper slot above. Capacity comes from the loaded runtime binding's
+   [max-concurrent], not an env var. *)
+let memory_runtime_max_concurrent_1_toml =
+  {|
+[runtime]
+default = "p0.default"
+
+[providers.p0]
+protocol = "openai-compatible-http"
+endpoint = "https://p0.example/v1"
+
+[models.default]
+api-name = "default"
+max-context = 4096
+temperature = 1.0
+
+[p0.default]
+max-concurrent = 1
+|}
+;;
+
+let memory_runtime_two_max_concurrent_1_toml =
+  {|
+[runtime]
+default = "p0.default"
+
+[providers.p0]
+protocol = "openai-compatible-http"
+endpoint = "https://p0.example/v1"
+
+[models.default]
+api-name = "default"
+max-context = 4096
+temperature = 1.0
+
+[models.alt]
+api-name = "alt"
+max-context = 4096
+temperature = 1.0
+
+[p0.default]
+max-concurrent = 1
+
+[p0.alt]
+max-concurrent = 1
+|}
+;;
+
+let test_librarian_runtime_slot_gate_caps_at_declared_capacity () =
+  with_runtime_config_toml memory_runtime_max_concurrent_1_toml (fun () ->
+    with_eio (fun ~sw ~net:_ ~clock ->
+      (* [max-concurrent = 1] in the loaded binding: while one entrant holds
+         the runtime slot, a concurrent entrant for the SAME runtime_id
+         drops ([None]) instead of blocking. *)
+      let entered, resolve_entered = Eio.Promise.create () in
+      let release, resolve_release = Eio.Promise.create () in
+      let first = ref None in
+      Eio.Fiber.fork ~sw (fun () ->
+        first
+        := Some
+             (Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () ->
+                Eio.Promise.resolve resolve_entered ();
+                Eio.Promise.await release;
+                "ran")));
+      Eio.Promise.await entered;
+      let second =
+        Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () -> "ran")
+      in
+      Eio.Promise.resolve resolve_release ();
+      wait_for_ref ~clock "first runtime slot holder" first;
+      Alcotest.(check (option string))
+        "concurrent entrant drops at the runtime's declared capacity"
+        None
+        second;
+      Alcotest.(check (option (option string)))
+        "slot holder ran"
+        (Some (Some "ran"))
+        !first))
+;;
+
+let test_librarian_runtime_slot_gate_disabled_when_undeclared () =
+  (* [memory_runtime_resolution_toml]'s [p0.default] binding declares no
+     [max-concurrent] -> capacity 0 -> the gate is a no-op, both run. *)
+  with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
+    with_eio (fun ~sw ~net:_ ~clock ->
+      let entered, resolve_entered = Eio.Promise.create () in
+      let release, resolve_release = Eio.Promise.create () in
+      let first = ref None in
+      Eio.Fiber.fork ~sw (fun () ->
+        first
+        := Some
+             (Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () ->
+                Eio.Promise.resolve resolve_entered ();
+                Eio.Promise.await release;
+                "ran")));
+      Eio.Promise.await entered;
+      let second =
+        Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () -> "ran")
+      in
+      Eio.Promise.resolve resolve_release ();
+      wait_for_ref ~clock "first runtime slot holder" first;
+      Alcotest.(check (option string))
+        "no declared cap: concurrent entrant also ran"
+        (Some "ran")
+        second;
+      Alcotest.(check (option (option string)))
+        "slot holder ran"
+        (Some (Some "ran"))
+        !first))
+;;
+
+let test_librarian_runtime_slot_gate_is_per_runtime () =
+  with_runtime_config_toml memory_runtime_two_max_concurrent_1_toml (fun () ->
+    with_eio (fun ~sw ~net:_ ~clock ->
+      (* A slot held for runtime "p0.default" must not block runtime
+         "p0.alt", even though both declare the same capacity. *)
+      let entered, resolve_entered = Eio.Promise.create () in
+      let release, resolve_release = Eio.Promise.create () in
+      let first = ref None in
+      Eio.Fiber.fork ~sw (fun () ->
+        first
+        := Some
+             (Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () ->
+                Eio.Promise.resolve resolve_entered ();
+                Eio.Promise.await release;
+                "ran")));
+      Eio.Promise.await entered;
+      let other_runtime =
+        Librarian_runtime.with_runtime_slot ~runtime_id:"p0.alt" (fun () -> "ran")
+      in
+      Eio.Promise.resolve resolve_release ();
+      wait_for_ref ~clock "first runtime slot holder" first;
+      Alcotest.(check (option string))
+        "different runtime_id runs despite the other's capacity held"
+        (Some "ran")
+        other_runtime;
       Alcotest.(check (option (option string)))
         "slot holder ran"
         (Some (Some "ran"))
@@ -4736,6 +4962,14 @@ let () =
             "preserves repeated claim rows"
             `Quick
             test_recall_preserves_repeated_claims
+        ; Alcotest.test_case
+            "selection budget truncates by recency"
+            `Quick
+            test_recall_selection_budget_truncates_facts_by_recency
+        ; Alcotest.test_case
+            "selection budget is a no-op at or below budget"
+            `Quick
+            test_recall_selection_budget_no_truncation_below_budget
         ] )
     ; ( "retention"
       , [ Alcotest.test_case
@@ -4818,6 +5052,18 @@ let () =
             "provider slot gate isolates keepers (P0-4)"
             `Quick
             test_librarian_provider_slot_gate_is_per_keeper
+        ; Alcotest.test_case
+            "runtime slot gate caps at the declared max-concurrent"
+            `Quick
+            test_librarian_runtime_slot_gate_caps_at_declared_capacity
+        ; Alcotest.test_case
+            "runtime slot gate is a no-op when no max-concurrent is declared"
+            `Quick
+            test_librarian_runtime_slot_gate_disabled_when_undeclared
+        ; Alcotest.test_case
+            "runtime slot gate isolates runtimes"
+            `Quick
+            test_librarian_runtime_slot_gate_is_per_runtime
         ] )
     ; ( "rfc-0259 volatile"
       , [ Alcotest.test_case

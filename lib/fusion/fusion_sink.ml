@@ -300,12 +300,14 @@ let broadcast_run_status ~registry ~run_id =
 let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id :
     (unit, string) result =
+  let ( let* ) = Result.bind in
   (* A run started outside a connector conversation has no route; the wake then
      says so explicitly instead of inventing a destination. *)
-  let channel =
+  let* channel =
     match Fusion_wake_route.peek ~run_id with
-    | Some channel -> channel
-    | None -> Keeper_continuation_channel.unrouted "no originating connector"
+    | Some channel -> Ok channel
+    | None ->
+      Ok (Keeper_continuation_channel.unrouted "no originating connector")
   in
   let fusion_completion =
     Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id; channel }

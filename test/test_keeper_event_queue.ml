@@ -255,24 +255,22 @@ let () =
          ; channel = Keeper_continuation_channel.unrouted "test fixture"
          })
       "post-1");
-  (* Reply-route parity: the fusion wake serializes its originating channel,
-     and — like the sibling Connector_attention/Hitl_resolved rows — a legacy
-     Fusion_completed row persisted before the channel field existed replays as
-     [Unrouted] rather than failing the snapshot parse (a parse failure recovers
-     to an empty queue, dropping every co-resident stimulus). *)
+  (* Reply-route parity: every continuation-bearing wake serializes its exact
+     originating channel. A missing route is malformed durable state, not an
+     implicit [Unrouted] destination. *)
   (let routed : Keeper_event_queue.fusion_completion =
      { run_id = "fus-routed"
      ; ok = true
      ; resolved_answer = "answer"
      ; board_post_id = "post-9"
      ; channel =
-         Keeper_continuation_channel.Discord
-           { guild_id = None
-           ; channel_id = "chan-42"
-           ; parent_channel_id = None
-           ; thread_id = Some "th-1"
-           ; user_id = "u-7"
-           }
+         (Keeper_continuation_channel.discord
+            ~guild_id:None
+            ~channel_id:"chan-42"
+            ~parent_channel_id:None
+            ~thread_id:(Some "th-1")
+            ~user_id:"u-7"
+          |> Result.get_ok)
      }
    in
    let stim : Keeper_event_queue.stimulus =
@@ -292,8 +290,8 @@ let () =
         | _ -> false)
     | Ok _ -> assert false
     | Error e -> failwith e);
-   let missing_channel_json =
-     match stimulus_to_yojson stim with
+   let without_payload_channel stimulus =
+     match stimulus_to_yojson stimulus with
      | `Assoc fields ->
        `Assoc
          (List.map
@@ -312,20 +310,30 @@ let () =
             fields)
      | other -> other
    in
-   match stimulus_of_yojson missing_channel_json with
-   | Ok { payload = Fusion_completed fc; _ } ->
-     assert (
-       match fc.channel with
-       | Keeper_continuation_channel.Unrouted { reason } ->
-         String.equal reason "legacy: channel not captured"
-       | _ -> false)
-   | Ok _ -> failwith "legacy fusion row must decode as Fusion_completed"
-   | Error e ->
-     failwith
-       (Printf.sprintf
-          "legacy fusion row without a channel key must replay Unrouted, not \
-           fail closed: %s"
-          e));
+   List.iter
+     (fun (label, stimulus) ->
+        match stimulus_of_yojson (without_payload_channel stimulus) with
+        | Error _ -> ()
+        | Ok _ -> failwith (label ^ " without channel must fail explicitly"))
+     [ "fusion completion", stim
+     ; ( "connector attention"
+       , { stim with
+           post_id = "connector-route"
+         ; payload =
+             Connector_attention
+               { event_id = "connector-route"; channel = routed.channel }
+         } )
+     ; ( "HITL resolution"
+       , { stim with
+           post_id = "hitl:approval-route"
+         ; payload =
+             Hitl_resolved
+               { approval_id = "approval-route"
+               ; decision = Hitl_approved
+               ; channel = routed.channel
+               }
+         } )
+     ]);
   assert (
     String.equal
       (fusion_completion_post_id
@@ -1631,46 +1639,5 @@ let () =
           ~ready:(fun _ -> true)
       in
       assert (String.equal second.post_id "bootstrap"));
-
-  (* RFC-0320 backward compat: pre-W2 persisted stimuli have no [channel] in
-     their payload and must replay as [Unrouted], not fail — a restart
-     replaying a legacy wake queue must not break. Simulate by serializing a W2
-     stimulus then stripping the [channel] field before parsing back. *)
-  (let strip_channel json =
-     match json with
-     | `Assoc top ->
-       `Assoc
-         (List.map
-            (fun (k, v) ->
-              if String.equal k "payload" then
-                ( k
-                , match v with
-                  | `Assoc p ->
-                    `Assoc
-                      (List.filter (fun (pk, _) -> not (String.equal pk "channel")) p)
-                  | other -> other )
-              else (k, v))
-            top)
-     | other -> other
-   in
-   let hitl_stim =
-     { post_id = "p-legacy"
-     ; urgency = Immediate
-     ; arrived_at = 1.0
-     ; payload =
-         Hitl_resolved
-           { approval_id = "a"
-           ; decision = Hitl_approved
-           ; channel = Keeper_continuation_channel.unrouted "seed"
-           }
-     }
-   in
-   match stimulus_of_yojson (strip_channel (stimulus_to_yojson hitl_stim)) with
-   | Ok s ->
-     (match s.payload with
-      | Hitl_resolved r ->
-        assert (not (Keeper_continuation_channel.is_routable r.channel))
-      | _ -> assert false)
-   | Error _ -> assert false);
 
   print_endline "test_keeper_event_queue: all passed"

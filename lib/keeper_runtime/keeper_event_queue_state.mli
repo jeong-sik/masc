@@ -145,4 +145,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v2"]. *)
+(** ["keeper.event_queue.state.v3"]. *)

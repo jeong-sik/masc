@@ -147,10 +147,12 @@ let test_dedup_never_merges_distinct_origins () =
     (fun () ->
        let input = `Assoc [ "target", `String "same-action" ] in
        let dashboard_a =
-         Keeper_continuation_channel.Dashboard { thread_id = "thread-a" }
+         Keeper_continuation_channel.dashboard ~thread_id:"thread-a"
+         |> Result.get_ok
        in
        let dashboard_b =
-         Keeper_continuation_channel.Dashboard { thread_id = "thread-b" }
+         Keeper_continuation_channel.dashboard ~thread_id:"thread-b"
+         |> Result.get_ok
        in
        let first =
          submit_with_context
@@ -492,7 +494,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
       ]
   in
   let continuation_channel =
-    Keeper_continuation_channel.Dashboard { thread_id = "origin-thread" }
+    Keeper_continuation_channel.dashboard ~thread_id:"origin-thread"
+    |> Result.get_ok
   in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)

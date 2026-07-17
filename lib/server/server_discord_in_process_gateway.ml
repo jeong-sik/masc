@@ -648,13 +648,16 @@ let handle_ambient ?resolved_keeper_name ~base_dir
                Keeper_event_queue.Connector_attention
                  { event_id
                  ; channel =
-                     Keeper_continuation_channel.Discord
-                       { guild_id
-                       ; channel_id
-                       ; parent_channel_id
-                       ; thread_id
-                       ; user_id = author_id
-                       }
+                     (match
+                        Keeper_continuation_channel.discord
+                          ~guild_id
+                          ~channel_id
+                          ~parent_channel_id
+                          ~thread_id
+                          ~user_id:author_id
+                      with
+                      | Ok channel -> channel
+                      | Error message -> invalid_arg message)
                  }
            }
          in

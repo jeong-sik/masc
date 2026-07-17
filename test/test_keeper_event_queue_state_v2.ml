@@ -639,14 +639,12 @@ let write_queue path queue =
   |> require_ok ("write fixture " ^ path)
 ;;
 
-let read_schema path =
-  match Safe_ops.read_json_file_safe path with
-  | Error message -> Alcotest.failf "read migrated state: %s" message
-  | Ok (`Assoc fields) ->
-    (match List.assoc_opt "schema" fields with
-     | Some (`String schema) -> schema
-     | _ -> Alcotest.fail "migrated state lacks schema")
-  | Ok _ -> Alcotest.fail "migrated state is not an object"
+let write_state path state =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  State.to_yojson state
+  |> Yojson.Safe.pretty_to_string
+  |> Fs_compat.save_file_atomic path
+  |> require_ok ("write fixture " ^ path)
 ;;
 
 let test_context_compaction_retry_is_durable_and_lane_local () =
@@ -784,46 +782,32 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
     | _ -> Alcotest.fail "retained retry was not left pending after peer work claimed")
 ;;
 
-let test_legacy_pair_migrates_once () =
-  with_temp_dir "keeper-event-queue-v2-migration" (fun base_path ->
-    let keeper_name = "migration_keeper" in
+let test_unsupported_snapshots_fail_closed () =
+  with_temp_dir "keeper-event-queue-v3-hardcut" (fun base_path ->
+    let keeper_name = "hardcut_keeper" in
     let dir = keeper_dir ~base_path ~keeper_name in
     let primary = Filename.concat dir "event-queue.json" in
-    let legacy = Filename.concat dir "event-queue-inflight.json" in
-    write_queue primary (queue [ stimulus "pending" 1.0 ]);
-    write_queue legacy (queue [ stimulus "leased" 2.0 ]);
-    let state =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "migrate legacy pair"
-    in
-    Alcotest.(check string) "primary became v2" State.schema (read_schema primary);
-    Alcotest.(check bool) "legacy input removed" false (Sys.file_exists legacy);
-    Alcotest.(check (list string))
-      "legacy lease recovered before publication"
-      [ "leased"; "pending" ]
-      (post_ids (State.pending state));
-    Alcotest.(check int) "no abandoned lease survives migration" 0 (List.length (State.leases state));
-    Alcotest.(check int)
-      "migration recovery receipt retained"
-      1
-      (List.length (State.transition_outbox state));
-    write_queue legacy (queue [ stimulus "leased" 2.0 ]);
-    let resumed =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "resume completed migration cleanup"
-    in
-    Alcotest.(check (list string))
-      "crash residue does not duplicate migrated stimulus"
-      [ "leased"; "pending" ]
-      (post_ids (State.pending resumed));
+    let unsupported = Filename.concat dir "event-queue-inflight.json" in
+    write_state
+      primary
+      (State.with_pending (queue [ stimulus "pending" 1.0 ]) State.empty);
+    write_queue unsupported (queue [ stimulus "obsolete" 2.0 ]);
+    (match Persistence.load_state_result ~base_path ~keeper_name with
+     | Error message ->
+       Alcotest.(check bool)
+         "unsupported sidecar is named"
+         true
+         (String.starts_with ~prefix:"unsupported event queue sidecar remains" message)
+     | Ok _ -> Alcotest.fail "current state silently accepted unsupported sidecar");
     Alcotest.(check bool)
-      "verified crash residue removed"
-      false
-      (Sys.file_exists legacy);
-    write_queue legacy (queue [ stimulus "forbidden-residue" 3.0 ]);
+      "hard cut does not delete unsupported input"
+      true
+      (Sys.file_exists unsupported);
+    Sys.remove unsupported;
+    write_queue primary (queue [ stimulus "old-schema" 3.0 ]);
     (match Persistence.load_state_result ~base_path ~keeper_name with
      | Error _ -> ()
-     | Ok _ -> Alcotest.fail "v2 state silently accepted legacy residue"))
+     | Ok _ -> Alcotest.fail "old primary schema was migrated"))
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
@@ -1050,7 +1034,10 @@ let () =
             "context compaction retry is durable and lane-local"
             `Quick
             test_context_compaction_retry_is_durable_and_lane_local
-        ; Alcotest.test_case "legacy pair migration" `Quick test_legacy_pair_migrates_once
+        ; Alcotest.test_case
+            "unsupported snapshots fail closed"
+            `Quick
+            test_unsupported_snapshots_fail_closed
         ; Alcotest.test_case
             "transition outbox projection"
             `Quick

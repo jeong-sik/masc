@@ -540,13 +540,13 @@ let test_emit_success_projects_board_chat_and_registry () =
    time is consumed exactly once by the completion wake. Pure map semantics
    plus the registration edge inside [handle_with_runner]. *)
 let discord_channel =
-  Keeper_continuation_channel.Discord
-    { guild_id = Some "g-1"
-    ; channel_id = "chan-9"
-    ; parent_channel_id = None
-    ; thread_id = None
-    ; user_id = "user-3"
-    }
+  Keeper_continuation_channel.discord
+    ~guild_id:(Some "g-1")
+    ~channel_id:"chan-9"
+    ~parent_channel_id:None
+    ~thread_id:None
+    ~user_id:"user-3"
+  |> Result.get_ok
 ;;
 
 let test_wake_route_register_take_discard () =

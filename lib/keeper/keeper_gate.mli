@@ -85,8 +85,8 @@ val decide :
   decision
 
 (** Recover durable Auto Judge work for exactly one workspace. Each exact
-    [(base_path, keeper_name)] owner activates at most its oldest pending
-    judgment; completion drains only that owner's FIFO. Decisive persisted
+    [(base_path, keeper_name)] owner activates at most its lowest durable
+    approval sequence; completion drains only that owner's FIFO. Decisive persisted
     output is finalized without creating a worker. Failed judgments are never
     retried merely because a process restarted. Every recovery candidate id
     has an explicit started, finalized, skipped, or failed outcome. *)
@@ -116,3 +116,14 @@ val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
+
+module For_testing : sig
+  val ready_auto_judge_heads :
+    base_path:string ->
+    Keeper_approval_queue.pending_approval list ->
+    Keeper_approval_queue.pending_approval list
+
+  val claim_auto_judge : Keeper_approval_queue.pending_approval -> bool
+  val release_auto_judge : Keeper_approval_queue.pending_approval -> unit
+  val reset_active_auto_judges : unit -> unit
+end

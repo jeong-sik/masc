@@ -289,7 +289,6 @@ module Auto_judge_owner = struct
 end
 
 module Auto_judge_owners = Map.Make (Auto_judge_owner)
-module Auto_judge_owner_set = Set.Make (Auto_judge_owner)
 
 let auto_judge_owner (entry : Keeper_approval_queue.pending_approval) =
   entry.audit_base_path, entry.keeper_name
@@ -342,8 +341,7 @@ let compare_auto_judge_entries
       (left : Keeper_approval_queue.pending_approval)
       (right : Keeper_approval_queue.pending_approval)
   =
-  let by_time = Float.compare left.requested_at right.requested_at in
-  if by_time <> 0 then by_time else String.compare left.id right.id
+  Int.compare left.sequence right.sequence
 ;;
 
 let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
@@ -356,6 +354,23 @@ let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
         | None -> true)
     && auto_judge_entry_ready entry)
   |> List.sort compare_auto_judge_entries
+;;
+
+let ready_auto_judge_heads ~base_path entries =
+  entries
+  |> List.fold_left
+       (fun owners (entry : Keeper_approval_queue.pending_approval) ->
+          if not (String.equal entry.audit_base_path base_path)
+             || not (auto_judge_entry_ready entry)
+          then owners
+          else
+            let owner = auto_judge_owner entry in
+            match Auto_judge_owners.find_opt owner owners with
+            | Some current when compare_auto_judge_entries current entry <= 0 -> owners
+            | Some _ | None -> Auto_judge_owners.add owner entry owners)
+       Auto_judge_owners.empty
+  |> Auto_judge_owners.bindings
+  |> List.map snd
 ;;
 
 type auto_judge_drain_outcome =
@@ -563,27 +578,18 @@ and drain_auto_judges ~base_path =
     []
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) -> []
   | Ok Keeper_gate_mode.Auto_judge ->
-    let owners =
-      Keeper_approval_queue.list_pending_entries ()
-      |> List.fold_left
-           (fun owners (entry : Keeper_approval_queue.pending_approval) ->
-              if String.equal entry.audit_base_path base_path
-                 && auto_judge_entry_ready entry
-              then Auto_judge_owner_set.add (auto_judge_owner entry) owners
-              else owners)
-           Auto_judge_owner_set.empty
-    in
-    Auto_judge_owner_set.fold
-      (fun (_, keeper_name) started_ids ->
+    Keeper_approval_queue.list_pending_entries ()
+    |> ready_auto_judge_heads ~base_path
+    |> List.filter_map (fun (entry : Keeper_approval_queue.pending_approval) ->
          let outcome =
-           drain_auto_judge_owner_queue ~base_path ~keeper_name ()
+           drain_auto_judge_owner_queue
+             ~base_path
+             ~keeper_name:entry.keeper_name
+             ()
          in
          match outcome.started_id with
-         | Some id -> id :: started_ids
-         | None -> started_ids)
-      owners
-      []
-    |> List.rev
+         | Some id -> Some id
+         | None -> None)
 ;;
 
 type recovered_work =
@@ -921,3 +927,10 @@ let decide ?cycle_grant ~keeper_always_allow request =
       ();
     Unavailable reason
 ;;
+
+module For_testing = struct
+  let ready_auto_judge_heads = ready_auto_judge_heads
+  let claim_auto_judge = claim_auto_judge
+  let release_auto_judge = release_auto_judge
+  let reset_active_auto_judges () = Atomic.set active_auto_judges Auto_judge_owners.empty
+end

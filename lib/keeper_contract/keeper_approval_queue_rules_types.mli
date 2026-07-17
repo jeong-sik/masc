@@ -24,13 +24,15 @@ and summary_status =
   | Summary_available of hitl_context_summary
   | Summary_failed of { reason : string; retryable : bool }
 
-(** A pending request never owns or suspends a Keeper lane. *)
+(** A pending request never owns or suspends a Keeper lane. [sequence] is the
+    durable queue-issued order identity; [requested_at] is observation only. *)
 type pending_approval =
   { id : string
   ; keeper_name : string
   ; tool_name : string
   ; input_hash : string
   ; input : Yojson.Safe.t
+  ; sequence : int
   ; requested_at : float
   ; turn_id : int option
   ; request_context : Yojson.Safe.t option

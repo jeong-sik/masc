@@ -40,6 +40,17 @@ type in_flight_info =
 
 type autonomous_block =
   | Turn_busy of in_flight_info option
+  | Chat_backlog of
+      { pending_count : int
+      ; inflight_count : int
+      }
+    (** The slot mutex itself is free, but active [Keeper_chat_queue]
+        receipts exist for this keeper; the standard autonomous lane yields
+        so the chat consumer can drain them. Distinct from [Turn_busy None]
+        (a held slot whose holder has not yet published its info): before
+        this variant existed both cases logged as "holder info not yet
+        published", which mis-directed the #24865 diagnosis toward a stale
+        slot when the durable chat backlog was the actual fence. *)
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
 type rejection =
@@ -110,9 +121,10 @@ val run_if_free
     re-raise.
 
     Also returns [`Busy] without attempting the lock when a chat request is
-    already parked on this slot ([chat_waiting] is true), or when a busy
-    connector/dashboard receipt is active in [Keeper_chat_queue] for this
-    keeper (pending or inflight). Eio.Mutex hands a released slot
+    already parked on this slot ([chat_waiting] is true, reported as
+    [Turn_busy]), or when a busy connector/dashboard receipt is active in
+    [Keeper_chat_queue] for this keeper (pending or inflight, reported as
+    [Chat_backlog] with the exact counts). Eio.Mutex hands a released slot
     directly to the next parked waiter, so a new autonomous cycle would not
     overtake a queued chat regardless; these pre-checks make the yield
     explicit and keep a heartbeat-scheduled cycle from competing for a slot
@@ -124,6 +136,30 @@ val run_if_free
     deterministically. Queue persistence/read errors remain explicit typed
     failures at the Chat mutation/consumer boundary; because they are not
     queued work, they do not close this independent autonomous lane. *)
+
+val run_compaction_if_free
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> [ `Ran of 'a | `Busy of autonomous_block ]
+(** [run_if_free] for a cycle that carries a manual-compaction request
+    ([Keeper_manual_compaction]), differing in exactly one fence: it does
+    not yield to the [Keeper_chat_queue] backlog and therefore never
+    returns [`Busy (Chat_backlog _)].
+
+    The standard lane's backlog yield assumes the chat consumer can drain
+    the queue. When the keeper's context has overflowed its provider
+    window, chat delivery itself fails until compaction rewrites the
+    checkpoint — so yielding parks the remedy behind the very backlog it
+    is meant to unblock, a priority inversion that starved manual
+    compaction indefinitely (#24865: durable pending receipts fenced every
+    cycle across restarts while the slot mutex stayed free).
+
+    Everything else is unchanged from [run_if_free]: a durable shutdown
+    reservation still fences admission, a parked chat waiter still wins,
+    and a genuinely held slot still returns [`Busy (Turn_busy _)] — this
+    lane never interleaves with an in-flight turn, it only stops queueing
+    behind work that cannot progress. *)
 
 val chat_waiting : base_path:string -> keeper_name:string -> bool
 (** [true] when at least one chat request is parked on this keeper's slot

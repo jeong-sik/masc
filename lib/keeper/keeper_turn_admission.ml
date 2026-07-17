@@ -21,6 +21,10 @@ type in_flight_info =
 
 type autonomous_block =
   | Turn_busy of in_flight_info option
+  | Chat_backlog of
+      { pending_count : int
+      ; inflight_count : int
+      }
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
 type rejection =
@@ -215,7 +219,7 @@ let shutdown_rejection_snapshot slot operation_id =
     })
 ;;
 
-let run_if_free ~base_path ~keeper_name f =
+let admit_autonomous ~yield_to_chat_backlog ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   (* Yield to deferred work before touching the lock. [waiting > 0] implies
      the slot is held (a waiter only parks because a turn is in flight), so
@@ -223,32 +227,57 @@ let run_if_free ~base_path ~keeper_name f =
      autonomous lane from competing for a slot a parked chat is already
      queued on. A non-empty [Keeper_chat_queue] means a busy connector
      (Slack/Discord) or dashboard message is deferred for this keeper but
-     has not parked on the slot; the autonomous lane must yield for it too,
-     otherwise a long or back-to-back autonomous turn starves that queue
-     indefinitely (the busy-ACK loop). Reading the queue length is a
+     has not parked on the slot; the standard autonomous lane must yield for
+     it too, otherwise a long or back-to-back autonomous turn starves that
+     queue indefinitely (the busy-ACK loop). Reading the queue length is a
      lock-only, non-suspending peek and is the SSOT signal that closes the
      gap: the autonomous lane cooperates on the same backlog the consumer
      drains, so the consumer's [in_flight = None] window opens
      deterministically instead of racing the next autonomous cycle. A leased
      receipt remains active until its terminal decision commits, so the
      autonomous lane must also yield during the short lease-to-admission and
-     admission-to-finalization windows. *)
+     admission-to-finalization windows.
+
+     [yield_to_chat_backlog:false] (the manual-compaction lane) skips only
+     that queue peek: the backlog yield presumes the chat consumer can make
+     progress, and a context-overflowed keeper violates that premise — its
+     chat turns fail until compaction rewrites the checkpoint, so queueing
+     the compaction cycle behind the backlog inverts the priority and
+     starves both lanes (#24865). *)
   match peek_shutdown slot with
   | Some operation_id -> `Busy (Shutdown_requested operation_id)
   | None when waiting_count slot > 0 -> `Busy (Turn_busy (peek_info slot))
   | None ->
-    let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-    (* Queue persistence/read failures remain typed Chat-boundary failures.
-       They are not evidence of queued work and therefore cannot close an
-       otherwise independent autonomous lane. *)
-    if snapshot.pending <> [] || snapshot.inflight <> []
-    then `Busy (Turn_busy (peek_info slot))
-    else if Eio.Mutex.try_lock slot.turn_mu
-    then
-      match run_locked slot ~lane:Autonomous f with
-      | `Ran value -> `Ran value
-      | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id)
-    else `Busy (Turn_busy (peek_info slot))
+    let chat_backlog =
+      if yield_to_chat_backlog
+      then (
+        let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+        (* Queue persistence/read failures remain typed Chat-boundary
+           failures. They are not evidence of queued work and therefore
+           cannot close an otherwise independent autonomous lane. *)
+        match List.length snapshot.pending, List.length snapshot.inflight with
+        | 0, 0 -> None
+        | pending_count, inflight_count ->
+          Some (Chat_backlog { pending_count; inflight_count }))
+      else None
+    in
+    (match chat_backlog with
+     | Some block -> `Busy block
+     | None ->
+       if Eio.Mutex.try_lock slot.turn_mu
+       then (
+         match run_locked slot ~lane:Autonomous f with
+         | `Ran value -> `Ran value
+         | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id))
+       else `Busy (Turn_busy (peek_info slot)))
+;;
+
+let run_if_free ~base_path ~keeper_name f =
+  admit_autonomous ~yield_to_chat_backlog:true ~base_path ~keeper_name f
+;;
+
+let run_compaction_if_free ~base_path ~keeper_name f =
+  admit_autonomous ~yield_to_chat_backlog:false ~base_path ~keeper_name f
 ;;
 
 let run_serialized ~base_path ~keeper_name f =

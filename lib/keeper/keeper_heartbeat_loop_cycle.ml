@@ -348,8 +348,20 @@ let run_keeper_cycle
       ?manual_compaction_requested
       ()
   =
+  let admit =
+    (* #24865: a manual-compaction cycle is the remedy for the overflow that
+       wedges chat delivery. Admitting it through the standard lane parks it
+       behind the durable chat backlog it exists to unblock, so it takes the
+       compaction admission variant, which skips only that backlog yield.
+       [None] means the caller did not thread the flag, which
+       [run_keeper_cycle_admitted] also treats as [false]; both take the
+       standard lane. *)
+    match manual_compaction_requested with
+    | Some true -> Keeper_turn_admission.run_compaction_if_free
+    | Some false | None -> Keeper_turn_admission.run_if_free
+  in
   match
-    Keeper_turn_admission.run_if_free
+    admit
       ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_triage.name
       (run_keeper_cycle_admitted
@@ -367,6 +379,15 @@ let run_keeper_cycle
          ?continuation_delivery_channel)
   with
   | `Ran outcome -> outcome
+  | `Busy ((Keeper_turn_admission.Chat_backlog { pending_count; inflight_count }) as
+          block) ->
+    Log.Keeper.info
+      "%s: yielding autonomous cycle to chat backlog (pending=%d inflight=%d); \
+       skipping until next heartbeat"
+      meta_after_triage.name
+      pending_count
+      inflight_count;
+    Busy { meta = meta_after_triage; block }
   | `Busy ((Keeper_turn_admission.Shutdown_requested operation_id) as block) ->
     Log.Keeper.info
       "%s: autonomous turn admission closed by shutdown operation %s"

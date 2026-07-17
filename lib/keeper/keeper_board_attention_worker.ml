@@ -2,6 +2,15 @@
 
 module Candidate = Keeper_board_attention_candidate
 
+(* One item queued for a judge/delivery worker. Carries [base_path] alongside
+   the candidate because the shared worker pool's dispatcher scans every
+   known [(base_path, keeper_name)] pair, not just the one this process was
+   booted with — a worker must never assume its own boot [base_path]. *)
+type enqueued_work =
+  { base_path : string
+  ; candidate : Candidate.candidate
+  }
+
 (* ── Policy from config ────────────────────────────────────────── *)
 
 let policy () : Candidate.retry_policy =
@@ -27,6 +36,8 @@ let effective_max_concurrency () =
   in
   clamp_to_runtime_limit ~configured ~runtime_limit
 ;;
+
+let per_keeper_max () = Keeper_config.board_attention_per_keeper_max_concurrency ()
 
 (* ── Metrics ────────────────────────────────────────────────────── *)
 
@@ -79,15 +90,14 @@ let outcome_label (result : (Candidate.candidate, string) result) =
 module Dirty_set = Set.Make (String)
 
 (* '\031' (unit separator) cannot appear in a base_path or keeper name, so the
-   concatenation is a lossless, order-preserving key. Mirrors the pre-existing
-   [active_key] convention in the candidate module. *)
-let dirty_key ~base_path ~keeper_name = String.concat "\031" [ base_path; keeper_name ]
+   concatenation is a lossless, order-preserving key. *)
+let lane_key ~base_path ~keeper_name = String.concat "\031" [ base_path; keeper_name ]
 
 let key_parts key =
   match String.split_on_char '\031' key with
   | [ base_path; keeper_name ] -> base_path, keeper_name
   | _ ->
-    (* Keys are only ever produced by [dirty_key] above. *)
+    (* Keys are only ever produced by [lane_key] above. *)
     failwith (Printf.sprintf "Board attention dirty key %S is malformed" key)
 ;;
 
@@ -121,11 +131,16 @@ let rec swap_dirty () =
 let condition = Eio.Condition.create ()
 let wait_mutex = Eio.Mutex.create ()
 
+(* [notify]'s mutation must happen under [wait_mutex], matching the
+   dispatcher's check-then-await critical section in [run_dispatcher]:
+   see the comment there for why (lost-wakeup otherwise — broadcast is a
+   documented no-op when nobody is registered as a waiter yet). *)
 let notify ~base_path ~keeper_name =
-  let key = dirty_key ~base_path ~keeper_name in
-  atomic_add dirty_keepers key;
-  atomic_add known_keepers key;
-  Eio.Condition.broadcast condition
+  let key = lane_key ~base_path ~keeper_name in
+  Eio.Mutex.use_ro wait_mutex (fun () ->
+    atomic_add dirty_keepers key;
+    atomic_add known_keepers key;
+    Eio.Condition.broadcast condition)
 ;;
 
 let record_and_notify ~base_path candidate =
@@ -164,7 +179,39 @@ let rec release_active key =
   else release_active key
 ;;
 
-(* ── Dispatcher: bounded, boot-scanning, expiry-first eligibility scan ── *)
+(* ── Per-keeper in-flight reservation (lane fairness) ─────────────── *)
+
+(* Reserved at dispatch time (before the item is even pushed to the shared
+   stream), not at worker-take time: a queued-but-not-yet-started item still
+   occupies its keeper's lane budget. Reserving only at worker-take time would
+   let the dispatcher queue more than [per_keeper_max_concurrency] items for
+   one keeper across two passes before any of them is claimed. *)
+module Count_map = Map.Make (String)
+
+let per_keeper_in_flight = Atomic.make Count_map.empty
+
+let per_keeper_in_flight_count ~base_path ~keeper_name =
+  Count_map.find_opt (lane_key ~base_path ~keeper_name) (Atomic.get per_keeper_in_flight)
+  |> Option.value ~default:0
+;;
+
+let rec adjust_per_keeper_in_flight ~base_path ~keeper_name delta =
+  let key = lane_key ~base_path ~keeper_name in
+  let current = Atomic.get per_keeper_in_flight in
+  let current_count = Count_map.find_opt key current |> Option.value ~default:0 in
+  let updated_count = current_count + delta in
+  let updated =
+    if updated_count <= 0 then Count_map.remove key current else Count_map.add key updated_count current
+  in
+  if Atomic.compare_and_set per_keeper_in_flight current updated
+  then ()
+  else adjust_per_keeper_in_flight ~base_path ~keeper_name delta
+;;
+
+let reserve_per_keeper_slot ~base_path ~keeper_name = adjust_per_keeper_in_flight ~base_path ~keeper_name 1
+let release_per_keeper_slot ~base_path ~keeper_name = adjust_per_keeper_in_flight ~base_path ~keeper_name (-1)
+
+(* ── Dispatcher: bounded, boot-scanning, expiry-first, round-robin ── *)
 
 let board_attention_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "board_attention_candidates"
@@ -183,103 +230,184 @@ let boot_scan_keepers ~base_path =
         notify ~base_path ~keeper_name))
 ;;
 
-(* One (base_path, keeper_name) pass: expire stale backlog first (no worker
-   slot spent), enqueue everything else eligible (oldest-recorded-first), and
-   report the earliest still-pending [Deferred.not_before] so the dispatcher's
-   idle wait does not overshoot it. *)
-let scan_and_dispatch ~now ~policy ~stream ~base_path ~keeper_name =
-  match Candidate.load_candidates ~base_path ~keeper_name with
-  | Error detail ->
-    Log.Keeper.warn
-      "Board attention dispatcher could not load keeper=%s: %s"
-      keeper_name
-      detail;
+type keeper_queue =
+  { base_path : string
+  ; keeper_name : string
+  ; queue : Candidate.candidate list (* oldest-recorded-first, already filtered eligible *)
+  ; next_due : float (* earliest not-yet-due Deferred.not_before in this keeper's ledger, or infinity *)
+  }
+
+(* Expire stale backlog first (no worker slot spent on it), then compute the
+   eligible-and-due queue for one keeper. Exceptions here (e.g. a workspace
+   removed from underneath a stale keeper reference) must not propagate: one
+   keeper's ledger becoming unreadable must never stop the dispatcher from
+   scanning every *other* keeper. [Eio.Cancel.Cancelled] still propagates so a
+   genuine switch cancellation is not swallowed. *)
+let load_keeper_queue_safely ~now ~policy ~base_path ~keeper_name : keeper_queue option =
+  try
+    match Candidate.load_candidates ~base_path ~keeper_name with
+    | Error detail ->
+      Log.Keeper.warn "Board attention dispatcher could not load keeper=%s: %s" keeper_name detail;
+      None
+    | Ok candidates ->
+      let expired_count = ref 0 in
+      let eligible =
+        List.filter_map
+          (fun candidate ->
+             match Candidate.terminalize_expired ~base_path ~now ~policy candidate with
+             | Error detail ->
+               Log.Keeper.warn
+                 "Board attention expiry check failed keeper=%s candidate=%s: %s"
+                 keeper_name
+                 candidate.Candidate.candidate_id
+                 detail;
+               None
+             | Ok { Candidate.status = Candidate.Terminal_failed { reason = Candidate.Expired_backlog _; _ }; _ } ->
+               incr expired_count;
+               None
+             | Ok unchanged ->
+               if Candidate.is_eligible_for_dispatch ~now unchanged then Some unchanged else None)
+          candidates
+      in
+      if !expired_count > 0
+      then
+        Log.Keeper.warn
+          "Board attention dispatcher expired %d stale candidate(s) keeper=%s"
+          !expired_count
+          keeper_name;
+      let queue =
+        List.sort
+          (fun (a : Candidate.candidate) (b : Candidate.candidate) -> Float.compare a.recorded_at b.recorded_at)
+          eligible
+      in
+      let next_due =
+        List.fold_left
+          (fun acc (candidate : Candidate.candidate) ->
+             match candidate.status with
+             | Candidate.Deferred { retry; _ } -> Float.min acc retry.not_before
+             | Candidate.Pending _ | Candidate.Judged _ | Candidate.Consumed _ | Candidate.Terminal_failed _ ->
+               acc)
+          infinity
+          candidates
+      in
+      Some { base_path; keeper_name; queue; next_due }
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn "Board attention dispatcher could not scan keeper=%s: %s" keeper_name (Printexc.to_string exn);
     None
-  | Ok candidates ->
-    let expired_count = ref 0 in
-    let eligible =
-      List.filter_map
-        (fun candidate ->
-           match Candidate.terminalize_expired ~base_path ~now ~policy candidate with
-           | Error detail ->
-             Log.Keeper.warn
-               "Board attention expiry check failed keeper=%s candidate=%s: %s"
-               keeper_name
-               candidate.Candidate.candidate_id
-               detail;
-             None
-           | Ok { Candidate.status = Candidate.Terminal_failed { reason = Candidate.Expired_backlog _; _ }; _ } ->
-             incr expired_count;
-             None
-           | Ok unchanged ->
-             if Candidate.is_eligible_for_dispatch ~now unchanged then Some unchanged else None)
-        candidates
+;;
+
+(* Rotation cursor: the lane key most recently dispatched from, so a pass
+   that stops partway (stream full, or ran out of eligible work) resumes
+   fairly next time instead of always favoring the same starting keeper. *)
+let rotation_cursor : string option Atomic.t = Atomic.make None
+
+let rotate_from_cursor cursor (queues : keeper_queue list) =
+  match cursor with
+  | None -> queues
+  | Some last_key ->
+    let rec split acc = function
+      | [] -> None
+      | (q : keeper_queue) :: rest
+        when String.equal (lane_key ~base_path:q.base_path ~keeper_name:q.keeper_name) last_key ->
+        Some (List.rev acc, q, rest)
+      | q :: rest -> split (q :: acc) rest
     in
-    if !expired_count > 0
-    then
-      Log.Keeper.warn
-        "Board attention dispatcher expired %d stale candidate(s) keeper=%s"
-        !expired_count
-        keeper_name;
-    eligible
-    |> List.sort (fun (a : Candidate.candidate) (b : Candidate.candidate) ->
-      Float.compare a.recorded_at b.recorded_at)
-    |> List.iter (Eio.Stream.add stream);
-    List.fold_left
-      (fun acc (candidate : Candidate.candidate) ->
-         match candidate.status with
-         | Candidate.Deferred { retry; _ } -> Float.min acc retry.not_before
-         | Candidate.Pending _ | Candidate.Judged _ | Candidate.Consumed _
-         | Candidate.Terminal_failed _ -> acc)
-      infinity
-      candidates
-    |> Option.some
+    (match split [] queues with
+     | None ->
+       (* The keeper we last dispatched from has no entry this pass (e.g. its
+          queue drained, or it's no longer known); nothing to rotate around. *)
+       queues
+     | Some (before, matched, after) ->
+       (* Move the previously-served keeper to the back of the wheel rather
+          than dropping it: everyone else gets first crack this pass, but
+          [matched] still gets a turn if the pass has budget left over. With
+          exactly one known keeper, dropping it (the old bug) left [ordered]
+          permanently empty from the second pass onward — the single
+          keeper's own queue was rotated straight out of existence and
+          [round_robin_dispatch] never dispatched from it again. *)
+       after @ before @ [ matched ])
+;;
+
+(* Round-robin: take one item from the front of each keeper's queue in turn
+   (reserving that keeper's lane budget at the moment of dispatch, not at
+   worker-take time), moving a keeper to the back of the wheel after each
+   item it contributes and dropping it once its per-pass budget or its queue
+   is exhausted. This bounds any single keeper to at most
+   [per_keeper_max] items queued-or-in-flight at once, and guarantees every
+   other eligible keeper gets a turn before a large-backlog keeper gets a
+   second item in the same pass. Returns the last keeper dispatched from, for
+   the next pass's rotation cursor. *)
+let round_robin_dispatch ~stream ~per_keeper_max (queues : keeper_queue list) =
+  let last_dispatched = ref None in
+  let initial =
+    List.filter_map
+      (fun (q : keeper_queue) ->
+         let budget = per_keeper_max - per_keeper_in_flight_count ~base_path:q.base_path ~keeper_name:q.keeper_name in
+         if budget <= 0 || q.queue = [] then None else Some (q.base_path, q.keeper_name, q.queue, budget))
+      queues
+  in
+  let rec loop = function
+    | [] -> ()
+    | (_, _, [], _) :: rest -> loop rest
+    | (_, _, _, budget) :: rest when budget <= 0 -> loop rest
+    | (base_path, keeper_name, candidate :: remaining_queue, budget) :: rest ->
+      reserve_per_keeper_slot ~base_path ~keeper_name;
+      last_dispatched := Some (lane_key ~base_path ~keeper_name);
+      Eio.Stream.add stream { base_path; candidate };
+      let next_budget = budget - 1 in
+      if next_budget > 0 && remaining_queue <> []
+      then loop (rest @ [ base_path, keeper_name, remaining_queue, next_budget ])
+      else loop rest
+  in
+  loop initial;
+  !last_dispatched
 ;;
 
 let idle_poll_sec = 5.0
 
-(* [fork_daemon]-shaped: loops forever until the owning switch cancels it
-   (e.g. a test's bounded [Switch.run] scope closing, or process shutdown).
-   A plain [Fiber.fork] loop never returns on its own, so [Switch.run] would
-   wait for it forever even after its caller's work is done — [fork_daemon]
-   instead ties its lifetime to "all non-daemon fibers are done". *)
-(* One keeper's ledger becoming unreadable (workspace removed, permission
-   error, transient FS fault) must never stop the dispatcher from scanning
-   every *other* keeper — [Eio.Cancel.Cancelled] still propagates so a
-   genuine switch cancellation is not swallowed here. *)
-let scan_keeper_safely ~now ~policy ~stream ~base_path ~keeper_name =
-  try scan_and_dispatch ~now ~policy ~stream ~base_path ~keeper_name with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Keeper.warn
-      "Board attention dispatcher could not scan keeper=%s: %s"
-      keeper_name
-      (Printexc.to_string exn);
-    None
-;;
-
-let run_dispatcher ~clock ~policy ~stream () : [ `Stop_daemon ] =
+let run_dispatcher ~clock ~policy ~stream ~per_keeper_max () : [ `Stop_daemon ] =
   let rec drain () =
-    let fresh = swap_dirty () in
-    Dirty_set.iter (atomic_add known_keepers) fresh;
     let now = Time_compat.now () in
     let policy = policy () in
-    let next_due =
-      Dirty_set.fold
-        (fun key acc ->
+    let known = Dirty_set.elements (Atomic.get known_keepers) in
+    let queues =
+      List.filter_map
+        (fun key ->
            let base_path, keeper_name = key_parts key in
-           match scan_keeper_safely ~now ~policy ~stream ~base_path ~keeper_name with
-           | Some due -> Float.min acc due
-           | None -> acc)
-        (Atomic.get known_keepers)
-        infinity
+           load_keeper_queue_safely ~now ~policy ~base_path ~keeper_name)
+        known
     in
-    let sleep_for =
-      if Float.is_finite next_due then Float.max 0.0 (next_due -. now) else idle_poll_sec
-    in
-    Eio.Fiber.first
-      (fun () -> Eio.Mutex.use_ro wait_mutex (fun () -> Eio.Condition.await condition wait_mutex))
-      (fun () -> Eio.Time.sleep clock (Float.min sleep_for idle_poll_sec));
+    let ordered = rotate_from_cursor (Atomic.get rotation_cursor) queues in
+    (match round_robin_dispatch ~stream ~per_keeper_max:(per_keeper_max ()) ordered with
+     | Some last -> Atomic.set rotation_cursor (Some last)
+     | None -> ());
+    let next_due = List.fold_left (fun acc (q : keeper_queue) -> Float.min acc q.next_due) infinity queues in
+    let sleep_for = if Float.is_finite next_due then Float.max 0.0 (next_due -. now) else idle_poll_sec in
+    (* The dirty-set check and the decision to await must run under the same
+       [wait_mutex] critical section as [notify]'s mutation+broadcast.
+       Otherwise there is a window — a worker calls [notify] after we last
+       drained [dirty_keepers] but before we register as a waiter inside
+       [Condition.await] — in which the broadcast lands on nobody and is
+       silently dropped ([condition.mli]: "If no fibers are waiting, nothing
+       happens"). We then sleep for the full [idle_poll_sec] even though
+       there is already more eligible work sitting in a keeper's queue,
+       waiting only for a freed per-keeper slot. This didn't surface before
+       the per-keeper fairness pass split single-keeper backlogs across
+       multiple dispatch passes (previously one pass + the bounded stream's
+       own backpressure was enough to drain everything eligible in one go).
+       Consuming [dirty_keepers] here, atomically with the await decision,
+       closes the window: any signal recorded since our last check is
+       observed before we decide to sleep at all. *)
+    Eio.Mutex.use_ro wait_mutex (fun () ->
+      let fresh = swap_dirty () in
+      Dirty_set.iter (atomic_add known_keepers) fresh;
+      if Dirty_set.is_empty fresh
+      then
+        Eio.Fiber.first
+          (fun () -> Eio.Condition.await condition wait_mutex)
+          (fun () -> Eio.Time.sleep clock (Float.min sleep_for idle_poll_sec)));
     drain ()
   in
   try drain () with
@@ -310,14 +438,7 @@ let process_one ~base_path ~policy ~judge (enqueued : Candidate.candidate) =
      with
      | None -> ()
      | Some fresh ->
-       let result =
-         Candidate.process_with_judge
-           ~base_path
-           ~now:Time_compat.now
-           ~policy
-           ~judge
-           fresh
-       in
+       let result = Candidate.process_with_judge ~base_path ~now:Time_compat.now ~policy ~judge fresh in
        record_outcome (outcome_label result);
        (match result with
         | Ok _ -> ()
@@ -344,21 +465,26 @@ let process_one_safely ~base_path ~policy ~judge enqueued =
       (Printexc.to_string exn)
 ;;
 
-let run_worker ~base_path ~policy ~judge ~stream () : [ `Stop_daemon ] =
+let run_worker ~policy ~judge ~stream () : [ `Stop_daemon ] =
   let rec loop () =
-    let enqueued = Eio.Stream.take stream in
-    let key =
-      active_key ~base_path ~keeper_name:enqueued.Candidate.keeper_name
-        ~candidate_id:enqueued.Candidate.candidate_id
-    in
+    let { base_path; candidate = enqueued } = Eio.Stream.take stream in
+    let keeper_name = enqueued.Candidate.keeper_name in
+    let key = active_key ~base_path ~keeper_name ~candidate_id:enqueued.Candidate.candidate_id in
     if claim_active key
     then
       Fun.protect
-        ~finally:(fun () -> release_active key)
+        ~finally:(fun () ->
+          release_active key;
+          release_per_keeper_slot ~base_path ~keeper_name;
+          (* Freeing this lane's budget may let waiting work in the same
+             keeper proceed; nudge the dispatcher rather than waiting for the
+             next idle poll. *)
+          notify ~base_path ~keeper_name)
         (fun () ->
            inc_in_flight ();
            Fun.protect ~finally:dec_in_flight (fun () ->
-             process_one_safely ~base_path ~policy:(policy ()) ~judge enqueued));
+             process_one_safely ~base_path ~policy:(policy ()) ~judge enqueued))
+    else release_per_keeper_slot ~base_path ~keeper_name;
     loop ()
   in
   try loop () with
@@ -368,13 +494,13 @@ let run_worker ~base_path ~policy ~judge ~stream () : [ `Stop_daemon ] =
     `Stop_daemon
 ;;
 
-let start_dispatcher ~sw ~clock ~base_path ~max_concurrency ~judge () =
+let start_dispatcher ~sw ~clock ~base_path ~max_concurrency ~per_keeper_max ~judge () =
   boot_scan_keepers ~base_path;
-  let stream : Candidate.candidate Eio.Stream.t = Eio.Stream.create (max 1 max_concurrency) in
+  let stream : enqueued_work Eio.Stream.t = Eio.Stream.create (max 1 max_concurrency) in
   for _ = 1 to max 1 max_concurrency do
-    Eio.Fiber.fork_daemon ~sw (run_worker ~base_path ~policy ~judge ~stream)
+    Eio.Fiber.fork_daemon ~sw (run_worker ~policy ~judge ~stream)
   done;
-  Eio.Fiber.fork_daemon ~sw (run_dispatcher ~clock ~policy ~stream)
+  Eio.Fiber.fork_daemon ~sw (run_dispatcher ~clock ~policy ~stream ~per_keeper_max)
 ;;
 
 let start ~sw ~clock ~base_path () =
@@ -383,6 +509,7 @@ let start ~sw ~clock ~base_path () =
     ~clock
     ~base_path
     ~max_concurrency:(effective_max_concurrency ())
+    ~per_keeper_max
     ~judge:(Candidate.run_judge ~base_path)
     ()
 ;;
@@ -390,8 +517,17 @@ let start ~sw ~clock ~base_path () =
 module For_testing = struct
   let effective_max_concurrency = clamp_to_runtime_limit
   let in_flight_count = in_flight_count
+  let per_keeper_in_flight_count = per_keeper_in_flight_count
+  let is_dirty ~base_path ~keeper_name = Dirty_set.mem (lane_key ~base_path ~keeper_name) (Atomic.get dirty_keepers)
 
-  let start_with_judge ~sw ~clock ~base_path ~max_concurrency ~judge () =
-    start_dispatcher ~sw ~clock ~base_path ~max_concurrency ~judge ()
+  let start_with_judge ~sw ~clock ~base_path ~max_concurrency ~per_keeper_max_concurrency ~judge () =
+    start_dispatcher
+      ~sw
+      ~clock
+      ~base_path
+      ~max_concurrency
+      ~per_keeper_max:(fun () -> per_keeper_max_concurrency)
+      ~judge
+      ()
   ;;
 end

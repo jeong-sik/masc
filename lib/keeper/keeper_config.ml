@@ -278,6 +278,25 @@ let board_attention_max_concurrency_rp =
 let board_attention_max_concurrency () : int =
   Runtime_params.get board_attention_max_concurrency_rp
 
+(** Lane-isolation bound: at most this many Board attention judge/delivery
+    items in flight (queued-or-processing) per keeper at once, independent of
+    [board_attention_max_concurrency] (the process-wide sum bound). Live
+    ledgers are skewed across keepers (one keeper's backlog can be an order
+    of magnitude larger than another's); without this cap a round-robin
+    dispatcher still lets the large-backlog keeper occupy every shared
+    worker slot as soon as they free up, starving every other keeper's
+    turn. Default 1: one board-attention judge per keeper lane at a time is
+    isolation, not throughput — the shared judge pool's throughput is
+    already bounded by [board_attention_max_concurrency]. *)
+let board_attention_per_keeper_max_concurrency_rp =
+  _rp_int ~key:"keeper.board_attention.per_keeper_max_concurrency"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_ATTENTION_PER_KEEPER_MAX_CONCURRENCY"
+                          ~default:1 ~min_v:1 ~max_v:32)
+    ~min_v:1 ~max_v:32
+    ~description:"Board attention judge/delivery in-flight cap per keeper lane" ()
+let board_attention_per_keeper_max_concurrency () : int =
+  Runtime_params.get board_attention_per_keeper_max_concurrency_rp
+
 (** Base delay before the first retry of a failed judge or delivery attempt.
     Doubles per attempt up to [board_attention_retry_max_sec]. *)
 let board_attention_retry_base_sec_rp =
@@ -335,6 +354,7 @@ let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get hitl_summary_temperature_rp in
   let (_ : int) = Runtime_params.get hitl_summary_max_concurrency_rp in
   let (_ : int) = Runtime_params.get board_attention_max_concurrency_rp in
+  let (_ : int) = Runtime_params.get board_attention_per_keeper_max_concurrency_rp in
   let (_ : float) = Runtime_params.get board_attention_retry_base_sec_rp in
   let (_ : float) = Runtime_params.get board_attention_retry_max_sec_rp in
   let (_ : int) = Runtime_params.get board_attention_max_attempts_rp in

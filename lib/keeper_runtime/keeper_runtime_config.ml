@@ -56,6 +56,7 @@ let key_to_env =
     "memory.llm_summary",               "MASC_KEEPER_MEMORY_LLM_SUMMARY";
     (* [board_attention] *)
     "board_attention.max_concurrency",     "MASC_KEEPER_BOARD_ATTENTION_MAX_CONCURRENCY";
+    "board_attention.per_keeper_max_concurrency", "MASC_KEEPER_BOARD_ATTENTION_PER_KEEPER_MAX_CONCURRENCY";
     "board_attention.retry_base_sec",      "MASC_KEEPER_BOARD_ATTENTION_RETRY_BASE_SEC";
     "board_attention.retry_max_sec",       "MASC_KEEPER_BOARD_ATTENTION_RETRY_MAX_SEC";
     "board_attention.max_attempts",        "MASC_KEEPER_BOARD_ATTENTION_MAX_ATTEMPTS";

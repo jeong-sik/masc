@@ -185,7 +185,7 @@ let test_boot_scan_expires_stale_rows_and_drains_fresh_rows_bounded () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  Worker.For_testing.start_with_judge ~sw ~clock ~base_path ~max_concurrency:2 ~judge ();
+  Worker.For_testing.start_with_judge ~sw ~clock ~base_path ~max_concurrency:2 ~per_keeper_max_concurrency:2 ~judge ();
   poll_until ~clock ~timeout_s:5.0 "boot backlog fully drained" (fun () ->
     let loaded = load_only ~base_path ~keeper_name in
     List.for_all
@@ -236,7 +236,7 @@ let test_storm_bounded_concurrency_each_candidate_judged_once () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  Worker.For_testing.start_with_judge ~sw ~clock ~base_path ~max_concurrency:4 ~judge ();
+  Worker.For_testing.start_with_judge ~sw ~clock ~base_path ~max_concurrency:4 ~per_keeper_max_concurrency:4 ~judge ();
   List.iter
     (fun c ->
        match Worker.record_and_notify ~base_path c with
@@ -278,7 +278,7 @@ let test_deferred_candidates_do_not_rejudge_before_due () =
   in
   Eio.Switch.run
   @@ fun sw ->
-  Worker.For_testing.start_with_judge ~sw ~clock ~base_path ~max_concurrency:2 ~judge ();
+  Worker.For_testing.start_with_judge ~sw ~clock ~base_path ~max_concurrency:2 ~per_keeper_max_concurrency:2 ~judge ();
   (match Worker.record_and_notify ~base_path fixture with
    | Ok _ -> ()
    | Error detail -> Alcotest.failf "record_and_notify failed: %s" detail);
@@ -302,7 +302,7 @@ let test_notify_from_domain_spawn_neither_raises_nor_loses_work () =
   let judge (_ : Candidate.candidate) = Ok (judgment Judgment.Not_relevant) in
   Eio.Switch.run
   @@ fun sw ->
-  Worker.For_testing.start_with_judge ~sw ~clock ~base_path ~max_concurrency:2 ~judge ();
+  Worker.For_testing.start_with_judge ~sw ~clock ~base_path ~max_concurrency:2 ~per_keeper_max_concurrency:2 ~judge ();
   (match Candidate.record ~base_path fixture with
    | Candidate.Recorded _ -> ()
    | Candidate.Duplicate _ | Candidate.Record_error _ -> Alcotest.fail "fixture record failed");
@@ -316,6 +316,86 @@ let test_notify_from_domain_spawn_neither_raises_nor_loses_work () =
     match find_by_id (load_only ~base_path ~keeper_name) fixture.candidate_id with
     | Some { status = Candidate.Consumed { delivery = Candidate.Not_relevant; _ }; _ } -> true
     | _ -> false)
+;;
+
+(* SPEC AMENDMENT (per-keeper lane fairness): a skewed live ledger (one
+   keeper's backlog an order of magnitude larger than another's) means a
+   fairness-blind dispatcher lets the large-backlog keeper starve every
+   other keeper's turn at the shared judge pool. With
+   per_keeper_max_concurrency=1 and max_concurrency=4, keeper A's 50-item
+   backlog must never occupy more than 1 in-flight slot, and keepers B/C
+   (2 items each) must complete quickly rather than waiting behind A's
+   full backlog. *)
+let test_per_keeper_fairness_prevents_starvation () =
+  with_temp_base "board-attention-worker-fairness" @@ fun base_path ->
+  with_root_eio_context @@ fun _env clock ->
+  let keeper_a = "fair-a" in
+  let keeper_b = "fair-b" in
+  let keeper_c = "fair-c" in
+  let candidates_a =
+    List.init 50 (fun i ->
+      candidate ~keeper_name:keeper_a ~post_id:(Printf.sprintf "a-post-%d" i) ~recorded_at:(Time_compat.now ()))
+  in
+  let candidates_b =
+    List.init 2 (fun i ->
+      candidate ~keeper_name:keeper_b ~post_id:(Printf.sprintf "b-post-%d" i) ~recorded_at:(Time_compat.now ()))
+  in
+  let candidates_c =
+    List.init 2 (fun i ->
+      candidate ~keeper_name:keeper_c ~post_id:(Printf.sprintf "c-post-%d" i) ~recorded_at:(Time_compat.now ()))
+  in
+  let judge_sequence = ref 0 in
+  let a_in_flight = ref 0 in
+  let a_max_in_flight = ref 0 in
+  let bc_sequence_numbers = ref [] in
+  let judge (c : Candidate.candidate) =
+    incr judge_sequence;
+    let this_sequence = !judge_sequence in
+    if String.equal c.keeper_name keeper_a
+    then (
+      incr a_in_flight;
+      if !a_in_flight > !a_max_in_flight then a_max_in_flight := !a_in_flight)
+    else bc_sequence_numbers := this_sequence :: !bc_sequence_numbers;
+    Eio.Time.sleep clock 0.01;
+    if String.equal c.keeper_name keeper_a then decr a_in_flight;
+    Ok (judgment Judgment.Not_relevant)
+  in
+  let all_consumed keeper_name =
+    load_only ~base_path ~keeper_name
+    |> List.for_all (fun (c : Candidate.candidate) ->
+      match c.status with
+      | Candidate.Consumed _ -> true
+      | Candidate.Pending _ | Candidate.Judged _ | Candidate.Deferred _ | Candidate.Terminal_failed _ -> false)
+  in
+  Eio.Switch.run
+  @@ fun sw ->
+  Worker.For_testing.start_with_judge
+    ~sw
+    ~clock
+    ~base_path
+    ~max_concurrency:4
+    ~per_keeper_max_concurrency:1
+    ~judge
+    ();
+  List.iter
+    (fun c ->
+       match Worker.record_and_notify ~base_path c with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.failf "record_and_notify failed: %s" detail)
+    (candidates_a @ candidates_b @ candidates_c);
+  poll_until ~clock ~timeout_s:10.0 "keepers B and C fully drained" (fun () ->
+    all_consumed keeper_b && all_consumed keeper_c);
+  Alcotest.(check bool)
+    "keeper A's per-keeper cap of 1 was never exceeded"
+    true
+    (!a_max_in_flight <= 1);
+  let worst_bc_sequence = List.fold_left max 0 !bc_sequence_numbers in
+  Alcotest.(check bool)
+    (Printf.sprintf
+       "keepers B and C were not starved behind A's 50-item backlog (worst judge sequence number = %d, expected well under A's 50)"
+       worst_bc_sequence)
+    true
+    (worst_bc_sequence <= 12)
 ;;
 
 let () =
@@ -342,6 +422,10 @@ let () =
             "notify from Domain.spawn neither raises nor loses work"
             `Quick
             test_notify_from_domain_spawn_neither_raises_nor_loses_work
+        ; Alcotest.test_case
+            "per-keeper lane fairness prevents starvation"
+            `Quick
+            test_per_keeper_fairness_prevents_starvation
         ] )
     ]
 ;;

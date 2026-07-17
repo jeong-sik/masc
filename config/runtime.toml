@@ -1015,9 +1015,15 @@ trigger_policy = "mention_or_thread"
 # Runtime_params 키의 부팅 시 env seed이며, 런타임 중에는 operator 대시보드에서
 # 개별 override 가능하다(Runtime_params.set_by_key).
 [board_attention]
-# 동시 judge/delivery 호출 상한. hitl_summary_max_concurrency와 동일하게
-# 같은 계열의 공유 엔드포인트를 보호하는 보수적 기본값.
+# 동시 judge/delivery 호출 상한(K, 프로세스 전역 합산 bound). hitl_summary_max_concurrency와
+# 동일하게 같은 계열의 공유 엔드포인트를 보호하는 보수적 기본값.
 max_concurrency = 2
+# 키퍼 레인(lane) 격리 bound — K와 독립적인 별개 knob. 실사용 ledger는 키퍼 간
+# 편차가 크므로(예: 한 키퍼 505건 vs 다른 키퍼 188건 eligible), 이 상한이 없으면
+# 라운드로빈 디스패치라도 backlog가 큰 키퍼가 여유 워커 슬롯을 계속 선점해
+# 다른 키퍼를 굶길 수 있다. 기본 1 = 키퍼당 동시 1건, 순수 격리 목적이며
+# 처리량은 max_concurrency(K)가 별도로 상한한다.
+per_keeper_max_concurrency = 1
 # 실패 1회당 대기(초). 시도마다 2배씩 증가해 retry_max_sec에서 상한.
 retry_base_sec = 30.0
 retry_max_sec = 1800.0

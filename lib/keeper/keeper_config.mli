@@ -158,6 +158,7 @@ val hitl_summary_max_concurrency : unit -> int
 (** {2 Board Attention Worker Policy} *)
 
 val board_attention_max_concurrency : unit -> int
+val board_attention_per_keeper_max_concurrency : unit -> int
 val board_attention_retry_base_sec : unit -> float
 val board_attention_retry_max_sec : unit -> float
 val board_attention_max_attempts : unit -> int

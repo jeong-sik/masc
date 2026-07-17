@@ -192,6 +192,57 @@ let test_exact_pair_repair_accounting () =
       (Keeper_compaction_evidence.decode_error_to_string error)
 ;;
 
+let test_legacy_pair_repair_migration () =
+  let open Keeper_compaction_evidence in
+  let restore json =
+    of_json ~selected_runtime_id:evidence.selected_runtime_id json
+  in
+  (match restore (remove "pair_repair_dropped_message_count" canonical) with
+   | Ok restored ->
+     Alcotest.(check int)
+       "zero pair-repair count derived"
+       0
+       restored.pair_repair_dropped_message_count
+   | Error error ->
+     Alcotest.failf
+       "legacy zero pair-repair evidence rejected: %s"
+       (decode_error_to_string error));
+  let with_pair_repair =
+    canonical
+    |> replace "after_message_count" (`Int 4)
+    |> remove "pair_repair_dropped_message_count"
+  in
+  (match restore with_pair_repair with
+   | Ok restored ->
+     Alcotest.(check int)
+       "non-zero pair-repair count derived"
+       2
+       restored.pair_repair_dropped_message_count
+   | Error error ->
+     Alcotest.failf
+       "legacy non-zero pair-repair evidence rejected: %s"
+       (decode_error_to_string error));
+  let impossible =
+    canonical
+    |> replace "after_message_count" (`Int 7)
+    |> remove "pair_repair_dropped_message_count"
+  in
+  match restore impossible with
+  | Error
+      (Legacy_message_accounting_not_derivable
+        { before_message_count = 12
+        ; after_message_count = 7
+        ; summarized_message_count = 6
+        ; dropped_message_count = 1
+        }) ->
+    ()
+  | Error error ->
+    Alcotest.failf
+      "unexpected legacy migration rejection: %s"
+      (decode_error_to_string error)
+  | Ok _ -> Alcotest.fail "impossible legacy evidence decoded"
+;;
+
 let () =
   Alcotest.run
     "keeper compaction evidence"
@@ -205,5 +256,9 @@ let () =
             "exact pair-repair accounting"
             `Quick
             test_exact_pair_repair_accounting
+        ; Alcotest.test_case
+            "legacy pair-repair migration"
+            `Quick
+            test_legacy_pair_repair_migration
         ] )
     ]

@@ -19,7 +19,12 @@ type compaction_decision =
   | Not_requested
   | Skipped_no_checkpoint
 
+val compaction_rejection_to_tag : compaction_rejection -> string
+(** Stable categorical tag without instance-specific evidence detail. *)
+
 val compaction_rejection_to_string : compaction_rejection -> string
+(** Diagnostic detail. Unlike {!compaction_rejection_to_tag}, this may include
+    the rejected evidence values. *)
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_prepared : compaction_decision -> bool
 val compaction_decision_applied : compaction_decision -> bool

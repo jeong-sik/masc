@@ -32,6 +32,21 @@ let test_prepared_becomes_applied_only_after_save () =
     check string "saved checkpoint returned" "durable-checkpoint" checkpoint
   | Ok _ -> fail "successful checkpoint save did not produce Applied Manual"
 
+let test_compaction_rejection_tag_is_stable () =
+  let error =
+    Post_turn.Compaction_rejected
+      (Compact_policy.Invalid_structural_evidence
+         Keeper_compaction_evidence.No_messages_compacted)
+  in
+  check string
+    "categorical tag excludes evidence detail"
+    "invalid_structural_evidence"
+    (Post_turn.compaction_recovery_error_to_tag error);
+  check string
+    "diagnostic detail remains observable"
+    "compaction rejected: invalid_structural_evidence:no_messages_compacted"
+    (Post_turn.compaction_recovery_error_to_string error)
+
 let make_meta
       ?(name = "post-turn-no-auto-compact")
       ?(trace_id = "trace-post-turn-no-auto-compact")
@@ -327,6 +342,9 @@ let test_manual_compaction_serializes_owner_lane () =
       check int "manifest records post-turn source size" 4
         Yojson.Safe.Util.(manifest.decision |> member "exact_evidence"
                           |> member "before_message_count" |> to_int);
+      check int "manifest records pair-repair drops" 0
+        Yojson.Safe.Util.(manifest.decision |> member "exact_evidence"
+                          |> member "pair_repair_dropped_message_count" |> to_int);
       Registry_queue.settle_result
         ~base_path
         meta.name
@@ -342,6 +360,8 @@ let () =
     "durable compaction", [
       test_case "Prepared requires a successful checkpoint save"
         `Quick test_prepared_becomes_applied_only_after_save;
+      test_case "compaction rejection tag is stable"
+        `Quick test_compaction_rejection_tag_is_stable;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "manual compaction serializes the owner lane"

@@ -122,16 +122,33 @@ let test_is_complete_turn () =
     (M.is_complete_turn complete)
 
 let test_compaction_evidence_public_projection () =
+  let evidence =
+    Keeper_compaction_evidence.create
+      ~selected_runtime_id:(Some "compact-runtime")
+      ~before_checkpoint_bytes:4096
+      ~after_checkpoint_bytes:1024
+      ~before_message_count:12
+      ~after_message_count:4
+      ~summarized_message_count:6
+      ~dropped_message_count:1
+      ~pair_repair_dropped_message_count:2
+      ~before_tool_use_count:3
+      ~after_tool_use_count:1
+      ~before_tool_result_count:3
+      ~after_tool_result_count:1
+    |> Result.get_ok
+    |> Keeper_compaction_evidence.to_json
+  in
   let decision =
+    let evidence_with_cross_scope_field =
+      match evidence with
+      | `Assoc fields -> `Assoc (("error", `String "must-not-leak") :: fields)
+      | _ -> Alcotest.fail "canonical compaction evidence must be an object"
+    in
     M.with_payload_role
       ~payload_role:M.Checkpoint
       (`Assoc
-        [ ( "exact_evidence"
-          , `Assoc
-              [ "before_checkpoint_bytes", `Int 4096
-              ; "after_checkpoint_bytes", `Int 1024
-              ] )
-        ])
+        [ "exact_evidence", evidence_with_cross_scope_field ])
   in
   let json =
     manifest ~event:M.Context_compacted ~decision ~links:(links ())
@@ -149,7 +166,12 @@ let test_compaction_evidence_public_projection () =
      |> member "decision"
      |> member "exact_evidence"
      |> member "before_checkpoint_bytes"
-     |> to_int)
+     |> to_int);
+  Alcotest.check
+    (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal)
+    "all canonical evidence fields retained"
+    evidence
+    (json |> member "decision" |> member "exact_evidence")
 
 let () =
   Alcotest.run "keeper_runtime_manifest_completeness"

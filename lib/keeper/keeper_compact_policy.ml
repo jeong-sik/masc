@@ -73,15 +73,21 @@ type compaction_rejection =
   | Checkpoint_not_reduced
   | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
 
-let compaction_rejection_to_string = function
+let compaction_rejection_to_tag = function
   | Runtime_identity_unavailable -> "runtime_identity_unavailable"
   | Summarizer_unavailable -> "summarizer_unavailable"
   | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
+  | Invalid_structural_evidence _ -> "invalid_structural_evidence"
+;;
+
+let compaction_rejection_to_string = function
   | Invalid_structural_evidence error ->
-    "invalid_structural_evidence:"
+    compaction_rejection_to_tag (Invalid_structural_evidence error)
+    ^ ":"
     ^ Keeper_compaction_evidence.decode_error_to_string error
+  | reason -> compaction_rejection_to_tag reason
 ;;
 
 type compaction_decision =

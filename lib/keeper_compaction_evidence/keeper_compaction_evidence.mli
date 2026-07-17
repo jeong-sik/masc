@@ -53,9 +53,17 @@ type decode_error =
       ; dropped_message_count : int
       ; pair_repair_dropped_message_count : int
       }
+  | Legacy_message_accounting_not_derivable of
+      { before_message_count : int
+      ; after_message_count : int
+      ; summarized_message_count : int
+      ; dropped_message_count : int
+      }
   | No_messages_compacted
 
 val decode_error_to_string : decode_error -> string
+val wire_field_names : string list
+(** Canonical JSON field names for public projection and closed decoding. *)
 
 val create
   :  selected_runtime_id:string option
@@ -87,6 +95,9 @@ val of_json
   -> (t, decode_error) result
 (** Restore persisted structural evidence. The Runtime identity is supplied
     from its enclosing typed projection rather than duplicated in the counts
-    object. Unknown, duplicate, missing, malformed, or objectively impossible
-    evidence is rejected explicitly. [Checkpoint_bytes] must strictly reduce;
-    the other measures may stay equal but cannot increase. *)
+    object. Rows written before [pair_repair_dropped_message_count] was added
+    are migrated by deriving that count exactly from the other message counts;
+    an impossible derivation is rejected. Other unknown, duplicate, missing,
+    malformed, or objectively impossible evidence is rejected explicitly.
+    [Checkpoint_bytes] must strictly reduce; the other measures may stay equal
+    but cannot increase. *)

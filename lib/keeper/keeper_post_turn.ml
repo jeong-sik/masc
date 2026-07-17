@@ -91,7 +91,7 @@ let compaction_recovery_error_to_tag = function
     "checkpoint_not_found"
   | Checkpoint_load_failed _ -> "checkpoint_load_failed"
   | Compaction_rejected reason ->
-    Keeper_compact_policy.compaction_rejection_to_string reason
+    Keeper_compact_policy.compaction_rejection_to_tag reason
   | Compaction_evidence_missing -> "compaction_evidence_missing"
   | Unexpected_compaction_decision _ -> "unexpected_compaction_decision"
   | Checkpoint_superseded _ -> "checkpoint_superseded"

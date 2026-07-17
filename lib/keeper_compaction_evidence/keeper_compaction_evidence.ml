@@ -51,6 +51,12 @@ type decode_error =
       ; dropped_message_count : int
       ; pair_repair_dropped_message_count : int
       }
+  | Legacy_message_accounting_not_derivable of
+      { before_message_count : int
+      ; after_message_count : int
+      ; summarized_message_count : int
+      ; dropped_message_count : int
+      }
   | No_messages_compacted
 
 let field_name = function
@@ -81,6 +87,8 @@ let all_fields =
   ; After_tool_result_count
   ]
 ;;
+
+let wire_field_names = List.map field_name all_fields
 
 let known_field name =
   List.exists (fun field -> String.equal name (field_name field)) all_fields
@@ -129,6 +137,18 @@ let decode_error_to_string = function
       summarized_message_count
       dropped_message_count
       pair_repair_dropped_message_count
+  | Legacy_message_accounting_not_derivable
+      { before_message_count
+      ; after_message_count
+      ; summarized_message_count
+      ; dropped_message_count
+      } ->
+    Printf.sprintf
+      "legacy_message_accounting_not_derivable:before=%d:after=%d:summarized=%d:dropped=%d"
+      before_message_count
+      after_message_count
+      summarized_message_count
+      dropped_message_count
   | No_messages_compacted -> "no_messages_compacted"
 ;;
 
@@ -165,6 +185,50 @@ let decode_nonnegative_integer fields field =
   | [ _, `Int _ ] -> Error (Invalid_field (field, Negative_integer))
   | [ _ ] -> Error (Invalid_field (field, Expected_integer))
   | _ -> Error (Invalid_field (field, Duplicate))
+;;
+
+let decode_optional_nonnegative_integer fields field =
+  match
+    List.filter
+      (fun (name, _) -> String.equal name (field_name field))
+      fields
+  with
+  | [] -> Ok None
+  | [ _, `Int value ] when value >= 0 -> Ok (Some value)
+  | [ _, `Int _ ] -> Error (Invalid_field (field, Negative_integer))
+  | [ _ ] -> Error (Invalid_field (field, Expected_integer))
+  | _ -> Error (Invalid_field (field, Duplicate))
+;;
+
+let derive_legacy_pair_repair_dropped_message_count
+      ~before_message_count
+      ~after_message_count
+      ~summarized_message_count
+      ~dropped_message_count
+  =
+  let invalid () =
+    Error
+      (Legacy_message_accounting_not_derivable
+         { before_message_count
+         ; after_message_count
+         ; summarized_message_count
+         ; dropped_message_count
+         })
+  in
+  if summarized_message_count > before_message_count
+  then invalid ()
+  else if dropped_message_count > before_message_count - summarized_message_count
+  then invalid ()
+  else
+    let after_plan =
+      before_message_count
+      - dropped_message_count
+      - summarized_message_count
+      + if summarized_message_count = 0 then 0 else 1
+    in
+    if after_message_count > after_plan
+    then invalid ()
+    else Ok (after_plan - after_message_count)
 ;;
 
 let create
@@ -276,8 +340,20 @@ let of_json ~selected_runtime_id = function
     let* after_message_count = integer After_message_count in
     let* summarized_message_count = integer Summarized_message_count in
     let* dropped_message_count = integer Dropped_message_count in
+    let* encoded_pair_repair_dropped_message_count =
+      decode_optional_nonnegative_integer
+        fields
+        Pair_repair_dropped_message_count
+    in
     let* pair_repair_dropped_message_count =
-      integer Pair_repair_dropped_message_count
+      match encoded_pair_repair_dropped_message_count with
+      | Some count -> Ok count
+      | None ->
+        derive_legacy_pair_repair_dropped_message_count
+          ~before_message_count
+          ~after_message_count
+          ~summarized_message_count
+          ~dropped_message_count
     in
     let* before_tool_use_count = integer Before_tool_use_count in
     let* after_tool_use_count = integer After_tool_use_count in

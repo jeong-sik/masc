@@ -254,7 +254,7 @@ domain fact.
 | #25018 | Draft, rebased to `fd70c8fc7f`, current CI running | merge exact settlement source index after fresh green |
 | #24971 | Draft, mergeable, full CI green | merge exact private JSONL cursor |
 | #25026 | Draft stacked on #24971, lightweight green | retarget after parent and run full CI |
-| canonical settlement receipt leaf | local, 218 changed lines; latest-main rebase and format/static checks clean | focused build after the external bare Dune build, then Draft PR |
+| #25044 canonical settlement receipt | Draft stacked on #25018; 218 changed lines; focused build and 15 direct cases green | fresh stacked CI, then WAL leaf |
 | settlement WAL | rejected generic prototype only | canonical State receipt, cursor replay, commit/checkpoint outcome |
 | structural compaction leaf | local, 399 changed lines; hostile code findings repaired; focused build and 40 direct cases green | typed durable Tool continuation authority, then two-stage no-dispatch/closed-dispatch proof |
 | per-Keeper Auto Judge drain | local, 396 changed lines; latest-main rebase clean | focused build after the external bare Dune build and a separate monotonic durable FIFO sequence leaf |

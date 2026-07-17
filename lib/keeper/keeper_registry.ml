@@ -415,7 +415,7 @@ let record_lifecycle_wakeup_denial ~intent (entry : registry_entry) denial =
     reason
 ;;
 
-let wakeup_entry ~intent ~require_running (entry : registry_entry) =
+let wakeup_running_entry ~intent (entry : registry_entry) =
   let lifecycle_state =
     Keeper_lifecycle_admission.state
       ~paused:entry.meta.paused
@@ -426,7 +426,7 @@ let wakeup_entry ~intent ~require_running (entry : registry_entry) =
     record_lifecycle_wakeup_denial ~intent entry denial;
     Deferred_lifecycle denial
   | Keeper_lifecycle_admission.Autonomous_admitted ->
-    if require_running && entry.phase <> Keeper_state_machine.Running
+    if entry.phase <> Keeper_state_machine.Running
     then Deferred_not_running entry.phase
     else (
       (* tla-lint: allow-mutation: lifecycle-admitted fiber hint signal *)
@@ -434,16 +434,10 @@ let wakeup_entry ~intent ~require_running (entry : registry_entry) =
       Signaled)
 ;;
 
-let wakeup ~intent ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> Deferred_unregistered
-  | Some entry -> wakeup_entry ~intent ~require_running:false entry
-;;
-
 let wakeup_running ~intent ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> Deferred_unregistered
-  | Some entry -> wakeup_entry ~intent ~require_running:true entry
+  | Some entry -> wakeup_running_entry ~intent entry
 ;;
 
 let wakeup_all ~intent ?base_path () =
@@ -456,7 +450,7 @@ let wakeup_all ~intent ?base_path () =
          if entry.phase = Running
          then
            let (_ : wakeup_outcome) =
-             wakeup_entry ~intent ~require_running:true entry
+             wakeup_running_entry ~intent entry
            in
            ())
     (Atomic.get registry)

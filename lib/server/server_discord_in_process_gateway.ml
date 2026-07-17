@@ -683,7 +683,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir
           | Keeper_registry_event_queue.Stimulus_enqueued
           | Keeper_registry_event_queue.Stimulus_already_present ->
             (match
-               Keeper_registry.wakeup
+               Keeper_registry.wakeup_running
                  ~intent:Keeper_registry.Reactive_signal
                  ~base_path:base_dir
                  keeper_name

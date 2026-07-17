@@ -39,26 +39,31 @@ let enqueue_goal_assigned_wakes
         ~base_path:config.base_path
         keeper_name
         stimulus;
-      match Keeper_registry.get ~base_path:config.base_path keeper_name with
-      | Some entry when entry.phase = Keeper_state_machine.Running ->
-        let (_ : Keeper_registry.wakeup_outcome) =
-          Keeper_registry.wakeup
-            ~intent:Keeper_registry.Goal_signal
-            ~base_path:config.base_path
-            keeper_name
-        in
-        ()
-      | Some entry ->
-        Log.Keeper.info
-          "goal assignment wake queued without fiber wake keeper=%s phase=%s \
-           goal_id=%s"
+      match
+        Keeper_registry.wakeup_running
+          ~intent:Keeper_registry.Goal_signal
+          ~base_path:config.base_path
           keeper_name
-          (Keeper_state_machine.phase_to_string entry.phase)
-          goal_id
-      | None ->
+      with
+      | Keeper_registry.Signaled -> ()
+      | Keeper_registry.Deferred_unregistered ->
         Log.Keeper.info
           "goal assignment wake persisted for unregistered keeper=%s goal_id=%s"
           keeper_name
+          goal_id
+      | Keeper_registry.Deferred_not_running phase ->
+        Log.Keeper.info
+          "goal assignment wake deferred by registry phase contract keeper=%s \
+           phase=%s goal_id=%s"
+          keeper_name
+          (Keeper_state_machine.phase_to_string phase)
+          goal_id
+      | Keeper_registry.Deferred_lifecycle denial ->
+        Log.Keeper.info
+          "goal assignment wake deferred by lifecycle keeper=%s reason=%s \
+           goal_id=%s"
+          keeper_name
+          (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
           goal_id)
     added;
   added

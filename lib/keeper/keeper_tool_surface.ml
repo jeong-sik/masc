@@ -471,7 +471,7 @@ let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option)
 
 let manual_compaction_wakeup_observation ~base_path keeper_name =
   match
-    Keeper_registry.wakeup
+    Keeper_registry.wakeup_running
       ~intent:Keeper_registry.Compaction_signal
       ~base_path
       keeper_name

@@ -1,11 +1,12 @@
 (* Fusion config -> JSON projection for the dashboard read endpoint.
 
    RFC-0306 §3.1. The dashboard fusion settings editor needs the full active
-   [Fusion_policy.t] as structured JSON to populate its form (panel roster, meta
-   judge, JoJ first-round judges). No serializer existed: the config
-   types derive only [show]/[eq], and the only consumer flattens errors to a
-   string ([fusion_config_loader.ml]). This is a read-only projection; it does
-   not round-trip back to TOML (the write path is line-based, RFC-0306 §3.2). *)
+   product-relevant [Fusion_policy.t] fields as structured JSON to populate its
+   form (panel roster, meta judge, JoJ first-round judges). No serializer
+   existed: the config types derive only [show]/[eq], and the only consumer
+   flattens errors to a string ([fusion_config_loader.ml]). This is a read-only
+   projection; it does not round-trip back to TOML (the write path is
+   line-based, RFC-0306 §3.2). *)
 
 let opt_int : int option -> Yojson.Safe.t = function
   | None -> `Null
@@ -52,8 +53,6 @@ let to_yojson (c : Fusion_policy.t) : Yojson.Safe.t =
   `Assoc
     [ ("enabled", `Bool c.Fusion_policy.enabled)
     ; ("default_preset", `String c.Fusion_policy.default_preset)
-    ; ("max_concurrent_panels", `Int c.Fusion_policy.max_concurrent_panels)
-    ; ("max_concurrent_judges", `Int c.Fusion_policy.max_concurrent_judges)
     ; ("staged_judge_group_size", `Int c.Fusion_policy.staged_judge_group_size)
     ; ( "presets"
       , `List

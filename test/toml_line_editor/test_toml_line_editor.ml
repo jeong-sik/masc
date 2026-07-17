@@ -7,8 +7,6 @@ let fixture =
   {|# top-of-file note
 [fusion]
 enabled = true
-# concurrency knob doc, must survive edits
-max_concurrent_panels = 2
 
 # panel roster doc line 1
 # panel roster doc line 2
@@ -79,15 +77,15 @@ let test_multiline_array_edit_preserves_comments () =
   Alcotest.(check bool) "sibling scalar untouched" true
     (has_line out {|judge = "old-judge"|})
 
-(* The scalar editor must target the right table: [max_concurrent_panels] exists
-   in [fusion] and must not be touched when editing [fusion.presets.trio]. *)
+(* The scalar editor must target the right table: [enabled] exists in [fusion]
+   and must not be touched when editing [fusion.presets.trio]. *)
 let test_scalar_edit_is_table_scoped () =
   let out =
     Toml_line_editor.edit_table_scalar fixture ~path:"fusion.presets.trio"
       ~key:"judge" ~value:(Some "new-judge")
   in
   Alcotest.(check bool) "[fusion] scalar untouched" true
-    (has_line out "max_concurrent_panels = 2")
+    (has_line out "enabled = true")
 
 let () =
   Alcotest.run "toml_line_editor"

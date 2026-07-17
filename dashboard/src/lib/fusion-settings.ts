@@ -24,7 +24,6 @@ import { deleteRuntimeTomlKey, getRuntimeTomlKey, setRuntimeTomlKey, setRuntimeT
 const SECTION_FUSION = 'fusion'
 const KEY_ENABLED = 'enabled'
 const KEY_DEFAULT_PRESET = 'default_preset'
-const KEY_MAX_CONCURRENT_PANELS = 'max_concurrent_panels'
 const KEY_MIN_ANSWERED = 'min_answered'
 const KEY_PANEL = 'panel'
 const KEY_JUDGE = 'judge'
@@ -33,7 +32,6 @@ const presetSection = (preset: string): string => `${SECTION_FUSION}.presets.${p
 export interface FusionSettings {
   readonly enabled: boolean
   readonly defaultPreset: string
-  readonly maxConcurrentPanels: number
   // min_answered for the default preset (RFC-0252 answered-panel quorum).
   readonly minAnswered: number
 }
@@ -60,7 +58,6 @@ export type FusionSettingsReadResult =
 export const FUSION_SETTINGS_DEFAULTS: FusionSettings = {
   enabled: false,
   defaultPreset: '',
-  maxConcurrentPanels: 1,
   minAnswered: 1,
 }
 
@@ -199,19 +196,12 @@ export function readFusionSettingsResult(sourceText: string): FusionSettingsRead
     FUSION_SETTINGS_DEFAULTS.defaultPreset,
     `${SECTION_FUSION}.${KEY_DEFAULT_PRESET}`,
   )
-  const maxConcurrentPanelsParsed = parsePositiveInt(
-    getRuntimeTomlKey(sourceText, SECTION_FUSION, KEY_MAX_CONCURRENT_PANELS),
-    FUSION_SETTINGS_DEFAULTS.maxConcurrentPanels,
-    `${SECTION_FUSION}.${KEY_MAX_CONCURRENT_PANELS}`,
-  )
   if (isParseIssue(enabledParsed)) issues.push(enabledParsed)
   if (isParseIssue(defaultPresetParsed)) issues.push(defaultPresetParsed)
-  if (isParseIssue(maxConcurrentPanelsParsed)) issues.push(maxConcurrentPanelsParsed)
   if (issues.length > 0) return { ok: false, issues }
 
   const enabled = enabledParsed as boolean
   const defaultPreset = defaultPresetParsed as string
-  const maxConcurrentPanels = maxConcurrentPanelsParsed as number
   const preset = defaultPreset
   const presetExists = preset !== '' && sectionExists(sourceText, presetSection(preset))
   if (enabled && preset !== '' && !presetExists) {
@@ -234,7 +224,6 @@ export function readFusionSettingsResult(sourceText: string): FusionSettingsRead
     settings: {
       enabled,
       defaultPreset,
-      maxConcurrentPanels,
       minAnswered,
     },
   }
@@ -260,9 +249,6 @@ export function readFusionPresetMinAnswered(sourceText: string, preset: string):
 
 export function validateFusionSettings(s: FusionSettings): string[] {
   const errors: string[] = []
-  if (!Number.isSafeInteger(s.maxConcurrentPanels) || s.maxConcurrentPanels < 1) {
-    errors.push(`${KEY_MAX_CONCURRENT_PANELS} must be an integer >= 1`)
-  }
   if (s.defaultPreset !== '' && s.defaultPreset.trim() === '') {
     errors.push(`${KEY_DEFAULT_PRESET} must not be whitespace`)
   }
@@ -291,7 +277,6 @@ export function applyFusionSettings(sourceText: string, s: FusionSettings): stri
   let text = sourceText
   text = setRuntimeTomlKey(text, SECTION_FUSION, KEY_ENABLED, s.enabled)
   text = setRuntimeTomlKey(text, SECTION_FUSION, KEY_DEFAULT_PRESET, s.defaultPreset)
-  text = setRuntimeTomlKey(text, SECTION_FUSION, KEY_MAX_CONCURRENT_PANELS, s.maxConcurrentPanels)
   if (previousPreset !== '' && previousPreset !== s.defaultPreset) {
     text = deleteRuntimeTomlKey(text, presetSection(previousPreset), KEY_MIN_ANSWERED)
   }

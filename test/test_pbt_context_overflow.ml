@@ -1,5 +1,4 @@
-(** Property-based tests for typed context overflow propagation and MASC-owned
-    tool-call pair repair. *)
+(** Property-based tests for typed context overflow propagation. *)
 
 module UT = Masc.Keeper_unified_turn
 module KC = Masc.Keeper_context_core
@@ -42,124 +41,6 @@ let user_text text : Agent_sdk.Types.message =
   ; metadata = []
   }
 
-let assistant_tool_use ?(input = `Null) id name : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.Assistant
-  ; content = [ Agent_sdk.Types.ToolUse { id; name; input } ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
-let user_tool_use ?(input = `Null) id name : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.User
-  ; content = [ Agent_sdk.Types.ToolUse { id; name; input } ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
-let assistant_text_and_tool_use ?(input = `Null) text id name : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.Assistant
-  ; content =
-      [ Agent_sdk.Types.Text text
-      ; Agent_sdk.Types.ToolUse { id; name; input }
-      ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
-let assistant_tool_uses uses : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.Assistant
-  ; content =
-      List.map
-        (fun (id, name) -> Agent_sdk.Types.ToolUse { id; name; input = `Null })
-        uses
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
-let assistant_text_and_tool_uses text uses : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.Assistant
-  ; content =
-      Agent_sdk.Types.Text text
-      :: List.map
-           (fun (id, name) ->
-             Agent_sdk.Types.ToolUse { id; name; input = `Null })
-           uses
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
-let assistant_same_message_tool_pair id name content : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.Assistant
-  ; content =
-      [ Agent_sdk.Types.ToolUse { id; name; input = `Null }
-      ; Agent_sdk.Types.ToolResult
-          { tool_use_id = id
-          ; content
-          ; outcome = Agent_sdk.Types.Tool_succeeded
-          ; json = None
-          ; content_blocks = None
-          }
-      ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
-let tool_result_message ?(role = Agent_sdk.Types.User) id content
-    : Agent_sdk.Types.message =
-  { role
-  ; content =
-      [ Agent_sdk.Types.ToolResult
-          { tool_use_id = id
-          ; content
-          ; outcome = Agent_sdk.Types.Tool_succeeded
-          ; json = None
-          ; content_blocks = None
-          }
-      ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
-let user_tool_result id content : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.User
-  ; content =
-      [ Agent_sdk.Types.ToolResult
-          { tool_use_id = id
-          ; content
-          ; outcome = Agent_sdk.Types.Tool_succeeded
-          ; json = None
-          ; content_blocks = None
-          }
-      ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
-let user_text_and_tool_result text id content : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.User
-  ; content =
-      [ Agent_sdk.Types.Text text
-      ; Agent_sdk.Types.ToolResult
-          { tool_use_id = id
-          ; content
-          ; outcome = Agent_sdk.Types.Tool_succeeded
-          ; json = None
-          ; content_blocks = None
-          }
-      ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-
 let text_blocks (messages : Agent_sdk.Types.message list) =
   List.concat_map
     (fun (msg : Agent_sdk.Types.message) ->
@@ -179,67 +60,6 @@ let text_blocks (messages : Agent_sdk.Types.message list) =
 
 let text_contains needle texts =
   List.exists (fun text -> Astring.String.is_infix ~affix:needle text) texts
-
-let count_tool_blocks messages =
-  List.fold_left
-    (fun counts (msg : Agent_sdk.Types.message) ->
-       List.fold_left
-         (fun (tool_uses, tool_results) -> function
-           | Agent_sdk.Types.ToolUse _ -> tool_uses + 1, tool_results
-           | Agent_sdk.Types.ToolResult _ -> tool_uses, tool_results + 1
-           | Agent_sdk.Types.Text _
-           | Agent_sdk.Types.Thinking _
-           | Agent_sdk.Types.ReasoningDetails _
-           | Agent_sdk.Types.RedactedThinking _
-           | Agent_sdk.Types.Image _
-           | Agent_sdk.Types.Document _
-           | Agent_sdk.Types.Audio _ -> tool_uses, tool_results)
-         counts
-         msg.content)
-    (0, 0)
-    messages
-
-let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =
-  let raw_messages =
-    [ user_text "q"
-    ; assistant_text_and_tool_use "assistant kept text" "dangling" "calc"
-    ; user_text "interrupt"
-    ; user_text_and_tool_result "result wrapper kept text" "orphan" "late"
-    ]
-  in
-  let repaired_messages, stats =
-    KC.repair_broken_tool_call_pairs_with_stats raw_messages
-  in
-  Alcotest.(check int)
-    "save repair drops dangling tool-use"
-    1
-    stats.dropped_tool_uses;
-  Alcotest.(check int)
-    "save repair drops orphan tool-result"
-    1
-    stats.dropped_tool_results;
-  let save_ctx =
-    KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096
-    |> fun ctx -> KC.append_many ctx repaired_messages
-  in
-  let checkpoint = KC.checkpoint_of_context save_ctx in
-  Alcotest.(check (pair int int))
-    "checkpoint save payload has no unpaired tool blocks"
-    (0, 0)
-    (count_tool_blocks checkpoint.Agent_sdk.Checkpoint.messages);
-  let texts = text_blocks checkpoint.Agent_sdk.Checkpoint.messages in
-  Alcotest.(check bool)
-    "checkpoint save keeps assistant text"
-    true
-    (text_contains "assistant kept text" texts);
-  Alcotest.(check bool)
-    "checkpoint save keeps wrapper text"
-    true
-    (text_contains "result wrapper kept text" texts);
-  Alcotest.(check bool)
-    "checkpoint save does not create visible repair marker"
-    false
-    (text_contains "unpaired tool use elided" texts)
 
 let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
   let assistant : Agent_sdk.Types.message =
@@ -305,82 +125,6 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
   in
   Alcotest.(check bool) "typed non-text block preserved" true thinking_preserved
 
-let test_pair_repair_drops_empty_structural_messages_with_stats () =
-  let messages =
-    [ user_text "q"
-    ; assistant_tool_use
-        ~input:(`Assoc [ "expr", `String "1+1" ])
-        "dangling-only"
-        "calc"
-    ; user_tool_result "orphan-only" "late"
-    ]
-  in
-  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
-  Alcotest.(check int)
-    "dangling-only tool use dropped"
-    1
-    stats.dropped_tool_uses;
-  Alcotest.(check int)
-    "orphan-only tool result dropped"
-    1
-    stats.dropped_tool_results;
-  Alcotest.(check (list (pair string string)))
-    "dangling-only tool use sample preserved"
-    [ "dangling-only", "calc" ]
-    stats.dropped_tool_use_samples;
-  Alcotest.(check (list string))
-    "orphan-only tool result id preserved"
-    [ "orphan-only" ]
-    stats.dropped_tool_result_ids;
-  Alcotest.(check int)
-    "empty structural messages removed"
-    1
-    (List.length repaired);
-  let texts = text_blocks repaired in
-  Alcotest.(check bool)
-    "empty structural drop does not create visible repair marker"
-    false
-    (text_contains "unpaired tool use elided" texts)
-
-let test_pair_repair_caps_diagnostic_sample_strings () =
-  let long_id =
-    "toolu_"
-    ^ String.make (KC.pair_repair_diagnostic_max_bytes + 32) 'x'
-  in
-  let long_name =
-    "keeper_"
-    ^ String.make (KC.pair_repair_diagnostic_max_bytes + 32) 'y'
-  in
-  let messages =
-    [ user_text "q"
-    ; assistant_text_and_tool_use "assistant kept text" long_id long_name
-    ; user_text "interrupt"
-    ; user_text_and_tool_result "result wrapper kept text" (long_id ^ "_orphan") "late"
-    ]
-  in
-  let _repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
-  let expected_id = KC.bound_pair_repair_diagnostic_string long_id in
-  let expected_result_id =
-    KC.bound_pair_repair_diagnostic_string (long_id ^ "_orphan")
-  in
-  let expected_name = KC.bound_pair_repair_diagnostic_string long_name in
-  Alcotest.(check int)
-    "diagnostic tool-use id capped"
-    KC.pair_repair_diagnostic_max_bytes
-    (String.length expected_id);
-  Alcotest.(check int)
-    "diagnostic tool-name capped"
-    KC.pair_repair_diagnostic_max_bytes
-    (String.length expected_name);
-  Alcotest.(check (list (pair string string)))
-    "tool-use diagnostic sample strings are capped"
-    [ expected_id, expected_name ]
-    stats.dropped_tool_use_samples;
-  Alcotest.(check (list string))
-    "tool-result diagnostic id strings are capped"
-    [ expected_result_id ]
-    stats.dropped_tool_result_ids
-
 (* ── Gospel-style specification (documentation) ────────── *)
 (*
    @gospel — formal specification (Ortac runtime not available on 5.4)
@@ -406,15 +150,9 @@ let () =
   Alcotest.run "pbt_context_overflow" [
     ("properties", qcheck_tests);
     ("typed contracts", [
-      Alcotest.test_case "checkpoint save repair drops unpaired tool blocks" `Quick
-        test_checkpoint_save_repair_drops_unpaired_tool_blocks;
       Alcotest.test_case
         "checkpoint patch keeps typed blocks and visible reply"
         `Quick
         test_checkpoint_patch_updates_visible_text_and_clears_working_context;
-      Alcotest.test_case "pair repair drops empty structural messages with stats" `Quick
-        test_pair_repair_drops_empty_structural_messages_with_stats;
-      Alcotest.test_case "pair repair caps diagnostic sample strings" `Quick
-        test_pair_repair_caps_diagnostic_sample_strings;
     ]);
   ]

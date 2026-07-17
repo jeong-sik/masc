@@ -59,7 +59,18 @@ async function loadSurface(
     .mockResolvedValue({ ok: true, id: 'appr-1' })
   const setGateMode = vi
     .fn()
-    .mockResolvedValue({ ok: true, mode: 'auto_judge', previous_mode: 'manual', actor: 'op', changed_at: '2026-06-19T00:00:00Z' })
+    .mockResolvedValue({
+      ok: true,
+      mode: 'auto_judge',
+      previous_mode: 'manual',
+      actor: 'op',
+      changed_at: '2026-06-19T00:00:00Z',
+      recovery_status: 'completed',
+      recovery_error: null,
+      reopened: 0,
+      started: 0,
+      queued: 0,
+    })
   const response = hitl
     ? responseWithQueue(approval_queue, recent_resolved, approval_rules, hitl)
     : responseWithQueue(approval_queue, recent_resolved, approval_rules)

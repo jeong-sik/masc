@@ -26,6 +26,14 @@ val get_fs_opt : unit -> Eio.Fs.dir_ty Eio.Path.t option
 (** Check if Eio fs is available. *)
 val has_fs : unit -> bool
 
+type execution_context =
+  | Eio_fiber
+  | Non_eio
+
+val execution_context : unit -> execution_context
+(** Actual execution context of the current caller. Process-global filesystem
+    installation does not imply that a raw Domain has an Eio effect handler. *)
+
 type exact_path_kind =
   | Exact_missing
   | Exact_kind of Unix.file_kind
@@ -816,9 +824,11 @@ type private_jsonl_append_error =
     {!update_private_file_durable_locked_result}, verifies only that an existing
     file ends at a newline boundary, then appends and fsyncs with rollback on
     failure. Every transaction also fsyncs the parent directory. Runtime cost
-    is proportional to [suffix], not to historical file size. When the Eio
-    filesystem is active, the entire blocking lock/write/fsync transaction runs
-    in a system thread so one contended file cannot stop unrelated fibers. *)
+    is proportional to [suffix], not to historical file size. From an Eio
+    fiber, the entire blocking lock/write/fsync transaction runs in a system
+    thread, including directory creation and in-process mutex acquisition, so
+    one contended file cannot stop unrelated fibers. Non-Eio callers execute
+    the same transaction directly. *)
 val append_private_jsonl_durable_locked_with_end_offset_result :
   string -> string -> (int, private_jsonl_append_error) result
 

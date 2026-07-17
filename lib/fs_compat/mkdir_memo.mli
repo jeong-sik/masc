@@ -12,9 +12,10 @@
     fallback. Cycle-free placement inside [fs_compat]'s wrapped
     library. *)
 
-(** [mkdir_p_memoized ~mkdir_p path] calls [mkdir_p path] only on
-    the first request for [path] in this process. Subsequent calls
-    skip the stat/mkdir entirely. *)
+(** [mkdir_p_memoized ~mkdir_p path] skips [mkdir_p path] after the
+    first successful completion for [path] in this process. Concurrent
+    cache misses may call [mkdir_p path] more than once, so the callback
+    must accept an already-created directory. *)
 val mkdir_p_memoized : mkdir_p:(string -> unit) -> string -> unit
 
 (** Reset the cache. Test-only — production code relies on

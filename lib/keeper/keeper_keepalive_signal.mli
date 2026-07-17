@@ -115,11 +115,11 @@ val interruptible_sleep :
 
     When [?stimulus] is given, the stimulus is durably appended to the keeper's
     Event Layer queue ([Keeper_registry_event_queue.enqueue]) independently of
-    lifecycle phase. The wake hint is sent to every lifecycle-admitted
-    registered Keeper; paused and dead-tombstone lanes remain denied by
-    [Keeper_registry.wakeup]. If no live registry entry exists, callers must
-    supply [base_path] so the payload can be persisted for replay. Callers that
-    only need to break the keeper out of [interruptible_sleep] may omit the
+    lifecycle phase. The wake hint is sent only to a lifecycle-admitted Running
+    Keeper; inactive, paused, and dead-tombstone lanes retain the durable event
+    without a false delivery claim. If no live registry entry exists, callers
+    must supply [base_path] so the payload can be persisted for replay. Callers
+    that only need to break the keeper out of [interruptible_sleep] may omit the
     stimulus. See RFC-0020 §3 (data channel vs hint signal). *)
 val wakeup_keeper :
   ?base_path:string ->

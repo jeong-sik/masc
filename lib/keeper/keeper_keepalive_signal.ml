@@ -258,7 +258,7 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
     Event Layer queue ([Keeper_registry_event_queue.enqueue]) before the wakeup
     flag flips. This is RFC-0020 Rule 1 (enqueue is independent of policy)
     + the data-channel half of the layer split — [fiber_wakeup] remains the
-    lifecycle-admitted hint signal, the queue is the authoritative payload. *)
+    Running-lane hint signal, the queue is the authoritative payload. *)
 let wakeup_keeper ?base_path ?stimulus name =
   let entries =
     Keeper_registry.all ?base_path ()
@@ -267,8 +267,8 @@ let wakeup_keeper ?base_path ?stimulus name =
   in
   (* Payload admission is independent of current lifecycle phase. A completion
      that arrives while the keeper is paused/restarting must remain durable for
-     the lane's next admitted turn; the wake hint delegates only to the typed
-     lifecycle admission contract. *)
+     the lane's next admitted turn; the wake hint delegates to the typed
+     Running-lane and lifecycle admission contract. *)
   (match entries, stimulus, base_path with
    | [], Some value, Some resolved_base_path ->
      Keeper_registry_event_queue.enqueue
@@ -294,7 +294,7 @@ let wakeup_keeper ?base_path ?stimulus name =
               value)
          stimulus;
        match
-         Keeper_registry.wakeup
+         Keeper_registry.wakeup_running
            ~intent:Keeper_registry.Reactive_signal
            ~base_path:entry.base_path
            name
@@ -535,7 +535,7 @@ let wakeup_relevant_keeper_for_board_signal
                     signal.post_id
                 else (
                   let outcome =
-                    Keeper_registry.wakeup
+                    Keeper_registry.wakeup_running
                       ~intent:Keeper_registry.Reactive_signal
                       ~base_path:config.base_path
                       meta.name

@@ -251,33 +251,12 @@ let test_wakeup_running_reports_typed_outcome () =
      fail "offline keeper did not return Deferred_not_running")
 ;;
 
-let test_wakeup_signals_lifecycle_admitted_offline_keeper () =
-  KR.clear ();
-  let meta = make_meta "offline-wakeup" in
-  let entry = KR.register_offline ~base_path meta.name meta in
-  Atomic.set entry.fiber_wakeup false;
-  (match KR.wakeup ~intent:KR.Scheduled_signal ~base_path meta.name with
-   | KR.Signaled -> ()
-   | KR.Deferred_unregistered
-   | KR.Deferred_not_running _
-   | KR.Deferred_lifecycle _ ->
-     fail "lifecycle-admitted offline keeper was not signaled");
-  check bool "offline keeper wake flag is set" true (Atomic.get entry.fiber_wakeup);
-  Atomic.set entry.fiber_wakeup false;
-  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path meta.name with
-   | KR.Deferred_not_running phase ->
-     check string "running-only deferred phase" "offline" (KSM.phase_to_string phase)
-   | KR.Signaled | KR.Deferred_unregistered | KR.Deferred_lifecycle _ ->
-     fail "running-only wake did not defer the offline keeper");
-  check bool "running-only wake leaves flag false" false (Atomic.get entry.fiber_wakeup)
-;;
-
 let test_wakeup_denies_paused_and_dead_without_signaling () =
   KR.clear ();
   let paused_meta = { (make_meta "paused-wakeup") with paused = true } in
   let paused_entry = KR.register ~base_path paused_meta.name paused_meta in
   Atomic.set paused_entry.fiber_wakeup false;
-  (match KR.wakeup ~intent:KR.Scheduled_signal ~base_path paused_meta.name with
+  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path paused_meta.name with
    | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
    | KR.Signaled
    | KR.Deferred_unregistered
@@ -293,7 +272,7 @@ let test_wakeup_denies_paused_and_dead_without_signaling () =
   in
   let entry = KR.register ~base_path meta.name meta in
   Atomic.set entry.fiber_wakeup false;
-  (match KR.wakeup ~intent:KR.Scheduled_signal ~base_path meta.name with
+  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path meta.name with
    | KR.Deferred_lifecycle
        Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
    | KR.Signaled
@@ -322,10 +301,12 @@ let cleanup_dir path =
         Unix.rmdir target)
       else Unix.unlink target
   in
-  try rm path with _ -> ()
+  match rm path with
+  | () -> ()
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
-let test_reactive_wakeup_signals_offline_lane_after_queue_commit () =
+let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
   let dir = temp_dir "registry_reactive_offline_wakeup" in
   Fun.protect
     ~finally:(fun () ->
@@ -349,7 +330,7 @@ let test_reactive_wakeup_signals_offline_lane_after_queue_commit () =
          ~base_path:dir
          ~stimulus
          meta.name;
-       check bool "offline reactive wake flag is set" true
+       check bool "offline reactive wake flag remains clear" false
          (Atomic.get entry.fiber_wakeup);
        match
          Masc.Keeper_registry_event_queue.snapshot ~base_path:dir meta.name
@@ -360,7 +341,7 @@ let test_reactive_wakeup_signals_offline_lane_after_queue_commit () =
        | _ -> fail "reactive stimulus was not retained in the offline lane")
 ;;
 
-let test_goal_assignment_signals_offline_lane_after_queue_commit () =
+let test_goal_assignment_defers_offline_lane_after_queue_commit () =
   let dir = temp_dir "registry_goal_offline_wakeup" in
   Fun.protect
     ~finally:(fun () ->
@@ -386,7 +367,7 @@ let test_goal_assignment_signals_offline_lane_after_queue_commit () =
            ()
        in
        check (list string) "new goal is reported" [ "goal-offline-1" ] added;
-       check bool "offline goal wake flag is set" true
+       check bool "offline goal wake flag remains clear" false
          (Atomic.get entry.fiber_wakeup);
        match
          Masc.Keeper_registry_event_queue.snapshot
@@ -560,23 +541,19 @@ let () =
             `Quick
             test_wakeup_running_reports_typed_outcome
         ; test_case
-            "signals lifecycle-admitted offline keeper"
-            `Quick
-            test_wakeup_signals_lifecycle_admitted_offline_keeper
-        ; test_case
             "paused and dead keepers never receive runnable signal"
             `Quick
             test_wakeup_denies_paused_and_dead_without_signaling
         ] )
     ; ( "wakeup_callers"
       , [ test_case
-            "reactive stimulus wakes lifecycle-admitted offline lane"
+            "reactive stimulus persists while offline wake is deferred"
             `Quick
-            test_reactive_wakeup_signals_offline_lane_after_queue_commit
+            test_reactive_wakeup_defers_offline_lane_after_queue_commit
         ; test_case
-            "goal assignment wakes lifecycle-admitted offline lane"
+            "goal assignment persists while offline wake is deferred"
             `Quick
-            test_goal_assignment_signals_offline_lane_after_queue_commit
+            test_goal_assignment_defers_offline_lane_after_queue_commit
         ] )
     ; ( "tool_dispatch_exact_resources"
       , [ test_case "preserves exact meta after healthy entry replacement" `Quick

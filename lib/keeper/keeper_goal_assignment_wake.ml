@@ -40,7 +40,7 @@ let enqueue_goal_assigned_wakes
         keeper_name
         stimulus;
       match
-        Keeper_registry.wakeup
+        Keeper_registry.wakeup_running
           ~intent:Keeper_registry.Goal_signal
           ~base_path:config.base_path
           keeper_name

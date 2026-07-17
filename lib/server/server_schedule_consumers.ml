@@ -359,7 +359,7 @@ let dispatch_keeper_wake
    | Already_drained -> ()
    | Wake_required ->
      let wakeup_outcome =
-       Keeper_registry.wakeup
+       Keeper_registry.wakeup_running
          ~intent:Keeper_registry.Scheduled_signal
          ~base_path
          keeper_name

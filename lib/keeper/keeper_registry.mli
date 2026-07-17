@@ -458,13 +458,6 @@ type wakeup_outcome =
   | Deferred_not_running of Keeper_state_machine.phase
   | Deferred_lifecycle of Keeper_lifecycle_admission.autonomous_denial
 
-(** Signal a registered keeper without requiring a Running phase. Lifecycle
-    admission is still mandatory: paused and dead-tombstone lanes are never
-    made runnable by a hint signal. The typed intent is observability data,
-    not a policy bypass. *)
-val wakeup :
-  intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
-
 val wakeup_running :
   intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
 (** Signal a registered Keeper only while its fiber phase is [Running]. The

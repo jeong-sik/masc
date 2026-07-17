@@ -1420,27 +1420,112 @@ describe('fetchDashboardGate', () => {
 })
 
 describe('setGateMode', () => {
+  const completedResponse = {
+    ok: true,
+    mode: 'auto_judge',
+    previous_mode: 'manual',
+    actor: 'operator',
+    changed_at: '2026-07-12T00:00:00Z',
+    recovery_status: 'completed',
+    recovery_error: null,
+    reopened: 2,
+    started: 1,
+    queued: 1,
+  } as const
+
   it('posts the exact non-hierarchical Gate mode contract', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        ok: true,
-        mode: 'auto_judge',
-        previous_mode: 'manual',
-        actor: 'operator',
-        changed_at: '2026-07-12T00:00:00Z',
-      }), {
+      new Response(JSON.stringify(completedResponse), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await setGateMode('auto_judge')
+    const result = await setGateMode('auto_judge')
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/gate/mode')
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual({ mode: 'auto_judge' })
+    expect(result).toMatchObject({
+      recovery_status: 'completed',
+      recovery_error: null,
+      reopened: 2,
+      started: 1,
+      queued: 1,
+    })
+  })
+
+  it.each([
+    {
+      label: 'failed recovery',
+      requestedMode: 'auto_judge' as const,
+      response: {
+        ...completedResponse,
+        recovery_status: 'failed',
+        recovery_error: 'judge worker unavailable',
+        reopened: 0,
+        started: 0,
+        queued: 0,
+      },
+    },
+    {
+      label: 'non-auto mode without recovery',
+      requestedMode: 'manual' as const,
+      response: {
+        ...completedResponse,
+        mode: 'manual',
+        recovery_status: 'not_requested',
+        recovery_error: null,
+        reopened: 0,
+        started: 0,
+        queued: 0,
+        replaced_read_error: 'replaced invalid persisted mode',
+      },
+    },
+  ])('decodes $label', async ({ requestedMode, response }) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(setGateMode(requestedMode)).resolves.toMatchObject(response)
+  })
+
+  it.each([
+    ['non-object', null],
+    ['unsuccessful envelope', { ...completedResponse, ok: false }],
+    ['requested mode mismatch', { ...completedResponse, mode: 'manual' }],
+    ['unknown recovery status', { ...completedResponse, recovery_status: 'pending' }],
+    ['completed recovery with error', { ...completedResponse, recovery_error: 'unexpected' }],
+    ['failed recovery without error', {
+      ...completedResponse,
+      recovery_status: 'failed',
+      reopened: 0,
+      started: 0,
+      queued: 0,
+    }],
+    ['negative count', { ...completedResponse, reopened: -1 }],
+    ['non-zero not-requested outcome', {
+      ...completedResponse,
+      recovery_status: 'not_requested',
+    }],
+    ['unknown field', { ...completedResponse, legacy_status: 'ok' }],
+  ])('rejects protocol drift: %s', async (_label, response) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(setGateMode('auto_judge')).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      errorCode: 'protocol_drift',
+    })
   })
 })
 

@@ -33,4 +33,6 @@ val status_json : base_path:string -> Yojson.Safe.t
 val set :
   Workspace.config -> actor:string -> t -> (change, string) result
 
-val change_json : change -> Yojson.Safe.t
+val change_json : change -> [ `Assoc of (string * Yojson.Safe.t) list ]
+(** Closed object projection; callers can extend its fields without an
+    impossible non-object branch. *)

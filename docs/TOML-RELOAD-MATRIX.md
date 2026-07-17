@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-06-26
+last_verified: 2026-07-17
 code_refs:
   - scripts/check-doc-truth.sh
   - config/
@@ -87,9 +87,11 @@ Operational meaning:
   watcher.
 - `[fusion]` is also read from this file by `Fusion_config_loader.load` at
   `masc_fusion` handler time. Fusion edits therefore take effect on the next
-  `masc_fusion` request, including `max_concurrent_judges` and
-  `staged_judge_group_size`, and invalid `[fusion]` config fails that request
-  closed.
+  `masc_fusion` request, including `staged_judge_group_size`, and invalid
+  `[fusion]` config fails that request closed.
+- `max_concurrent_panels` and `max_concurrent_judges` are retired. They never
+  controlled execution and must be removed from authored TOML; configured
+  model identities define the exact Fusion fan-out set.
 
 ## Rules for New TOML Files
 

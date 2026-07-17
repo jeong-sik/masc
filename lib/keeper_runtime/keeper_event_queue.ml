@@ -317,22 +317,6 @@ let remove_by_post_id_pair post_id left right =
   let right_removed, right' = remove_by_post_id post_id right in
   uniq_stimuli (left_removed @ right_removed), left', right'
 
-let dedup_by_post_id ?(window_seconds = 60.0) (queue : t) : t =
-  let within_window a b =
-    Float.abs (a.arrived_at -. b.arrived_at) <= window_seconds
-  in
-  let rec aux acc = function
-    | [] -> List.rev acc
-    | s :: rest ->
-        let later =
-          List.filter
-            (fun s' -> not (s'.post_id = s.post_id && within_window s s'))
-            rest
-        in
-        aux (s :: acc) later
-  in
-  of_list (aux [] (to_list queue))
-
 let sort_by_urgency (queue : t) : t =
   queue
   |> to_list

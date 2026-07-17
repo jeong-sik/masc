@@ -22,7 +22,8 @@ type urgency =
   | Low        (** background polling, telemetry-driven nudges *)
 
 type post_id = string
-(** Identifier used by [dedup_by_post_id] to collapse repeat events.
+(** Producer-supplied identity component used by
+    {!stimulus_identity_equal}.
 
     The runtime uses the originating board post id, the mention
     target id, or the operator directive token. The queue does
@@ -274,11 +275,6 @@ val dedup_by_identity : t -> t
 val remove_by_post_id_pair : post_id -> t -> t -> stimulus list * t * t
 (** Remove matching stimuli from two queues and return the de-duplicated
     removed stimuli plus both remaining queues. *)
-
-val dedup_by_post_id : ?window_seconds:float -> t -> t
-(** Drops later duplicates of the same [post_id] when their
-    [arrived_at] differs by less than [window_seconds] (default
-    [60.0]). FIFO order of survivors is preserved. *)
 
 val sort_by_urgency : t -> t
 (** Stable sort: [Immediate] < [Normal] < [Low]. Two stimuli of the

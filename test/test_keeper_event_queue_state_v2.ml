@@ -931,8 +931,26 @@ let test_transition_outbox_projects_with_stable_identity () =
      with
      | Persistence.Already_present -> ()
      | Persistence.Enqueued -> Alcotest.fail "outbox stimulus was duplicated");
-    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
-    |> require_ok "project transition outbox";
+    let report =
+      match
+        Masc.Keeper_transition_projector.project_transition_outbox
+          ~base_path
+          ~keeper_name
+      with
+      | Ok report -> report
+      | Error failure ->
+        Alcotest.failf
+          "project transition outbox: %s"
+          (Masc.Keeper_transition_projector.projection_failure_to_string failure)
+    in
+    Alcotest.(check int)
+      "one transition projected"
+      1
+      report.projected_transition_count;
+    Alcotest.(check int)
+      "one stimulus projected"
+      1
+      report.projected_stimulus_count;
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load projected state"

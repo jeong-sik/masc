@@ -382,43 +382,13 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
     )
 ;;
 
-let reaction_kind_of_settlement = function
-  | Keeper_registry_event_queue.Ack -> Keeper_reaction_ledger.Event_queue_ack
-  | Keeper_registry_event_queue.Requeue _ ->
-    Keeper_reaction_ledger.Event_queue_requeued
-  | Keeper_registry_event_queue.Escalate _ ->
-    Keeper_reaction_ledger.Event_queue_escalated
-;;
-
 let project_transition_outbox ~base_path ~keeper_name =
-  let rec project_stimuli ~reaction_kind ~receipt = function
-    | [] -> Ok ()
-    | stimulus :: rest ->
-      (match
-         Keeper_reaction_ledger.record_event_queue_transition_reaction_result
-           ~base_path
-           ~keeper_name
-           ~reaction_kind
-           ~receipt
-           stimulus
-       with
-       | Error _ as error -> error
-       | Ok () -> project_stimuli ~reaction_kind ~receipt rest)
-  in
-  match Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name with
-  | Error _ as error -> error
-  | Ok [] -> Ok ()
-  | Ok [ (entry : Keeper_registry_event_queue.outbox_entry) ] ->
-    let receipt = entry.receipt in
-    let reaction_kind = reaction_kind_of_settlement receipt.settlement in
-    (match project_stimuli ~reaction_kind ~receipt entry.stimuli with
-     | Error _ as error -> error
-     | Ok () ->
-       Keeper_registry_event_queue.mark_transition_projected_result
-         ~base_path
-         keeper_name
-         ~transition_id:receipt.transition_id)
-  | Ok (_ :: _ :: _) -> Error "event queue state has multiple unprojected transitions"
+  match
+    Keeper_transition_projector.project_transition_outbox ~base_path ~keeper_name
+  with
+  | Ok _ -> Ok ()
+  | Error failure ->
+    Error (Keeper_transition_projector.projection_failure_to_string failure)
 ;;
 
 let settle_claimed_lease

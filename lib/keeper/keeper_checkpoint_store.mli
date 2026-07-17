@@ -6,16 +6,6 @@
 val oas_checkpoint_path :
   session_dir:string -> session_id:string -> string
 
-(** Path of the fingerprinted watermark sidecar beside a canonical
-    checkpoint file ([<canonical_path>.watermark.json]). RFC-0225 §3.2:
-    the sidecar records [session_id], [turn_count], and the canonical
-    file's own [size]/[mtime] fingerprint at write time, so a later save
-    can skip re-parsing the full canonical JSON when the fingerprint still
-    matches. It is never treated as a source of truth on its own -- every
-    read re-verifies it against a fresh [stat] of the canonical file, and
-    any mismatch, absence, or corruption falls back to a full parse. *)
-val watermark_sidecar_path : string -> string
-
 (** [oas-snapshot-] prefix on OAS history archive entries. *)
 val oas_history_prefix : string
 
@@ -169,7 +159,6 @@ type checkpoint_cas_error =
       { source_turn : int
       ; candidate_turn : int
       }
-  | Watermark_invalidation_failed of Keeper_fs.durable_remove_error
   | Commit_not_installed of Keeper_fs.durable_write_error
   | Commit_durability_unknown of
       { installed_ref : Keeper_checkpoint_ref.t
@@ -185,11 +174,7 @@ type checkpoint_cas_error =
     current bytes are re-read and hashed, and an equal-turn checkpoint with
     different content is rejected as [Source_changed]. On success the returned
     ref is derived from the exact compact bytes passed to the durable atomic
-    JSON writer. The previous watermark sidecar is durably invalidated before
-    the canonical commit and refreshed from the installed candidate, so a
-    same-size, same-mtime replacement cannot reuse stale admission metadata.
-    A sidecar invalidation failure refuses the canonical write. A writer error
-    after atomic rename is
+    JSON writer. A writer error after atomic rename is
     [Commit_durability_unknown], never a retryable not-installed failure. This
     same rule applies when releasing the stable lock fails after the body:
     [Transaction_outcome_unknown] requires reconciliation rather than retry. The
@@ -200,16 +185,3 @@ val save_oas_if_source :
   expected_source_ref:Keeper_checkpoint_ref.t ->
   Agent_sdk.Checkpoint.t ->
   (Keeper_checkpoint_ref.t, checkpoint_cas_error) result
-
-module For_testing : sig
-  (** Number of times the checkpoint watermark resolution has fallen back to
-      a full canonical-file parse (sidecar absent, corrupt, or fingerprint
-      mismatch) since the last {!reset_full_parse_count}. Exists so a test
-      can prove the sidecar fast path actually skips
-      [load_canonical_strict] rather than merely returning the right answer
-      by coincidence. *)
-  val get_full_parse_count : unit -> int
-
-  (** Reset {!get_full_parse_count} to zero. *)
-  val reset_full_parse_count : unit -> unit
-end

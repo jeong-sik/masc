@@ -84,11 +84,12 @@ val decide :
   request ->
   decision
 
-(** Recover durable Auto Judge work for exactly one workspace: restart an
-    interrupted [Summary_pending] worker and finalize decisive
-    [Summary_available] output. Failed judgments are never retried merely
-    because a process restarted. Every recovery candidate id has an explicit
-    started, finalized, skipped, or failed outcome. *)
+(** Recover durable Auto Judge work for exactly one workspace. Each exact
+    [(base_path, keeper_name)] owner activates at most its oldest pending
+    judgment; completion drains only that owner's FIFO. Decisive persisted
+    output is finalized without creating a worker. Failed judgments are never
+    retried merely because a process restarted. Every recovery candidate id
+    has an explicit started, finalized, skipped, or failed outcome. *)
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
@@ -106,8 +107,8 @@ type operator_recovery_report =
   }
 
 (** Reopen failed request-local judgments after an explicit operator selection
-    of Auto Judge, then start a concurrency-bounded drain of every unresolved
-    judgment for the workspace. *)
+    of Auto Judge, then activate one FIFO drain for each Keeper owner with
+    unresolved work in the workspace. *)
 val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 

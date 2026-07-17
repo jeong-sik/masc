@@ -6,10 +6,6 @@ type summary_provider = private
 
 val provider_config_for_summary : keeper_name:string -> summary_provider option
 
-(** Effective Auto Judge worker cap. The subsystem cap is further bounded by
-    the selected runtime binding's [max_concurrent] declaration. *)
-val max_concurrency : unit -> int
-
 (** Verify that the registry-owned Gate judgment prompt is renderable. This is
     the readiness floor for selecting the workspace Auto Judge mode. *)
 val readiness : unit -> (unit, string) result
@@ -82,9 +78,6 @@ module For_testing : sig
 
   val sdk_error_of_http_error
     : Llm_provider.Http_client.http_error -> Agent_sdk.Error.sdk_error
-
-  val effective_max_concurrency
-    : configured:int -> runtime_limit:int option -> int
 
   val body_timeout_clock
     : unit -> float Eio.Time.clock_ty Eio.Resource.t option

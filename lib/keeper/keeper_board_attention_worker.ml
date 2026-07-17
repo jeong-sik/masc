@@ -191,6 +191,7 @@ module Count_map = Map.Make (String)
 let per_keeper_in_flight = Atomic.make Count_map.empty
 
 let per_keeper_in_flight_count ~base_path ~keeper_name =
+  (* DET-OK: sparse-map absence is the canonical zero (adjust removes keys at zero). *)
   Count_map.find_opt (lane_key ~base_path ~keeper_name) (Atomic.get per_keeper_in_flight)
   |> Option.value ~default:0
 ;;
@@ -198,6 +199,7 @@ let per_keeper_in_flight_count ~base_path ~keeper_name =
 let rec adjust_per_keeper_in_flight ~base_path ~keeper_name delta =
   let key = lane_key ~base_path ~keeper_name in
   let current = Atomic.get per_keeper_in_flight in
+  (* DET-OK: sparse-map absence is the canonical zero (adjust removes keys at zero). *)
   let current_count = Count_map.find_opt key current |> Option.value ~default:0 in
   let updated_count = current_count + delta in
   let updated =

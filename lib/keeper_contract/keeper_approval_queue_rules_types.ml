@@ -29,6 +29,7 @@ type pending_approval =
   ; tool_name : string
   ; input_hash : string
   ; input : Yojson.Safe.t
+  ; sequence : int
   ; requested_at : float
   ; turn_id : int option
   ; request_context : Yojson.Safe.t option

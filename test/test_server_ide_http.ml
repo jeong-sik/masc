@@ -405,6 +405,21 @@ let test_presence_projects_only_canonical_keeper_identity () =
       (json_string_member "busy keeper" "role" busy))
 ;;
 
+let test_presence_last_seen_ms_shared_projection () =
+  let valid =
+    presence_agent
+      ~keeper_name:"ms-keeper"
+      ~last_seen:"2020-01-01T00:00:00Z"
+      ~status:Masc_domain.Active
+      "runtime-ms"
+  in
+  check int64 "valid ISO8601 maps to epoch milliseconds" 1577836800000L
+    (Server_presence.last_seen_ms ~context:"test presence" valid);
+  let invalid = { valid with Masc_domain.last_seen = "not-a-timestamp" } in
+  check int64 "invalid timestamp maps to 0" 0L
+    (Server_presence.last_seen_ms ~context:"test presence" invalid)
+;;
+
 let test_post_annotations_rejects_client_keeper_id () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
@@ -1052,6 +1067,10 @@ let () =
             "presence projects canonical keeper identity and status"
             `Quick
             test_presence_projects_only_canonical_keeper_identity
+        ; test_case
+            "last_seen_ms shared projection maps valid ISO and invalid to 0"
+            `Quick
+            test_presence_last_seen_ms_shared_projection
         ] )
     ; ( "scope_contract"
       , [ test_case

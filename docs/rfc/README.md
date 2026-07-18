@@ -300,7 +300,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0304 | Withdraw Critical-class HITL escalation | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0305 | Withdraw global fail-closed governance policy | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0306 | Typed, comment-preserving fusion settings editor | Draft | ba354b7bb0 2026-07-17 | - |
-| 0307 | Mid-turn advisor consult for keepers — evaluation and deferral | Draft | 03d5feaf25 2026-07-08 | - |
+| 0307 | Mid-turn advisor consult for keepers — evaluation and deferral | Draft | 36fee8372f 2026-07-18 | - |
 | 0308 | Withdraw verifier-required Task routing | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0309 | Withdrawn product-specific capability hierarchy | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0311 | Withdraw deterministic evidence floors | Withdrawn | 7b62a87d44 2026-07-13 | - |

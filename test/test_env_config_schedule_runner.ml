@@ -11,10 +11,17 @@
 open Masc
 
 let test_interval_floor () =
-  Alcotest.(check bool)
-    "poll cadence is clamped to the floor"
-    true
-    (Env_config_runtime_services.ScheduleRunner.interval_sec >= 1.0)
+  (* Non-vacuous: exercises the clamp directly, so deleting [Float.max 1.0]
+     from the code turns the sub-floor case red. The module-load
+     [interval_sec] cannot test this — it is read once before the test runs. *)
+  Alcotest.(check (float 0.001))
+    "a sub-floor interval clamps up to the floor"
+    1.0
+    (Env_config_runtime_services.ScheduleRunner.clamp_interval_sec 0.1);
+  Alcotest.(check (float 0.001))
+    "an above-floor interval passes through unchanged"
+    42.0
+    (Env_config_runtime_services.ScheduleRunner.clamp_interval_sec 42.0)
 ;;
 
 let test_interval_default () =

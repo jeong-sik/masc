@@ -64,9 +64,15 @@ module ScheduleRunner = struct
       >= 1.0 to prevent tight-loop when misconfigured.
       @category Runtime
       @ops_class operator *)
+  let interval_floor_sec = 1.0
+
+  (* Exposed as a pure function so the floor contract is testable in-process:
+     [interval_sec] is read once at module load, so a test cannot exercise the
+     clamp by setting a sub-floor env var. *)
+  let clamp_interval_sec value = Float.max interval_floor_sec value
+
   let interval_sec =
-    Float.max 1.0
-      (get_float ~default:15.0 "MASC_SCHEDULE_RUNNER_INTERVAL_SEC")
+    clamp_interval_sec (get_float ~default:15.0 "MASC_SCHEDULE_RUNNER_INTERVAL_SEC")
 end
 
 (** {1 Operator Snapshot Cache Configuration} *)

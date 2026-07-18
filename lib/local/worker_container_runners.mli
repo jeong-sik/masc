@@ -1,5 +1,5 @@
-(** Worker_container_runners — OAS-backed and legacy-backed worker
-    spawn entry points.
+(** Worker_container_runners — OAS-backed worker spawn entry
+    point.
 
     Re-exported by {!Worker_runtime} (the public facade) which
     does \[include module type of Worker_container_runners\] in its
@@ -12,7 +12,6 @@
     [list_masc_tools], [parse_text_tool_calls], [run_result]).
 
     Internal helpers stay private — \[resolve_net\],
-    \[build_execution_spec\],
     \[workspace_path_of_spec\],
     \[dedupe_tools_by_name\], \[create_raw_trace\].  All consumed
     inside the run / preflight pipelines. *)
@@ -26,11 +25,10 @@ end
 val run_worker_oas :
   sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
-  workspace_config:Workspace.config option ->
   Worker_execution_spec.t ->
   unit ->
   (run_result, string) result
-(** [run_worker_oas ~sw ?net ~workspace_config spec] returns a thunk
+(** [run_worker_oas ~sw ?net spec] returns a thunk
     that runs (or resumes) the worker via OAS:
 
     - Resolve net (from [?net] or {!Eio_context}).

@@ -79,7 +79,6 @@
   masc.discovery_cache
   masc.local_runtime_pool
   masc.worker_execution_backend
-  masc.worker_runtime_config
   masc.worker_execution_spec
   ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
   ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.

@@ -804,6 +804,5 @@ lib/voice/voice_config.ml:149
 lib/voice/voice_session_manager.ml:68
 lib/worker_execution_backend/worker_execution_backend.ml:13
 lib/worker_execution_spec/worker_execution_spec.ml:33
-lib/worker_runtime_config/worker_runtime_config.ml:84
 lib/worker_runtime_helper_protocol.ml:24
 lib/worktree_live_context.ml:50

@@ -517,7 +517,6 @@ let handle_tool_execute_typed
 
 let handle_tool_execute_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~exec_cache:_
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -547,7 +546,6 @@ let handle_tool_execute_with_outcome
 
 let handle_tool_execute
       ~turn_sandbox_factory
-      ~exec_cache
       ~config
       ~meta
       ?continuation_channel
@@ -558,7 +556,6 @@ let handle_tool_execute
   =
   (handle_tool_execute_with_outcome
      ~turn_sandbox_factory
-     ~exec_cache
      ~config
      ~meta
      ?continuation_channel

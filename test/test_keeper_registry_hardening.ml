@@ -460,7 +460,6 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
                 ~meta:exact_resources.entry.meta
                 ~publication_recovery:exact_resources.publication_recovery
                 ~ctx_work
-                ~exec_cache:None
                 ~name:"Read"
                 ~input:(`Assoc [ ("file_path", `String evidence_path) ])
                 ()

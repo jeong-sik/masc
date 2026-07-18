@@ -2524,25 +2524,35 @@ let save_file_atomic
   : (unit, string) Result.t
   =
   let dir = Stdlib.Filename.dirname path in
-  let tmp =
-    Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
+  let error exn =
+    Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
   in
   try
-    save_file tmp content;
-    fsync_path tmp;
-    Stdlib.Sys.rename tmp path;
-    (try fsync_path dir with
-     | Unix.Unix_error _ -> ());
-    Ok ()
+    let tmp =
+      Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
+    in
+    (try
+       save_file tmp content;
+       fsync_path tmp;
+       Stdlib.Sys.rename tmp path;
+       (try fsync_path dir with
+        | Unix.Unix_error _ -> ());
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ as exn ->
+       (try Stdlib.Sys.remove tmp with
+        | Sys_error _ -> ());
+       raise exn
+     | exn ->
+       (try Stdlib.Sys.remove tmp with
+        | Sys_error _ -> ());
+       error exn)
   with
-  | Eio.Cancel.Cancelled _ as e ->
-    (try Stdlib.Sys.remove tmp with
-     | Sys_error _ -> ());
-    raise e
-  | exn ->
-    (try Stdlib.Sys.remove tmp with
-     | Sys_error _ -> ());
-    Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  (* Filename.temp_file's only documented failure is Sys_error; anything
+     else (Out_of_memory, Assert_failure, ...) is fatal and must stay loud
+     rather than collapse into the string error channel. *)
+  | Sys_error _ as exn -> error exn
 ;;
 
 let has_atomic_temp_shape ~prefix name =

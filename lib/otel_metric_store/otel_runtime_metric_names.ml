@@ -10,6 +10,10 @@ let metric_mcp_tool_schema_component_bytes =
 let metric_inference_inflight = "masc_inference_inflight"
 let metric_inference_started =
   Otel_metric_store_core.declare_counter "masc_inference_started_total"
+let metric_runtime_metrics_eviction =
+  Otel_metric_store_core.declare_counter "masc_runtime_metrics_eviction_total"
+let metric_runtime_audit_failure =
+  Otel_metric_store_core.declare_counter "masc_runtime_audit_failure_total"
 let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
 let metric_agent_stale_total = Otel_metric_store_core.declare_counter "masc_agent_stale_total"
 

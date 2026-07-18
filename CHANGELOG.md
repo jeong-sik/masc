@@ -7,6 +7,8 @@
 
 ### Removed
 - Removed the dead external-MCP voice session/conference cluster (~380 lines: session/conference lifecycle, health cache, `call_session_tool`, unraised `Timeout`) from `voice_bridge`; superseded by the local `Voice_session_manager`. The live local voice API is unchanged.
+||||||| cada71244c
+- Removed the retired `Autonomous_bridge`/`Autonomous_state` modules (~540 lines) whose keeper wire-in was already deleted by #24765, plus a foreign `session_tracker` QA test targeting a PostgreSQL module that never existed in this repo. `Autonomous_phase` stays live via the autonomous routes. No replacement: the surfaces had no production consumers.
 - Removed automatic config-root, cwd-parent, executable-parent, and `MASC_MODEL_CATALOG` full-catalog discovery. OAS's embedded catalog is now the only base; `oas-models-overlay.toml` carries deployment-local rows, while `OAS_MODEL_CATALOG` remains an explicit operator override.
 - Removed the per-turn prefix/string heuristic that rewrote unknown-looking
   prompt tokens. Keeper prompt prose now describes behaviour, while the active
